@@ -798,8 +798,10 @@ def get_ck_info_and_dvc_outs_from_tree(
         return hit_value
     # Not in this process, which says nothing about whether it has been
     # worked out: there are several workers, and they all restart on a
-    # deploy. Keyed by the bytes it was derived from, so an entry is never
-    # stale and is shared by every worker and every viewer.
+    # deploy. Keyed by the bytes it was derived from, so a change to any of
+    # them invalidates it, and it is shared by every worker and every
+    # viewer. Object storage is the one input the key can't see, which is
+    # why an expansion that came up short on it is never written here.
     shared_key = cache.make_key("ck-dvc", cache_key)
     shared = cache.get_json(shared_key)
     if isinstance(shared, list) and len(shared) == 4:
@@ -851,7 +853,29 @@ def get_ck_info_and_dvc_outs_from_tree(
         _ck_dvc_cache[cache_key] = (now, result)
         if len(_ck_dvc_cache) > _CK_DVC_CACHE_MAX:
             _ck_dvc_cache.popitem(last=False)
-    cache.set_json(shared_key, list(result))
+    # A directory out whose .dir object isn't in storage expands to nothing,
+    # so the directory and every file in it are simply absent here. That
+    # answer stops being true the moment the data is pushed, while the key
+    # it would be stored under is derived only from the repo's bytes, which
+    # the push doesn't change. Returned, so this request still answers from
+    # what is there, but not shared with the other workers: the in-process
+    # entry above ages out in minutes, whereas the shared one would go on
+    # hiding a pushed directory for a day.
+    missing_dir_outs = [
+        out["path"]
+        for stage in dvc_lock.get("stages", {}).values()
+        for out in stage.get("outs", [])
+        if str(out.get("md5", "")).endswith(".dir")
+        and out["path"] not in dvc_lock_outs
+    ]
+    if missing_dir_outs:
+        logger.warning(
+            f"Not caching incomplete DVC outs for {owner_name}/"
+            f"{project_name}; .dir objects missing from storage for: "
+            f"{', '.join(sorted(missing_dir_outs))}"
+        )
+    else:
+        cache.set_json(shared_key, list(result))
     return result
 
 

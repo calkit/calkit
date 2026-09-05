@@ -6587,7 +6587,7 @@ def get_project_overleaf_sync_status(
         min_access_level="read",
     )
     repo = get_repo(project=project, user=current_user, session=session)
-    ck_info = get_ck_info_from_repo(repo)
+    ck_info = get_ck_info_from_repo(repo, read_only=True)
     sync_info = calkit.overleaf.get_sync_info(
         wdir=repo.working_dir, ck_info=deepcopy(ck_info)
     )

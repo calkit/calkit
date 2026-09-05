@@ -415,6 +415,35 @@ function PdfViewerInner({
     }
   }, [scaleValue, pagedNav])
 
+  // Re-apply the scale as soon as our own container changes width, rather
+  // than waiting for PdfHighlighter's 500 ms-debounced observer. A viewer
+  // embedded in a page that reflows while it loads -- the project showcase,
+  // where figures and notebooks land above it -- otherwise renders at a
+  // width the page no longer has, then visibly corrects itself.
+  useEffect(() => {
+    if (pagedNav) return
+    const root = containerRef.current
+    if (!root || typeof ResizeObserver === "undefined") return
+    let lastWidth = root.clientWidth
+    let raf: number | null = null
+    const observer = new ResizeObserver(() => {
+      if (raf !== null) return
+      raf = requestAnimationFrame(() => {
+        raf = null
+        const width = root.clientWidth
+        if (width === lastWidth || width === 0) return
+        lastWidth = width
+        const viewer = highlighterRef.current?.viewer
+        if (viewer) viewer.currentScaleValue = scaleValue
+      })
+    })
+    observer.observe(root)
+    return () => {
+      observer.disconnect()
+      if (raf !== null) cancelAnimationFrame(raf)
+    }
+  }, [scaleValue, pagedNav, containerRef])
+
   // Load the section outline (bookmarks) once per document.
   useEffect(() => {
     let cancelled = false

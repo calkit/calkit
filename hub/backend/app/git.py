@@ -203,11 +203,20 @@ def _clone_dir_segment(name: str) -> str:
     return segment
 
 
+def shared_reader_root() -> str:
+    """The directory the shared read-only checkouts live under."""
+    return os.path.join(settings.CLONE_ROOT, SHARED_READER_DIR)
+
+
 def is_shared_read_checkout(repo: git.Repo) -> bool:
-    """Whether this repo is the checkout everybody reads from."""
-    return (os.sep + SHARED_READER_DIR + os.sep) in os.path.abspath(
-        str(repo.working_dir)
-    )
+    """Whether this repo is the checkout everybody reads from.
+
+    Against the actual shared root, not any ``_shared`` segment: CLONE_ROOT
+    could itself contain one, and a writable clone misread as shared makes
+    ``_configure_committer`` 500 on a perfectly good repo.
+    """
+    root = os.path.abspath(shared_reader_root())
+    return os.path.abspath(str(repo.working_dir)).startswith(root + os.sep)
 
 
 def refuse_if_shared(repo: git.Repo) -> None:
@@ -272,7 +281,11 @@ def _shared_read_token(project: Project) -> tuple[bool, str | None]:
         else (project.owner_github_name, project.name)
     )
     try:
-        return True, github.get_app_installation_token(gh_owner, gh_repo)
+        # Read-only: this token goes into the checkout everyone reads, so it
+        # should not be able to write even if something tries.
+        return True, github.get_app_installation_token(
+            gh_owner, gh_repo, read_only=True
+        )
     except (github.GitHubAppNotConfigured, HTTPException) as e:
         logger.info(
             f"No shared checkout for private {gh_owner}/{gh_repo}: {e}"
@@ -310,9 +323,7 @@ def get_repo(
     # Add the file to the repo(s) -- we may need to clone it.
     # Ref-based reads should not mutate this working tree checkout.
     if shared:
-        base_dir = os.path.join(
-            settings.CLONE_ROOT, SHARED_READER_DIR, owner_name, project_name
-        )
+        base_dir = os.path.join(shared_reader_root(), owner_name, project_name)
     elif user is not None:
         # github_username is None for GitHub-less users; fall back to the
         # (always-present, unique) account name for a stable temp path.
@@ -383,8 +394,10 @@ def get_repo(
                 )
                 try:
                     with _timed("get-app-installation-token", user=user.email):
+                        # A read-only caller gets a token that can't push,
+                        # whether or not it ended up on a shared checkout.
                         access_token = github.get_app_installation_token(
-                            gh_owner, gh_repo
+                            gh_owner, gh_repo, read_only=read_only
                         )
                 except (github.GitHubAppNotConfigured, HTTPException) as e:
                     # A public repo can still be read/cloned unauthenticated,

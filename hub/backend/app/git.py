@@ -831,12 +831,19 @@ def get_dvc_pipeline(
     return get_dvc_pipeline_from_repo(repo)
 
 
-def get_dvc_pipeline_from_repo(repo: git.Repo) -> dict:
-    if os.path.isfile(os.path.join(repo.working_dir, "dvc.yaml")):
-        with open(os.path.join(repo.working_dir, "dvc.yaml")) as f:
-            return ryaml.load(f)
-    else:
+def get_dvc_pipeline_from_repo(
+    repo: git.Repo, read_only: bool = False
+) -> dict:
+    """Load dvc.yaml from the repo's working tree.
+
+    ``read_only`` swaps ruamel's round-trip parser for the C loader; on a
+    large dvc.yaml that is the difference between ~300ms and a few.
+    """
+    fpath = os.path.join(repo.working_dir, "dvc.yaml")
+    if not os.path.isfile(fpath):
         return {}
+    with open(fpath) as f:
+        return (load_yaml_fast(f.read()) if read_only else ryaml.load(f)) or {}
 
 
 def get_overleaf_repo(

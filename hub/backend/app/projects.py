@@ -1333,7 +1333,7 @@ def get_dvc_pipeline_for_ref(
     not check it out), so it must not be used for ref-scoped reads.
     """
     if ref is None:
-        return get_dvc_pipeline_from_repo(repo)
+        return get_dvc_pipeline_from_repo(repo, read_only=True)
     tree = get_repo_tree_for_ref(repo, ref)
     if not tree.is_file("dvc.yaml"):
         return {}

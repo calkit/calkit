@@ -2628,6 +2628,69 @@ class _FigureContext(NamedTuple):
     dvc_lock: dict[str, Any]
 
 
+def _looks_like_figure(path: str) -> bool:
+    """Whether ``path`` is a file we'd show as a figure without being told."""
+    parts = path.split("/")
+    if any(p.startswith(".") for p in parts):
+        return False
+    ext = "." + parts[-1].rsplit(".", 1)[-1] if "." in parts[-1] else ""
+    dir_parts = [p.lower() for p in parts[:-1]]
+    return ext.lower() in FIGURE_EXTS and any(
+        d in FIGURE_DIRS for d in dir_parts
+    )
+
+
+def _tree_figure_paths(repo: git.Repo, ref: str | None) -> list[str]:
+    """Figure-looking paths in the tree, including via `.dvc` pointers.
+
+    A full tree walk plus a YAML parse of every `.dvc` file, which is tens
+    of milliseconds on a large project and the same answer for every viewer
+    of a commit, so it is cached against that commit and warmed on push.
+    """
+    sha = resolve_commit_sha(repo, ref)
+    key = cache.make_key("figpaths", sha) if sha else None
+    if key is not None:
+        cached = cache.get_json(key)
+        if isinstance(cached, list):
+            return cached
+    paths: list[str] = []
+    try:
+        commit = repo.commit(ref) if ref else repo.head.commit
+        for blob in commit.tree.traverse():
+            if blob.type != "blob":  # type: ignore[union-attr]
+                continue
+            blob_path: str = blob.path  # type: ignore[union-attr]
+            if _looks_like_figure(blob_path):
+                paths.append(blob_path)
+            # Figures stored via standalone `.dvc` pointer files (tracked
+            # with `dvc add`, not via a pipeline stage).
+            if not blob_path.endswith(".dvc"):
+                continue
+            actual_path = blob_path[:-4]
+            try:
+                dvc_data = yaml.safe_load(blob.data_stream.read())  # type: ignore[union-attr]
+                outs = (
+                    dvc_data.get("outs")
+                    if isinstance(dvc_data, dict)
+                    else None
+                )
+                out = outs[0] if isinstance(outs, list) and outs else None
+                out_path = out.get("path") if isinstance(out, dict) else None
+                if isinstance(out_path, str) and out_path:
+                    actual_path = os.path.normpath(
+                        os.path.join(os.path.dirname(blob_path), out_path)
+                    )
+            except Exception:
+                pass
+            if actual_path and _looks_like_figure(actual_path):
+                paths.append(actual_path)
+    except Exception:
+        return paths
+    if key is not None:
+        cache.set_json(key, paths)
+    return paths
+
+
 def _discover_figures(
     project: Project,
     repo: git.Repo,
@@ -2657,54 +2720,12 @@ def _discover_figures(
         """Add `path` to figures if it looks like a figure and is not yet
         known.
         """
-        parts = path.split("/")
-        if any(p.startswith(".") for p in parts):
-            return
-        ext = "." + parts[-1].rsplit(".", 1)[-1] if "." in parts[-1] else ""
-        dir_parts = [p.lower() for p in parts[:-1]]
-        if ext.lower() in FIGURE_EXTS and any(
-            d in FIGURE_DIRS for d in dir_parts
-        ):
-            if path not in declared_paths:
-                figures.append({"path": path, "title": title_from_path(path)})
-                declared_paths.add(path)
+        if _looks_like_figure(path) and path not in declared_paths:
+            figures.append({"path": path, "title": title_from_path(path)})
+            declared_paths.add(path)
 
-    # Auto-detect figures from the repo tree
-    try:
-        commit = repo.commit(ref) if ref else repo.head.commit
-        for blob in commit.tree.traverse():
-            if blob.type != "blob":  # type: ignore[union-attr]
-                continue
-            blob_path: str = blob.path  # type: ignore[union-attr]
-            _maybe_add_figure(blob_path)
-            # Also detect figures stored via standalone .dvc pointer files
-            # (tracked with `dvc add`, not via a DVC pipeline stage).
-            if blob_path.endswith(".dvc"):
-                try:
-                    dvc_data = yaml.safe_load(blob.data_stream.read())  # type: ignore[union-attr]
-                    outs = (
-                        dvc_data.get("outs")
-                        if isinstance(dvc_data, dict)
-                        else None
-                    )
-                    out = outs[0] if isinstance(outs, list) and outs else None
-                    out_path = (
-                        out.get("path") if isinstance(out, dict) else None
-                    )
-                    if isinstance(out_path, str) and out_path:
-                        actual_path = os.path.normpath(
-                            os.path.join(os.path.dirname(blob_path), out_path)
-                        )
-                    else:
-                        actual_path = blob_path[:-4]
-                    if actual_path:
-                        _maybe_add_figure(actual_path)
-                except Exception:
-                    actual_path = blob_path[:-4]
-                    if actual_path:
-                        _maybe_add_figure(actual_path)
-    except Exception:
-        pass
+    for path in _tree_figure_paths(repo, ref):
+        _maybe_add_figure(path)
     # Pre-compute calkit.yaml / dvc.lock metadata once for the tree so we
     # don't re-read and re-expand on every iteration.
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
@@ -2781,6 +2802,7 @@ def _resolve_figures(
             .group_by(ProjectComment.artifact_path)
         ).all()
     )
+    sha = resolve_commit_sha(repo, ref)
     # Staleness is best-effort: never let it block the figure listing.
     stage_statuses = {}
     try:
@@ -2794,7 +2816,7 @@ def _resolve_figures(
             owner_name=project.owner_account_name,
             project_name=project.name,
             fs=get_object_fs(),
-            cache_token=resolve_commit_sha(repo, ref),
+            cache_token=sha,
         )
     except Exception as e:
         logger.warning(f"Failed to compute pipeline status for figures: {e}")
@@ -2812,7 +2834,26 @@ def _resolve_figures(
             fig["stage_status"] = stage_statuses[fig["stage"]].model_dump()
         return fig
 
+    def _thumb_key(path: str) -> str | None:
+        # By commit and path rather than by content hash: the content hash
+        # is only knowable once the bytes are in hand, so keying on it means
+        # downloading a full-size figure to discover we already have its
+        # thumbnail. What lives at a path in a commit never changes, so this
+        # answers before any download.
+        return cache.make_key("figthumb", sha, path) if sha else None
+
     def _resolve(fig: dict[str, Any]) -> dict[str, Any]:
+        key = _thumb_key(fig["path"]) if thumbnails else None
+        if key is not None:
+            hit = cache.get_json(key)
+            if isinstance(hit, dict) and hit.get("thumbnail"):
+                # The grid renders the thumbnail and nothing else, so the
+                # bytes it would otherwise download go unread.
+                fig["thumbnail"] = hit["thumbnail"]
+                fig["storage"] = hit.get("storage")
+                fig["content"] = None
+                fig["url"] = None
+                return _annotate(fig)
         item = app.projects.get_contents_from_tree(
             project=project,
             tree=tree,
@@ -2840,6 +2881,14 @@ def _resolve_figures(
             # The full-size bytes are what this call was avoiding sending.
             if fig.get("thumbnail"):
                 fig["content"] = None
+                if key is not None:
+                    cache.set_json(
+                        key,
+                        {
+                            "thumbnail": fig["thumbnail"],
+                            "storage": item.storage,
+                        },
+                    )
         return _annotate(fig)
 
     if not resolve_content:
@@ -8030,7 +8079,7 @@ def get_project_references(
         ref=ref,
         read_only=True,
     )
-    ck_info = get_ck_info_from_repo(repo)
+    ck_info = get_ck_info_from_repo(repo, read_only=True)
     # An empty "references:" key in calkit.yaml parses to None.
     ref_collections = ck_info.get("references") or []
     declared_paths = {

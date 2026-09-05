@@ -398,6 +398,18 @@ function Publications() {
     publicationsRequest.data?.find((p) => p.path === selectedPath) ??
     publicationsRequest.data?.[0]
 
+  // Landing without a path shows the first publication, so put it in the URL
+  // to match: otherwise a link copied from here points at "whichever is
+  // first", which is not necessarily what the sender was looking at.
+  // Replaced rather than pushed, so arriving doesn't cost a back step.
+  useEffect(() => {
+    if (selectedPath || !selectedPub?.path) return
+    navigate({
+      search: (prev) => ({ ...prev, path: selectedPub.path }),
+      replace: true,
+    })
+  }, [selectedPath, selectedPub?.path, navigate])
+
   // Arriving from a question's evidence (or right after committing an edit)
   // can transiently return an empty list; if we expected a specific
   // publication (path in the URL) but got none, refetch once so it appears

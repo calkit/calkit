@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import os
 import random
+import subprocess
 from pathlib import Path
 
 import git
@@ -646,3 +647,51 @@ def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
     (ours / "inside.csv").symlink_to(ours / "ours.csv")
     assert tree.is_safe_symlink("inside.csv")
     assert tree.read_bytes("inside.csv") == b"ours\n"
+
+
+def test_remote_head_cache_is_bypassed_when_the_caller_wants_the_truth(
+    tmp_path,
+):
+    origin = tmp_path / "origin.git"
+    seed = tmp_path / "seed"
+    subprocess.check_call(
+        ["git", "init", "--bare", "-q", "-b", "main", str(origin)]
+    )
+    subprocess.check_call(["git", "init", "-q", "-b", "main", str(seed)])
+    for k, v in (("user.email", "ci@example.com"), ("user.name", "CI")):
+        subprocess.check_call(["git", "-C", str(seed), "config", k, v])
+    (seed / "f.txt").write_text("v1\n")
+    subprocess.check_call(["git", "-C", str(seed), "add", "f.txt"])
+    subprocess.check_call(["git", "-C", str(seed), "commit", "-qm", "v1"])
+    subprocess.check_call(
+        ["git", "-C", str(seed), "remote", "add", "origin", str(origin)]
+    )
+    subprocess.check_call(
+        ["git", "-C", str(seed), "push", "-q", "origin", "main"]
+    )
+    clone = tmp_path / "clone"
+    subprocess.check_call(["git", "clone", "-q", str(origin), str(clone)])
+    repo = git.Repo(str(clone))
+    old = repo.head.commit.hexsha
+    # A read before the push leaves the pre-push head in the cache
+    assert app.git.get_remote_head_sha(repo, str(origin), "main") == old
+    (seed / "f.txt").write_text("v2\n")
+    subprocess.check_call(["git", "-C", str(seed), "commit", "-qam", "v2"])
+    subprocess.check_call(
+        ["git", "-C", str(seed), "push", "-q", "origin", "main"]
+    )
+    new = (
+        subprocess.check_output(["git", "-C", str(seed), "rev-parse", "HEAD"])
+        .decode()
+        .strip()
+    )
+    assert new != old
+    # A cached read still answers with the old head, which is what let a
+    # push land without the warm it queued ever fetching it
+    assert app.git.get_remote_head_sha(repo, str(origin), "main") == old
+    # ttl=0/None callers ask the remote instead, and refresh the cache
+    assert (
+        app.git.get_remote_head_sha(repo, str(origin), "main", use_cache=False)
+        == new
+    )
+    assert app.git.get_remote_head_sha(repo, str(origin), "main") == new

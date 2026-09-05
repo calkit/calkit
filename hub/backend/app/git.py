@@ -154,7 +154,7 @@ REMOTE_HEAD_TTL = 300
 
 
 def get_remote_head_sha(
-    repo: git.Repo, remote_url: str, branch: str
+    repo: git.Repo, remote_url: str, branch: str, use_cache: bool = True
 ) -> str | None:
     """The SHA ``origin`` has for ``branch``, or None if it can't be read.
 
@@ -164,9 +164,10 @@ def get_remote_head_sha(
     back equal to what we already have, the fetch can be skipped entirely.
     """
     key = cache.make_key("remote-head", remote_url, branch)
-    cached = cache.get_json(key)
-    if isinstance(cached, str):
-        return cached
+    if use_cache:
+        cached = cache.get_json(key)
+        if isinstance(cached, str):
+            return cached
     try:
         with _timed("ls-remote", branch=branch):
             out = repo.git.ls_remote(
@@ -593,8 +594,18 @@ def get_repo(
                         local_head: str | None = repo.head.commit.hexsha
                     except (ValueError, GitCommandError):
                         local_head = None
+                    # A caller asking for ttl 0/None wants the truth, not
+                    # a cached answer. That is the path a push takes, and a
+                    # head cached from before it would say "already current"
+                    # and mark a stale clone fresh -- so the warm a push
+                    # queues would rebuild everything at the old commit.
                     remote_head = (
-                        get_remote_head_sha(repo, git_plain_url, branch_name)
+                        get_remote_head_sha(
+                            repo,
+                            git_plain_url,
+                            branch_name,
+                            use_cache=bool(ttl),
+                        )
                         if local_head
                         else None
                     )

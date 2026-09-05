@@ -396,14 +396,26 @@ function PdfViewerInner({
   // giving up: otherwise the first paint keeps PDF.js's own default scale
   // until PdfHighlighter's ResizeObserver corrects it 500 ms later, which
   // reads as the page loading zoomed in and then jumping.
+  //
+  // Keyed on `url` as well: PdfHighlighter is keyed on it too, so every new
+  // document builds a fresh viewer that needs the scale applied again.
+  // Without it only the very first document opened would avoid the jump.
   useEffect(() => {
     if (pagedNav) return
+    // A deliberate trigger rather than a value we read, as with
+    // highlightsKey above; referencing it keeps it a real dependency.
+    void url
     let raf: number | null = null
     const deadline = performance.now() + 5000
     const apply = () => {
       raf = null
       const viewer = highlighterRef.current?.viewer
-      if (viewer) {
+      // Not just "the viewer exists": setting currentScaleValue before
+      // PdfHighlighter has called setDocument on it does nothing at all,
+      // and then the 500 ms correction is the only thing that ever applies
+      // the scale. Which of those wins is a race, so this waits for the
+      // document rather than for the object that will hold it.
+      if (viewer?.pdfDocument) {
         viewer.currentScaleValue = scaleValue
         return
       }
@@ -413,36 +425,7 @@ function PdfViewerInner({
     return () => {
       if (raf !== null) cancelAnimationFrame(raf)
     }
-  }, [scaleValue, pagedNav])
-
-  // Re-apply the scale as soon as our own container changes width, rather
-  // than waiting for PdfHighlighter's 500 ms-debounced observer. A viewer
-  // embedded in a page that reflows while it loads -- the project showcase,
-  // where figures and notebooks land above it -- otherwise renders at a
-  // width the page no longer has, then visibly corrects itself.
-  useEffect(() => {
-    if (pagedNav) return
-    const root = containerRef.current
-    if (!root || typeof ResizeObserver === "undefined") return
-    let lastWidth = root.clientWidth
-    let raf: number | null = null
-    const observer = new ResizeObserver(() => {
-      if (raf !== null) return
-      raf = requestAnimationFrame(() => {
-        raf = null
-        const width = root.clientWidth
-        if (width === lastWidth || width === 0) return
-        lastWidth = width
-        const viewer = highlighterRef.current?.viewer
-        if (viewer) viewer.currentScaleValue = scaleValue
-      })
-    })
-    observer.observe(root)
-    return () => {
-      observer.disconnect()
-      if (raf !== null) cancelAnimationFrame(raf)
-    }
-  }, [scaleValue, pagedNav, containerRef])
+  }, [scaleValue, pagedNav, url])
 
   // Load the section outline (bookmarks) once per document.
   useEffect(() => {

@@ -92,6 +92,31 @@ services:
       # without rebuilding. Resolved by the Makefile.
       HUB_VERSION: ${HUB_VERSION-}
 
+  # Without this the worker runs whatever was baked into the image while
+  # everything else runs the mounted source, so a signature change breaks
+  # every job until someone rebuilds.
+  worker:
+    restart: "no"
+    env_file:
+      - .env
+    volumes:
+      - ../:/app
+      - /app/.venv
+    build:
+      context: ..
+      dockerfile: hub/backend/Dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+    # RQ has no --reload of its own, so watchfiles (already here, via
+    # `fastapi run --reload`) restarts it when the source it runs changes.
+    command:
+      - watchfiles
+      - --filter
+      - python
+      - "rq worker --url ${REDIS_URL:-redis://cache:6379/0} warm"
+      - app
+      - ../../calkit
+
   backend-dvc:
     restart: "no"
     env_file:

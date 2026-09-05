@@ -2840,7 +2840,14 @@ def _resolve_figures(
         # downloading a full-size figure to discover we already have its
         # thumbnail. What lives at a path in a commit never changes, so this
         # answers before any download.
-        return cache.make_key("figthumb", sha, path) if sha else None
+        #
+        # Scoped to the project, not just the commit: a fork shares its
+        # parent's commits but not its DVC storage, so a figure tracked by
+        # DVC is a different file at the same commit and path. Without this
+        # a public fork could be served a private parent's thumbnail.
+        if not sha or project.id is None:
+            return None
+        return cache.make_key("figthumb", str(project.id), sha, path)
 
     def _resolve(fig: dict[str, Any]) -> dict[str, Any]:
         key = _thumb_key(fig["path"]) if thumbnails else None

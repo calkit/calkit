@@ -623,6 +623,19 @@ def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
         assert excinfo.value.status_code == 404
     with pytest.raises(HTTPException):
         tree.listdir("../../../victim-owner/victim-proj/repo")
+    # Repo plumbing is not project content, however it is spelled, but a
+    # name that merely starts with ".git" is
+    (ours / ".gitignore").write_text("*.pyc\n")
+    for internal in (".git", ".git/config", "a/../.git/config"):
+        assert not tree.is_file(internal)
+        with pytest.raises(HTTPException):
+            tree.read_bytes(internal)
+    # A symlink is the spelling that survives normalization, so the
+    # resolved path is checked too
+    (ours / "link").symlink_to(".git")
+    with pytest.raises(HTTPException):
+        tree.read_bytes("link/config")
+    assert tree.read_bytes(".gitignore") == b"*.pyc\n"
     # A symlink is the other way out, so content reads resolve
     (ours / "link.csv").symlink_to(victim / "private.csv")
     assert tree.is_file("link.csv")

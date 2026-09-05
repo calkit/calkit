@@ -894,7 +894,10 @@ def get_contents_from_tree(
         p for p, obj in dvc_lock_outs.items() if obj["type"] == "dir"
     ]
     ignore_paths = [".git", ".dvc/cache", ".dvc/tmp", ".dvc/config.local"]
-    if path is not None and path in ignore_paths:
+    # Prefixes, not exact names: ".git" alone left ".git/config" readable.
+    if path is not None and any(
+        path == p or path.startswith(p + "/") for p in ignore_paths
+    ):
         raise HTTPException(404)
     # Let's restructure as a dictionary keyed by path
     categories_with_path = [

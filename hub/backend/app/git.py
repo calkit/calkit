@@ -1677,6 +1677,11 @@ class WorkingTree(RepoTree):
     def _within(root: str, candidate: str) -> bool:
         return candidate == root or candidate.startswith(root + os.sep)
 
+    @staticmethod
+    def _is_repo_internal(path: str) -> bool:
+        """Whether ``path`` names anything under a ``.git`` directory."""
+        return ".git" in path.replace(os.sep, "/").split("/")
+
     def _abs(self, path: str | None) -> str | None:
         """Absolute path for ``path``, or ``None`` if it leaves the checkout.
 
@@ -1685,6 +1690,12 @@ class WorkingTree(RepoTree):
         """
         if not path:
             return self._root
+        # `.git` is the one thing this tree can see that ``GitTree`` cannot,
+        # and it is repo plumbing rather than project content: the remote
+        # URL, and whatever a legacy clone embedded in it.
+        if self._is_repo_internal(path):
+            logger.warning(f"Refusing to read repo internals: {path!r}")
+            return None
         full = os.path.join(self._root, path)
         if not self._within(self._root_norm, os.path.normpath(full)):
             logger.warning(f"Refusing path outside {self._root}: {path!r}")
@@ -1712,7 +1723,14 @@ class WorkingTree(RepoTree):
         if fpath is None:
             return False
         try:
-            return self._within(self._root_real, os.path.realpath(fpath))
+            resolved = os.path.realpath(fpath)
+            if not self._within(self._root_real, resolved):
+                return False
+            # Checked again on the resolved path: a symlink to `.git` is
+            # inside the checkout, so containment alone lets it through.
+            return not self._is_repo_internal(
+                os.path.relpath(resolved, self._root_real)
+            )
         except (OSError, ValueError):
             return False
 

@@ -863,16 +863,15 @@ def test_dvc_dir_out_resolves_after_being_pushed(
     repo.git.commit(["-m", "Track app with DVC"])
     project = _make_project()
     tree = get_repo_tree_for_ref(repo, None)
-    # Before the data is pushed, the directory expands to nothing, and that
-    # answer must not reach the shared cache, whose key can't see storage
+    # Unpushed, the directory expands to nothing, and that must not be
+    # shared under a key that a push won't change
     res = app.projects.get_ck_info_and_dvc_outs_from_tree(
         project=project, tree=tree
     )
     assert "app" not in res.dvc_lock_outs
     assert "app/index.html" not in res.dvc_lock_outs
     assert not [k for k in store.data if "ck-dvc" in k]
-    # Once pushed, the same tree resolves the directory and its files: no
-    # sticky miss from the .dir read, no stale entry from the shared cache
+    # Once pushed, the same tree resolves it: no sticky miss, no stale entry
     dir_fpath = make_data_fpath(
         owner_name=project.owner_account_name,
         project_name=project.name,
@@ -888,7 +887,7 @@ def test_dvc_dir_out_resolves_after_being_pushed(
     )
     assert res.dvc_lock_outs["app"]["type"] == "dir"
     assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5
-    # A complete expansion is worth sharing, and reads back the same
+    # A complete expansion is shared, and reads back the same
     shared_keys = [k for k in store.data if "ck-dvc" in k]
     assert len(shared_keys) == 1
     app.projects._ck_dvc_cache.clear()

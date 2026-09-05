@@ -51,10 +51,8 @@ def run_dvc_command(args: list[str], wdir: str, check: bool = False) -> int:
 def _read_dvc_dir(dvc_dir_path: str) -> Any:
     """Read a DVC .dir object, raising FileNotFoundError if it isn't there.
 
-    An object at one of these paths never changes, so its contents are
-    cached forever. The miss deliberately raises rather than returning
-    None: lru_cache doesn't memoize exceptions, which is what keeps a
-    directory pushed after we first looked for it from staying missing.
+    Raises rather than returning None so the miss isn't cached, since
+    lru_cache doesn't memoize exceptions and the object may yet be pushed.
     """
     fs = get_object_fs()
     with fs.open(dvc_dir_path) as f:

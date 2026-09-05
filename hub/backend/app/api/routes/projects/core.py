@@ -9736,11 +9736,10 @@ def post_project_environment(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    ck_info = app.projects.get_ck_info_for_ref(
-        project=project,
-        repo=repo,
-        ref=ref,
-    )
+    # Written back below, so it has to come through the round-trip parser
+    # and without the path normalization ``get_ck_info_for_ref`` applies:
+    # both would be silently saved into the user's calkit.yaml.
+    ck_info = app.projects.get_ck_info_from_repo(repo)
     envs = ck_info.get("environments", {})
     if req.name in envs:
         raise HTTPException(400, "Environment with same name already exists")

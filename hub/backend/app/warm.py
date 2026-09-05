@@ -18,12 +18,12 @@ minutes and the threadpool is what serves requests.
 import time
 from typing import Any, Callable
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app import cache
 from app.core import logger
 from app.db import engine
-from app.models import Account, Project, User
+from app.models import Account, Project, User, UserOrgMembership
 
 
 def warm_project(
@@ -48,14 +48,35 @@ def warm_project(
         if project is None:
             logger.warning(f"Nothing to warm: {owner_name}/{project_name}")
             return {"project": f"{owner_name}/{project_name}", "found": False}
-        # A shared checkout carries the project's own credentials, so only
-        # a private project the App isn't installed on needs a user, and an
-        # org has none. Whether it can be read is settled by trying below.
+        # The steps below go through the routes, which check access as
+        # somebody, so a private project needs a user even when the shared
+        # checkout could be read without one. An org account has no user of
+        # its own, so warm as one of its members -- any of them can read it.
         user: User | None = None
         if not project.is_public:
-            user = session.exec(
-                select(User).where(User.id == project.owner_account.user_id)
-            ).first()
+            account = project.owner_account
+            if account.user_id is not None:
+                user = session.exec(
+                    select(User).where(User.id == account.user_id)
+                ).first()
+            elif account.org_id is not None:
+                user = session.exec(
+                    select(User)
+                    .join(
+                        UserOrgMembership,
+                        UserOrgMembership.user_id == User.id,  # type: ignore[arg-type]
+                    )
+                    .where(UserOrgMembership.org_id == account.org_id)
+                    .order_by(col(UserOrgMembership.role_id).desc())
+                ).first()
+            if user is None:
+                logger.warning(
+                    f"No user to warm private {owner_name}/{project_name}"
+                )
+                return {
+                    "project": f"{owner_name}/{project_name}",
+                    "private_no_user": True,
+                }
         # The clone is what tells us which commit we would be warming, so
         # it happens here rather than as a step: everything after it is
         # derived from that commit and keyed by it, so if the last warm

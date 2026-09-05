@@ -1183,7 +1183,7 @@ def test_check_questions(tmp_dir):
     subprocess.check_call(["git", "add", "-A"])
     subprocess.check_call(["git", "commit", "-q", "-m", "Answer"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
-    assert "Answers consistent with their evidence: 1/1" in out
+    assert "Answers whose evidence checks out: 1/1" in out
     # Nothing in the project says where the results file came from, which
     # is advice rather than a failure: the answer may be perfectly good
     assert "Evidence with nothing recorded behind it: 1" in out
@@ -1250,7 +1250,7 @@ def test_check_questions(tmp_dir):
     out = subprocess.check_output(
         ["calkit", "check", "questions"], text=True, env=env
     )
-    assert "Answers consistent with their evidence: 1/1" in out
+    assert "Answers whose evidence checks out: 1/1" in out
     assert "\u2705" not in out
     # The check can be pointed at a project somewhere else
     os.makedirs("elsewhere")

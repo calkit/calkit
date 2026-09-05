@@ -44,6 +44,62 @@ export const AccountPublicSchema = {
   title: "AccountPublic",
 } as const
 
+export const ArtifactUsageSchema = {
+  properties: {
+    document: {
+      type: "string",
+      title: "Document",
+    },
+    kind: {
+      type: "string",
+      enum: ["value", "figure", "text", "block"],
+      title: "Kind",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    pages: {
+      items: {
+        type: "integer",
+      },
+      type: "array",
+      title: "Pages",
+    },
+  },
+  type: "object",
+  required: ["document", "kind"],
+  title: "ArtifactUsage",
+  description:
+    "One place an artifact appears in one of the project's documents.",
+} as const
+
+export const ArtifactUsagesSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    items: {
+      items: {
+        $ref: "#/components/schemas/ArtifactUsage",
+      },
+      type: "array",
+      title: "Items",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ArtifactUsages",
+} as const
+
 export const Body_login_login_access_tokenSchema = {
   properties: {
     grant_type: {
@@ -6680,20 +6736,38 @@ export const PublicationSchema = {
 
 export const PublicationComponentSchema = {
   properties: {
+    kind: {
+      type: "string",
+      enum: ["file", "value", "figure", "text", "block"],
+      title: "Kind",
+    },
     path: {
       type: "string",
       title: "Path",
     },
-    kind: {
+    provenance: {
       type: "string",
-      enum: ["produced", "authored", "attested", "imported", "unknown"],
-      title: "Kind",
+      enum: [
+        "pipeline",
+        "authored",
+        "attested",
+        "imported",
+        "project",
+        "undeclared",
+      ],
+      title: "Provenance",
     },
     via: {
-      type: "string",
-      enum: ["folder", "input"],
+      anyOf: [
+        {
+          type: "string",
+          enum: ["folder", "input"],
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Via",
-      default: "folder",
     },
     stage: {
       anyOf: [
@@ -6716,6 +6790,24 @@ export const PublicationComponentSchema = {
         },
       ],
       title: "Stage Kind",
+    },
+    stage_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Stage Inputs",
+    },
+    script: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Script",
     },
     source: {
       anyOf: [
@@ -6751,11 +6843,72 @@ export const PublicationComponentSchema = {
       ],
       title: "Size",
     },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    pages: {
+      items: {
+        type: "integer",
+      },
+      type: "array",
+      title: "Pages",
+    },
+    build_value: {
+      title: "Build Value",
+    },
+    current_value: {
+      title: "Current Value",
+    },
+    build_hash: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Build Hash",
+    },
+    current_hash: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Current Hash",
+    },
+    status: {
+      type: "string",
+      enum: ["ok", "stale", "missing", "unknown"],
+      title: "Status",
+      default: "unknown",
+    },
+    stale_reasons: {
+      items: {
+        type: "string",
+        enum: ["stage-out-of-date", "changed-since-build", "answer-stale"],
+      },
+      type: "array",
+      title: "Stale Reasons",
+    },
   },
   type: "object",
-  required: ["path", "kind"],
+  required: ["kind", "path", "provenance"],
   title: "PublicationComponent",
-  description: "One file a publication is made of and where it comes from.",
+  description:
+    "One thing a publication is made of, and where it came from.\n\nEither a file -- a source in its folder, or an input its build stage\nreads from elsewhere in the project -- or a piece of project content\nthe document typesets: a value from a results file, a figure a stage\nplotted, a block of generated prose. A value a stage computed is as\nmuch a component of the publication as the file it lands in, which is\nwhy they share a list.",
 } as const
 
 export const PublicationComponentsSchema = {
@@ -6764,6 +6917,22 @@ export const PublicationComponentsSchema = {
       type: "string",
       title: "Folder",
     },
+    document: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Document",
+    },
+    built: {
+      type: "boolean",
+      title: "Built",
+      default: false,
+    },
     items: {
       items: {
         $ref: "#/components/schemas/PublicationComponent",
@@ -6771,13 +6940,19 @@ export const PublicationComponentsSchema = {
       type: "array",
       title: "Items",
     },
-    n_unknown: {
+    n_undeclared: {
       type: "integer",
-      title: "N Unknown",
+      title: "N Undeclared",
+      default: 0,
+    },
+    n_stale: {
+      type: "integer",
+      title: "N Stale",
+      default: 0,
     },
   },
   type: "object",
-  required: ["folder", "items", "n_unknown"],
+  required: ["folder"],
   title: "PublicationComponents",
 } as const
 
@@ -6872,7 +7047,7 @@ export const QuestionEvidenceSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "value", "result", "table", "publication"],
       title: "Kind",
     },
     path: {
@@ -6889,6 +7064,17 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Key",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
     },
     explanation: {
       anyOf: [
@@ -6952,7 +7138,7 @@ export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "value", "result", "table", "publication"],
       title: "Kind",
     },
     path: {
@@ -6969,6 +7155,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Key",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
     },
     explanation: {
       anyOf: [
@@ -7059,6 +7256,29 @@ export const QuestionPublicSchema = {
       type: "array",
       title: "Evidence",
       default: [],
+    },
+    status: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["ok", "stale", "error", "unanswered", "no-evidence"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Status",
+    },
+    status_message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Status Message",
     },
   },
   type: "object",

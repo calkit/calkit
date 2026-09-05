@@ -2200,12 +2200,13 @@ Options:
 
 Describe things.
 
-| Command                                                             | Description                                                        |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
-| [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
-| [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
-| [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
+| Command                                                                   | Description                                                        |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [`system`](#subcommand-describe-desc-system)                              | Describe the system.                                               |
+| [`environment\|env`](#subcommand-describe-desc-environment-env)           | Describe a single environment, including spec and lock file paths. |
+| [`environments\|envs`](#subcommand-describe-desc-environments-envs)       | Describe all environments, including spec and lock file paths.     |
+| [`schema`](#subcommand-describe-desc-schema)                              | Print a JSON schema.                                               |
+| [`components\|component`](#subcommand-describe-desc-components-component) | Describe the project content a document uses.                      |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2266,9 +2267,9 @@ Options:
 
 #### `calkit describe|desc schema`
 
-Print the JSON schema for calkit.yaml.
+Print a JSON schema.
 
-Editors can use this to validate and autocomplete the file. See https://docs.calkit.org/calkit-yaml for how to set that up.
+Editors can use these to validate and autocomplete the files they describe. See https://docs.calkit.org/calkit-yaml for how to set that up.
 
 Usage:
 
@@ -2278,9 +2279,44 @@ calkit describe|desc schema [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default | Description                                               |
-| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
-| `--output`, `-o` | str  | no       |         | Path at which to write the schema instead of printing it. |
+| Option           | Type | Required | Default     | Description                                                                                      |
+| ---------------- | ---- | -------- | ----------- | ------------------------------------------------------------------------------------------------ |
+| `--output`, `-o` | str  | no       |             | Path at which to write the schema instead of printing it.                                        |
+| `--for`          | str  | no       | calkit.yaml | Which schema: 'calkit.yaml', or 'provenance' for the record a build writes beside each artifact. |
+
+<a id="subcommand-describe-desc-components-component"></a>
+
+#### `calkit describe|desc components|component`
+
+Describe the project content a document uses.
+
+Every value, figure and generated block the document takes from the project, with the file it came from, the stage and script that produce it, the pages it lands on, and whether it is still current -- either because its stage needs a rerun, or because the project has moved on since the document was built.
+
+With --line (and optionally --column) this answers "what is under my cursor?", which is what an editor asks on hover or go-to-definition.
+
+Usage:
+
+```text
+calkit describe|desc components|component [OPTIONS] [DOCUMENT]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                                                                                                                                                |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `document` | str  | no       |         | Document to describe. The LaTeX source, the built PDF, or the provenance sidecar all name the same document. Left out, it is worked out from --source, or from the project if it builds only one document. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                                                                                 |
+| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--line`            | int     | no       |         | Describe only what is on this line of the source (1-based), rather than the whole document.                                                                 |
+| `--column`, `--col` | int     | no       |         | Narrow a --line to the component under this column.                                                                                                         |
+| `--source`          | str     | no       |         | File the --line refers to, if the cursor is in a file the document inputs rather than the document itself.                                                  |
+| `--page`            | int     | no       |         | Only components appearing on this page.                                                                                                                     |
+| `--stale`           | boolean | no       | False   | Only components known to be out of date or missing. A component nothing could be checked about is not one of them; it reads as unknown in the full listing. |
+| `--no-stage-check`  | boolean | no       | False   | Skip the pipeline status check, which is the slow part. Drift between the document and the project is still reported; a stage needing a rerun is not.       |
+| `--json`            | boolean | no       | False   | Output result as JSON.                                                                                                                                      |
 
 <a id="command-group-import"></a>
 
@@ -2937,7 +2973,7 @@ Check things.
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
-| [`questions`](#subcommand-check-questions)                  | Check that answered questions are consistent with their evidence.                                            |
+| [`questions`](#subcommand-check-questions)                  | Check the evidence behind each answered question.                                                            |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3261,9 +3297,11 @@ Options:
 
 #### `calkit check questions`
 
-Check that answered questions are consistent with their evidence.
+Check the evidence behind each answered question.
 
 A question is stale if any of its evidence changed after the commit that last edited the question, in Git history for Git-tracked outputs or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value keys must resolve, every placeholder in the text must render, and a publication label must still be present in the LaTeX source. Exits with an error if any answered question is stale or broken.
+
+Whether the answer follows from the evidence is not checked here and cannot be: that is about the sentence. A stale question is a prompt to read it again, not a finding that it is wrong.
 
 Usage:
 
@@ -3285,11 +3323,12 @@ Options:
 
 Work with LaTeX.
 
-| Command                                        | Description                                           |
-| ---------------------------------------------- | ----------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                         |
-| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk.         |
-| [`diff`](#subcommand-latex-tex-diff)           | Build a PDF showing what changed in a LaTeX document. |
+| Command                                                  | Description                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------ |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as LaTeX commands. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3297,7 +3336,7 @@ Work with LaTeX.
 
 Convert a JSON file to LaTeX.
 
-This is useful for referencing calculated values in LaTeX documents.
+This is useful for referencing calculated values in LaTeX documents. Each value is wrapped in `\ckvalue` with the file and pipeline stage it came from, which calkit.sty can mark and log; without the package the values print as plain text.
 
 Usage:
 
@@ -3319,6 +3358,26 @@ Options:
 | `--command`      | str  | no       |         | Command name to use in LaTeX output.                                                                                            |
 | `--key`          | str  | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
 | `--format-json`  | str  | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
+
+<a id="subcommand-latex-tex-from-questions"></a>
+
+#### `calkit latex|tex from-questions`
+
+Write the project's questions and answers as LaTeX commands.
+
+Gives `\ckquestion[n]`, `\ckanswer[n]`, `\ckevidence[n]` and friends, plus `\ckfindings` for every answered question, with each `{name}` placeholder rendered as a provenance-marked value from the results file it points at.
+
+Usage:
+
+```text
+calkit latex|tex from-questions [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default                 | Description             |
+| ---------------- | ---- | -------- | ----------------------- | ----------------------- |
+| `--output`, `-o` | str  | no       | generated-questions.tex | Output LaTeX file path. |
 
 <a id="subcommand-latex-tex-build"></a>
 
@@ -3342,17 +3401,18 @@ Arguments:
 
 Options:
 
-| Option               | Type    | Required | Default | Description                                                                                      |
-| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `--env`, `-e`        | str     | no       |         | Environment in which to run latexmk, if applicable.                                              |
-| `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running latexmk.                                     |
-| `--latexmk-rc`, `-r` | str     | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
-| `--output-dir`       | str     | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
-| `--aux-dir`          | str     | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
-| `--latexmk-arg`      | str     | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
-| `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
-| `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
-| `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
+| Option               | Type    | Required | Default | Description                                                                                                                                         |
+| -------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--env`, `-e`        | str     | no       |         | Environment in which to run latexmk, if applicable.                                                                                                 |
+| `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running latexmk.                                                                                        |
+| `--latexmk-rc`, `-r` | str     | no       |         | Path to a latexmkrc file to use for compilation.                                                                                                    |
+| `--output-dir`       | str     | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir.                                                    |
+| `--aux-dir`          | str     | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.                                                     |
+| `--latexmk-arg`      | str     | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.                                                                 |
+| `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                                                                              |
+| `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                                                                                  |
+| `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                                                                               |
+| `--provenance`       | boolean | no       | False   | Install calkit.sty beside the document, generate its artifact table, and write <document>.provenance.json from the build's log of injected content. |
 
 <a id="subcommand-latex-tex-diff"></a>
 

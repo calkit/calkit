@@ -1408,3 +1408,55 @@ def test_detect_latex_io_finds_class_and_style_files(tmp_dir):
     assert "refs.bib" in inputs
     # graphicx comes from TeX Live, not the project
     assert "graphicx.sty" not in inputs
+
+
+def test_detect_project_artifacts_considers_ignored_pipeline_outputs(tmp_dir):
+    # A stage output is the project's whatever Git and DVC know about it.
+    # One that is gitignored and not DVC-cached, which is what a map-paths
+    # copy is, was invisible: neither list_repo_files nor
+    # list_dvc_tracked_files has it, so the project's own figure was
+    # missing from its own figure list.
+    import subprocess
+
+    import calkit.detect
+
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("figures")
+    os.makedirs("paper/figures")
+    for path in ("figures/plot.png", "paper/figures/plot.png"):
+        with open(path, "w") as f:
+            f.write("png")
+    with open(".gitignore", "w") as f:
+        f.write("figures/plot.png\npaper/figures/plot.png\n")
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "outputs": ["figures/plot.png"],
+                },
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/plot.png",
+                            "dest": "paper/figures/plot.png",
+                        }
+                    ],
+                },
+            }
+        }
+    }
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "figures/plot.png" in figures
+    # The map-paths destination is an output too, said under 'paths'
+    assert "paper/figures/plot.png" in figures
+    # An output no stage has produced yet is not there to be a figure
+    ck_info["pipeline"]["stages"]["plot"]["outputs"].append("figures/none.png")
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "figures/none.png" not in figures

@@ -1468,30 +1468,92 @@ class Publication(_DeclaredArtifact):
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
 
 
-class PublicationComponent(BaseModel):
-    """One file a publication is made of and where it comes from."""
+#: What a component is. A publication is made of files -- the sources in
+#: its folder, the inputs its build reads -- and of the project content the
+#: document typesets on the page. Both are components of the publication;
+#: only the first kind is a file.
+ComponentKind = Literal["file", "value", "figure", "text", "block"]
+#: Where a component came from. "pipeline" is the only one that is checked
+#: rather than claimed; "undeclared" is the gap. Spelled apart from the
+#: status vocabulary, where "unknown" already means nothing checked it.
+ComponentProvenance = Literal[
+    "pipeline", "authored", "attested", "imported", "project", "undeclared"
+]
+ComponentStatus = Literal["ok", "stale", "missing", "unknown"]
+ComponentStaleReason = Literal[
+    "stage-out-of-date", "changed-since-build", "answer-stale"
+]
 
-    # Repo-relative
+
+class PublicationComponent(BaseModel):
+    """One thing a publication is made of, and where it came from.
+
+    Either a file -- a source in its folder, or an input its build stage
+    reads from elsewhere in the project -- or a piece of project content
+    the document typesets: a value from a results file, a figure a stage
+    plotted, a block of generated prose. A value a stage computed is as
+    much a component of the publication as the file it lands in, which is
+    why they share a list.
+    """
+
+    kind: ComponentKind
+    # Repo-relative path of the file, or of the file the content came from
     path: str
-    kind: Literal["produced", "authored", "attested", "imported", "unknown"]
-    # In the publication's folder, or read by its build stage from
-    # elsewhere in the project
-    via: Literal["folder", "input"] = "folder"
-    # For "produced": the stage that makes it, and that stage's kind, so a
-    # map-paths copy can be told from something computed
+    provenance: ComponentProvenance
+    # Files only: in the publication's folder, or read by its build stage
+    # from elsewhere in the project
+    via: Literal["folder", "input"] | None = None
+    # For "pipeline": the stage that makes it, that stage's kind so a
+    # map-paths copy can be told from something computed, what it reads,
+    # and what to open to change it
     stage: str | None = None
     stage_kind: str | None = None
+    stage_inputs: list[str] = Field(default_factory=list)
+    script: str | None = None
     # For "authored": where the source is edited
     source: Literal["overleaf", "git"] | None = None
-    # For "unknown": a project figure with identical bytes, if any
+    # For an undeclared file: a project figure with identical bytes, if any
     matching_figure: str | None = None
     size: int | None = None
+    # Content only: the results key or question number, and the pages of
+    # the built document it appears on
+    key: str | None = None
+    pages: list[int] = Field(default_factory=list)
+    # Content only: the raw value behind it when the document was built and
+    # now, and the hash of its source file then and now
+    build_value: Any = None
+    current_value: Any = None
+    build_hash: str | None = None
+    current_hash: str | None = None
+    status: ComponentStatus = "unknown"
+    stale_reasons: list[ComponentStaleReason] = Field(default_factory=list)
 
 
 class PublicationComponents(BaseModel):
     folder: str
-    items: list[PublicationComponent]
-    n_unknown: int
+    # The document whose page content was read, and whether a build left a
+    # provenance record to read it from. Without one there is nothing to
+    # show and nothing is wrong: the document may simply never have been
+    # built with provenance turned on.
+    document: str | None = None
+    built: bool = False
+    items: list[PublicationComponent] = Field(default_factory=list)
+    n_undeclared: int = 0
+    n_stale: int = 0
+
+
+class ArtifactUsage(BaseModel):
+    """One place an artifact appears in one of the project's documents."""
+
+    document: str
+    kind: Literal["value", "figure", "text", "block"]
+    key: str | None = None
+    pages: list[int] = Field(default_factory=list)
+
+
+class ArtifactUsages(BaseModel):
+    path: str
+    items: list[ArtifactUsage] = Field(default_factory=list)
 
 
 class MiscArtifact(BaseModel):
@@ -1509,9 +1571,13 @@ class MiscArtifact(BaseModel):
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
 class QuestionEvidence(SQLModel):
-    kind: Literal["figure", "result", "table", "publication"]
+    # "value" is one value inside a results file, which is what an answer
+    # templates a number from; "result" with a key is its deprecated form
+    kind: Literal["figure", "value", "result", "table", "publication"]
     path: str
     key: str | None = None
+    # What the value is called in the answer's "{name}" placeholders
+    name: str | None = None
     explanation: str | None = None
     # Resolved artifact the evidence points to, if it could be found
     figure: Figure | None = None
@@ -1523,9 +1589,10 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "result", "table", "publication"]
+    kind: Literal["figure", "value", "result", "table", "publication"]
     path: str
     key: str | None = None
+    name: str | None = None
     explanation: str | None = None
 
 
@@ -1537,6 +1604,16 @@ class QuestionPublic(SQLModel):
     hypothesis: str | None = None
     answer: str | None = None
     evidence: list[QuestionEvidence] = []
+    # What `calkit check questions` could check at the ref being browsed:
+    # that the evidence is there, that placeholders resolve, and whether
+    # any cited value has moved since the answer was last edited. Not
+    # whether the answer follows from the evidence, which is about the
+    # prose. None when nothing checked, which is not the same as nothing
+    # being wrong.
+    status: (
+        Literal["ok", "stale", "error", "unanswered", "no-evidence"] | None
+    ) = None
+    status_message: str | None = None
 
 
 class QuestionPut(SQLModel):

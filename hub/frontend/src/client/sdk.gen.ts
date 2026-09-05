@@ -113,6 +113,8 @@ import type {
   GetProjectAppResponses,
   GetProjectAppsErrors,
   GetProjectAppsResponses,
+  GetProjectArtifactUsagesErrors,
+  GetProjectArtifactUsagesResponses,
   GetProjectCollaboratorsErrors,
   GetProjectCollaboratorsResponses,
   GetProjectCommentsErrors,
@@ -4377,7 +4379,11 @@ export class ProjectsService {
   /**
    * Get Project Publication Components
    *
-   * List the files a publication is made of, each with its provenance.
+   * List what a publication is made of, each with its provenance.
+   *
+   * Two kinds of component, in one list. A value a stage computed is as
+   * much a part of the publication as the file it lands in, so both are
+   * here and both name the stage to open.
    *
    * A component is any file in the publication's folder, i.e., the
    * directory of ``path``, at ``ref``, whether tracked by Git or DVC, other
@@ -4386,7 +4392,7 @@ export class ProjectsService {
    * outside that folder, with ``from_stage_outputs`` inputs expanded and
    * directories walked (``via`` is ``input``). Each is one of:
    *
-   * - ``produced``: an output of a pipeline stage, whether declared in its
+   * - ``pipeline``: an output of a pipeline stage, whether declared in its
    * ``outputs`` or as the destination of a map-paths mapping (a file, or
    * anything under a directory destination). ``stage`` names it, and
    * ``stage_kind`` says whether that's a copy (``map-paths``) or
@@ -4396,12 +4402,20 @@ export class ProjectsService {
    * - ``imported``: declared likewise with ``imported_from``.
    * - ``authored``: a LaTeX or text source, edited in Overleaf when the
    * folder is synced with one (``source``), otherwise in Git.
-   * - ``unknown``: anything else. A figure-like file at or under 20 MB is
+   * - ``undeclared``: anything else. A figure-like file at or under 20 MB is
    * compared byte-for-byte against the project's declared figures, and
    * ``matching_figure`` names one with identical content, which is what
    * a copy made without a map-paths stage looks like.
    *
-   * ``n_unknown`` counts the ``unknown`` items.
+   * The second kind is the project content the document typesets: every
+   * value, figure and generated block it took from the project rather than
+   * copied, with the pages it lands on and whether it is still current.
+   * These come from the document's provenance record, so ``built`` is
+   * false and none are listed when the document has never been built with
+   * ``provenance: true``, which is not a problem to report.
+   *
+   * ``n_undeclared`` counts the components nothing accounts for, and
+   * ``n_stale`` those known to be out of date or missing.
    */
   public static getProjectPublicationComponents<
     ThrowOnError extends boolean = true,
@@ -4439,6 +4453,56 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/publications/components",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Artifact Usages
+   *
+   * Which of the project's documents show this artifact, and where.
+   *
+   * The reverse of ``publications/components``: given a figure or
+   * a results file, the papers that typeset it and the pages it lands on,
+   * so a change to a result shows what it touches. Read from the documents'
+   * provenance records, so a document that has never been built with
+   * provenance on contributes nothing.
+   */
+  public static getProjectArtifactUsages<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectArtifactUsagesResponses,
+    GetProjectArtifactUsagesErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectArtifactUsagesResponses,
+      GetProjectArtifactUsagesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/artifacts/usages",
       ...options,
       ...params,
     })

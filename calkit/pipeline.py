@@ -1120,6 +1120,29 @@ def get_status(
             os.chdir(prev_cwd)
 
 
+def map_paths_outputs(stage: dict) -> list[str]:
+    """Where a ``map-paths`` stage writes.
+
+    Such a stage says what it produces under ``paths`` rather than
+    ``outputs``: copying is the whole of what it does, so its destinations
+    are its outputs. Mirrors each mapping's own ``out_path``, since
+    ``file-to-dir`` writes ``dest/<name>`` rather than ``dest``.
+    """
+    out: list[str] = []
+    for mapping in stage.get("paths", []) or []:
+        if not isinstance(mapping, dict):
+            continue
+        dest = mapping.get("dest")
+        src = mapping.get("src")
+        if not dest:
+            continue
+        if mapping.get("kind") == "file-to-dir" and src:
+            out.append(Path(dest, Path(src).name).as_posix())
+        else:
+            out.append(Path(dest).as_posix())
+    return out
+
+
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any."""
     target = Path(path).as_posix()
@@ -1133,6 +1156,11 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
             out_path = out.get("path") if isinstance(out, dict) else out
             if out_path and Path(out_path).as_posix() == target:
                 return name
+        if stage.get("kind") == "map-paths":
+            for out in map_paths_outputs(stage):
+                # A directory mapping produces everything it writes into
+                if target == out or target.startswith(out + "/"):
+                    return name
     return None
 
 

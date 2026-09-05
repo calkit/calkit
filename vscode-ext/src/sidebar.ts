@@ -1,4 +1,11 @@
 import * as vscode from "vscode";
+import {
+  citedValues,
+  type DocumentCitation,
+  isMappedCopy,
+  mappingOutPath,
+  type PathMapping,
+} from "./components/core";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type {
@@ -34,6 +41,23 @@ type ArtifactCollection =
   | "results"
   | "publications"
   | "presentations";
+
+/** A question as calkit renders it, with its placeholders filled. */
+export interface RenderedQuestion {
+  question?: string;
+  hypothesis?: string | null;
+  answer?: string | null;
+  notes?: string | null;
+  evidence?: { explanation?: string | null }[];
+}
+
+const ARTIFACT_COLLECTIONS: ArtifactCollection[] = [
+  "figures",
+  "results",
+  "datasets",
+  "publications",
+  "presentations",
+];
 
 // The displayed text of a question, which may be a plain string or a structured
 // entry carrying a hypothesis/answer/evidence alongside the question itself.
@@ -120,6 +144,10 @@ export class CalkitSidebarProvider
   );
   private readonly resultsSectionItem = this.makeSection("Results", "results");
   private stageItemCache = new Map<string, SidebarItem>();
+  private artifactItemCache = new Map<string, SidebarItem>();
+  private questionItemCache = new Map<string, SidebarItem>();
+  private documentCitations: DocumentCitation[] = [];
+  private renderedQuestions: RenderedQuestion[] = [];
   private envItemCache = new Map<string, SidebarItem>();
 
   refresh(
@@ -136,6 +164,8 @@ export class CalkitSidebarProvider
     detectedPresentations?: string[],
     hiddenSections?: Set<string>,
     staleStageDetails?: Record<string, StaleStageDetail>,
+    documentCitations?: DocumentCitation[],
+    renderedQuestions?: RenderedQuestion[],
   ): void {
     const nextFingerprint = JSON.stringify([
       calkitConfig,
@@ -150,6 +180,8 @@ export class CalkitSidebarProvider
       detectedPresentations,
       [...(hiddenSections ?? [])].sort(),
       staleStageDetails,
+      documentCitations,
+      renderedQuestions,
     ]);
     if (nextFingerprint === this.lastFingerprint) {
       return;
@@ -160,6 +192,8 @@ export class CalkitSidebarProvider
     this.dvcYaml = dvcYaml;
     this.staleStageNames = staleStageNames;
     this.staleStageDetails = staleStageDetails ?? {};
+    this.documentCitations = documentCitations ?? [];
+    this.renderedQuestions = renderedQuestions ?? [];
     this.runningStageNames = runningStageNames ?? new Set();
     this.envDescriptions = envDescriptions;
     this.detectedNotebooks = detectedNotebooks ?? [];
@@ -169,6 +203,8 @@ export class CalkitSidebarProvider
     this.detectedPresentations = detectedPresentations ?? [];
     this.hiddenSections = hiddenSections ?? new Set();
     this.stageItemCache.clear();
+    this.artifactItemCache.clear();
+    this.questionItemCache.clear();
     this.envItemCache.clear();
     this._onDidChangeTreeData.fire();
   }
@@ -268,7 +304,7 @@ export class CalkitSidebarProvider
           nodeKind,
           outputToStage,
         );
-        if (!entry.stage && !entry.imported_from) {
+        if (!entry.stage && !entry.imported_from && !entry.created_by) {
           n++;
         }
       }
@@ -284,6 +320,47 @@ export class CalkitSidebarProvider
       this.getStageItems();
     }
     return this.stageItemCache.get(stageName);
+  }
+
+  /**
+   * The item for one artifact, so it can be revealed by its path.
+   *
+   * Built on demand for the collection it belongs to, since a document
+   * asking about a figure is not a reason to walk every collection the
+   * project has.
+   */
+  findArtifactItem(
+    kind: ArtifactCollection,
+    artifactPath: string,
+  ): SidebarItem | undefined {
+    if (!this.artifactItemCache.has(artifactPath)) {
+      this.getArtifactItems(kind);
+    }
+    return this.artifactItemCache.get(artifactPath);
+  }
+
+  /** The item for one question, by its 1-based position in calkit.yaml. */
+  findQuestionItem(index: string): SidebarItem | undefined {
+    if (this.questionItemCache.size === 0) {
+      this.getQuestionItems();
+    }
+    return this.questionItemCache.get(index);
+  }
+
+  /**
+   * The item for one artifact, wherever the project declares it.
+   *
+   * A document knows it uses a file, not which collection it was written
+   * down under, so the collections are tried rather than asked for.
+   */
+  findArtifactItemAnywhere(artifactPath: string): SidebarItem | undefined {
+    for (const kind of ARTIFACT_COLLECTIONS) {
+      const found = this.findArtifactItem(kind, artifactPath);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
   }
 
   findEnvItem(envName: string): SidebarItem | undefined {
@@ -316,6 +393,18 @@ export class CalkitSidebarProvider
     }
     if (element.nodeKind === "dataset") {
       return this.datasetsSectionItem;
+    }
+    if (element.nodeKind === "result") {
+      return this.resultsSectionItem;
+    }
+    if (element.nodeKind === "publication") {
+      return this.publicationsSectionItem;
+    }
+    if (element.nodeKind === "presentation") {
+      return this.presentationsSectionItem;
+    }
+    if (element.nodeKind === "question") {
+      return this.questionsSectionItem;
     }
     return undefined;
   }
@@ -429,7 +518,8 @@ export class CalkitSidebarProvider
       return this.emptyOrNone("No questions defined");
     }
     return filtered.map(({ question, index }) => {
-      const text = questionText(question);
+      const text =
+        this.renderedQuestions[index - 1]?.question ?? questionText(question);
       // Plain-string questions stay leaf nodes; a structured entry expands to
       // show whichever of hypothesis/answer/evidence it carries.
       const hasDetails =
@@ -448,6 +538,7 @@ export class CalkitSidebarProvider
       item.iconPath = new vscode.ThemeIcon("question");
       item.tooltip = text;
       item.contextValue = "question";
+      this.questionItemCache.set(String(index), item);
       return item;
     });
   }
@@ -471,26 +562,46 @@ export class CalkitSidebarProvider
       item.iconPath = new vscode.ThemeIcon(icon);
       items.push(item);
     };
-    if (question.hypothesis) {
-      detail("Hypothesis", question.hypothesis, "lightbulb");
+    // What a reader should see is the answer with its numbers in it, not
+    // the template that produces them. calkit fills them from the
+    // evidence; the text as written is the fallback when it could not.
+    const rendered = this.renderedQuestions[Number(indexId) - 1];
+    const hypothesis = rendered?.hypothesis ?? question.hypothesis;
+    const answer = rendered?.answer ?? question.answer;
+    if (hypothesis) {
+      detail("Hypothesis", hypothesis, "lightbulb");
     }
-    if (question.answer) {
-      detail("Answer", question.answer, "check");
+    if (answer) {
+      detail("Answer", answer, "check");
     }
-    for (const ev of question.evidence ?? []) {
+    if (rendered?.notes) {
+      detail("Notes", rendered.notes, "note");
+    }
+    (question.evidence ?? []).forEach((ev, evIndex) => {
       // Evidence references a figure or result file with an optional
-      // explanation; clicking opens the file when it has a path.
-      const label = ev.explanation || ev.path || ev.kind || "Evidence";
+      // explanation, which can be templated like the answer is.
+      const explanation =
+        rendered?.evidence?.[evIndex]?.explanation ?? ev.explanation;
+      const label = explanation || ev.path || ev.kind || "Evidence";
       const evItem = new SidebarItem(
         label,
         vscode.TreeItemCollapsibleState.None,
         "question-evidence",
         ev.path,
       );
-      evItem.description = ev.path;
-      evItem.tooltip = ev.explanation ?? ev.path;
+      // One value inside a file is not the file, and the name is what the
+      // answer's {placeholder} spells, so both belong on the row
+      const name = ev.name ?? ev.key;
+      evItem.description = ev.key
+        ? `${ev.path}:${ev.key}` + (name && name !== ev.key ? ` {${name}}` : "")
+        : ev.path;
+      evItem.tooltip = explanation ?? evItem.description;
       evItem.iconPath = new vscode.ThemeIcon(
-        ev.kind === "result" ? "graph" : "file-media",
+        ev.kind === "value" || ev.kind === "result"
+          ? "symbol-numeric"
+          : ev.kind === "publication"
+          ? "file-pdf"
+          : "file-media",
       );
       if (this.workspaceRoot && ev.path) {
         evItem.command = {
@@ -500,7 +611,7 @@ export class CalkitSidebarProvider
         };
       }
       items.push(evItem);
-    }
+    });
     return items;
   }
 
@@ -921,7 +1032,11 @@ export class CalkitSidebarProvider
         allPaths.push(p);
       }
     }
-    return allPaths;
+    // A file a map-paths stage copied in is the same artifact as the file
+    // it was copied from, which is already listed. Showing both says
+    // there are two of a thing there is one of.
+    const stages = this.calkitConfig?.pipeline?.stages ?? {};
+    return allPaths.filter((p) => !isMappedCopy(p, stages));
   }
 
   private getArtifactItems(kind: ArtifactCollection): SidebarItem[] {
@@ -946,13 +1061,22 @@ export class CalkitSidebarProvider
     nodeKind: ArtifactKind,
   ): SidebarItem {
     const label = path.basename(entry.path);
-    const hasProvenance = !!entry.stage || !!entry.imported_from;
+    const hasProvenance =
+      !!entry.stage || !!entry.imported_from || !!entry.created_by;
+    // A results file with values something cites has those to show, even
+    // when nothing says where the file itself came from
+    const hasCited =
+      nodeKind === "result" &&
+      citedValues(entry.path, this.calkitConfig ?? {}, this.documentCitations)
+        .length > 0;
     const isStale =
       typeof entry.stage === "string" && this.staleStageNames.has(entry.stage);
-    const collapsible = hasProvenance
-      ? vscode.TreeItemCollapsibleState.Collapsed
-      : vscode.TreeItemCollapsibleState.None;
+    const collapsible =
+      hasProvenance || hasCited
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None;
     const item = new SidebarItem(label, collapsible, nodeKind, entry.path);
+    this.artifactItemCache.set(entry.path, item);
     item.description = entry.path;
     if (!hasProvenance) {
       item.iconPath = new vscode.ThemeIcon(
@@ -1014,6 +1138,28 @@ export class CalkitSidebarProvider
       this.buildOutputToStageMap(),
     );
     const items: SidebarItem[] = [];
+    // A results file holds every number a stage wrote; these are the ones
+    // something in the project actually quotes, which is a much shorter
+    // list and the one worth reading
+    if (nodeKind === "result") {
+      for (const cited of citedValues(
+        artifactPath,
+        this.calkitConfig ?? {},
+        this.documentCitations,
+      )) {
+        const item = new SidebarItem(
+          cited.key,
+          vscode.TreeItemCollapsibleState.None,
+          "artifact-cited-value",
+        );
+        item.description = cited.by.join(", ");
+        item.iconPath = new vscode.ThemeIcon("symbol-numeric");
+        item.tooltip = `${artifactPath}:${cited.key}, cited by ${cited.by.join(
+          ", ",
+        )}`;
+        items.push(item);
+      }
+    }
     if (typeof entry.stage === "string") {
       const stageName = entry.stage;
       const stageItem = new SidebarItem(
@@ -1269,6 +1415,23 @@ export class CalkitSidebarProvider
     if (calkitStage) {
       if (typeof calkitStage.kind === "string") {
         prop("Kind", calkitStage.kind, "symbol-enum");
+      }
+      // What a map-paths stage does is its list of copies, so that is what
+      // there is to inspect. Opens the source, which is the file somebody
+      // would change; the copy is written by the stage.
+      if (calkitStage.kind === "map-paths") {
+        for (const mapping of (calkitStage.paths ?? []) as PathMapping[]) {
+          const out = mappingOutPath(mapping);
+          if (!mapping.src || !out) {
+            continue;
+          }
+          prop(
+            mapping.kind?.startsWith("dir-") ? "Copies dir" : "Copies",
+            `${mapping.src} → ${out}`,
+            "arrow-right",
+            mapping.src,
+          );
+        }
       }
       // The stage command itself changed (e.g. its args), independent of any
       // individual input/output file.

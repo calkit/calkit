@@ -24,6 +24,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   type MutableRefObject,
+  type ReactElement,
   type ReactNode,
   useCallback,
   useMemo,
@@ -49,6 +50,7 @@ import useAuth from "../../hooks/useAuth"
 import PdfDocumentViewer, {
   type HighlightTransform,
   type OnSelectionFinished,
+  type PdfDocumentViewerProps,
 } from "../Common/PdfDocumentViewer"
 
 // ---------------------------------------------------------------------------
@@ -263,6 +265,12 @@ interface PdfAnnotatorProps {
   // Optional element rendered in the viewer toolbar, e.g. an "Edit LaTeX"
   // button.
   toolbarAction?: ReactNode
+  // Optional panel beside the document, given the page in view. Forwarded
+  // to the viewer; publications use it for the page's components.
+  sidePanel?: PdfDocumentViewerProps["sidePanel"]
+  sidePanelLabel?: string
+  sidePanelIcon?: ReactElement
+  sidePanelBadge?: ReactNode
 }
 
 export default function PdfAnnotator({
@@ -276,6 +284,10 @@ export default function PdfAnnotator({
   pagedNav = false,
   externalScrollRef,
   toolbarAction,
+  sidePanel,
+  sidePanelLabel,
+  sidePanelIcon,
+  sidePanelBadge,
 }: PdfAnnotatorProps) {
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -473,6 +485,10 @@ export default function PdfAnnotator({
       pagedNav={pagedNav}
       source={artifactType}
       toolbarAction={toolbarAction}
+      sidePanel={sidePanel}
+      sidePanelLabel={sidePanelLabel}
+      sidePanelIcon={sidePanelIcon}
+      sidePanelBadge={sidePanelBadge}
     />
   )
 }

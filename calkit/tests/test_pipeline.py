@@ -3472,3 +3472,51 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open(".gitattributes") as f:
         assert f.read().count("/.calkit/** text eol=lf") == 1
+
+
+def test_get_stage_for_output_reads_map_paths_destinations():
+    # A map-paths stage is what copies a figure into a document's folder,
+    # which is the fix for a document reaching outside it. It says what it
+    # produces under 'paths', so a lookup that only reads 'outputs' leaves
+    # the copy looking like a file nothing accounts for.
+    from calkit.pipeline import get_stage_for_output
+
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/a.png",
+                            "dest": "paper/figures/a.png",
+                        },
+                        {
+                            "kind": "file-to-dir",
+                            "src": "figures/b.png",
+                            "dest": "paper/figures",
+                        },
+                        {
+                            "kind": "dir-to-dir-merge",
+                            "src": "shared",
+                            "dest": "paper/shared",
+                        },
+                    ],
+                },
+                "plot": {
+                    "kind": "python-script",
+                    "outputs": ["figures/a.png"],
+                },
+            }
+        }
+    }
+    assert get_stage_for_output("paper/figures/a.png", ck_info) == "copy"
+    # file-to-dir writes dest/<name>, not dest
+    assert get_stage_for_output("paper/figures/b.png", ck_info) == "copy"
+    # A directory mapping produces everything it writes into
+    assert get_stage_for_output("paper/shared/x/y.tex", ck_info) == "copy"
+    assert get_stage_for_output("paper/shared", ck_info) == "copy"
+    # The original is still the plotting stage's, not the copy's
+    assert get_stage_for_output("figures/a.png", ck_info) == "plot"
+    assert get_stage_for_output("paper/figures/nope.png", ck_info) is None

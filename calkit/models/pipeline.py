@@ -996,6 +996,16 @@ class LatexStage(Stage):
         description="Extra arguments passed straight through to latexmk, for "
         "control Calkit does not model.",
     )
+    provenance: bool = Field(
+        default=False,
+        description=(
+            "Mark and record where injected content came from: install "
+            "calkit.sty beside the document, generate its artifact table "
+            "before each build, and write <document>.provenance.json "
+            "afterwards listing every value, figure and text block the "
+            "document took from the project, with the stage that made it."
+        ),
+    )
 
     @property
     def diff_pairs(self) -> list[tuple[str, str]]:
@@ -1179,6 +1189,8 @@ class LatexStage(Stage):
             cmd += " --no-synctex"
         for arg in self.latexmk_args:
             cmd += f" --latexmk-arg {shlex.quote(arg)}"
+        if self.provenance:
+            cmd += " --provenance"
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
@@ -1206,6 +1218,52 @@ class LatexStage(Stage):
                 outs.append({out_path: {"cache": False}})
             else:
                 outs.append(out_path)
+        if self.provenance:
+            sidecar = calkit.latex.provenance_sidecar_path(self.target_path)
+            if sidecar not in out_paths:
+                outs.append({sidecar: {"cache": False}})
+        return outs
+
+
+class QuestionsToLatexStage(Stage):
+    """Inject the project's questions and answers into a LaTeX document.
+
+    Reads ``calkit.yaml`` and the results files its value evidence points
+    at, and writes commands giving each question's fields with every
+    placeholder rendered as a provenance-marked value.
+    """
+
+    kind: Literal["questions-to-latex"] = "questions-to-latex"
+    environment: str = "_system"
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = "calkit latex from-questions"
+        for out in self.outputs:
+            out_path = out if isinstance(out, str) else out.path
+            cmd += f" --output {shlex.quote(out_path)}"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        # The questions live in calkit.yaml, so a change there re-renders
+        return ["calkit.yaml"] + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=True if out.storage == "dvc" else False,
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
         return outs
 
 
@@ -2068,6 +2126,7 @@ class Pipeline(BaseModel):
                 | LatexStage
                 | QuartoStage
                 | JsonToLatexStage
+                | QuestionsToLatexStage
                 | MatlabScriptStage
                 | MatlabCommandStage
                 | ShellCommandStage

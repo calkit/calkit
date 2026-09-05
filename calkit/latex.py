@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from calkit.core import LOCAL_DIR
 
@@ -160,6 +161,9 @@ _INPUT_COMMANDS: dict[str, list[str]] = {
     "include": [".tex"],
     "subfile": [".tex"],
     "includegraphics": _GRAPHICS_EXTS,
+    # Provenance-marked equivalents from calkit.sty
+    "ckfigure": _GRAPHICS_EXTS,
+    "ckinput": [".tex"],
     "includesvg": [".svg", ".pdf"],
     "lstinputlisting": [""],
     "verbatiminput": [""],
@@ -280,3 +284,673 @@ def _is_immutable_ref(repo: git.Repo, ref: str | None) -> bool:
     except Exception:
         return False
     return True
+
+
+# -- provenance -------------------------------------------------------------
+#
+# Content injected into a document from elsewhere in the project -- a value
+# from a results file, a figure, a generated block of text -- is marked with
+# macros from calkit.sty so a reader of the TeX or the PDF can see it came
+# from somewhere and follow the trail back. The generated commands below
+# expand to those macros; the style file makes them invisible in final mode
+# and colored, hyperlinked and logged in provenance mode.
+
+STYLE_FNAME = "calkit.sty"
+PROVENANCE_TEX_FNAME = "calkit-provenance.tex"
+PROVENANCE_LOG_EXT = ".ckprov"
+#: Published alongside the calkit.yaml schema, so an editor validates a
+#: provenance record the same way it validates the project file
+PROVENANCE_SCHEMA_URL = "https://docs.calkit.org/schemas/provenance.json"
+#: JSON carries no comments, so the warning that belongs at the top of a
+#: file nothing should hand-edit goes in a field of its own
+PROVENANCE_NOTE = (
+    "Written by 'calkit latex build --provenance'. Do not edit. These "
+    "hashes and values are evidence of what a build actually used; "
+    "changing them to resolve an error or make a check pass falsifies "
+    "that evidence. If something here looks wrong, say so rather than "
+    "correcting it: regenerate the artifact instead."
+)
+_TEX_SPECIALS = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+
+def escape_tex(text: str) -> str:
+    """Escape TeX special characters in plain text."""
+    return "".join(_TEX_SPECIALS.get(c, c) for c in str(text))
+
+
+def unwrap_singleton(value: Any) -> Any:
+    """A one-element list of a scalar, as that scalar.
+
+    MATLAB and NumPy write a scalar as a one-element array, so a results
+    file exported from either has ``[3.54]`` where the author means 3.54.
+    Left alone it prints with its brackets into the prose, and a numeric
+    format spec raises rather than formatting it.
+    """
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        inner = value[0]
+        if isinstance(inner, (int, float, str, bool)):
+            return inner
+    return value
+
+
+def format_value(value: Any, spec: str | None = None) -> str:
+    """A value as plain text for a document, with an optional format spec.
+
+    Not escaped for TeX: callers escape once, after formatting, so a
+    string value is not escaped twice.
+    """
+    value = unwrap_singleton(value)
+    if spec:
+        return format(value, spec)
+    if isinstance(value, float):
+        return f"{value:g}"
+    if isinstance(value, (list, dict)):
+        return json.dumps(value)
+    return str(value)
+
+
+def keyed_command(
+    name: str, entries: dict[str, str], listing: dict[str, str] | None = None
+) -> str:
+    """Define ``\\name[key]``, expanding to the TeX in ``entries[key]``.
+
+    ``\\name`` alone, or ``\\name[all]``, prints every key (and its plain
+    value, if ``listing`` gives one), which is handy for checking what a
+    document has available. The structure is a chain of ``\\pdfstrcmp``
+    tests, so it works in any engine that has ``\\pdfstrcmp`` (pdfTeX,
+    XeTeX, LuaTeX via pdftexcmds).
+    """
+    lines = [
+        "\\makeatletter%",
+        f"\\newcommand\\{name}[1][all]{{%",
+        "  \\ifnum\\pdfstrcmp{#1}{all}=0%",
+        f"    \\def\\{name}@out{{%",
+    ]
+    listing = listing or {}
+    listed = ", ".join(
+        escape_tex(k) + (f": {listing[k]}" if k in listing else "")
+        for k in entries
+    )
+    lines.append(f"      {listed}}}%")
+    for key, tex in entries.items():
+        lines.append(f"  \\else\\ifnum\\pdfstrcmp{{#1}}{{{key}}}=0%")
+        lines.append(f"    \\def\\{name}@out{{%")
+        lines.append(f"      {tex}}}%")
+    lines.append(
+        "  \\else\\PackageError{calkit}{Unknown key '#1' for \\string\\"
+        + name
+        + "}{}%"
+    )
+    lines.append("  " + "\\fi" * (len(entries) + 1) + "%")
+    lines.append(f"  \\{name}@out}}%")
+    lines.append("\\makeatother%")
+    return "\n".join(lines) + "\n"
+
+
+def value_macro(key: str, value: str, path: str, stage: str | None) -> str:
+    """The provenance-carrying expansion of one injected value."""
+    return (
+        f"\\ckvalue{{{escape_tex(key)}}}{{{value}}}"
+        f"{{{escape_tex(path)}}}{{{escape_tex(stage or '')}}}"
+    )
+
+
+PREAMBLE = (
+    "%% Generated by Calkit. Do not edit.\n"
+    "%% Values are wrapped in \\ckvalue so calkit.sty can mark and log where\n"
+    "%% they came from; without the package they print as plain text.\n"
+    "\\providecommand\\ckvalue[4]{#2}%\n"
+)
+
+
+def stage_for(path: str, ck_info: dict) -> str | None:
+    from calkit.pipeline import get_stage_for_output
+
+    return get_stage_for_output(path, ck_info)
+
+
+def _lock_hashes(wdir: str) -> dict[str, str]:
+    """Output path -> hash, from ``dvc.lock`` if there is one."""
+    import calkit
+
+    lock_path = os.path.join(wdir, "dvc.lock")
+    if not os.path.isfile(lock_path):
+        return {}
+    try:
+        with open(lock_path, encoding="utf-8") as f:
+            lock = calkit.ryaml.load(f)
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    for stage in ((lock or {}).get("stages") or {}).values():
+        for o in (stage or {}).get("outs") or []:
+            if isinstance(o, dict) and o.get("path"):
+                out[o["path"]] = str(o.get("md5") or o.get("hash") or "")
+    return out
+
+
+def artifact_records(paths: list[str], ck_info: dict, wdir: str) -> list[dict]:
+    """Provenance of project paths: producing stage, its inputs, hash."""
+    hashes = _lock_hashes(wdir)
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    records = []
+    for path in paths:
+        stage_name = stage_for(path, ck_info)
+        stage = stages.get(stage_name) if stage_name else None
+        inputs: list[str] = []
+        if isinstance(stage, dict):
+            for inp in stage.get("inputs") or []:
+                inputs.append(inp if isinstance(inp, str) else json.dumps(inp))
+        records.append(
+            {
+                "path": path,
+                "stage": stage_name,
+                "stage_inputs": inputs,
+                "hash": hashes.get(path),
+            }
+        )
+    return records
+
+
+def write_provenance_tex(
+    target_path: str, ck_info: dict, wdir: str | None = None
+) -> str:
+    """Write the artifact table calkit.sty reads, beside the document.
+
+    One ``\\ckartifact{path}{stage}{hash}{project path}`` per project file
+    the document references, keyed by the path as TeX sees it (relative to
+    the document), so a caption can name the stage that produced a figure
+    and a link can point at the file's place in the project.
+    """
+    wdir = wdir or os.getcwd()
+    tex_dir = os.path.dirname(target_path)
+    lines = ["%% Generated by Calkit for each build. Do not edit or commit."]
+    for rel in detect_inputs(target_path, wdir):
+        rec = artifact_records([rel], ck_info, wdir)[0]
+        if rec["stage"] is None:
+            continue
+        as_written = Path(os.path.relpath(rel, tex_dir or ".")).as_posix()
+        lines.append(
+            f"\\ckartifact{{{as_written}}}{{{rec['stage']}}}"
+            f"{{{rec['hash'] or ''}}}{{{rel}}}"
+        )
+    out_path = os.path.join(wdir, tex_dir, PROVENANCE_TEX_FNAME)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return out_path
+
+
+def install_style(target_path: str, wdir: str | None = None) -> str:
+    """Put calkit.sty beside the document if it is missing or outdated.
+
+    A copy in the project rather than a TEXINPUTS trick, so the document
+    builds the same way on Overleaf, in a container, or on a laptop, and so
+    the style is under version control with the paper that uses it.
+    """
+    import calkit.resources
+
+    wdir = wdir or os.getcwd()
+    src = os.path.join(calkit.resources.get_dir(), "latex", STYLE_FNAME)
+    dest = os.path.join(wdir, os.path.dirname(target_path), STYLE_FNAME)
+    with open(src, encoding="utf-8") as f:
+        wanted = f.read()
+    current = None
+    if os.path.isfile(dest):
+        with open(dest, encoding="utf-8") as f:
+            current = f.read()
+    if current != wanted:
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(wanted)
+    return dest
+
+
+def provenance_sidecar_path(target_path: str) -> str:
+    return os.path.splitext(target_path)[0] + ".provenance.json"
+
+
+def synctex_pages(
+    target_path: str, wdir: str, artifact_path: str | None = None
+) -> dict[str, dict[int, list[int]]]:
+    """Which page of the built PDF each line of each source ended up on.
+
+    Read out of the ``.synctex.gz`` latexmk already writes, so a document
+    needs nothing in it for its components to be placed on pages. TeX
+    records where material was shipped out rather than where it was
+    written, so a float that moved is reported on the page it landed on,
+    which is the whole reason to ask TeX rather than to guess.
+
+    Parsed here rather than shelled out to the ``synctex`` binary, which
+    lives wherever the project's TeX does: for a container environment
+    that is a container start per lookup, where one file read answers
+    every component at once. Keyed by the path TeX recorded, which for a
+    container build is absolute and inside the container, so
+    :func:`pages_at` matches it by suffix rather than by equality.
+    """
+    import gzip
+
+    stem = os.path.splitext(os.path.join(wdir, artifact_path or target_path))[
+        0
+    ]
+    path = next(
+        (
+            p
+            for p in (stem + ".synctex.gz", stem + ".synctex")
+            if os.path.isfile(p)
+        ),
+        None,
+    )
+    if path is None:
+        return {}
+    inputs: dict[int, str] = {}
+    by_tag: dict[int, dict[int, set[int]]] = {}
+    page: int | None = None
+    # Every record naming a place in the source starts with its type, then
+    # the input's tag and the line
+    record = re.compile(r"^[\[(vhxkg$]\s*(\d+),(\d+)")
+    opener = gzip.open if path.endswith(".gz") else open
+    try:
+        with opener(path, "rt", errors="replace") as f:
+            for line in f:
+                line = line.rstrip("\n")
+                named = re.match(r"^Input:(\d+):(.*)$", line)
+                if named:
+                    inputs[int(named.group(1))] = named.group(2)
+                    continue
+                if line.startswith("{"):
+                    try:
+                        page = int(line[1:])
+                    except ValueError:
+                        page = None
+                    continue
+                if line.startswith("}"):
+                    page = None
+                    continue
+                found = record.match(line)
+                if found and page is not None:
+                    tag, at = int(found.group(1)), int(found.group(2))
+                    by_tag.setdefault(tag, {}).setdefault(at, set()).add(page)
+    except OSError:
+        return {}
+    out: dict[str, dict[int, list[int]]] = {}
+    for tag, lines in by_tag.items():
+        raw = inputs.get(tag)
+        if raw is None or not raw.endswith(".tex"):
+            continue
+        norm = Path(os.path.normpath(raw)).as_posix()
+        into = out.setdefault(norm, {})
+        for at, pages in lines.items():
+            into[at] = sorted(set(into.get(at, [])) | pages)
+    return out
+
+
+def localize_synctex(
+    target_path: str, wdir: str, artifact_path: str | None = None
+) -> bool:
+    """Point a build's SyncTeX at where its sources actually are.
+
+    TeX records the paths it saw, so a build in a container records the
+    container's: ``/work/paper/main.tex``, which nothing outside it can
+    open. Reverse search in a PDF viewer then finds the right line of a
+    file that does not exist, which looks like the feature being broken
+    rather than the path being someone else's.
+
+    Each recorded input that names a file this project has is rewritten to
+    that file's path here. Matched by the longest trailing part that
+    exists, so it needs to know nothing about where the container mounted
+    anything. Anything else, such as a class file from the TeX
+    distribution, is left as it was.
+
+    Returns whether the file was changed.
+    """
+    import gzip
+
+    stem = os.path.splitext(os.path.join(wdir, artifact_path or target_path))[
+        0
+    ]
+    path = next(
+        (
+            p
+            for p in (stem + ".synctex.gz", stem + ".synctex")
+            if os.path.isfile(p)
+        ),
+        None,
+    )
+    if path is None:
+        return False
+    root = Path(wdir).resolve()
+
+    def local(raw: str) -> str | None:
+        parts = Path(os.path.normpath(raw)).as_posix().split("/")
+        for i in range(len(parts)):
+            rel = "/".join(parts[i:])
+            if not rel or rel.startswith(".."):
+                continue
+            if (root / rel).is_file():
+                return (root / rel).as_posix()
+        return None
+
+    opener = gzip.open if path.endswith(".gz") else open
+    try:
+        with opener(path, "rt", errors="replace") as f:
+            lines = f.read().split("\n")
+    except OSError:
+        return False
+    changed = False
+    for i, line in enumerate(lines):
+        named = re.match(r"^(Input:\d+:)(.*)$", line)
+        if named is None:
+            continue
+        found = local(named.group(2))
+        if found is not None and found != named.group(2):
+            lines[i] = named.group(1) + found
+            changed = True
+    if not changed:
+        return False
+    try:
+        with opener(path, "wt") as f:
+            f.write("\n".join(lines))
+    except OSError:
+        return False
+    return True
+
+
+def pages_at(
+    mapping: dict[str, dict[int, list[int]]], source: str, line: int
+) -> list[int]:
+    """The page one line of a project-relative source landed on.
+
+    TeX records a box against the line it started on, so a line in the
+    middle of a paragraph often has no record of its own. The nearest
+    recorded line at or before it is the box that carried it, which is
+    where it was typeset.
+
+    The first page only. A line whose material spans a break is recorded
+    on both, and naming the second would put the component on a page a
+    reader looking for it would not find it on.
+    """
+    wanted = Path(source).as_posix()
+    base = os.path.basename(wanted)
+    for suffix in ("/" + wanted, "/" + base):
+        for norm, lines in mapping.items():
+            if norm != wanted and not norm.endswith(suffix):
+                continue
+            at = max((n for n in lines if n <= line), default=None)
+            if at is not None and lines[at]:
+                return lines[at][:1]
+    return []
+
+
+def collect_provenance(
+    target_path: str,
+    ck_info: dict,
+    wdir: str | None = None,
+    artifact_path: str | None = None,
+    kind: str = "publication",
+) -> dict:
+    r"""Record what a document takes from the project, and where it landed.
+
+    Every component the document uses, with the pages it appears on and
+    the stage, inputs and hash of what it came from, so a reader or a tool
+    can follow any number or figure in the PDF back through the pipeline.
+    Written beside the PDF as ``<document>.provenance.json``.
+
+    Nothing in the document is required for this. What it uses is read
+    from its source, the same way ``calkit describe components`` reads it,
+    so a paper that includes figures with a plain ``\includegraphics``
+    gets a record like any other. Pages come from the ``.synctex.gz`` the
+    build already writes. ``calkit.sty``'s log is folded in when the
+    package was used, since it catches what no parse can see: a path built
+    by a macro, or content inside a conditional.
+    """
+    from calkit.components import LocalProject, source_components
+
+    wdir = wdir or os.getcwd()
+    tex_dir = os.path.dirname(target_path)
+    uses: dict[tuple[str, str, str | None], dict] = {}
+    # What the source names, and where each of it is written
+    for rec in source_components(target_path, wdir):
+        key = (rec["kind"], rec["path"], rec.get("key"))
+        uses[key] = {
+            "kind": key[0],
+            "path": key[1],
+            "key": key[2],
+            "pages": [],
+            "locations": rec.get("locations", []),
+        }
+    # What the build logged, for a document that loaded the package
+    log_path = os.path.join(
+        wdir, os.path.splitext(target_path)[0] + PROVENANCE_LOG_EXT
+    )
+    if os.path.isfile(log_path):
+        with open(log_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                path_as_written = str(entry.get("path", ""))
+                # Generated value commands carry project-relative paths;
+                # figures and inputs are written as TeX resolves them,
+                # relative to the document
+                if entry.get("kind") in ("value", "block"):
+                    rel = Path(os.path.normpath(path_as_written)).as_posix()
+                else:
+                    rel = Path(
+                        os.path.normpath(
+                            os.path.join(tex_dir, path_as_written)
+                        )
+                    ).as_posix()
+                key = (
+                    entry.get("kind", ""),
+                    rel,
+                    str(entry.get("key", "")) or None,
+                )
+                use = uses.setdefault(
+                    key,
+                    {
+                        "kind": key[0],
+                        "path": key[1],
+                        "key": key[2],
+                        "pages": [],
+                        "locations": [],
+                    },
+                )
+                page = entry.get("page")
+                if page is not None and page not in use["pages"]:
+                    use["pages"].append(page)
+    # Where the source said each thing is, turned into where TeX put it
+    mapping = synctex_pages(target_path, wdir, artifact_path)
+    for use in uses.values():
+        if use["pages"]:
+            continue
+        pages: list[int] = []
+        for location in use.pop("locations", []) or []:
+            source = getattr(location, "source", None) or location["source"]
+            at = getattr(location, "line", None) or location["line"]
+            for page in pages_at(mapping, source, at):
+                if page not in pages:
+                    pages.append(page)
+        use["pages"] = sorted(pages)
+    records = {
+        r["path"]: r
+        for r in artifact_records(
+            sorted({u["path"] for u in uses.values()}), ck_info, wdir
+        )
+    }
+    view = LocalProject(ck_info, wdir, check_stages=False)
+    components = []
+    for use in uses.values():
+        use.pop("locations", None)
+        rec = records.get(use["path"], {})
+        entry = {
+            **use,
+            "stage": rec.get("stage"),
+            "stage_inputs": rec.get("stage_inputs", []),
+            "hash": rec.get("hash"),
+        }
+        # What each value read as in this build. A results file can change
+        # in a key the document never cites, so its hash says nothing about
+        # whether the page is out of date; the value itself does. Recorded
+        # raw, since one value can be typeset several ways in one document
+        # and a difference in formatting is not a difference in the result.
+        if use["kind"] == "value":
+            entry["value"] = view.current_value(use["path"], use["key"])
+        components.append(entry)
+    components.sort(key=lambda u: (u["kind"], u["path"], u["key"] or ""))
+    # The artifact is what the build produced and what a reader reads; the
+    # source is where a person edits it and where a position resolves. A
+    # figure or a dataset has only the first, which is why they are named
+    # apart rather than one standing in for the other.
+    from calkit.components import ProvenanceRecord
+
+    sidecar = ProvenanceRecord(
+        artifact=artifact_path or (os.path.splitext(target_path)[0] + ".pdf"),
+        source=target_path,
+        kind=kind,
+        components=components,
+    ).model_dump(mode="json", by_alias=True)
+    with open(
+        os.path.join(wdir, provenance_sidecar_path(target_path)),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(sidecar, f, indent=2)
+        f.write("\n")
+    # The log is scratch: LaTeX appends to it a line at a time during the
+    # build, and once it has been read there is nothing in it the sidecar
+    # does not hold. Left behind it litters the document's folder and
+    # syncs to Overleaf along with everything else there.
+    if os.path.isfile(log_path):
+        try:
+            os.remove(log_path)
+        except OSError:
+            pass
+    return sidecar
+
+
+def questions_tex(ck_info: dict, wdir: str | None = None) -> str:
+    """LaTeX commands that inject the project's questions and answers.
+
+    ``\\ckquestion[n]``, ``\\ckhypothesis[n]``, ``\\ckanswer[n]``,
+    ``\\cknotes[n]`` give one question's fields with every ``{name}``
+    placeholder rendered as a provenance-marked value, ``\\ckevidence[n]``
+    lists its evidence with section references where a publication entry
+    carries a label, and ``\\ckfindings`` typesets every answered question.
+    Numbers reach the document by the same route as ``calkit.yaml``'s own
+    rendering, so the paper and the project cannot disagree.
+    """
+    import string
+
+    from calkit.questions import (
+        TEMPLATED_FIELDS,
+        evidence_name,
+        is_value_evidence,
+        read_evidence_file,
+        resolve_key,
+    )
+
+    wdir = wdir or os.getcwd()
+    questions = ck_info.get("questions", []) or []
+    fields: dict[str, dict[str, str]] = {
+        f: {} for f in ("question", *TEMPLATED_FIELDS, "evidence")
+    }
+    answered: list[int] = []
+    formatter = string.Formatter()
+    for n, q in enumerate(questions, start=1):
+        key = str(n)
+        if isinstance(q, str):
+            fields["question"][key] = escape_tex(q)
+            continue
+        fields["question"][key] = escape_tex(q.get("question", ""))
+        values: dict[str, tuple[Any, str, str | None]] = {}
+        for ev in q.get("evidence") or []:
+            if not is_value_evidence(ev):
+                continue
+            data = read_evidence_file(os.path.join(wdir, ev["path"]))
+            values[evidence_name(ev) or ""] = (
+                resolve_key(data, ev["key"]),
+                ev["path"],
+                stage_for(ev["path"], ck_info),
+            )
+
+        def render_tex(text: str | None) -> str:
+            out = []
+            for literal, name, spec, conv in formatter.parse(text or ""):
+                out.append(escape_tex(literal))
+                if name is None:
+                    continue
+                if name not in values:
+                    raise KeyError(name)
+                value, path, stage = values[name]
+                shown = escape_tex(format_value(value, spec))
+                out.append(value_macro(name, shown, path, stage))
+            return "".join(out)
+
+        for f in TEMPLATED_FIELDS:
+            if q.get(f):
+                fields[f][key] = render_tex(q[f])
+        if q.get("answer"):
+            answered.append(n)
+        items = []
+        for ev in q.get("evidence") or []:
+            kind = ev.get("kind", "result")
+            path = escape_tex(ev.get("path", ""))
+            if is_value_evidence(ev):
+                items.append(
+                    f"\\item value \\texttt{{{path}}}: "
+                    f"\\texttt{{{escape_tex(ev.get('key', ''))}}}"
+                )
+            elif kind == "publication" and ev.get("label"):
+                items.append(
+                    f"\\item Section~\\ref{{{ev['label']}}}"
+                    + (
+                        f" ({escape_tex(ev['section'])})"
+                        if ev.get("section")
+                        else ""
+                    )
+                )
+            else:
+                items.append(f"\\item {kind} \\texttt{{{path}}}")
+            if ev.get("explanation"):
+                items[-1] += " -- " + render_tex(ev["explanation"])
+        if items:
+            fields["evidence"][key] = (
+                "\\begin{itemize}" + "".join(items) + "\\end{itemize}"
+            )
+    out = [PREAMBLE, "\\providecommand\\ckblock[2]{}%\n"]
+    for f, name in (
+        ("question", "ckquestion"),
+        ("hypothesis", "ckhypothesis"),
+        ("answer", "ckanswer"),
+        ("notes", "cknotes"),
+        ("evidence", "ckevidence"),
+    ):
+        out.append(keyed_command(name, fields[f]))
+    # Every answered question, as a paragraph the document can drop in
+    # Plain paragraphs rather than \\paragraph, which not every document
+    # class defines
+    body = []
+    for n in answered:
+        body.append(
+            f"\\par\\noindent\\textbf{{Q{n}. \\ckquestion[{n}]}}"
+            f"\\ckblock{{{n}}}{{calkit.yaml}}\\par\\noindent"
+            f"\\ckanswer[{n}]"
+            + (f"\\ckevidence[{n}]" if str(n) in fields["evidence"] else "")
+            + "\\par"
+        )
+    out.append("\\newcommand\\ckfindings{" + "\n".join(body) + "}%\n")
+    return "".join(out)

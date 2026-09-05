@@ -335,3 +335,315 @@ beats an attestation whenever one exists. Prefer, in order:
 3. **A URL**, optionally with the date it was retrieved
 4. **An attestation** that someone collected or created it, when there's
    genuinely nothing to point at
+
+## Documents
+
+A paper is where provenance is easiest to lose. A number is copied from a
+results file into a sentence, a figure is dropped into a float, and from
+then on nothing connects the document to the pipeline that produced them.
+Calkit's `json-to-latex` and `questions-to-latex` stages inject that
+content instead of copying it, and `calkit.sty` marks each injection so
+that a reader of the TeX source or the PDF can see it came from elsewhere
+in the project and follow the trail.
+
+Set `provenance: true` on a `latex` stage:
+
+```yaml
+pipeline:
+  stages:
+    paper-numbers-to-latex:
+      kind: json-to-latex
+      command_name: result
+      inputs: [results/paper-numbers.json]
+      outputs:
+        - path: paper/generated-numbers.tex
+          storage: git
+    questions-to-latex:
+      kind: questions-to-latex
+      inputs: [results/findings.json]
+      outputs:
+        - path: paper/generated-questions.tex
+          storage: git
+    build-paper:
+      kind: latex
+      target_path: paper/main.tex
+      provenance: true
+      inputs: [paper/generated-numbers.tex, paper/generated-questions.tex]
+```
+
+The document itself needs nothing:
+
+```latex
+\input{generated-numbers}
+...
+The error falls by \result[Improvement]x.
+\includegraphics[width=0.7\textwidth]{../figures/dissipation.pdf}
+```
+
+What the document uses is read from its source, the same way
+[`calkit describe components`](#following-a-component-back) reads it, so
+an ordinary `\includegraphics` is a component like anything else. The
+page each one landed on comes from the `.synctex.gz` the build already
+writes, which records where TeX shipped material out rather than where it
+was written, so a float that moved is reported on the page it moved to.
+The values themselves come from the results files as the build read them.
+No package, no special commands, no rewriting a paper that already exists.
+
+The same file is what a viewer uses to jump from a spot in the PDF to the
+line of source behind it. A build in a container records the container's
+paths, which nothing outside it can open, so those are rewritten after
+each build to point at the files as they actually sit. Reverse search in
+[LaTeX Workshop](https://github.com/James-Yu/LaTeX-Workshop) then lands on
+the real line, where the components lens takes over: from a number on the
+page to the stage that computed it, without leaving the editor.
+
+`calkit.sty` is for the one thing none of that can do: marking injected
+content on the page. Load it and pass `provenance`, and every injected
+value is colored so a reader can see it came from elsewhere:
+
+```latex
+\usepackage[provenance]{calkit}
+```
+
+Its `\ckfigure`, `\ckinput` and `\ckblock` also log what they typeset,
+which is worth having for content no parse can see: a path a macro built,
+or a figure inside a conditional. That log is folded into the record
+alongside what the source says. Everything else about the package is
+optional. Drop the option, or pass `final`, and the document renders as if
+it were not there, so the markers cost nothing in the version that goes to
+a journal.
+
+Each build writes `<artifact>.provenance.json`: every value, figure and
+text block the document took from the project, the pages it appears on,
+the stage that produced it, that stage's inputs, the hash recorded in
+`dvc.lock`, and, for a value, the value itself. That file is the trail in
+machine-readable form, for editors, the hub, and checks. A build that
+loads the package also gets `calkit.sty` installed beside the document
+(commit it, so the paper builds on Overleaf and anywhere else without
+Calkit) and a per-build artifact table `calkit-provenance.tex` (do not
+commit it).
+
+### What a record says
+
+```json
+{
+  "$schema": "https://docs.calkit.org/schemas/provenance.json",
+  "_note": "Written by 'calkit latex build --provenance'. Do not edit...",
+  "artifact": "paper/main.pdf",
+  "source": "paper/main.tex",
+  "kind": "publication",
+  "components": [ ... ]
+}
+```
+
+The record is named after the **artifact** --- what the build produced and
+what a reader reads --- rather than after its source, because not every
+kind of artifact has a source to edit. A publication has one, and it is
+where a person writes and where a position in the editor resolves, so it
+is named separately as `source`. `kind` says which positional vocabulary
+the components use: a publication has pages.
+
+A component names the artifact its value came _from_, not the file it
+passed through. A number reaches the page as
+`results/findings.json` → `paper/generated-numbers.tex` → `paper/main.pdf`,
+and the record names the results file, because that is what a reader
+cares about and the generated `.tex` is plumbing.
+
+The schema is published at
+[docs.calkit.org/schemas/provenance.json](https://docs.calkit.org/schemas/provenance.json),
+the same way the [`calkit.yaml` schema](calkit-yaml.md) is, so an editor
+validates a record without any per-user configuration. Records are written
+by the build and read by tools; nothing in one should be edited by hand,
+which is what the `_note` says to anything that might try.
+
+### Reaching one value in a big results file
+
+Without `keys`, every top-level key in the input becomes available as
+`\result[Key]`. That suits a results file written for the paper. A file
+exported wholesale from an analysis is a different matter: one exported
+from a MATLAB table can hold hundreds of thousands of values, and turning
+all of them into LaTeX commands produces a multi-megabyte `.tex` the
+document never reads.
+
+Name what the paper uses instead, dotted to reach into nested output:
+
+```yaml
+pipeline:
+  stages:
+    paper-numbers-to-latex:
+      kind: json-to-latex
+      command_name: result
+      inputs: [results/energy-flux.json]
+      keys:
+        - c_eps_collapse.slope
+        - summary.rmse
+        - stations.0.cf
+```
+
+which gives `\result[c_eps_collapse.slope]` and the rest, and nothing
+else. Dotted keys are read the same way question evidence reads them: a
+key that exists literally wins, so one containing dots keeps working, and
+an integer part indexes into a list. A key that isn't in the input stops
+the stage rather than quietly going missing from the paper.
+
+Two more things that bite when results come out of MATLAB or NumPy. A
+scalar written as a one-element array, `[3.54]`, is read as the scalar it
+stands for, so it prints as `3.54` rather than with its brackets and a
+numeric format applies to it. And when a stage merges several input files
+that disagree about a key, the stage stops: taking whichever file was read
+last would put a number in the paper that nobody could trace.
+
+The questions commands are `\ckquestion[n]`, `\ckhypothesis[n]`,
+`\ckanswer[n]`, `\cknotes[n]`, `\ckevidence[n]`, numbered as in
+`calkit list questions`, and `\ckfindings` for every answered question.
+A `{name}` placeholder in an answer becomes a marked value in the paper by
+the same rendering `calkit list questions` uses, so the two cannot
+disagree, and a publication evidence entry with a `label` becomes a
+`\ref` to that section.
+
+### Following a component back
+
+Ask about a document and you get its components -- every place project
+content lands on the page -- with what to open to change each one:
+
+```sh
+calkit describe components paper/main.pdf
+```
+
+```text
+figure figures/dissipation.pdf
+    ok · stage plot-dissipation · scripts/plot.py · p. 4
+figure figures/schematic.png
+    ok · NO PROVENANCE · p. 2
+value results/paper-numbers.json:Improvement
+    STALE · stage benchmark · scripts/bench.py · p. 3 · changed-since-build · 2.1 -> 2.4
+```
+
+Add `--json` for the same thing machine-readably, `--page 3` for what is
+on one page of the PDF, and `--stale` for only what is known to be out of
+date or missing. Give it a `--line` (and a `--column`) instead and it
+answers about one place in the source, which is what an editor asks when
+the cursor lands on a value or a figure:
+
+```sh
+calkit describe components paper/main.tex --line 42 --column 18
+```
+
+The source, the built PDF, and the sidecar all name the same document, so
+it doesn't matter which one a tool has in hand. Without a build there is
+no sidecar and no pages, but the question still has an answer: the
+generated `.tex` files say which results file and key each command came
+from, so the trail holds in a project that has never been built.
+
+### Documents that reach outside their own folder
+
+A document is meant to be a folder somebody can hand over, sync to Overleaf,
+or move somewhere else. `\includegraphics{../figures/plot.png}` builds
+perfectly well and quietly costs that: the folder is no longer the document.
+
+A component the source names from outside the document's folder is reported
+as such, in the listing and as a warning in the editor. The fix is a
+`map-paths` stage copying it in, after which the document references it from
+beside itself:
+
+```yaml
+paper-figures:
+  kind: map-paths
+  paths:
+    - kind: file-to-file
+      src: figures/plot.png
+      dest: paper/figures/plot.png
+```
+
+Only a file the source points at. A value reaches the page through a
+generated `.tex` inside the folder, so where its results file sits says
+nothing about whether the document is self-contained.
+
+### Components with nothing behind them
+
+Being current is not the only thing worth knowing about a component. The
+gap this page opens with -- a file that arrived some other way and had its
+origin written down nowhere -- reaches the page like anything else, and
+looks exactly like a figure the pipeline made. Every component carries
+where its source file came from:
+
+- **`pipeline`** -- a stage produces it, so the command, the inputs and
+  the environment are already recorded. This is the only one that is
+  checked rather than claimed.
+- **`imported`** -- declared with `imported_from`, so a reader can go and
+  fetch the original.
+- **`attested`** -- declared with `created_by`, so somebody answers for it.
+- **`undeclared`** -- nothing makes it, nobody claims it, and it is
+  recorded as coming from nowhere. Shown as `NO PROVENANCE`.
+
+An undeclared component is not stale and running the pipeline will not
+help; it needs a line in `calkit.yaml` saying where it came from, which is
+what the rest of this page is about. Flagging it here is the point: a
+schematic dropped into a paper is the one thing on the page no automated
+check can catch, because there is nothing to check.
+
+A question block reads as `project`, since its words are the project's
+own and there is no outside source to account for.
+
+### Ways to be out of date
+
+A component can be out of date in more than one way, and the ways are
+unrelated. The distinction matters because the fix differs:
+
+- **`stage-out-of-date`** -- the pipeline would rerun the stage that
+  produces it. The artifact itself is behind; rebuilding the document
+  first would only typeset the old one. Run the stage.
+- **`changed-since-build`** -- the project has moved on since the document
+  was built. The stage may be perfectly current; it is the PDF in front of
+  you that is showing a number or a figure the project no longer produces.
+  Rebuild the document.
+- **`answer-stale`** -- for a `\ckfindings` or `\ckanswer` block, the
+  evidence behind the answer changed after the answer was written, which
+  is what [`calkit check questions`](questions.md) reports. Reread the
+  answer. Whether it still holds is yours to say.
+
+Values are compared value to value rather than by file hash: a results
+file changing in a key the document never cites says nothing about the
+page. The comparison uses the raw value, not the typeset text, so
+`{ratio:.1f}` and `{ratio}` in the same document don't disagree with each
+other.
+
+The stage check is the slow part, since it asks the pipeline for its
+status. Pass `--no-stage-check` to skip it -- drift between the document
+and the project is still reported -- and note that a component nothing
+could be checked about reads as `unknown`, never as current.
+
+### While writing
+
+In the VS Code extension, the same readings are reported as diagnostics, so
+they reach the Problems panel and get counted: an error for content the
+project no longer has, and a warning both for content out of date and for
+content nothing accounts for. This is what a hover and a lens cannot do ---
+both need you to already be looking at the line. A number that moved on page
+nine is worth knowing about before you go looking for it.
+
+Questions are reported there too, on the line in `calkit.yaml` that declares
+them, from [`calkit check questions`](questions.md). A placeholder that fills
+from nothing, or evidence that has moved since the answer was written, is
+about the question rather than the paper that typesets it, so that is where it
+is flagged. What is reported is what changed, not whether the answer is still
+right: that is a question about the sentence, and reading it is the point of
+being told. A question nobody has answered yet is work outstanding rather than
+a fault, and is left alone.
+
+### Reading a built document
+
+The same answer follows the PDF into the hub. Open a publication and the
+viewer's toolbar carries a **components** panel, which lists what the page
+in view took from the project --- the value or figure, whether it is
+current, and a link to the stage behind it --- so the question a paragraph
+raises is answered beside the paragraph rather than in a table above the
+document. Anything out of date elsewhere in the document is counted on the
+panel's button, and the panel offers to go to the next page carrying it,
+so a reader with no reason to open the panel is still told there is
+something to look at.
+
+The panel reads the same `<document>.provenance.json` as everything else
+on this page, so it is only there for a document built with `provenance`
+turned on; without a record there are no pages to attribute anything to,
+and the panel says so rather than showing an empty list.

@@ -51,6 +51,8 @@ test-docs: sync-docs ## Test if documentation can be built without warnings or e
 schema: ## Generate the published JSON schema for calkit.yaml.
 	@echo "🚀 Generating calkit.yaml JSON schema"
 	@uv run calkit describe schema -o docs/schemas/calkit.json
+	@uv run calkit describe schema --for provenance \
+		-o docs/schemas/provenance.json
 	@cp docs/schemas/calkit.json vscode-ext/schemas/calkit.json
 
 .PHONY: sync-docs

@@ -356,3 +356,63 @@ def test_check_questions(tmp_dir):
     assert "publication paper/main.pdf [skipped]" in format_status(
         status, verbose=True
     )
+
+
+def test_render_question_reads_evidence_through_a_caller():
+    # The hub's project is a Git tree at a ref rather than a directory, so
+    # it hands over the reading and keeps the rendering. Anything else means
+    # the same sentence gets filled two different ways in two places.
+    question = {
+        "question": "How much faster?",
+        "answer": "About {improvement:.1f}x, from {n} cases.",
+        "evidence": [
+            {
+                "kind": "value",
+                "path": "results/bench.json",
+                "key": "cases.a.speedup",
+                "name": "improvement",
+                "explanation": "{n} of them ran clean.",
+            },
+            {
+                "kind": "value",
+                "path": "results/counts.yaml",
+                "key": "n",
+            },
+        ],
+    }
+    read: list[str] = []
+
+    def read_evidence(path):
+        read.append(path)
+        if path == "results/bench.json":
+            return {"cases": {"a": {"speedup": 5.1014}}}
+        return {"n": 12}
+
+    rendered = render_question(question, read_evidence=read_evidence)
+    assert rendered["answer"] == "About 5.1x, from 12 cases."
+    # An entry with no name is templated under its key
+    assert rendered["evidence"][0]["explanation"] == "12 of them ran clean."
+    assert read == ["results/bench.json", "results/counts.yaml"]
+
+
+def test_render_question_leaves_what_it_cannot_read():
+    # Displaying a question is not the place to fail: an unreadable results
+    # file leaves the placeholder as written, which says plainly that the
+    # number is not there, where an exception would lose the whole question
+    def read_evidence(path):
+        raise ValueError("gone")
+
+    rendered = render_question(
+        {
+            "answer": "About {improvement}x.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/bench.json",
+                    "key": "improvement",
+                }
+            ],
+        },
+        read_evidence=read_evidence,
+    )
+    assert rendered["answer"] == "About {improvement}x."

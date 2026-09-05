@@ -31,6 +31,44 @@ export type AccountPublic = {
 }
 
 /**
+ * ArtifactUsage
+ *
+ * One place an artifact appears in one of the project's documents.
+ */
+export type ArtifactUsage = {
+  /**
+   * Document
+   */
+  document: string
+  /**
+   * Kind
+   */
+  kind: "value" | "figure" | "text" | "block"
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Pages
+   */
+  pages?: Array<number>
+}
+
+/**
+ * ArtifactUsages
+ */
+export type ArtifactUsages = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Items
+   */
+  items?: Array<ArtifactUsage>
+}
+
+/**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
@@ -3812,21 +3850,38 @@ export type Publication = {
 /**
  * PublicationComponent
  *
- * One file a publication is made of and where it comes from.
+ * One thing a publication is made of, and where it came from.
+ *
+ * Either a file -- a source in its folder, or an input its build stage
+ * reads from elsewhere in the project -- or a piece of project content
+ * the document typesets: a value from a results file, a figure a stage
+ * plotted, a block of generated prose. A value a stage computed is as
+ * much a component of the publication as the file it lands in, which is
+ * why they share a list.
  */
 export type PublicationComponent = {
+  /**
+   * Kind
+   */
+  kind: "file" | "value" | "figure" | "text" | "block"
   /**
    * Path
    */
   path: string
   /**
-   * Kind
+   * Provenance
    */
-  kind: "produced" | "authored" | "attested" | "imported" | "unknown"
+  provenance:
+    | "pipeline"
+    | "authored"
+    | "attested"
+    | "imported"
+    | "project"
+    | "undeclared"
   /**
    * Via
    */
-  via?: "folder" | "input"
+  via?: "folder" | "input" | null
   /**
    * Stage
    */
@@ -3835,6 +3890,14 @@ export type PublicationComponent = {
    * Stage Kind
    */
   stage_kind?: string | null
+  /**
+   * Stage Inputs
+   */
+  stage_inputs?: Array<string>
+  /**
+   * Script
+   */
+  script?: string | null
   /**
    * Source
    */
@@ -3847,6 +3910,40 @@ export type PublicationComponent = {
    * Size
    */
   size?: number | null
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Pages
+   */
+  pages?: Array<number>
+  /**
+   * Build Value
+   */
+  build_value?: unknown
+  /**
+   * Current Value
+   */
+  current_value?: unknown
+  /**
+   * Build Hash
+   */
+  build_hash?: string | null
+  /**
+   * Current Hash
+   */
+  current_hash?: string | null
+  /**
+   * Status
+   */
+  status?: "ok" | "stale" | "missing" | "unknown"
+  /**
+   * Stale Reasons
+   */
+  stale_reasons?: Array<
+    "stage-out-of-date" | "changed-since-build" | "answer-stale"
+  >
 }
 
 /**
@@ -3858,13 +3955,25 @@ export type PublicationComponents = {
    */
   folder: string
   /**
+   * Document
+   */
+  document?: string | null
+  /**
+   * Built
+   */
+  built?: boolean
+  /**
    * Items
    */
-  items: Array<PublicationComponent>
+  items?: Array<PublicationComponent>
   /**
-   * N Unknown
+   * N Undeclared
    */
-  n_unknown: number
+  n_undeclared?: number
+  /**
+   * N Stale
+   */
+  n_stale?: number
 }
 
 /**
@@ -3926,7 +4035,7 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "table" | "publication"
+  kind: "figure" | "value" | "result" | "table" | "publication"
   /**
    * Path
    */
@@ -3935,6 +4044,10 @@ export type QuestionEvidence = {
    * Key
    */
   key?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
   /**
    * Explanation
    */
@@ -3955,7 +4068,7 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "table" | "publication"
+  kind: "figure" | "value" | "result" | "table" | "publication"
   /**
    * Path
    */
@@ -3964,6 +4077,10 @@ export type QuestionEvidencePost = {
    * Key
    */
   key?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
   /**
    * Explanation
    */
@@ -4016,6 +4133,14 @@ export type QuestionPublic = {
    * Evidence
    */
   evidence?: Array<QuestionEvidence>
+  /**
+   * Status
+   */
+  status?: "ok" | "stale" | "error" | "unanswered" | "no-evidence" | null
+  /**
+   * Status Message
+   */
+  status_message?: string | null
 }
 
 /**
@@ -10055,6 +10180,51 @@ export type GetProjectPublicationComponentsResponses = {
 
 export type GetProjectPublicationComponentsResponse =
   GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
+
+export type GetProjectArtifactUsagesData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/artifacts/usages"
+}
+
+export type GetProjectArtifactUsagesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectArtifactUsagesError =
+  GetProjectArtifactUsagesErrors[keyof GetProjectArtifactUsagesErrors]
+
+export type GetProjectArtifactUsagesResponses = {
+  /**
+   * Successful Response
+   */
+  200: ArtifactUsages
+}
+
+export type GetProjectArtifactUsagesResponse =
+  GetProjectArtifactUsagesResponses[keyof GetProjectArtifactUsagesResponses]
 
 export type PostProjectMiscData = {
   body: MiscArtifactPost

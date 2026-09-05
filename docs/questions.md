@@ -74,6 +74,14 @@ answer: The closure cuts the error by about {improvement:.1f}x.
 `calkit list questions` renders placeholders from the results files
 (`--raw` shows the text as written), so a number in an answer is always
 the one the pipeline produced.
+Giving a results file a key in the hub's question editor records `value`
+evidence, so an answer edited there can template from it too.
+The hub's project page renders them the same way, from the results file
+as it stands at the ref being browsed --- the same function does both, so
+the two cannot fill one sentence differently. It runs the same check
+there too, and marks a question whose evidence has moved since the answer
+was written. Read at the ref rather than at whatever the server last
+checked out, so a question reads at each commit the way it read then.
 A placeholder that names no evidence, or a format that its value cannot
 satisfy, is an error in `calkit check questions`.
 
@@ -97,9 +105,10 @@ calkit check questions --json     # for tools
 ```
 
 This is a check of its own rather than part of `calkit status`.
-Judging whether an answer still matches its evidence means reading
-`calkit.yaml`'s history, which nothing else in `calkit status` needs, and
-the report is a page of its own once a project has a few questions.
+Telling whether an answer's evidence has moved since it was written means
+reading `calkit.yaml`'s history, which nothing else in `calkit status`
+needs, and the report is a page of its own once a project has a few
+questions.
 
 A stale question is not fixed by re-running anything; it is fixed by
 reading the rendered answer against the new evidence.
@@ -111,6 +120,12 @@ This is the weakest part of the mechanism, and it is being replaced. See
 [issue #1606](https://github.com/calkit/calkit/issues/1606) for the design:
 a review record that says what was confirmed, by whom, rather than a commit
 that says something changed.
+
+## Into the publication
+
+The `questions-to-latex` stage injects the questions into a LaTeX
+document, with every placeholder rendered as a provenance-marked value;
+see [Provenance: documents](provenance.md#documents).
 
 ## Pointing at the publication
 

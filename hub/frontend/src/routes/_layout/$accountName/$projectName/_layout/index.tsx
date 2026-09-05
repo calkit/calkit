@@ -5,6 +5,7 @@ import {
   AccordionIcon,
   AccordionItem,
   AccordionPanel,
+  Badge,
   Box,
   Checkbox,
   Flex,
@@ -39,8 +40,13 @@ import { FiGrid } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import Tooltip from "../../../../../components/Common/Tooltip"
 
-import { type QuestionEvidence, ReleasesService } from "../../../../../client"
+import {
+  type QuestionEvidence,
+  type QuestionPublic,
+  ReleasesService,
+} from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
 import FigureView from "../../../../../components/Figures/FigureView"
 import FileEditorModal from "../../../../../components/Files/FileEditorModal"
@@ -300,6 +306,43 @@ function EvidenceItem({
   )
 }
 
+/**
+ * What the deterministic check found, which is never a verdict on the
+ * answer itself.
+ *
+ * A cited value moving means the sentence was written against a number
+ * that has since changed, so somebody should read it again. It does not
+ * mean the answer is wrong, and no badge does not mean it is right: an
+ * answer that never followed from its evidence reads as fine here
+ * forever, because nothing in a commit history can tell.
+ *
+ * So the badge says what happened, not what to conclude. Shown only when
+ * there is something to act on: one on every question would make the two
+ * that matter invisible, an unanswered question is work outstanding
+ * rather than a fault, and `null` means nothing checked.
+ */
+function QuestionStatusBadge({ question }: { question: QuestionPublic }) {
+  if (question.status === "stale") {
+    return (
+      <Tooltip label={question.status_message ?? undefined}>
+        <Badge colorScheme="orange" flexShrink={0} ml={1}>
+          Evidence changed
+        </Badge>
+      </Tooltip>
+    )
+  }
+  if (question.status === "error") {
+    return (
+      <Tooltip label={question.status_message ?? undefined}>
+        <Badge colorScheme="red" flexShrink={0} ml={1}>
+          Evidence unreadable
+        </Badge>
+      </Tooltip>
+    )
+  }
+  return null
+}
+
 function ProjectView() {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   const { accountName, projectName } = Route.useParams()
@@ -555,14 +598,18 @@ function ProjectView() {
                                 {`${question.number}. ${question.question}`}
                               </Markdown>
                             </Box>
+                            <QuestionStatusBadge question={question} />
                             <AccordionIcon />
                           </AccordionButton>
                         ) : (
-                          <Box flex="1" py={1} sx={{ "& p": { my: 0 } }}>
-                            <Markdown>
-                              {`${question.number}. ${question.question}`}
-                            </Markdown>
-                          </Box>
+                          <>
+                            <Box flex="1" py={1} sx={{ "& p": { my: 0 } }}>
+                              <Markdown>
+                                {`${question.number}. ${question.question}`}
+                              </Markdown>
+                            </Box>
+                            <QuestionStatusBadge question={question} />
+                          </>
                         )}
                         {userHasWriteAccess ? (
                           <IconButton

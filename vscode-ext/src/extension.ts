@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -33,6 +34,8 @@ import type {
 import { dvcStageOutputPaths } from "./pipeline/core";
 import {
   formatYamlSyntaxError,
+  pathLikeScalars,
+  stageDefinitionLine,
   yamlSyntaxError,
   type YamlSyntaxError,
 } from "./yaml";
@@ -47,10 +50,11 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
-import {
-  FigureSourceCodeLensProvider,
-  openFiguresCarousel,
-} from "./figures/view";
+import { openFiguresCarousel } from "./figures/view";
+import { ComponentsProvider } from "./components/view";
+import { questionLines, stagePdfOutput } from "./components/core";
+import type { RenderedQuestion } from "./sidebar";
+import type { DocumentComponents, QuestionsReport } from "./components/core";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -91,8 +95,13 @@ const COMMAND_PREVIEW_PLOTLY_TO_SIDE =
 const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
 const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
+const COMMAND_RUN_COMPONENT_STAGE = "calkit-vscode.runComponentStage";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
+const COMMAND_VIEW_COMPONENT_OBJECT = "calkit-vscode.viewComponentObject";
+const COMMAND_OPEN_PATH = "calkit-vscode.openPath";
+const COMMAND_OPEN_PDF_SOURCE = "calkit-vscode.openPdfSource";
+const COMMAND_GO_TO_QUESTION = "calkit-vscode.goToQuestion";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
 const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
 const COMMAND_MANAGE_SECTIONS = "calkit-vscode.manageSections";
@@ -185,6 +194,12 @@ let currentDetectedNotebooks: string[] = [];
 let currentDetectedFigures: string[] = [];
 let currentDetectedDatasets: string[] = [];
 let currentDetectedResults: string[] = [];
+let currentDocumentCitations: {
+  path: string;
+  key: string;
+  document: string;
+}[] = [];
+let currentRenderedQuestions: RenderedQuestion[] = [];
 let currentDetectedPresentations: string[] = [];
 let sidebarProvider: CalkitSidebarProvider | undefined;
 let sidebarTreeView:
@@ -315,7 +330,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        await openStageSourceFile(workspaceRoot, stageName);
+        await goToStageDefinition(workspaceRoot, stageName);
       },
     ),
   );
@@ -342,7 +357,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_SHOW_PROVENANCE,
       async (uri?: vscode.Uri) => {
-        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const fileUri = uri ?? activeFileUri();
         if (!fileUri) {
           void vscode.window.showErrorMessage(
             "No file selected to show source for.",
@@ -455,7 +470,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_RUN_STAGE_FOR_FILE,
       async (uri?: vscode.Uri) => {
-        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const fileUri = uri ?? activeFileUri();
         if (!fileUri) {
           return;
         }
@@ -479,7 +494,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_OPEN_STAGE_PDF,
       async (uri?: vscode.Uri) => {
-        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const fileUri = uri ?? activeFileUri();
         if (!fileUri) {
           return;
         }
@@ -495,13 +510,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
-        const pdfRelPath = (Array.isArray(stage?.outputs) ? stage.outputs : [])
-          .map((out) => (typeof out === "string" ? out : out.path))
-          .find(
-            (outPath) =>
-              typeof outPath === "string" &&
-              outPath.toLowerCase().endsWith(".pdf"),
-          );
+        const pdfRelPath = stage ? stagePdfOutput(stage) : undefined;
         if (!pdfRelPath) {
           void vscode.window.showErrorMessage(
             `Stage '${stageName}' has no PDF output to open.`,
@@ -518,6 +527,78 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         await openPdfInLatexWorkshop(context, pdfUri);
+      },
+    ),
+  );
+
+  // A question is written in calkit.yaml and nowhere else, so that is
+  // where looking at one takes you.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_GO_TO_QUESTION,
+      async (item?: import("./sidebar").SidebarItem | string) => {
+        const id = typeof item === "string" ? item : item?.nodeId;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!id || !workspaceRoot) {
+          return;
+        }
+        const uri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
+        let doc: vscode.TextDocument;
+        try {
+          doc = await vscode.workspace.openTextDocument(uri);
+        } catch {
+          void vscode.window.showErrorMessage(
+            "No calkit.yaml in this workspace.",
+          );
+          return;
+        }
+        // The sidebar numbers questions from one, in file order, which is
+        // the order these come back in
+        const line = questionLines(doc.getText())[Number(id) - 1];
+        const editor = await vscode.window.showTextDocument(doc);
+        if (line === undefined || line >= doc.lineCount) {
+          return;
+        }
+        const pos = new vscode.Position(line, 0);
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(
+          new vscode.Range(pos, pos),
+          vscode.TextEditorRevealType.InCenter,
+        );
+      },
+    ),
+  );
+
+  // The way back from a rendered PDF to the document that produced it, in
+  // the pane the PDF is in, so reading and editing are the same place
+  // rather than two halves of a split.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_PDF_SOURCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? activeFileUri();
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const stageName = await findStageForFile(workspaceRoot, fileUri);
+        const stage = stageName
+          ? currentCalkitConfig?.pipeline?.stages?.[stageName]
+          : undefined;
+        const target =
+          typeof stage?.target_path === "string"
+            ? stage.target_path
+            : undefined;
+        if (!target) {
+          void vscode.window.showErrorMessage(
+            `No document source found for '${path.basename(fileUri.fsPath)}'.`,
+          );
+          return;
+        }
+        await vscode.window.showTextDocument(
+          vscode.Uri.file(path.join(workspaceRoot, target)),
+          { viewColumn: vscode.ViewColumn.Active },
+        );
       },
     ),
   );
@@ -624,8 +705,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_VIEW_STAGE,
-      async (item?: import("./sidebar").SidebarItem) => {
-        const stageName = item?.nodeId;
+      // A sidebar item when the tree invoked it, a bare name when a code
+      // lens did: both are asking for the same stage
+      async (target?: string | import("./sidebar").SidebarItem) => {
+        const stageName = typeof target === "string" ? target : target?.nodeId;
         if (!stageName) {
           return;
         }
@@ -805,6 +888,15 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        // The editor is built around a stage that runs something: a
+        // source file, an environment, inputs and outputs. A map-paths
+        // stage has none of those, only its list of copies, and the CLI
+        // has no way to set them, so editing it means editing where it is
+        // written rather than a form that cannot hold it.
+        if (stage?.kind === "map-paths") {
+          await goToStageDefinition(workspaceRoot, stageName);
+          return;
+        }
         await showStageEditor(
           context,
           workspaceRoot,
@@ -821,7 +913,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_DEFINE_PROVENANCE,
       async (uri?: vscode.Uri) => {
-        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const fileUri = uri ?? activeFileUri();
         if (!fileUri) {
           return;
         }
@@ -1334,20 +1426,169 @@ export function activate(context: vscode.ExtensionContext): void {
   void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
   void refreshActiveFileFigureOutputContext();
 
-  // Surfaces "Source: <stage>" CodeLenses on figure references in Quarto
-  // (![](...)) and LaTeX (\includegraphics{...}) documents.
-  const figureCodeLensProvider = new FigureSourceCodeLensProvider({
+  // Hover, go-to-definition/declaration and CodeLenses over the project
+  // content a LaTeX document injects: where a value or figure came from, the
+  // stage and script behind it, and whether the project has moved on since.
+  const componentDiagnostics =
+    vscode.languages.createDiagnosticCollection("calkit");
+  context.subscriptions.push(componentDiagnostics);
+  const componentsProvider = new ComponentsProvider({
     getWorkspaceRoot,
+    describeComponents,
     buildOutputToStageMap,
-    goToFigureSourceCommand: COMMAND_GO_TO_FIGURE_SOURCE,
+    runStageCommand: COMMAND_RUN_COMPONENT_STAGE,
+    viewStageCommand: COMMAND_VIEW_STAGE,
+    viewComponentObjectCommand: COMMAND_VIEW_COMPONENT_OBJECT,
+    diagnostics: componentDiagnostics,
+    checkQuestions,
+    log,
   });
+  // Report on whatever is open now and whenever a document is opened or
+  // brought to the front, so Problems is about the paper being written
+  // rather than only about the last one saved.
+  const refreshComponentDiagnostics = (
+    document: vscode.TextDocument | undefined,
+  ): void => {
+    if (!document) {
+      return;
+    }
+    // A broken answer is a fault in calkit.yaml rather than in the paper
+    // that typesets it, so each document gets the check that can see it
+    if (/(^|[\\/])calkit\.yaml$/i.test(document.uri.fsPath)) {
+      void componentsProvider.updateQuestionDiagnostics(document);
+    } else {
+      void componentsProvider.updateDiagnostics(document);
+    }
+  };
   context.subscriptions.push(
-    vscode.languages.registerCodeLensProvider(
-      [
-        { scheme: "file", pattern: "**/*.qmd" },
-        { scheme: "file", pattern: "**/*.tex" },
-      ],
-      figureCodeLensProvider,
+    vscode.workspace.onDidOpenTextDocument(refreshComponentDiagnostics),
+    vscode.window.onDidChangeActiveTextEditor((editor) =>
+      refreshComponentDiagnostics(editor?.document),
+    ),
+    // A closed document's problems belong to a file nobody is looking at
+    vscode.workspace.onDidCloseTextDocument((document) =>
+      componentDiagnostics.delete(document.uri),
+    ),
+  );
+  for (const document of vscode.workspace.textDocuments) {
+    refreshComponentDiagnostics(document);
+  }
+  const texSelector: vscode.DocumentSelector = [
+    { scheme: "file", language: "latex" },
+    { scheme: "file", pattern: "**/*.tex" },
+  ];
+  // Hover and navigation need the resolver, which reads a LaTeX document.
+  // The lens also covers Quarto and Markdown, where it falls back to
+  // resolving figure references against the pipeline's outputs -- one lens
+  // provider rather than two saying overlapping things on the same line.
+  const lensSelector: vscode.DocumentSelector = [
+    { scheme: "file", language: "latex" },
+    { scheme: "file", pattern: "**/*.tex" },
+    { scheme: "file", pattern: "**/*.qmd" },
+    { scheme: "file", pattern: "**/*.md" },
+  ];
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(texSelector, componentsProvider),
+    vscode.languages.registerDefinitionProvider(
+      texSelector,
+      componentsProvider,
+    ),
+    vscode.languages.registerDeclarationProvider(
+      texSelector,
+      componentsProvider,
+    ),
+    vscode.languages.registerCodeLensProvider(lensSelector, componentsProvider),
+    // Opening a directory is how the sidebar's input and output rows focus
+    // and expand it in the file tree, so a path in calkit.yaml does the same
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_PATH,
+      async (fsPath?: string) => {
+        if (fsPath) {
+          await vscode.commands.executeCommand(
+            "vscode.open",
+            vscode.Uri.file(fsPath),
+          );
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_VIEW_COMPONENT_OBJECT,
+      async (target?: { path?: string; question?: string }) => {
+        if (target) {
+          await revealObjectInSidebar(target);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_RUN_COMPONENT_STAGE,
+      (stageName?: string) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (workspaceRoot && stageName) {
+          runStageInTerminal(workspaceRoot, stageName);
+        }
+      },
+    ),
+    // A saved document can inject something new, and a finished run changes
+    // what is current, so both invalidate what the provider last read
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      const saved = document.uri.fsPath.toLowerCase();
+      if (saved.endsWith(".tex")) {
+        componentsProvider.refresh();
+        refreshComponentDiagnostics(document);
+      } else if (/(^|[\\/])calkit\.yaml$/.test(saved)) {
+        // Editing a question is how one stops being stale, so the report
+        // it is judged against has to be taken again
+        refreshComponentDiagnostics(document);
+      }
+    }),
+  );
+
+  // Paths in calkit.yaml open the file they name. Which strings are paths
+  // is decided by what is actually on disk rather than by a list of keys:
+  // every stage kind brings its own, and a link that opens nothing is
+  // worse than no link.
+  context.subscriptions.push(
+    vscode.languages.registerDocumentLinkProvider(
+      { scheme: "file", pattern: "**/calkit.yaml" },
+      {
+        provideDocumentLinks(document) {
+          const root = path.dirname(document.uri.fsPath);
+          const links: vscode.DocumentLink[] = [];
+          for (const found of pathLikeScalars(document.getText())) {
+            const target = path.resolve(root, found.value);
+            // Only what the project holds: a value that escapes it is not
+            // its file
+            if (!target.startsWith(root + path.sep)) {
+              continue;
+            }
+            let isDirectory: boolean;
+            try {
+              isDirectory = fs.statSync(target).isDirectory();
+            } catch {
+              continue;
+            }
+            const link = new vscode.DocumentLink(
+              new vscode.Range(
+                document.positionAt(found.offset),
+                document.positionAt(found.offset + found.length),
+              ),
+              // A directory has nothing to open in an editor, so it goes
+              // through the command that reveals it in the file tree
+              isDirectory
+                ? vscode.Uri.parse(
+                    `command:${COMMAND_OPEN_PATH}?` +
+                      encodeURIComponent(JSON.stringify([target])),
+                  )
+                : vscode.Uri.file(target),
+            );
+            link.tooltip = isDirectory
+              ? `Reveal ${found.value}`
+              : `Open ${found.value}`;
+            links.push(link);
+          }
+          return links;
+        },
+      },
     ),
   );
 
@@ -1374,7 +1615,8 @@ export function activate(context: vscode.ExtensionContext): void {
   // Watch for changes to dvc.yaml/calkit.yaml to keep pipeline output context fresh.
   const refreshPipelineDerived = (): void => {
     scheduleRefreshPipelineOutputContext(context);
-    figureCodeLensProvider.refresh();
+    componentsProvider.refresh();
+    refreshComponentDiagnostics(vscode.window.activeTextEditor?.document);
     // A file only gets stage lenses once calkit.yaml declares it, so these
     // have to be recomputed when that changes
     markdownStageCodeLensProvider.refresh();
@@ -1752,6 +1994,28 @@ function updateSidebarBadge(): void {
 // Reveal a pipeline stage in the sidebar's Pipeline section, expanded and
 // selected. Shared by the "Show Source" affordances (editor toolbar, figures
 // carousel) and the stage context menu.
+// Reveal what a document uses in the sidebar: the artifact at a path,
+// wherever the project declares it, or a question by its number. What a
+// document says about a file is that it uses it; where it came from is
+// said in calkit.yaml, and the sidebar entry is the way in.
+async function revealObjectInSidebar(target: {
+  path?: string;
+  question?: string;
+}): Promise<void> {
+  const item = target.question
+    ? sidebarProvider?.findQuestionItem(target.question)
+    : target.path
+    ? sidebarProvider?.findArtifactItemAnywhere(target.path)
+    : undefined;
+  if (item && sidebarTreeView) {
+    await sidebarTreeView.reveal(item, {
+      select: true,
+      focus: true,
+      expand: true,
+    });
+  }
+}
+
 async function revealStageInSidebar(
   stageName: string,
   focus = true,
@@ -1802,6 +2066,59 @@ async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
 // artifacts reserved so they aren't listed twice) and flags auto-detected
 // entries with `detected: true`; we keep only those, since declared artifacts
 // already come from calkit.yaml.
+// Ask calkit what project content a document uses. One call for the whole
+// document, or one for a position in it; the resolver is the same either way,
+// and it is the same one the hub and the browser extension read, so nothing
+// here has to understand LaTeX.
+async function describeComponents(
+  workspaceRoot: string,
+  args: string[],
+): Promise<DocumentComponents | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["describe", "components", ...args],
+      { cwd: workspaceRoot, timeout: 60_000 },
+    );
+    return JSON.parse(stdout) as DocumentComponents;
+  } catch (error) {
+    // A document the resolver can't place, a project without a pipeline, or
+    // no calkit on PATH: all of them mean there is nothing to show, and none
+    // of them is worth interrupting someone writing a paper
+    log(`describe components ${args.join(" ")} failed: ${String(error)}`);
+    return undefined;
+  }
+}
+
+// Ask calkit what it can check about each question: that the evidence is
+// there, that placeholders resolve, and whether a cited value has moved
+// since the answer was written. Exits non-zero when it has something to
+// report, which is the normal case here rather than a failure, so the
+// report is read off stdout either way.
+async function checkQuestions(
+  workspaceRoot: string,
+): Promise<QuestionsReport | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["check", "questions", "--json"],
+      { cwd: workspaceRoot, timeout: 60_000 },
+    );
+    return JSON.parse(stdout) as QuestionsReport;
+  } catch (error) {
+    const stdout = (error as { stdout?: string })?.stdout;
+    if (stdout) {
+      try {
+        return JSON.parse(stdout) as QuestionsReport;
+      } catch {
+        // Fall through to reporting nothing
+      }
+    }
+    log(`check questions failed: ${String(error)}`);
+    return undefined;
+  }
+}
+
 async function listDetectedArtifacts(
   workspaceRoot: string,
   kind: "figures" | "datasets" | "results" | "presentations",
@@ -1825,6 +2142,68 @@ async function listDetectedArtifacts(
   }
 }
 
+// Which values each document actually references, resolved from its LaTeX
+// rather than from what a stage made available. A json-to-latex stage's
+// `keys` say what a document could reference; only the source says what it
+// does, and a results file's useful list is the second one.
+// The project's questions with every {name} placeholder filled from the
+// evidence behind it, which is what a reader should see: the answer says
+// "the proof (1)", not "the proof ({proof})". Rendered by calkit rather
+// than here, so the sidebar and `calkit list questions` cannot disagree
+// about what an answer says.
+async function scanRenderedQuestions(
+  workspaceRoot: string,
+): Promise<RenderedQuestion[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["list", "questions", "--json"],
+      { cwd: workspaceRoot, timeout: 30_000 },
+    );
+    const parsed = JSON.parse(stdout) as unknown;
+    return Array.isArray(parsed) ? (parsed as RenderedQuestion[]) : [];
+  } catch (error) {
+    // No project, no calkit on PATH, or a template that cannot render:
+    // the sidebar falls back to the text as written
+    log(`list questions failed: ${String(error)}`);
+    return [];
+  }
+}
+
+async function scanDocumentCitations(
+  workspaceRoot: string,
+): Promise<{ path: string; key: string; document: string }[]> {
+  const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+  const documents = new Set<string>();
+  for (const stage of Object.values(stages)) {
+    if (
+      (stage?.kind === "latex" || stage?.kind === "quarto") &&
+      typeof stage.target_path === "string"
+    ) {
+      documents.add(stage.target_path);
+    }
+  }
+  const found: { path: string; key: string; document: string }[] = [];
+  for (const document of documents) {
+    const result = await describeComponents(workspaceRoot, [
+      "--source",
+      document,
+      "--no-stage-check",
+      "--json",
+    ]);
+    for (const component of result?.components ?? []) {
+      if (component.kind === "value" && component.key) {
+        found.push({
+          path: component.path,
+          key: component.key,
+          document,
+        });
+      }
+    }
+  }
+  return found;
+}
+
 async function scanDetectedFiles(
   workspaceRoot: string,
   calkitYamlExists: boolean,
@@ -1838,6 +2217,8 @@ async function scanDetectedFiles(
     currentDetectedDatasets = [];
     currentDetectedResults = [];
     currentDetectedPresentations = [];
+    currentDocumentCitations = [];
+    currentRenderedQuestions = [];
     return;
   }
   const [
@@ -1868,6 +2249,8 @@ async function scanDetectedFiles(
   currentDetectedDatasets = detectedDatasets;
   currentDetectedResults = detectedResults;
   currentDetectedPresentations = detectedPresentations;
+  currentDocumentCitations = await scanDocumentCitations(workspaceRoot);
+  currentRenderedQuestions = await scanRenderedQuestions(workspaceRoot);
 }
 
 function scheduleRefreshPipelineOutputContext(
@@ -2022,6 +2405,8 @@ function renderSidebarFromState(): void {
     currentDetectedPresentations,
     getHiddenSections(),
     staleStageDetails,
+    currentDocumentCitations,
+    currentRenderedQuestions,
   );
   updateSidebarBadge();
 }
@@ -3634,12 +4019,14 @@ async function openPdfInLatexWorkshop(
 // Open a stage's source file (notebook/script/target), opening .ipynb in the
 // notebook editor. Shared by the sidebar "Open stage file" action and figure
 // go-to-source navigation.
-async function openStageSourceFile(
+// Show where a stage is written down: the block in the Markdown file that
+// declares it, or its entry in calkit.yaml.
+async function goToStageDefinition(
   workspaceRoot: string,
   stageName: string,
 ): Promise<void> {
-  // A stage declared in a Markdown file has no source file of its own, so
-  // open the file that declares it and go to the block
+  // A stage declared in a Markdown file is defined by its block, which is
+  // in that file rather than in calkit.yaml
   const md = splitMarkdownStageName(stageName, currentCalkitConfig);
   if (md) {
     const mdPath = markdownStagePath(currentCalkitConfig, md.markdownStageName);
@@ -3660,6 +4047,42 @@ async function openStageSourceFile(
       }
       return;
     }
+  }
+  // Where the stage itself is written. Its script, notebook or target is
+  // already one click away under the stage's own properties; what the row
+  // has no other way to reach is the definition.
+  const uri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
+  let doc: vscode.TextDocument;
+  try {
+    doc = await vscode.workspace.openTextDocument(uri);
+  } catch {
+    void vscode.window.showErrorMessage("No calkit.yaml in this workspace.");
+    return;
+  }
+  const line = stageDefinitionLine(doc.getText(), stageName);
+  const editor = await vscode.window.showTextDocument(doc);
+  if (line === undefined) {
+    return;
+  }
+  const pos = new vscode.Position(line, 0);
+  editor.selection = new vscode.Selection(pos, pos);
+  editor.revealRange(
+    new vscode.Range(pos, pos),
+    vscode.TextEditorRevealType.InCenter,
+  );
+}
+
+// Open the file a stage runs: its script, notebook or LaTeX target. What
+// somebody following a figure back wants is the code that drew it, not the
+// pipeline entry that names it.
+async function openStageSourceFile(
+  workspaceRoot: string,
+  stageName: string,
+): Promise<void> {
+  // A Markdown stage's code is the block that declares it
+  if (splitMarkdownStageName(stageName, currentCalkitConfig)) {
+    await goToStageDefinition(workspaceRoot, stageName);
+    return;
   }
   const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
   const filePath =
@@ -3714,6 +4137,19 @@ async function buildOutputToStageMap(
     }
   }
   return map;
+}
+
+// The file the user is looking at, including one shown by a custom editor
+// such as the PDF viewer, where there is no active text editor at all.
+function activeFileUri(): vscode.Uri | undefined {
+  const fromText = vscode.window.activeTextEditor?.document.uri;
+  if (fromText) {
+    return fromText;
+  }
+  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input as
+    | { uri?: vscode.Uri }
+    | undefined;
+  return input?.uri;
 }
 
 async function findStageForFile(

@@ -1,0 +1,224 @@
+# Design notes: LaTeX review sessions via Word
+
+Feasibility notes behind the
+[LaTeX and Word tutorial](../tutorials/latex-word.md).
+Not user-facing.
+Complements the ingestion notes in PR #1580 (`docs/dev/docx-ingestion.md`),
+which cover the diffing side in more depth; this covers the rendering side
+and the repo-first session design.
+
+Everything below was checked with a small two-column `article` paper
+(natbib citations, an `\input` file, a display equation, inline math, a
+PDF figure, a booktabs table, and cross-references) on macOS with Word,
+LibreOffice, pdflatex, and pandoc 3.6.4.
+
+## Getting a Word document that looks like the PDF
+
+Four converters were tried on the same PDF or source.
+
+| Path                   | Fidelity                                                                                 | Structure                                                                              | Runs where               |
+| ---------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------ |
+| Word's own PDF import  | Near identical: two columns, fonts, figure, citations, bibliography, cross-refs all kept | Real paragraphs in reading order; equation becomes a shape, table becomes tabbed lines | Mac or Windows with Word |
+| pandoc from `.tex`     | Plain manuscript look, single column; figure and table numbers lost                      | Clean paragraphs, native editable equations, citeproc bibliography                     | Anywhere                 |
+| pdf2docx               | Layout roughly kept                                                                      | Inter-word spaces dropped with Computer Modern fonts; paragraphs split by column       | Anywhere                 |
+| LibreOffice PDF import | Visual only                                                                              | Every line is a text frame; zero body paragraphs                                       | Anywhere                 |
+
+Word's import is the only path that satisfies "looks like the PDF" and
+also yields editable paragraphs a reviewer can track changes in.
+It confirms the hunch in #1529.
+pdf2docx and LibreOffice are out.
+Pandoc is the fallback for machines without Word and for the hub, and it
+is genuinely usable, just not pretty:
+with a Lua filter it can resolve `\ref` and `\eqref` from the `.aux`
+file we already produce, and `--citeproc` with the project's `.bib`
+gives a bibliography close to natbib's.
+Figures need converting from PDF to PNG first, since Word can't render
+PDF images on Windows.
+
+So: Word is a requirement for the high-fidelity path, and that's
+acceptable.
+`docx2pdf` is already a dependency and already automates Word through
+AppleScript on macOS and COM on Windows, so `calkit office word-to-pdf`
+is the precedent.
+PDF import is the same call in the other direction:
+`Documents.Open` on a `.pdf` triggers Word's reflow, then save as
+`.docx`.
+Suppress the "Word will now convert your PDF" alert with
+`display alerts to alerts none` (macOS) or `DisplayAlerts = 0` (COM).
+
+Known fidelity gaps in Word's import, none of which block the workflow:
+
+- Display equations come through as drawings, not OMML, so a reviewer
+  can't edit them.
+  They can comment on them, which is what a Word-only collaborator would
+  do anyway.
+- Inline math is flattened to text, e.g., `$f_s = 1$~kHz` reads as
+  `fs = 1 kHz`.
+  This matters for anchoring, see below.
+- Tables become tab-separated paragraphs rather than Word tables.
+- Fonts are substituted, so line breaks shift slightly.
+
+## Markers survive the trip
+
+The ingestion notes say a source map only exists if we control the
+render, and that if we don't, inject markers into the source and find
+them in the output.
+That works through Word's import.
+
+In the marked build, each text-mode paragraph start gets a macro that
+typesets a short letters-only token in a 2pt font, zero width, with the
+PDF text render mode set to invisible:
+
+```latex
+\newcommand{\ckp}[1]{\rlap{\pdfliteral{3 Tr}%
+  {\fontsize{2}{2}\selectfont ckx#1xkc}\pdfliteral{0 Tr}}}
+```
+
+The token is in the PDF's text layer (`pdftotext` finds it), invisible
+on the page, and Word's import carries it into the `.docx` as a tiny
+paragraph of its own immediately before the paragraph it marks.
+Word also restored reading order across the two columns, so markers
+came out in source order even though `pdftotext` did not.
+A post-processing pass then deletes each marker paragraph and inserts a
+`w:bookmarkStart`/`w:bookmarkEnd` pair named `ck_p0001` etc. at the
+start of the following paragraph.
+Underscores in the token render as spaces, hence the letters-only
+form.
+
+The marked build is a separate compile into a temporary directory, the
+way `calkit latex diff` builds its worktree copies, so the project's
+own source is never touched.
+The sidecar map records bookmark name to flattened source line, and the
+flattening is `latexpand`, which `calkit latex diff` already uses, so
+line numbers can be mapped back to the original `\input` files.
+
+The bookmarks then survived a Word editing session with tracked changes
+and a save, as did document core properties (`identifier` and
+`keywords`), which is where the session ID goes so an ingested file
+identifies its own session regardless of file name.
+
+Marker placement is a heuristic over the flattened source:
+after a blank line, outside environments, not on a line starting with a
+command like `\section` or `\begin`.
+The prototype missed paragraphs that start right after `\end{equation}`
+and the first paragraph inside `abstract`.
+That's fine, since the sidecar plus sequence alignment is the baseline
+and bookmarks are the bonus, but the heuristic should be tested against
+a few real papers before it ships.
+
+## Ingesting the marked-up document
+
+A prototype of the diff side, on a document edited in Word with tracked
+changes and a comment, produced exactly what the ingestion notes
+predict:
+
+- Final-view text per body paragraph (skip `w:del`, keep `w:ins`, skip
+  text boxes), aligned against our original with `difflib` at paragraph
+  granularity and then word granularity.
+- A deleted sentence in Methods resolved via its bookmark to the source
+  line and the longest common substring found the span in the `.tex`.
+- A paragraph the reviewer added showed as an insert with no bookmark,
+  positioned by the neighboring paragraphs.
+- The comment came out of `word/comments.xml` with author and text.
+  Its anchor is the paragraph containing the comment range.
+
+Pandoc's docx reader with `--track-changes=all` sees the same
+insertions, deletions, and comments, and could serve as the normalizer
+on both sides instead of hand-written XML walking.
+It's worth weighing:
+it's less code, but it's a large binary dependency for something a
+hundred lines of `lxml` does, and we already need the `.docx` XML for
+bookmarks and properties.
+
+The hard residual is edits that land on text that doesn't exist in the
+source verbatim: inline math, `\cite` keys, `~` and `--`, `\emph`.
+A change to "the flow is turbulent" applies mechanically because the
+words are in the `.tex`.
+A change to "fs = 1 kHz" doesn't, because the source says
+`$f_s = 1$~kHz`.
+The plan is:
+
+1. Try to locate the reviewer's _original_ span in the paragraph's
+   source lines.
+   If it's found verbatim, replace it.
+2. If it isn't, tokenize the source line into words and markup, align
+   the words against the rendered text, and apply the change to the
+   word tokens only if every changed word maps to a plain-text token.
+3. Otherwise show the reviewer's version next to the source and let the
+   lead apply it by hand or defer it as a task.
+
+Step 3 is the honest floor and it must stay cheap in the UI.
+
+## Repo-first sessions with the hub as a view
+
+The question in #1529 was whether the hub can be a transparent view over
+a process that lives in the repo.
+Mostly yes, with two exceptions that are inherent rather than design
+choices.
+
+Everything the process produces is a file:
+the manifest, the two originals, the sidecar, the returned documents,
+and the decision log.
+Given those files at a commit, the diff and the per-change state are
+deterministic, so the CLI and the hub compute the same view from the
+same data.
+Accepting a change is a text edit to a `.tex` file plus a line in
+`decisions.yaml`; the hub can make that commit through its existing
+repo access, and the CLI does it in the working tree.
+Neither needs the other.
+
+The exceptions:
+
+- **Rendering needs Word**, so the hub can't start the high-fidelity
+  session itself.
+  Starting a session is a CLI operation, and the hub receives the result
+  on push.
+  The hub can offer the pandoc fallback for the "I'm on Linux and don't
+  care how it looks" case.
+- **Receiving responses needs a mailbox.**
+  A reviewer replying to an email has to hit a server.
+  That's the one thing that is hub-only, and it's the contribution
+  request machinery from #1580: the request row, the token, the reply
+  address.
+  The returned file is held there only until it's pulled into
+  `responses/`, at which point the repo is the record again.
+  Without a hub, the mailbox is the lead's own inbox and
+  `calkit review ingest <file>` does the pull.
+
+This reconciles the two vocabularies.
+A **review session** is the repo-side record in `.calkit/reviews/`.
+A **contribution request** is the hub-side delivery mechanism, one per
+reviewer, pointing at a session.
+The session exists without any request; a request never exists without
+a session.
+
+Open decisions:
+
+- Whether `original.docx` and the responses go in Git or DVC.
+  They're tens of kilobytes for a typical paper, so Git is fine and
+  keeps the session clonable without a DVC remote, but a paper full of
+  embedded figures could reach megabytes.
+- Whether ingest requires a clean working tree.
+  It writes to `.tex` files, and mixing accepted review edits with
+  in-progress writing in one commit loses the audit trail that
+  "squash accepted changes into one commit referencing the request" in
+  #1580 wants.
+- Command naming.
+  The tutorial uses `calkit new review-session` and `calkit review
+ingest|send|show`; #1580 uses `calkit task ingest`.
+  The task commands should probably be what ingest creates, not what
+  runs it.
+
+## Not needed for a first version
+
+- An Office add-in.
+  It would let a reviewer submit from inside Word and could set
+  bookmarks natively, but email reply already covers submission, and
+  bookmarks are already surviving.
+  Revisit if reviewers on Word for the web turn out to matter, since
+  the desktop-only PDF import is on the lead's side, not theirs.
+- Per-change author attribution from `w:ins`/`w:del`.
+  One response file per reviewer already tells us who.
+- Handling a file that went through Google Docs.
+  Bookmarks are lost, sequence alignment still works, and the
+  ingestion notes already say so.

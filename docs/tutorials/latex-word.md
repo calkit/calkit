@@ -18,55 +18,35 @@ and migrating the contributions back into LaTeX is a tedious manual process.
 For these situations, Calkit supports a workflow where the source of
 truth is LaTeX, but Word documents can be sent out for review,
 and the project lead can merge the comments and edits from the `.docx` files
-back into the main project as to-do items and LaTeX changes,
-respectively.
-
-Nothing about the process is stored in the project:
-the Word document carries everything Calkit needs to merge it back,
-so you export it, email it, and merge whatever comes back,
-whenever it comes back.
+back into the TeX source, and back out to `.docx` again.
 
 <!-- prettier-ignore -->
 !!! note
-    Producing a Word document that looks like the PDF requires
-    Microsoft Word itself, on macOS or Windows, on the machine that
-    exports it.
-    Reviewers only need Word, or anything that can edit a `.docx`,
-    and merging the result back needs neither.
-    Nothing else needs installing: the document is built in the
-    project's own LaTeX environment, as usual.
+    This workflow requires Microsoft Word on all collaborators' machines,
+    even the project lead who primarily writes in LaTeX.
 
 ## Exporting the document for review
 
-Assuming we have a LaTeX document in our Calkit project at `paper/main.tex`,
-already set up to build in the project pipeline,
+Assuming we have an up-to-date compiled LaTeX document in our project at
+`paper/main.pdf`,
 we can export a Word copy of it with:
 
 ```sh
-calkit latex to-docx paper/main.tex
+calkit latex to-docx paper/main.pdf -o paper/main-for-review.docx
 ```
 
-The export is pinned to a commit,
-so Calkit will ask you to commit any outstanding changes first,
-then rebuild the document to make sure the PDF matches the source.
-It then compiles a copy of the document with invisible paragraph
-markers, opens that PDF in Word to convert it to `.docx`,
-and turns the markers into bookmarks that record which line of which
-source file each paragraph came from.
-The result is written next to the document as `paper/main-review.docx`.
-It doesn't need to be committed:
-the file records the commit it was built from,
-the source file it came from,
-and a copy of its own text as sent,
-and those survive editing and saving in Word.
+Note that this will be more reliable if it's produced as a `latex` stage
+in the Calkit pipeline, but it's not an absolute requirement.
+It's also useful if the `.tex` source is committed to Git, since the `.docx`
+will get commit information for its corresponding rev.
 
-By default the document has tracked changes forced on,
+By default the Word document has tracked changes forced to be enabled,
 so nobody has to remember to turn them on,
 and the reviewer's edits and comments both come back in the same file.
 With `--permission comment` the document is locked to comments only,
 for the reviewer you want opinions from but not rewrites.
 
-Email the file to your reviewers.
+You can then email the file to your reviewers.
 The same file can go to the whole team,
 since Word stamps every change and comment with the name of the person
 who made it.
@@ -84,10 +64,22 @@ and nothing you do there needs to be repeated later.
 
 ## Merging back into the project
 
-When you're done in Word, merge the document:
+When you're done in Word, merge it back into LaTeX with:
 
 ```sh
-calkit latex merge-docx ~/Downloads/main_advisor_comments.docx
+calkit latex merge-docx reviews/main-for-review-PI-comments.docx
+```
+
+This command assumes we've saved the `.docx` we got back to a `reviews`
+folder inside the project.
+It may be a good idea to keep the `.docx` around for posterity.
+You can save to DVC
+(better for tracking binary files,
+but Git can be okay if the file isn't large from many embedded figures)
+with:
+
+```sh
+calkit save reviews/main-for-review-PI-comments.docx --to dvc -m "Add review"
 ```
 
 Calkit reads the commit from the document,

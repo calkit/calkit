@@ -130,6 +130,34 @@ That's fine, since the sidecar plus sequence alignment is the baseline
 and bookmarks are the bonus, but the heuristic should be tested against
 a few real papers before it ships.
 
+### Markers are optional: any PDF works
+
+The marker's only job is to say which source line a Word paragraph came
+from, and that can be recovered after the fact.
+Aligning the Word import of the _unmarked_ PDF against the flattened
+source, with about forty lines of Python (strip markup from each source
+paragraph, score word overlap, walk both lists monotonically), anchored
+every prose paragraph, heading, caption, and table row to the right
+source block.
+The six that didn't anchor were the date, the display equation, the
+References heading, two bibliography entries, and the page number, none
+of which has a source paragraph.
+Math-heavy paragraphs are the real risk and should be flagged rather
+than guessed.
+
+So the export can take any PDF, however it was built, as long as it
+knows the source: from the pipeline stage if the PDF is an output, else
+`--source`.
+It aligns at export time, injects the bookmarks itself after Word's
+import, and writes the custom XML part as before, so nothing downstream
+changes, and it reports the paragraphs it couldn't anchor.
+A PDF built from uncommitted edits fails alignment on exactly the edited
+paragraphs, which is a usable signal; a stale pipeline output is
+something Calkit can say outright.
+The marked build becomes an accuracy upgrade for later.
+Splitting source paragraphs at environment and sectioning boundaries,
+not only blank lines, is the first improvement to make.
+
 ## Ingesting the marked-up document
 
 A prototype of the diff side, on a document edited in Word with tracked

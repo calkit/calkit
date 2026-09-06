@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 import re
 import subprocess
@@ -117,6 +118,7 @@ class Original:
     rev: str | None
     source: str
     paragraphs: dict[str, str]
+    media: dict[str, str] = field(default_factory=dict)
 
 
 def normalize(text: str) -> str:
@@ -160,10 +162,12 @@ class Document:
             texts, pending = [], False
             authors: list[str] = []
             for el in p.iter():
-                if el.tag == _tag(W, "t") and not _in(
-                    self._parents, el, p, _tag(W, "del")
-                ):
+                if _in(self._parents, el, p, _tag(W, "del")):
+                    continue
+                if el.tag == _tag(W, "t"):
                     texts.append(el.text or "")
+                elif el.tag in (_tag(W, "tab"), _tag(W, "br"), _tag(W, "cr")):
+                    texts.append(" ")
                 elif el.tag in (_tag(W, "ins"), _tag(W, "del")):
                     pending = True
                     author = el.get(_tag(W, "author"))
@@ -200,6 +204,10 @@ class Document:
             p = ET.SubElement(root, _tag(CK_NS, "p"))
             p.set("id", name)
             p.text = text
+        for name, digest in original.media.items():
+            m = ET.SubElement(root, _tag(CK_NS, "media"))
+            m.set("name", name)
+            m.set("sha1", digest)
         self.parts["customXml/item1.xml"] = ET.tostring(
             root, xml_declaration=True, encoding="UTF-8"
         )
@@ -234,7 +242,19 @@ class Document:
                 p.get("id", ""): p.text or ""
                 for p in root.iter(_tag(CK_NS, "p"))
             },
+            media={
+                m.get("name", ""): m.get("sha1", "")
+                for m in root.iter(_tag(CK_NS, "media"))
+            },
         )
+
+    def media_hashes(self) -> dict[str, str]:
+        """Images and other embedded media, by part name."""
+        return {
+            name: hashlib.sha1(data).hexdigest()
+            for name, data in self.parts.items()
+            if name.startswith("word/media/")
+        }
 
     def last_modified_by(self) -> str | None:
         core = ET.fromstring(self.parts["docProps/core.xml"])

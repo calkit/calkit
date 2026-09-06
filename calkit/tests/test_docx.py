@@ -258,6 +258,28 @@ def test_docx_round_trip(
         "Wakes matter"
     ) in Path("paper/main.tex").read_text(encoding="utf-8")
     main = Path("paper/main.tex").read_text(encoding="utf-8")
+    # A table value edited in Word lands in the tabular row, and a figure
+    # swapped in Word is warned about, since figures come from the pipeline
+    doc = calkit.docx.Document("reviews/accepted.docx")
+    for para in doc.paragraphs():
+        assert para.element is not None
+        for t in para.element.iter(f"{{{calkit.docx.W}}}t"):
+            if t.text and "0.05" in t.text:
+                t.text = t.text.replace("0.05", "0.07")
+    doc.parts["word/media/image1.png"] = b"not the same picture"
+    doc.save("reviews/table.docx")
+    res = subprocess.run(
+        ["calkit", "latex", "merge-docx", "reviews/table.docx"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    out = res.stderr + res.stdout
+    assert "Growth rate & $k$ & 0.07" in Path("paper/main.tex").read_text(
+        encoding="utf-8"
+    )
+    assert "Figures were changed in Word" in out and "image1.png" in out
+    main = Path("paper/main.tex").read_text(encoding="utf-8")
     # A thread resolved in Word is marked resolved in the source, and
     # exports back to Word as resolved
     subprocess.run(
@@ -273,7 +295,7 @@ def test_docx_round_trip(
     assert [c.done for c in exported if c.author == "T. Author"] == [True]
     assert Path("paper/main.tex").read_text(encoding="utf-8") == main
     merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
-    assert len(merges) == 6
+    assert len(merges) == 7
     fixture = returned.read_original()
     assert fixture is not None
     fixture_uuid = fixture.uuid

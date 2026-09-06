@@ -735,7 +735,11 @@ def to_docx(
     except Exception:
         pass
     export_id = str(uuid.uuid4())
-    doc.write_original(calkit.docx.Original(export_id, rev, source, original))
+    doc.write_original(
+        calkit.docx.Original(
+            export_id, rev, source, original, doc.media_hashes()
+        )
+    )
     doc.set_identifier(f"calkit-review:{export_id}:{rev or ''}:{source}")
     doc.save()
     record = DocxExport(
@@ -798,6 +802,19 @@ def merge_docx(
         )
     if not os.path.isfile(original.source):
         raise_error(f"Source {original.source} does not exist")
+    # Figures come from the pipeline, so a picture swapped or edited in
+    # Word can't be merged
+    media = doc.media_hashes()
+    changed = sorted(
+        name
+        for name in set(media) | set(original.media)
+        if media.get(name) != original.media.get(name)
+    )
+    if changed:
+        warn(
+            "Figures were changed in Word and can't be merged; edit the "
+            "pipeline instead: " + ", ".join(changed)
+        )
     lines = calkit.latex.flatten(original.source)
     blks = calkit.latex.blocks(lines)
     path_for_hash = {

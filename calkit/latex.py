@@ -465,11 +465,16 @@ def find_block(
     return best[2] if best and best[0] >= 0.6 else None
 
 
+def _tokens(text: str) -> set[str]:
+    """Words and numbers, so a change to a value counts as a change."""
+    return set(re.findall(r"[A-Za-z0-9][\w.]*", text))
+
+
 def already_applied(block: Block, old: str, new: str) -> bool:
     """Whether the block already reads as ``new`` rather than ``old``."""
-    have = _words(block.text)
-    inserted = _words(new) - _words(old)
-    deleted = _words(old) - _words(new)
+    have = _tokens("\n".join(ln.text for ln in block.lines))
+    inserted = _tokens(new) - _tokens(old)
+    deleted = _tokens(old) - _tokens(new)
     if not inserted <= have:
         return False
     return not deleted or len(deleted & have) / len(deleted) <= 0.5

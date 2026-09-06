@@ -119,19 +119,19 @@ without being asked,
 which makes the merge non-interactive if you decided everything in
 Word.
 
-Comments you didn't resolve are written into the source as LaTeX
-comments, just above the paragraph they were left on,
+Comments are written into the source as LaTeX comments,
+just above the paragraph they were left on,
 with any replies in order,
-where they stay until you delete them:
+in the form described under [comments](#comments) below:
 
 ```latex
-% REVIEW (A. Reviewer, 2026-09-14): Quantify this: give an RMS error.
-% REVIEW (P. Bachant, 2026-09-15): Will add RMS error to Table 2.
+% COMMENT author=a.reviewer@uni.edu
+% Quantify this: give an RMS error.
+%%%% REPLY author=pete@x.edu
+%%%% Will add RMS error to Table 2.
 The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
 reasonably well.
 ```
-
-Resolved comments are dropped.
 
 Some edits can't be applied mechanically,
 e.g., a change inside an equation, a citation, or a table,
@@ -246,3 +246,24 @@ These are some design decisions we need to make:
     for. So threads and possibly the raw responses could be
     distributed without being in the tree, while decisions, which
     must move in lockstep with the source, stay in the worktree.
+
+## Comments
+
+These show up in the raw TeX source like:
+
+```tex
+% COMMENT author=user@email.com resolved=false
+% This is the comment body.
+%%%% REPLY author=replier@other.net
+%%%% As you can see, we indent for thread.
+This is the text being commented on.
+
+% COMMENT author=reviewer-2
+% This is something you should change.
+```
+
+The objective is to make it readable in TeX.
+These comments will make their way out into the docx,
+and docx comments will make their way back into TeX.
+Deleting is okay, but it's probably a good idea to do this in the Git
+commit history.

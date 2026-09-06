@@ -182,8 +182,8 @@ paragraph by paragraph, keyed by bookmark.
 Ingest is therefore XML on one file, needs no stored original and no
 Word, and the source map isn't needed either if bookmark names carry
 the anchor.
-Comments go back into the source as `% REVIEW (...)` lines above the
-paragraph, where the lead resolves them by deleting them.
+Comments go back into the source as `%` comment blocks above the
+paragraph, in the format proposed in the tutorial's Comments section.
 The only record of a review is the diff it produced.
 
 The realistic flow decides how ingest behaves.
@@ -195,8 +195,8 @@ applies plain differences without asking, since those are decisions
 already made.
 Only revisions still pending prompt, with `--accept-remaining` and
 `--reject-remaining` to make the merge non-interactive.
-Unresolved comment threads become `% REVIEW` lines with replies in
-order; resolved ones are dropped.
+Comment threads become `% COMMENT` blocks with `%%%% REPLY` lines in
+order.
 Threads were tested by writing them per spec and letting Word open and
 re-save the file, which re-serializes every part:
 a reply is a comment whose `w14:paraId` appears in
@@ -239,8 +239,38 @@ The `.docx` is the contract, and the parts that must not change later:
   resolves against the file list at the pinned rev.
   Encoding the anchor beats an index into a sidecar precisely because
   there is no sidecar.
-- **The comment line format**, so later tooling can ingest existing
-  ones into tasks.
+- **The comment block format**, which is being designed in the
+  tutorial's Comments section and is the third-party-readable part of
+  the contract.
+  Notes from the Word side that bear on it:
+  Word supplies display names only, so the merge maps names to emails
+  from the project's collaborators and Git authors and falls back to
+  the bare name; a re-merge of the same file needs to recognize a
+  thread it already wrote, which the comment's `paraId` can seed if the
+  format carries an ID, else anchor plus body text has to do; Word
+  comments have an exact range, which a quote of the commented text
+  would preserve; and Word records a date per comment.
+  Resolution is project state and belongs in the file, so the
+  `resolved` attribute is right; collapsed or hidden is display state
+  and stays in VS Code or the hub.
+  There is no accepted representation of comment threads in TeX
+  source to adopt instead.
+  Overleaf keeps comments, threads, and tracked changes in its own
+  database against character ranges; none of it reaches the `.tex` or
+  the Git sync.
+  The packages that do put annotations in the source are `todonotes`
+  (`\todo`, most common, an author option, no threads), `fixme`
+  (multi-author notes with a final mode), `changes` (`\added`,
+  `\deleted`, `\replaced`, `\comment` with declared authors, the
+  nearest analog to Word), and `pdfcomment` (real PDF annotations,
+  the only one with replies, viewer-dependent).
+  TeXstudio lists `\todo` and `%TODO` comments in its structure panel
+  and nothing scans a custom prefix.
+  Plain `%` lines need no package and don't touch the PDF; emitting
+  `\todo`, `\fxnote`, or `\comment` when the document already loads
+  the package is a later option, and `changes` suggests a later home
+  for undecided revisions: `\replaced{new}{old}` in the source rather
+  than a prompt.
 
 What stateless can't do, and what sessions add later:
 memory of what was skipped, "another reviewer changed this paragraph",

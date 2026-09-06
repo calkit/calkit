@@ -19,8 +19,8 @@ stages:
       size: 1530
     - path: paper/methods.tex
       hash: md5
-      md5: 6b8ac7be4ef93a0f2f3ebf667175aa72
-      size: 683
+      md5: dc72182bfa9c42e69f41247216f7632f
+      size: 671
     - path: paper/refs.bib
       hash: md5
       md5: ffcc0d351b85648c6ed8cf6c098fc8f2
@@ -28,7 +28,7 @@ stages:
     outs:
     - path: paper/main.pdf
       hash: md5
-      md5: ca7d10833191db8f8cf85c893ea0cde7
+      md5: 0db2cb0f07abc9039273e3cbf3d3d347
       size: 124860
   plot-wake:
     cmd: calkit xenv -n py --no-check -- python scripts/plot-wake.py

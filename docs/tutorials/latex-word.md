@@ -125,6 +125,11 @@ The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
 reasonably well.
 ```
 
+The objective is to make it readable in TeX.
+These comments will make their way out into the docx,
+and docx comments will make their way back into TeX.
+Deleting a thread signals that it's resolved.
+
 Some edits can't be applied mechanically,
 e.g., a change inside an equation, a citation, or a table,
 since the reviewer was editing rendered text rather than the LaTeX that
@@ -174,88 +179,3 @@ loses nothing:
 the document still carries the text as sent,
 so their edits are found the same way as accepted ones,
 only without a name attached.
-
-## What comes later
-
-Everything above is stateless:
-the only record of a review is the diff it produced.
-That's enough to ship, and the Word document is the contract that
-keeps it extensible.
-Each export carries a unique ID alongside the commit and source path,
-so later layers can refer to an export without changing the file or
-the merge command:
-
-- **Review sessions** that remember who was sent what and when,
-  which edits were skipped, and which paragraphs more than one reviewer
-  touched, stored in the repo under `.calkit/reviews/`.
-- **Sending through the hub**, with a reply address per reviewer,
-  so a returned document lands in the project without passing through
-  your inbox.
-- **Comments as tasks** rather than source comments,
-  with threads that show up on the hub,
-  ingested from the same `% REVIEW` lines.
-
-## TODO
-
-These are some design decisions we need to make:
-
-- [ ] Fully distributed or brokered by the hub? Do we want these interactions to actually live in the repo?
-  - Feasible to keep them in the repo; see the
-    [design notes](../dev/latex-word.md).
-    Only rendering (needs Word) and receiving replies (needs a mailbox)
-    can't be repo-local.
-- [ ] How important is it that the Word doc look like the LaTeX PDF?
-  - Word's own PDF import gets us nearly identical for free, so we don't
-    have to trade this off against editability. A Pandoc fallback is
-    possible but not worth shipping in v1; see the design notes.
-- [ ] Is Word a requirement?
-  - Only for the high-fidelity render on the lead's machine. Reviewers
-    need anything that edits `.docx`. `docx2pdf` already automates
-    Word on Mac and Windows.
-- [ ] Integrate git-bug now for conversations around comments?
-- [ ] Can it be more stateless, i.e., do we need review sessions, or can we simply try to merge a docx back into tex source idempotently?
-  - Yes, and that's now the MVP above. With tracked changes forced on,
-    the returned `.docx` contains both what we sent (reject all) and
-    what the reviewer wants (accept all), and bookmark names encode the
-    source anchor, so nothing has to be stored. Sessions become an
-    optional layer on top; see [what comes later](#what-comes-later).
-- [ ] Comment threads in document or in review database? If in review database how do we keep them attached to the content? I suppose the start of a review is at a pinned version, so line numbers synctex-ish workflow works. We also want these comments to show up on the hub though, and we have a database table for these.
-  - Where a thread is anchored and where it lives are separate
-    questions. The anchor (bookmark, source file and line, quoted
-    text) is valid at the pinned revision however the source moves
-    afterward, the same way a patch hunk is, so it can sit in the
-    review directory. The conversation can live wherever tasks end up,
-    git-bug eventually, with the hub table as a mirror synced on push.
-  - Tension: putting human interaction in a repo that may one day be
-    public could scare off users. The reviewer's raw comments and the
-    returned `.docx` are in `.calkit/reviews/` under this design, and
-    history keeps them even if they're deleted later. GitHub keeps a
-    clear border between the repo and communication about it.
-    Transparency and distributed operation are still worth having.
-  - Git itself has that border: worktree files are the work, and refs
-    outside the default push refspec (git-bug's approach) are
-    communication about it, not cloned or shown by GitHub unless asked
-    for. So threads and possibly the raw responses could be
-    distributed without being in the tree, while decisions, which
-    must move in lockstep with the source, stay in the worktree.
-
-## Comments
-
-These show up in the raw TeX source like:
-
-```tex
-% COMMENT author=user@email.com resolved=false
-% This is the comment body.
-%%%% REPLY author=replier@other.net
-%%%% As you can see, we indent for thread.
-This is the text being commented on.
-
-% COMMENT author=reviewer-2
-% This is something you should change.
-```
-
-The objective is to make it readable in TeX.
-These comments will make their way out into the docx,
-and docx comments will make their way back into TeX.
-Deleting is okay, but it's probably a good idea to do this in the Git
-commit history.

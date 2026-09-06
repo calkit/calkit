@@ -120,5 +120,7 @@ then merging in with `calkit latex merge-docx`.
 
 For the next round of review, use the `to-docx` command on the LaTeX PDF
 again.
+Comments left in the `.tex` that follow the format above will be exported
+to `.docx`.
 It's probably a good idea to move the old review copies and keep track
 of who you sent them to, how, and when.

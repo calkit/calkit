@@ -7,6 +7,7 @@ output, ``returned.docx`` has a reviewer's tracked edits and a comment,
 ``resolved.docx`` additionally has the exported thread resolved.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -161,6 +162,15 @@ def test_docx_round_trip(
         check=True,
     )
     assert "not yet accepted" in res.stderr + res.stdout
+    record = json.loads(
+        Path(
+            calkit.latex.DOCX_MERGES_DIR,
+            os.listdir(calkit.latex.DOCX_MERGES_DIR)[0],
+        ).read_text()
+    )
+    assert [c["author"] for c in record["changes"]] == ["Bachant, Pete"] * 2
+    assert "A. Reviewer" in record["authors"]
+    assert record["last_modified_by"]
     assert "as shown by" not in Path("paper/main.tex").read_text()
     assert "sampling frequency" in Path("paper/methods.tex").read_text()
     assert "%   A. Reviewer:" in Path("paper/main.tex").read_text()

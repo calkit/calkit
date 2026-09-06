@@ -93,6 +93,7 @@ class Paragraph:
     text: str
     bookmark: str | None = None
     pending: bool = False
+    authors: list[str] = field(default_factory=list)
     element: ET.Element | None = field(default=None, repr=False)
 
 
@@ -157,6 +158,7 @@ class Document:
             if _in(self._parents, p, self.doc, _tag(W, "txbxContent")):
                 continue
             texts, pending = [], False
+            authors: list[str] = []
             for el in p.iter():
                 if el.tag == _tag(W, "t") and not _in(
                     self._parents, el, p, _tag(W, "del")
@@ -164,6 +166,9 @@ class Document:
                     texts.append(el.text or "")
                 elif el.tag in (_tag(W, "ins"), _tag(W, "del")):
                     pending = True
+                    author = el.get(_tag(W, "author"))
+                    if author and author not in authors:
+                        authors.append(author)
             bookmark = None
             for b in p.iter(_tag(W, "bookmarkStart")):
                 name = b.get(_tag(W, "name"), "")
@@ -171,7 +176,7 @@ class Document:
                     bookmark = name
             text = normalize("".join(texts))
             if text or bookmark:
-                out.append(Paragraph(text, bookmark, pending, p))
+                out.append(Paragraph(text, bookmark, pending, authors, p))
         return out
 
     def add_bookmark(self, para: ET.Element, name: str, bid: int) -> None:
@@ -230,6 +235,14 @@ class Document:
                 for p in root.iter(_tag(CK_NS, "p"))
             },
         )
+
+    def last_modified_by(self) -> str | None:
+        core = ET.fromstring(self.parts["docProps/core.xml"])
+        el = core.find(
+            "{http://schemas.openxmlformats.org/package/2006/metadata/"
+            "core-properties}lastModifiedBy"
+        )
+        return el.text if el is not None else None
 
     def set_identifier(self, value: str) -> None:
         core = _parse(self.parts["docProps/core.xml"])

@@ -827,7 +827,10 @@ def merge_docx(
             warn(f"Tracked change at {loc} not yet accepted or rejected")
             changes.append(
                 DocxMergeChange(
-                    path=blk.path, lineno=blk.lineno, status="pending"
+                    path=blk.path,
+                    lineno=blk.lineno,
+                    status="pending",
+                    author=", ".join(para.authors) or None,
                 )
             )
             continue
@@ -934,11 +937,15 @@ def merge_docx(
         rev = calkit.git.get_repo().head.commit.hexsha
     except Exception:
         pass
+    seen = {a for p in doc.paragraphs() for a in p.authors}
+    seen |= {c.author for c in doc.comments()}
     record = DocxMerge(
         uuid=original.uuid,
         created=datetime.datetime.now(datetime.timezone.utc),
         docx=docx_path,
         rev=rev,
+        authors=sorted(seen),
+        last_modified_by=doc.last_modified_by(),
         changes=changes,
         comments_added=added,
         comments_updated=updated,

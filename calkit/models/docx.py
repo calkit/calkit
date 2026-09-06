@@ -39,7 +39,13 @@ class DocxMergeChange(BaseModel):
     status: str = Field(
         description="'applied', 'already-applied', 'pending', 'unplaced'."
     )
-    author: str | None = None
+    author: str | None = Field(
+        default=None,
+        description=(
+            "Who made the change, known only while it's still tracked; "
+            "Word drops the author when a change is accepted."
+        ),
+    )
 
 
 class DocxMerge(BaseModel):
@@ -47,6 +53,13 @@ class DocxMerge(BaseModel):
     created: datetime
     docx: str
     rev: str | None = Field(default=None, description="Git commit at merge.")
+    authors: list[str] = Field(
+        default=[],
+        description="Everyone named on a tracked change or comment.",
+    )
+    last_modified_by: str | None = Field(
+        default=None, description="Who last saved the document, per Word."
+    )
     changes: list[DocxMergeChange] = []
     comments_added: int = 0
     comments_updated: int = 0

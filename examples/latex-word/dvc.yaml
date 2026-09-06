@@ -1,0 +1,32 @@
+stages:
+  plot-wake:
+    cmd: calkit xenv -n py --no-check -- python scripts/plot-wake.py
+    deps:
+      - scripts/plot-wake.py
+      - .calkit/env-locks/py
+    outs:
+      - figures/wake-deficit.pdf
+    desc: Automatically generated from the 'plot-wake' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  figs-to-paper:
+    cmd: calkit map-paths --dir-to-dir-replace 'figures->paper/figures'
+    deps:
+      - figures
+    outs:
+      - paper/figures:
+          cache: false
+          persist: true
+    desc: Automatically generated from the 'figs-to-paper' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  build-paper:
+    cmd: calkit latex build -e tex --no-check paper/main.tex
+    deps:
+      - paper/main.tex
+      - paper/methods.tex
+      - paper/refs.bib
+      - .calkit/env-locks/tex
+      - paper/figures
+    outs:
+      - paper/main.pdf
+    desc: Automatically generated from the 'build-paper' stage in calkit.yaml. Changes
+      made here will be overwritten.

@@ -228,11 +228,19 @@ def test_docx_round_trip(
         "Wakes matter"
     ) in Path("paper/main.tex").read_text()
     main = Path("paper/main.tex").read_text()
-    # A thread resolved in Word is removed from the source
+    # A thread resolved in Word is marked resolved in the source, and
+    # exports back to Word as resolved
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/resolved.docx"], check=True
     )
-    assert "% COMMENT" not in Path("paper/methods.tex").read_text()
+    methods = Path("paper/methods.tex").read_text()
+    assert "% COMMENT resolved=true\n%   T. Author:" in methods
+    parsed = calkit.latex.parse_comments(methods.split("\n"))
+    assert [c.resolved for c in parsed] == [True]
+    os.remove("paper/main-for-review.docx")
+    calkit.cli.latex.to_docx("paper/main.pdf")
+    exported = calkit.docx.Document("paper/main-for-review.docx").comments()
+    assert [c.done for c in exported if c.author == "T. Author"] == [True]
     assert Path("paper/main.tex").read_text() == main
     merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
     assert len(merges) == 6

@@ -50,4 +50,3 @@ class DocxMerge(BaseModel):
     changes: list[DocxMergeChange] = []
     comments_added: int = 0
     comments_updated: int = 0
-    comments_removed: int = 0

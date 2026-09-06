@@ -401,6 +401,7 @@ class Document:
         threads: list[list[tuple[str, str]]],
         paras: list[ET.Element],
         highlights: list[str | None] | None = None,
+        resolved: list[bool] | None = None,
     ) -> None:
         """Attach comment threads, each a list of (author, text), to
         paragraphs; ``paras[i]`` anchors ``threads[i]``, around
@@ -408,6 +409,7 @@ class Document:
         if not threads:
             return
         highlights = highlights or [None] * len(threads)
+        resolved = resolved or [False] * len(threads)
         # Append to whatever comments the document already has
         existing = self.parts.get("word/comments.xml")
         comments = (
@@ -428,7 +430,9 @@ class Document:
             ),
             default=-1,
         )
-        for thread, para, highlight in zip(threads, paras, highlights):
+        for thread, para, highlight, done in zip(
+            threads, paras, highlights, resolved
+        ):
             parent_pid = None
             para_text = "".join(t.text or "" for t in para.iter(_tag(W, "t")))
             at = para_text.find(highlight) if highlight else -1
@@ -448,7 +452,7 @@ class Document:
                 ex.set(_tag(W15, "paraId"), pid)
                 if parent_pid:
                     ex.set(_tag(W15, "paraIdParent"), parent_pid)
-                ex.set(_tag(W15, "done"), "0")
+                ex.set(_tag(W15, "done"), "1" if done else "0")
                 # Range around the paragraph's runs
                 start = ET.Element(_tag(W, "commentRangeStart"))
                 start.set(_tag(W, "id"), str(cid))

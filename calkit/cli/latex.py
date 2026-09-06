@@ -708,7 +708,7 @@ def to_docx(
         original[name] = para.text
         para_for_block.setdefault(id(blk), para.element)
     # Existing comment blocks in the source go out as Word comments
-    threads, anchors, highlights = [], [], []
+    threads, anchors, highlights, resolved = [], [], [], []
     for path in sorted({ln.path for ln in lines}):
         file_lines = Path(path).read_text().split("\n")
         for tc in calkit.latex.parse_comments(file_lines):
@@ -720,7 +720,8 @@ def to_docx(
                 threads.append(tc.entries)
                 anchors.append(para_for_block[id(blk)])
                 highlights.append(tc.highlight)
-    doc.add_comments(threads, anchors, highlights)
+                resolved.append(tc.resolved)
+    doc.add_comments(threads, anchors, highlights, resolved)
     if comment_only:
         doc.protect("comments")
     else:
@@ -778,7 +779,7 @@ def merge_docx(
     rejected, and edits that no longer fit the source, are left alone with
     a warning: deal with them in Word and merge again. Comments become
     comment blocks above the paragraph; threads resolved in Word are
-    removed.
+    marked resolved.
     """
     import datetime
 
@@ -861,7 +862,7 @@ def merge_docx(
     for path, updates in edits.items():
         for lineno, count, new_lines in sorted(updates, reverse=True):
             files[path][lineno - 1 : lineno - 1 + count] = new_lines
-    added = updated = removed = 0
+    added = updated = 0
     if not no_comments:
         # Threads keyed by root, anchored through the root's bookmark
         comments = doc.comments()
@@ -869,9 +870,7 @@ def merge_docx(
         roots = [c for c in comments if not c.parent_id]
         # Resolve every thread to a block first, then edit each file from
         # the bottom up so earlier line numbers stay valid
-        placed: list[
-            tuple[calkit.latex.Block, calkit.latex.TexComment, bool]
-        ] = []
+        placed: list[tuple[calkit.latex.Block, calkit.latex.TexComment]] = []
         for root in roots:
             replies = [
                 (c.author, c.text)
@@ -879,7 +878,9 @@ def merge_docx(
                 if c.parent_id and by_id.get(c.parent_id) is root
             ]
             tc = calkit.latex.TexComment(
-                [(root.author, root.text)] + replies, highlight=root.highlight
+                [(root.author, root.text)] + replies,
+                highlight=root.highlight,
+                resolved=root.done,
             )
             if root.bookmark is None:
                 warn(
@@ -896,8 +897,8 @@ def merge_docx(
                     f"Can't place a comment by {root.author}: {root.text[:60]}"
                 )
                 continue
-            placed.append((blk, tc, root.done))
-        for blk, tc, done in sorted(
+            placed.append((blk, tc))
+        for blk, tc in sorted(
             placed, key=lambda x: (x[0].path, x[0].lineno), reverse=True
         ):
             content = files[blk.path]
@@ -911,16 +912,16 @@ def merge_docx(
                 None,
             )
             if existing is not None:
-                if not done and existing.replies == tc.replies:
+                if (
+                    existing.replies == tc.replies
+                    and existing.resolved == tc.resolved
+                ):
                     continue
                 del content[
                     existing.lineno - 1 : existing.lineno - 1 + existing.nlines
                 ]
                 if existing.lineno < at:
                     at -= existing.nlines
-                removed += done
-            if done:
-                continue
             content[at - 1 : at - 1] = tc.render()
             added += existing is None
             updated += existing is not None
@@ -941,7 +942,6 @@ def merge_docx(
         changes=changes,
         comments_added=added,
         comments_updated=updated,
-        comments_removed=removed,
     )
     os.makedirs(calkit.latex.DOCX_MERGES_DIR, exist_ok=True)
     stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
@@ -959,6 +959,5 @@ def merge_docx(
     typer.echo(
         f"Applied {counts['applied']} edits ({counts['already-applied']} "
         f"already there, {counts['pending']} pending, {counts['unplaced']} "
-        f"unplaced); {added} comments added, {updated} updated, "
-        f"{removed} removed"
+        f"unplaced); {added} comments added, {updated} updated"
     )

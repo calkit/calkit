@@ -514,7 +514,11 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
     return [ln.rstrip() for ln in src.split("\n") if ln.strip()]
 
 
-_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+_ATTR_RE = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
+
+
+def _attrs(line: str) -> dict[str, str]:
+    return {k: q or bare for k, q, bare in _ATTR_RE.findall(line)}
 
 
 @dataclass
@@ -524,6 +528,7 @@ class TexComment:
 
     entries: list[tuple[str, str]]
     highlight: str | None = None
+    resolved: bool = False
     lineno: int = 0
     nlines: int = 0
 
@@ -543,6 +548,8 @@ class TexComment:
         head = "% COMMENT"
         if self.highlight:
             head += ' highlight="%s"' % self.highlight.replace('"', "'")
+        if self.resolved:
+            head += " resolved=true"
         out = [head]
         for author, text in self.entries:
             out.append(f"%   {author}:")
@@ -564,7 +571,7 @@ def parse_comments(lines: list[str]) -> list[TexComment]:
             i += 1
             continue
         start = i
-        attrs = dict(_ATTR_RE.findall(lines[i]))
+        attrs = _attrs(lines[i])
         entries: list[tuple[str, str]] = []
         i += 1
         while i < len(lines) and re.match(r"%(   |$)", lines[i]):
@@ -579,7 +586,11 @@ def parse_comments(lines: list[str]) -> list[TexComment]:
         if entries:
             out.append(
                 TexComment(
-                    entries, attrs.get("highlight"), start + 1, i - start
+                    entries,
+                    attrs.get("highlight"),
+                    attrs.get("resolved") == "true",
+                    start + 1,
+                    i - start,
                 )
             )
     return out

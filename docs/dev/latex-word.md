@@ -149,7 +149,7 @@ The plan is:
 
 Step 3 is the honest floor and it must stay cheap in the UI.
 
-## Repo-first sessions with the hub as a view
+## Repo-first reviews with the hub as a view
 
 The question in #1529 was whether the hub can be a transparent view over
 a process that lives in the repo.
@@ -185,12 +185,57 @@ The exceptions:
   Without a hub, the mailbox is the lead's own inbox and
   `calkit review ingest <file>` does the pull.
 
-This reconciles the two vocabularies.
-A **review session** is the repo-side record in `.calkit/reviews/`.
-A **contribution request** is the hub-side delivery mechanism, one per
-reviewer, pointing at a session.
-The session exists without any request; a request never exists without
-a session.
+### One kind of request
+
+#1580 has a general **contribution request** with a permission ladder
+(view, comment, suggest, edit), a submit mode for bulk uploads, inbound
+access requests, and public calls, all as hub rows.
+A review session looked like a second concept next to that.
+It isn't: a review request _is_ the request, and it's the only kind we
+need.
+
+- View, comment, and suggest are review requests at three permission
+  levels.
+  Comment-only is a real case (the PI you want opinions from, not
+  rewrites), and the `.docx` can enforce it:
+  `w:documentProtection` with `w:edit="comments"` locks Word to
+  comments, and `w:edit="trackedChanges"` forces tracked changes on,
+  which also settles "the reviewer forgot to turn them on."
+  Neither needs a password; a determined reviewer can stop protection,
+  and the diff handles that anyway.
+- Edit, meaning direct commits to the default branch, is what a
+  collaborator invite link already grants.
+  It doesn't need to be a request.
+- Submit (a hundred authors each uploading a chapter) is a different
+  feature with a different shape.
+  Defer it rather than generalize for it now.
+- Inbound access requests are a pending invite, not a review.
+  Public calls are many review requests.
+
+So the repo record is `.calkit/reviews/<session>/`, a session being one
+document at one revision sent to one or more recipients, with one
+review request per recipient inside it.
+The session is the unit that shares a rendered original; the request is
+the unit that gets chased, revoked, and superseded.
+
+The split with the hub follows from that:
+
+- **Repo**: everything the lead decided.
+  The session, its requests, their permission and identity requirement
+  and due date, status changes, pulled responses, and decisions.
+  Closing or revoking from the hub UI is a commit, like accepting a
+  change.
+- **Hub**: delivery and the inbox.
+  Token hash, reply key, sent and viewed state, and responses nobody has
+  pulled yet.
+  A response enters the repo when the lead pulls it, so a public call
+  with ninety declined responses puts nothing in `git log`, which is the
+  same "a response is data, not a branch" argument #1580 makes.
+
+`ContribRequest` in #1580 therefore becomes two things: the fields
+that are the lead's decisions turn into the `review.yaml` schema, and
+the hub row keeps the delivery fields plus a pointer to the session and
+request in the repo.
 
 ### Worktree files, not the Git database
 

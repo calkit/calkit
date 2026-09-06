@@ -47,6 +47,14 @@ calkit new review-session paper/main.tex \
     --due 2026-09-20
 ```
 
+A session holds one review request per recipient,
+so each can be chased, revoked, or superseded on its own.
+By default reviewers may suggest edits,
+and the Word document they receive has tracked changes forced on,
+so nobody has to remember to turn them on.
+With `--permission comment` the document is locked to comments only,
+for the reviewer you want opinions from but not rewrites.
+
 If you think you'll eventually want to squash the review session into a
 single commit, use the `--branch` option.
 If you don't provide a name, one will be created for you like
@@ -94,9 +102,8 @@ you can instead let it do the sending:
 calkit review send main-2026-09-06
 ```
 
-This pushes the session and creates one contribution request per
-reviewer, each with an email containing the document and a reply address
-unique to that request.
+This pushes the session, and the hub emails each review request:
+the document, your message, and a reply address unique to that request.
 The reviewer marks up the document in Word and replies with it attached.
 Nothing about their side of the process involves Calkit.
 
@@ -205,7 +212,7 @@ was sent from all the same.
 Because the session is nothing but files in the repo,
 starting one is a single commit,
 and reverting that commit cancels the review:
-the hub closes the contribution requests it sent the next time you push.
+the hub revokes the review requests it sent the next time you push.
 
 ## Reviewing the session later
 

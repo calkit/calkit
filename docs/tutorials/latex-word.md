@@ -5,7 +5,9 @@ system setup.
 Thus, despite its limitations for technical writing,
 Microsoft Word remains an important tool.
 In some projects, the lead may want to use LaTeX or some other
-text-first typesetting system like Quarto,
+text-first typesetting system like Quarto since those make it easier
+to ensure document components like figures, tables, and values remain
+up-to-date with the analysis,
 but the rest of the team does not want to engage in that way.
 They prefer a WYSIWYG experience without needing to sign up for a web
 app like Overleaf (or Calkit for that matter).

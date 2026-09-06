@@ -45,6 +45,11 @@ calkit new review-session paper/main.tex \
     --due 2026-09-20
 ```
 
+If you think you'll eventually want to squash the review session into a
+single commit, use the `--branch` option.
+If you don't provide a name, one will be created for you like
+`review/main-2026-09-20`.
+
 A review session is pinned to a commit,
 so Calkit will ask you to commit any outstanding changes first,
 then rebuild the document to make sure the PDF matches the source.

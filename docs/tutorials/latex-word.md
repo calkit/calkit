@@ -24,8 +24,8 @@ back into the TeX source.
 
 <!-- prettier-ignore -->
 !!! note
-    Exporting and reviewing require Microsoft Word, on macOS or Windows,
-    However, merging changed back into LaTeX does not.
+    Exporting and reviewing require Microsoft Word, on macOS or Windows.
+    However, merging changes back into LaTeX does not.
 
 ## Exporting the document for review
 
@@ -41,17 +41,17 @@ Calkit needs the LaTeX source as well as the PDF,
 since again, we are treating that as the source of truth.
 The `to-docx` command assumes the `.tex` source is alongside the PDF, i.e.,
 `paper/main.tex`.
-It that's not correct, it can be passed in with the `--source` option.
-If the PDF if built as part of a `latex` stage in the Calkit pipeline,
-the source (`target_path`) will be looked up there.
-If the document is not part of the pipeline, it's up to you so ensure
+If that's not correct, it can be passed in with the `--source` option.
+If the PDF is built as part of a `latex` stage in the Calkit pipeline,
+the source (`target_path`) will be looked up there,
+and Calkit will run the stage before export if necessary.
+If the document is not part of the pipeline, it's up to you to ensure
 the compiled PDF is up-to-date.
-Otherwise, Calkit will run the stage before export if necessary.
 
 By default, the Word document is written next to the PDF, e.g.,
 `paper/main-for-review.docx`, but this can be controlled with the `-o` flag.
 It will look very similar to the PDF, except that
-equations are pictures, which they can comment on but not edit,
+equations are pictures, which reviewers can comment on but not edit,
 and tables are tab-separated text rather than native Word tables.
 
 By default the Word document has "track changes" enabled,
@@ -63,10 +63,13 @@ etc.
 
 ## Reacting and responding to the feedback
 
-It's possible to deal with a review copy either in Word or from the CLI.
-If using Word, you can simply accept/reject changes, reply to comments, etc.
-Anything unresolved in Word will cause the CLI to prompt the user at
-merge time.
+The review copy is dealt with in Word.
+Accept or reject each change, reply to comments or resolve them,
+and make any edits of your own.
+Note that your own edits are tracked too,
+so accept them before merging.
+The `.docx` is the record of the decisions you made,
+which is why it's worth keeping.
 
 ## Merging back into the project
 
@@ -91,7 +94,12 @@ calkit save reviews/main-for-review-PI-comments.docx --to dvc -m "Add review"
 ```
 
 Changes you accepted in Word are applied to the LaTeX source.
-Remaining tracked changes that were not rejected will throw a warning.
+Tracked changes you haven't accepted or rejected yet are left alone
+with a warning,
+as is an edit that no longer fits because the paragraph has changed
+since the copy was sent,
+e.g., when two reviewers changed the same sentence.
+Go back into Word, deal with them, and run `merge-docx` again.
 
 Comments are written into the source as LaTeX comments,
 just above the paragraph they were left on, e.g.:
@@ -105,6 +113,8 @@ The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
 reasonably well.
 ```
 
+A thread you resolved in Word is deleted from the `.tex` if it was
+there, and never written if it wasn't.
 It's possible to disable comments merging back into LaTeX with `--no-comments`.
 
 Note that merging is idempotent, meaning it can be called over again

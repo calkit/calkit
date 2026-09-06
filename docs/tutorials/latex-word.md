@@ -60,8 +60,10 @@ Finally, it writes the session to `.calkit/reviews/main-2026-09-06/`:
 ├── original.pdf      # what the reviewers were sent
 ├── original.docx     # the Word copy, tagged with the session ID
 ├── sourcemap.json    # paragraph bookmark -> source file and line
-├── responses/        # returned documents, one per reviewer
-└── decisions.yaml    # what you did with each change
+└── responses/        # one directory per reviewer
+    └── advisor/
+        ├── response.docx   # what they sent back
+        └── decisions.yaml  # what you did with each of their changes
 ```
 
 These files are committed to the project,
@@ -140,9 +142,13 @@ produced it.
 Those are shown with the reviewer's version alongside the source line,
 and you can apply them by hand with `e` or defer them.
 
-Every decision is recorded in `decisions.yaml`,
-and the applied changes are ordinary edits to the `.tex` files,
-which you commit like any other.
+Each accepted change is committed on its own,
+together with the decision that produced it,
+so `git log` reads as a record of the review
+and `git revert` undoes any single decision.
+For that reason the reviewed `.tex` files need to be clean when you
+start ingesting; commit or stash your own edits to them first.
+Rejected and deferred decisions are committed at the end of the walk.
 
 ## Multiple reviewers
 
@@ -180,8 +186,7 @@ is shown three ways:
 the paragraph as it was sent out, as it is now, and as this reviewer
 wants it.
 You pick one or edit the result.
-Accepted changes can be reversed while the session is open,
-provided nothing else has been written over them since.
+To take back an accepted change, revert its commit.
 
 A session closes when every reviewer has responded and every change
 is decided.
@@ -189,6 +194,11 @@ You can also close it early with responses outstanding,
 e.g., if a reviewer never sends theirs back,
 and anything that comes in later is ingested against the session it
 was sent from all the same.
+
+Because the session is nothing but files in the repo,
+starting one is a single commit,
+and reverting that commit cancels the review:
+the hub closes the contribution requests it sent the next time you push.
 
 ## Reviewing the session later
 

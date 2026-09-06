@@ -192,17 +192,50 @@ reviewer, pointing at a session.
 The session exists without any request; a request never exists without
 a session.
 
+### Worktree files, not the Git database
+
+The session could live outside the worktree, in custom refs the way
+git-bug stores issues.
+It shouldn't, for the same reason `.calkit/overleaf-sync.json` is a
+tracked file:
+the record has to move in lockstep with the source.
+Accepting a change is a `.tex` edit plus a decision, and if both are
+worktree files they share a commit, so `git revert` undoes both together
+and the log never claims a change was accepted when the source says
+otherwise.
+Custom refs would put the two in separate histories, need explicit push
+refspecs, be invisible to the GitHub UI and VS Code, and be untrackable
+by DVC.
+Those costs may be fine for comment threads later, which is what git-bug
+is for; they're wrong for this.
+
+Consequences:
+
+- One commit per accepted change, made by ingest, referencing the
+  session and reviewer.
+  Reversal is then `git revert` rather than inverse-patch machinery, and
+  "squash into one commit" from #1580 is a `git rebase` the lead can do
+  or skip.
+- Ingest therefore requires the reviewed `.tex` files to be clean, so
+  the lead's in-progress edits don't get swept into an accept commit.
+  Other files can be dirty.
+- Reverting the session's creating commit cancels the review.
+  The hub treats a session missing from the repo on push as revoked and
+  closes its requests.
+  A document that comes back afterwards still identifies its session
+  from its properties, and the original is still in history at the
+  pinned commit, so ingest can offer to proceed anyway.
+- `original.docx` and the responses go in Git, not DVC, so a session is
+  complete in any clone and the hub can render it without a DVC fetch.
+  They're tens of kilobytes for a typical paper.
+  A paper full of embedded figures could reach megabytes, which is
+  still tolerable for something that happens a few times per paper.
+- Decisions are one file per response, under `responses/<reviewer>/`,
+  so two people ingesting different responses on different branches
+  don't conflict on a shared YAML file.
+
 Open decisions:
 
-- Whether `original.docx` and the responses go in Git or DVC.
-  They're tens of kilobytes for a typical paper, so Git is fine and
-  keeps the session clonable without a DVC remote, but a paper full of
-  embedded figures could reach megabytes.
-- Whether ingest requires a clean working tree.
-  It writes to `.tex` files, and mixing accepted review edits with
-  in-progress writing in one commit loses the audit trail that
-  "squash accepted changes into one commit referencing the request" in
-  #1580 wants.
 - Command naming.
   The tutorial uses `calkit new review-session` and `calkit review
 ingest|send|show`; #1580 uses `calkit task ingest`.

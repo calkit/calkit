@@ -613,3 +613,339 @@ def _build_diff(
     finally:
         if not keep_tex and os.path.isfile(diff_tex):
             os.remove(diff_tex)
+
+
+@latex_app.command(name="to-docx")
+def to_docx(
+    pdf_path: Annotated[str, typer.Argument(help="Compiled PDF to export.")],
+    source: Annotated[
+        str | None,
+        typer.Option(
+            "--source",
+            help=(
+                "Main .tex file. Defaults to the pipeline stage's target, "
+                "else the .tex next to the PDF."
+            ),
+        ),
+    ] = None,
+    output: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Where to write the .docx. Defaults to <pdf>-for-review.docx.",
+        ),
+    ] = None,
+    comment_only: Annotated[
+        bool,
+        typer.Option("--comment-only", help="Lock the document to comments."),
+    ] = False,
+) -> None:
+    """Export a Word copy of a LaTeX document for review.
+
+    Uses Word's own PDF import, so the copy looks like the PDF, then records
+    inside the file which source line each paragraph came from and the text
+    as sent, so ``merge-docx`` can bring edits and comments back.
+    """
+    import datetime
+    import sys
+    import uuid
+    from typing import Any
+
+    import calkit.docx
+    import calkit.git
+    import calkit.pipeline
+    from calkit.models.docx import DocxExport
+
+    ck_info = calkit.load_calkit_info()
+    stage_name = calkit.pipeline.get_stage_for_output(pdf_path, ck_info)
+    if source is None and stage_name is not None:
+        source = ck_info["pipeline"]["stages"][stage_name].get("target_path")
+    if source is None:
+        source = str(Path(pdf_path).with_suffix(".tex"))
+    if not os.path.isfile(source):
+        raise_error(f"Source {source} does not exist; pass --source")
+    if stage_name is not None:
+        typer.echo(f"Running stage {stage_name} to make sure the PDF is fresh")
+        subprocess.run(
+            [sys.executable, "-m", "calkit", "run", stage_name], check=True
+        )
+    if not os.path.isfile(pdf_path):
+        raise_error(f"{pdf_path} does not exist")
+    if output is None:
+        output = str(
+            Path(pdf_path).with_name(Path(pdf_path).stem + "-for-review.docx")
+        )
+    typer.echo("Converting the PDF with Word")
+    calkit.docx.pdf_to_docx(pdf_path, output)
+    doc = calkit.docx.Document(output)
+    lines = calkit.latex.flatten(source)
+    blks = calkit.latex.blocks(lines)
+    paras = doc.paragraphs()
+    matched = calkit.latex.align([p.text for p in paras], blks)
+    # Bookmark each anchored paragraph; a block rendering as several
+    # paragraphs gets numbered suffixes
+    original: dict[str, str] = {}
+    para_for_block: dict[int, Any] = {}
+    seen: dict[str, int] = {}
+    for i, (para, blk) in enumerate(zip(paras, matched)):
+        if blk is None or para.element is None:
+            continue
+        name = calkit.latex.bookmark_name(blk.path, blk.lineno)
+        seen[name] = seen.get(name, 0) + 1
+        if seen[name] > 1:
+            name = f"{name}_{seen[name]}"
+        doc.add_bookmark(para.element, name, 9000 + i)
+        original[name] = para.text
+        para_for_block.setdefault(id(blk), para.element)
+    # Existing comment blocks in the source go out as Word comments
+    threads, anchors = [], []
+    for path in sorted({ln.path for ln in lines}):
+        file_lines = Path(path).read_text().split("\n")
+        for tc in calkit.latex.parse_comments(file_lines):
+            after = tc.lineno + tc.nlines
+            blk = next(
+                (b for b in blks if b.path == path and b.lineno >= after), None
+            )
+            if blk is not None and id(blk) in para_for_block:
+                threads.append([(tc.author, tc.text)] + tc.replies)
+                anchors.append(para_for_block[id(blk)])
+    doc.add_comments(threads, anchors)
+    doc.protect("comments" if comment_only else "trackedChanges")
+    rev, dirty = None, False
+    try:
+        repo = calkit.git.get_repo()
+        rev = repo.head.commit.hexsha
+        dirty = any(repo.is_dirty(path=p) for p in {ln.path for ln in lines})
+    except Exception:
+        pass
+    export_id = str(uuid.uuid4())
+    doc.write_original(calkit.docx.Original(export_id, rev, source, original))
+    doc.set_identifier(f"calkit-review:{export_id}:{rev or ''}:{source}")
+    doc.save()
+    record = DocxExport(
+        uuid=export_id,
+        created=datetime.datetime.now(datetime.timezone.utc),
+        source=source,
+        pdf=pdf_path,
+        docx=output,
+        rev=rev,
+        dirty=dirty,
+        permission="comment" if comment_only else "suggest",
+        paragraphs=len(original),
+        unanchored=sum(
+            1 for p, m in zip(paras, matched) if m is None and p.text
+        ),
+        comments_exported=len(threads),
+    )
+    os.makedirs(calkit.latex.DOCX_EXPORTS_DIR, exist_ok=True)
+    with open(
+        os.path.join(calkit.latex.DOCX_EXPORTS_DIR, f"{export_id}.yaml"), "w"
+    ) as f:
+        calkit.ryaml.dump(record.model_dump(mode="json"), f)
+    typer.echo(
+        f"Wrote {output} ({record.paragraphs} paragraphs anchored, "
+        f"{record.unanchored} not, {len(threads)} comments)"
+    )
+
+
+@latex_app.command(name="merge-docx")
+def merge_docx(
+    docx_path: Annotated[str, typer.Argument(help="Reviewed .docx to merge.")],
+    no_comments: Annotated[
+        bool,
+        typer.Option(
+            "--no-comments", help="Don't write comments to the .tex."
+        ),
+    ] = False,
+) -> None:
+    """Merge a reviewed Word document back into the LaTeX source.
+
+    Accepted changes are applied. Tracked changes not yet accepted or
+    rejected, and edits that no longer fit the source, are left alone with
+    a warning: deal with them in Word and merge again. Comments become
+    comment blocks above the paragraph; threads resolved in Word are
+    removed.
+    """
+    import datetime
+
+    import calkit.docx
+    import calkit.git
+    from calkit.cli.core import warn
+    from calkit.models.docx import DocxMerge, DocxMergeChange
+
+    doc = calkit.docx.Document(docx_path)
+    original = doc.read_original()
+    if original is None:
+        raise_error(
+            f"{docx_path} was not exported by Calkit, or its metadata was "
+            "stripped by another application"
+        )
+    if not os.path.isfile(original.source):
+        raise_error(f"Source {original.source} does not exist")
+    lines = calkit.latex.flatten(original.source)
+    blks = calkit.latex.blocks(lines)
+    path_for_hash = {
+        calkit.latex.bookmark_name(p, 0).split("_")[1]: p
+        for p in {ln.path for ln in lines}
+    }
+    edits: dict[str, list[tuple[int, int, list[str]]]] = {}
+    changes: list[DocxMergeChange] = []
+    for para in doc.paragraphs():
+        if para.bookmark is None or para.bookmark not in original.paragraphs:
+            continue
+        sent = original.paragraphs[para.bookmark]
+        if para.text == sent:
+            continue
+        parts = para.bookmark.split("_")
+        path, lineno = path_for_hash.get(parts[1], ""), int(parts[2])
+        blk = calkit.latex.find_block(
+            blks, path, lineno, sent
+        ) or calkit.latex.find_block(blks, path, lineno, para.text)
+        if blk is None:
+            warn(f"Can't place an edit from {path}:{lineno}: {para.text[:60]}")
+            changes.append(
+                DocxMergeChange(path=path, lineno=lineno, status="unplaced")
+            )
+            continue
+        loc = f"{blk.path}:{blk.lineno}"
+        if para.pending:
+            warn(f"Tracked change at {loc} not yet accepted or rejected")
+            changes.append(
+                DocxMergeChange(
+                    path=blk.path, lineno=blk.lineno, status="pending"
+                )
+            )
+            continue
+        if calkit.latex.already_applied(blk, sent, para.text):
+            changes.append(
+                DocxMergeChange(
+                    path=blk.path, lineno=blk.lineno, status="already-applied"
+                )
+            )
+            continue
+        new_lines = calkit.latex.apply_edit(blk, sent, para.text)
+        if new_lines is None:
+            warn(
+                f"Edit at {loc} touches markup; apply it by hand: {para.text[:60]}"
+            )
+            changes.append(
+                DocxMergeChange(
+                    path=blk.path, lineno=blk.lineno, status="unplaced"
+                )
+            )
+            continue
+        edits.setdefault(blk.path, []).append(
+            (blk.lineno, len(blk.lines), new_lines)
+        )
+        changes.append(
+            DocxMergeChange(path=blk.path, lineno=blk.lineno, status="applied")
+        )
+        typer.echo(f"Applied edit at {loc}")
+    files = {
+        p: Path(p).read_text().split("\n") for p in {ln.path for ln in lines}
+    }
+    for path, updates in edits.items():
+        for lineno, count, new_lines in sorted(updates, reverse=True):
+            files[path][lineno - 1 : lineno - 1 + count] = new_lines
+    added = removed = 0
+    if not no_comments:
+        # Threads keyed by root, anchored through the root's bookmark
+        comments = doc.comments()
+        by_id = {c.para_id: c for c in comments}
+        roots = [c for c in comments if not c.parent_id]
+        inserts: dict[str, list[tuple[int, list[str]]]] = {}
+        for root in roots:
+            replies = [
+                (c.author, c.text)
+                for c in comments
+                if c.parent_id and by_id.get(c.parent_id) is root
+            ]
+            tc = calkit.latex.TexComment(root.author, root.text, replies)
+            if root.bookmark is None:
+                warn(
+                    f"Comment by {root.author} has no anchor: {root.text[:60]}"
+                )
+                continue
+            parts = root.bookmark.split("_")
+            path, lineno = path_for_hash.get(parts[1], ""), int(parts[2])
+            blk = calkit.latex.find_block(
+                blks, path, lineno, original.paragraphs.get(root.bookmark, "")
+            )
+            if blk is None:
+                warn(
+                    f"Can't place a comment by {root.author}: {root.text[:60]}"
+                )
+                continue
+            existing = next(
+                (
+                    e
+                    for e in calkit.latex.parse_comments(files[blk.path])
+                    if e.author == tc.author and e.text == tc.text
+                ),
+                None,
+            )
+            if existing is not None:
+                if root.done or existing.replies != tc.replies:
+                    del files[blk.path][
+                        existing.lineno - 1 : existing.lineno
+                        - 1
+                        + existing.nlines
+                    ]
+                    removed += root.done
+                    # Later inserts shift up by the removed block
+                    for k, (ln_, block_) in enumerate(
+                        inserts.get(blk.path, [])
+                    ):
+                        if ln_ > existing.lineno:
+                            inserts[blk.path][k] = (
+                                ln_ - existing.nlines,
+                                block_,
+                            )
+                if root.done:
+                    continue
+                if existing.replies == tc.replies:
+                    continue
+            elif root.done:
+                continue
+            inserts.setdefault(blk.path, []).append((blk.lineno, tc.render()))
+            added += 1
+        for path, items in inserts.items():
+            for lineno, block_lines in sorted(items, reverse=True):
+                files[path][lineno - 1 : lineno - 1] = block_lines
+    for path, content in files.items():
+        new = "\n".join(content)
+        if new != Path(path).read_text():
+            Path(path).write_text(new)
+    rev = None
+    try:
+        rev = calkit.git.get_repo().head.commit.hexsha
+    except Exception:
+        pass
+    record = DocxMerge(
+        uuid=original.uuid,
+        created=datetime.datetime.now(datetime.timezone.utc),
+        docx=docx_path,
+        rev=rev,
+        changes=changes,
+        comments_added=added,
+        comments_removed=removed,
+    )
+    os.makedirs(calkit.latex.DOCX_MERGES_DIR, exist_ok=True)
+    stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
+    with open(
+        os.path.join(
+            calkit.latex.DOCX_MERGES_DIR, f"{stamp}-{original.uuid}.yaml"
+        ),
+        "w",
+    ) as f:
+        calkit.ryaml.dump(record.model_dump(mode="json"), f)
+    counts = {
+        s: sum(1 for c in changes if c.status == s)
+        for s in ("applied", "already-applied", "pending", "unplaced")
+    }
+    typer.echo(
+        f"Applied {counts['applied']} edits ({counts['already-applied']} "
+        f"already there, {counts['pending']} pending, {counts['unplaced']} "
+        f"unplaced); {added} comments added, {removed} removed"
+    )

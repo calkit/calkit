@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import difflib
+import hashlib
 import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -280,3 +283,281 @@ def _is_immutable_ref(repo: git.Repo, ref: str | None) -> bool:
     except Exception:
         return False
     return True
+
+
+DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")
+DOCX_MERGES_DIR = os.path.join(".calkit", "latex", "docx-merges")
+# Word bookmark names: 40 chars max, letters/digits/underscores
+_INCLUDE_RE = re.compile(
+    r"^\s*\\(input|include|subfile|import)\{([^}]*)\}(?:\{([^}]*)\})?"
+)
+_BLOCK_START_RE = re.compile(
+    r"^\s*\\(begin|end|section|subsection|subsubsection|chapter|part|item|"
+    r"caption|maketitle|documentclass)\b"
+)
+
+
+@dataclass
+class SourceLine:
+    path: str
+    lineno: int
+    text: str
+
+
+@dataclass
+class Block:
+    """A run of source lines that renders as one Word paragraph."""
+
+    lines: list[SourceLine]
+
+    @property
+    def path(self) -> str:
+        return self.lines[0].path
+
+    @property
+    def lineno(self) -> int:
+        return self.lines[0].lineno
+
+    @property
+    def text(self) -> str:
+        return detex("\n".join(ln.text for ln in self.lines))
+
+
+def flatten(main_path: str) -> list[SourceLine]:
+    """Inline \\input and friends, keeping each line's file and number."""
+    main = Path(main_path)
+    out: list[SourceLine] = []
+    seen: set[str] = set()
+
+    def visit(path: Path, base: Path) -> None:
+        key = path.resolve().as_posix()
+        if key in seen or not path.is_file():
+            return
+        seen.add(key)
+        rel = path.as_posix()
+        for i, line in enumerate(path.read_text().split("\n"), 1):
+            m = _INCLUDE_RE.match(line.split("%")[0])
+            if m:
+                cmd, a, b = m.groups()
+                target = Path(b) if cmd == "import" and b else Path(a)
+                start = base / a if cmd == "import" else base
+                child = start / target
+                if child.suffix == "":
+                    child = child.with_suffix(".tex")
+                visit(child, child.parent)
+                continue
+            out.append(SourceLine(rel, i, line))
+
+    visit(main, main.parent)
+    return out
+
+
+def detex(text: str) -> str:
+    """Roughly what LaTeX would print for a bit of source."""
+    text = "\n".join(ln.split("%")[0] for ln in text.split("\n"))
+    text = re.sub(r"\$[^$]*\$", " ", text)
+    text = re.sub(
+        r"\\(cite[pt]?|ref|eqref|label|includegraphics|usepackage|"
+        r"documentclass|bibliography\w*|begin|end)\*?(\[[^\]]*\])?\{[^}]*\}",
+        " ",
+        text,
+    )
+    text = re.sub(r"\\[a-zA-Z]+\*?(\[[^\]]*\])?", " ", text)
+    text = re.sub(r"[{}~]", " ", text).replace("---", " ").replace("--", " ")
+    text = text.replace("``", "").replace("''", "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def blocks(lines: list[SourceLine]) -> list[Block]:
+    """Split flattened source into paragraph-sized blocks."""
+    out: list[Block] = []
+    cur: list[SourceLine] = []
+    for ln in lines:
+        stripped = ln.text.strip()
+        if not stripped:
+            if cur:
+                out.append(Block(cur))
+                cur = []
+            continue
+        # A comment line inside a paragraph doesn't end it; one before it
+        # isn't part of it
+        if stripped.startswith("%"):
+            if cur:
+                cur.append(ln)
+            continue
+        if cur and _BLOCK_START_RE.match(ln.text):
+            out.append(Block(cur))
+            cur = []
+        cur.append(ln)
+    if cur:
+        out.append(Block(cur))
+    return [b for b in out if b.text]
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-zA-Z]{3,}", text.lower()))
+
+
+def similarity(a: str, b: str) -> float:
+    wa, wb = _words(a), _words(b)
+    return len(wa & wb) / len(wa) if wa else 0.0
+
+
+def align(
+    texts: list[str], blks: list[Block], threshold: float = 0.5
+) -> list[Block | None]:
+    """Match rendered paragraphs to source blocks, in order."""
+    out: list[Block | None] = []
+    last = 0
+    for text in texts:
+        scores = [
+            (similarity(text, b.text), j)
+            for j, b in enumerate(blks[last:], last)
+        ]
+        best = max(scores, default=(0.0, -1))
+        if best[0] >= threshold:
+            out.append(blks[best[1]])
+            last = best[1]
+        else:
+            out.append(None)
+    return out
+
+
+def bookmark_name(path: str, lineno: int) -> str:
+    digest = hashlib.sha1(path.encode()).hexdigest()[:8]
+    return f"ck_{digest}_{lineno}"
+
+
+def find_block(
+    blks: list[Block], path: str, lineno: int, text: str
+) -> Block | None:
+    """The block a bookmark points at, by line first and text second."""
+    same_file = [b for b in blks if b.path == path]
+    for b in same_file:
+        if b.lineno == lineno and similarity(text, b.text) >= 0.5:
+            return b
+    scored = [
+        (similarity(text, b.text), -abs(b.lineno - lineno), b)
+        for b in same_file
+    ]
+    best = max(scored, key=lambda s: s[:2], default=None)
+    return best[2] if best and best[0] >= 0.6 else None
+
+
+def already_applied(block: Block, old: str, new: str) -> bool:
+    """Whether the block already reads as ``new`` rather than ``old``."""
+    have = _words(block.text)
+    inserted = _words(new) - _words(old)
+    deleted = _words(old) - _words(new)
+    if not inserted <= have:
+        return False
+    return not deleted or len(deleted & have) / len(deleted) <= 0.5
+
+
+def _find_span(src: str, words: list[str]) -> tuple[int, int] | None:
+    """Where ``words`` sit in the source: verbatim, else by their edges,
+    so a span whose middle holds markup can still be replaced."""
+
+    def once(ws: list[str]) -> re.Match | None:
+        pattern = (
+            r"(?<![A-Za-z])"
+            + r"\s+".join(re.escape(w) for w in ws)
+            + r"(?![A-Za-z])"
+        )
+        found = list(re.finditer(pattern, src))
+        return found[0] if len(found) == 1 else None
+
+    m = once(words)
+    if m is not None:
+        return m.start(), m.end()
+    if len(words) < 4:
+        return None
+    head, tail = once(words[:2]), once(words[-2:])
+    if head is None or tail is None or tail.start() < head.end():
+        return None
+    return head.start(), tail.end()
+
+
+def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
+    """The block's lines rewritten so ``old`` reads as ``new``.
+
+    Works at the word level: each changed span must be findable in the
+    source, else the edit touches markup and None is returned.
+    """
+    ow, nw = old.split(), new.split()
+    sm = difflib.SequenceMatcher(a=ow, b=nw, autojunk=False)
+    src = "\n".join(ln.text for ln in block.lines)
+    for tag, i1, i2, j1, j2 in reversed(sm.get_opcodes()):
+        if tag == "equal":
+            continue
+        new_span = " ".join(nw[j1:j2])
+        if tag == "insert":
+            # Anchor on the preceding word
+            if i1 == 0:
+                return None
+            pattern = (
+                r"(?<![A-Za-z])" + re.escape(ow[i1 - 1]) + r"(?![A-Za-z])"
+            )
+            hits = list(re.finditer(pattern, src))
+            if len(hits) != 1:
+                return None
+            at = hits[0].end()
+            src = src[:at] + " " + new_span + src[at:]
+            continue
+        span = _find_span(src, ow[i1:i2])
+        if span is None:
+            return None
+        src = src[: span[0]] + new_span + src[span[1] :]
+    # A line emptied by a deletion goes, since a blank line would split
+    # the paragraph
+    return [ln.rstrip() for ln in src.split("\n") if ln.strip()]
+
+
+_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+
+
+@dataclass
+class TexComment:
+    author: str
+    text: str
+    replies: list[tuple[str, str]] = field(default_factory=list)
+    lineno: int = 0
+    nlines: int = 0
+
+    def render(self) -> list[str]:
+        out = [f'% COMMENT author="{self.author}"', f"% {self.text}"]
+        for author, text in self.replies:
+            out += [f'%   REPLY author="{author}"', f"%   {text}"]
+        return out
+
+
+def parse_comments(lines: list[str]) -> list[TexComment]:
+    """Comment blocks in a file's lines, with their position and extent."""
+    out: list[TexComment] = []
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith("% COMMENT "):
+            i += 1
+            continue
+        start = i
+        attrs = dict(_ATTR_RE.findall(lines[i]))
+        comment = TexComment(attrs.get("author", ""), "", lineno=start + 1)
+        i += 1
+        target: TexComment | None = comment
+        while i < len(lines) and lines[i].startswith("%"):
+            line = lines[i][1:]
+            if line.startswith("   REPLY "):
+                attrs = dict(_ATTR_RE.findall(line))
+                comment.replies.append((attrs.get("author", ""), ""))
+                target = None
+            elif line.startswith("   ") and comment.replies:
+                a, t = comment.replies[-1]
+                comment.replies[-1] = (a, (t + " " + line.strip()).strip())
+            elif line.startswith(" COMMENT "):
+                break
+            elif target is not None:
+                target.text = (target.text + " " + line.strip()).strip()
+            i += 1
+        comment.nlines = i - start
+        out.append(comment)
+    return out

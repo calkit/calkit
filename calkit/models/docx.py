@@ -1,0 +1,52 @@
+"""Records of LaTeX review round trips through Word.
+
+Written to ``.calkit/latex/docx-exports`` and ``.calkit/latex/docx-merges``,
+one file per run, named by export UUID (and timestamp for merges). Committing
+them is optional; they're a history of what the CLI did, and what a hub would
+index if it wanted to track reviews.
+"""
+
+from datetime import datetime
+
+from pydantic import BaseModel, Field
+
+
+class DocxExport(BaseModel):
+    uuid: str = Field(description="Identifier carried inside the .docx.")
+    created: datetime
+    source: str = Field(description="Main .tex file the PDF came from.")
+    pdf: str
+    docx: str
+    rev: str | None = Field(
+        default=None, description="Git commit at export, if in a repo."
+    )
+    dirty: bool = Field(
+        default=False, description="Whether the source had uncommitted edits."
+    )
+    permission: str = Field(
+        default="suggest", description="'suggest' or 'comment'."
+    )
+    paragraphs: int = Field(description="Paragraphs anchored to the source.")
+    unanchored: int = Field(
+        default=0, description="Paragraphs with no source location."
+    )
+    comments_exported: int = 0
+
+
+class DocxMergeChange(BaseModel):
+    path: str
+    lineno: int
+    status: str = Field(
+        description="'applied', 'already-applied', 'pending', 'unplaced'."
+    )
+    author: str | None = None
+
+
+class DocxMerge(BaseModel):
+    uuid: str = Field(description="Export the merged document came from.")
+    created: datetime
+    docx: str
+    rev: str | None = Field(default=None, description="Git commit at merge.")
+    changes: list[DocxMergeChange] = []
+    comments_added: int = 0
+    comments_removed: int = 0

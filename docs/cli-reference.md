@@ -3285,11 +3285,13 @@ Options:
 
 Work with LaTeX.
 
-| Command                                        | Description                                           |
-| ---------------------------------------------- | ----------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                         |
-| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk.         |
-| [`diff`](#subcommand-latex-tex-diff)           | Build a PDF showing what changed in a LaTeX document. |
+| Command                                          | Description                                                |
+| ------------------------------------------------ | ---------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)   | Convert a JSON file to LaTeX.                              |
+| [`build`](#subcommand-latex-tex-build)           | Build a PDF of a LaTeX document with latexmk.              |
+| [`diff`](#subcommand-latex-tex-diff)             | Build a PDF showing what changed in a LaTeX document.      |
+| [`to-docx`](#subcommand-latex-tex-to-docx)       | Export a Word copy of a LaTeX document for review.         |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx) | Merge a reviewed Word document back into the LaTeX source. |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3391,6 +3393,60 @@ Options:
 | `--keep-tex`      | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                |
 | `--no-check`      | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                             |
 | `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                                                                                                            |
+
+<a id="subcommand-latex-tex-to-docx"></a>
+
+#### `calkit latex|tex to-docx`
+
+Export a Word copy of a LaTeX document for review.
+
+Uses Word's own PDF import, so the copy looks like the PDF, then records inside the file which source line each paragraph came from and the text as sent, so `merge-docx` can bring edits and comments back.
+
+Usage:
+
+```text
+calkit latex|tex to-docx [OPTIONS] PDF-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description             |
+| ---------- | ---- | -------- | ------- | ----------------------- |
+| `pdf_path` | str  | yes      |         | Compiled PDF to export. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                             |
+| ---------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------- |
+| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF. |
+| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                            |
+| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                          |
+
+<a id="subcommand-latex-tex-merge-docx"></a>
+
+#### `calkit latex|tex merge-docx`
+
+Merge a reviewed Word document back into the LaTeX source.
+
+Accepted changes are applied. Tracked changes not yet accepted or rejected, and edits that no longer fit the source, are left alone with a warning: deal with them in Word and merge again. Comments become comment blocks above the paragraph; threads resolved in Word are removed.
+
+Usage:
+
+```text
+calkit latex|tex merge-docx [OPTIONS] DOCX-PATH
+```
+
+Arguments:
+
+| Argument    | Type | Required | Default | Description              |
+| ----------- | ---- | -------- | ------- | ------------------------ |
+| `docx_path` | str  | yes      |         | Reviewed .docx to merge. |
+
+Options:
+
+| Option          | Type    | Required | Default | Description                       |
+| --------------- | ------- | -------- | ------- | --------------------------------- |
+| `--no-comments` | boolean | no       | False   | Don't write comments to the .tex. |
 
 <a id="command-group-overleaf-ol"></a>
 

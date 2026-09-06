@@ -214,6 +214,26 @@ an edit already applied shows the new text where the old was expected,
 and a comment already present matches by content, so a rerun on the
 same file skips both.
 
+The protection was tested in Word for Mac by driving it with
+AppleScript:
+
+- `<w:documentProtection w:edit="trackedChanges" w:enforcement="1"/>`
+  with no password, placed in `settings.xml` between `w:zoom` and
+  `w:defaultTabStop`.
+  Word is strict about schema order here; out of place, the file opens
+  as nothing at all.
+- Word reported the protection as "allow only revisions."
+  With tracking never turned on, and after an explicit attempt to turn
+  it off, two find-and-replace edits came back as two `w:ins` and two
+  `w:del`, and the protection survived the save.
+- Reject-all on the returned file, i.e., skip `w:ins` and keep
+  `w:delText` in document order, reproduced the sent text exactly.
+- Unprotecting without a password succeeds, as expected.
+  After that, an edit came back untracked and the element was saved
+  with `w:enforcement="0"`.
+
+So the enforcement value on the returned file says whether reject-all
+can be trusted, before the fingerprint is even needed.
 If the reviewer stopped protection and edited untracked, the
 fingerprint mismatches, and the fallback is to rebuild the sent copy
 from the rev (needs Word) or to warn and merge only the comments.

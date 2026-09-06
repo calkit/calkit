@@ -660,11 +660,21 @@ def to_docx(
     import calkit.git
     import calkit.pipeline
     from calkit.models.docx import DocxExport
+    from calkit.models.pipeline import LatexStage
 
     ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
     stage_name = calkit.pipeline.get_stage_for_output(pdf_path, ck_info)
+    # A latex stage's PDF is implied by its target, not listed as an output
+    if stage_name is None:
+        for name, stage in stages.items():
+            if isinstance(stage, dict) and stage.get("kind") == "latex":
+                pdf = LatexStage.model_validate(stage).pdf_path
+                if pdf == Path(pdf_path).as_posix():
+                    stage_name = name
+                    break
     if source is None and stage_name is not None:
-        source = ck_info["pipeline"]["stages"][stage_name].get("target_path")
+        source = stages[stage_name].get("target_path")
     if source is None:
         source = Path(pdf_path).with_suffix(".tex").as_posix()
     source = Path(source).as_posix()

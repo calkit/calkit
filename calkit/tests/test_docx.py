@@ -137,7 +137,24 @@ def test_docx_round_trip(
         lambda pdf, out: shutil.copy(FIXTURES / "word-import.docx", out),
     )
     Path("paper/main.pdf").write_bytes(b"")
-    calkit.cli.latex.to_docx("paper/main.pdf")
+    # When the PDF is a latex stage's implied output, the stage runs first
+    # and the source comes from its target
+    Path("calkit.yaml").write_text(
+        "environments:\n  tex:\n    kind: docker\n    image: texlive\n"
+        "pipeline:\n  stages:\n    build-paper:\n      kind: latex\n"
+        "      target_path: paper/main.tex\n      environment: tex\n",
+        encoding="utf-8",
+    )
+    runs: list[list[str]] = []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            calkit.cli.latex.subprocess,
+            "run",
+            lambda cmd, **kw: runs.append(cmd),
+        )
+        calkit.cli.latex.to_docx("paper/main.pdf")
+    assert runs and runs[0][-3:] == ["calkit", "run", "build-paper"]
+    Path("calkit.yaml").write_text("", encoding="utf-8")
     doc = calkit.docx.Document("paper/main-for-review.docx")
     original = doc.read_original()
     assert original is not None

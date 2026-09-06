@@ -3421,6 +3421,7 @@ Options:
 | `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF. |
 | `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                            |
 | `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                          |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                           |
 
 <a id="subcommand-latex-tex-merge-docx"></a>
 
@@ -3428,7 +3429,7 @@ Options:
 
 Merge a reviewed Word document back into the LaTeX source.
 
-Accepted changes are applied. Tracked changes not yet accepted or rejected, and edits that no longer fit the source, are left alone with a warning: deal with them in Word and merge again. Comments become comment blocks above the paragraph; threads resolved in Word are removed.
+Accepted changes are applied. Tracked changes not yet accepted or rejected, and edits that no longer fit the source, are left alone with a warning: deal with them in Word and merge again. Comments become comment blocks above the paragraph; threads resolved in Word are marked resolved.
 
 Usage:
 

@@ -90,6 +90,20 @@ def test_latex_source_helpers(project: Path) -> None:
         )
         is None
     )
+    # Word's typographic characters come back as LaTeX conventions, and
+    # match the source across ties and quotes
+    quoted = calkit.latex.from_word_text(
+        "compound like \u201chigh-Reynolds-number\u201d plus a "
+        "non-breaking\u00a0space and an em dash\u2014like this one."
+    )
+    assert quoted == (
+        "compound like ``high-Reynolds-number'' plus a non-breaking~space "
+        "and an em dash---like this one."
+    )
+    fixed = calkit.latex.apply_edit(
+        intro, quoted, quoted.replace("this one", "that one")
+    )
+    assert fixed is not None and fixed[-1].endswith("dash---like that one.")
     assert calkit.latex.already_applied(intro, sent, sent) is True
     assert not calkit.latex.already_applied(
         intro, sent, sent.replace("discussed", "shown")

@@ -834,14 +834,16 @@ def merge_docx(
                 )
             )
             continue
-        if calkit.latex.already_applied(blk, sent, para.text):
+        sent_tex = calkit.latex.from_word_text(sent)
+        new_tex = calkit.latex.from_word_text(para.text)
+        if calkit.latex.already_applied(blk, sent_tex, new_tex):
             changes.append(
                 DocxMergeChange(
                     path=blk.path, lineno=blk.lineno, status="already-applied"
                 )
             )
             continue
-        new_lines = calkit.latex.apply_edit(blk, sent, para.text)
+        new_lines = calkit.latex.apply_edit(blk, sent_tex, new_tex)
         if new_lines is None:
             warn(
                 f"Edit at {loc} touches markup; apply it by hand: {para.text[:60]}"

@@ -353,6 +353,25 @@ def flatten(main_path: str) -> list[SourceLine]:
     return out
 
 
+_WORD_TO_TEX = str.maketrans(
+    {
+        "\u2019": "'",
+        "\u2018": "`",
+        "\u201c": "``",
+        "\u201d": "''",
+        "\u2013": "--",
+        "\u2014": "---",
+        "\u00a0": "~",
+    }
+)
+
+
+def from_word_text(text: str) -> str:
+    """Rendered text in LaTeX source conventions: straight quotes,
+    dashes as hyphens, non-breaking spaces as ties."""
+    return text.translate(_WORD_TO_TEX)
+
+
 def detex(text: str) -> str:
     """Roughly what LaTeX would print for a bit of source."""
     text = "\n".join(ln.split("%")[0] for ln in text.split("\n"))
@@ -462,7 +481,7 @@ def _find_span(src: str, words: list[str]) -> tuple[int, int] | None:
     def once(ws: list[str]) -> re.Match | None:
         pattern = (
             r"(?<![A-Za-z])"
-            + r"\s+".join(re.escape(w) for w in ws)
+            + r"[\s~]+".join(re.escape(w) for w in ws)
             + r"(?![A-Za-z])"
         )
         found = list(re.finditer(pattern, src))

@@ -8,7 +8,7 @@ In some projects, the lead may want to use LaTeX or some other
 text-first typesetting system like Quarto since those make it easier
 to ensure document components like figures, tables, and values remain
 up-to-date with the analysis,
-but the rest of the team does not want to engage in that way.
+but others on the team may not want to engage in that way.
 They prefer a WYSIWYG experience without needing to sign up for a web
 app like Overleaf (or Calkit for that matter).
 
@@ -34,6 +34,10 @@ we can export a Word copy of it with:
 ```sh
 calkit latex to-docx paper/main.pdf -o paper/main-for-review.docx
 ```
+
+This command assumes the `.tex` source is alongside the PDF, i.e.,
+`paper/main.tex`.
+It that's not correct, it can be passed in with the `--source` option.
 
 Note that this will be more reliable if it's produced as a `latex` stage
 in the Calkit pipeline, but it's not an absolute requirement.

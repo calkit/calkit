@@ -49,4 +49,5 @@ class DocxMerge(BaseModel):
     rev: str | None = Field(default=None, description="Git commit at merge.")
     changes: list[DocxMergeChange] = []
     comments_added: int = 0
+    comments_updated: int = 0
     comments_removed: int = 0

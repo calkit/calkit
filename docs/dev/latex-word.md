@@ -334,10 +334,18 @@ AppleScript:
   with `w:enforcement="0"`.
 
 With the carried original, reject-all is a cross-check rather than the
-source of truth, and the protection is what keeps attribution on the
-reviewer's edits rather than what makes ingest possible.
-A reviewer who unprotects and edits untracked loses only the author on
+source of truth, and tracking only keeps attribution on the reviewer's
+edits rather than making ingest possible.
+So the export doesn't lock the document to tracked changes after all.
+The lock disables accept and reject for everyone, including the lead
+adjudicating the returned copy, and stopping it is a step on every round
+trip.
+Instead the export turns Track Changes on (`w:trackRevisions` in
+settings, which the lock alone does not do: without it the document
+opened with tracking off in the UI), so a reviewer has to go out of
+their way to turn it off, and one who does loses only the author on
 those edits.
+`--comment-only` still locks, since that one is a deliberate choice.
 
 ## Repo-first reviews with the hub as a view (later)
 
@@ -392,8 +400,9 @@ need.
   Comment-only is a real case (the PI you want opinions from, not
   rewrites), and the `.docx` can enforce it:
   `w:documentProtection` with `w:edit="comments"` locks Word to
-  comments, and `w:edit="trackedChanges"` forces tracked changes on,
-  which also settles "the reviewer forgot to turn them on."
+  comments.
+  The matching `w:edit="trackedChanges"` lock was tried and dropped; see
+  the stateless section.
   Neither needs a password; a determined reviewer can stop protection,
   and the diff handles that anyway.
 - Edit, meaning direct commits to the default branch, is what a

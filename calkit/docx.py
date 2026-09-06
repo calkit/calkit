@@ -290,16 +290,22 @@ class Document:
                     c.get(_tag(W15, "paraIdParent")),
                     c.get(_tag(W15, "done")) == "1",
                 )
-        # Which bookmark each comment range lands in
+        # Which bookmark each comment range lands in: the paragraph's own,
+        # else the last one seen
         anchors: dict[str, str | None] = {}
         current = None
         for p in self.doc.iter(_tag(W, "p")):
+            own = next(
+                (
+                    b.get(_tag(W, "name"))
+                    for b in p.iter(_tag(W, "bookmarkStart"))
+                    if b.get(_tag(W, "name"), "").startswith(BOOKMARK_PREFIX)
+                ),
+                None,
+            )
+            current = own or current
             for el in p.iter():
-                if el.tag == _tag(W, "bookmarkStart") and el.get(
-                    _tag(W, "name"), ""
-                ).startswith(BOOKMARK_PREFIX):
-                    current = el.get(_tag(W, "name"))
-                elif el.tag == _tag(W, "commentRangeStart"):
+                if el.tag == _tag(W, "commentRangeStart"):
                     anchors[el.get(_tag(W, "id"), "")] = current
                 elif el.tag == _tag(W, "commentReference"):
                     anchors.setdefault(el.get(_tag(W, "id"), ""), current)
@@ -373,7 +379,15 @@ class Document:
                 ref_run = ET.Element(_tag(W, "r"))
                 ref = ET.SubElement(ref_run, _tag(W, "commentReference"))
                 ref.set(_tag(W, "id"), str(cid))
-                idx = 1 if len(para) and para[0].tag == _tag(W, "pPr") else 0
+                # After the paragraph properties and any bookmarks
+                idx = 0
+                for i, child in enumerate(para):
+                    if child.tag in (
+                        _tag(W, "pPr"),
+                        _tag(W, "bookmarkStart"),
+                        _tag(W, "bookmarkEnd"),
+                    ):
+                        idx = i + 1
                 para.insert(idx, start)
                 para.append(end)
                 para.append(ref_run)

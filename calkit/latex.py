@@ -6,7 +6,8 @@ import difflib
 import hashlib
 import os
 import re
-from dataclasses import dataclass, field
+import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -518,16 +519,39 @@ _ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 
 @dataclass
 class TexComment:
-    author: str
-    text: str
-    replies: list[tuple[str, str]] = field(default_factory=list)
+    """A comment thread in the source: entries of (author, text), the
+    first being the comment itself, above the paragraph it's about."""
+
+    entries: list[tuple[str, str]]
+    highlight: str | None = None
     lineno: int = 0
     nlines: int = 0
 
+    @property
+    def author(self) -> str:
+        return self.entries[0][0]
+
+    @property
+    def text(self) -> str:
+        return self.entries[0][1]
+
+    @property
+    def replies(self) -> list[tuple[str, str]]:
+        return self.entries[1:]
+
     def render(self) -> list[str]:
-        out = [f'% COMMENT author="{self.author}"', f"% {self.text}"]
-        for author, text in self.replies:
-            out += [f'%   REPLY author="{author}"', f"%   {text}"]
+        head = "% COMMENT"
+        if self.highlight:
+            head += ' highlight="%s"' % self.highlight.replace('"', "'")
+        out = [head]
+        for author, text in self.entries:
+            out.append(f"%   {author}:")
+            out += textwrap.wrap(
+                text,
+                width=79,
+                initial_indent="%     ",
+                subsequent_indent="%     ",
+            )
         return out
 
 
@@ -536,28 +560,26 @@ def parse_comments(lines: list[str]) -> list[TexComment]:
     out: list[TexComment] = []
     i = 0
     while i < len(lines):
-        if not lines[i].startswith("% COMMENT "):
+        if not re.match(r"% COMMENT( |$)", lines[i]):
             i += 1
             continue
         start = i
         attrs = dict(_ATTR_RE.findall(lines[i]))
-        comment = TexComment(attrs.get("author", ""), "", lineno=start + 1)
+        entries: list[tuple[str, str]] = []
         i += 1
-        target: TexComment | None = comment
-        while i < len(lines) and lines[i].startswith("%"):
-            line = lines[i][1:]
-            if line.startswith("   REPLY "):
-                attrs = dict(_ATTR_RE.findall(line))
-                comment.replies.append((attrs.get("author", ""), ""))
-                target = None
-            elif line.startswith("   ") and comment.replies:
-                a, t = comment.replies[-1]
-                comment.replies[-1] = (a, (t + " " + line.strip()).strip())
-            elif line.startswith(" COMMENT "):
-                break
-            elif target is not None:
-                target.text = (target.text + " " + line.strip()).strip()
+        while i < len(lines) and re.match(r"%(   |$)", lines[i]):
+            body = lines[i][1:]
+            indent = len(body) - len(body.lstrip())
+            if indent == 3 and body.rstrip().endswith(":"):
+                entries.append((body.strip()[:-1], ""))
+            elif indent > 3 and entries:
+                author, text = entries[-1]
+                entries[-1] = (author, (text + " " + body.strip()).strip())
             i += 1
-        comment.nlines = i - start
-        out.append(comment)
+        if entries:
+            out.append(
+                TexComment(
+                    entries, attrs.get("highlight"), start + 1, i - start
+                )
+            )
     return out

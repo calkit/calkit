@@ -105,10 +105,14 @@ Comments are written into the source as LaTeX comments,
 just above the paragraph they were left on, e.g.:
 
 ```latex
-% COMMENT author="A. Reviewer"
-% Quantify this: give an RMS error.
-%   REPLY author="T. Author"
-%   Will add RMS error to Table 2.
+% COMMENT highlight="this is optional highlighted text"
+%   A. Reviewer:
+%     Quantify this: give an RMS error. If this goes over 80 characters it will
+%     indent.
+%   Someone Else:
+%     Will add RMS error to Table 2.
+%   Another Person:
+%     I agree!
 The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
 reasonably well.
 ```

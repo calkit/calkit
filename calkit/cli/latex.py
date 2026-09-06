@@ -717,7 +717,7 @@ def to_docx(
                 (b for b in blks if b.path == path and b.lineno >= after), None
             )
             if blk is not None and id(blk) in para_for_block:
-                threads.append([(tc.author, tc.text)] + tc.replies)
+                threads.append(tc.entries)
                 anchors.append(para_for_block[id(blk)])
     doc.add_comments(threads, anchors)
     if comment_only:
@@ -860,7 +860,7 @@ def merge_docx(
     for path, updates in edits.items():
         for lineno, count, new_lines in sorted(updates, reverse=True):
             files[path][lineno - 1 : lineno - 1 + count] = new_lines
-    added = removed = 0
+    added = updated = removed = 0
     if not no_comments:
         # Threads keyed by root, anchored through the root's bookmark
         comments = doc.comments()
@@ -877,7 +877,7 @@ def merge_docx(
                 for c in comments
                 if c.parent_id and by_id.get(c.parent_id) is root
             ]
-            tc = calkit.latex.TexComment(root.author, root.text, replies)
+            tc = calkit.latex.TexComment([(root.author, root.text)] + replies)
             if root.bookmark is None:
                 warn(
                     f"Comment by {root.author} has no anchor: {root.text[:60]}"
@@ -920,6 +920,7 @@ def merge_docx(
                 continue
             content[at - 1 : at - 1] = tc.render()
             added += existing is None
+            updated += existing is not None
     for path, content in files.items():
         new = "\n".join(content)
         if new != Path(path).read_text():
@@ -936,6 +937,7 @@ def merge_docx(
         rev=rev,
         changes=changes,
         comments_added=added,
+        comments_updated=updated,
         comments_removed=removed,
     )
     os.makedirs(calkit.latex.DOCX_MERGES_DIR, exist_ok=True)
@@ -954,5 +956,6 @@ def merge_docx(
     typer.echo(
         f"Applied {counts['applied']} edits ({counts['already-applied']} "
         f"already there, {counts['pending']} pending, {counts['unplaced']} "
-        f"unplaced); {added} comments added, {removed} removed"
+        f"unplaced); {added} comments added, {updated} updated, "
+        f"{removed} removed"
     )

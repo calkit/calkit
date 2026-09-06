@@ -102,6 +102,13 @@ def test_latex_source_helpers(project: Path) -> None:
     assert tc.text == "Is this the right model for near wake?"
     assert tc.replies == [("P. Bachant", "Probably fine for x/D > 3.")]
     assert src[tc.lineno - 1 : tc.lineno - 1 + tc.nlines] == tc.render()
+    long = calkit.latex.TexComment([("A", "word " * 30)], highlight='a "b"')
+    rendered = long.render()
+    assert rendered[0] == "% COMMENT highlight=\"a 'b'\""
+    assert all(len(ln) <= 79 for ln in rendered) and len(rendered) > 3
+    assert calkit.latex.parse_comments(rendered)[0].entries == [
+        ("A", ("word " * 30).strip())
+    ]
     assert calkit.latex.bookmark_name("paper/main.tex", 19).startswith("ck_")
 
 
@@ -133,7 +140,8 @@ def test_docx_round_trip(
     comments = doc.comments()
     assert [c.author for c in comments] == ["T. Author", "P. Bachant"]
     assert comments[1].parent_id == comments[0].para_id
-    assert comments[0].bookmark is not None
+    model = next(p for p in paras if p.text.startswith("The mean velocity"))
+    assert comments[0].bookmark == model.bookmark
     records = os.listdir(calkit.latex.DOCX_EXPORTS_DIR)
     assert records == [f"{original.uuid}.json"]
     # Word bookkeeping survives Word: the fixtures were made from an export
@@ -155,9 +163,7 @@ def test_docx_round_trip(
     assert "not yet accepted" in res.stderr + res.stdout
     assert "as shown by" not in Path("paper/main.tex").read_text()
     assert "sampling frequency" in Path("paper/methods.tex").read_text()
-    assert (
-        '% COMMENT author="A. Reviewer"' in Path("paper/main.tex").read_text()
-    )
+    assert "%   A. Reviewer:" in Path("paper/main.tex").read_text()
     # After accepting in Word, both edits land and the comment is written
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/accepted.docx"], check=True
@@ -167,8 +173,9 @@ def test_docx_round_trip(
     assert "as shown by \\citet{smith2020}" in main
     assert "sampling frequency" not in methods
     assert (
-        '% COMMENT author="A. Reviewer"\n'
-        "% Quantify this: give an RMS error.\n"
+        "% COMMENT\n"
+        "%   A. Reviewer:\n"
+        "%     Quantify this: give an RMS error.\n"
         "The model in Eq."
     ) in main
     assert methods.count("% COMMENT") == 1
@@ -182,7 +189,7 @@ def test_docx_round_trip(
     # duplicated or displaced
     src = Path("paper/methods.tex").read_text().split("\n")
     at = next(i for i, ln in enumerate(src) if ln.startswith("% COMMENT"))
-    del src[at + 2 : at + 4]
+    del src[at + 3 : at + 5]
     Path("paper/methods.tex").write_text("\n".join(src))
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/accepted.docx"], check=True

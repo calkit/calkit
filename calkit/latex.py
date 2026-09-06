@@ -336,7 +336,8 @@ def flatten(main_path: str) -> list[SourceLine]:
             return
         seen.add(key)
         rel = path.as_posix()
-        for i, line in enumerate(path.read_text().split("\n"), 1):
+        text = path.read_text(encoding="utf-8")
+        for i, line in enumerate(text.split("\n"), 1):
             m = _INCLUDE_RE.match(line.split("%")[0])
             if m:
                 cmd, a, b = m.groups()

@@ -109,7 +109,7 @@ def test_latex_source_helpers(project: Path) -> None:
         intro, sent, sent.replace("discussed", "shown")
     )
     # Comment blocks parse and render back to the same lines
-    src = Path("paper/methods.tex").read_text().split("\n")
+    src = Path("paper/methods.tex").read_text(encoding="utf-8").split("\n")
     comments = calkit.latex.parse_comments(src)
     assert len(comments) == 1
     tc = comments[0]
@@ -180,20 +180,26 @@ def test_docx_round_trip(
         Path(
             calkit.latex.DOCX_MERGES_DIR,
             os.listdir(calkit.latex.DOCX_MERGES_DIR)[0],
-        ).read_text()
+        ).read_text(encoding="utf-8")
     )
     assert [c["author"] for c in record["changes"]] == ["Bachant, Pete"] * 2
     assert "A. Reviewer" in record["authors"]
     assert record["last_modified_by"]
-    assert "as shown by" not in Path("paper/main.tex").read_text()
-    assert "sampling frequency" in Path("paper/methods.tex").read_text()
-    assert "%   A. Reviewer:" in Path("paper/main.tex").read_text()
+    assert "as shown by" not in Path("paper/main.tex").read_text(
+        encoding="utf-8"
+    )
+    assert "sampling frequency" in Path("paper/methods.tex").read_text(
+        encoding="utf-8"
+    )
+    assert "%   A. Reviewer:" in Path("paper/main.tex").read_text(
+        encoding="utf-8"
+    )
     # After accepting in Word, both edits land and the comment is written
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/accepted.docx"], check=True
     )
-    main = Path("paper/main.tex").read_text()
-    methods = Path("paper/methods.tex").read_text()
+    main = Path("paper/main.tex").read_text(encoding="utf-8")
+    methods = Path("paper/methods.tex").read_text(encoding="utf-8")
     assert "as shown by \\citet{smith2020}" in main
     assert "sampling frequency" not in methods
     assert (
@@ -207,18 +213,18 @@ def test_docx_round_trip(
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/accepted.docx"], check=True
     )
-    assert Path("paper/main.tex").read_text() == main
-    assert Path("paper/methods.tex").read_text() == methods
+    assert Path("paper/main.tex").read_text(encoding="utf-8") == main
+    assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods
     # A thread whose replies changed in Word is rewritten in place, not
     # duplicated or displaced
-    src = Path("paper/methods.tex").read_text().split("\n")
+    src = Path("paper/methods.tex").read_text(encoding="utf-8").split("\n")
     at = next(i for i, ln in enumerate(src) if ln.startswith("% COMMENT"))
     del src[at + 3 : at + 5]
-    Path("paper/methods.tex").write_text("\n".join(src))
+    Path("paper/methods.tex").write_text("\n".join(src), encoding="utf-8")
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/accepted.docx"], check=True
     )
-    assert Path("paper/methods.tex").read_text() == methods
+    assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods
     # A comment on a selection carries the selected text as its highlight,
     # in both directions
     doc = calkit.docx.Document("reviews/accepted.docx")
@@ -250,14 +256,14 @@ def test_docx_round_trip(
         "%   R. Viewer:\n"
         "%     Cite more\n"
         "Wakes matter"
-    ) in Path("paper/main.tex").read_text()
-    main = Path("paper/main.tex").read_text()
+    ) in Path("paper/main.tex").read_text(encoding="utf-8")
+    main = Path("paper/main.tex").read_text(encoding="utf-8")
     # A thread resolved in Word is marked resolved in the source, and
     # exports back to Word as resolved
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/resolved.docx"], check=True
     )
-    methods = Path("paper/methods.tex").read_text()
+    methods = Path("paper/methods.tex").read_text(encoding="utf-8")
     assert "% COMMENT resolved=true\n%   T. Author:" in methods
     parsed = calkit.latex.parse_comments(methods.split("\n"))
     assert [c.resolved for c in parsed] == [True]
@@ -265,7 +271,7 @@ def test_docx_round_trip(
     calkit.cli.latex.to_docx("paper/main.pdf")
     exported = calkit.docx.Document("paper/main-for-review.docx").comments()
     assert [c.done for c in exported if c.author == "T. Author"] == [True]
-    assert Path("paper/main.tex").read_text() == main
+    assert Path("paper/main.tex").read_text(encoding="utf-8") == main
     merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
     assert len(merges) == 6
     fixture = returned.read_original()

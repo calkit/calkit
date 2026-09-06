@@ -666,7 +666,8 @@ def to_docx(
     if source is None and stage_name is not None:
         source = ck_info["pipeline"]["stages"][stage_name].get("target_path")
     if source is None:
-        source = str(Path(pdf_path).with_suffix(".tex"))
+        source = Path(pdf_path).with_suffix(".tex").as_posix()
+    source = Path(source).as_posix()
     if not os.path.isfile(source):
         raise_error(f"Source {source} does not exist; pass --source")
     if stage_name is not None:
@@ -710,7 +711,7 @@ def to_docx(
     # Existing comment blocks in the source go out as Word comments
     threads, anchors, highlights, resolved = [], [], [], []
     for path in sorted({ln.path for ln in lines}):
-        file_lines = Path(path).read_text().split("\n")
+        file_lines = Path(path).read_text(encoding="utf-8").split("\n")
         for tc in calkit.latex.parse_comments(file_lines):
             after = tc.lineno + tc.nlines
             blk = next(
@@ -862,7 +863,8 @@ def merge_docx(
         )
         typer.echo(f"Applied edit at {loc}")
     files = {
-        p: Path(p).read_text().split("\n") for p in {ln.path for ln in lines}
+        p: Path(p).read_text(encoding="utf-8").split("\n")
+        for p in {ln.path for ln in lines}
     }
     for path, updates in edits.items():
         for lineno, count, new_lines in sorted(updates, reverse=True):
@@ -932,8 +934,8 @@ def merge_docx(
             updated += existing is not None
     for path, content in files.items():
         new = "\n".join(content)
-        if new != Path(path).read_text():
-            Path(path).write_text(new)
+        if new != Path(path).read_text(encoding="utf-8"):
+            Path(path).write_text(new, encoding="utf-8")
     rev = None
     try:
         rev = calkit.git.get_repo().head.commit.hexsha

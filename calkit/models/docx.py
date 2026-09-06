@@ -1,9 +1,9 @@
 """Records of LaTeX review round trips through Word.
 
 Written to ``.calkit/latex/docx-exports`` and ``.calkit/latex/docx-merges``,
-one file per run, named by export UUID (and timestamp for merges). Committing
-them is optional; they're a history of what the CLI did, and what a hub would
-index if it wanted to track reviews.
+one JSON file per run, named by export UUID (plus a timestamp for merges).
+Committing them is optional; they're a history of what the CLI did, and
+what a hub would index if it wanted to track reviews.
 """
 
 from datetime import datetime

@@ -135,7 +135,7 @@ def test_docx_round_trip(
     assert comments[1].parent_id == comments[0].para_id
     assert comments[0].bookmark is not None
     records = os.listdir(calkit.latex.DOCX_EXPORTS_DIR)
-    assert records == [f"{original.uuid}.yaml"]
+    assert records == [f"{original.uuid}.json"]
     # Word bookkeeping survives Word: the fixtures were made from an export
     # like this one and edited in Word
     returned = calkit.docx.Document(str(FIXTURES / "returned.docx"))
@@ -184,7 +184,12 @@ def test_docx_round_trip(
     )
     assert "% COMMENT" not in Path("paper/methods.tex").read_text()
     assert Path("paper/main.tex").read_text() == main
-    assert len(os.listdir(calkit.latex.DOCX_MERGES_DIR)) == 4
+    merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
+    assert len(merges) == 4
+    fixture = returned.read_original()
+    assert fixture is not None
+    fixture_uuid = fixture.uuid
+    assert merges[0].startswith(fixture_uuid) and merges[0].endswith(".json")
     # A document without Calkit's metadata is refused
     shutil.copy(FIXTURES / "word-import.docx", "reviews/plain.docx")
     res = subprocess.run(

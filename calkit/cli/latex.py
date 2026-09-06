@@ -740,9 +740,9 @@ def to_docx(
     )
     os.makedirs(calkit.latex.DOCX_EXPORTS_DIR, exist_ok=True)
     with open(
-        os.path.join(calkit.latex.DOCX_EXPORTS_DIR, f"{export_id}.yaml"), "w"
+        os.path.join(calkit.latex.DOCX_EXPORTS_DIR, f"{export_id}.json"), "w"
     ) as f:
-        calkit.ryaml.dump(record.model_dump(mode="json"), f)
+        f.write(record.model_dump_json(indent=2))
     typer.echo(
         f"Wrote {output} ({record.paragraphs} paragraphs anchored, "
         f"{record.unanchored} not, {len(threads)} comments)"
@@ -935,11 +935,11 @@ def merge_docx(
     stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
     with open(
         os.path.join(
-            calkit.latex.DOCX_MERGES_DIR, f"{stamp}-{original.uuid}.yaml"
+            calkit.latex.DOCX_MERGES_DIR, f"{original.uuid}-{stamp}.json"
         ),
         "w",
     ) as f:
-        calkit.ryaml.dump(record.model_dump(mode="json"), f)
+        f.write(record.model_dump_json(indent=2))
     counts = {
         s: sum(1 for c in changes if c.status == s)
         for s in ("applied", "already-applied", "pending", "unplaced")

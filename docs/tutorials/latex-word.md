@@ -117,7 +117,7 @@ A thread you resolved in Word is deleted from the `.tex` if it was
 there, and never written if it wasn't.
 It's possible to disable comments merging back into LaTeX with `--no-comments`.
 
-Note that merging is idempotent, meaning it can be called over again
+Note that merging is idempotent, meaning it can be called again
 and content won't be duplicated.
 
 ## Multiple reviewers

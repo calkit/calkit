@@ -27,16 +27,33 @@ Word's import is the only path that satisfies "looks like the PDF" and
 also yields editable paragraphs a reviewer can track changes in.
 It confirms the hunch in #1529.
 pdf2docx and LibreOffice are out.
-Pandoc is the fallback for machines without Word and for the hub, and it
-is genuinely usable, just not pretty:
+Pandoc from source is genuinely usable, just not pretty:
 with a Lua filter it can resolve `\ref` and `\eqref` from the `.aux`
 file we already produce, and `--citeproc` with the project's `.bib`
 gives a bibliography close to natbib's.
 Figures need converting from PDF to PNG first, since Word can't render
 PDF images on Windows.
 
-So: Word is a requirement for the high-fidelity path, and that's
-acceptable.
+It should not ship as a fallback in the first version, though.
+Pandoc isn't part of the Calkit environment, and Calkit's rule is to
+ship requirements with Calkit or with the project rather than customize
+the system.
+Bundling a 30 MB binary with Calkit, or adding a curl-to-`~/.local/bin`
+entry to the `calkit install` registry, is a lot for a path nobody
+should prefer.
+If it's built later it runs the way TeX Live does: in a Docker
+environment declared in the project, e.g., the `pandoc/latex` image,
+which bundles pandoc with a TeX Live, so the render runs in the
+document's own environment via `--env` exactly as `calkit latex diff`
+does.
+That's also what the hub would run.
+Without Word, the honest first-version answer is that the Word copy
+can't be produced on this machine.
+
+So: Word is a requirement, and that's acceptable.
+The Word path itself adds no dependency:
+`docx2pdf` is already present for the automation, and the `.docx`
+post-processing is zip and XML from the standard library.
 `docx2pdf` is already a dependency and already automates Word through
 AppleScript on macOS and COM on Windows, so `calkit office word-to-pdf`
 is the precedent.
@@ -73,6 +90,12 @@ PDF text render mode set to invisible:
 \newcommand{\ckp}[1]{\rlap{\pdfliteral{3 Tr}%
   {\fontsize{2}{2}\selectfont ckx#1xkc}\pdfliteral{0 Tr}}}
 ```
+
+`\pdfliteral` is pdfTeX's spelling.
+The marked build runs in the project's own environment and engine, so
+the macro needs the `iftex` three-way switch:
+`\pdfextension literal` for LuaTeX and `\special{pdf:literal ...}`
+for XeTeX.
 
 The token is in the PDF's text layer (`pdftotext` finds it), invisible
 on the page, and Word's import carries it into the `.docx` as a tiny
@@ -127,8 +150,9 @@ insertions, deletions, and comments, and could serve as the normalizer
 on both sides instead of hand-written XML walking.
 It's worth weighing:
 it's less code, but it's a large binary dependency for something a
-hundred lines of `lxml` does, and we already need the `.docx` XML for
-bookmarks and properties.
+hundred lines of standard-library XML does, and we already need the
+`.docx` XML for bookmarks and properties.
+The dependency rule above settles it: no pandoc.
 
 The hard residual is edits that land on text that doesn't exist in the
 source verbatim: inline math, `\cite` keys, `~` and `--`, `\emph`.
@@ -173,8 +197,8 @@ The exceptions:
   session itself.
   Starting a session is a CLI operation, and the hub receives the result
   on push.
-  The hub can offer the pandoc fallback for the "I'm on Linux and don't
-  care how it looks" case.
+  A Docker-based pandoc render for the "I'm on Linux and don't care how
+  it looks" case can come later, per the dependency rule above.
 - **Receiving responses needs a mailbox.**
   A reviewer replying to an email has to hit a server.
   That's the one thing that is hub-only, and it's the contribution

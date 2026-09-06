@@ -31,8 +31,8 @@ from the Calkit web app, or a bit of both.
     Microsoft Word itself, on macOS or Windows, on the machine that
     starts the review.
     Reviewers only need Word, or anything that can edit a `.docx`.
-    Without Word, Calkit falls back to Pandoc, which produces a clean
-    but plainer document.
+    Nothing else needs installing: the document is built in the
+    project's own LaTeX environment, as usual.
 
 ## Starting a review session
 
@@ -248,8 +248,8 @@ These are some design decisions we need to make:
     can't be repo-local.
 - [ ] How important is it that the Word doc look like the LaTeX PDF?
   - Word's own PDF import gets us nearly identical for free, so we don't
-    have to trade this off against editability. Pandoc is the plainer
-    fallback.
+    have to trade this off against editability. A Pandoc fallback is
+    possible but not worth shipping in v1; see the design notes.
 - [ ] Is Word a requirement?
   - Only for the high-fidelity render on the lead's machine. Reviewers
     need anything that edits `.docx`. `docx2pdf` already automates
@@ -260,3 +260,4 @@ These are some design decisions we need to make:
     minimum that file and the source map have to be kept somewhere. A
     session is just a name for that directory; the ingest itself is
     idempotent given those files.
+- [ ] Comment threads in document or in review database? If in review database how do we keep them attached to the content? I suppose the start of a review is at a pinned version, so line numbers synctex-ish workflow works. We also want these comments to show up on the hub though, and we have a database table for these.

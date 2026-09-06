@@ -63,35 +63,32 @@ etc.
 
 ## Reacting and responding to the feedback
 
-The review copy is dealt with in Word.
-Accept or reject each change, reply to comments or resolve them,
-and make any edits of your own.
+When you get a reviewed copy back, open it up in Word, reply to or
+resolve comments, accept or reject proposed changes,
+and optionally make new edits of your own.
 Note that your own edits are tracked too,
-so accept them before merging.
-The `.docx` is the record of the decisions you made,
-which is why it's worth keeping.
+so be sure to accept them before merging.
 
 ## Merging back into the project
 
 When you're done in Word, merge it back into LaTeX with:
 
 ```sh
-calkit latex merge-docx reviews/main-for-review-PI-comments.docx
+calkit latex merge-docx reviews/main-for-review-pi-comments.docx
 ```
 
 This command assumes we've saved the `.docx` we got back into a
 `reviews` folder inside the project,
 which is just a convention; the file can be anywhere as it retains
 information about the LaTeX source from which it came.
-It may be a good idea to keep the `.docx` around for posterity.
-You can save to DVC
-(better for tracking binary files,
-but Git can be okay if the file isn't large from many embedded figures)
-with:
 
-```sh
-calkit save reviews/main-for-review-PI-comments.docx --to dvc -m "Add review"
-```
+<!-- prettier-ignore -->
+!!! note
+    It's probably a good idea to save copies of the returned `.docx` files
+    to the project repo for posterity. You can do this with:
+    ```sh
+    calkit save reviews/main-for-review-pi-comments.docx -m "Add review"
+    ```
 
 Changes you accepted in Word are applied to the LaTeX source.
 Tracked changes you haven't accepted or rejected yet are left alone

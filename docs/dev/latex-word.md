@@ -1,11 +1,12 @@
-# Design notes: LaTeX review sessions via Word
+# Design notes: LaTeX review via Word
 
 Feasibility notes behind the
 [LaTeX and Word tutorial](../tutorials/latex-word.md).
 Not user-facing.
 Complements the ingestion notes in PR #1580 (`docs/dev/docx-ingestion.md`),
-which cover the diffing side in more depth; this covers the rendering side
-and the repo-first session design.
+which cover the diffing side in more depth; this covers the rendering side,
+the stateless first version, and the repo-first session design that can
+follow it.
 
 Everything below was checked with a small two-column `article` paper
 (natbib citations, an `\input` file, a display equation, inline math, a
@@ -173,7 +174,54 @@ The plan is:
 
 Step 3 is the honest floor and it must stay cheap in the UI.
 
-## Repo-first reviews with the hub as a view
+## The stateless first version
+
+Sessions aren't needed to ship, because of one property of the returned
+file: with `w:documentProtection w:edit="trackedChanges"` the `.docx`
+contains both the text we sent (reject all) and the text the reviewer
+wants (accept all).
+Ingest is therefore XML on one file, needs no stored original and no
+Word, and the source map isn't needed either if bookmark names carry
+the anchor.
+Comments go back into the source as `% REVIEW (...)` lines above the
+paragraph, where the lead resolves them by deleting them.
+The only record of a review is the diff it produced.
+
+The `.docx` is the contract, and the parts that must not change later:
+
+- **Core properties.**
+  `identifier` holds `calkit-review:<uuid>:<rev>:<tex path>`, and
+  `keywords` a text fingerprint of the sent body, so untracked edits
+  are detectable.
+  The UUID is unused in v1 and exists so sessions and hub delivery can
+  key on it without touching the file format.
+  Both properties survived a Word edit-and-save in testing.
+- **Bookmark names.**
+  Word allows 40 characters, letters and digits and underscores,
+  starting with a letter.
+  `ck_<8-char hash of the source path>_<line>` fits, and the path
+  resolves against the file list at the pinned rev.
+  Encoding the anchor beats an index into a sidecar precisely because
+  there is no sidecar.
+- **The comment line format**, so later tooling can ingest existing
+  ones into tasks.
+
+What stateless can't do, and what sessions add later:
+memory of what was skipped, "another reviewer changed this paragraph",
+who was sent what and when, and hub delivery.
+Idempotency has to be designed in from the start regardless:
+an edit already applied shows the new text where the old was expected,
+and a comment already present matches by content, so a rerun on the
+same file skips both.
+
+If the reviewer stopped protection and edited untracked, the
+fingerprint mismatches, and the fallback is to rebuild the sent copy
+from the rev (needs Word) or to warn and merge only the comments.
+
+## Repo-first reviews with the hub as a view (later)
+
+Everything in this section is the layer that can be added on top of the
+stateless version, keyed on the export UUID.
 
 The question in #1529 was whether the hub can be a transparent view over
 a process that lives in the repo.

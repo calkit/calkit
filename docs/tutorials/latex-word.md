@@ -21,110 +21,70 @@ and the project lead can merge the comments and edits from the `.docx` files
 back into the main project as to-do items and LaTeX changes,
 respectively.
 
-The whole process is recorded in the project repo,
-so it works the same whether you drive it from the CLI,
-from the Calkit web app, or a bit of both.
+Nothing about the process is stored in the project:
+the Word document carries everything Calkit needs to merge it back,
+so you export it, email it, and merge whatever comes back,
+whenever it comes back.
 
 <!-- prettier-ignore -->
 !!! note
     Producing a Word document that looks like the PDF requires
     Microsoft Word itself, on macOS or Windows, on the machine that
-    starts the review.
-    Reviewers only need Word, or anything that can edit a `.docx`.
+    exports it.
+    Reviewers only need Word, or anything that can edit a `.docx`,
+    and merging the result back needs neither.
     Nothing else needs installing: the document is built in the
     project's own LaTeX environment, as usual.
 
-## Starting a review session
+## Exporting the document for review
 
 Assuming we have a LaTeX document in our Calkit project at `paper/main.tex`,
 already set up to build in the project pipeline,
-we can start a review session for it with:
+we can export a Word copy of it with:
 
 ```sh
-calkit new review-session paper/main.tex \
-    --to advisor@university.edu \
-    --to coauthor@elsewhere.org \
-    --due 2026-09-20
+calkit latex to-docx paper/main.tex
 ```
 
-A session holds one review request per recipient,
-so each can be chased, revoked, or superseded on its own.
-By default reviewers may suggest edits,
-and the Word document they receive has tracked changes forced on,
-so nobody has to remember to turn them on.
+The export is pinned to a commit,
+so Calkit will ask you to commit any outstanding changes first,
+then rebuild the document to make sure the PDF matches the source.
+It then compiles a copy of the document with invisible paragraph
+markers, opens that PDF in Word to convert it to `.docx`,
+and turns the markers into bookmarks that record which line of which
+source file each paragraph came from.
+The result is written next to the document as `paper/main-review.docx`.
+It doesn't need to be committed:
+its document properties record the commit it was built from,
+the source file it came from, and a fingerprint of its text,
+and those survive editing and saving in Word.
+
+By default the document has tracked changes forced on,
+so nobody has to remember to turn them on,
+and the reviewer's edits and comments both come back in the same file.
 With `--permission comment` the document is locked to comments only,
 for the reviewer you want opinions from but not rewrites.
 
-If you think you'll eventually want to squash the review session into a
-single commit, use the `--branch` option.
-If you don't provide a name, one will be created for you like
-`review/main-2026-09-20`.
-
-A review session is pinned to a commit,
-so Calkit will ask you to commit any outstanding changes first,
-then rebuild the document to make sure the PDF matches the source.
-It then compiles a copy of the document with invisible paragraph markers,
-opens that PDF in Word to convert it to `.docx`,
-and turns the markers into bookmarks that let the edits find their way
-back to the right lines of LaTeX later.
-Finally, it writes the session to `.calkit/reviews/main-2026-09-06/`:
-
-```
-.calkit/reviews/main-2026-09-06/
-├── review.yaml       # document, commit, reviewers, due date, status
-├── original.pdf      # what the reviewers were sent
-├── original.docx     # the Word copy, tagged with the session ID
-├── sourcemap.json    # paragraph bookmark -> source file and line
-└── responses/        # one directory per reviewer
-    └── advisor/
-        ├── response.docx   # what they sent back
-        └── decisions.yaml  # what you did with each of their changes
-```
-
-These files are committed to the project,
-which is what makes the session portable:
-a teammate who clones the repo, or the web app looking at it,
-sees exactly the same session.
-
-## Sending it out
-
-The simplest way to send the document is to email
-`original.docx` yourself.
-The file carries the session ID in its document properties,
-which survives editing and saving in Word,
-so Calkit can tell which session a returned file belongs to
-no matter what it has been renamed to.
-
-If the project is connected to the Calkit hub,
-you can instead let it do the sending:
-
-```sh
-calkit review send main-2026-09-06
-```
-
-This pushes the session, and the hub emails each review request:
-the document, your message, and a reply address unique to that request.
-The reviewer marks up the document in Word and replies with it attached.
+Email the file to your reviewers.
 Nothing about their side of the process involves Calkit.
 
-## Ingesting the responses
+## Merging a marked-up document back
 
-When a marked-up document comes back by email, ingest it:
+When a marked-up document comes back, merge it:
 
 ```sh
-calkit review ingest ~/Downloads/main_advisor_comments.docx
+calkit latex merge-docx ~/Downloads/main_advisor_comments.docx
 ```
 
-If the hub sent the requests, the replies land in the session's inbox
-instead, and pulling the project brings them into `responses/`.
-Either way, ingestion is the same:
-Calkit stores the returned file in `responses/`,
-compares its text paragraph by paragraph against `original.docx`,
+Calkit reads the commit from the document,
+takes the text as sent and the text as edited from the tracked changes
+in the file itself,
 and finds every insertion, deletion, and comment.
-Reviewers who forgot to turn on tracked changes are handled the same
-way, since the comparison doesn't depend on Word's revision marks.
+Each is anchored to a source line at that commit,
+then carried forward to your current source the way a patch is:
+by line number first, and by matching text when the file has moved on.
 
-Calkit then walks you through each change:
+Calkit then walks you through each edit:
 
 ```
 [1/14] paper/methods.tex:31 (A. Reviewer)
@@ -133,20 +93,19 @@ Calkit then walks you through each change:
   - and the integral time scale was estimated from the autocorrelation.
   + We measured the velocity field with a two-component laser Doppler
   + velocimeter~\citep{lee2018}.
-  Apply, reject, defer, or edit? [a/r/d/e]
+  Apply, skip, or edit? [a/s/e]
 ```
 
 Applying writes the change to the LaTeX source in your working tree.
-Rejecting records the decision and moves on.
-Deferring creates a task with the proposed change attached,
-for the ones that need more thought than a keystroke.
-Comments from the document always become tasks,
-anchored to the paragraph they were left on:
+Skipping leaves the source alone.
+Comments are written into the source as LaTeX comments,
+just above the paragraph they were left on,
+where they stay until you delete them:
 
-```
-[9/14] Comment on paper/main.tex:58 (A. Reviewer)
-  "Quantify this: give an RMS error."
-  Created task 12.
+```latex
+% REVIEW (A. Reviewer, 2026-09-14): Quantify this: give an RMS error.
+The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
+reasonably well.
 ```
 
 Some edits can't be applied mechanically,
@@ -154,88 +113,61 @@ e.g., a change inside an equation, a citation, or a table,
 since the reviewer was editing rendered text rather than the LaTeX that
 produced it.
 Those are shown with the reviewer's version alongside the source line,
-and you can apply them by hand with `e` or defer them.
+and you can apply them by hand with `e` or skip them.
 
-Each accepted change is committed on its own,
-together with the decision that produced it,
-so `git log` reads as a record of the review
-and `git revert` undoes any single decision.
-For that reason the reviewed `.tex` files need to be clean when you
-start ingesting; commit or stash your own edits to them first.
-Rejected and deferred decisions are committed at the end of the walk.
+If you think you'll eventually want to squash the review into a
+single commit, use the `--branch` option.
+If you don't provide a name, one will be created for you like
+`review/main-2026-09-20`.
+Otherwise the applied changes and comments are ordinary edits to the
+`.tex` files, which you commit like any other.
 
-## Multiple reviewers
+## Multiple reviewers, and running it twice
 
-Responses rarely arrive together,
-and there's no need to wait for them.
-Each one is compared against the same `original.docx`,
-never against another response or against your current source,
-so they can be ingested in any order and weeks apart,
-and a change proposed by one reviewer is never disturbed by ingesting
-another.
+Merging is idempotent.
+An edit that's already in the source is recognized and skipped,
+and so is a comment that's already there,
+so rerunning on the same document is harmless,
+and you can merge a second reviewer's copy of the same export the same
+way as the first.
+Since each document is compared against the text it was sent with,
+never against another reviewer's copy or against your current source,
+they can arrive and be merged in any order, weeks apart.
 
-Accepting a change writes it to your source right away
-and the session stays open,
-so you can keep writing while the other reviewers take their time.
-When a later response touches a paragraph another reviewer already
-changed, Calkit says so before asking what to do,
-showing the other reviewer's version and what you decided about it:
-
-```
-[3/11] paper/main.tex:24 (B. Coauthor)
-  A. Reviewer also changed this paragraph (accepted).
-  ...
-```
-
-If you'd rather hear from everyone before touching a paragraph,
-defer it.
-`calkit review show` groups deferred changes by paragraph across
-reviewers, so once the last response is in you can settle each one with
-all the opinions in front of you.
-
-A change that no longer fits,
-because you accepted a different version from someone else
-or edited the paragraph yourself since the session started,
-is shown three ways:
-the paragraph as it was sent out, as it is now, and as this reviewer
-wants it.
+When an edit no longer fits,
+because you took a different version from someone else
+or edited the paragraph yourself since the export,
+it's shown three ways:
+the paragraph as it was sent, as it is now, and as this reviewer wants
+it.
 You pick one or edit the result.
-To take back an accepted change, revert its commit.
 
-A session closes when every reviewer has responded and every change
-is decided.
-You can also close it early with responses outstanding,
-e.g., if a reviewer never sends theirs back,
-and anything that comes in later is ingested against the session it
-was sent from all the same.
+A reviewer who turns protection off and edits without tracking makes
+their edits indistinguishable from the original.
+Calkit detects this from the text fingerprint and,
+if Word is available, rebuilds the sent copy from the recorded commit
+to compare against.
+Otherwise it says so and merges only the comments.
 
-Because the session is nothing but files in the repo,
-starting one is a single commit,
-and reverting that commit cancels the review:
-the hub revokes the review requests it sent the next time you push.
+## What comes later
 
-## Reviewing the session later
+Everything above is stateless:
+the only record of a review is the diff it produced.
+That's enough to ship, and the Word document is the contract that
+keeps it extensible.
+Each export carries a unique ID alongside the commit and source path,
+so later layers can refer to an export without changing the file or
+the merge command:
 
-To see where a session stands, e.g., who has responded and what is still
-undecided:
-
-```sh
-calkit review show main-2026-09-06
-```
-
-You can rerun `calkit review ingest` on a response at any time to
-revisit the changes you deferred or rejected.
-The web app shows the same session from the same files,
-with the same accept and reject controls,
-so a decision made in the browser is committed to the repo just like one
-made at the terminal.
-
-When you've revised the document and want another round,
-start a new session at the new revision and link it to the last one:
-
-```sh
-calkit new review-session paper/main.tex --supersedes main-2026-09-06
-```
+- **Review sessions** that remember who was sent what and when,
+  which edits were skipped, and which paragraphs more than one reviewer
+  touched, stored in the repo under `.calkit/reviews/`.
+- **Sending through the hub**, with a reply address per reviewer,
+  so a returned document lands in the project without passing through
+  your inbox.
+- **Comments as tasks** rather than source comments,
+  with threads that show up on the hub,
+  ingested from the same `% REVIEW` lines.
 
 ## TODO
 
@@ -256,10 +188,11 @@ These are some design decisions we need to make:
     Word on Mac and Windows.
 - [ ] Integrate git-bug now for conversations around comments?
 - [ ] Can it be more stateless, i.e., do we need review sessions, or can we simply try to merge a docx back into tex source idempotently?
-  - The diff needs the original we sent, pinned to a revision, so at
-    minimum that file and the source map have to be kept somewhere. A
-    session is just a name for that directory; the ingest itself is
-    idempotent given those files.
+  - Yes, and that's now the MVP above. With tracked changes forced on,
+    the returned `.docx` contains both what we sent (reject all) and
+    what the reviewer wants (accept all), and bookmark names encode the
+    source anchor, so nothing has to be stored. Sessions become an
+    optional layer on top; see [what comes later](#what-comes-later).
 - [ ] Comment threads in document or in review database? If in review database how do we keep them attached to the content? I suppose the start of a review is at a pinned version, so line numbers synctex-ish workflow works. We also want these comments to show up on the hub though, and we have a database table for these.
   - Where a thread is anchored and where it lives are separate
     questions. The anchor (bookmark, source file and line, quoted

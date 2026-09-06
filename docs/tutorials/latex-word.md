@@ -117,8 +117,8 @@ The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
 reasonably well.
 ```
 
-A thread you resolved in Word is deleted from the `.tex` if it was
-there, and never written if it wasn't.
+A thread resolved in Word merges back into LaTeX with a `resolved=true`
+annotation on the `COMMENT` line.
 It's possible to disable comments merging back into LaTeX with `--no-comments`.
 
 Note that merging is idempotent, meaning it can be called again

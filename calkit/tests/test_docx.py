@@ -19,7 +19,7 @@ import calkit.cli.latex
 import calkit.docx
 import calkit.latex
 
-FIXTURES = Path(__file__).parent / "fixtures" / "docx"
+FIXTURES = Path(__file__).parent.parent.parent / "test" / "docx"
 
 
 @pytest.fixture

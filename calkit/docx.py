@@ -244,6 +244,8 @@ class Document:
         settings = _parse(self.parts["word/settings.xml"])
         for old in settings.findall(_tag(W, "documentProtection")):
             settings.remove(old)
+        for old in settings.findall(_tag(W, "trackRevisions")):
+            settings.remove(old)
         el = ET.Element(_tag(W, "documentProtection"))
         el.set(_tag(W, "edit"), edit)
         el.set(_tag(W, "enforcement"), "1")
@@ -254,6 +256,9 @@ class Document:
                 idx = i
                 break
         settings.insert(idx, el)
+        # Protection only stops tracking being turned off; this turns it on
+        if edit == "trackedChanges":
+            settings.insert(idx, ET.Element(_tag(W, "trackRevisions")))
         self.parts["word/settings.xml"] = _dump(
             settings, self.parts["word/settings.xml"]
         )
@@ -427,26 +432,43 @@ class Document:
 def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     """Convert a PDF to .docx with Word's own importer."""
     pdf_path, docx_path = os.path.abspath(pdf_path), os.path.abspath(docx_path)
+    # Word won't save over a document it has open, so write beside the
+    # target and move into place
+    tmp_path = docx_path[: -len(".docx")] + ".tmp.docx"
     if sys.platform == "darwin":
         script = (
             'tell application "Microsoft Word"\n'
             "set display alerts to alerts none\n"
             f'open (POSIX file "{pdf_path}")\n'
-            "set doc to active document\n"
-            f'save as doc file name "{docx_path}" file format format document\n'
-            "close doc saving no\n"
+            # The import runs after open returns; wait for the document
+            "repeat 1200 times\n"
+            f'if exists document "{os.path.basename(pdf_path)}" then '
+            "exit repeat\n"
+            "delay 0.1\n"
+            "end repeat\n"
+            f'set doc to document "{os.path.basename(pdf_path)}"\n'
+            f'save as doc file name "{tmp_path}" file format format document\n'
+            f'close document "{os.path.basename(tmp_path)}" saving no\n'
             "end tell"
         )
-        subprocess.run(["osascript", "-e", script], check=True)
+        res = subprocess.run(
+            ["osascript", "-e", script], capture_output=True, text=True
+        )
+        if res.returncode != 0:
+            raise RuntimeError(
+                "Word could not convert the PDF: "
+                + res.stderr.strip().split(": ", 1)[-1]
+            )
     elif sys.platform == "win32":
         import win32com.client  # type: ignore[import-not-found]
 
         word = win32com.client.Dispatch("Word.Application")
         word.DisplayAlerts = 0
         doc = word.Documents.Open(pdf_path, ConfirmConversions=False)
-        doc.SaveAs2(docx_path, FileFormat=12)
+        doc.SaveAs2(tmp_path, FileFormat=12)
         doc.Close(False)
     else:
         raise RuntimeError(
             "Converting PDF to Word requires Word on macOS or Windows"
         )
+    os.replace(tmp_path, docx_path)

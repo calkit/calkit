@@ -178,6 +178,16 @@ def test_docx_round_trip(
     )
     assert Path("paper/main.tex").read_text() == main
     assert Path("paper/methods.tex").read_text() == methods
+    # A thread whose replies changed in Word is rewritten in place, not
+    # duplicated or displaced
+    src = Path("paper/methods.tex").read_text().split("\n")
+    at = next(i for i, ln in enumerate(src) if ln.startswith("% COMMENT"))
+    del src[at + 2 : at + 4]
+    Path("paper/methods.tex").write_text("\n".join(src))
+    subprocess.run(
+        ["calkit", "latex", "merge-docx", "reviews/accepted.docx"], check=True
+    )
+    assert Path("paper/methods.tex").read_text() == methods
     # A thread resolved in Word is removed from the source
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/resolved.docx"], check=True
@@ -185,7 +195,7 @@ def test_docx_round_trip(
     assert "% COMMENT" not in Path("paper/methods.tex").read_text()
     assert Path("paper/main.tex").read_text() == main
     merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
-    assert len(merges) == 4
+    assert len(merges) == 5
     fixture = returned.read_original()
     assert fixture is not None
     fixture_uuid = fixture.uuid

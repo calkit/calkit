@@ -640,6 +640,10 @@ def to_docx(
         bool,
         typer.Option("--comment-only", help="Lock the document to comments."),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Overwrite an existing export."),
+    ] = False,
 ) -> None:
     """Export a Word copy of a LaTeX document for review.
 
@@ -676,8 +680,13 @@ def to_docx(
         output = str(
             Path(pdf_path).with_name(Path(pdf_path).stem + "-for-review.docx")
         )
+    if os.path.exists(output) and not force:
+        raise_error(f"{output} already exists; use --force to overwrite it")
     typer.echo("Converting the PDF with Word")
-    calkit.docx.pdf_to_docx(pdf_path, output)
+    try:
+        calkit.docx.pdf_to_docx(pdf_path, output)
+    except RuntimeError as e:
+        raise_error(str(e))
     doc = calkit.docx.Document(output)
     lines = calkit.latex.flatten(source)
     blks = calkit.latex.blocks(lines)
@@ -854,7 +863,11 @@ def merge_docx(
         comments = doc.comments()
         by_id = {c.para_id: c for c in comments}
         roots = [c for c in comments if not c.parent_id]
-        inserts: dict[str, list[tuple[int, list[str]]]] = {}
+        # Resolve every thread to a block first, then edit each file from
+        # the bottom up so earlier line numbers stay valid
+        placed: list[
+            tuple[calkit.latex.Block, calkit.latex.TexComment, bool]
+        ] = []
         for root in roots:
             replies = [
                 (c.author, c.text)
@@ -877,42 +890,33 @@ def merge_docx(
                     f"Can't place a comment by {root.author}: {root.text[:60]}"
                 )
                 continue
+            placed.append((blk, tc, root.done))
+        for blk, tc, done in sorted(
+            placed, key=lambda x: (x[0].path, x[0].lineno), reverse=True
+        ):
+            content = files[blk.path]
+            at = blk.lineno
             existing = next(
                 (
                     e
-                    for e in calkit.latex.parse_comments(files[blk.path])
+                    for e in calkit.latex.parse_comments(content)
                     if e.author == tc.author and e.text == tc.text
                 ),
                 None,
             )
             if existing is not None:
-                if root.done or existing.replies != tc.replies:
-                    del files[blk.path][
-                        existing.lineno - 1 : existing.lineno
-                        - 1
-                        + existing.nlines
-                    ]
-                    removed += root.done
-                    # Later inserts shift up by the removed block
-                    for k, (ln_, block_) in enumerate(
-                        inserts.get(blk.path, [])
-                    ):
-                        if ln_ > existing.lineno:
-                            inserts[blk.path][k] = (
-                                ln_ - existing.nlines,
-                                block_,
-                            )
-                if root.done:
+                if not done and existing.replies == tc.replies:
                     continue
-                if existing.replies == tc.replies:
-                    continue
-            elif root.done:
+                del content[
+                    existing.lineno - 1 : existing.lineno - 1 + existing.nlines
+                ]
+                if existing.lineno < at:
+                    at -= existing.nlines
+                removed += done
+            if done:
                 continue
-            inserts.setdefault(blk.path, []).append((blk.lineno, tc.render()))
-            added += 1
-        for path, items in inserts.items():
-            for lineno, block_lines in sorted(items, reverse=True):
-                files[path][lineno - 1 : lineno - 1] = block_lines
+            content[at - 1 : at - 1] = tc.render()
+            added += existing is None
     for path, content in files.items():
         new = "\n".join(content)
         if new != Path(path).read_text():

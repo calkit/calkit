@@ -261,3 +261,21 @@ These are some design decisions we need to make:
     session is just a name for that directory; the ingest itself is
     idempotent given those files.
 - [ ] Comment threads in document or in review database? If in review database how do we keep them attached to the content? I suppose the start of a review is at a pinned version, so line numbers synctex-ish workflow works. We also want these comments to show up on the hub though, and we have a database table for these.
+  - Where a thread is anchored and where it lives are separate
+    questions. The anchor (bookmark, source file and line, quoted
+    text) is valid at the pinned revision however the source moves
+    afterward, the same way a patch hunk is, so it can sit in the
+    review directory. The conversation can live wherever tasks end up,
+    git-bug eventually, with the hub table as a mirror synced on push.
+  - Tension: putting human interaction in a repo that may one day be
+    public could scare off users. The reviewer's raw comments and the
+    returned `.docx` are in `.calkit/reviews/` under this design, and
+    history keeps them even if they're deleted later. GitHub keeps a
+    clear border between the repo and communication about it.
+    Transparency and distributed operation are still worth having.
+  - Git itself has that border: worktree files are the work, and refs
+    outside the default push refspec (git-bug's approach) are
+    communication about it, not cloned or shown by GitHub unless asked
+    for. So threads and possibly the raw responses could be
+    distributed without being in the tree, while decisions, which
+    must move in lockstep with the source, stay in the worktree.

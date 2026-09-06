@@ -300,3 +300,37 @@ ingest|send|show`; #1580 uses `calkit task ingest`.
 - Handling a file that went through Google Docs.
   Bookmarks are lost, sequence alignment still works, and the
   ingestion notes already say so.
+
+## Journal reviews and the reviewer's side (#1435)
+
+Out of scope for the first version, but the layout should not preclude
+it, and it doesn't.
+
+A journal's reviews arrive as text or PDF rather than `.docx`.
+They fit the same session model:
+a session created at the submitted revision with no recipients, e.g.,
+`--external "JFM round 1"`, whose responses are ingested as they
+arrive.
+Only the reader is format-specific.
+The docx reader diffs against our render; a PDF reader takes the text
+under each highlight; a text reader parses "Line 33, 'quote': comment"
+and anchors by the quote with the line number as a hint.
+The pinned `original.pdf` is what makes the line numbers resolvable,
+since they refer to the submitted PDF, not the current source.
+Text and PDF reviews yield tasks rather than applicable changes, except
+where the reviewer wrote suggested wording.
+
+#1435 is the mirror image, us as the reviewer of someone else's paper,
+producing a text file to paste into the journal's form.
+The text format proposed there is the bridge:
+the PDF viewer writes it when we review, the text reader ingests it
+when we're reviewed, and a paper between two Calkit users round-trips.
+Design that format once, for both directions, when the docx path has
+shipped.
+
+Private storage needs nothing new.
+A manuscript under review lives in a private project, possibly never
+pushed, with the PDF in DVC against a private remote or none, which
+already exists.
+The distributed-first design already rules out anything that would
+require the hub to see the document.

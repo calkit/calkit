@@ -720,7 +720,10 @@ def to_docx(
                 threads.append([(tc.author, tc.text)] + tc.replies)
                 anchors.append(para_for_block[id(blk)])
     doc.add_comments(threads, anchors)
-    doc.protect("comments" if comment_only else "trackedChanges")
+    if comment_only:
+        doc.protect("comments")
+    else:
+        doc.track_changes()
     rev, dirty = None, False
     try:
         repo = calkit.git.get_repo()

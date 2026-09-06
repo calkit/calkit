@@ -121,7 +121,7 @@ def test_docx_round_trip(
     assert original is not None
     assert original.source == "paper/main.tex"
     assert original.uuid
-    assert doc.protection() == "trackedChanges"
+    assert doc.tracking() and doc.protection() is None
     paras = doc.paragraphs()
     assert sum(p.bookmark is not None for p in paras) == len(
         original.paragraphs

@@ -239,29 +239,36 @@ class Document:
             core, self.parts["docProps/core.xml"]
         )
 
-    def protect(self, edit: str) -> None:
-        """Lock the document to tracked changes or comments (no password)."""
+    def _settings_insert(self, el: ET.Element) -> None:
+        """Add a settings element in schema order, replacing any of its
+        kind: after w:zoom and friends, before w:defaultTabStop."""
         settings = _parse(self.parts["word/settings.xml"])
-        for old in settings.findall(_tag(W, "documentProtection")):
+        for old in settings.findall(el.tag):
             settings.remove(old)
-        for old in settings.findall(_tag(W, "trackRevisions")):
-            settings.remove(old)
-        el = ET.Element(_tag(W, "documentProtection"))
-        el.set(_tag(W, "edit"), edit)
-        el.set(_tag(W, "enforcement"), "1")
-        # Schema order: after w:zoom and friends, before w:defaultTabStop
         idx = len(settings)
         for i, child in enumerate(settings):
             if child.tag == _tag(W, "defaultTabStop"):
                 idx = i
                 break
         settings.insert(idx, el)
-        # Protection only stops tracking being turned off; this turns it on
-        if edit == "trackedChanges":
-            settings.insert(idx, ET.Element(_tag(W, "trackRevisions")))
         self.parts["word/settings.xml"] = _dump(
             settings, self.parts["word/settings.xml"]
         )
+
+    def track_changes(self) -> None:
+        """Turn Track Changes on, so it's on when the document opens."""
+        self._settings_insert(ET.Element(_tag(W, "trackRevisions")))
+
+    def tracking(self) -> bool:
+        settings = ET.fromstring(self.parts["word/settings.xml"])
+        return settings.find(_tag(W, "trackRevisions")) is not None
+
+    def protect(self, edit: str) -> None:
+        """Lock the document to comments or tracked changes (no password)."""
+        el = ET.Element(_tag(W, "documentProtection"))
+        el.set(_tag(W, "edit"), edit)
+        el.set(_tag(W, "enforcement"), "1")
+        self._settings_insert(el)
 
     def protection(self) -> str | None:
         """The edit restriction in force, or None if none or unenforced."""

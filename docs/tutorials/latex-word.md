@@ -12,87 +12,61 @@ but others on the team may not want to engage in that way.
 They prefer a WYSIWYG experience without needing to sign up for a web
 app like Overleaf (or Calkit for that matter).
 
-However, converting from LaTeX to Word with something like Pandoc produces
+However, converting from LaTeX to Word with something like
+[Pandoc](https://pandoc.org)
+produces
 a Word document that doesn't look like the final output,
-and migrating the contributions back into LaTeX is a tedious manual process.
+and migrating the contributions back into LaTeX is a manual process.
 For these situations, Calkit supports a workflow where the source of
 truth is LaTeX, but Word documents can be sent out for review,
 and the project lead can merge the comments and edits from the `.docx` files
-back into the TeX source, and back out to `.docx` again.
+back into the TeX source.
 
 <!-- prettier-ignore -->
 !!! note
-    Exporting requires Microsoft Word, on macOS or Windows,
-    even for the project lead who primarily writes in LaTeX,
-    and reviewers need Word too.
-    Merging back needs neither.
-    Word is what converts the PDF and what preserves the invisible
-    bookkeeping in the `.docx`; Google Docs strips it,
-    and a document that comes back stripped is refused with a clear
-    message rather than merged badly.
+    Exporting and reviewing require Microsoft Word, on macOS or Windows,
+    However, merging changed back into LaTeX does not.
 
 ## Exporting the document for review
 
 Assuming we have an up-to-date compiled LaTeX document in our project at
 `paper/main.pdf`,
-we can export a Word copy of it with:
+we can export a Word copy for review with:
 
 ```sh
-calkit latex to-docx paper/main.pdf -o paper/main-for-review.docx
+calkit latex to-docx paper/main.pdf
 ```
 
-This command assumes the `.tex` source is alongside the PDF, i.e.,
+Calkit needs the LaTeX source as well as the PDF,
+since again, we are treating that as the source of truth.
+The `to-docx` command assumes the `.tex` source is alongside the PDF, i.e.,
 `paper/main.tex`.
 It that's not correct, it can be passed in with the `--source` option.
+If the PDF if built as part of a `latex` stage in the Calkit pipeline,
+the source (`target_path`) will be looked up there.
+If the document is not part of the pipeline, it's up to you so ensure
+the compiled PDF is up-to-date.
+Otherwise, Calkit will run the stage before export if necessary.
 
-Without `-o`, the file is written next to the PDF as
-`paper/main-review.docx`.
-
-Calkit needs the LaTeX source as well as the PDF,
-since that's what the reviewer's edits eventually land in.
-If the PDF is the output of a `latex` stage in the pipeline,
-the stage says which `.tex` file produced it;
-otherwise pass `--source paper/main.tex`.
-Documents split across several files with `\input`, `\include`,
-`\subfile`, or `\import` are fine:
-give the main file, and each paragraph is traced back to the file and
-line it actually came from, so edits to a chapter land in that
-chapter's file.
-
-Producing the PDF from the pipeline is more reliable,
-since Calkit can tell whether it's up to date with the source,
-but it isn't a requirement.
-Nor is committing first:
-the `.docx` records the current commit as a hint,
-but carries the text it was built from,
-and that's what the merge matches against.
-
-Reviewers see a document that looks like the PDF,
-with two exceptions worth telling them about:
+By default, the Word document is written next to the PDF, e.g.,
+`paper/main-for-review.docx`, but this can be controlled with the `-o` flag.
+It will look very similar to the PDF, except that
 equations are pictures, which they can comment on but not edit,
-and tables come through as tab-separated text rather than Word tables.
+and tables are tab-separated text rather than native Word tables.
 
-By default the Word document has tracked changes forced to be enabled,
-so nobody has to remember to turn them on,
-and the reviewer's edits and comments both come back in the same file.
-With `--permission comment` the document is locked to comments only,
-for the reviewer you want opinions from but not rewrites.
+By default the Word document has "track changes" enabled,
+and if you export with `--comment-only`
+the document cannot be edited.
 
-You can then email the file to your reviewers.
-The same file can go to the whole team,
-since Word stamps every change and comment with the name of the person
-who made it.
-Nothing about their side of the process involves Calkit.
+After export, you can email to your collaborators, put on a shared drive,
+etc.
 
-## Responding to the review in Word
+## Reacting and responding to the feedback
 
-When a marked-up document comes back,
-the natural place to go through it is Word itself.
-Accept the changes you want and reject the rest,
-reply to comments or resolve them,
-and make your own edits.
-Word is where the reviewer's reasoning is easiest to see,
-and nothing you do there needs to be repeated later.
+It's possible to deal with a review copy either in Word or from the CLI.
+If using Word, you can simply accept/reject changes, reply to comments, etc.
+Anything unresolved in Word will cause the CLI to prompt the user at
+merge time.
 
 ## Merging back into the project
 
@@ -104,7 +78,8 @@ calkit latex merge-docx reviews/main-for-review-PI-comments.docx
 
 This command assumes we've saved the `.docx` we got back into a
 `reviews` folder inside the project,
-which is just a convention; the file can be anywhere.
+which is just a convention; the file can be anywhere as it retains
+information about the LaTeX source from which it came.
 It may be a good idea to keep the `.docx` around for posterity.
 You can save to DVC
 (better for tracking binary files,
@@ -115,100 +90,35 @@ with:
 calkit save reviews/main-for-review-PI-comments.docx --to dvc -m "Add review"
 ```
 
-Calkit reads the commit from the document,
-compares the document as it is now with the copy of the text it
-carried when it was sent,
-and finds everything that differs.
-Each difference is anchored to a source line at that commit,
-then carried forward to your current source the way a patch is:
-by line number first, and by matching text when the file has moved on.
-
-Changes you accepted in Word are already decided,
-so they're applied to the LaTeX source without asking.
-Only what's still undecided prompts:
-tracked changes you left neither accepted nor rejected,
-and edits Calkit can't place on its own:
-
-```
-[1/3] paper/methods.tex:31 (A. Reviewer, still tracked)
-  - We measured the velocity field with a two-component laser Doppler
-  - velocimeter~\citep{lee2018}. The sampling frequency was $f_s = 1$~kHz
-  - and the integral time scale was estimated from the autocorrelation.
-  + We measured the velocity field with a two-component laser Doppler
-  + velocimeter~\citep{lee2018}.
-  Apply, skip, or edit? [a/s/e]
-```
-
-Pass `--accept-remaining` or `--reject-remaining` to settle those
-without being asked,
-which makes the merge non-interactive if you decided everything in
-Word.
+Changes you accepted in Word are applied to the LaTeX source.
+Remaining tracked changes that were not rejected will throw a warning.
 
 Comments are written into the source as LaTeX comments,
-just above the paragraph they were left on,
-with any replies in order,
-in this form:
+just above the paragraph they were left on, e.g.:
 
 ```latex
-% COMMENT author=a.reviewer@uni.edu
+% COMMENT author="A. Reviewer"
 % Quantify this: give an RMS error.
-%    REPLY author=pete@x.edu
-%%%% Will add RMS error to Table 2.
+%   REPLY author="T. Author"
+%   Will add RMS error to Table 2.
 The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
 reasonably well.
 ```
 
-The objective is to make it readable in TeX.
-These comments will make their way out into the docx,
-and docx comments will make their way back into TeX.
-Deleting a thread signals that it's resolved.
+It's possible to disable comments merging back into LaTeX with `--no-comments`.
 
-Some edits can't be applied mechanically,
-e.g., a change inside an equation, a citation, or a table,
-since the reviewer was editing rendered text rather than the LaTeX that
-produced it.
-Those are shown with the reviewer's version alongside the source line,
-and you can apply them by hand with `e` or skip them.
+Note that merging is idempotent, meaning it can be called over again
+and content won't be duplicated.
 
-Attribution comes from the document.
-Each comment keeps the name Word recorded for its author,
-and tracked changes keep theirs while they're still tracked.
-Accepting a change in Word removes its author,
-which is fine, since by then it's your decision.
-If a document's author names are unhelpful,
-e.g., the reviewer's copy of Word is signed in as "User",
-pass `--reviewer "A. Reviewer"` to name them.
+## Multiple reviewers
 
-If you think you'll eventually want to squash the review into a
-single commit, use the `--branch` option.
-If you don't provide a name, one will be created for you like
-`review/main-2026-09-20`.
-Otherwise the applied changes and comments are ordinary edits to the
-`.tex` files, which you commit like any other.
+It's okay to send the same copy out to multiple collaborators.
+Follow the same process, checking their markup in Word,
+then merging in with `calkit latex merge-docx`.
 
-## Multiple reviewers, and running it twice
+## Multiple rounds
 
-Merging is idempotent.
-An edit that's already in the source is recognized and skipped,
-and so is a comment that's already there,
-so rerunning on the same document is harmless,
-and you can merge a second reviewer's copy of the same export the same
-way as the first.
-Since each document carries the text it was sent with and is compared
-against that,
-never against another reviewer's copy or against your current source,
-they can arrive and be merged in any order, weeks apart.
-
-When an edit no longer fits,
-because you took a different version from someone else
-or edited the paragraph yourself since the export,
-it's shown three ways:
-the paragraph as it was sent, as it is now, and as this reviewer wants
-it.
-You pick one or edit the result.
-
-A reviewer who turns protection off and edits without tracking
-loses nothing:
-the document still carries the text as sent,
-so their edits are found the same way as accepted ones,
-only without a name attached.
+For the next round of review, use the `to-docx` command on the LaTeX PDF
+again.
+It's probably a good idea to move the old review copies and keep track
+of who you sent them to, how, and when.

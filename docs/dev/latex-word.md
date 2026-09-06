@@ -196,8 +196,18 @@ already made.
 Only revisions still pending prompt, with `--accept-remaining` and
 `--reject-remaining` to make the merge non-interactive.
 Unresolved comment threads become `% REVIEW` lines with replies in
-order; resolved ones (`w15:done` in `commentsExtended.xml`) are
-dropped.
+order; resolved ones are dropped.
+Threads were tested by writing them per spec and letting Word open and
+re-save the file, which re-serializes every part:
+a reply is a comment whose `w14:paraId` appears in
+`commentsExtended.xml` with `w15:paraIdParent` pointing at the parent's
+`paraId`, and it shares the parent's range in the body; resolved is
+`w15:done="1"` on the thread's root.
+Word kept both through the round trip, and added a `commentsIds.xml`
+part with durable IDs.
+It also renumbered `w:id` on every comment and reordered them, so
+nothing may key on `w:id`; match comments by anchor and content, and
+walk threads by `paraId`.
 Attribution comes from `w:author` and `w:date` on each revision and
 comment, which Word stamps and which were present in every returned
 test file, so one export can go to the whole team.

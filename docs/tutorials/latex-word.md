@@ -22,8 +22,14 @@ back into the TeX source, and back out to `.docx` again.
 
 <!-- prettier-ignore -->
 !!! note
-    This workflow requires Microsoft Word on all collaborators' machines,
-    even the project lead who primarily writes in LaTeX.
+    Exporting requires Microsoft Word, on macOS or Windows,
+    even for the project lead who primarily writes in LaTeX,
+    and reviewers need Word too.
+    Merging back needs neither.
+    Word is what converts the PDF and what preserves the invisible
+    bookkeeping in the `.docx`; Google Docs strips it,
+    and a document that comes back stripped is refused with a clear
+    message rather than merged badly.
 
 ## Exporting the document for review
 
@@ -39,10 +45,32 @@ This command assumes the `.tex` source is alongside the PDF, i.e.,
 `paper/main.tex`.
 It that's not correct, it can be passed in with the `--source` option.
 
-Note that this will be more reliable if it's produced as a `latex` stage
-in the Calkit pipeline, but it's not an absolute requirement.
-It's also useful if the `.tex` source is committed to Git, since the `.docx`
-will get commit information for its corresponding rev.
+Without `-o`, the file is written next to the PDF as
+`paper/main-review.docx`.
+
+Calkit needs the LaTeX source as well as the PDF,
+since that's what the reviewer's edits eventually land in.
+If the PDF is the output of a `latex` stage in the pipeline,
+the stage says which `.tex` file produced it;
+otherwise pass `--source paper/main.tex`.
+Documents split across several files with `\input`, `\include`,
+`\subfile`, or `\import` are fine:
+give the main file, and each paragraph is traced back to the file and
+line it actually came from, so edits to a chapter land in that
+chapter's file.
+
+Producing the PDF from the pipeline is more reliable,
+since Calkit can tell whether it's up to date with the source,
+but it isn't a requirement.
+Nor is committing first:
+the `.docx` records the current commit as a hint,
+but carries the text it was built from,
+and that's what the merge matches against.
+
+Reviewers see a document that looks like the PDF,
+with two exceptions worth telling them about:
+equations are pictures, which they can comment on but not edit,
+and tables come through as tab-separated text rather than Word tables.
 
 By default the Word document has tracked changes forced to be enabled,
 so nobody has to remember to turn them on,
@@ -74,8 +102,9 @@ When you're done in Word, merge it back into LaTeX with:
 calkit latex merge-docx reviews/main-for-review-PI-comments.docx
 ```
 
-This command assumes we've saved the `.docx` we got back to a `reviews`
-folder inside the project.
+This command assumes we've saved the `.docx` we got back into a
+`reviews` folder inside the project,
+which is just a convention; the file can be anywhere.
 It may be a good idea to keep the `.docx` around for posterity.
 You can save to DVC
 (better for tracking binary files,
@@ -118,12 +147,12 @@ Word.
 Comments are written into the source as LaTeX comments,
 just above the paragraph they were left on,
 with any replies in order,
-in the form described under [comments](#comments) below:
+in this form:
 
 ```latex
 % COMMENT author=a.reviewer@uni.edu
 % Quantify this: give an RMS error.
-%%%% REPLY author=pete@x.edu
+%    REPLY author=pete@x.edu
 %%%% Will add RMS error to Table 2.
 The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
 reasonably well.

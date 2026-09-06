@@ -112,9 +112,16 @@ form.
 The marked build is a separate compile into a temporary directory, the
 way `calkit latex diff` builds its worktree copies, so the project's
 own source is never touched.
-The sidecar map records bookmark name to flattened source line, and the
-flattening is `latexpand`, which `calkit latex diff` already uses, so
-line numbers can be mapped back to the original `\input` files.
+Anchors are per source file, not per flattened line, since a bookmark
+name carries a hash of the file path plus the line, and a merge writes
+to whichever file the anchor names.
+That's what makes multi-file documents work, and it needs a flattener
+that records the originating file and line for every flattened line.
+`latexpand`, which `calkit latex diff` uses, inlines but emits no such
+map, so this is a small flattener of our own following `\input`,
+`\include`, `\subfile`, and `\import`, resolving paths relative to
+the main file and honoring `\includeonly`.
+The user supplies the main file, from the pipeline stage or `--source`.
 
 The bookmarks then survived a Word editing session with tracked changes
 and a save, as did document core properties (`identifier` and

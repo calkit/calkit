@@ -176,10 +176,9 @@ Step 3 is the honest floor and it must stay cheap in the UI.
 
 ## The stateless first version
 
-Sessions aren't needed to ship, because of one property of the returned
-file: with `w:documentProtection w:edit="trackedChanges"` the `.docx`
-contains both the text we sent (reject all) and the text the reviewer
-wants (accept all).
+Sessions aren't needed to ship, because the `.docx` can carry its own
+original: a custom XML part in the package holding the text as sent,
+paragraph by paragraph, keyed by bookmark.
 Ingest is therefore XML on one file, needs no stored original and no
 Word, and the source map isn't needed either if bookmark names carry
 the anchor.
@@ -187,15 +186,42 @@ Comments go back into the source as `% REVIEW (...)` lines above the
 paragraph, where the lead resolves them by deleting them.
 The only record of a review is the diff it produced.
 
+The realistic flow decides how ingest behaves.
+The lead doesn't read diffs in a terminal; they open the returned file,
+accept and reject in Word, reply to or resolve comments, make their own
+edits, and merge afterwards.
+So the merge compares the final view against the carried original and
+applies plain differences without asking, since those are decisions
+already made.
+Only revisions still pending prompt, with `--accept-remaining` and
+`--reject-remaining` to make the merge non-interactive.
+Unresolved comment threads become `% REVIEW` lines with replies in
+order; resolved ones (`w15:done` in `commentsExtended.xml`) are
+dropped.
+Attribution comes from `w:author` and `w:date` on each revision and
+comment, which Word stamps and which were present in every returned
+test file, so one export can go to the whole team.
+Accepting in Word strips the author from a change, which is
+acceptable since by then it's the lead's decision.
+`--reviewer` on merge is only an override for unhelpful author names.
+
 The `.docx` is the contract, and the parts that must not change later:
 
-- **Core properties.**
-  `identifier` holds `calkit-review:<uuid>:<rev>:<tex path>`, and
-  `keywords` a text fingerprint of the sent body, so untracked edits
-  are detectable.
+- **The custom XML part.**
+  `customXml/item1.xml` in a `https://calkit.org/review` namespace,
+  related from `document.xml.rels` with the standard `customXml`
+  relationship type.
+  It holds the export UUID, the rev, the tex path, and the sent text
+  per bookmark.
+  Tested: Word preserved it, and the bookmarks, through accepting all
+  revisions and saving.
+  The rev and path also go in the core properties (`identifier` as
+  `calkit-review:<uuid>:<rev>:<tex path>`) so they're visible in a
+  file dialog; those survived a save too.
   The UUID is unused in v1 and exists so sessions and hub delivery can
   key on it without touching the file format.
-  Both properties survived a Word edit-and-save in testing.
+  A file that went through Google Docs loses the part; that's a hard
+  failure with a clear message, not a degraded mode.
 - **Bookmark names.**
   Word allows 40 characters, letters and digits and underscores,
   starting with a letter.
@@ -232,11 +258,11 @@ AppleScript:
   After that, an edit came back untracked and the element was saved
   with `w:enforcement="0"`.
 
-So the enforcement value on the returned file says whether reject-all
-can be trusted, before the fingerprint is even needed.
-If the reviewer stopped protection and edited untracked, the
-fingerprint mismatches, and the fallback is to rebuild the sent copy
-from the rev (needs Word) or to warn and merge only the comments.
+With the carried original, reject-all is a cross-check rather than the
+source of truth, and the protection is what keeps attribution on the
+reviewer's edits rather than what makes ingest possible.
+A reviewer who unprotects and edits untracked loses only the author on
+those edits.
 
 ## Repo-first reviews with the hub as a view (later)
 

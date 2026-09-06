@@ -55,8 +55,9 @@ and turns the markers into bookmarks that record which line of which
 source file each paragraph came from.
 The result is written next to the document as `paper/main-review.docx`.
 It doesn't need to be committed:
-its document properties record the commit it was built from,
-the source file it came from, and a fingerprint of its text,
+the file records the commit it was built from,
+the source file it came from,
+and a copy of its own text as sent,
 and those survive editing and saving in Word.
 
 By default the document has tracked changes forced on,
@@ -66,28 +67,45 @@ With `--permission comment` the document is locked to comments only,
 for the reviewer you want opinions from but not rewrites.
 
 Email the file to your reviewers.
+The same file can go to the whole team,
+since Word stamps every change and comment with the name of the person
+who made it.
 Nothing about their side of the process involves Calkit.
 
-## Merging a marked-up document back
+## Responding to the review in Word
 
-When a marked-up document comes back, merge it:
+When a marked-up document comes back,
+the natural place to go through it is Word itself.
+Accept the changes you want and reject the rest,
+reply to comments or resolve them,
+and make your own edits.
+Word is where the reviewer's reasoning is easiest to see,
+and nothing you do there needs to be repeated later.
+
+## Merging back into the project
+
+When you're done in Word, merge the document:
 
 ```sh
 calkit latex merge-docx ~/Downloads/main_advisor_comments.docx
 ```
 
 Calkit reads the commit from the document,
-takes the text as sent and the text as edited from the tracked changes
-in the file itself,
-and finds every insertion, deletion, and comment.
-Each is anchored to a source line at that commit,
+compares the document as it is now with the copy of the text it
+carried when it was sent,
+and finds everything that differs.
+Each difference is anchored to a source line at that commit,
 then carried forward to your current source the way a patch is:
 by line number first, and by matching text when the file has moved on.
 
-Calkit then walks you through each edit:
+Changes you accepted in Word are already decided,
+so they're applied to the LaTeX source without asking.
+Only what's still undecided prompts:
+tracked changes you left neither accepted nor rejected,
+and edits Calkit can't place on its own:
 
 ```
-[1/14] paper/methods.tex:31 (A. Reviewer)
+[1/3] paper/methods.tex:31 (A. Reviewer, still tracked)
   - We measured the velocity field with a two-component laser Doppler
   - velocimeter~\citep{lee2018}. The sampling frequency was $f_s = 1$~kHz
   - and the integral time scale was estimated from the autocorrelation.
@@ -96,17 +114,24 @@ Calkit then walks you through each edit:
   Apply, skip, or edit? [a/s/e]
 ```
 
-Applying writes the change to the LaTeX source in your working tree.
-Skipping leaves the source alone.
-Comments are written into the source as LaTeX comments,
-just above the paragraph they were left on,
+Pass `--accept-remaining` or `--reject-remaining` to settle those
+without being asked,
+which makes the merge non-interactive if you decided everything in
+Word.
+
+Comments you didn't resolve are written into the source as LaTeX
+comments, just above the paragraph they were left on,
+with any replies in order,
 where they stay until you delete them:
 
 ```latex
 % REVIEW (A. Reviewer, 2026-09-14): Quantify this: give an RMS error.
+% REVIEW (P. Bachant, 2026-09-15): Will add RMS error to Table 2.
 The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
 reasonably well.
 ```
+
+Resolved comments are dropped.
 
 Some edits can't be applied mechanically,
 e.g., a change inside an equation, a citation, or a table,
@@ -114,6 +139,15 @@ since the reviewer was editing rendered text rather than the LaTeX that
 produced it.
 Those are shown with the reviewer's version alongside the source line,
 and you can apply them by hand with `e` or skip them.
+
+Attribution comes from the document.
+Each comment keeps the name Word recorded for its author,
+and tracked changes keep theirs while they're still tracked.
+Accepting a change in Word removes its author,
+which is fine, since by then it's your decision.
+If a document's author names are unhelpful,
+e.g., the reviewer's copy of Word is signed in as "User",
+pass `--reviewer "A. Reviewer"` to name them.
 
 If you think you'll eventually want to squash the review into a
 single commit, use the `--branch` option.
@@ -130,7 +164,8 @@ and so is a comment that's already there,
 so rerunning on the same document is harmless,
 and you can merge a second reviewer's copy of the same export the same
 way as the first.
-Since each document is compared against the text it was sent with,
+Since each document carries the text it was sent with and is compared
+against that,
 never against another reviewer's copy or against your current source,
 they can arrive and be merged in any order, weeks apart.
 
@@ -142,12 +177,11 @@ the paragraph as it was sent, as it is now, and as this reviewer wants
 it.
 You pick one or edit the result.
 
-A reviewer who turns protection off and edits without tracking makes
-their edits indistinguishable from the original.
-Calkit detects this from the text fingerprint and,
-if Word is available, rebuilds the sent copy from the recorded commit
-to compare against.
-Otherwise it says so and merges only the comments.
+A reviewer who turns protection off and edits without tracking
+loses nothing:
+the document still carries the text as sent,
+so their edits are found the same way as accepted ones,
+only without a name attached.
 
 ## What comes later
 

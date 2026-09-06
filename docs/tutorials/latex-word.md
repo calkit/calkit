@@ -144,6 +144,52 @@ Every decision is recorded in `decisions.yaml`,
 and the applied changes are ordinary edits to the `.tex` files,
 which you commit like any other.
 
+## Multiple reviewers
+
+Responses rarely arrive together,
+and there's no need to wait for them.
+Each one is compared against the same `original.docx`,
+never against another response or against your current source,
+so they can be ingested in any order and weeks apart,
+and a change proposed by one reviewer is never disturbed by ingesting
+another.
+
+Accepting a change writes it to your source right away
+and the session stays open,
+so you can keep writing while the other reviewers take their time.
+When a later response touches a paragraph another reviewer already
+changed, Calkit says so before asking what to do,
+showing the other reviewer's version and what you decided about it:
+
+```
+[3/11] paper/main.tex:24 (B. Coauthor)
+  A. Reviewer also changed this paragraph (accepted).
+  ...
+```
+
+If you'd rather hear from everyone before touching a paragraph,
+defer it.
+`calkit review show` groups deferred changes by paragraph across
+reviewers, so once the last response is in you can settle each one with
+all the opinions in front of you.
+
+A change that no longer fits,
+because you accepted a different version from someone else
+or edited the paragraph yourself since the session started,
+is shown three ways:
+the paragraph as it was sent out, as it is now, and as this reviewer
+wants it.
+You pick one or edit the result.
+Accepted changes can be reversed while the session is open,
+provided nothing else has been written over them since.
+
+A session closes when every reviewer has responded and every change
+is decided.
+You can also close it early with responses outstanding,
+e.g., if a reviewer never sends theirs back,
+and anything that comes in later is ingested against the session it
+was sent from all the same.
+
 ## Reviewing the session later
 
 To see where a session stands, e.g., who has responded and what is still

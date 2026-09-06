@@ -55,3 +55,13 @@ for posterity and revisiting later.
 This process can be done on the web as well instead of the CLI,
 and all of the data is the same, so it works equally well from either
 location.
+
+## TODO
+
+These are some design decisions we need to make:
+
+- [ ] Fully distributed or brokered by the hub? Do we want these interactions to actually live in the repo?
+- [ ] How important is it that the Word doc look like the LaTeX PDF?
+- [ ] Is Word a requirement?
+- [ ] Integrate git-bug now for conversations around comments?
+- [ ] Can it be more stateless, i.e., do we need review sessions, or can we simply try to merge a docx back into tex source idempotently?

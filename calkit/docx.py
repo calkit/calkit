@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 import subprocess
@@ -104,6 +105,7 @@ class Comment:
     parent_id: str | None = None
     done: bool = False
     bookmark: str | None = None
+    highlight: str | None = None
 
 
 @dataclass
@@ -293,6 +295,8 @@ class Document:
         # Which bookmark each comment range lands in: the paragraph's own,
         # else the last one seen
         anchors: dict[str, str | None] = {}
+        ranges: dict[str, list[str]] = {}
+        whole: dict[str, str] = {}
         current = None
         for p in self.doc.iter(_tag(W, "p")):
             own = next(
@@ -304,11 +308,26 @@ class Document:
                 None,
             )
             current = own or current
+            open_ids: set[str] = set()
+            para_text: list[str] = []
             for el in p.iter():
+                cid = el.get(_tag(W, "id"), "")
                 if el.tag == _tag(W, "commentRangeStart"):
-                    anchors[el.get(_tag(W, "id"), "")] = current
+                    anchors[cid] = current
+                    open_ids.add(cid)
+                    ranges.setdefault(cid, [])
+                elif el.tag == _tag(W, "commentRangeEnd"):
+                    open_ids.discard(cid)
                 elif el.tag == _tag(W, "commentReference"):
-                    anchors.setdefault(el.get(_tag(W, "id"), ""), current)
+                    anchors.setdefault(cid, current)
+                elif el.tag == _tag(W, "t") and not _in(
+                    self._parents, el, p, _tag(W, "del")
+                ):
+                    para_text.append(el.text or "")
+                    for oid in open_ids:
+                        ranges[oid].append(el.text or "")
+            for oid in list(ranges):
+                whole.setdefault(oid, normalize("".join(para_text)))
         out = []
         for c in ET.fromstring(data).iter(_tag(W, "comment")):
             first = c.find(_tag(W, "p"))
@@ -322,6 +341,11 @@ class Document:
                     for p in c.iter(_tag(W, "p"))
                 )
             )
+            cid = c.get(_tag(W, "id"), "")
+            # A range covering the whole paragraph says nothing extra
+            highlight = normalize("".join(ranges.get(cid, []))) or None
+            if highlight == whole.get(cid):
+                highlight = None
             out.append(
                 Comment(
                     author=c.get(_tag(W, "author"), ""),
@@ -330,7 +354,8 @@ class Document:
                     para_id=para_id,
                     parent_id=parent,
                     done=done,
-                    bookmark=anchors.get(c.get(_tag(W, "id"), "")),
+                    bookmark=anchors.get(cid),
+                    highlight=highlight,
                 )
             )
         # Resolved is recorded on the root; replies inherit it
@@ -342,20 +367,73 @@ class Document:
             cm.done = top.done
         return out
 
+    def _split_run(self, para: ET.Element, offset: int) -> int:
+        """Split the run containing text offset ``offset`` so a marker can
+        go there; returns the child index the marker goes at."""
+        pos = 0
+        for i, run in enumerate(list(para)):
+            if run.tag != _tag(W, "r"):
+                continue
+            text = "".join(t.text or "" for t in run.iter(_tag(W, "t")))
+            if pos + len(text) <= offset:
+                pos += len(text)
+                continue
+            if pos == offset:
+                return i
+            cut = offset - pos
+            first = copy.deepcopy(run)
+            for t in first.iter(_tag(W, "t")):
+                t.text = (t.text or "")[:cut]
+                t.set(
+                    "{http://www.w3.org/XML/1998/namespace}space", "preserve"
+                )
+            for t in run.iter(_tag(W, "t")):
+                t.text = (t.text or "")[cut:]
+                t.set(
+                    "{http://www.w3.org/XML/1998/namespace}space", "preserve"
+                )
+            para.insert(i, first)
+            return i + 1
+        return len(para)
+
     def add_comments(
-        self, threads: list[list[tuple[str, str]]], paras: list[ET.Element]
+        self,
+        threads: list[list[tuple[str, str]]],
+        paras: list[ET.Element],
+        highlights: list[str | None] | None = None,
     ) -> None:
         """Attach comment threads, each a list of (author, text), to
-        paragraphs; ``paras[i]`` anchors ``threads[i]``."""
+        paragraphs; ``paras[i]`` anchors ``threads[i]``, around
+        ``highlights[i]`` if that text is found, else the whole paragraph."""
         if not threads:
             return
-        comments = ET.Element(_tag(W, "comments"))
-        extended = ET.Element(_tag(W15, "commentsEx"))
-        cid = 0
-        for thread, para in zip(threads, paras):
+        highlights = highlights or [None] * len(threads)
+        # Append to whatever comments the document already has
+        existing = self.parts.get("word/comments.xml")
+        comments = (
+            _parse(existing)
+            if existing is not None
+            else ET.Element(_tag(W, "comments"))
+        )
+        existing_ex = self.parts.get("word/commentsExtended.xml")
+        extended = (
+            _parse(existing_ex)
+            if existing_ex is not None
+            else ET.Element(_tag(W15, "commentsEx"))
+        )
+        cid = 1 + max(
+            (
+                int(c.get(_tag(W, "id"), "0"))
+                for c in comments.iter(_tag(W, "comment"))
+            ),
+            default=-1,
+        )
+        for thread, para, highlight in zip(threads, paras, highlights):
             parent_pid = None
+            para_text = "".join(t.text or "" for t in para.iter(_tag(W, "t")))
+            at = para_text.find(highlight) if highlight else -1
             for author, text in thread:
-                pid = f"{cid + 1:08X}"
+                pid = f"{0x7C000000 + cid:08X}"
                 c = ET.SubElement(comments, _tag(W, "comment"))
                 c.set(_tag(W, "id"), str(cid))
                 c.set(_tag(W, "author"), author)
@@ -379,26 +457,29 @@ class Document:
                 ref_run = ET.Element(_tag(W, "r"))
                 ref = ET.SubElement(ref_run, _tag(W, "commentReference"))
                 ref.set(_tag(W, "id"), str(cid))
-                # After the paragraph properties and any bookmarks
-                idx = 0
-                for i, child in enumerate(para):
-                    if child.tag in (
-                        _tag(W, "pPr"),
-                        _tag(W, "bookmarkStart"),
-                        _tag(W, "bookmarkEnd"),
-                    ):
-                        idx = i + 1
-                para.insert(idx, start)
-                para.append(end)
-                para.append(ref_run)
+                if at >= 0 and highlight:
+                    para.insert(
+                        self._split_run(para, at + len(highlight)), end
+                    )
+                    para.insert(self._split_run(para, at), start)
+                    para.append(ref_run)
+                else:
+                    # After the paragraph properties and any bookmarks
+                    idx = 0
+                    for i, child in enumerate(para):
+                        if child.tag in (
+                            _tag(W, "pPr"),
+                            _tag(W, "bookmarkStart"),
+                            _tag(W, "bookmarkEnd"),
+                        ):
+                            idx = i + 1
+                    para.insert(idx, start)
+                    para.append(end)
+                    para.append(ref_run)
                 parent_pid = parent_pid or pid
                 cid += 1
-        self.parts["word/comments.xml"] = ET.tostring(
-            comments, xml_declaration=True, encoding="UTF-8"
-        )
-        self.parts["word/commentsExtended.xml"] = ET.tostring(
-            extended, xml_declaration=True, encoding="UTF-8"
-        )
+        self.parts["word/comments.xml"] = _dump(comments, existing)
+        self.parts["word/commentsExtended.xml"] = _dump(extended, existing_ex)
         self._add_rel("comments", "comments.xml")
         self._add_rel(COMMENTS_EX_TYPE, "commentsExtended.xml", full=True)
         self._ensure_override("/word/comments.xml", COMMENTS_CT)

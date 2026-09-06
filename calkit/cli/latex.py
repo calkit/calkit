@@ -708,7 +708,7 @@ def to_docx(
         original[name] = para.text
         para_for_block.setdefault(id(blk), para.element)
     # Existing comment blocks in the source go out as Word comments
-    threads, anchors = [], []
+    threads, anchors, highlights = [], [], []
     for path in sorted({ln.path for ln in lines}):
         file_lines = Path(path).read_text().split("\n")
         for tc in calkit.latex.parse_comments(file_lines):
@@ -719,7 +719,8 @@ def to_docx(
             if blk is not None and id(blk) in para_for_block:
                 threads.append(tc.entries)
                 anchors.append(para_for_block[id(blk)])
-    doc.add_comments(threads, anchors)
+                highlights.append(tc.highlight)
+    doc.add_comments(threads, anchors, highlights)
     if comment_only:
         doc.protect("comments")
     else:
@@ -877,7 +878,9 @@ def merge_docx(
                 for c in comments
                 if c.parent_id and by_id.get(c.parent_id) is root
             ]
-            tc = calkit.latex.TexComment([(root.author, root.text)] + replies)
+            tc = calkit.latex.TexComment(
+                [(root.author, root.text)] + replies, highlight=root.highlight
+            )
             if root.bookmark is None:
                 warn(
                     f"Comment by {root.author} has no anchor: {root.text[:60]}"

@@ -195,6 +195,39 @@ def test_docx_round_trip(
         ["calkit", "latex", "merge-docx", "reviews/accepted.docx"], check=True
     )
     assert Path("paper/methods.tex").read_text() == methods
+    # A comment on a selection carries the selected text as its highlight,
+    # in both directions
+    doc = calkit.docx.Document("reviews/accepted.docx")
+    intro = next(
+        p for p in doc.paragraphs() if p.text.startswith("Wakes matter")
+    )
+    assert intro.element is not None
+    doc.add_comments(
+        [[("R. Viewer", "Cite more")]], [intro.element], ["wind farm layout"]
+    )
+    doc.save("reviews/highlight.docx")
+    again = calkit.docx.Document("reviews/highlight.docx")
+    assert [(c.author, c.highlight) for c in again.comments()][-1] == (
+        "R. Viewer",
+        "wind farm layout",
+    )
+    assert (
+        next(
+            p for p in again.paragraphs() if p.text.startswith("Wakes matter")
+        ).text
+        == intro.text
+    )
+    subprocess.run(
+        ["calkit", "latex", "merge-docx", "reviews/highlight.docx"],
+        check=True,
+    )
+    assert (
+        '% COMMENT highlight="wind farm layout"\n'
+        "%   R. Viewer:\n"
+        "%     Cite more\n"
+        "Wakes matter"
+    ) in Path("paper/main.tex").read_text()
+    main = Path("paper/main.tex").read_text()
     # A thread resolved in Word is removed from the source
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/resolved.docx"], check=True
@@ -202,7 +235,7 @@ def test_docx_round_trip(
     assert "% COMMENT" not in Path("paper/methods.tex").read_text()
     assert Path("paper/main.tex").read_text() == main
     merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
-    assert len(merges) == 5
+    assert len(merges) == 6
     fixture = returned.read_original()
     assert fixture is not None
     fixture_uuid = fixture.uuid

@@ -298,6 +298,26 @@ class Document:
         settings = ET.fromstring(self.parts["word/settings.xml"])
         return settings.find(_tag(W, "trackRevisions")) is not None
 
+    def show_all_markup(self) -> None:
+        """Force the "All Markup" display mode when the document opens.
+
+        Without this, Word falls back to its own app-wide display
+        preference (often "Simple Markup"), which hides inline insertions
+        and deletions a reviewer needs to see. Appended rather than run
+        through ``_settings_insert``: unlike trackRevisions/
+        documentProtection, w:revisionView belongs near the very end of
+        CT_Settings' schema order, well after w:defaultTabStop.
+        """
+        settings = _parse(self.parts["word/settings.xml"])
+        for old in settings.findall(_tag(W, "revisionView")):
+            settings.remove(old)
+        el = ET.SubElement(settings, _tag(W, "revisionView"))
+        for attr in ("insDel", "formatting", "inkAnnotations", "markup"):
+            el.set(_tag(W, attr), "1")
+        self.parts["word/settings.xml"] = _dump(
+            settings, self.parts["word/settings.xml"]
+        )
+
     def protect(self, edit: str) -> None:
         """Lock the document to comments or tracked changes (no password)."""
         el = ET.Element(_tag(W, "documentProtection"))
@@ -604,6 +624,12 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
         word = win32com.client.Dispatch("Word.Application")
         word.DisplayAlerts = 0
         doc = word.Documents.Open(pdf_path, ConfirmConversions=False)
+        # Word's PDF reconstruction leaves the doc protected/marked final,
+        # which blocks editing and commenting; macOS's import doesn't.
+        if doc.ProtectionType != -1:  # wdNoProtection
+            doc.Unprotect()
+        doc.Final = False
+        doc.ReadOnlyRecommended = False
         doc.SaveAs2(tmp_path, FileFormat=12)
         doc.Close(False)
     else:

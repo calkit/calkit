@@ -84,6 +84,16 @@ def test_latex_source_helpers(project: Path) -> None:
     )
     assert inserted is not None
     assert inserted[0].startswith("Wakes really matter for wind")
+    # An insertion whose preceding word ("a") recurs elsewhere in the block
+    # still lands, by widening the anchor phrase until it's unique.
+    abstract = next(b for b in blks if b.text.startswith("We study the wake"))
+    ambiguous = calkit.latex.apply_edit(
+        abstract,
+        "We study the wake of a model turbine.",
+        "We study the wake of a sick model turbine.",
+    )
+    assert ambiguous is not None
+    assert "of a sick model turbine" in "\n".join(ambiguous)
     assert (
         calkit.latex.apply_edit(
             methods_blk, "frequency was fs = 1 kHz", "frequency was fs = 2 kHz"

@@ -1946,6 +1946,18 @@ def to_dvc(
         # spawning a git subprocess per output (~100 ms each).
         if write and manage_gitignore:
             repo = calkit.git.get_repo(wdir)
+            # A subproject is usually a plain subdirectory rather than its
+            # own git repo, so an output path relative to it (``wdir``) must
+            # be re-based onto the enclosing repo's root before it's handed
+            # to the ignore helpers below, or they'd write the rule into the
+            # top-level .gitignore under the wrong, subproject-relative path.
+            repo_root = Path(repo.working_dir).resolve()
+            wdir_rel = Path(wdir or ".").resolve().relative_to(repo_root)
+            wdir_rel_posix = wdir_rel.as_posix()
+
+            def _repo_rel(p: str) -> str:
+                return f"{wdir_rel_posix}/{p}" if wdir_rel_posix != "." else p
+
             # Ensure we catch any Jupyter Notebook outputs
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
@@ -1965,13 +1977,19 @@ def to_dvc(
             old_stage = existing_dvc_stages.get(stage_name, {})
             for old_path in calkit.dvc.out_paths_from_stage(old_stage):
                 if old_path not in current_out_paths:
-                    calkit.git.ensure_path_is_not_ignored(repo, path=old_path)
+                    calkit.git.ensure_path_is_not_ignored(
+                        repo, path=_repo_rel(old_path)
+                    )
             # Deal with any gitignore changes necessary
             for out in outputs:
                 if isinstance(out, PathOutput) and out.storage is None:
-                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                 elif isinstance(out, PathOutput) and out.storage == "git":
-                    calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_not_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                     if out.path.endswith(".ipynb"):
                         # A notebook stage's storage is declared here, in the
                         # pipeline, so a clean filter installed in the clone
@@ -1980,10 +1998,12 @@ def to_dvc(
                         # commit bytes that don't match what DVC hashed, with
                         # nothing showing as modified locally.
                         calkit.git.ensure_path_is_not_filtered(
-                            repo, path=out.path
+                            repo, path=_repo_rel(out.path)
                         )
                 elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
-                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                     calkit.dvc.zip.add(out.path, is_stage_output=True)
         # For LaTeX stages, warn on a latexmkrc/output_dir mismatch and keep
         # the generated aux files out of Git via a managed .gitignore block.

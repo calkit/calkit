@@ -518,14 +518,27 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
             continue
         new_span = " ".join(nw[j1:j2])
         if tag == "insert":
-            # Anchor on the preceding word
+            # Anchor on the preceding word(s), widening the phrase until
+            # it's unique -- a single preceding word is often repeated
+            # elsewhere in the block even when the insertion point isn't
+            # anywhere near markup.
             if i1 == 0:
                 return None
-            pattern = (
-                r"(?<![A-Za-z])" + re.escape(ow[i1 - 1]) + r"(?![A-Za-z])"
-            )
-            hits = list(re.finditer(pattern, src))
-            if len(hits) != 1:
+            hits = None
+            for k in range(1, i1 + 1):
+                phrase = ow[i1 - k : i1]
+                pattern = (
+                    r"(?<![A-Za-z])"
+                    + r"[\s~]+".join(re.escape(w) for w in phrase)
+                    + r"(?![A-Za-z])"
+                )
+                found = list(re.finditer(pattern, src))
+                if len(found) == 1:
+                    hits = found
+                    break
+                if not found:
+                    break
+            if hits is None:
                 return None
             at = hits[0].end()
             src = src[:at] + " " + new_span + src[at:]

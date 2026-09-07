@@ -737,6 +737,7 @@ def to_docx(
         doc.protect("comments")
     else:
         doc.track_changes()
+    doc.show_all_markup()
     rev, dirty = None, False
     try:
         repo = calkit.git.get_repo()

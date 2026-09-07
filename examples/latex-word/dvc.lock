@@ -10,54 +10,54 @@ stages:
       nfiles: 2
     - path: paper/figures
       hash: md5
-      md5: ed8090d325a61eaf205c05b580906681.dir
-      size: 10835
+      md5: a47f1c47051ce6c45a28060ec6f6f3f7.dir
+      size: 10834
       nfiles: 2
     - path: paper/main.tex
       hash: md5
-      md5: 04cb52487ba170543c68108486110272
-      size: 1530
+      md5: 1d0fe2c1186498c3960dfd71d0fe5fc3
+      size: 1587
     - path: paper/methods.tex
       hash: md5
-      md5: dc72182bfa9c42e69f41247216f7632f
-      size: 671
+      md5: b56a59736c54be896d9194ac318c84fd
+      size: 692
     - path: paper/refs.bib
       hash: md5
-      md5: ffcc0d351b85648c6ed8cf6c098fc8f2
-      size: 388
+      md5: 5ab1183dc30c5f6e36c11ea050165e93
+      size: 404
     outs:
     - path: paper/main.pdf
       hash: md5
-      md5: 0db2cb0f07abc9039273e3cbf3d3d347
-      size: 124860
+      md5: 52b546095ffc2c467be10710f256f89d
+      size: 125002
   plot-wake:
     cmd: calkit xenv -n py --no-check -- python scripts/plot-wake.py
     deps:
     - path: .calkit/env-locks/py
       hash: md5
-      md5: 7971f102faaa43f0e2abdd58c6dab862.dir
-      size: 189
-      nfiles: 1
+      md5: 399b8b8c9af3162242d15f5feee3462b.dir
+      size: 378
+      nfiles: 2
     - path: scripts/plot-wake.py
       hash: md5
-      md5: d408073e0b7d015b98bc37327afd10e2
-      size: 500
+      md5: 0f3b586290046a1651601938699a780c
+      size: 518
     outs:
     - path: figures/wake-deficit.pdf
       hash: md5
-      md5: 54d6a1c9d11678e62db731a90bd514cd
-      size: 10817
+      md5: e10454178199440ef9821ccf9810ad4b
+      size: 10815
   figs-to-paper:
-    cmd: calkit map-paths --dir-to-dir-replace 'figures->paper/figures'
+    cmd: calkit map-paths --dir-to-dir-replace "figures->paper/figures"
     deps:
     - path: figures
       hash: md5
-      md5: ed8090d325a61eaf205c05b580906681.dir
-      size: 10835
+      md5: a47f1c47051ce6c45a28060ec6f6f3f7.dir
+      size: 10834
       nfiles: 2
     outs:
     - path: paper/figures
       hash: md5
-      md5: ed8090d325a61eaf205c05b580906681.dir
-      size: 10835
+      md5: a47f1c47051ce6c45a28060ec6f6f3f7.dir
+      size: 10834
       nfiles: 2

@@ -784,7 +784,9 @@ class MapPathsStage(Stage):
 
         @property
         def arg(self) -> str:
-            return f"--{self.kind} '{self.src}->{self.dest}'"
+            # Double quotes, since cmd.exe on Windows doesn't treat single
+            # quotes as quoting and would let '>' trigger redirection.
+            return f'--{self.kind} "{self.src}->{self.dest}"'
 
         @property
         def out_path(self) -> str:
@@ -806,7 +808,9 @@ class MapPathsStage(Stage):
 
         @property
         def arg(self) -> str:
-            return f"--{self.kind} '{self.src}->{self.dest}'"
+            # Double quotes, since cmd.exe on Windows doesn't treat single
+            # quotes as quoting and would let '>' trigger redirection.
+            return f'--{self.kind} "{self.src}->{self.dest}"'
 
         @property
         def out_path(self) -> str:
@@ -828,7 +832,9 @@ class MapPathsStage(Stage):
 
         @property
         def arg(self) -> str:
-            return f"--{self.kind} '{self.src}->{self.dest}'"
+            # Double quotes, since cmd.exe on Windows doesn't treat single
+            # quotes as quoting and would let '>' trigger redirection.
+            return f'--{self.kind} "{self.src}->{self.dest}"'
 
         @property
         def out_path(self) -> str:
@@ -868,7 +874,9 @@ class MapPathsStage(Stage):
 
         @property
         def arg(self) -> str:
-            return f"--{self.kind} '{self.src}->{self.dest}'"
+            # Double quotes, since cmd.exe on Windows doesn't treat single
+            # quotes as quoting and would let '>' trigger redirection.
+            return f'--{self.kind} "{self.src}->{self.dest}"'
 
         @property
         def out_path(self) -> str:

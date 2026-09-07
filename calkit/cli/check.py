@@ -1517,7 +1517,9 @@ def check_docker_env(
             deps_md5s=deps_md5s,
             run_config=run_config,
         )
-        with open(arch_lock_fpath, "w") as f:
+        # newline="\n" so the file is byte-identical on every platform,
+        # rather than a Windows checkout flipping it to CRLF.
+        with open(arch_lock_fpath, "w", newline="\n") as f:
             json.dump(arch_lock, f, indent=4)
 
     current_arch = get_docker_arch()

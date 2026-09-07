@@ -24,5 +24,5 @@ calkit latex merge-docx reviews/main-for-review.docx
 ```
 
 Check `git diff` to see what landed in the source, then rebuild and export
-again for another round.
+again (with `--force` to replace the old copy) for another round.
 Records of each export and merge are written under `.calkit/latex/`.

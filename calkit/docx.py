@@ -274,15 +274,31 @@ class Document:
             core, self.parts["docProps/core.xml"]
         )
 
+    # The stretch of CT_Settings' schema order we write into; Word refuses
+    # a settings part whose elements are out of order
+    _SETTINGS_ORDER = [
+        "revisionView",
+        "trackRevisions",
+        "doNotTrackMoves",
+        "doNotTrackFormatting",
+        "documentProtection",
+        "autoFormatOverride",
+        "styleLockTheme",
+        "styleLockQFSet",
+        "defaultTabStop",
+    ]
+
     def _settings_insert(self, el: ET.Element) -> None:
         """Add a settings element in schema order, replacing any of its
-        kind: after w:zoom and friends, before w:defaultTabStop."""
+        kind."""
         settings = _parse(self.parts["word/settings.xml"])
         for old in settings.findall(el.tag):
             settings.remove(old)
+        order = [_tag(W, t) for t in self._SETTINGS_ORDER]
+        rank = order.index(el.tag)
         idx = len(settings)
         for i, child in enumerate(settings):
-            if child.tag == _tag(W, "defaultTabStop"):
+            if child.tag in order and order.index(child.tag) > rank:
                 idx = i
                 break
         settings.insert(idx, el)
@@ -299,24 +315,16 @@ class Document:
         return settings.find(_tag(W, "trackRevisions")) is not None
 
     def show_all_markup(self) -> None:
-        """Force the "All Markup" display mode when the document opens.
+        """Ask for the "All Markup" display when the document opens.
 
         Without this, Word falls back to its own app-wide display
         preference (often "Simple Markup"), which hides inline insertions
-        and deletions a reviewer needs to see. Appended rather than run
-        through ``_settings_insert``: unlike trackRevisions/
-        documentProtection, w:revisionView belongs near the very end of
-        CT_Settings' schema order, well after w:defaultTabStop.
+        and deletions a reviewer needs to see.
         """
-        settings = _parse(self.parts["word/settings.xml"])
-        for old in settings.findall(_tag(W, "revisionView")):
-            settings.remove(old)
-        el = ET.SubElement(settings, _tag(W, "revisionView"))
+        el = ET.Element(_tag(W, "revisionView"))
         for attr in ("insDel", "formatting", "inkAnnotations", "markup"):
             el.set(_tag(W, attr), "1")
-        self.parts["word/settings.xml"] = _dump(
-            settings, self.parts["word/settings.xml"]
-        )
+        self._settings_insert(el)
 
     def protect(self, edit: str) -> None:
         """Lock the document to comments or tracked changes (no password)."""

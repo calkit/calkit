@@ -688,8 +688,10 @@ def to_docx(
     if not os.path.isfile(pdf_path):
         raise_error(f"{pdf_path} does not exist")
     if output is None:
-        output = str(
-            Path(pdf_path).with_name(Path(pdf_path).stem + "-for-review.docx")
+        output = (
+            Path(pdf_path)
+            .with_name(Path(pdf_path).stem + "-for-review.docx")
+            .as_posix()
         )
     if os.path.exists(output) and not force:
         raise_error(f"{output} already exists; use --force to overwrite it")
@@ -757,8 +759,8 @@ def to_docx(
         uuid=export_id,
         created=datetime.datetime.now(datetime.timezone.utc),
         source=source,
-        pdf=pdf_path,
-        docx=output,
+        pdf=Path(pdf_path).as_posix(),
+        docx=Path(output).as_posix(),
         rev=rev,
         dirty=dirty,
         permission="comment" if comment_only else "suggest",
@@ -770,7 +772,9 @@ def to_docx(
     )
     os.makedirs(calkit.latex.DOCX_EXPORTS_DIR, exist_ok=True)
     with open(
-        os.path.join(calkit.latex.DOCX_EXPORTS_DIR, f"{export_id}.json"), "w"
+        os.path.join(calkit.latex.DOCX_EXPORTS_DIR, f"{export_id}.json"),
+        "w",
+        encoding="utf-8",
     ) as f:
         f.write(record.model_dump_json(indent=2))
     typer.echo(
@@ -974,7 +978,7 @@ def merge_docx(
     record = DocxMerge(
         uuid=original.uuid,
         created=datetime.datetime.now(datetime.timezone.utc),
-        docx=docx_path,
+        docx=Path(docx_path).as_posix(),
         rev=rev,
         authors=sorted(seen),
         last_modified_by=doc.last_modified_by(),
@@ -989,6 +993,7 @@ def merge_docx(
             calkit.latex.DOCX_MERGES_DIR, f"{original.uuid}-{stamp}.json"
         ),
         "w",
+        encoding="utf-8",
     ) as f:
         f.write(record.model_dump_json(indent=2))
     counts = {

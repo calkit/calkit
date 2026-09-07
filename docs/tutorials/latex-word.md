@@ -12,10 +12,11 @@ but others on the team may not want to engage in that way.
 They prefer a WYSIWYG experience without needing to sign up for a web
 app like Overleaf (or Calkit for that matter).
 
-However, converting from LaTeX to Word with something like
+Though it is an awesome tool,
+converting from LaTeX to Word with something like
 [Pandoc](https://pandoc.org)
 produces
-a Word document that doesn't look like the final output,
+a Word document that doesn't look like the compiled LaTeX,
 and migrating the contributions back into LaTeX is a manual process.
 For these situations, Calkit supports a workflow where the source of
 truth is LaTeX, but Word documents can be sent out for review,
@@ -103,7 +104,7 @@ Comments are written into the source as LaTeX comments,
 just above the paragraph they were left on, e.g.:
 
 ```latex
-% COMMENT highlight="this is optional highlighted text"
+% COMMENT highlight={text: "this is optional highlighted text"}
 %   A. Reviewer:
 %     Quantify this: give an RMS error. If this goes over 80 characters it will
 %     indent.
@@ -136,3 +137,8 @@ Comments left in the `.tex` that follow the format above will be exported
 to `.docx`.
 It's probably a good idea to move the old review copies and keep track
 of who you sent them to, how, and when.
+
+## Example
+
+For an example project that uses this approach,
+see [here](https://github.com/calkit/calkit/tree/main/examples/latex-word).

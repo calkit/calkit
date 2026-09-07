@@ -775,6 +775,7 @@ def to_docx(
         os.path.join(calkit.latex.DOCX_EXPORTS_DIR, f"{export_id}.json"),
         "w",
         encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(record.model_dump_json(indent=2))
     typer.echo(
@@ -994,6 +995,7 @@ def merge_docx(
         ),
         "w",
         encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(record.model_dump_json(indent=2))
     counts = {

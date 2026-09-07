@@ -629,17 +629,30 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     elif sys.platform == "win32":
         import win32com.client  # type: ignore[import-not-found]
 
-        word = win32com.client.Dispatch("Word.Application")
+        # Reuse a running Word rather than quitting one the user has open
+        try:
+            word = win32com.client.GetActiveObject("Word.Application")
+            started = False
+        except Exception:
+            word = win32com.client.Dispatch("Word.Application")
+            started = True
         word.DisplayAlerts = 0
-        doc = word.Documents.Open(pdf_path, ConfirmConversions=False)
-        # Word's PDF reconstruction leaves the doc protected/marked final,
-        # which blocks editing and commenting; macOS's import doesn't.
-        if doc.ProtectionType != -1:  # wdNoProtection
-            doc.Unprotect()
-        doc.Final = False
-        doc.ReadOnlyRecommended = False
-        doc.SaveAs2(tmp_path, FileFormat=12)
-        doc.Close(False)
+        doc = None
+        try:
+            doc = word.Documents.Open(pdf_path, ConfirmConversions=False)
+            # Word's PDF reconstruction leaves the doc protected/marked
+            # final, which blocks editing and commenting; macOS's import
+            # doesn't.
+            if doc.ProtectionType != -1:  # wdNoProtection
+                doc.Unprotect()
+            doc.Final = False
+            doc.ReadOnlyRecommended = False
+            doc.SaveAs2(tmp_path, FileFormat=12)
+        finally:
+            if doc is not None:
+                doc.Close(False)
+            if started:
+                word.Quit()
     else:
         raise RuntimeError(
             "Converting PDF to Word requires Word on macOS or Windows"

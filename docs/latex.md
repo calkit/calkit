@@ -224,6 +224,8 @@ of text in the following block.
 Each comment has an author name and optional email and timestamp.
 Indentation is used to denote where each message starts and ends, and the
 comment thread initiation metadata can span multiple lines if needed.
+A highlight occurrence, `occ`, is assumed to be the first (0),
+if omitted.
 For example:
 
 ```latex

@@ -9,7 +9,7 @@ import re
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from calkit.core import LOCAL_DIR
 
@@ -552,47 +552,128 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
     return [ln.rstrip() for ln in src.split("\n") if ln.strip()]
 
 
-_ATTR_RE = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
+_AUTHOR_RE = re.compile(
+    r"^(?P<name>.*?)\s*(?:<(?P<email>[^>]*)>)?\s*(?:\((?P<date>[^)]*)\))?:$"
+)
 
 
-def _attrs(line: str) -> dict[str, str]:
-    return {k: q or bare for k, q, bare in _ATTR_RE.findall(line)}
+def _parse_header(text: str) -> dict[str, Any]:
+    """The key=value attributes on a COMMENT line; a value is a bare word,
+    a quoted string, or a YAML flow mapping like {text: "x", occ: 0}."""
+    import json
+
+    from calkit import ryaml
+
+    out: dict[str, Any] = {}
+    i = 0
+    while True:
+        m = re.compile(r"\s*(\w+)=").match(text, i)
+        if not m:
+            return out
+        key, i = m.group(1), m.end()
+        if i < len(text) and text[i] == "{":
+            depth, j, quoted = 0, i, False
+            while j < len(text):
+                ch = text[j]
+                if ch == '"' and text[j - 1] != "\\":
+                    quoted = not quoted
+                elif not quoted and ch == "{":
+                    depth += 1
+                elif not quoted and ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            out[key] = ryaml.load(text[i : j + 1])
+            i = j + 1
+        elif i < len(text) and text[i] == '"':
+            m2 = re.compile(r'"((?:[^"\\]|\\.)*)"').match(text, i)
+            if not m2:
+                return out
+            out[key], i = json.loads(m2.group(0)), m2.end()
+        else:
+            m3 = re.compile(r"\S*").match(text, i)
+            assert m3 is not None
+            out[key], i = m3.group(0), m3.end()
+
+
+def word_date(value: str | None) -> str | None:
+    """A Word timestamp like 2026-09-06T08:44:00Z as 2026-09-06 08:44."""
+    if not value:
+        return None
+    m = re.match(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})", value)
+    return f"{m.group(1)} {m.group(2)}" if m else value
+
+
+@dataclass
+class Entry:
+    """One message in a thread."""
+
+    author: str
+    text: str
+    email: str | None = None
+    date: str | None = None
+
+    def header(self) -> str:
+        out = self.author
+        if self.email:
+            out += f" <{self.email}>"
+        if self.date:
+            out += f" ({self.date})"
+        return out + ":"
 
 
 @dataclass
 class TexComment:
-    """A comment thread in the source: entries of (author, text), the
-    first being the comment itself, above the paragraph it's about."""
+    """A comment thread in the source, above the paragraph it's about.
 
-    entries: list[tuple[str, str]]
+    The first entry is the comment itself, the rest are replies.
+    """
+
+    entries: list[Entry]
     highlight: str | None = None
+    highlight_occ: int = 0
     resolved: bool = False
     lineno: int = 0
     nlines: int = 0
 
     @property
     def author(self) -> str:
-        return self.entries[0][0]
+        return self.entries[0].author
 
     @property
     def text(self) -> str:
-        return self.entries[0][1]
+        return self.entries[0].text
 
     @property
-    def replies(self) -> list[tuple[str, str]]:
+    def replies(self) -> list[Entry]:
         return self.entries[1:]
 
+    def messages(self) -> list[tuple[str, str]]:
+        return [(e.author, e.text) for e in self.entries]
+
     def render(self) -> list[str]:
-        head = "% COMMENT"
-        if self.highlight:
-            head += ' highlight="%s"' % self.highlight.replace('"', "'")
+        import json
+
+        attrs = []
         if self.resolved:
-            head += " resolved=true"
-        out = [head]
-        for author, text in self.entries:
-            out.append(f"%   {author}:")
+            attrs.append("resolved=true")
+        if self.highlight:
+            value = f"text: {json.dumps(self.highlight)}"
+            if self.highlight_occ:
+                value += f", occ: {self.highlight_occ}"
+            attrs.append("highlight={" + value + "}")
+        out = ["% COMMENT"]
+        # Attributes continue onto their own lines when they don't fit
+        for attr in attrs:
+            if len(out[-1]) + 1 + len(attr) <= 79 or out[-1] == "% COMMENT":
+                out[-1] += " " + attr
+            else:
+                out.append(f"%   {attr}")
+        for e in self.entries:
+            out.append(f"%   {e.header()}")
             out += textwrap.wrap(
-                text,
+                e.text,
                 width=79,
                 initial_indent="%     ",
                 subsequent_indent="%     ",
@@ -609,24 +690,41 @@ def parse_comments(lines: list[str]) -> list[TexComment]:
             i += 1
             continue
         start = i
-        attrs = _attrs(lines[i])
-        entries: list[tuple[str, str]] = []
+        header = lines[i][len("% COMMENT") :]
+        entries: list[Entry] = []
         i += 1
         while i < len(lines) and re.match(r"%(   |$)", lines[i]):
             body = lines[i][1:]
             indent = len(body) - len(body.lstrip())
-            if indent == 3 and body.rstrip().endswith(":"):
-                entries.append((body.strip()[:-1], ""))
+            author = _AUTHOR_RE.match(body.strip()) if indent == 3 else None
+            if not entries and indent == 3 and re.match(r"\s*\w+=", body):
+                header += " " + body.strip()
+            elif author is not None:
+                entries.append(
+                    Entry(
+                        author["name"].strip(),
+                        "",
+                        author["email"] or None,
+                        author["date"] or None,
+                    )
+                )
             elif indent > 3 and entries:
-                author, text = entries[-1]
-                entries[-1] = (author, (text + " " + body.strip()).strip())
+                e = entries[-1]
+                e.text = (e.text + " " + body.strip()).strip()
             i += 1
         if entries:
+            attrs = _parse_header(header)
+            highlight = attrs.get("highlight")
+            if isinstance(highlight, dict):
+                text, occ = highlight.get("text"), highlight.get("occ", 0)
+            else:
+                text, occ = highlight, 0
             out.append(
                 TexComment(
                     entries,
-                    attrs.get("highlight"),
-                    attrs.get("resolved") == "true",
+                    str(text) if text else None,
+                    int(occ or 0),
+                    str(attrs.get("resolved", "")).lower() == "true",
                     start + 1,
                     i - start,
                 )

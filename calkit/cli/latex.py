@@ -730,9 +730,11 @@ def to_docx(
                 (b for b in blks if b.path == path and b.lineno >= after), None
             )
             if blk is not None and id(blk) in para_for_block:
-                threads.append(tc.entries)
+                threads.append(tc.messages())
                 anchors.append(para_for_block[id(blk)])
-                highlights.append(tc.highlight)
+                highlights.append(
+                    (tc.highlight, tc.highlight_occ) if tc.highlight else None
+                )
                 resolved.append(tc.resolved)
     doc.add_comments(threads, anchors, highlights, resolved)
     if comment_only:
@@ -912,14 +914,20 @@ def merge_docx(
         # the bottom up so earlier line numbers stay valid
         placed: list[tuple[calkit.latex.Block, calkit.latex.TexComment]] = []
         for root in roots:
-            replies = [
-                (c.author, c.text)
+            thread = [root] + [
+                c
                 for c in comments
                 if c.parent_id and by_id.get(c.parent_id) is root
             ]
             tc = calkit.latex.TexComment(
-                [(root.author, root.text)] + replies,
+                [
+                    calkit.latex.Entry(
+                        c.author, c.text, date=calkit.latex.word_date(c.date)
+                    )
+                    for c in thread
+                ],
                 highlight=root.highlight,
+                highlight_occ=root.highlight_occ,
                 resolved=root.done,
             )
             if root.bookmark is None:
@@ -953,10 +961,18 @@ def merge_docx(
             )
             if existing is not None:
                 if (
-                    existing.replies == tc.replies
+                    existing.messages() == tc.messages()
                     and existing.resolved == tc.resolved
                 ):
                     continue
+                # Word knows neither emails nor what the source already
+                # recorded, so carry those over for unchanged messages
+                known = {(e.author, e.text): e for e in existing.entries}
+                for e in tc.entries:
+                    old_e = known.get((e.author, e.text))
+                    if old_e is not None:
+                        e.email = old_e.email
+                        e.date = old_e.date or e.date
                 del content[
                     existing.lineno - 1 : existing.lineno - 1 + existing.nlines
                 ]

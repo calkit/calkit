@@ -108,6 +108,7 @@ class Comment:
     done: bool = False
     bookmark: str | None = None
     highlight: str | None = None
+    highlight_occ: int = 0
 
 
 @dataclass
@@ -358,6 +359,7 @@ class Document:
         anchors: dict[str, str | None] = {}
         ranges: dict[str, list[str]] = {}
         whole: dict[str, str] = {}
+        offsets: dict[str, int] = {}
         current = None
         for p in self.doc.iter(_tag(W, "p")):
             own = next(
@@ -377,6 +379,7 @@ class Document:
                     anchors[cid] = current
                     open_ids.add(cid)
                     ranges.setdefault(cid, [])
+                    offsets[cid] = len("".join(para_text))
                 elif el.tag == _tag(W, "commentRangeEnd"):
                     open_ids.discard(cid)
                 elif el.tag == _tag(W, "commentReference"):
@@ -388,7 +391,7 @@ class Document:
                     for oid in open_ids:
                         ranges[oid].append(el.text or "")
             for oid in list(ranges):
-                whole.setdefault(oid, normalize("".join(para_text)))
+                whole.setdefault(oid, "".join(para_text))
         out = []
         for c in ET.fromstring(data).iter(_tag(W, "comment")):
             first = c.find(_tag(W, "p"))
@@ -403,10 +406,16 @@ class Document:
                 )
             )
             cid = c.get(_tag(W, "id"), "")
-            # A range covering the whole paragraph says nothing extra
-            highlight = normalize("".join(ranges.get(cid, []))) or None
-            if highlight == whole.get(cid):
+            # A range covering the whole paragraph says nothing extra;
+            # otherwise say which occurrence of the text it is
+            raw = "".join(ranges.get(cid, []))
+            highlight: str | None = normalize(raw) or None
+            occ = 0
+            if highlight == normalize(whole.get(cid, "")):
                 highlight = None
+            elif highlight:
+                before = whole.get(cid, "")[: offsets.get(cid, 0)]
+                occ = before.count(raw) if raw else 0
             out.append(
                 Comment(
                     author=c.get(_tag(W, "author"), ""),
@@ -417,6 +426,7 @@ class Document:
                     done=done,
                     bookmark=anchors.get(cid),
                     highlight=highlight,
+                    highlight_occ=occ,
                 )
             )
         # Resolved is recorded on the root; replies inherit it
@@ -461,12 +471,13 @@ class Document:
         self,
         threads: list[list[tuple[str, str]]],
         paras: list[ET.Element],
-        highlights: list[str | None] | None = None,
+        highlights: list[tuple[str, int] | None] | None = None,
         resolved: list[bool] | None = None,
     ) -> None:
         """Attach comment threads, each a list of (author, text), to
-        paragraphs; ``paras[i]`` anchors ``threads[i]``, around
-        ``highlights[i]`` if that text is found, else the whole paragraph."""
+        paragraphs; ``paras[i]`` anchors ``threads[i]``, around the given
+        occurrence of ``highlights[i]`` if that text is found, else the
+        whole paragraph."""
         if not threads:
             return
         highlights = highlights or [None] * len(threads)
@@ -496,7 +507,15 @@ class Document:
         ):
             parent_pid = None
             para_text = "".join(t.text or "" for t in para.iter(_tag(W, "t")))
-            at = para_text.find(highlight) if highlight else -1
+            at = -1
+            if highlight:
+                text, occ = highlight
+                at = -1
+                for _ in range(occ + 1):
+                    at = para_text.find(text, at + 1)
+                    if at < 0:
+                        break
+                highlight = (text, occ) if at >= 0 else None
             for author, text in thread:
                 pid = f"{0x7C000000 + cid:08X}"
                 c = ET.SubElement(comments, _tag(W, "comment"))
@@ -524,7 +543,7 @@ class Document:
                 ref.set(_tag(W, "id"), str(cid))
                 if at >= 0 and highlight:
                     para.insert(
-                        self._split_run(para, at + len(highlight)), end
+                        self._split_run(para, at + len(highlight[0])), end
                     )
                     para.insert(self._split_run(para, at), start)
                     para.append(ref_run)

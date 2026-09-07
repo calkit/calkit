@@ -9,6 +9,7 @@ output, ``returned.docx`` has a reviewer's tracked edits and a comment,
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -125,15 +126,49 @@ def test_latex_source_helpers(project: Path) -> None:
     tc = comments[0]
     assert tc.author == "T. Author"
     assert tc.text == "Is this the right model for near wake?"
-    assert tc.replies == [("P. Bachant", "Probably fine for x/D > 3.")]
+    assert tc.messages()[1:] == [("P. Bachant", "Probably fine for x/D > 3.")]
     assert src[tc.lineno - 1 : tc.lineno - 1 + tc.nlines] == tc.render()
-    long = calkit.latex.TexComment([("A", "word " * 30)], highlight='a "b"')
+    # The full schema: emails, timestamps, quoted highlight text with an
+    # occurrence index, a header continued onto a second line, and bodies
+    # wrapped at 79 columns
+    long = calkit.latex.TexComment(
+        [
+            calkit.latex.Entry(
+                "A", ("word " * 30).strip(), "a@x.org", "2026-09-06 08:44"
+            ),
+            calkit.latex.Entry("Person, Other", "Reply: yes."),
+        ],
+        highlight='a "b", c',
+        highlight_occ=2,
+        resolved=True,
+    )
     rendered = long.render()
-    assert rendered[0] == "% COMMENT highlight=\"a 'b'\""
-    assert all(len(ln) <= 79 for ln in rendered) and len(rendered) > 3
-    assert calkit.latex.parse_comments(rendered)[0].entries == [
-        ("A", ("word " * 30).strip())
+    assert rendered[0] == (
+        '% COMMENT resolved=true highlight={text: "a \\"b\\", c", occ: 2}'
+    )
+    assert rendered[1] == "%   A <a@x.org> (2026-09-06 08:44):"
+    assert all(len(ln) <= 79 for ln in rendered) and len(rendered) > 5
+    back = calkit.latex.parse_comments(rendered)[0]
+    assert back.entries == long.entries
+    assert (back.highlight, back.highlight_occ, back.resolved) == (
+        'a "b", c',
+        2,
+        True,
+    )
+    split = [
+        "% COMMENT resolved=false",
+        '%   highlight={text: "something", occ: 0}',
+        "%   Someone Name <email@mail.com> (2025-01-01 01:00):",
+        "%     This is a comment.",
     ]
+    back = calkit.latex.parse_comments(split)[0]
+    assert (back.highlight, back.highlight_occ, back.resolved) == (
+        "something",
+        0,
+        False,
+    )
+    assert back.entries[0].email == "email@mail.com"
+    assert calkit.latex.word_date("2026-09-06T08:44:00Z") == "2026-09-06 08:44"
     assert calkit.latex.bookmark_name("paper/main.tex", 19).startswith("ck_")
 
 
@@ -218,7 +253,7 @@ def test_docx_round_trip(
     assert "sampling frequency" in Path("paper/methods.tex").read_text(
         encoding="utf-8"
     )
-    assert "%   A. Reviewer:" in Path("paper/main.tex").read_text(
+    assert "%   A. Reviewer" in Path("paper/main.tex").read_text(
         encoding="utf-8"
     )
     # After accepting in Word, both edits land and the comment is written
@@ -229,12 +264,11 @@ def test_docx_round_trip(
     methods = Path("paper/methods.tex").read_text(encoding="utf-8")
     assert "as shown by \\citet{smith2020}" in main
     assert "sampling frequency" not in methods
-    assert (
-        "% COMMENT\n"
-        "%   A. Reviewer:\n"
-        "%     Quantify this: give an RMS error.\n"
-        "The model in Eq."
-    ) in main
+    assert re.search(
+        r"% COMMENT\n%   A\. Reviewer \(\d{4}-\d\d-\d\d \d\d:\d\d\):\n"
+        r"%     Quantify this: give an RMS error\.\nThe model in Eq\.",
+        main,
+    )
     assert methods.count("% COMMENT") == 1
     # Merging again changes nothing
     subprocess.run(
@@ -260,14 +294,13 @@ def test_docx_round_trip(
     )
     assert intro.element is not None
     doc.add_comments(
-        [[("R. Viewer", "Cite more")]], [intro.element], ["wind farm layout"]
+        [[("R. Viewer", "Cite more")]], [intro.element], [("layout", 0)]
     )
     doc.save("reviews/highlight.docx")
     again = calkit.docx.Document("reviews/highlight.docx")
-    assert [(c.author, c.highlight) for c in again.comments()][-1] == (
-        "R. Viewer",
-        "wind farm layout",
-    )
+    assert [
+        (c.author, c.highlight, c.highlight_occ) for c in again.comments()
+    ][-1] == ("R. Viewer", "layout", 0)
     assert (
         next(
             p for p in again.paragraphs() if p.text.startswith("Wakes matter")
@@ -279,7 +312,7 @@ def test_docx_round_trip(
         check=True,
     )
     assert (
-        '% COMMENT highlight="wind farm layout"\n'
+        '% COMMENT highlight={text: "layout"}\n'
         "%   R. Viewer:\n"
         "%     Cite more\n"
         "Wakes matter"

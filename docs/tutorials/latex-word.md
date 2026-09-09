@@ -20,7 +20,7 @@ a Word document that doesn't look like the compiled LaTeX,
 and migrating the contributions back into LaTeX is a manual process.
 For these situations, Calkit supports a workflow where the source of
 truth is LaTeX, but Word documents can be sent out for review,
-and the project lead can merge the comments and edits from the `.docx` files
+and the project lead can merge the comments and edits from the .docx files
 back into the TeX source.
 
 <!-- prettier-ignore -->
@@ -78,14 +78,14 @@ When you're done in Word, merge it back into LaTeX with:
 calkit latex merge-docx reviews/main-for-review-pi-comments.docx
 ```
 
-This command assumes we've saved the `.docx` we got back into a
+This command assumes we've saved the .docx we got back into a
 `reviews` folder inside the project,
 which is just a convention; the file can be anywhere as it retains
 information about the LaTeX source from which it came.
 
 <!-- prettier-ignore -->
 !!! note
-    It's probably a good idea to save copies of the returned `.docx` files
+    It's probably a good idea to save copies of the returned .docx files
     to the project repo for posterity. You can do this with:
 
     ```sh
@@ -134,7 +134,7 @@ then merging in with `calkit latex merge-docx`.
 For the next round of review, use the `to-docx` command on the LaTeX PDF
 again.
 Comments left in the `.tex` that follow the format above will be exported
-to `.docx`.
+to .docx.
 It's probably a good idea to move the old review copies and keep track
 of who you sent them to, how, and when.
 

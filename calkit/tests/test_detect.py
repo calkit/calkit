@@ -963,6 +963,8 @@ using .LocalModule
 import ..ParentModule
 import Base: show
 x = 1; using Random
+@everywhere using Distributed
+@eval import SparseArrays
 # using Commented
 """
     deps = detect_julia_dependencies(code=code)
@@ -988,6 +990,44 @@ x = 1; using Random
     # A statement can follow a semicolon, but not a comment
     assert "Random" in deps
     assert "Commented" not in deps
+    # A macro can prefix the statement
+    assert "Distributed" in deps
+    assert "SparseArrays" in deps
+
+
+def test_detect_julia_dependencies_follows_includes(tmp_dir):
+    os.makedirs("src")
+    os.makedirs("scripts")
+    with open("scripts/run.jl", "w") as f:
+        f.write(
+            "using DataFrames\n"
+            'include("../src/helpers.jl")\n'
+            'include(joinpath(pkgdir(Foo), "experiments", "utils.jl"))\n'
+            'include("/elsewhere/outside.jl")\n'
+            'include("src/missing.jl")\n'
+        )
+    # Included files resolve their own includes relative to themselves, and a
+    # cycle back to the entry script must not hang
+    with open("src/helpers.jl", "w") as f:
+        f.write(
+            'import JLD2\ninclude("nested.jl")\ninclude("../scripts/run.jl")\n'
+        )
+    with open("src/nested.jl", "w") as f:
+        f.write("using CairoMakie\n")
+    # Outside the project, so its dependencies belong to its own project
+    os.makedirs("../outside_project", exist_ok=True)
+    with open("../outside_project/escaped.jl", "w") as f:
+        f.write("using ShouldNotAppear\n")
+    with open("src/reaches_out.jl", "w") as f:
+        f.write('include("../../outside_project/escaped.jl")\n')
+
+    deps = detect_julia_dependencies(script_path="scripts/run.jl")
+
+    assert deps == ["CairoMakie", "DataFrames", "JLD2"]
+    # A dynamic or absolute include path isn't followed, and neither is one
+    # escaping the project
+    escaped = detect_julia_dependencies(script_path="src/reaches_out.jl")
+    assert escaped == []
 
 
 def test_detect_dependencies_from_python_notebook(tmp_dir):

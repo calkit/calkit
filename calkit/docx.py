@@ -115,7 +115,7 @@ class Comment:
 class Original:
     """What the custom XML part records about the export."""
 
-    uuid: str
+    id: str
     rev: str | None
     source: str
     paragraphs: dict[str, str]
@@ -197,7 +197,7 @@ class Document:
     # Custom XML part carrying the original text and export identity
     def write_original(self, original: Original) -> None:
         root = ET.Element(_tag(CK_NS, "review"))
-        root.set("uuid", original.uuid)
+        root.set("id", original.id)
         root.set("source", original.source)
         if original.rev:
             root.set("rev", original.rev)
@@ -217,7 +217,7 @@ class Document:
             '<ds:datastoreItem ds:itemID="{%s}" xmlns:ds="http://schemas.'
             'openxmlformats.org/officeDocument/2006/customXml"><ds:schemaRefs>'
             '<ds:schemaRef ds:uri="%s"/></ds:schemaRefs></ds:datastoreItem>'
-            % (original.uuid.upper(), CK_NS)
+            % (original.id.upper(), CK_NS)
         ).encode()
         self.parts["customXml/_rels/item1.xml.rels"] = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -236,7 +236,7 @@ class Document:
         if root.tag != _tag(CK_NS, "review"):
             return None
         return Original(
-            uuid=root.get("uuid", ""),
+            id=root.get("id", ""),
             rev=root.get("rev"),
             source=root.get("source", ""),
             paragraphs={

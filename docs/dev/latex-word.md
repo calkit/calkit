@@ -261,7 +261,7 @@ The `.docx` is the contract, and the parts that must not change later:
   Tested: Word preserved it, and the bookmarks, through accepting all
   revisions and saving.
   The rev and path also go in the core properties (`identifier` as
-  `calkit-review:<uuid>:<rev>:<tex path>`) so they're visible in a
+  `calkit-review:<id>:<rev>:<tex path>`) so they're visible in a
   file dialog; those survived a save too.
   The UUID is unused in v1 and exists so sessions and hub delivery can
   key on it without touching the file format.

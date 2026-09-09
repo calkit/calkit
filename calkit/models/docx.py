@@ -1,7 +1,7 @@
 """Records of LaTeX review round trips through Word.
 
 Written to ``.calkit/latex/docx-exports`` and ``.calkit/latex/docx-merges``,
-one JSON file per run, named by export UUID (plus a timestamp for merges).
+one JSON file per run, named by export ID (plus a timestamp for merges).
 Committing them is optional; they're a history of what the CLI did, and
 what a hub would index if it wanted to track reviews.
 """
@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 
 class DocxExport(BaseModel):
-    uuid: str = Field(description="Identifier carried inside the .docx.")
+    id: str = Field(description="Identifier carried inside the .docx.")
     created: datetime
     source: str = Field(description="Main .tex file the PDF came from.")
     pdf: str
@@ -49,7 +49,7 @@ class DocxMergeChange(BaseModel):
 
 
 class DocxMerge(BaseModel):
-    uuid: str = Field(description="Export the merged document came from.")
+    export_id: str = Field(description="Export the merged document came from.")
     created: datetime
     docx: str
     rev: str | None = Field(default=None, description="Git commit at merge.")

@@ -758,7 +758,7 @@ def to_docx(
     doc.set_identifier(f"calkit-review:{export_id}:{rev or ''}:{source}")
     doc.save()
     record = DocxExport(
-        uuid=export_id,
+        id=export_id,
         created=datetime.datetime.now(datetime.timezone.utc),
         source=source,
         pdf=Path(pdf_path).as_posix(),
@@ -993,7 +993,7 @@ def merge_docx(
     seen = {a for p in doc.paragraphs() for a in p.authors}
     seen |= {c.author for c in doc.comments()}
     record = DocxMerge(
-        uuid=original.uuid,
+        export_id=original.id,
         created=datetime.datetime.now(datetime.timezone.utc),
         docx=Path(docx_path).as_posix(),
         rev=rev,
@@ -1007,7 +1007,7 @@ def merge_docx(
     stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
     with open(
         os.path.join(
-            calkit.latex.DOCX_MERGES_DIR, f"{original.uuid}-{stamp}.json"
+            calkit.latex.DOCX_MERGES_DIR, f"{original.id}-{stamp}.json"
         ),
         "w",
         encoding="utf-8",

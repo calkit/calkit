@@ -204,7 +204,7 @@ def test_docx_round_trip(
     original = doc.read_original()
     assert original is not None
     assert original.source == "paper/main.tex"
-    assert original.uuid
+    assert original.id
     assert doc.tracking() and doc.protection() is None
     paras = doc.paragraphs()
     assert sum(p.bookmark is not None for p in paras) == len(
@@ -220,7 +220,7 @@ def test_docx_round_trip(
     model = next(p for p in paras if p.text.startswith("The mean velocity"))
     assert comments[0].bookmark == model.bookmark
     records = os.listdir(calkit.latex.DOCX_EXPORTS_DIR)
-    assert records == [f"{original.uuid}.json"]
+    assert records == [f"{original.id}.json"]
     # Word bookkeeping survives Word: the fixtures were made from an export
     # like this one and edited in Word
     returned = calkit.docx.Document(str(FIXTURES / "returned.docx"))
@@ -358,8 +358,8 @@ def test_docx_round_trip(
     assert len(merges) == 7
     fixture = returned.read_original()
     assert fixture is not None
-    fixture_uuid = fixture.uuid
-    assert merges[0].startswith(fixture_uuid) and merges[0].endswith(".json")
+    fixture_id = fixture.id
+    assert merges[0].startswith(fixture_id) and merges[0].endswith(".json")
     # A document without Calkit's metadata is refused
     shutil.copy(FIXTURES / "word-import.docx", "reviews/plain.docx")
     res = subprocess.run(

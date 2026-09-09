@@ -65,22 +65,37 @@ def _person_from_options(
     return person.model_dump(exclude_none=True)
 
 
-def _split_template_subdir(
-    template: str, git_url: str
-) -> tuple[str, str | None]:
-    """Split a directory out of an 'owner/repo/path' template.
+def _parse_template(
+    template: str, hub_url: str
+) -> tuple[str, str | None, str | None]:
+    """Resolve a template to its name, Git URL, and directory in the repo.
 
-    One repo can hold several self-contained example projects, so a
-    template may name a directory within it. Only the shorthand form is
-    split; a full URL is left alone, since its path is the repo's.
+    'owner/project[/dir]', or that under the hub URL, names a project on
+    the hub, whose Git URL is looked up later, so it comes back as None.
+    An HTTPS or SSH URL works on any host, e.g.,
+    'https://github.com/owner/repo/dir'. One repo can hold several
+    self-contained example projects, so a template may name a directory
+    within it; the first two path segments are the repo. Other URLs,
+    e.g., 'file://', are used as is.
     """
-    if "://" in template or "github.com" in template:
-        return git_url, None
-    parts = template.strip("/").split("/")
-    if len(parts) <= 2:
-        return git_url, None
-    subdir = "/".join(parts[2:])
-    return git_url.rsplit("/" + subdir, 1)[0], subdir
+    import re
+
+    hub_url = hub_url.rstrip("/")
+    for prefix in (hub_url + "/", hub_url.split("://", 1)[-1] + "/"):
+        if template.startswith(prefix):
+            template = template.removeprefix(prefix)
+            break
+    m = re.match(r"^(https?://[^/]+/|[\w.-]+@[\w.-]+:)(.+)$", template)
+    if m is None and "://" in template:
+        return template, template, None
+    base, path = m.groups() if m else (None, template)
+    parts = path.strip("/").split("/")
+    if len(parts) < 2:
+        raise_error(f"Template '{template}' should be 'owner/project'")
+    parts[1] = parts[1].removesuffix(".git")
+    subdir = "/".join(parts[2:]) or None
+    url = base + "/".join(parts[:2]) if base else None
+    return "/".join(parts), url, subdir
 
 
 @new_app.command(name="project", cls=_NewProjectCommand)
@@ -137,10 +152,12 @@ def new_project(
         str | None,
         typer.Option(
             "--template",
+            "--from",
             "-t",
             help=(
-                "Template from which to derive the project, e.g., "
-                "'calkit/example-basic'."
+                "Template from which to derive the project: a hub project "
+                "as 'owner/project' or its hub URL, or a Git URL on any "
+                "host, e.g., 'https://github.com/owner/repo/dir'."
             ),
         ),
     ] = None,
@@ -412,24 +429,22 @@ def new_project(
         return
     # If using a template, clone it first
     if template:
-        # TODO: If the template is not a Git repo URL, make a request to the
-        # the hub to get it?
-        # For now, assume consistency between hub projects and
-        # GitHub repo URLs
-        if "github.com" in template:
-            template_git_url = template
-            template_name = template.split("github.com")[-1][1:].removesuffix(
-                ".git"
-            )
-        else:
-            template_name = template
-            template_git_url = f"https://github.com/{template}"
-        # A template can name a directory inside a repo, e.g.
-        # 'calkit/calkit/examples/markdown', so one repo can hold several
-        # self-contained examples.
-        template_git_url, template_subdir = _split_template_subdir(
-            template, template_git_url
+        template_name, template_git_url, template_subdir = _parse_template(
+            template, calkit.hub.get_hub_url()
         )
+        if template_git_url is None:
+            project = "/".join(template_name.split("/")[:2])
+            typer.echo(f"Fetching Git repo URL for {project} from the hub")
+            try:
+                template_git_url = calkit.hub.get(f"/projects/{project}")[
+                    "git_repo_url"
+                ]
+            except Exception as e:
+                raise_error(
+                    f"Could not fetch project {project} from the hub ({e}); "
+                    "for a repo not on the hub, pass its URL, e.g., "
+                    f"https://github.com/{template_name}"
+                )
         if template_subdir is None:
             # Now clone it
             subprocess.run(["git", "clone", template_git_url, abs_path])

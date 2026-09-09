@@ -7,6 +7,7 @@ import sys
 
 import git
 import pytest
+import typer
 
 import calkit
 import calkit.schema
@@ -2008,23 +2009,46 @@ def test_new_release_license_and_cff_authors(tmp_dir, monkeypatch):
     assert "Read 1 author(s) from CITATION.cff" in out
 
 
-def test_split_template_subdir():
-    # A template may name a directory inside a repo.
-    #
-    # One repo can hold several self-contained examples, e.g.
-    # 'calkit/calkit/examples/markdown'.
-    from calkit.cli.new import _split_template_subdir
+def test_parse_template():
+    from functools import partial
 
-    assert _split_template_subdir(
-        "calkit/example-basic", "https://github.com/calkit/example-basic"
-    ) == ("https://github.com/calkit/example-basic", None)
-    assert _split_template_subdir(
-        "calkit/calkit/examples/markdown",
-        "https://github.com/calkit/calkit/examples/markdown",
-    ) == ("https://github.com/calkit/calkit", "examples/markdown")
-    # A full URL's path belongs to the repo, so it is left alone
-    for url in [
-        "https://github.com/calkit/example-basic",
-        "file:///tmp/x/examples/demo",
+    from calkit.cli.new import _parse_template as parse
+
+    _parse_template = partial(parse, hub_url="https://calkit.io")
+    gh = "https://github.com/"
+    # Shorthand, or the hub URL with or without its scheme, names a hub
+    # project, whose Git URL is looked up later
+    for t in [
+        "calkit/example-basic",
+        "https://calkit.io/calkit/example-basic",
+        "calkit.io/calkit/example-basic",
     ]:
-        assert _split_template_subdir(url, url) == (url, None)
+        assert _parse_template(t) == ("calkit/example-basic", None, None)
+    assert _parse_template("owner/project/dir") == (
+        "owner/project/dir",
+        None,
+        "dir",
+    )
+    # URLs work on any host, HTTPS or SSH, with or without .git, and may
+    # name a directory inside the repo so one repo can hold several
+    # self-contained examples
+    assert _parse_template(gh + "calkit/calkit/examples/latex-word") == (
+        "calkit/calkit/examples/latex-word",
+        gh + "calkit/calkit",
+        "examples/latex-word",
+    )
+    assert _parse_template("https://gitlab.com/owner/repo.git") == (
+        "owner/repo",
+        "https://gitlab.com/owner/repo",
+        None,
+    )
+    assert _parse_template("git@codeberg.org:owner/repo.git/dir") == (
+        "owner/repo/dir",
+        "git@codeberg.org:owner/repo",
+        "dir",
+    )
+    # Other schemes have no owner/repo convention, so they're used as is
+    url = "file:///tmp/x/examples/demo"
+    assert _parse_template(url) == (url, url, None)
+    with pytest.raises(typer.Exit):
+        _parse_template("just-a-name")

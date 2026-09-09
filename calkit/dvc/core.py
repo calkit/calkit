@@ -57,10 +57,27 @@ class _StaleRWLockWarningFilter(logging.Filter):
         return "Auto removed it from the lock file" not in record.getMessage()
 
 
+class _SubdirHeadDiffWarningFilter(logging.Filter):
+    """Drop DVC's "does not contain a DVC repo" warning from data status.
+
+    ``_diff_head_to_index`` (in ``dvc/repo/data.py``) switches to ``HEAD`` to
+    diff it against the index, and for a project whose DVC repo lives in a
+    subdirectory of a larger Git repo (an isolated subproject, e.g. one
+    inside a ``calkit new subproject``), that switch spuriously raises
+    ``NotDvcRepoError`` even on the commit that's currently checked out. DVC's
+    own comment on the except block calls this "a bug in `repo.switch`", and
+    treats it as harmless by falling back to an empty index either way.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "does not contain a DVC repo" not in record.getMessage()
+
+
 _frozen_stage_warning_filter = _FrozenStageWarningFilter()
 for _name in ("dvc.repo.reproduce", "dvc.repo.status"):
     logging.getLogger(_name).addFilter(_frozen_stage_warning_filter)
 logging.getLogger("dvc.rwlock").addFilter(_StaleRWLockWarningFilter())
+logging.getLogger("dvc.repo.data").addFilter(_SubdirHeadDiffWarningFilter())
 
 
 def _tolerate_lock_release_failures() -> None:

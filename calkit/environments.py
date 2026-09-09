@@ -923,7 +923,8 @@ def write_system_env_lock(
         with open(lock_fpath, "r") as f:
             if f.read() == content:
                 return lock_fpath
-    with open(lock_fpath, "w") as f:
+    # newline="\n" so the file is byte-identical on every platform.
+    with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
     return lock_fpath
 

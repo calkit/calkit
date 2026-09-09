@@ -1,0 +1,58 @@
+owner: calkit
+name: example-latex-word
+title: LaTeX and Word review example
+description: >-
+  A LaTeX paper split across files, for trying the Word review round trip:
+  export a Word copy, mark it up, and merge the edits and comments back.
+
+requirements:
+  - docker
+  - uv
+
+environments:
+  py:
+    kind: uv-venv
+    path: requirements.txt
+    python: "3.13"
+    prefix: .venv
+    description: Python for plotting.
+  tex:
+    kind: docker
+    image: texlive/texlive:latest-full
+    description: TeX Live via Docker.
+
+pipeline:
+  stages:
+    plot-wake:
+      kind: python-script
+      script_path: scripts/plot-wake.py
+      environment: py
+      outputs:
+        - figures/wake-deficit.pdf
+    figs-to-paper:
+      kind: map-paths
+      paths:
+        - kind: dir-to-dir-replace
+          src: figures
+          dest: paper/figures
+    build-paper:
+      kind: latex
+      target_path: paper/main.tex
+      environment: tex
+      inputs:
+        - paper/methods.tex
+        - paper/refs.bib
+        - from_stage_outputs: figs-to-paper
+
+publications:
+  - path: paper/main.pdf
+    kind: journal-article
+    title: Wake recovery behind a model turbine
+    description: A two-column stand-in paper with a figure, a table, equations, and citations.
+    stage: build-paper
+
+figures:
+  - path: figures/wake-deficit.pdf
+    title: Wake velocity deficit
+    description: Modeled velocity deficit downstream of the turbine.
+    stage: plot-wake

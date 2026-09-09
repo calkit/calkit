@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import difflib
+import hashlib
 import os
 import re
+import textwrap
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from calkit.core import LOCAL_DIR
 
@@ -280,3 +284,449 @@ def _is_immutable_ref(repo: git.Repo, ref: str | None) -> bool:
     except Exception:
         return False
     return True
+
+
+DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")
+DOCX_MERGES_DIR = os.path.join(".calkit", "latex", "docx-merges")
+# Word bookmark names: 40 chars max, letters/digits/underscores
+_INCLUDE_RE = re.compile(
+    r"^\s*\\(input|include|subfile|import)\{([^}]*)\}(?:\{([^}]*)\})?"
+)
+_BLOCK_START_RE = re.compile(
+    r"^\s*\\(begin|end|section|subsection|subsubsection|chapter|part|item|"
+    r"caption|maketitle|documentclass)\b"
+)
+
+
+@dataclass
+class SourceLine:
+    path: str
+    lineno: int
+    text: str
+
+
+@dataclass
+class Block:
+    """A run of source lines that renders as one Word paragraph."""
+
+    lines: list[SourceLine]
+
+    @property
+    def path(self) -> str:
+        return self.lines[0].path
+
+    @property
+    def lineno(self) -> int:
+        return self.lines[0].lineno
+
+    @property
+    def text(self) -> str:
+        return detex("\n".join(ln.text for ln in self.lines))
+
+
+def flatten(main_path: str) -> list[SourceLine]:
+    """Inline \\input and friends, keeping each line's file and number."""
+    main = Path(main_path)
+    out: list[SourceLine] = []
+    seen: set[str] = set()
+
+    def visit(path: Path, base: Path) -> None:
+        key = path.resolve().as_posix()
+        if key in seen or not path.is_file():
+            return
+        seen.add(key)
+        rel = path.as_posix()
+        text = path.read_text(encoding="utf-8")
+        for i, line in enumerate(text.split("\n"), 1):
+            m = _INCLUDE_RE.match(line.split("%")[0])
+            if m:
+                cmd, a, b = m.groups()
+                target = Path(b) if cmd == "import" and b else Path(a)
+                start = base / a if cmd == "import" else base
+                child = start / target
+                if child.suffix == "":
+                    child = child.with_suffix(".tex")
+                visit(child, child.parent)
+                continue
+            out.append(SourceLine(rel, i, line))
+
+    visit(main, main.parent)
+    return out
+
+
+_WORD_TO_TEX = str.maketrans(
+    {
+        "\u2019": "'",
+        "\u2018": "`",
+        "\u201c": "``",
+        "\u201d": "''",
+        "\u2013": "--",
+        "\u2014": "---",
+        "\u00a0": "~",
+    }
+)
+
+
+def from_word_text(text: str) -> str:
+    """Rendered text in LaTeX source conventions: straight quotes,
+    dashes as hyphens, non-breaking spaces as ties."""
+    return text.translate(_WORD_TO_TEX)
+
+
+def detex(text: str) -> str:
+    """Roughly what LaTeX would print for a bit of source."""
+    text = "\n".join(ln.split("%")[0] for ln in text.split("\n"))
+    text = re.sub(r"\$[^$]*\$", " ", text)
+    text = re.sub(
+        r"\\(cite[pt]?|ref|eqref|label|includegraphics|usepackage|"
+        r"documentclass|bibliography\w*|begin|end)\*?(\[[^\]]*\])?\{[^}]*\}",
+        " ",
+        text,
+    )
+    text = re.sub(r"\\[a-zA-Z]+\*?(\[[^\]]*\])?", " ", text)
+    text = re.sub(r"[{}~]", " ", text).replace("---", " ").replace("--", " ")
+    text = text.replace("``", "").replace("''", "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def blocks(lines: list[SourceLine]) -> list[Block]:
+    """Split flattened source into paragraph-sized blocks."""
+    out: list[Block] = []
+    cur: list[SourceLine] = []
+    for ln in lines:
+        stripped = ln.text.strip()
+        if not stripped:
+            if cur:
+                out.append(Block(cur))
+                cur = []
+            continue
+        # A comment line inside a paragraph doesn't end it; one before it
+        # isn't part of it
+        if stripped.startswith("%"):
+            if cur:
+                cur.append(ln)
+            continue
+        if cur and _BLOCK_START_RE.match(ln.text):
+            out.append(Block(cur))
+            cur = []
+        cur.append(ln)
+    if cur:
+        out.append(Block(cur))
+    return [b for b in out if b.text]
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-zA-Z]{3,}", text.lower()))
+
+
+def similarity(a: str, b: str) -> float:
+    wa, wb = _words(a), _words(b)
+    return len(wa & wb) / len(wa) if wa else 0.0
+
+
+def align(
+    texts: list[str], blks: list[Block], threshold: float = 0.5
+) -> list[Block | None]:
+    """Match rendered paragraphs to source blocks, in order."""
+    out: list[Block | None] = []
+    last = 0
+    for text in texts:
+        scores = [
+            (similarity(text, b.text), j)
+            for j, b in enumerate(blks[last:], last)
+        ]
+        best = max(scores, default=(0.0, -1))
+        if best[0] >= threshold:
+            out.append(blks[best[1]])
+            last = best[1]
+        else:
+            out.append(None)
+    return out
+
+
+def make_bookmark_name(path: str, lineno: int) -> str:
+    digest = hashlib.sha1(path.encode()).hexdigest()[:8]
+    return f"ck_{digest}_{lineno}"
+
+
+def find_block(
+    blks: list[Block], path: str, lineno: int, text: str
+) -> Block | None:
+    """The block a bookmark points at, by line first and text second."""
+    same_file = [b for b in blks if b.path == path]
+    for b in same_file:
+        if b.lineno == lineno and similarity(text, b.text) >= 0.5:
+            return b
+    scored = [
+        (similarity(text, b.text), -abs(b.lineno - lineno), b)
+        for b in same_file
+    ]
+    best = max(scored, key=lambda s: s[:2], default=None)
+    return best[2] if best and best[0] >= 0.6 else None
+
+
+def _tokens(text: str) -> set[str]:
+    """Words and numbers, so a change to a value counts as a change."""
+    return set(re.findall(r"[A-Za-z0-9][\w.]*", text))
+
+
+def already_applied(block: Block, old: str, new: str) -> bool:
+    """Whether the block already reads as ``new`` rather than ``old``."""
+    have = _tokens("\n".join(ln.text for ln in block.lines))
+    inserted = _tokens(new) - _tokens(old)
+    deleted = _tokens(old) - _tokens(new)
+    if not inserted <= have:
+        return False
+    return not deleted or len(deleted & have) / len(deleted) <= 0.5
+
+
+def _find_span(src: str, words: list[str]) -> tuple[int, int] | None:
+    """Where ``words`` sit in the source: verbatim, else by their edges,
+    so a span whose middle holds markup can still be replaced."""
+
+    def once(ws: list[str]) -> re.Match | None:
+        pattern = (
+            r"(?<![A-Za-z])"
+            + r"[\s~]+".join(re.escape(w) for w in ws)
+            + r"(?![A-Za-z])"
+        )
+        found = list(re.finditer(pattern, src))
+        return found[0] if len(found) == 1 else None
+
+    m = once(words)
+    if m is not None:
+        return m.start(), m.end()
+    if len(words) < 4:
+        return None
+    head, tail = once(words[:2]), once(words[-2:])
+    if head is None or tail is None or tail.start() < head.end():
+        return None
+    return head.start(), tail.end()
+
+
+def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
+    """The block's lines rewritten so ``old`` reads as ``new``.
+
+    Works at the word level: each changed span must be findable in the
+    source, else the edit touches markup and None is returned.
+    """
+    ow, nw = old.split(), new.split()
+    sm = difflib.SequenceMatcher(a=ow, b=nw, autojunk=False)
+    src = "\n".join(ln.text for ln in block.lines)
+    for tag, i1, i2, j1, j2 in reversed(sm.get_opcodes()):
+        if tag == "equal":
+            continue
+        new_span = " ".join(nw[j1:j2])
+        if tag == "insert":
+            # Anchor on the preceding word(s), widening the phrase until
+            # it's unique -- a single preceding word is often repeated
+            # elsewhere in the block even when the insertion point isn't
+            # anywhere near markup.
+            if i1 == 0:
+                return None
+            hits = None
+            for k in range(1, i1 + 1):
+                phrase = ow[i1 - k : i1]
+                pattern = (
+                    r"(?<![A-Za-z])"
+                    + r"[\s~]+".join(re.escape(w) for w in phrase)
+                    + r"(?![A-Za-z])"
+                )
+                found = list(re.finditer(pattern, src))
+                if len(found) == 1:
+                    hits = found
+                    break
+                if not found:
+                    break
+            if hits is None:
+                return None
+            at = hits[0].end()
+            src = src[:at] + " " + new_span + src[at:]
+            continue
+        span = _find_span(src, ow[i1:i2])
+        if span is None:
+            return None
+        src = src[: span[0]] + new_span + src[span[1] :]
+    # A line emptied by a deletion goes, since a blank line would split
+    # the paragraph
+    return [ln.rstrip() for ln in src.split("\n") if ln.strip()]
+
+
+_AUTHOR_RE = re.compile(
+    r"^(?P<name>.*?)\s*(?:<(?P<email>[^>]*)>)?\s*(?:\((?P<date>[^)]*)\))?:$"
+)
+
+
+def _parse_header(text: str) -> dict[str, Any]:
+    """The key=value attributes on a COMMENT line; a value is a bare word,
+    a quoted string, or a YAML flow mapping like {text: "x", occ: 0}."""
+    import json
+
+    from calkit import ryaml
+
+    out: dict[str, Any] = {}
+    i = 0
+    while True:
+        m = re.compile(r"\s*(\w+)=").match(text, i)
+        if not m:
+            return out
+        key, i = m.group(1), m.end()
+        if i < len(text) and text[i] == "{":
+            depth, j, quoted = 0, i, False
+            while j < len(text):
+                ch = text[j]
+                if ch == '"' and text[j - 1] != "\\":
+                    quoted = not quoted
+                elif not quoted and ch == "{":
+                    depth += 1
+                elif not quoted and ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            out[key] = ryaml.load(text[i : j + 1])
+            i = j + 1
+        elif i < len(text) and text[i] == '"':
+            m2 = re.compile(r'"((?:[^"\\]|\\.)*)"').match(text, i)
+            if not m2:
+                return out
+            out[key], i = json.loads(m2.group(0)), m2.end()
+        else:
+            m3 = re.compile(r"\S*").match(text, i)
+            assert m3 is not None
+            out[key], i = m3.group(0), m3.end()
+
+
+def word_date(value: str | None) -> str | None:
+    """A Word timestamp like 2026-09-06T08:44:00Z as 2026-09-06 08:44."""
+    if not value:
+        return None
+    m = re.match(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})", value)
+    return f"{m.group(1)} {m.group(2)}" if m else value
+
+
+@dataclass
+class Entry:
+    """One message in a thread."""
+
+    author: str
+    text: str
+    email: str | None = None
+    date: str | None = None
+
+    def header(self) -> str:
+        out = self.author
+        if self.email:
+            out += f" <{self.email}>"
+        if self.date:
+            out += f" ({self.date})"
+        return out + ":"
+
+
+@dataclass
+class TexComment:
+    """A comment thread in the source, above the paragraph it's about.
+
+    The first entry is the comment itself, the rest are replies.
+    """
+
+    entries: list[Entry]
+    highlight: str | None = None
+    highlight_occ: int = 0
+    resolved: bool = False
+    lineno: int = 0
+    nlines: int = 0
+
+    @property
+    def author(self) -> str:
+        return self.entries[0].author
+
+    @property
+    def text(self) -> str:
+        return self.entries[0].text
+
+    @property
+    def replies(self) -> list[Entry]:
+        return self.entries[1:]
+
+    def messages(self) -> list[tuple[str, str]]:
+        return [(e.author, e.text) for e in self.entries]
+
+    def render(self) -> list[str]:
+        import json
+
+        attrs = []
+        if self.resolved:
+            attrs.append("resolved=true")
+        if self.highlight:
+            value = f"text: {json.dumps(self.highlight)}"
+            if self.highlight_occ:
+                value += f", occ: {self.highlight_occ}"
+            attrs.append("highlight={" + value + "}")
+        out = ["% COMMENT"]
+        # Attributes continue onto their own lines when they don't fit
+        for attr in attrs:
+            if len(out[-1]) + 1 + len(attr) <= 79 or out[-1] == "% COMMENT":
+                out[-1] += " " + attr
+            else:
+                out.append(f"%   {attr}")
+        for e in self.entries:
+            out.append(f"%   {e.header()}")
+            out += textwrap.wrap(
+                e.text,
+                width=79,
+                initial_indent="%     ",
+                subsequent_indent="%     ",
+            )
+        return out
+
+
+def parse_comments(lines: list[str]) -> list[TexComment]:
+    """Comment blocks in a file's lines, with their position and extent."""
+    out: list[TexComment] = []
+    i = 0
+    while i < len(lines):
+        if not re.match(r"% COMMENT( |$)", lines[i]):
+            i += 1
+            continue
+        start = i
+        header = lines[i][len("% COMMENT") :]
+        entries: list[Entry] = []
+        i += 1
+        while i < len(lines) and re.match(r"%(   |$)", lines[i]):
+            body = lines[i][1:]
+            indent = len(body) - len(body.lstrip())
+            author = _AUTHOR_RE.match(body.strip()) if indent == 3 else None
+            if not entries and indent == 3 and re.match(r"\s*\w+=", body):
+                header += " " + body.strip()
+            elif author is not None:
+                entries.append(
+                    Entry(
+                        author["name"].strip(),
+                        "",
+                        author["email"] or None,
+                        author["date"] or None,
+                    )
+                )
+            elif indent > 3 and entries:
+                e = entries[-1]
+                e.text = (e.text + " " + body.strip()).strip()
+            i += 1
+        if entries:
+            attrs = _parse_header(header)
+            highlight = attrs.get("highlight")
+            if isinstance(highlight, dict):
+                text, occ = highlight.get("text"), highlight.get("occ", 0)
+            else:
+                text, occ = highlight, 0
+            out.append(
+                TexComment(
+                    entries,
+                    str(text) if text else None,
+                    int(occ or 0),
+                    str(attrs.get("resolved", "")).lower() == "true",
+                    start + 1,
+                    i - start,
+                )
+            )
+    return out

@@ -633,7 +633,7 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     pdf_path, docx_path = os.path.abspath(pdf_path), os.path.abspath(docx_path)
     # Word won't save over a document it has open, so write beside the
     # target and move into place
-    tmp_path = docx_path[: -len(".docx")] + ".tmp.docx"
+    tmp_path = docx_path.removesuffix(".docx") + ".tmp.docx"
     if sys.platform == "darwin":
         script = (
             'tell application "Microsoft Word"\n'

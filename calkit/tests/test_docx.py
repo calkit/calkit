@@ -170,7 +170,9 @@ def test_latex_source_helpers(project: Path) -> None:
     )
     assert back.entries[0].email == "email@mail.com"
     assert calkit.latex.word_date("2026-09-06T08:44:00Z") == "2026-09-06 08:44"
-    assert calkit.latex.bookmark_name("paper/main.tex", 19).startswith("ck_")
+    assert calkit.latex.make_bookmark_name("paper/main.tex", 19).startswith(
+        "ck_"
+    )
 
 
 def test_docx_round_trip(

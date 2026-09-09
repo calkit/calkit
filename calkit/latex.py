@@ -444,7 +444,7 @@ def align(
     return out
 
 
-def bookmark_name(path: str, lineno: int) -> str:
+def make_bookmark_name(path: str, lineno: int) -> str:
     digest = hashlib.sha1(path.encode()).hexdigest()[:8]
     return f"ck_{digest}_{lineno}"
 

@@ -713,7 +713,7 @@ def to_docx(
     for i, (para, blk) in enumerate(zip(paras, matched)):
         if blk is None or para.element is None:
             continue
-        name = calkit.latex.bookmark_name(blk.path, blk.lineno)
+        name = calkit.latex.make_bookmark_name(blk.path, blk.lineno)
         seen[name] = seen.get(name, 0) + 1
         if seen[name] > 1:
             name = f"{name}_{seen[name]}"
@@ -843,7 +843,7 @@ def merge_docx(
     lines = calkit.latex.flatten(original.source)
     blks = calkit.latex.blocks(lines)
     path_for_hash = {
-        calkit.latex.bookmark_name(p, 0).split("_")[1]: p
+        calkit.latex.make_bookmark_name(p, 0).split("_")[1]: p
         for p in {ln.path for ln in lines}
     }
     edits: dict[str, list[tuple[int, int, list[str]]]] = {}

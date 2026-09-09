@@ -1,5 +1,14 @@
 # Collaborating on a LaTeX document using Microsoft Word for feedback
 
+<!-- prettier-ignore -->
+!!! tip
+    If you want to try Calkit without [installing](../installation.md),
+    you can use it directly from [`uv`](https://docs.astral.sh/uv/) with:
+
+    ```sh
+    uvx ck9 # Use this in place of `calkit` in commands below
+    ```
+
 Teams have a variety of tolerance for markup languages and complex
 system setup.
 Thus, despite its limitations for technical writing,

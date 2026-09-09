@@ -13,7 +13,8 @@ For a complete working project, see the
 which you can create a copy of with:
 
 ```sh
-calkit new project my-readme --template calkit/calkit/examples/markdown
+calkit new project my-readme \
+    --from https://github.com/calkit/calkit/examples/markdown
 ```
 
 ## Declaring the stage

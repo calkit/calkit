@@ -151,3 +151,10 @@ of who you sent them to, how, and when.
 
 For an example project that uses this approach,
 see [here](https://github.com/calkit/calkit/tree/main/examples/latex-word).
+
+You can use it as a starting point for your own project with:
+
+```sh
+calkit new project --from https://github.com/calkit/calkit/examples/latex-word \
+    my-project-name
+```

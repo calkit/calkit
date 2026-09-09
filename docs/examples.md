@@ -42,8 +42,13 @@ Features:
 - Environments declared by the install commands the README shows
 - Output printed by each stage written back into the README
 
-Create a copy with
-`calkit new project my-readme --template calkit/calkit/examples/markdown`.
+Create a copy with:
+
+```sh
+calkit new project my-readme \
+    --from https://github.com/calkit/calkit/examples/markdown
+```
+
 See [Runnable Markdown](pipeline/markdown.md) for how it works.
 
 ## MATLAB

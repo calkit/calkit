@@ -92,17 +92,21 @@ jobs:
       # Tests that isolate themselves in a throwaway depot append this one,
       # so whatever is here is read rather than rebuilt -- measured at 65s
       # cold vs 1s warm for a single `Pkg.instantiate` on an empty project.
-      - name: Cache the Julia depot
-        uses: actions/cache@v6
+      # Restore only. This workflow is `on: pull_request`, so anything it
+      # saved would land in `refs/pull/N/merge`, where no other pull request
+      # can read it---25+ such entries piled up on one pull request alone,
+      # evicting useful caches against the repository's 10 GB limit while
+      # every run still started cold. warm-julia-depot.yml publishes the
+      # entry these keys restore, in the default branch's scope.
+      - name: Restore the Julia depot
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.julia/artifacts
             ~/.julia/compiled
             ~/.julia/packages
             ~/.julia/registries
-          # A new entry each run, restoring the newest previous one, so the
-          # depot keeps up with whatever the tests install
-          key: julia-depot-${{ runner.os }}-${{ github.run_id }}
+          key: julia-depot-${{ runner.os }}-
           restore-keys: julia-depot-${{ runner.os }}-
       # Cheap on a cache hit, and on a miss it pays the precompile once here
       # rather than inside whichever test happens to reach Julia first

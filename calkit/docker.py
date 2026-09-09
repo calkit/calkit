@@ -51,10 +51,12 @@ RUN apt-get update > /dev/null && \
     echo ". ${CONDA_DIR}/etc/profile.d/conda.sh && conda activate base" >> ~/.bashrc
 """.strip()
 
+# foamPy ships only an sdist whose setup.py imports numpy, so it needs the
+# surrounding environment rather than an isolated build one
 FOAMPY_LAYER_TEXT = r"""
 RUN pip install --no-cache-dir numpy pandas matplotlib h5py \
     && pip install --no-cache-dir scipy \
-    && pip install --no-cache-dir foampy
+    && pip install --no-cache-dir --no-build-isolation foampy
 """.strip()
 
 UV_LAYER_TEXT = """

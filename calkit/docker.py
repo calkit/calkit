@@ -14,7 +14,7 @@ from pydantic import BaseModel
 MINIFORGE_LAYER_TXT = r"""
 # Install Miniforge
 ARG MINIFORGE_NAME=Miniforge3
-ARG MINIFORGE_VERSION=24.9.2-0
+ARG MINIFORGE_VERSION=26.7.2-0
 ARG TARGETPLATFORM
 
 ENV CONDA_DIR=/opt/conda
@@ -58,17 +58,17 @@ RUN pip install --no-cache-dir numpy pandas matplotlib h5py \
 """.strip()
 
 UV_LAYER_TEXT = """
-COPY --from=ghcr.io/astral-sh/uv:0.8.5 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.11 /uv /uvx /bin/
 """
 
 JULIA_LAYER_TEXT = """
 # Install Julia
-# Ensure base image is a bullseye distribution
-COPY --from=julia:1.11.6-bullseye /usr/local/julia /usr/local/julia
+# Ensure base image is a bookworm distribution
+COPY --from=julia:1.11.9-bookworm /usr/local/julia /usr/local/julia
 ENV JULIA_PATH=/usr/local/julia \
     PATH=$PATH:/usr/local/julia/bin \
     JULIA_GPG=3673DF529D9049477F76B37566E3C7DC03D6E495 \
-    JULIA_VERSION=1.11.6
+    JULIA_VERSION=1.11.9
 """
 
 LAYERS = {

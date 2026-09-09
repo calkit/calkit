@@ -1,5 +1,9 @@
 # Design notes: LaTeX review via Word
 
+<!-- prettier-ignore -->
+!!! note
+    This document was written by Anthropic's Claude Code.
+
 Feasibility notes behind the
 [LaTeX and Word tutorial](../tutorials/latex-word.md).
 Not user-facing.

@@ -771,6 +771,13 @@ def to_docx(
             1 for p, m in zip(paras, matched) if m is None and p.text
         ),
         comments_exported=len(threads),
+        files={
+            p: "md5:" + calkit.get_md5(p)
+            for p in sorted(
+                {ln.path for ln in lines}
+                | {Path(pdf_path).as_posix(), Path(output).as_posix()}
+            )
+        },
     )
     os.makedirs(calkit.latex.DOCX_EXPORTS_DIR, exist_ok=True)
     with open(
@@ -1002,6 +1009,12 @@ def merge_docx(
         changes=changes,
         comments_added=added,
         comments_updated=updated,
+        files={
+            p: "md5:" + calkit.get_md5(p)
+            for p in sorted(
+                {ln.path for ln in lines} | {Path(docx_path).as_posix()}
+            )
+        },
     )
     os.makedirs(calkit.latex.DOCX_MERGES_DIR, exist_ok=True)
     stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")

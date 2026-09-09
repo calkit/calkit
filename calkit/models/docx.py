@@ -31,6 +31,13 @@ class DocxExport(BaseModel):
         default=0, description="Paragraphs with no source location."
     )
     comments_exported: int = 0
+    files: dict[str, str] = Field(
+        default={},
+        description=(
+            "Hash of every file involved (.tex inputs, PDF, .docx), as "
+            "'md5:<hex>'."
+        ),
+    )
 
 
 class DocxMergeChange(BaseModel):
@@ -63,3 +70,10 @@ class DocxMerge(BaseModel):
     changes: list[DocxMergeChange] = []
     comments_added: int = 0
     comments_updated: int = 0
+    files: dict[str, str] = Field(
+        default={},
+        description=(
+            "Hash of the .docx and every .tex file after merging, as "
+            "'md5:<hex>'."
+        ),
+    )

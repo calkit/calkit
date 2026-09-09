@@ -19,6 +19,7 @@ import pytest
 import calkit.cli.latex
 import calkit.docx
 import calkit.latex
+from calkit.models.docx import DocxExport, DocxMerge
 
 FIXTURES = Path(__file__).parent.parent.parent / "test" / "docx"
 
@@ -221,6 +222,18 @@ def test_docx_round_trip(
     assert comments[0].bookmark == model.bookmark
     records = os.listdir(calkit.latex.DOCX_EXPORTS_DIR)
     assert records == [f"{original.id}.json"]
+    export = DocxExport.model_validate_json(
+        Path(calkit.latex.DOCX_EXPORTS_DIR, records[0]).read_text()
+    )
+    assert set(export.files) == {
+        "paper/main.tex",
+        "paper/methods.tex",
+        "paper/main.pdf",
+        "paper/main-for-review.docx",
+    }
+    assert export.files["paper/main.tex"] == "md5:" + calkit.get_md5(
+        "paper/main.tex"
+    )
     # Word bookkeeping survives Word: the fixtures were made from an export
     # like this one and edited in Word
     returned = calkit.docx.Document(str(FIXTURES / "returned.docx"))
@@ -360,6 +373,17 @@ def test_docx_round_trip(
     assert fixture is not None
     fixture_id = fixture.id
     assert merges[0].startswith(fixture_id) and merges[0].endswith(".json")
+    merge = DocxMerge.model_validate_json(
+        Path(calkit.latex.DOCX_MERGES_DIR, merges[-1]).read_text()
+    )
+    assert set(merge.files) == {
+        "paper/main.tex",
+        "paper/methods.tex",
+        merge.docx,
+    }
+    assert merge.files["paper/main.tex"] == "md5:" + calkit.get_md5(
+        "paper/main.tex"
+    )
     # A document without Calkit's metadata is refused
     shutil.copy(FIXTURES / "word-import.docx", "reviews/plain.docx")
     res = subprocess.run(

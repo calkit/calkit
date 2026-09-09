@@ -17,9 +17,7 @@ from app.tests import random_email, random_lower_string
 def test_get_users_superuser_me(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
-    r = client.get(
-        f"{settings.API_V1_STR}/user", headers=superuser_token_headers
-    )
+    r = client.get("/user", headers=superuser_token_headers)
     current_user = r.json()
     assert current_user
     assert current_user["is_active"] is True
@@ -30,9 +28,7 @@ def test_get_users_superuser_me(
 def test_get_users_normal_user_me(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
-    r = client.get(
-        f"{settings.API_V1_STR}/user", headers=normal_user_token_headers
-    )
+    r = client.get("/user", headers=normal_user_token_headers)
     current_user = r.json()
     assert current_user
     assert current_user["is_active"] is True
@@ -52,7 +48,7 @@ def test_create_user_new_email(
         password = random_lower_string()
         data = {"email": username, "password": password}
         r = client.post(
-            f"{settings.API_V1_STR}/users",
+            "/users",
             headers=superuser_token_headers,
             json=data,
         )
@@ -72,7 +68,7 @@ def test_get_existing_user(
     user = users.create_user(session=db, user_create=user_in)
     user_id = user.id
     r = client.get(
-        f"{settings.API_V1_STR}/users/{user_id}",
+        f"/users/{user_id}",
         headers=superuser_token_headers,
     )
     assert 200 <= r.status_code < 300
@@ -94,14 +90,12 @@ def test_get_existing_user_current_user(
         "username": username,
         "password": password,
     }
-    r = client.post(
-        f"{settings.API_V1_STR}/login/access-token", data=login_data
-    )
+    r = client.post("/login/access-token", data=login_data)
     tokens = r.json()
     a_token = tokens["access_token"]
     headers = {"Authorization": f"Bearer {a_token}"}
     r = client.get(
-        f"{settings.API_V1_STR}/users/{user_id}",
+        f"/users/{user_id}",
         headers=headers,
     )
     assert 200 <= r.status_code < 300
@@ -115,7 +109,7 @@ def test_get_existing_user_permissions_error(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     r = client.get(
-        f"{settings.API_V1_STR}/users/{uuid.uuid4()}",
+        f"/users/{uuid.uuid4()}",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 404
@@ -131,7 +125,7 @@ def test_create_user_existing_username(
     users.create_user(session=db, user_create=user_in)
     data = {"email": username, "password": password}
     r = client.post(
-        f"{settings.API_V1_STR}/users",
+        "/users",
         headers=superuser_token_headers,
         json=data,
     )
@@ -147,7 +141,7 @@ def test_create_user_by_normal_user(
     password = random_lower_string()
     data = {"email": username, "password": password}
     r = client.post(
-        f"{settings.API_V1_STR}/users",
+        "/users",
         headers=normal_user_token_headers,
         json=data,
     )
@@ -165,9 +159,7 @@ def test_retrieve_users(
     password2 = random_lower_string()
     user_in2 = UserCreate(email=username2, password=password2)
     users.create_user(session=db, user_create=user_in2)
-    r = client.get(
-        f"{settings.API_V1_STR}/users/", headers=superuser_token_headers
-    )
+    r = client.get("/users/", headers=superuser_token_headers)
     all_users = r.json()
     assert len(all_users["data"]) > 1
     assert "count" in all_users
@@ -182,7 +174,7 @@ def test_update_user_me(
     email = random_email()
     data = {"full_name": full_name, "email": email}
     r = client.patch(
-        f"{settings.API_V1_STR}/user",
+        "/user",
         headers=normal_user_token_headers,
         json=data,
     )
@@ -207,7 +199,7 @@ def test_update_password_me(
         "new_password": new_password,
     }
     r = client.patch(
-        f"{settings.API_V1_STR}/user/password",
+        "/user/password",
         headers=superuser_token_headers,
         json=data,
     )
@@ -225,7 +217,7 @@ def test_update_password_me(
         "new_password": settings.FIRST_SUPERUSER_PASSWORD,
     }
     r = client.patch(
-        f"{settings.API_V1_STR}/user/password",
+        "/user/password",
         headers=superuser_token_headers,
         json=old_data,
     )
@@ -243,7 +235,7 @@ def test_update_password_me_incorrect_password(
     new_password = random_lower_string()
     data = {"current_password": new_password, "new_password": new_password}
     r = client.patch(
-        f"{settings.API_V1_STR}/user/password",
+        "/user/password",
         headers=superuser_token_headers,
         json=data,
     )
@@ -261,7 +253,7 @@ def test_update_user_me_email_exists(
     user = users.create_user(session=db, user_create=user_in)
     data = {"email": user.email}
     r = client.patch(
-        f"{settings.API_V1_STR}/user",
+        "/user",
         headers=normal_user_token_headers,
         json=data,
     )
@@ -277,7 +269,7 @@ def test_update_password_me_same_password_error(
         "new_password": settings.FIRST_SUPERUSER_PASSWORD,
     }
     r = client.patch(
-        f"{settings.API_V1_STR}/user/password",
+        "/user/password",
         headers=superuser_token_headers,
         json=data,
     )
@@ -296,7 +288,7 @@ def test_register_user(client: TestClient, db: Session) -> None:
     full_name = random_lower_string()
     data = {"email": email, "password": password, "full_name": full_name}
     r = client.post(
-        f"{settings.API_V1_STR}/users/signup",
+        "/users/signup",
         json=data,
     )
     assert 200 <= r.status_code < 300
@@ -319,7 +311,7 @@ def test_register_user_already_exists_error(client: TestClient) -> None:
         "full_name": full_name,
     }
     r = client.post(
-        f"{settings.API_V1_STR}/users/signup",
+        "/users/signup",
         json=data,
     )
     assert r.status_code == 400
@@ -330,18 +322,18 @@ def test_github_less_user_cannot_create_project(client: TestClient) -> None:
     email = random_email()
     password = random_lower_string()
     r = client.post(
-        f"{settings.API_V1_STR}/users/signup",
+        "/users/signup",
         json={"email": email, "password": password},
     )
     assert 200 <= r.status_code < 300
     login = client.post(
-        f"{settings.API_V1_STR}/login/access-token",
+        "/login/access-token",
         data={"username": email, "password": password},
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     r = client.post(
-        f"{settings.API_V1_STR}/projects",
+        "/projects",
         headers=headers,
         json={"name": "ghless-project", "title": "GitHub-less project"},
     )
@@ -359,7 +351,7 @@ def test_update_user(
 
     data = {"full_name": "Updated_full_name"}
     r = client.patch(
-        f"{settings.API_V1_STR}/users/{user.id}",
+        f"/users/{user.id}",
         headers=superuser_token_headers,
         json=data,
     )
@@ -380,7 +372,7 @@ def test_update_user_not_exists(
 ) -> None:
     data = {"full_name": "Updated_full_name"}
     r = client.patch(
-        f"{settings.API_V1_STR}/users/{uuid.uuid4()}",
+        f"/users/{uuid.uuid4()}",
         headers=superuser_token_headers,
         json=data,
     )
@@ -404,7 +396,7 @@ def test_update_user_email_exists(
     user2 = users.create_user(session=db, user_create=user_in2)
     data = {"email": user2.email}
     r = client.patch(
-        f"{settings.API_V1_STR}/users/{user.id}",
+        f"/users/{user.id}",
         headers=superuser_token_headers,
         json=data,
     )
@@ -422,14 +414,12 @@ def test_delete_user_me(client: TestClient, db: Session) -> None:
         "username": username,
         "password": password,
     }
-    r = client.post(
-        f"{settings.API_V1_STR}/login/access-token", data=login_data
-    )
+    r = client.post("/login/access-token", data=login_data)
     tokens = r.json()
     a_token = tokens["access_token"]
     headers = {"Authorization": f"Bearer {a_token}"}
     r = client.delete(
-        f"{settings.API_V1_STR}/user",
+        "/user",
         headers=headers,
     )
     assert r.status_code == 200
@@ -447,7 +437,7 @@ def test_delete_user_me_as_superuser(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
     r = client.delete(
-        f"{settings.API_V1_STR}/user",
+        "/user",
         headers=superuser_token_headers,
     )
     assert r.status_code == 403
@@ -467,7 +457,7 @@ def test_delete_user_super_user(
     user = users.create_user(session=db, user_create=user_in)
     user_id = user.id
     r = client.delete(
-        f"{settings.API_V1_STR}/users/{user_id}",
+        f"/users/{user_id}",
         headers=superuser_token_headers,
     )
     assert r.status_code == 200
@@ -481,7 +471,7 @@ def test_delete_user_not_found(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
     r = client.delete(
-        f"{settings.API_V1_STR}/users/{uuid.uuid4()}",
+        f"/users/{uuid.uuid4()}",
         headers=superuser_token_headers,
     )
     assert r.status_code == 404
@@ -497,7 +487,7 @@ def test_delete_user_current_super_user_error(
     assert super_user
     user_id = super_user.id
     r = client.delete(
-        f"{settings.API_V1_STR}/users/{user_id}",
+        f"/users/{user_id}",
         headers=superuser_token_headers,
     )
     assert r.status_code == 403
@@ -515,7 +505,7 @@ def test_delete_user_without_privileges(
     user_in = UserCreate(email=username, password=password)
     user = users.create_user(session=db, user_create=user_in)
     r = client.delete(
-        f"{settings.API_V1_STR}/users/{user.id}",
+        f"/users/{user.id}",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 403
@@ -526,9 +516,7 @@ def test_post_user_zotero_auth(
     client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
     # Look the user up by ID since earlier tests change the test user's email
-    r = client.get(
-        f"{settings.API_V1_STR}/user", headers=normal_user_token_headers
-    )
+    r = client.get("/user", headers=normal_user_token_headers)
     user = db.get(User, uuid.UUID(r.json()["id"]))
     assert user
     request_token = {
@@ -539,7 +527,7 @@ def test_post_user_zotero_auth(
         "app.zotero.fetch_request_token", return_value=request_token
     ) as fetch_request_token:
         r = client.post(
-            f"{settings.API_V1_STR}/user/zotero-auth/start",
+            "/user/zotero-auth/start",
             headers=normal_user_token_headers,
         )
     assert r.status_code == 200
@@ -554,7 +542,7 @@ def test_post_user_zotero_auth(
     assert pending is not None
     # A verifier for a different request token must not be accepted
     r = client.post(
-        f"{settings.API_V1_STR}/user/zotero-auth",
+        "/user/zotero-auth",
         headers=normal_user_token_headers,
         json={"oauth_token": "other-token", "oauth_verifier": "verifier"},
     )
@@ -577,7 +565,7 @@ def test_post_user_zotero_auth(
         },
     ):
         r = client.post(
-            f"{settings.API_V1_STR}/user/zotero-auth",
+            "/user/zotero-auth",
             headers=normal_user_token_headers,
             json={
                 "oauth_token": "request-token",
@@ -601,12 +589,12 @@ def test_post_user_zotero_auth(
         is None
     )
     r = client.get(
-        f"{settings.API_V1_STR}/user/connected-accounts",
+        "/user/connected-accounts",
         headers=normal_user_token_headers,
     )
     assert r.json()["zotero"]
     r = client.delete(
-        f"{settings.API_V1_STR}/user/external-credentials/zotero",
+        "/user/external-credentials/zotero",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 200
@@ -635,7 +623,7 @@ def _github_auth(client: TestClient, headers: dict[str, str], username: str):
         patch("app.api.routes.users.users.save_github_token"),
     ):
         return client.post(
-            f"{settings.API_V1_STR}/user/github-auth",
+            "/user/github-auth",
             headers=headers,
             json={"code": "c", "redirect_uri": "http://localhost/x"},
         )
@@ -713,9 +701,9 @@ def test_email_verification(client: TestClient, db: Session) -> None:
     headers = authentication_token_from_email(
         client=client, email=user.email, db=db
     )
-    base = f"{settings.API_V1_STR}/user/email-verification"
+    base = "/user/email-verification"
     # A password signup starts out unverified
-    r = client.get(f"{settings.API_V1_STR}/user", headers=headers)
+    r = client.get("/user", headers=headers)
     assert r.json()["email_verified"] is False
     # Nothing to confirm before a code has been sent
     r = client.post(
@@ -797,7 +785,7 @@ def test_email_verification(client: TestClient, db: Session) -> None:
     assert r.status_code == 400
     # The link in the email verifies without being logged in, but only a
     # verification token for the address the user still has
-    verify_url = f"{settings.API_V1_STR}/verify-email"
+    verify_url = "/verify-email"
     r = client.post(
         verify_url, json={"token": generate_password_reset_token(user.email)}
     )
@@ -816,7 +804,7 @@ def test_email_verification(client: TestClient, db: Session) -> None:
     assert r.status_code == 200, r.text
     db.refresh(user)
     assert user.email_verified is True
-    r = client.get(f"{settings.API_V1_STR}/user", headers=headers)
+    r = client.get("/user", headers=headers)
     assert r.json()["email_verified"] is True
 
 
@@ -827,7 +815,7 @@ def test_onboarding_flags_round_trip(
     from app.models import Project
     from app.tests import authentication_token_from_email, create_random_user
 
-    base = f"{settings.API_V1_STR}/user/onboarding-flags"
+    base = "/user/onboarding-flags"
     # Start from a known state, since the normal user is shared by tests.
     for step in ["cli", "editor", "dismissed"]:
         client.delete(
@@ -973,7 +961,7 @@ def test_read_users_search_and_sort(
     """Superusers can find a user and order the list by signup time."""
     from app import users as users_mod
 
-    url = f"{settings.API_V1_STR}/users"
+    url = "/users"
     marker = uuid.uuid4().hex[:8]
     first = users_mod.create_user(
         session=db,
@@ -1061,7 +1049,7 @@ def test_get_user_github_repos_excludes_collaborations(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     """Only repos a project can actually be created for, newest first."""
-    url = f"{settings.API_V1_STR}/user/github/repos"
+    url = "/user/github/repos"
     calls = []
 
     def fake_get(request_url, headers=None, params=None):
@@ -1141,7 +1129,7 @@ def test_get_user_github_repos_search(
         patch("app.api.routes.users.users.get_github_token", return_value="t"),
     ):
         resp = client.get(
-            f"{settings.API_V1_STR}/user/github/repos",
+            "/user/github/repos",
             params={"search": "  boundary   layer "},
             headers=normal_user_token_headers,
         )

@@ -8,9 +8,7 @@ import polars as pl
 import yaml
 from fastapi.testclient import TestClient
 
-from app.config import settings
-
-BASE = f"{settings.API_V1_STR}/projects/o/p/dataset-csv"
+BASE = "/projects/o/p/dataset-csv"
 
 
 def _csv(resp) -> str:
@@ -117,7 +115,7 @@ def test_get_project_dataset_hdf5(client: TestClient, tmp_path) -> None:
     repo.git.add(all=True)
     repo.git.commit("-m", "Data")
     fake_project = SimpleNamespace(owner_account_name="o", name="p")
-    base = f"{settings.API_V1_STR}/projects/o/p/dataset-hdf5"
+    base = "/projects/o/p/dataset-hdf5"
     with (
         patch(
             "app.api.routes.projects.datasets.app.projects.get_project",
@@ -235,7 +233,7 @@ def test_imported_dataset_reads_from_source_project(
     assert seen_projects == ["o/p", "src/proj"]
 
 
-URL = f"{settings.API_V1_STR}/projects/o/p/datasets"
+URL = "/projects/o/p/datasets"
 
 
 def _repo(tmp_path):
@@ -366,11 +364,9 @@ def test_post_project_dataset_fetches_imports(
             json={
                 "path": "data/wind.csv",
                 "imported_from": {
-                    "git": {
-                        "repo_url": str(tmp_path / "src"),
-                        "rev": rev,
-                        "path": "data/wind.csv",
-                    }
+                    "git_repo_url": str(tmp_path / "src"),
+                    "git_ref": rev,
+                    "path": "data/wind.csv",
                 },
             },
             headers=normal_user_token_headers,
@@ -386,10 +382,8 @@ def test_post_project_dataset_fetches_imports(
             json={
                 "path": "data/wind-head.csv",
                 "imported_from": {
-                    "git": {
-                        "repo_url": str(tmp_path / "src"),
-                        "path": "data/wind.csv",
-                    }
+                    "git_repo_url": str(tmp_path / "src"),
+                    "path": "data/wind.csv",
                 },
             },
             headers=normal_user_token_headers,
@@ -415,10 +409,8 @@ def test_post_project_dataset_fetches_imports(
         assert by_path["data/zenodo-via-url"]["imported_from"] == {
             "doi": "10.5281/zenodo.1234567"
         }
-        assert by_path["data/wind.csv"]["imported_from"]["git"]["rev"] == rev
-        assert (
-            by_path["data/wind-head.csv"]["imported_from"]["git"]["rev"] == rev
-        )
+        assert by_path["data/wind.csv"]["imported_from"]["git_rev"] == rev
+        assert by_path["data/wind-head.csv"]["imported_from"]["git_rev"] == rev
         assert "data/multi" in by_path and "data/multi.csv" not in by_path
         # Importing from another Calkit project copies Git-tracked files
         # and pins the source revision. (get_project/get_repo are patched to

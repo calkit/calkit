@@ -61,7 +61,10 @@ class _ThreadLocalYAML(threading.local):
         self.yaml = ruamel.yaml.YAML()
         self.yaml.indent(mapping=2, sequence=4, offset=2)
         self.yaml.preserve_quotes = True
-        self.yaml.width = 70
+        # 80 rather than ruamel's default so prose wrapped at the usual
+        # 79-80 columns is written back as it was; at 70, lines of 71-80
+        # characters were re-folded with a stray word on the next line
+        self.yaml.width = 80
 
 
 _yaml_local = _ThreadLocalYAML()
@@ -176,14 +179,36 @@ DVC_EXTENSIONS = [
 DVC_SIZE_THRESH_BYTES = 5_000_000
 
 
+def check_or_x(val: bool | int) -> str:
+    """A check mark for something that holds, an X for something that does
+    not.
+
+    The mark every report prints, so a project's checks read the same way
+    wherever they are shown.
+    """
+    return "✅" if val else "❌"
+
+
+def encode_safe(message: str, err: bool = False) -> str:
+    """A message with whatever the console cannot encode replaced.
+
+    A Windows console is typically cp1252, which has no check mark: left
+    alone, printing one raises UnicodeEncodeError and the command dies
+    with no output at all. Anything that can carry a mark or an emoji has
+    to go through here rather than straight to ``typer.echo``.
+    """
+    stream = sys.stderr if err else sys.stdout
+    enc = stream.encoding or "utf-8"
+    return message.encode(enc, errors="replace").decode(enc)
+
+
 def echo(message: str) -> None:
     """Print a message safely, replacing unencodable characters
     (e.g., emoji).
     """
     import typer
 
-    enc = sys.stdout.encoding or "utf-8"
-    typer.echo(message.encode(enc, errors="replace").decode(enc))
+    typer.echo(encode_safe(message))
 
 
 def find_project_dirs(relative=False, max_depth=3) -> list[str]:

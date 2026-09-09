@@ -95,12 +95,12 @@ function PresInfo({ presentation }: PresInfoProps) {
           </Link>
         </Text>
       )}
-      {presentation.type && (
+      {presentation.kind && (
         <Text fontSize="sm" mb={1}>
           <Text as="span" fontWeight="semibold">
             Type:
           </Text>{" "}
-          <Badge>{presentation.type}</Badge>
+          <Badge>{presentation.kind}</Badge>
         </Text>
       )}
       <Text fontSize="sm" mb={1}>

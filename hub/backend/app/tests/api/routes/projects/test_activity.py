@@ -8,7 +8,6 @@ from sqlmodel import Session, select
 
 from app import users
 from app.api.routes.projects.dvc import record_dvc_push
-from app.config import settings
 from app.core import utcnow
 from app.models import (
     ProjectComment,
@@ -29,10 +28,7 @@ def test_get_project_activity(
     project, headers = _make_owner_with_project(db, client)
     owner = project.owner_account.user
     assert owner is not None
-    url = (
-        f"{settings.API_V1_STR}/projects/{project.owner_account_name}/"
-        f"{project.name}/activity"
-    )
+    url = f"/projects/{project.owner_account_name}/{project.name}/activity"
     repo = git.Repo.init(tmp_path / "repo")
     with repo.config_writer() as cw:
         cw.set_value("user", "name", "Committer")

@@ -1,12 +1,10 @@
 from fastapi.testclient import TestClient
 
-from app.config import settings
-
 
 def test_uploaded_figure_needs_attestation(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
-    url = f"{settings.API_V1_STR}/projects/o/p/figures"
+    url = "/projects/o/p/figures"
     # A file with no stage and nobody named to stand behind it is refused
     # before anything is touched
     resp = client.post(

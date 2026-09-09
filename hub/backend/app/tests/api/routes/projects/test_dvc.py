@@ -8,16 +8,11 @@ from unittest.mock import ANY, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.config import settings
-
 OWNER = "testowner"
 PROJECT = "testproject"
 IDX = "ab"
 MD5 = "cdef1234567890abcdef1234567890ab"
-GET_URL = (
-    f"{settings.API_V1_STR}/projects/{OWNER}/{PROJECT}"
-    f"/dvc/files/md5/{IDX}/{MD5}"
-)
+GET_URL = f"/projects/{OWNER}/{PROJECT}/dvc/files/md5/{IDX}/{MD5}"
 
 
 def _fake_project() -> SimpleNamespace:
@@ -32,7 +27,7 @@ def _dvc_scope_headers(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> dict[str, str]:
     response = client.post(
-        f"{settings.API_V1_STR}/user/tokens",
+        "/user/tokens",
         headers=normal_user_token_headers,
         json={"expires_days": 7, "scope": "dvc", "description": "test"},
     )
@@ -51,10 +46,7 @@ def test_get_dvc_file_lowercases_owner_and_project_name(
     fake_fs.open.return_value.__exit__.return_value = False
     mixed_owner = "TestOwner"
     mixed_project = "TestProject"
-    url = (
-        f"{settings.API_V1_STR}/projects/{mixed_owner}/{mixed_project}"
-        f"/dvc/files/md5/{IDX}/{MD5}"
-    )
+    url = f"/projects/{mixed_owner}/{mixed_project}/dvc/files/md5/{IDX}/{MD5}"
     with (
         patch(
             "app.api.routes.projects.dvc.app.projects.get_project",
@@ -128,8 +120,7 @@ def test_post_dvc_file_lowercases_owner_and_project_name(
     mixed_owner = "MyOrg"
     mixed_project = "MyProject"
     post_url = (
-        f"{settings.API_V1_STR}/projects/{mixed_owner}/{mixed_project}"
-        f"/dvc/files/md5/{idx}/{md5}"
+        f"/projects/{mixed_owner}/{mixed_project}/dvc/files/md5/{idx}/{md5}"
     )
     with (
         patch(
@@ -186,10 +177,7 @@ def test_post_dvc_file_storage_limit_exceeded_returns_400(
     digest = hashlib.md5(body).hexdigest()
     idx = digest[:2]
     md5 = digest[2:]
-    post_url = (
-        f"{settings.API_V1_STR}/projects/{OWNER}/{PROJECT}"
-        f"/dvc/files/md5/{idx}/{md5}"
-    )
+    post_url = f"/projects/{OWNER}/{PROJECT}/dvc/files/md5/{idx}/{md5}"
     with (
         patch(
             "app.api.routes.projects.dvc.app.projects.get_project",
@@ -230,10 +218,7 @@ def test_post_dvc_file_md5_mismatch_cleans_pending_file(
     body = b"mismatch"
     idx = "aa"
     md5 = "bb" * 16
-    post_url = (
-        f"{settings.API_V1_STR}/projects/{OWNER}/{PROJECT}"
-        f"/dvc/files/md5/{idx}/{md5}"
-    )
+    post_url = f"/projects/{OWNER}/{PROJECT}/dvc/files/md5/{idx}/{md5}"
     with (
         patch(
             "app.api.routes.projects.dvc.app.projects.get_project",

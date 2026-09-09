@@ -65,3 +65,5 @@ respectively.
 
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
+
+Don't be verbose in comments. One sentence is usually fine.

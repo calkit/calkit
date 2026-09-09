@@ -1,6 +1,7 @@
 """Functionality for working with Git."""
 
 import atexit
+import hashlib
 import json
 import os
 import posixpath
@@ -25,7 +26,8 @@ from ruamel.yaml import YAMLError
 from sqlmodel import Session, select
 
 import calkit
-from app import github, users
+from app import cache, github, users
+from app.config import settings
 from app.core import load_yaml_fast, logger, ryaml
 from app.models import GitRef, Project, User, UserProjectAccess
 
@@ -34,8 +36,12 @@ _SYMLINK_MODE = 0o120000
 # Max seconds a single git network subprocess may run before being killed,
 # so a stalled remote can't wedge a worker indefinitely. Clone gets a
 # larger budget than fetch since initial clones of large repos are
-# legitimately slower.
-GIT_CLONE_TIMEOUT = 300
+# legitimately slower: a research project carrying its results in Git runs
+# to a gigabyte across a few thousand commits, which is several minutes on
+# a good connection. Anything under that is not a safety limit, it is a
+# project the hub can never open, because each attempt restarts from
+# nothing.
+GIT_CLONE_TIMEOUT = 900
 GIT_FETCH_TIMEOUT = 120
 
 
@@ -133,6 +139,160 @@ def _make_git_auth_env(
     return env
 
 
+# How long a remote's head SHA is trusted.
+#
+# Longer than a clone's own TTL, deliberately: a clone that lapses asks
+# whether the remote moved, so a shorter window here would mean the answer
+# had always expired by the time it was wanted, and every lapse would pay
+# for its own round trip. At several times the clone TTL, one answer covers
+# many lapses, across every user's clone of the project.
+#
+# Being minutes stale costs little now that a push says so directly, through
+# the GitHub App's webhook or `calkit push` (see ``app.warm``). This poll is
+# the fallback for pushes that arrive without either.
+REMOTE_HEAD_TTL = 300
+
+
+def get_remote_head_sha(
+    repo: git.Repo, remote_url: str, branch: str, use_cache: bool = True
+) -> str | None:
+    """The SHA ``origin`` has for ``branch``, or None if it can't be read.
+
+    ``ls-remote`` costs about as much as a fetch that has nothing to
+    transfer -- both are a round trip to the host -- so this is only worth
+    doing because the answer is cached and a fetch's isn't. When it comes
+    back equal to what we already have, the fetch can be skipped entirely.
+    """
+    key = cache.make_key("remote-head", remote_url, branch)
+    if use_cache:
+        cached = cache.get_json(key)
+        if isinstance(cached, str):
+            return cached
+    try:
+        with _timed("ls-remote", branch=branch):
+            out = repo.git.ls_remote(
+                ["origin", branch], kill_after_timeout=GIT_FETCH_TIMEOUT
+            )
+    except GitCommandError as e:
+        logger.warning(f"Could not read remote head for {branch}: {e}")
+        return None
+    line = out.strip().split("\n")[0] if out.strip() else ""
+    sha = line.split()[0] if line else None
+    if sha:
+        cache.set_json(key, sha, ttl=REMOTE_HEAD_TTL)
+    return sha
+
+
+# Where the one checkout everybody reads from lives, under CLONE_ROOT. No
+# GitHub name can be spelled this way, and ``_clone_dir_segment`` keeps the
+# per-user directories out of it too.
+SHARED_READER_DIR = "_shared"
+
+
+def _clone_dir_segment(name: str) -> str:
+    """Make ``name`` safe to use as one directory under ``CLONE_ROOT``.
+
+    An account name is whatever someone typed at signup, so ``..`` (outside
+    CLONE_ROOT) and ``_shared`` (on top of the tree everyone reads) are both
+    one signup away.
+    """
+    segment = name.replace(os.sep, "_").replace("/", "_")
+    if segment in ("", ".", "..", SHARED_READER_DIR):
+        # Stable, so the account finds its checkout again next time.
+        segment = "acct_" + hashlib.sha256(name.encode()).hexdigest()[:16]
+    return segment
+
+
+def shared_reader_root() -> str:
+    """The directory the shared read-only checkouts live under."""
+    return os.path.join(settings.CLONE_ROOT, SHARED_READER_DIR)
+
+
+def is_shared_read_checkout(repo: git.Repo) -> bool:
+    """Whether this repo is the checkout everybody reads from.
+
+    Against the actual shared root, not any ``_shared`` segment: CLONE_ROOT
+    could itself contain one, and a writable clone misread as shared makes
+    ``_configure_committer`` 500 on a perfectly good repo.
+    """
+    root = os.path.abspath(shared_reader_root())
+    return os.path.abspath(str(repo.working_dir)).startswith(root + os.sep)
+
+
+def refuse_if_shared(repo: git.Repo) -> None:
+    """Stop a write that has landed on the shared checkout.
+
+    Committing there would author it in a tree other people are reading, and
+    push it under whatever credentials that copy holds.
+    """
+    if is_shared_read_checkout(repo):
+        raise HTTPException(
+            500, "Refusing to write to the shared read-only checkout"
+        )
+
+
+# Refuse writes to the shared checkout from inside Git itself. `pre-push`
+# goes with `pre-commit` because that copy carries the project's own
+# credentials.
+_SHARED_HOOKS = ("pre-commit", "pre-push")
+_SHARED_HOOK_SCRIPT = (
+    "#!/bin/sh\n"
+    "# Installed by Calkit. This is the shared read-only checkout every\n"
+    "# reader of this project sees; writes get their own copy.\n"
+    'echo "calkit: refusing to write to the shared read-only checkout" >&2\n'
+    "exit 1\n"
+)
+
+
+def _install_read_only_hooks(repo_dir: str) -> None:
+    """Make ``repo_dir`` refuse commits and pushes at the Git level.
+
+    ``refuse_if_shared`` only catches writes going through our own helpers;
+    these catch anything reaching ``git commit``. Best effort: a checkout we
+    can't write a hook into is still readable.
+    """
+    hooks_dir = os.path.join(repo_dir, ".git", "hooks")
+    try:
+        os.makedirs(hooks_dir, exist_ok=True)
+        for name in _SHARED_HOOKS:
+            fpath = os.path.join(hooks_dir, name)
+            # A hook that isn't executable is one Git ignores.
+            if os.path.isfile(fpath) and os.access(fpath, os.X_OK):
+                continue
+            with open(fpath, "w") as f:
+                f.write(_SHARED_HOOK_SCRIPT)
+            os.chmod(fpath, 0o755)
+    except OSError as e:
+        logger.warning(f"Could not install read-only hooks in {repo_dir}: {e}")
+
+
+def _shared_read_token(project: Project) -> tuple[bool, str | None]:
+    """Whether this project can be read from one shared checkout, and how.
+
+    A public repo needs no credentials; a private one takes the App
+    installation token, which belongs to the project rather than to whoever
+    asked first. Returns ``(False, None)`` when neither applies.
+    """
+    if project.is_public:
+        return True, None
+    gh_owner, gh_repo = (
+        project.github_repo.split("/", 1)
+        if project.github_repo
+        else (project.owner_github_name, project.name)
+    )
+    try:
+        # Read-only: this token goes into the checkout everyone reads, so it
+        # should not be able to write even if something tries.
+        return True, github.get_app_installation_token(
+            gh_owner, gh_repo, read_only=True
+        )
+    except (github.GitHubAppNotConfigured, HTTPException) as e:
+        logger.info(
+            f"No shared checkout for private {gh_owner}/{gh_repo}: {e}"
+        )
+        return False, None
+
+
 def get_repo(
     project: Project,
     user: User | None,
@@ -140,34 +300,64 @@ def get_repo(
     ttl: int | None = None,
     fresh=False,
     ref: str | None = None,
+    read_only: bool = False,
 ) -> git.Repo:
     """Ensure that the repo exists and is ready for operating upon for the user.
 
     Handles concurrency in case multiple API calls request the repo
     simultaneously. If TTL is None, the latest version is always fetched.
+
+    ``read_only`` promises the caller will only read, which lets every
+    reader of a project share one warm checkout instead of cloning their
+    own. Opt-in, so the cost of missing one is a slow read rather than a
+    wrong write; breaking the promise is caught by ``refuse_if_shared``.
     """
     owner_name = project.owner_github_name
     project_name = project.name
+    shared_token: str | None = None
+    # A private repo the App isn't installed on falls back to a per-user
+    # checkout, still read-only.
+    shared = False
+    if read_only:
+        shared, shared_token = _shared_read_token(project)
     # Add the file to the repo(s) -- we may need to clone it.
     # Ref-based reads should not mutate this working tree checkout.
-    if user is not None:
+    if shared:
+        base_dir = os.path.join(shared_reader_root(), owner_name, project_name)
+    elif user is not None:
         # github_username is None for GitHub-less users; fall back to the
         # (always-present, unique) account name for a stable temp path.
-        user_dir = user.github_username or user.account.name
-        base_dir = f"/tmp/{user_dir}/{owner_name}/{project_name}"
+        user_dir = _clone_dir_segment(
+            user.github_username or user.account.name
+        )
+        base_dir = os.path.join(
+            settings.CLONE_ROOT, user_dir, owner_name, project_name
+        )
     else:
-        base_dir = f"/tmp/anonymous/{owner_name}/{project_name}"
+        base_dir = os.path.join(
+            settings.CLONE_ROOT, "anonymous", owner_name, project_name
+        )
     repo_dir = os.path.join(base_dir, "repo")
     updated_fpath = os.path.join(base_dir, "updated.txt")
     lock_fpath = os.path.join(base_dir, "updating.lock")
     lock = FileLock(lock_fpath, timeout=5)
     os.makedirs(base_dir, exist_ok=True)
-    if os.path.isdir(repo_dir) and fresh:
+    if fresh and os.path.isdir(repo_dir):
         logger.info("Deleting repo directory to clone a fresh copy")
         shutil.rmtree(repo_dir, ignore_errors=True)
+        # The marker is what says a complete checkout exists, so it has to go
+        # with the tree it described. Leaving it behind claims a repo that is
+        # no longer there, and the next read fails on the missing directory
+        # instead of cloning again.
+        if os.path.isfile(updated_fpath):
+            os.remove(updated_fpath)
     # Clone the repo if it doesn't exist -- it will be in a "repo" dir
     access_token: str | None = None
-    if user is not None:
+    if shared:
+        # The project's credentials, never a user's. This authorizes
+        # nothing; the caller has already been through get_project.
+        access_token = shared_token
+    elif user is not None:
         if user.account.github_name is not None:
             # GitHub user: operate with their personal token.
             logger.info(f"Getting {user.email}'s token for Git operations")
@@ -204,8 +394,10 @@ def get_repo(
                 )
                 try:
                     with _timed("get-app-installation-token", user=user.email):
+                        # A read-only caller gets a token that can't push,
+                        # whether or not it ended up on a shared checkout.
                         access_token = github.get_app_installation_token(
-                            gh_owner, gh_repo
+                            gh_owner, gh_repo, read_only=read_only
                         )
                 except (github.GitHubAppNotConfigured, HTTPException) as e:
                     # A public repo can still be read/cloned unauthenticated,
@@ -245,42 +437,97 @@ def get_repo(
         git_plain_url += ".git"
     newly_cloned = False
     repo = None
-    if not os.path.isdir(repo_dir):
+    # `updated.txt` appears only after a clone has finished, so a repo
+    # directory without one is a clone that is still running or that died
+    # partway -- not something to read.
+    if not os.path.isfile(updated_fpath):
         newly_cloned = True
         logger.info(f"Git cloning into {repo_dir}")
         try:
             with lock:
-                try:
-                    clone_cmd = ["git", "clone", git_plain_url, repo_dir]
-                    env = (
-                        {**os.environ, **_make_git_auth_env(access_token)}
-                        if access_token
-                        else None
-                    )
-                    with _timed(
-                        "clone",
-                        repo=f"{owner_name}/{project_name}",
-                    ):
-                        subprocess.check_call(
-                            clone_cmd,
-                            env=env,
-                            timeout=GIT_CLONE_TIMEOUT,
+                # Whoever holds the lock owns this directory, so re-check
+                # inside it: another worker may have finished the clone while
+                # we waited, in which case there is nothing left to do.
+                if not os.path.isfile(updated_fpath):
+                    # Clone alongside the destination and move it into place
+                    # only once git says it finished. `repo_dir` then either
+                    # doesn't exist or holds a complete checkout -- never a
+                    # tree that a reader could mistake for a project with no
+                    # files in it. Anything left from an earlier attempt that
+                    # died is ours to clear, since we hold the lock.
+                    staging_dir = repo_dir + ".cloning"
+                    for stale in (staging_dir, repo_dir):
+                        if os.path.isdir(stale):
+                            logger.warning(f"Removing incomplete {stale}")
+                            shutil.rmtree(stale, ignore_errors=True)
+                    try:
+                        clone_cmd = ["git", "clone"]
+                        if settings.GIT_CLONE_FILTER:
+                            clone_cmd.append(
+                                f"--filter={settings.GIT_CLONE_FILTER}"
+                            )
+                        clone_cmd += [git_plain_url, staging_dir]
+                        env = (
+                            {**os.environ, **_make_git_auth_env(access_token)}
+                            if access_token
+                            else None
                         )
-                except subprocess.CalledProcessError:
-                    logger.error("Failed to clone repo")
-                    # It's possible another process cloned this repo just as
-                    # we were about to, so check again
-                    if not os.path.isdir(repo_dir):
+                        with _timed(
+                            "clone",
+                            repo=f"{owner_name}/{project_name}",
+                        ):
+                            subprocess.check_call(
+                                clone_cmd,
+                                env=env,
+                                timeout=GIT_CLONE_TIMEOUT,
+                            )
+                    except subprocess.CalledProcessError:
+                        logger.error("Failed to clone repo")
+                        shutil.rmtree(staging_dir, ignore_errors=True)
                         raise HTTPException(404, "Git repo not found")
-                # Touch a file so we can compute a TTL
-                subprocess.check_call(["touch", updated_fpath])
+                    except subprocess.TimeoutExpired:
+                        # Every retry starts this repo over from nothing, so
+                        # a repo too big to clone inside the budget never
+                        # converges however many times it is asked for. Say
+                        # so rather than letting it look like a server error.
+                        logger.error(
+                            f"Clone of {owner_name}/{project_name} exceeded "
+                            f"{GIT_CLONE_TIMEOUT}s"
+                        )
+                        shutil.rmtree(staging_dir, ignore_errors=True)
+                        raise HTTPException(
+                            504,
+                            "This project's repository took too long to "
+                            "download.",
+                        )
+                    os.rename(staging_dir, repo_dir)
+                    # Touch a file so we can compute a TTL
+                    subprocess.check_call(["touch", updated_fpath])
                 repo = git.Repo(repo_dir)
         except Timeout:
             logger.warning("Git repo lock timed out")
-    if os.path.isfile(updated_fpath):
-        last_updated = os.path.getmtime(updated_fpath)
-    else:
-        last_updated = 0
+    # `updated.txt` is only written once a clone has finished, so its absence
+    # means this checkout has never been complete -- either a first clone is
+    # running right now behind the lock we just gave up on, or one died
+    # partway. Reading the directory anyway hands callers a tree with no
+    # calkit.yaml and no files, which they cannot tell apart from a project
+    # that genuinely has neither: the request 200s with an empty list, or
+    # 404s on a file that does exist. Say "not ready yet" instead.
+    if not os.path.isfile(updated_fpath):
+        logger.warning(
+            f"Repo for {owner_name}/{project_name} is not ready "
+            "(no completed clone)"
+        )
+        raise HTTPException(
+            503,
+            "This project is still being prepared. Try again in a moment.",
+            headers={"Retry-After": "5"},
+        )
+    if shared:
+        # Here rather than next to the clone so it covers existing checkouts
+        # and the TTL fast path that returns below.
+        _install_read_only_hooks(repo_dir)
+    last_updated = os.path.getmtime(updated_fpath)
     did_refresh = newly_cloned
     if not newly_cloned:
         # TODO: Only pull if we know we need to, perhaps with a call to GitHub
@@ -349,10 +596,42 @@ def get_repo(
                             kill_after_timeout=GIT_FETCH_TIMEOUT,
                         )
                     subprocess.call(["touch", updated_fpath])
-                if not is_shallow:
+                # Ask what the remote has before going to get it. That
+                # answer is shared between everyone's clone of the project,
+                # so most expiries are settled without touching the network,
+                # and when it matches ours there is nothing to fetch at all.
+                already_current = False
+                if not is_shallow and ref is None:
+                    branch_name = repo.active_branch.name
+                    try:
+                        local_head: str | None = repo.head.commit.hexsha
+                    except (ValueError, GitCommandError):
+                        local_head = None
+                    # A caller asking for ttl 0/None wants the truth, not
+                    # a cached answer. That is the path a push takes, and a
+                    # head cached from before it would say "already current"
+                    # and mark a stale clone fresh -- so the warm a push
+                    # queues would rebuild everything at the old commit.
+                    remote_head = (
+                        get_remote_head_sha(
+                            repo,
+                            git_plain_url,
+                            branch_name,
+                            use_cache=bool(ttl),
+                        )
+                        if local_head
+                        else None
+                    )
+                    if remote_head is not None and remote_head == local_head:
+                        logger.info(
+                            f"{repo_label} is already at {remote_head[:7]}"
+                        )
+                        subprocess.call(["touch", updated_fpath])
+                        did_refresh = True
+                        already_current = True
+                if not is_shallow and not already_current:
                     logger.info("Git fetching")
                     if ref is None:
-                        branch_name = repo.active_branch.name
                         with _timed(
                             "fetch", repo=repo_label, branch=branch_name
                         ):
@@ -412,7 +691,7 @@ def get_repo(
     # have stored the literal string "None" as the committer, so we
     # re-run on every refresh to repair that -- but not on every cached
     # read, which would be pure overhead.
-    if user is not None and did_refresh:
+    if user is not None and did_refresh and not shared:
         _configure_committer(repo, user, session=session)
     if did_refresh:
         record_project_update(project, repo, session)
@@ -481,6 +760,7 @@ def _configure_committer(
     -> ``email`` so we never pass ``None`` (which GitPython would stringify
     to "None").
     """
+    refuse_if_shared(repo)
     email = user.email or f"{user.github_username}@users.noreply.github.com"
     if not user.full_name and session is not None:
         detected = _detect_full_name_from_history(repo, email)
@@ -544,16 +824,22 @@ def get_ck_info(
     session: Session,
     ttl=None,
     ref: str | None = None,
+    read_only: bool = False,
 ) -> dict:
-    """Load the calkit.yaml file contents into a dictionary."""
+    """Load the calkit.yaml file contents into a dictionary.
+
+    ``read_only`` promises the caller never writes the result back, which
+    buys both the shared checkout and the fast parser.
+    """
     repo = get_repo(
         project=project,
         user=user,
         session=session,
         ttl=ttl,
         ref=ref,
+        read_only=read_only,
     )
-    return get_ck_info_from_repo(repo=repo)
+    return get_ck_info_from_repo(repo=repo, read_only=read_only)
 
 
 def get_dvc_pipeline(
@@ -569,12 +855,19 @@ def get_dvc_pipeline(
     return get_dvc_pipeline_from_repo(repo)
 
 
-def get_dvc_pipeline_from_repo(repo: git.Repo) -> dict:
-    if os.path.isfile(os.path.join(repo.working_dir, "dvc.yaml")):
-        with open(os.path.join(repo.working_dir, "dvc.yaml")) as f:
-            return ryaml.load(f)
-    else:
+def get_dvc_pipeline_from_repo(
+    repo: git.Repo, read_only: bool = False
+) -> dict:
+    """Load dvc.yaml from the repo's working tree.
+
+    ``read_only`` swaps ruamel's round-trip parser for the C loader; on a
+    large dvc.yaml that is the difference between ~300ms and a few.
+    """
+    fpath = os.path.join(repo.working_dir, "dvc.yaml")
+    if not os.path.isfile(fpath):
         return {}
+    with open(fpath) as f:
+        return (load_yaml_fast(f.read()) if read_only else ryaml.load(f)) or {}
 
 
 def get_overleaf_repo(
@@ -583,7 +876,7 @@ def get_overleaf_repo(
     """Get a freshly pulled Overleaf repository for a user/project."""
     owner_name, project_name = project.owner_github_name, project.name
     base_dir = (
-        f"/tmp/{user.github_username}/{owner_name}/"
+        f"{settings.CLONE_ROOT}/{user.github_username}/{owner_name}/"
         f"{project_name}/overleaf/{overleaf_project_id}"
     )
     repo_dir = os.path.join(base_dir, "repo")
@@ -908,6 +1201,18 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
     cached = _peek_dvc_lock_outs(blob_sha)
     if cached is not None:
         return cached
+    # A history walk reads dvc.lock at every commit that touched the file,
+    # and a project of any size keeps a megabyte of it: parsing a thousand
+    # revisions is minutes of work that is identical for every worker, every
+    # viewer and every restart. Keyed by the blob, so it is only ever done
+    # once anywhere.
+    shared_key = cache.make_key("dvc-lock-outs", blob_sha)
+    shared = cache.get_json(shared_key)
+    if isinstance(shared, dict):
+        _DVC_LOCK_PARSE_CACHE[blob_sha] = shared
+        if len(_DVC_LOCK_PARSE_CACHE) > _DVC_LOCK_PARSE_CACHE_MAX:
+            _DVC_LOCK_PARSE_CACHE.popitem(last=False)
+        return shared
     try:
         # Not ryaml: we only pull plain strings out of this and never write it
         # back. On a 47 KB dvc.lock that is ~6 ms/parse versus ~94 ms, which
@@ -917,7 +1222,15 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
         data = {}
     outs: dict[str, str] = {}
     for stage in (data.get("stages") or {}).values():
+        # A revision can carry a stage name with nothing under it, which
+        # parses to None. Walking history means reading every dvc.lock a
+        # project ever had, so one malformed old revision must not take the
+        # whole file history down with it.
+        if not isinstance(stage, dict):
+            continue
         for out in stage.get("outs") or []:
+            if not isinstance(out, dict):
+                continue
             p = out.get("path")
             if not p:
                 continue
@@ -925,6 +1238,7 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
     _DVC_LOCK_PARSE_CACHE[blob_sha] = outs
     if len(_DVC_LOCK_PARSE_CACHE) > _DVC_LOCK_PARSE_CACHE_MAX:
         _DVC_LOCK_PARSE_CACHE.popitem(last=False)
+    cache.set_json(shared_key, outs)
     return outs
 
 
@@ -1372,46 +1686,105 @@ class RepoTree(ABC):
 
 
 class WorkingTree(RepoTree):
-    """RepoTree backed by a live filesystem checkout."""
+    """RepoTree backed by a live filesystem checkout.
+
+    Unlike ``GitTree``, this reaches the filesystem, and paths arrive here
+    from ``calkit.yaml`` and from request URLs. Every project's checkout
+    sits beside every other one under ``CLONE_ROOT``, so a path that walks
+    out of this repo walks into someone else's.
+    """
 
     def __init__(self, root: str) -> None:
         self._root = root
+        self._root_norm = os.path.normpath(root)
+        # Kept apart from the normalized form: CLONE_ROOT may itself be a
+        # symlink, so a resolved path needs a resolved root to compare to.
+        try:
+            self._root_real = os.path.realpath(root)
+        except (OSError, ValueError):
+            self._root_real = self._root_norm
 
-    def _abs(self, path: str | None) -> str:
-        return self._root if not path else os.path.join(self._root, path)
+    @staticmethod
+    def _within(root: str, candidate: str) -> bool:
+        return candidate == root or candidate.startswith(root + os.sep)
+
+    @staticmethod
+    def _is_repo_internal(path: str) -> bool:
+        """Whether ``path`` names anything under a ``.git`` directory."""
+        return ".git" in path.replace(os.sep, "/").split("/")
+
+    def _abs(self, path: str | None) -> str | None:
+        """Absolute path for ``path``, or ``None`` if it leaves the checkout.
+
+        Lexical, so it costs no syscalls in the directory listings that call
+        it once per entry; symlinks are ``is_safe_symlink``'s job.
+        """
+        if not path:
+            return self._root
+        # `.git` is the one thing this tree can see that ``GitTree`` cannot,
+        # and it is repo plumbing rather than project content: the remote
+        # URL, and whatever a legacy clone embedded in it.
+        if self._is_repo_internal(path):
+            logger.warning(f"Refusing to read repo internals: {path!r}")
+            return None
+        full = os.path.join(self._root, path)
+        if not self._within(self._root_norm, os.path.normpath(full)):
+            logger.warning(f"Refusing path outside {self._root}: {path!r}")
+            return None
+        return full
 
     def exists(self, path: str) -> bool:
-        return os.path.exists(self._abs(path))
+        fpath = self._abs(path)
+        return fpath is not None and os.path.exists(fpath)
 
     def is_file(self, path: str) -> bool:
-        return os.path.isfile(self._abs(path))
+        fpath = self._abs(path)
+        return fpath is not None and os.path.isfile(fpath)
 
     def is_dir(self, path: str | None) -> bool:
-        return os.path.isdir(self._abs(path))
+        fpath = self._abs(path)
+        return fpath is not None and os.path.isdir(fpath)
 
     def is_symlink(self, path: str) -> bool:
-        return os.path.islink(self._abs(path))
+        fpath = self._abs(path)
+        return fpath is not None and os.path.islink(fpath)
 
     def is_safe_symlink(self, path: str) -> bool:
+        fpath = self._abs(path)
+        if fpath is None:
+            return False
         try:
-            resolved = os.path.realpath(self._abs(path))
-            root_real = os.path.realpath(self._root)
-            return (
-                resolved.startswith(root_real + os.sep)
-                or resolved == root_real
+            resolved = os.path.realpath(fpath)
+            if not self._within(self._root_real, resolved):
+                return False
+            # Checked again on the resolved path: a symlink to `.git` is
+            # inside the checkout, so containment alone lets it through.
+            return not self._is_repo_internal(
+                os.path.relpath(resolved, self._root_real)
             )
         except (OSError, ValueError):
             return False
 
     def read_bytes(self, path: str) -> bytes:
-        with open(self._abs(path), "rb") as f:
+        fpath = self._abs(path)
+        # Content is what leaves the machine, so this one also pays for a
+        # resolved check: `..` isn't the only way out of the tree.
+        if fpath is None or not self.is_safe_symlink(path):
+            raise HTTPException(404)
+        with open(fpath, "rb") as f:
             return f.read()
 
     def size(self, path: str) -> int:
-        return os.path.getsize(self._abs(path))
+        fpath = self._abs(path)
+        if fpath is None:
+            raise HTTPException(404)
+        return os.path.getsize(fpath)
 
     def listdir(self, path: str | None) -> list[str]:
-        return os.listdir(self._abs(path))
+        fpath = self._abs(path)
+        if fpath is None:
+            raise HTTPException(404)
+        return os.listdir(fpath)
 
 
 _ODB_LOCK_ATTR = "_calkit_odb_lock"

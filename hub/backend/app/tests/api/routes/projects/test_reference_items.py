@@ -1,12 +1,10 @@
 from fastapi.testclient import TestClient
 
-from app.config import settings
-
 
 def test_reference_item_needs_a_field(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
-    url = f"{settings.API_V1_STR}/projects/o/p/references/items"
+    url = "/projects/o/p/references/items"
     # Key and type alone would be written as an entry bibtexparser can't
     # read back, so it's refused up front rather than silently lost
     resp = client.post(

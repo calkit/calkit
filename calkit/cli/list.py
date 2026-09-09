@@ -222,9 +222,59 @@ def list_questions(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
+    raw: Annotated[
+        bool,
+        typer.Option(
+            "--raw",
+            help="Show the text as written, with its {name} placeholders, "
+            "instead of rendered from the evidence.",
+        ),
+    ] = False,
 ):
-    """List the project's questions (1-indexed)."""
-    questions = calkit.load_calkit_info().get("questions", []) or []
+    """List the project's questions (1-indexed).
+
+    Placeholders in the text, such as ``{improvement:.1f}``, are filled from
+    the question's value evidence, so numbers shown are read from the
+    results files rather than retyped into ``calkit.yaml``.
+    """
+    from calkit.questions import (
+        TEMPLATED_FIELDS,
+        placeholders,
+        render_question,
+    )
+
+    def _texts(question: dict) -> list[str]:
+        evidence = question.get("evidence") or []
+        return [question.get(f) or "" for f in TEMPLATED_FIELDS] + [
+            ev.get("explanation") or ""
+            for ev in evidence
+            if isinstance(ev, dict)
+        ]
+
+    ck_info = calkit.load_calkit_info()
+    questions = ck_info.get("questions", []) or []
+    if not raw:
+        rendered = [render_question(q, ck_info) for q in questions]
+        # A placeholder left as written looks exactly like text somebody
+        # meant literally, so say when one could not be filled rather than
+        # let a fresh clone read as a project that types its braces. Any
+        # placeholder left standing counts, whether it names evidence that
+        # could not be read or names nothing at all: a brace meant to stay
+        # in the text is written '{{' and never reaches here.
+        unfilled = any(
+            placeholders(text)
+            for q in rendered
+            if isinstance(q, dict)
+            for text in _texts(q)
+        )
+        if unfilled:
+            warn(
+                "Some placeholders could not be filled from the evidence. "
+                "Run 'calkit check questions' to see why; 'calkit pull' if "
+                "the results files are not here yet.",
+                err=json_output,
+            )
+        questions = rendered
     if json_output:
         echo_json(questions)
         return
@@ -472,3 +522,57 @@ def list_remotes(
         typer.echo(f"(Git) {name}: {url}")
     for name, url in result["dvc"].items():
         typer.echo(f"(DVC) {name}: {url}")
+
+
+@list_app.command(name="imports")
+def list_imports(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
+    """List everything in the project that was imported from elsewhere.
+
+    Walks every artifact kind, so an import shows up here whichever list it
+    was recorded in. Entries are annotated with the kind they came from and
+    a one-line description of the source, since where a file came from is
+    the question being asked and it's spelled differently for a Git repo, a
+    project, a URL, and a DOI.
+
+    What each import resolved to -- the commit, the checksum, when it was
+    fetched -- is read from '.calkit/imports.json' and shown under
+    'locked', so both halves of the record are in one listing.
+    """
+    from calkit.provenance import (
+        describe_source,
+        get_artifact_types_with_imports,
+        read_import_locks,
+    )
+
+    ck_info = calkit.load_calkit_info()
+    # calkit.yaml says what each import follows; the lock file says where
+    # following it led. Joined here so a listing answers both without the
+    # reader opening two files.
+    locks = read_import_locks()
+    imports = []
+    for kind in get_artifact_types_with_imports():
+        for obj in ck_info.get(kind, []) or []:
+            if not isinstance(obj, dict) or not obj.get("imported_from"):
+                continue
+            entry = dict(obj, kind=kind)
+            lock = locks.get(obj.get("path"))
+            if lock:
+                entry["locked"] = lock
+            imports.append(entry)
+    if json_output:
+        echo_json(imports)
+        return
+    if not imports:
+        typer.echo("No imported artifacts found")
+        return
+    for obj in imports:
+        obj = dict(obj)
+        source = describe_source(obj["imported_from"])
+        # Rendered as a line of its own rather than left as the nested
+        # mapping, so a listing can be skimmed for where things came from
+        obj["source"] = source
+        _echo_object(obj)

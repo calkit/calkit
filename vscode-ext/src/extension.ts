@@ -2414,7 +2414,8 @@ async function defineProvenance(
     const source = await vscode.window.showInputBox({
       title: "Mark as Imported",
       prompt: "Where was this file imported from?",
-      placeHolder: "URL, project name, or brief description",
+      placeHolder:
+        "URL, DOI, Git repo, someone/some-project/path, or a description",
     });
     if (!source) {
       return;
@@ -2422,7 +2423,7 @@ async function defineProvenance(
     try {
       await execFileAsync(
         "calkit",
-        ["update", artifactKind, relPath, "--imported-from-url", source],
+        ["update", artifactKind, relPath, "--imported-from", source],
         { cwd: workspaceRoot },
       );
     } catch (err) {

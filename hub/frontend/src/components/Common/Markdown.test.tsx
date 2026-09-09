@@ -57,4 +57,17 @@ describe("Markdown", () => {
     expect(clamp?.[2]).toContain("display:-webkit-box")
     expect(clamp?.[2]).not.toContain("display:inline")
   })
+
+  it("keeps long code blocks within the markdown container", () => {
+    const html = renderToStaticMarkup(
+      <ChakraProvider>
+        <Markdown>{"```sh\ncommand --with-a-very-long-argument\n```"}</Markdown>
+      </ChakraProvider>,
+    )
+    const preClass = html.match(/<pre[^>]*class="(css-[a-z0-9]+)"/i)?.[1]
+    expect(preClass).toBeDefined()
+    const preStyles = html.match(new RegExp(`\\.${preClass}\\{([^}]*)\\}`))?.[1]
+    expect(preStyles).toContain("max-width:100%")
+    expect(preStyles).toContain("overflow-x:auto")
+  })
 })

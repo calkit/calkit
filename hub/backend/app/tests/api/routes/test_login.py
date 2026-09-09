@@ -22,9 +22,7 @@ def test_get_access_token(client: TestClient) -> None:
         "username": settings.FIRST_SUPERUSER,
         "password": settings.FIRST_SUPERUSER_PASSWORD,
     }
-    r = client.post(
-        f"{settings.API_V1_STR}/login/access-token", data=login_data
-    )
+    r = client.post("/login/access-token", data=login_data)
     tokens = r.json()
     assert r.status_code == 200
     assert "access_token" in tokens
@@ -43,14 +41,12 @@ def test_refresh_access_token_rotates(
         "username": settings.FIRST_SUPERUSER,
         "password": settings.FIRST_SUPERUSER_PASSWORD,
     }
-    r = client.post(
-        f"{settings.API_V1_STR}/login/access-token", data=login_data
-    )
+    r = client.post("/login/access-token", data=login_data)
     assert r.status_code == 200
     initial = r.json()
     initial_refresh = initial["refresh_token"]
     r = client.post(
-        f"{settings.API_V1_STR}/login/refresh",
+        "/login/refresh",
         json={"refresh_token": initial_refresh},
     )
     assert r.status_code == 200
@@ -62,7 +58,7 @@ def test_refresh_access_token_rotates(
     # Rotated token should work for authenticated endpoint.
     headers = {"Authorization": f"Bearer {rotated['access_token']}"}
     r = client.post(
-        f"{settings.API_V1_STR}/login/test-token",
+        "/login/test-token",
         headers=headers,
     )
     assert r.status_code == 200
@@ -70,7 +66,7 @@ def test_refresh_access_token_rotates(
     # interrupted rotation (the client reloaded before storing the new token)
     # can retry with it and get a fresh pair instead of being stranded.
     r = client.post(
-        f"{settings.API_V1_STR}/login/refresh",
+        "/login/refresh",
         json={"refresh_token": initial_refresh},
     )
     assert r.status_code == 200
@@ -89,7 +85,7 @@ def test_refresh_access_token_rotates(
     db.add(old_token)
     db.commit()
     r = client.post(
-        f"{settings.API_V1_STR}/login/refresh",
+        "/login/refresh",
         json={"refresh_token": initial_refresh},
     )
     assert r.status_code == 401
@@ -98,7 +94,7 @@ def test_refresh_access_token_rotates(
 
 def test_refresh_access_token_invalid(client: TestClient) -> None:
     r = client.post(
-        f"{settings.API_V1_STR}/login/refresh",
+        "/login/refresh",
         json={"refresh_token": "not-a-real-refresh-token"},
     )
     assert r.status_code == 401
@@ -123,7 +119,7 @@ def test_refresh_access_token_expired(client: TestClient, db: Session) -> None:
     db.commit()
 
     r = client.post(
-        f"{settings.API_V1_STR}/login/refresh",
+        "/login/refresh",
         json={"refresh_token": refresh_raw},
     )
     assert r.status_code == 401
@@ -155,7 +151,7 @@ def test_refresh_access_token_inactive_user(
     )
     db.commit()
     r = client.post(
-        f"{settings.API_V1_STR}/login/refresh",
+        "/login/refresh",
         json={"refresh_token": refresh_raw},
     )
     assert r.status_code == 401
@@ -172,9 +168,7 @@ def test_get_access_token_incorrect_password(client: TestClient) -> None:
         "username": settings.FIRST_SUPERUSER,
         "password": "incorrect",
     }
-    r = client.post(
-        f"{settings.API_V1_STR}/login/access-token", data=login_data
-    )
+    r = client.post("/login/access-token", data=login_data)
     assert r.status_code == 400
 
 
@@ -182,7 +176,7 @@ def test_use_access_token(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
     r = client.post(
-        f"{settings.API_V1_STR}/login/test-token",
+        "/login/test-token",
         headers=superuser_token_headers,
     )
     result = r.json()
@@ -191,7 +185,7 @@ def test_use_access_token(
 
 
 def test_device_initiate(client: TestClient) -> None:
-    r = client.post(f"{settings.API_V1_STR}/login/device")
+    r = client.post("/login/device")
     assert r.status_code == 200
     data = r.json()
     assert "device_code" in data
@@ -211,7 +205,7 @@ def test_device_token_pending(client: TestClient, db: Session) -> None:
     db.add(auth_request)
     db.commit()
     r = client.post(
-        f"{settings.API_V1_STR}/login/device/token",
+        "/login/device/token",
         json={"device_code": auth_request.device_code},
     )
     assert r.status_code == 202
@@ -226,7 +220,7 @@ def test_device_token_expired(client: TestClient, db: Session) -> None:
     db.add(auth_request)
     db.commit()
     r = client.post(
-        f"{settings.API_V1_STR}/login/device/token",
+        "/login/device/token",
         json={"device_code": auth_request.device_code},
     )
     assert r.status_code == 400
@@ -238,12 +232,12 @@ def test_device_authorize_and_token(
     superuser_token_headers: dict[str, str],
 ) -> None:
     # Initiate
-    r = client.post(f"{settings.API_V1_STR}/login/device")
+    r = client.post("/login/device")
     assert r.status_code == 200
     device_code = r.json()["device_code"]
     # Authorize (requires auth)
     r = client.post(
-        f"{settings.API_V1_STR}/login/device/authorize",
+        "/login/device/authorize",
         json={"device_code": device_code},
         headers=superuser_token_headers,
     )
@@ -251,7 +245,7 @@ def test_device_authorize_and_token(
     assert r.json() == {"message": "CLI access authorized"}
     # Poll for token — should now succeed
     r = client.post(
-        f"{settings.API_V1_STR}/login/device/token",
+        "/login/device/token",
         json={"device_code": device_code},
     )
     assert r.status_code == 200
@@ -264,7 +258,7 @@ def test_device_authorize_and_token(
     assert data["expires_in"] > 0
     # Row should be deleted — second poll returns 404
     r = client.post(
-        f"{settings.API_V1_STR}/login/device/token",
+        "/login/device/token",
         json={"device_code": device_code},
     )
     assert r.status_code == 404
@@ -280,7 +274,7 @@ def test_device_authorize_requires_auth(
     db.add(auth_request)
     db.commit()
     r = client.post(
-        f"{settings.API_V1_STR}/login/device/authorize",
+        "/login/device/authorize",
         json={"device_code": auth_request.device_code},
     )
     assert r.status_code == 401
@@ -298,7 +292,7 @@ def test_device_authorize_expired(
     db.add(auth_request)
     db.commit()
     r = client.post(
-        f"{settings.API_V1_STR}/login/device/authorize",
+        "/login/device/authorize",
         json={"device_code": auth_request.device_code},
         headers=superuser_token_headers,
     )
@@ -315,7 +309,7 @@ def test_recovery_password(
     ):
         email = "test@example.com"
         r = client.post(
-            f"{settings.API_V1_STR}/password-recovery/{email}",
+            f"/password-recovery/{email}",
             headers=normal_user_token_headers,
         )
         assert r.status_code == 200
@@ -328,7 +322,7 @@ def test_recovery_password_user_not_exits(
 ) -> None:
     email = "jVgQr@example.com"
     r = client.post(
-        f"{settings.API_V1_STR}/password-recovery/{email}",
+        f"/password-recovery/{email}",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 404
@@ -341,7 +335,7 @@ def test_reset_password(
     token = generate_password_reset_token(email=settings.FIRST_SUPERUSER)
     data = {"new_password": "changethis", "token": token}
     r = client.post(
-        f"{settings.API_V1_STR}/reset-password/",
+        "/reset-password/",
         headers=superuser_token_headers,
         json=data,
     )
@@ -359,7 +353,7 @@ def test_reset_password_invalid_token(
 ) -> None:
     data = {"new_password": "changethis", "token": "invalid"}
     r = client.post(
-        f"{settings.API_V1_STR}/reset-password/",
+        "/reset-password/",
         headers=superuser_token_headers,
         json=data,
     )
@@ -399,7 +393,7 @@ def test_login_with_google_creates_github_less_user(
         patch("app.api.routes.login.users.save_google_token"),
     ):
         r = client.post(
-            f"{settings.API_V1_STR}/login/google",
+            "/login/google",
             json={
                 "code": "auth-code",
                 "redirect_uri": "http://localhost:5173/auth/google",
@@ -431,7 +425,7 @@ def test_login_with_google_requires_verified_email(client: TestClient) -> None:
         ),
     ):
         r = client.post(
-            f"{settings.API_V1_STR}/login/google",
+            "/login/google",
             json={"code": "c", "redirect_uri": "http://localhost:5173/x"},
         )
     assert r.status_code == 400
@@ -473,7 +467,7 @@ def _github_login(
         patch("app.api.routes.login.users.save_github_token"),
     ):
         return client.post(
-            f"{settings.API_V1_STR}/login/github",
+            "/login/github",
             json={
                 "code": "auth-code",
                 "redirect_uri": "http://localhost:5173/login",

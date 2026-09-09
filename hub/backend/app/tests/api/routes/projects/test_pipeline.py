@@ -4,10 +4,9 @@ from unittest.mock import patch
 import yaml
 from fastapi.testclient import TestClient
 
-from app.config import settings
 from app.tests.api.routes.projects.test_figures import _make_repo
 
-URL = f"{settings.API_V1_STR}/projects/o/p/pipeline/map-paths"
+URL = "/projects/o/p/pipeline/map-paths"
 
 
 def _call(

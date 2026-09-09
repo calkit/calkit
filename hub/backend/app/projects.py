@@ -37,11 +37,12 @@ def _yaml_load(data: bytes | str):
 
 
 import app.dvc
+from app import cache
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
+    load_yaml_fast,
     normalize_artifact_path,
     params_from_url,
-    ryaml,
     utcnow,
 )
 from app.dvc import (
@@ -340,7 +341,13 @@ def read_project_file(
     project) or its object was never pushed, and 413 when it's larger
     than ``max_bytes``, checked before reading and again after, since a
     DVC output's recorded size is what the pusher said it was.
+
+    Raises 400 for a path outside the project: callers reach here with one
+    straight out of a request URL, and ``WorkingTree`` reads the live
+    checkout. The tree refuses it too; this just answers more clearly.
     """
+    if os.path.isabs(path) or ".." in path.split("/"):
+        raise HTTPException(400, "Path traversal is not allowed")
     if not dvc_only and tree.is_file(path):
         data = bytes(tree.read_bytes(path))
         if len(data) > max_bytes:
@@ -789,6 +796,23 @@ def get_ck_info_and_dvc_outs_from_tree(
             f"(read {t_read * 1000:.0f}ms)"
         )
         return hit_value
+    # Not in this process, which says nothing about whether it has been
+    # worked out: there are several workers, and they all restart on a
+    # deploy. Keyed by the bytes it was derived from, so any edit to them
+    # invalidates it; object storage is the one input the key can't see.
+    shared_key = cache.make_key("ck-dvc", cache_key)
+    shared = cache.get_json(shared_key)
+    if isinstance(shared, list) and len(shared) == 4:
+        result = CkInfoAndOuts(*shared)
+        with _ck_dvc_cache_lock:
+            _ck_dvc_cache[cache_key] = (now, result)
+            if len(_ck_dvc_cache) > _CK_DVC_CACHE_MAX:
+                _ck_dvc_cache.popitem(last=False)
+        logger.info(
+            f"ck/dvc shared cache hit for {owner_name}/{project_name} "
+            f"(read {t_read * 1000:.0f}ms)"
+        )
+        return result
     logger.info(
         f"ck/dvc cache miss for {owner_name}/{project_name} "
         f"(read {t_read * 1000:.0f}ms)"
@@ -827,6 +851,24 @@ def get_ck_info_and_dvc_outs_from_tree(
         _ck_dvc_cache[cache_key] = (now, result)
         if len(_ck_dvc_cache) > _CK_DVC_CACHE_MAX:
             _ck_dvc_cache.popitem(last=False)
+    # A directory whose .dir object isn't in storage yet expands to nothing,
+    # and a push makes that wrong without changing the key, so it goes no
+    # further than the in-process entry above, which ages out in minutes.
+    missing_dir_outs = [
+        out["path"]
+        for stage in dvc_lock.get("stages", {}).values()
+        for out in stage.get("outs", [])
+        if str(out.get("md5", "")).endswith(".dir")
+        and out["path"] not in dvc_lock_outs
+    ]
+    if missing_dir_outs:
+        logger.warning(
+            f"Not caching incomplete DVC outs for {owner_name}/"
+            f"{project_name}; .dir objects missing from storage for: "
+            f"{', '.join(sorted(missing_dir_outs))}"
+        )
+    else:
+        cache.set_json(shared_key, list(result))
     return result
 
 
@@ -869,7 +911,10 @@ def get_contents_from_tree(
         p for p, obj in dvc_lock_outs.items() if obj["type"] == "dir"
     ]
     ignore_paths = [".git", ".dvc/cache", ".dvc/tmp", ".dvc/config.local"]
-    if path is not None and path in ignore_paths:
+    # Prefixes, not exact names: ".git" alone left ".git/config" readable.
+    if path is not None and any(
+        path == p or path.startswith(p + "/") for p in ignore_paths
+    ):
         raise HTTPException(404)
     # Let's restructure as a dictionary keyed by path
     categories_with_path = [
@@ -1257,21 +1302,21 @@ def get_ck_info_for_ref(
     project: Project,
     repo: git.Repo,
     ref: str | None = None,
-    read_only: bool = False,
 ) -> dict:
     """Return Calkit metadata for the requested ref, if provided.
 
     Always returns a dict; an empty one when calkit.yaml doesn't exist at
     the ref or doesn't hold a mapping. Declared artifact paths come back
-    normalized (see ``normalize_ck_info_paths``), so callers must not write
-    the result back to calkit.yaml.
+    normalized in place (see ``normalize_ck_info_paths``), so what comes
+    back must never be written to calkit.yaml.
 
-    Pass ``read_only=True`` only when the caller won't write the result back;
-    see ``get_ck_info_from_repo``.
+    Hence it always parses read-only: round-tripping a large calkit.yaml
+    costs a quarter of a second, and only a faithful rewrite needs that.
+    Callers that do write it back use ``get_ck_info_from_repo``.
     """
     if ref is None:
         return normalize_ck_info_paths(
-            get_ck_info_from_repo(repo=repo, read_only=read_only)
+            get_ck_info_from_repo(repo=repo, read_only=True)
         )
     try:
         ck_item = get_contents_from_repo(
@@ -1305,11 +1350,12 @@ def get_dvc_pipeline_for_ref(
     not check it out), so it must not be used for ref-scoped reads.
     """
     if ref is None:
-        return get_dvc_pipeline_from_repo(repo)
+        return get_dvc_pipeline_from_repo(repo, read_only=True)
     tree = get_repo_tree_for_ref(repo, ref)
     if not tree.is_file("dvc.yaml"):
         return {}
-    return ryaml.load(tree.read_text("dvc.yaml")) or {}
+    # Read-only, so the fast loader rather than the round-trip parser
+    return load_yaml_fast(tree.read_text("dvc.yaml")) or {}
 
 
 def get_figure_from_repo(
@@ -1346,7 +1392,7 @@ def get_publication_from_repo(
     publications = ck_info.get("publications", [])
     # Get the figure content (will be base64-encoded)
     for pub in publications:
-        if pub.get("path") == path:
+        if isinstance(pub, dict) and pub.get("path") == path:
             item = get_contents_from_repo(
                 project=project,
                 repo=repo,

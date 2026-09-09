@@ -13,7 +13,7 @@ def test_get_feature_vote_status(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     r = client.get(
-        f"{settings.API_V1_STR}/feature-votes/{FEATURE}",
+        f"/feature-votes/{FEATURE}",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 200
@@ -26,7 +26,7 @@ def test_unknown_feature_404(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     r = client.get(
-        f"{settings.API_V1_STR}/feature-votes/bogus",
+        "/feature-votes/bogus",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 404
@@ -36,7 +36,7 @@ def test_cast_feature_vote_is_idempotent(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     r = client.post(
-        f"{settings.API_V1_STR}/feature-votes/{FEATURE}",
+        f"/feature-votes/{FEATURE}",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 200
@@ -44,7 +44,7 @@ def test_cast_feature_vote_is_idempotent(
     assert first["has_voted"] is True
     assert first["count"] >= 1
     r = client.post(
-        f"{settings.API_V1_STR}/feature-votes/{FEATURE}",
+        f"/feature-votes/{FEATURE}",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 200
@@ -58,18 +58,18 @@ def test_remove_feature_vote(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     client.post(
-        f"{settings.API_V1_STR}/feature-votes/{FEATURE}",
+        f"/feature-votes/{FEATURE}",
         headers=normal_user_token_headers,
     )
     r = client.delete(
-        f"{settings.API_V1_STR}/feature-votes/{FEATURE}",
+        f"/feature-votes/{FEATURE}",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 200
     assert r.json()["has_voted"] is False
     # Removing again is a no-op, not an error.
     r = client.delete(
-        f"{settings.API_V1_STR}/feature-votes/{FEATURE}",
+        f"/feature-votes/{FEATURE}",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 200
@@ -81,7 +81,7 @@ def test_get_feature_votes_for_admin(
     normal_user_token_headers: dict[str, str],
     superuser_token_headers: dict[str, str],
 ) -> None:
-    base = f"{settings.API_V1_STR}/feature-votes"
+    base = "/feature-votes"
     resp = client.post(
         f"{base}/local-workspace-compute", headers=normal_user_token_headers
     )
@@ -114,7 +114,7 @@ def test_post_feedback(
     superuser_token_headers: dict[str, str],
 ) -> None:
     """Feedback is stored, listed for superusers, and emailed best-effort."""
-    url = f"{settings.API_V1_STR}/feedback"
+    url = "/feedback"
     assert client.post(url, json={"message": "hi"}).status_code == 401
     with (
         patch("app.config.settings.SMTP_HOST", "smtp.example.com"),

@@ -81,7 +81,8 @@ def test_update_dataset(tmp_dir):
             },
         }
     ]
-    # Git needs a commit hash; a branch would move
+    # A branch in the deprecated 'rev' is still the mistake worth
+    # catching --- what moves goes in 'ref'
     result = runner.invoke(
         update_app,
         [
@@ -95,6 +96,8 @@ def test_update_dataset(tmp_dir):
     )
     assert result.exit_code != 0
     assert "commit hash" in result.output
+    # A repo alone is a complete declaration: what it resolves to is
+    # recorded in .calkit/imports.json by 'calkit sync import', not here
     result = runner.invoke(
         update_app,
         [
@@ -102,19 +105,8 @@ def test_update_dataset(tmp_dir):
             "data/b.csv",
             "--imported-from-git-url",
             "https://github.com/a/b",
-        ],
-    )
-    assert result.exit_code != 0
-    assert "--imported-from-git-rev is required" in result.output
-    result = runner.invoke(
-        update_app,
-        [
-            "dataset",
-            "data/b.csv",
-            "--imported-from-git-url",
-            "https://github.com/a/b",
-            "--imported-from-git-rev",
-            "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
+            "--imported-from-git-ref",
+            "main",
             "--imported-from-git-path",
             "data/x.csv",
         ],
@@ -122,11 +114,9 @@ def test_update_dataset(tmp_dir):
     assert result.exit_code == 0, result.output
     ck_info = calkit.load_calkit_info()
     assert ck_info["datasets"][1]["imported_from"] == {
-        "git": {
-            "repo_url": "https://github.com/a/b",
-            "rev": "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
-            "path": "data/x.csv",
-        }
+        "git_repo_url": "https://github.com/a/b",
+        "path": "data/x.csv",
+        "git_ref": "main",
     }
     # Only one source, and the extras need a source to go with
     result = runner.invoke(
@@ -494,3 +484,51 @@ def test_update_docker_env_registry(tmp_dir):
     # Nothing to update is a mistake worth reporting, not a no-op
     result = runner.invoke(update_app, ["docker-env", "-n", "main"])
     assert result.exit_code != 0
+
+
+def test_update_imported_from_detects_the_kind(tmp_dir):
+    # 'calkit update <kind> --imported-from' takes a source written one
+    # way and works out which it is, so the VS Code extension's "define
+    # source" prompt --- which invites a URL, a project, or prose --- no
+    # longer records all three as a URL
+    import calkit
+    from calkit.cli.update import update_app
+
+    runner = CliRunner()
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"figures": [{"path": "f.png", "title": "F"}]}, f)
+    cases = {
+        "Provided by a colleague": {"description": "Provided by a colleague"},
+        "someone/some-project/fig.png": {
+            "project": "someone/some-project",
+            "path": "fig.png",
+        },
+        "https://doi.org/10.5281/zenodo.123": {"doi": "10.5281/zenodo.123"},
+        "https://github.com/o/r/blob/main/fig.png": {
+            "git_repo_url": "https://github.com/o/r.git",
+            "path": "fig.png",
+            "git_ref": "main",
+        },
+        "https://example.com/f.png": {"url": "https://example.com/f.png"},
+    }
+    for written, expected in cases.items():
+        result = runner.invoke(
+            update_app, ["figure", "f.png", "--imported-from", written]
+        )
+        assert result.exit_code == 0, result.output
+        got = calkit.load_calkit_info()["figures"][0]["imported_from"]
+        assert got == expected, written
+    # It says where something came from on its own
+    result = runner.invoke(
+        update_app,
+        [
+            "figure",
+            "f.png",
+            "--imported-from",
+            "https://x/a",
+            "--imported-from-url",
+            "https://y/b",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "on its own" in result.output

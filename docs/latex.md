@@ -196,3 +196,42 @@ calkit latex diff pubs/paper-1/main.tex --from main --env tex
 That one can't be reproduced from two revisions, so it isn't tracked: it
 goes under `.calkit/local`, which is private to the machine.
 With no `--from` it compares against the merge base with the default branch.
+
+## Interoperability with Microsoft Word
+
+For projects to be as inclusive as possible towards collaborators who
+prefer Microsoft Word, Calkit has the ability to export Word documents
+from LaTeX using Word's PDF converter to make them look as faithful as
+possible using the `calkit latex to-docx` command.
+After they've been marked up and commented on,
+those contributions can be merged back into the .tex source,
+including comments,
+with `calkit latex merge-docx`.
+
+See [this tutorial](tutorials/latex-word.md) for more.
+
+## Comments
+
+The Calkit LaTeX comment schema is designed to be portable and interoperable,
+easy to read as plain text but simple enough to be written by and interacted
+with graphically in any application.
+
+A comment thread is delineated with a LaTeX comment starting with `COMMENT`
+and the thread persists until the next non-commented line.
+The first line contains metadata about the comment such as
+whether or not it's resolved and if it's referring to a highlighted region
+of text in the following block.
+Each comment has an author name and optional email and timestamp.
+Indentation is used to denote where each message starts and ends, and the
+comment thread initiation metadata can span multiple lines if needed.
+A highlight occurrence, `occ`, is assumed to be the first (0),
+if omitted.
+For example:
+
+```latex
+% COMMENT resolved=false highlight={text: "something", occ: 0}
+%   Someone Name <email@mail.com> (2025-01-01 01:00):
+%     This is a comment.
+%   Person, Other:
+%     That's a very good comment.
+```

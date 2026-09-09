@@ -685,8 +685,17 @@ export function ArtifactCompareModal({
   // "figure" the fetch is a direct single-item call, so it's cheap.
   // When there is no initialArtifact (e.g. opened from the files page), also
   // enable the query without a ref so the current version is shown on open.
+  // A figure the listing carried as a thumbnail has no full-size bytes and,
+  // when it lives in Git rather than object storage, no URL either -- so
+  // there is nothing to show at full size without asking for it. Treat that
+  // the same as having been opened with no artifact at all.
+  const initialIsDisplayable = Boolean(
+    initialArtifact &&
+      ((initialArtifact as { content?: string | null }).content ||
+        (initialArtifact as { url?: string | null }).url),
+  )
   const artifact1Enabled =
-    kind === "file" || !initialArtifact ? isOpen : isOpen && Boolean(ref1)
+    kind === "file" || !initialIsDisplayable ? isOpen : isOpen && Boolean(ref1)
   const artifact1Query = useArtifactAtRef(
     ownerName,
     projectName,
@@ -710,11 +719,11 @@ export function ArtifactCompareModal({
   // opened from the files page), fall through to artifact1Query so the current
   // version is displayed.
   const displayData1 =
-    kind === "file" || ref1 || !initialArtifact
+    kind === "file" || ref1 || !initialIsDisplayable
       ? artifact1Query.data
       : initialArtifact
   const isPending1 =
-    kind === "file" || ref1 || !initialArtifact
+    kind === "file" || ref1 || !initialIsDisplayable
       ? artifact1Query.isPending
       : false
 

@@ -42,7 +42,6 @@ a GitHub App's permissions are what its tokens carry.
 Set the callback URL to the hub's login page,
 e.g., `https://your-hub.example.edu/login`,
 which is where GitHub sends users back with their authorization code.
-There are no webhooks to configure.
 Grant these permissions:
 
 | Permission                 | Access       | Used for                                                       |
@@ -69,6 +68,46 @@ installation token.
     the GitHub Container Registry alongside their code. An instance that
     doesn't need that can leave it out, and image pushes will ask users for
     their own token with the `write:packages` scope instead.
+
+### The push webhook
+
+Everything a project page shows is worked out from its latest commit, and
+for a large project that takes long enough to be worth doing before someone
+opens the page rather than while they wait.
+A push is when that work becomes necessary and when nobody is waiting, so
+the hub asks GitHub to tell it about pushes.
+
+The webhook belongs to the App, not to each repository:
+set it once and every repo the App is installed on delivers to it.
+In the App's settings, under **Webhook**:
+
+- Tick **Active**.
+- Set the URL to `https://api.your-hub.example.edu/events/github`.
+- Set a secret, and give the backend the same value as `GH_WEBHOOK_SECRET`.
+- Under **Subscribe to events**, tick **Push**.
+
+Deliveries are rejected unless their signature matches `GH_WEBHOOK_SECRET`,
+and an instance that hasn't set one refuses them outright, so there is no
+unauthenticated way to make a hub do this work.
+
+This is an optimization, not a requirement.
+Leave the webhook off and pages still show the right thing;
+the first person to open one after a push is the one who waits for it.
+Warming needs the `worker` service and a `REDIS_URL` to queue onto,
+both of which are in the bundled compose file.
+The `rq-exporter` and `redis-exporter` services report what the queue and
+the cache are doing to Prometheus, and the bundled Grafana has a
+**Warm queue and cache** dashboard for them: how deep the queue is, whether
+jobs are failing, whether a worker is alive at all, and what the cache is
+holding, hitting, and evicting.
+
+<!-- prettier-ignore -->
+!!! tip
+
+    `calkit push` also tells the hub directly, so people pushing through the
+    CLI get warmed pages whether or not the webhook is set up. That path
+    covers repos GitHub can't call back on, such as a hub reachable only
+    inside your network.
 
 ## Where to start
 

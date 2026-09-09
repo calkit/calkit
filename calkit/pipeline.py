@@ -1279,6 +1279,50 @@ def _warn_on_latexmkrc_out_dir_mismatch(
     )
 
 
+def _ensure_calkit_gitattributes(wdir: str | None = None) -> bool:
+    """Pin the line endings of Calkit's own generated files to LF.
+
+    Several of them are committed *and* hashed by DVC as stage
+    dependencies -- an environment's lock file most of all. Git rewrites
+    text files to CRLF on checkout when ``core.autocrlf`` is on, which is
+    the default for Git for Windows, and DVC hashes the working tree, so a
+    Windows collaborator's checkout disagrees with everyone else's
+    ``dvc.lock`` and the stage reads stale forever. Writing the file with
+    LF is not enough: the rewrite happens on the way out of Git, after we
+    are done.
+
+    DVC recommends the same mechanism for cross-platform work, but applied
+    to everything (``* text=auto eol=lf``, plus ``core.autocrlf false``);
+    see its guide to running on Windows. This rule is deliberately
+    narrower, since normalizing a project's own files is the project's
+    call and doing it unasked would renormalize files nobody meant to
+    touch. The two agree in direction, so a project that follows DVC's
+    advice as well loses nothing.
+
+    ``.gitattributes`` outranks ``core.autocrlf``, so this holds however
+    the user has Git configured.
+
+    Scoped to ``.calkit`` --- everything Calkit generates, and nothing a
+    project writes for itself. Deliberately not narrower than that: the
+    files here that are both committed and hashed are spread across
+    ``env-locks`` and ``envs``, in ``.json``, ``.yml`` and ``.txt``, and
+    an allowlist of those would silently stop covering the next one
+    added. Ignored files inside ``.calkit`` pick up the rule too, which
+    costs nothing, since Git never rewrites what it isn't tracking.
+
+    Locks a project keeps outside ``.calkit`` --- ``uv.lock``,
+    ``pixi.lock``, a ``.python-version`` beside an environment spec ---
+    are not covered. They are written by their own tools, and normalizing
+    a project's own files is the project's call; DVC's guide to running on
+    Windows covers them.
+    """
+    return _write_managed_gitignore_block(
+        os.path.join(wdir, ".gitattributes") if wdir else ".gitattributes",
+        marker="calkit generated files",
+        lines=["/.calkit/** text eol=lf"],
+    )
+
+
 def _ensure_latex_aux_gitignore(
     stage: LatexStage, wdir: str | None = None
 ) -> bool:
@@ -1494,7 +1538,7 @@ def to_dvc(
     """
     import calkit.dvc.zip
     import calkit.markdown
-    from calkit.environments import get_env_lock_fpath
+    from calkit.environments import get_env_input_paths, get_env_lock_fpath
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -1658,6 +1702,20 @@ def to_dvc(
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
+        # An env that runs setup commands can name the files they read---a
+        # setup script it sources, most often. Those are inputs to every
+        # stage using the env, in the same way its lock file is: editing
+        # how a build is set up changes what the build produces. Declared
+        # rather than parsed out of the commands, since a shell command
+        # doesn't reliably say which of its words is a path. Only the kinds
+        # with a ``default_setup``: a Docker env's ``inputs`` are files
+        # copied into the image, and their checksums already ride along in
+        # its lock file, which stages depend on.
+        if env.get("kind") in ("system", "slurm", "pbs"):
+            for env_input in get_env_input_paths(env, env_name):
+                env_lock_fpaths.setdefault(env_name, []).append(
+                    Path(env_input).as_posix()
+                )
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=True, for_dvc=True, wdir=wdir
         )
@@ -1734,6 +1792,40 @@ def to_dvc(
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
+    # Tell procedure stages where their procedure is written down, which
+    # only calkit.yaml knows
+    pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
+    if write:
+        # The resolved setup commands each stage runs, written beside the
+        # pipeline so the compiled command can name a path instead of
+        # carrying shell-quoted text, which no single quoting survives on
+        # both cmd.exe and a POSIX shell. Written after the merge above,
+        # which is what works out the list.
+        setup_files = [
+            path
+            for stage in pipeline.stages.values()
+            if (path := stage.write_setup_file(wdir=wdir)) is not None
+        ]
+        # Not committed: unlike an import's lock, this is derived from
+        # calkit.yaml and rewritten by every compile, which is to say by
+        # every 'calkit run' and 'calkit status' -- the same reason a
+        # cleaned notebook isn't committed either.
+        if manage_gitignore and setup_files:
+            _write_managed_gitignore_block(
+                os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
+                marker="calkit stage setup",
+                lines=["/.calkit/stage-setup/"],
+            )
+        # Only when there is a lock file to protect. A project with no
+        # environment that locks under .calkit has nothing whose hash a
+        # line-ending rewrite could change, and shouldn't get a
+        # .gitattributes it never needed.
+        if manage_gitignore and any(
+            Path(p).as_posix().startswith(".calkit/env-locks/")
+            for paths in env_lock_fpaths.values()
+            for p in paths
+        ):
+            _ensure_calkit_gitattributes(wdir=wdir)
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
@@ -1854,6 +1946,18 @@ def to_dvc(
         # spawning a git subprocess per output (~100 ms each).
         if write and manage_gitignore:
             repo = calkit.git.get_repo(wdir)
+            # A subproject is usually a plain subdirectory rather than its
+            # own git repo, so an output path relative to it (``wdir``) must
+            # be re-based onto the enclosing repo's root before it's handed
+            # to the ignore helpers below, or they'd write the rule into the
+            # top-level .gitignore under the wrong, subproject-relative path.
+            repo_root = Path(repo.working_dir).resolve()
+            wdir_rel = Path(wdir or ".").resolve().relative_to(repo_root)
+            wdir_rel_posix = wdir_rel.as_posix()
+
+            def _repo_rel(p: str) -> str:
+                return f"{wdir_rel_posix}/{p}" if wdir_rel_posix != "." else p
+
             # Ensure we catch any Jupyter Notebook outputs
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
@@ -1873,13 +1977,19 @@ def to_dvc(
             old_stage = existing_dvc_stages.get(stage_name, {})
             for old_path in calkit.dvc.out_paths_from_stage(old_stage):
                 if old_path not in current_out_paths:
-                    calkit.git.ensure_path_is_not_ignored(repo, path=old_path)
+                    calkit.git.ensure_path_is_not_ignored(
+                        repo, path=_repo_rel(old_path)
+                    )
             # Deal with any gitignore changes necessary
             for out in outputs:
                 if isinstance(out, PathOutput) and out.storage is None:
-                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                 elif isinstance(out, PathOutput) and out.storage == "git":
-                    calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_not_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                     if out.path.endswith(".ipynb"):
                         # A notebook stage's storage is declared here, in the
                         # pipeline, so a clean filter installed in the clone
@@ -1888,10 +1998,12 @@ def to_dvc(
                         # commit bytes that don't match what DVC hashed, with
                         # nothing showing as modified locally.
                         calkit.git.ensure_path_is_not_filtered(
-                            repo, path=out.path
+                            repo, path=_repo_rel(out.path)
                         )
                 elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
-                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                     calkit.dvc.zip.add(out.path, is_stage_output=True)
         # For LaTeX stages, warn on a latexmkrc/output_dir mismatch and keep
         # the generated aux files out of Git via a managed .gitignore block.

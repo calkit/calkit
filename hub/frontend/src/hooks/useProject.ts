@@ -128,8 +128,10 @@ const useProjectFigures = (
   accountName: string,
   projectName: string,
   ref?: string,
+  enabled = true,
 ) => {
   const figuresRequest = useQuery({
+    enabled,
     queryKey: ["projects", accountName, projectName, "figures", ref, "all"],
     queryFn: async () => {
       const all: Figure[] = []
@@ -156,8 +158,10 @@ const useProjectResults = (
   accountName: string,
   projectName: string,
   ref?: string,
+  enabled = true,
 ) => {
   const resultsRequest = useQuery({
+    enabled,
     queryKey: ["projects", accountName, projectName, "results", ref],
     queryFn: () =>
       ProjectsService.getProjectResults({
@@ -221,8 +225,10 @@ const useProjectPublications = (
   accountName: string,
   projectName: string,
   ref?: string,
+  enabled = true,
 ) => {
   const publicationsRequest = useQuery({
+    enabled,
     queryKey: ["projects", accountName, projectName, "publications", ref],
     queryFn: () =>
       ProjectsService.getProjectPublications({
@@ -256,8 +262,10 @@ const useProjectTables = (
   projectName: string,
   ref?: string,
   includeContent = true,
+  enabled = true,
 ) => {
   const tablesRequest = useQuery({
+    enabled,
     queryKey: [
       "projects",
       accountName,

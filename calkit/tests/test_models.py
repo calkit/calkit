@@ -47,11 +47,9 @@ def test_dataset_provenance():
                 {
                     "path": "d.csv",
                     "imported_from": {
-                        "git": {
-                            "repo_url": "https://github.com/a/b",
-                            "rev": "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
-                            "path": "data/x.csv",
-                        }
+                        "git_repo_url": "https://github.com/a/b",
+                        "path": "data/x.csv",
+                        "git_ref": "main",
                     },
                 },
                 {"path": "e.csv"},
@@ -66,7 +64,9 @@ def test_dataset_provenance():
     # A malformed imported_from is an error at the project level, not a key
     # quietly dropped by falling back to a looser model.
     for bad in [
-        {"git": {"repo_url": "https://x", "rev": "main"}},
+        {"git_repo_url": "https://x", "git_rev": "main"},
+        # A Git source nested rather than written flat
+        {"git": {"repo_url": "https://x"}},
         {"doi": None},
         {"doi": "10.21223.zenodo/etc"},
         {"url": "https://x", "date": "not-a-date"},
@@ -97,7 +97,8 @@ def test_dataset_provenance():
                 {
                     "path": "x",
                     "imported_from": {
-                        "git": {"repo_url": "https://x", "rev": bad_rev}
+                        "git_repo_url": "https://x",
+                        "git_rev": bad_rev,
                     },
                 }
             )

@@ -1180,6 +1180,37 @@ def test_system_env_lock(tmp_dir):
     bare = {"kind": "system"}
     assert envs.get_env_lock_fpath(env=bare, env_name="sys") is None
     assert envs.write_system_env_lock(env_name="sys", env=bare) is None
+    # 'default_setup' is compiled into the stage's command, where DVC
+    # already watches it, so it isn't copied here -- an env that only has
+    # setup commands needs no lock file at all
+    setup_env = {"kind": "system", "default_setup": ["module load cuda"]}
+    assert envs.get_env_lock_fpath(env=setup_env, env_name="setup") is None
+    assert envs.write_system_env_lock(env_name="setup", env=setup_env) is None
+    # The shell those commands run in isn't in the compiled command, so it
+    # is recorded -- and sits alongside the locked properties
+    both = {
+        "kind": "system",
+        "lock": ["os"],
+        "default_setup": ["module load cuda"],
+        "shell": "zsh",
+    }
+    with open(envs.write_system_env_lock(env_name="both", env=both)) as f:
+        data = json.load(f)
+    assert set(data) == {"os", "shell"}
+    assert data["shell"] == "zsh"
+    # A shell other than the default is recorded with no defaults set, for
+    # the sake of a stage's own setup commands, which run in it
+    shell_env = {"kind": "system", "shell": "zsh"}
+    with open(envs.write_system_env_lock(env_name="zsh", env=shell_env)) as f:
+        assert json.load(f) == {"shell": "zsh"}
+    # Writing the default explicitly says exactly what leaving it out says,
+    # so it must not be what decides whether there is a lock file at all --
+    # otherwise 'shell: bash' would silently add a dependency to every
+    # stage using the env and rerun them
+    bash_env = {"kind": "system", "shell": "bash"}
+    assert envs.get_env_lock_fpath(env=bash_env, env_name="b") is None
+    assert envs.write_system_env_lock(env_name="b", env=bash_env) is None
+    assert envs.get_env_lock_fpath(env=shell_env, env_name="z") is not None
     # Locking something writes it, and the file is what stages depend on
     env = {"kind": "system", "lock": ["os", "python-version"]}
     lock_fpath = envs.write_system_env_lock(env_name="sys", env=env)
@@ -1515,3 +1546,69 @@ def test_system_env_checks_are_not_cached():
     assert not envs.cacheable({"kind": "system"})
     for kind in ["uv", "conda", "docker", "slurm", "renv"]:
         assert envs.cacheable({"kind": kind}), kind
+
+
+def test_get_env_input_paths(capsys):
+    # An environment's files are read from 'inputs', with the older 'deps'
+    # spelling still accepted so a project that predates the rename doesn't
+    # have its files go silently untracked
+    import calkit.environments as envs
+
+    assert envs.get_env_input_paths({}) == []
+    assert envs.get_env_input_paths({"inputs": ["a.sh"]}) == ["a.sh"]
+    # Reset, since the warning is deliberately only issued once per process
+    envs._warned_deprecated_deps_key = False
+    assert envs.get_env_input_paths({"deps": ["b.sh"]}, "old") == ["b.sh"]
+    captured = capsys.readouterr()
+    assert "deprecated" in captured.out + captured.err
+    assert "old" in captured.out + captured.err
+    # Only once, however many readers ask
+    envs.get_env_input_paths({"deps": ["c.sh"]}, "old")
+    assert "deprecated" not in capsys.readouterr().out
+    # Saying the same thing twice in two places that can drift apart is
+    # reported rather than silently resolved one way
+    with pytest.raises(ValueError, match="merge them into 'inputs'"):
+        envs.get_env_input_paths({"inputs": ["a"], "deps": ["b"]}, "both")
+
+
+def test_env_inputs_must_be_inside_the_project():
+    # A stage can't depend on something the repo doesn't carry, so the
+    # inputs this PR adds are constrained the way a stage's wdir is. Note
+    # this is a pydantic constraint, not a JSON-schema one, so it catches a
+    # file being loaded as a model rather than one being linted in an
+    # editor -- same as every other RelativeChildPathString field.
+    from pydantic import ValidationError
+
+    import calkit.environments as envs
+    from calkit.models.core import (
+        DockerEnvironment,
+        PBSEnvironment,
+        SlurmEnvironment,
+        SystemEnvironment,
+    )
+
+    for model in (SystemEnvironment, SlurmEnvironment, PBSEnvironment):
+        assert model(inputs=["scripts/setup.sh"]).inputs == [
+            "scripts/setup.sh"
+        ]
+        for bad in ["../outside.sh", "/etc/hosts"]:
+            with pytest.raises(ValidationError):
+                model(inputs=[bad])
+    # The models are not what production reads: every caller goes through
+    # get_env_input_paths with a raw dict, so the check has to be there
+    # too or the guarantee only holds in tests
+    for kind in ("system", "slurm", "pbs"):
+        assert envs.get_env_input_paths(
+            {"kind": kind, "inputs": ["scripts/setup.sh"]}
+        ) == ["scripts/setup.sh"]
+        for bad in ["../outside.sh", "/etc/hosts"]:
+            with pytest.raises(ValueError, match="outside|absolute"):
+                envs.get_env_input_paths({"kind": kind, "inputs": [bad]})
+    # Docker's is a rename of a field that has been published for a while,
+    # so tightening it would retroactively invalidate existing projects
+    assert DockerEnvironment(image="x", inputs=["../outside.C"]).inputs == [
+        "../outside.C"
+    ]
+    assert envs.get_env_input_paths(
+        {"kind": "docker", "inputs": ["../outside.C"]}
+    ) == ["../outside.C"]

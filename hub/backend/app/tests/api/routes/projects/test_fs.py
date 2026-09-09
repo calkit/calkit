@@ -5,11 +5,9 @@ from unittest.mock import ANY, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.config import settings
-
 OWNER = "testowner"
 PROJECT = "testproject"
-FS_OPS_URL = f"{settings.API_V1_STR}/projects/{OWNER}/{PROJECT}/fs/ops"
+FS_OPS_URL = f"/projects/{OWNER}/{PROJECT}/fs/ops"
 
 
 def _fake_project():
@@ -19,9 +17,7 @@ def _fake_project():
 def test_lowercases_owner_and_project_name(client: TestClient):
     mixed_owner = "TestOwner"
     mixed_project = "TestProject"
-    url = (
-        f"{settings.API_V1_STR}/projects/{mixed_owner}/{mixed_project}/fs/ops"
-    )
+    url = f"/projects/{mixed_owner}/{mixed_project}/fs/ops"
     fake_fs = MagicMock()
     fake_fs.exists.return_value = True
     fake_fs.ls.side_effect = FileNotFoundError
@@ -58,7 +54,7 @@ def test_lowercases_owner_and_project_name(client: TestClient):
 
 
 def test_lowercases_owner_only_capital(client: TestClient):
-    url = f"{settings.API_V1_STR}/projects/OwnerWithCaps/{PROJECT}/fs/ops"
+    url = f"/projects/OwnerWithCaps/{PROJECT}/fs/ops"
     fake_fs = MagicMock()
     fake_fs.exists.return_value = True
     fake_fs.ls.side_effect = FileNotFoundError

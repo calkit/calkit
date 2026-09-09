@@ -358,7 +358,7 @@ function OriginCell({ item }: { item: PublicationComponent }) {
           to="../pipeline"
           search={{ stage: item.stage } as any}
         >
-          <Code fontSize="xs" cursor="pointer">
+          <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
             {item.stage}
           </Code>
         </Link>
@@ -462,7 +462,11 @@ function ComponentsModal({
                             to="../files"
                             search={{ path: item.path } as any}
                           >
-                            <Code fontSize="xs" cursor="pointer">
+                            <Code
+                              fontSize="xs"
+                              cursor="pointer"
+                              wordBreak="break-all"
+                            >
                               {relativeComponentPath(item.path, folder)}
                             </Code>
                           </Link>
@@ -612,7 +616,7 @@ export default function PublicationComponents({
       </Text>{" "}
       <Link onClick={openModal}>
         {nItems} {nItems === 1 ? "file" : "files"} in{" "}
-        <Code fontSize="xs" cursor="pointer">
+        <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
           {data.folder}
         </Code>
         {data.items.some((item) => item.via === "input")

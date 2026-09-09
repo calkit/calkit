@@ -43,10 +43,16 @@ const ProjectChecklist = ({
 }: ProjectChecklistProps) => {
   const { projectFlags, setFlag, flagsLoading } = useOnboardingFlags(projectId)
   const { questionsRequest } = useProjectQuestions(accountName, projectName)
-  // Both of these read the project's repo, which the page has already had
-  // cloned and cached for the README and showcase, so they're cheap here
-  // and expensive nowhere else.
+  const isDismissed = projectFlags.includes(DISMISSED)
+  // A dismissed checklist renders nothing at all, and until the flags land
+  // we don't know which it is. Both queries below read the whole repo --
+  // checking a project's reproducibility and working out its pipeline are
+  // seconds of work on a large one -- so they wait until we know they'll be
+  // looked at. Without this the project page pays for them on every visit
+  // to build a card that is then thrown away.
+  const isNeeded = !flagsLoading && !isDismissed
   const reproCheckQuery = useQuery({
+    enabled: isNeeded,
     queryKey: ["projects", accountName, projectName, "repro-check"],
     queryFn: () =>
       ProjectsService.getProjectReproCheck({
@@ -57,6 +63,7 @@ const ProjectChecklist = ({
     refetchOnWindowFocus: false,
   })
   const pipelineQuery = useQuery({
+    enabled: isNeeded,
     queryKey: ["projects", accountName, projectName, "pipeline", undefined],
     queryFn: () =>
       ProjectsService.getProjectPipeline({
@@ -88,7 +95,10 @@ const ProjectChecklist = ({
   // nothing about the project either, so that's no reason to show one.
   // The flags say whether this list was dismissed, so they have to land
   // before anything renders for the same reason.
-  if (reproCheckQuery.isPending || reproCheckQuery.isError || flagsLoading) {
+  if (flagsLoading || isDismissed) {
+    return null
+  }
+  if (reproCheckQuery.isPending || reproCheckQuery.isError) {
     return null
   }
   const actions: Record<string, React.ReactNode> = {

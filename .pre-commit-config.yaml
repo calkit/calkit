@@ -16,11 +16,12 @@ repos:
       - id: check-toml
       # The example projects' results files are stage outputs: a stage
       # writes them, and a formatted copy is a changed output that makes
-      # the stage stale, so they are left exactly as written.
+      # the stage stale, so they are left exactly as written. Likewise
+      # .calkit/env-locks, which calkit writes and compares byte for byte.
       - id: end-of-file-fixer
-        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/
+        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/|(^|/)\.calkit/env-locks/
       - id: trailing-whitespace
-        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/
+        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/|(^|/)\.calkit/env-locks/
       - id: check-yaml
         args: ["--unsafe"]
       - id: check-json

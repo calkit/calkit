@@ -13,7 +13,6 @@ from sqlmodel import Session, select
 
 from app import projects as projects_module
 from app import users
-from app.config import settings
 from app.core import ryaml
 from app.models import OverleafLink, Project, UserCreate
 from app.models.core import ROLE_IDS, UserProjectAccess
@@ -120,7 +119,7 @@ def test_record_overleaf_links_and_lookup(
     # The owner can resolve the Overleaf project back to their project,
     # straight from the index
     resp = client.get(
-        f"{settings.API_V1_STR}/user/overleaf-syncs/ol333",
+        "/user/overleaf-syncs/ol333",
         headers=headers,
     )
     assert resp.status_code == 200
@@ -131,7 +130,7 @@ def test_record_overleaf_links_and_lookup(
     assert data[0]["current_user_access"] == "owner"
     # An unrelated user gets nothing back for the same private project
     resp = client.get(
-        f"{settings.API_V1_STR}/user/overleaf-syncs/ol333",
+        "/user/overleaf-syncs/ol333",
         headers=other_headers,
     )
     assert resp.status_code == 200
@@ -163,9 +162,7 @@ def test_get_projects_min_access_level_write(
     )
 
     def _list(headers: dict[str, str], **params):
-        resp = client.get(
-            f"{settings.API_V1_STR}/projects", params=params, headers=headers
-        )
+        resp = client.get("/projects", params=params, headers=headers)
         assert resp.status_code == 200
         return {
             f"{p['owner_account_name']}/{p['name']}"
@@ -209,9 +206,7 @@ def test_get_projects_min_access_level_write(
     db.commit()
     assert others_spec in _list(reader_headers, min_access_level="write")
     # Anonymous callers can't ask for write access at all
-    resp = client.get(
-        f"{settings.API_V1_STR}/projects", params={"min_access_level": "write"}
-    )
+    resp = client.get("/projects", params={"min_access_level": "write"})
     assert resp.status_code == 403
 
 
@@ -221,7 +216,7 @@ def test_get_projects_filters_by_github_repo(
     project, headers = _make_owner_with_project(db, client)
     github_repo = project.git_repo_url.removeprefix("https://github.com/")
     resp = client.get(
-        f"{settings.API_V1_STR}/projects",
+        "/projects",
         params={"github_repo": github_repo},
         headers=headers,
     )
@@ -232,7 +227,7 @@ def test_get_projects_filters_by_github_repo(
     # Matching is exact, so a repo whose name merely starts the same doesn't
     # come back
     resp = client.get(
-        f"{settings.API_V1_STR}/projects",
+        "/projects",
         params={"github_repo": f"{github_repo}-other"},
         headers=headers,
     )
@@ -269,7 +264,7 @@ def test_get_user_reference_matches(
     def _search(params: dict):
         with patch("app.api.routes.references.get_repo", return_value=repo):
             return client.get(
-                f"{settings.API_V1_STR}/references",
+                "/references",
                 params={"project": [project_spec], **params},
                 headers=headers,
             )
@@ -310,7 +305,7 @@ def test_get_user_reference_matches(
     # what makes this "my references" rather than "this project's"
     with patch("app.api.routes.references.get_repo", return_value=repo):
         resp = client.get(
-            f"{settings.API_V1_STR}/references",
+            "/references",
             params={"doi": "10.1234/abcd"},
             headers=headers,
         )
@@ -318,7 +313,7 @@ def test_get_user_reference_matches(
     assert [m["key"] for m in resp.json()] == ["smith2020"]
     # A project the user can't read is skipped, not an error
     resp = client.get(
-        f"{settings.API_V1_STR}/references",
+        "/references",
         params={
             "project": ["someone-else/private-project"],
             "doi": "10.1234/abcd",
@@ -346,7 +341,7 @@ def test_post_reference_item_creates_missing_collection(
     repo.git.remote(["add", "origin", str(remote_dir)])
     repo.git.push(["-u", "origin", repo.active_branch.name])
     url = (
-        f"{settings.API_V1_STR}/projects/{project.owner_account_name}/"
+        f"/projects/{project.owner_account_name}/"
         f"{project.name}/references/items"
     )
     with patch("app.api.routes.projects.core.get_repo", return_value=repo):
@@ -391,7 +386,7 @@ def test_get_user_overleaf_sync_scans_lazily(
     client: TestClient, db: Session, tmp_path
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
-    url = f"{settings.API_V1_STR}/user/overleaf-syncs/54b68eff0ee71ad2767b704a"
+    url = "/user/overleaf-syncs/54b68eff0ee71ad2767b704a"
     ck_info = {
         "overleaf_sync": {
             "paper2": {
@@ -430,7 +425,7 @@ def test_get_user_overleaf_sync_scans_lazily(
     # Both syncs declared in one calkit.yaml are indexed together, so the
     # second Overleaf project resolves without reading anything again
     resp = client.get(
-        f"{settings.API_V1_STR}/user/overleaf-syncs/699f2a0fb20a38960a52bc26",
+        "/user/overleaf-syncs/699f2a0fb20a38960a52bc26",
         headers=headers,
     )
     assert resp.status_code == 200
@@ -444,7 +439,7 @@ def test_get_user_overleaf_sync_scans_lazily(
     # A project already scanned isn't re-read until the TTL lapses, so an
     # Overleaf project nobody syncs with doesn't cost a scan per lookup
     resp = client.get(
-        f"{settings.API_V1_STR}/user/overleaf-syncs/nonexistent",
+        "/user/overleaf-syncs/nonexistent",
         headers=headers,
     )
     assert resp.status_code == 200

@@ -38,10 +38,12 @@ interface PublicationPostWithFile {
   kind:
     | "journal-article"
     | "conference-paper"
-    | "presentation"
-    | "poster"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
+    | "thesis"
+    | "phd-thesis"
   template?: string
   stage?: string
   environment?: string
@@ -221,11 +223,13 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                 })}
               >
                 <option value="journal-article">Journal article</option>
-                <option value="presentation">Presentation</option>
                 <option value="conference-paper">Conference paper</option>
-                <option value="poster">Poster</option>
+                <option value="proposal">Proposal</option>
                 <option value="report">Report</option>
+                <option value="blog">Blog</option>
                 <option value="book">Book</option>
+                <option value="thesis">Thesis</option>
+                <option value="phd-thesis">PhD thesis</option>
               </Select>
             </FormControl>
             <FormControl mt={4} isRequired isInvalid={!!errors.title}>

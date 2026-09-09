@@ -348,6 +348,8 @@ import type {
   PostProjectOverleafSyncResponses,
   PostProjectPublicationErrors,
   PostProjectPublicationResponses,
+  PostProjectPushEventErrors,
+  PostProjectPushEventResponses,
   PostProjectQuestionErrors,
   PostProjectQuestionResponses,
   PostProjectReferenceItemErrors,
@@ -390,6 +392,7 @@ import type {
   ProjectInvitationPost,
   ProjectPatch,
   ProjectPost,
+  ProjectPushEventPost,
   ProjectStatusPost,
   PutOrgSubscriptionErrors,
   PutOrgSubscriptionResponses,
@@ -3659,6 +3662,7 @@ export class ProjectsService {
       offset?: number
       q?: string | null
       include_content?: boolean
+      thumbnails?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3678,6 +3682,7 @@ export class ProjectsService {
             { in: "query", key: "offset" },
             { in: "query", key: "q" },
             { in: "query", key: "include_content" },
+            { in: "query", key: "thumbnails" },
           ],
         },
       ],
@@ -4289,6 +4294,7 @@ export class ProjectsService {
       owner_name: string
       project_name: string
       ref?: string | null
+      include_content?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -4304,6 +4310,7 @@ export class ProjectsService {
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
             { in: "query", key: "ref" },
+            { in: "query", key: "include_content" },
           ],
         },
       ],
@@ -4787,6 +4794,62 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/syncs",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Post Project Push Event
+   *
+   * Tell the hub this project has been pushed to somewhere else.
+   *
+   * ``calkit push`` reports here, so the person who just pushed doesn't have
+   * to be the one who waits for the pipeline, figures and references to be
+   * worked out again. The GitHub App's webhook says the same thing for
+   * anyone pushing through GitHub; this covers the rest, and arrives sooner.
+   *
+   * Needs write access, since it is a request to spend server time on the
+   * project, and returns immediately either way: warming is an optimization,
+   * and a deployment with no queue configured simply doesn't do it.
+   */
+  public static postProjectPushEvent<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      projectPushEventPost: ProjectPushEventPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPushEventResponses,
+    PostProjectPushEventErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "projectPushEventPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPushEventResponses,
+      PostProjectPushEventErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/events/push",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

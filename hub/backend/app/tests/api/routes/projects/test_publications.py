@@ -12,10 +12,9 @@ from unittest.mock import patch
 import git
 from fastapi.testclient import TestClient
 
-from app.config import settings
 from app.core import ryaml
 
-URL = f"{settings.API_V1_STR}/projects/o/p/publications"
+URL = "/projects/o/p/publications"
 
 
 def _make_repo(

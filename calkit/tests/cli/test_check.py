@@ -1006,6 +1006,7 @@ def _project() -> None:
             "A value read from the pipeline: \\result[DragCoefficient].\n"
             "The same value typed by hand: 0.42.\n"
             "A value with nothing behind it: 3.14.\n"
+            "\\ckfigure[width=0.75\\textwidth]{f.pdf}\n"
             "\\end{document}\n"
         )
     # The check reads the compiled pipeline, which is where the commands
@@ -1016,46 +1017,261 @@ def _project() -> None:
 def test_check_repro_literals(tmp_dir):
     _project()
     result = subprocess.run(
-        ["calkit", "check", "repro"],
+        ["calkit", "check", "repro"], capture_output=True, text=True
+    )
+    # A retyped value is the one finding that fails the check
+    assert result.returncode == 1
+    # 0.42 is computed by the pipeline and typed into the document anyway:
+    # right today, wrong the next time that stage runs. That is the copy
+    # and paste worth catching, and it counts against the project.
+    assert "Values typed out rather than read from the pipeline: 1" in (
+        result.stdout
+    )
+    # 3.14 has nothing behind it, which is worth a look but is not a
+    # defect: most numbers in a paper are not results
+    assert "Numbers with nothing recorded behind them: 1" in result.stdout
+    assert "worth a look" in result.stdout
+    # The summary stays a summary and points at the findings
+    assert "3.14" not in result.stdout
+    assert "0.42" not in result.stdout
+    # The mark itself is whatever the console can encode---a Windows one
+    # cannot encode a cross---so the line is checked without it
+    assert (
+        "Values typed out rather than read from the pipeline: 1"
+        in result.stdout
+    )
+    assert "[-c retyped]" in result.stdout
+    assert "[-c numbers]" in result.stdout
+    assert "calkit check repro -c retyped" in result.stdout
+    out = subprocess.run(
+        ["calkit", "check", "repro", "-c", "retyped"],
         capture_output=True,
         text=True,
-        check=True,
+    ).stdout
+    assert "0.42" in out
+    assert "results.json:DragCoefficient" in out
+    assert "main.tex:5" in out
+    numbers = subprocess.run(
+        ["calkit", "check", "repro", "-c", "numbers"],
+        capture_output=True,
+        text=True,
     )
-    # 3.14 is not in any results file, so nothing accounts for it
-    assert "Untraceable literals: 1" in result.stdout
-    assert "Untraceable Literals" in result.stdout
-    assert "3.14" in result.stdout
-    # 0.42 is in the results file, so it reads as traceable even though it
-    # was typed here. The check under-flags on purpose: a value the project
-    # computes is not evidence of a mistake, and a false positive on a real
-    # number costs more than a missed one.
-    assert "0.42" not in result.stdout.split("Untraceable Literals")[1]
+    # Asking for advice does not make the defect go away
+    assert numbers.returncode == 1
+    out = numbers.stdout
+    assert "3.14" in out
+    assert "0.42" not in out
+    # Both detail views say what they do not catch, since a check offered
+    # as guidance is only useful if its blind spots are known
+    assert "What this does not catch" in out
+    retyped = subprocess.run(
+        ["calkit", "check", "repro", "-c", "retyped"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "What this does not catch" in retyped
+    # A figure width is layout, not a result, whether the macro is
+    # LaTeX's or Calkit's
+    assert "0.75" not in out
     result_json = subprocess.run(
-        ["calkit", "check", "repro", "--json"],
+        ["calkit", "check", "repro", "--json"], capture_output=True, text=True
+    )
+    assert result_json.returncode == 1
+    parsed = json.loads(result_json.stdout)
+    assert [f["value"] for f in parsed["retyped_values"]] == ["0.42"]
+    assert parsed["retyped_values"][0]["source"] == (
+        "results.json:DragCoefficient"
+    )
+    assert [f["value"] for f in parsed["unattributed_numbers"]] == ["3.14"]
+    # A category with nothing behind it says so rather than printing an
+    # empty table, and one that isn't a category is an error
+    out = subprocess.run(
+        ["calkit", "check", "repro", "-c", "provenance"],
         capture_output=True,
         text=True,
-        check=True,
+    ).stdout
+    assert "provenance: nothing to report" in out
+    bad = subprocess.run(
+        ["calkit", "check", "repro", "-c", "nope"],
+        capture_output=True,
+        text=True,
     )
-    parsed = json.loads(result_json.stdout)
-    assert len(parsed["untraceable_literals"]) == 1
-    finding = parsed["untraceable_literals"][0]
-    assert finding["value"] == "3.14"
-    assert finding["file"] == "main.tex"
-    assert finding["line"] == 6
-    # The fix points at the stage kind, not at a hand-written DVC command
-    assert "json-to-latex" in finding["suggestion"]
+    assert bad.returncode != 0
+    assert "Invalid category" in bad.stderr
+    # A stage that names a nested key puts that value within the
+    # document's reach, so typing it is the same copy and paste. Reading
+    # only the top level would miss exactly what the stage exposed.
+    with open("results.json", "w") as f:
+        json.dump(
+            {
+                "DragCoefficient": 0.42,
+                "cases": {"a": {"cp": 0.7321}},
+                # Named by no key, so the document has no command for it
+                "NotExposed": 0.6194,
+            },
+            f,
+        )
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"]["stages"]["results-latex"]["keys"] = [
+        "DragCoefficient",
+        "cases.a.cp",
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open("main.tex", "a") as f:
+        f.write("A nested value typed by hand: 0.7321.\n")
+        f.write("A value the stage does not expose: 0.6194.\n")
+    out = subprocess.run(
+        ["calkit", "check", "repro", "--json"], capture_output=True, text=True
+    ).stdout
+    retyped_values = {
+        f["value"]: f["source"] for f in json.loads(out)["retyped_values"]
+    }
+    assert retyped_values.get("0.7321") == "results.json:cases.a.cp"
+    # Once a stage names its keys, what it does not name is out of the
+    # document's reach: reporting it would ask for a command that was
+    # never generated. It is still a result-like number with nothing
+    # recorded behind it, which is the weaker list
+    assert "0.6194" not in retyped_values
+    assert "0.6194" in {
+        f["value"] for f in json.loads(out)["unattributed_numbers"]
+    }
     # The file a json-to-latex stage writes is full of the very numbers
-    # the check is looking for, and reporting them would flag the fix
-    # itself, so it is not scanned
+    # the check looks for, and reporting them would flag the fix itself
     with open("results.tex", "w") as f:
         f.write("\\newcommand\\result[1][all]{0.42 1.23 9.99}\n")
-    result = subprocess.run(
-        ["calkit", "check", "repro", "--json"],
+    out = subprocess.run(
+        ["calkit", "check", "repro", "--json"], capture_output=True, text=True
+    ).stdout
+    parsed = json.loads(out)
+    assert sorted(f["value"] for f in parsed["retyped_values"]) == [
+        "0.42",
+        "0.7321",
+    ]
+    # 0.6194 stays in the weaker list: the stage reads its file but does
+    # not name that key, so the document cannot reference it
+    assert [f["value"] for f in parsed["unattributed_numbers"]] == [
+        "3.14",
+        "0.6194",
+    ]
+
+
+def test_check_questions(tmp_dir):
+    import json
+
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("results")
+    with open("results/findings.json", "w") as f:
+        json.dump({"n_top": 8}, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"] = [
+        {
+            "question": "Do the top structures use the rectifier?",
+            "answer": "{n_top} of eight do.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/findings.json",
+                    "key": "n_top",
+                }
+            ],
+        }
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-q", "-m", "Answer"])
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
+    assert "Answers consistent with their evidence: 1/1" in out
+    # Nothing in the project says where the results file came from, which
+    # is advice rather than a failure: the answer may be perfectly good
+    assert "Evidence with nothing recorded behind it: 1" in out
+    # Listing renders the placeholder from the results file
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "answer: 8 of eight do." in out
+    out = subprocess.check_output(
+        ["calkit", "list", "questions", "--raw"], text=True
+    )
+    assert "answer: {n_top} of eight do." in out
+    # The pipeline changes the number in a later commit: the check fails,
+    # status warns, JSON says stale, and the listing already shows 0
+    with open("results/findings.json", "w") as f:
+        json.dump({"n_top": 0}, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Re-run"])
+    proc = subprocess.run(
+        ["calkit", "check", "questions"], capture_output=True, text=True
+    )
+    assert proc.returncode == 1
+    assert "n_top was 8 at" in proc.stdout
+    proc = subprocess.run(
+        ["calkit", "check", "questions", "--json"],
         capture_output=True,
         text=True,
-        check=True,
     )
-    values = [
-        f["value"] for f in json.loads(result.stdout)["untraceable_literals"]
+    assert proc.returncode == 1
+    assert json.loads(proc.stdout)["questions"][0]["status"] == "stale"
+    # Questions are a check of their own, not part of status
+    out = subprocess.check_output(["calkit", "status", "--json"], text=True)
+    assert "questions" not in json.loads(out)
+    bad = subprocess.run(
+        ["calkit", "status", "-c", "questions"],
+        capture_output=True,
+        text=True,
+    )
+    assert bad.returncode != 0
+    assert "Invalid category" in bad.stderr
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "answer: 0 of eight do." in out
+    # Reviewing the answer is an edit to the question, which clears it
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"][0]["notes"] = "Reread against the new value."
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Review"])
+    subprocess.check_call(["calkit", "check", "questions"])
+    # Declaring where the results file came from clears the advice
+    ck_info = calkit.load_calkit_info()
+    ck_info["datasets"] = [
+        {
+            "path": "results/findings.json",
+            "created_by": {"name": "A person"},
+        }
     ]
-    assert values == ["3.14"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Declare"])
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
+    assert "nothing recorded behind it" not in out
+    # A console that cannot encode a check mark gets a '?' rather than a
+    # UnicodeEncodeError, which on Windows would kill the command with no
+    # output at all
+    env = dict(os.environ, PYTHONIOENCODING="cp1252")
+    out = subprocess.check_output(
+        ["calkit", "check", "questions"], text=True, env=env
+    )
+    assert "Answers consistent with their evidence: 1/1" in out
+    assert "\u2705" not in out
+    # The check can be pointed at a project somewhere else
+    os.makedirs("elsewhere")
+    out = subprocess.check_output(
+        ["calkit", "check", "questions", "--wdir", ".."],
+        text=True,
+        cwd="elsewhere",
+    )
+    assert "Questions answered: 1/1" in out
+    # A placeholder that names nothing renders as written, which looks
+    # like text somebody meant literally, so the listing says so
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"][0]["answer"] = "It is {missing} of them."
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "placeholders could not be filled" in out
+    assert "It is {missing} of them." in out
+    # A project with no questions says so rather than printing nothing
+    os.remove("calkit.yaml")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({}, f)
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
+    assert "No questions defined." in out

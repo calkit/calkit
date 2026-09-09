@@ -185,10 +185,13 @@ function PubInfo({
             },
       )
     }
+    // The references tab takes the collection's path and opens it, which is
+    // where someone following a bibliography link wants to land -- the file
+    // viewer would show them the raw BibTeX instead.
     for (const path of inputs.references)
       referenceLinks.push({
         key: path,
-        to: "../files",
+        to: "../references",
         search: { path },
         label: path,
         code: true,
@@ -270,12 +273,12 @@ function PubInfo({
           </Link>
         </Text>
       )}
-      {publication.type && (
+      {publication.kind && (
         <Text fontSize="sm" mb={1}>
           <Text as="span" fontWeight="semibold">
             Type:
           </Text>{" "}
-          <Badge>{publication.type}</Badge>
+          <Badge>{publication.kind}</Badge>
         </Text>
       )}
       <Text fontSize="sm" mb={1}>
@@ -394,6 +397,18 @@ function Publications() {
   const selectedPub =
     publicationsRequest.data?.find((p) => p.path === selectedPath) ??
     publicationsRequest.data?.[0]
+
+  // Landing without a path shows the first publication, so put it in the URL
+  // to match: otherwise a link copied from here points at "whichever is
+  // first", which is not necessarily what the sender was looking at.
+  // Replaced rather than pushed, so arriving doesn't cost a back step.
+  useEffect(() => {
+    if (selectedPath || !selectedPub?.path) return
+    navigate({
+      search: (prev) => ({ ...prev, path: selectedPub.path }),
+      replace: true,
+    })
+  }, [selectedPath, selectedPub?.path, navigate])
 
   // Arriving from a question's evidence (or right after committing an edit)
   // can transiently return an empty list; if we expected a specific

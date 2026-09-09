@@ -48,15 +48,24 @@ def run_dvc_command(args: list[str], wdir: str, check: bool = False) -> int:
 
 
 @lru_cache(maxsize=512)
+def _read_dvc_dir(dvc_dir_path: str) -> Any:
+    """Read a DVC .dir object, raising FileNotFoundError if it isn't there.
+
+    Raises rather than returning None so the miss isn't cached, since
+    lru_cache doesn't memoize exceptions and the object may yet be pushed.
+    """
+    fs = get_object_fs()
+    with fs.open(dvc_dir_path) as f:
+        return json.load(f)
+
+
 def read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
     """Cache DVC .dir file contents by path.
 
     Returns None if file doesn't exist.
     """
-    fs = get_object_fs()
     try:
-        with fs.open(dvc_dir_path) as f:
-            return json.load(f)
+        return _read_dvc_dir(dvc_dir_path)
     except FileNotFoundError:
         return None
 

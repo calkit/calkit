@@ -391,11 +391,41 @@ function PdfViewerInner({
   // re-applies pdfScaleValue on initial load or on a container resize (not on a
   // prop change), so without this the toolbar zoom wouldn't take effect until
   // the next layout change.
+  //
+  // The viewer doesn't exist yet on mount, so this waits for it rather than
+  // giving up: otherwise the first paint keeps PDF.js's own default scale
+  // until PdfHighlighter's ResizeObserver corrects it 500 ms later, which
+  // reads as the page loading zoomed in and then jumping.
+  //
+  // Keyed on `url` as well: PdfHighlighter is keyed on it too, so every new
+  // document builds a fresh viewer that needs the scale applied again.
+  // Without it only the very first document opened would avoid the jump.
   useEffect(() => {
     if (pagedNav) return
-    const viewer = highlighterRef.current?.viewer
-    if (viewer) viewer.currentScaleValue = scaleValue
-  }, [scaleValue, pagedNav])
+    // A deliberate trigger rather than a value we read, as with
+    // highlightsKey above; referencing it keeps it a real dependency.
+    void url
+    let raf: number | null = null
+    const deadline = performance.now() + 5000
+    const apply = () => {
+      raf = null
+      const viewer = highlighterRef.current?.viewer
+      // Not just "the viewer exists": setting currentScaleValue before
+      // PdfHighlighter has called setDocument on it does nothing at all,
+      // and then the 500 ms correction is the only thing that ever applies
+      // the scale. Which of those wins is a race, so this waits for the
+      // document rather than for the object that will hold it.
+      if (viewer?.pdfDocument) {
+        viewer.currentScaleValue = scaleValue
+        return
+      }
+      if (performance.now() < deadline) raf = requestAnimationFrame(apply)
+    }
+    apply()
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf)
+    }
+  }, [scaleValue, pagedNav, url])
 
   // Load the section outline (bookmarks) once per document.
   useEffect(() => {

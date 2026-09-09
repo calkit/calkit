@@ -3,10 +3,11 @@
 <!-- prettier-ignore -->
 !!! tip
     If you want to try Calkit without [installing](../installation.md),
-    you can use it directly from [`uv`](https://docs.astral.sh/uv/) with:
+    you can use it directly from [`uv`](https://docs.astral.sh/uv/) with
+    (use in place of `calkit` in any command below):
 
     ```sh
-    uvx ck9 # Use this in place of `calkit` in commands below
+    uvx ck9
     ```
 
 Teams have a variety of tolerance for markup languages and complex
@@ -14,23 +15,26 @@ system setup.
 Thus, despite its limitations for technical writing,
 Microsoft Word remains an important tool.
 In some projects, the lead may want to use LaTeX or some other
-text-first typesetting system like Quarto since those make it easier
+text-first typesetting system like Typst or Quarto since those
+play more nicely with version control systems like
+Git and make it easier
 to ensure document components like figures, tables, and values remain
 up-to-date with the analysis,
 but others on the team may not want to engage in that way.
-They prefer a WYSIWYG experience without needing to sign up for a web
-app like Overleaf (or Calkit for that matter).
+They prefer a WYSIWYG experience, and many would prefer to not need to
+sign up for a web app like Overleaf.
+They simply find it most intuitive to email Word documents.
 
-Though it is an awesome tool,
-converting from LaTeX to Word with something like
 [Pandoc](https://pandoc.org)
-produces
-a Word document that doesn't look like the compiled LaTeX,
+provides one solution to this problem since it can convert .tex to .docx.
+However, Pandoc produces
+a Word document that doesn't look like the compiled LaTeX unless a custom
+template is provided,
 and migrating the contributions back into LaTeX is a manual process.
-For these situations, Calkit supports a workflow where the source of
-truth is LaTeX, but Word documents can be sent out for review,
-and the project lead can merge the comments and edits from the .docx files
-back into the TeX source.
+Calkit, on the other hand, uses Word's built in PDF converter and inserts
+special bookmarks into the .docx file to enable merging changes and comments
+back into the original .tex source idempotently,
+allowing teams to work in both systems without painful manual merges.
 
 <!-- prettier-ignore -->
 !!! note

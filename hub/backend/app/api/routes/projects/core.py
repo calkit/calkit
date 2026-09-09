@@ -2231,15 +2231,18 @@ def _resolve_result_value(
     ref: str | None,
     path: str,
     key: str,
-    cache: dict[str, dict | None],
+    cache: dict[tuple[str | None, str], dict | None],
 ) -> str | None:
     """Read a result file and return the value at ``key`` as a string.
 
     Supports JSON and YAML result files and dot-separated nested keys (e.g.
-    ``metrics.mean``). ``cache`` memoizes parsed files across evidence items.
+    ``metrics.mean``). ``cache`` memoizes parsed files across evidence items,
+    keyed by ref as well as path: two evidence entries can cite one file at
+    two refs, and they are not the same file.
     Returns None if the file or key cannot be resolved.
     """
-    if path not in cache:
+    cache_key = (ref, path)
+    if cache_key not in cache:
         data: dict | None = None
         try:
             item = app.projects.get_contents_from_repo(
@@ -2253,9 +2256,9 @@ def _resolve_result_value(
                 elif lower.endswith((".yaml", ".yml")):
                     data = ryaml.load(text)
         except Exception as e:
-            logger.warning(f"Failed to read result {path}: {e}")
-        cache[path] = data if isinstance(data, dict) else None
-    data = cache[path]
+            logger.warning(f"Failed to read result {path} at {ref}: {e}")
+        cache[cache_key] = data if isinstance(data, dict) else None
+    data = cache[cache_key]
     if data is None:
         return None
     value: object = data
@@ -2269,18 +2272,57 @@ def _resolve_result_value(
     return str(value)
 
 
+class _EvidenceLookups(NamedTuple):
+    """What evidence resolves against, at one Git ref.
+
+    Evidence can name a ref of its own, so there is one of these per
+    distinct ref a question's evidence cites rather than one per request.
+    """
+
+    figures_by_path: dict[str, Figure]
+    results_by_path: dict[tuple[str, str | None], Result]
+    tables_by_path: dict[str, Result]
+    publications_by_path: dict[str, Publication]
+
+
+def _declared_git_ref(ev: dict) -> str | None:
+    """The ``git_ref`` an evidence entry declares, as a string.
+
+    calkit.yaml is hand-written, and YAML reads an all-digit short SHA as an
+    int. That's still a ref, so coerce rather than letting it fail validation
+    and take the whole question with it.
+    """
+    git_ref = ev.get("git_ref")
+    if git_ref is None or git_ref == "":
+        return None
+    return git_ref if isinstance(git_ref, str) else str(git_ref)
+
+
+def _evidence_ref(ev: dict, ref: str | None) -> str | None:
+    """The ref an evidence entry resolves at.
+
+    Its own ``git_ref`` when it names one, otherwise the ref being browsed.
+    """
+    return _declared_git_ref(ev) or ref
+
+
 def _build_question_evidence(
     project: Project,
     repo: git.Repo,
     ref: str | None,
     evidence_ck: list,
-    figures_by_path: dict[str, Figure],
-    results_by_path: dict[tuple[str, str | None], Result],
-    tables_by_path: dict[str, Result],
-    publications_by_path: dict[str, Publication],
-    result_value_cache: dict[str, dict | None],
+    lookups_by_ref: dict[str | None, _EvidenceLookups],
+    result_value_cache: dict[tuple[str | None, str], dict | None],
 ) -> list[QuestionEvidence]:
-    """Turn calkit.yaml evidence entries into resolved QuestionEvidence."""
+    """Turn calkit.yaml evidence entries into resolved QuestionEvidence.
+
+    Each entry resolves at its own ``git_ref`` if it names one, so an answer
+    can keep pointing at the figure it was written against after the branch
+    has moved on. ``lookups_by_ref`` holds the artifacts for every ref the
+    evidence cites; a ref missing from it is one that could not be read, and
+    its evidence comes back unresolved rather than failing the question.
+    """
+    empty = _EvidenceLookups({}, {}, {}, {})
     evidence = []
     for ev in evidence_ck:
         if not isinstance(ev, dict) or ev.get("kind") not in (
@@ -2291,16 +2333,22 @@ def _build_question_evidence(
         ):
             continue
         path = ev.get("path", "")
+        ev_ref = _evidence_ref(ev, ref)
+        lookups = lookups_by_ref.get(ev_ref, empty)
         item = QuestionEvidence(
             kind=ev["kind"],
             path=path,
             key=ev.get("key"),
             explanation=ev.get("explanation"),
+            # What the entry declares, not what it resolved at: this is the
+            # field an edit writes back, so filling it in from the browsed
+            # ref would pin every citation on the next save.
+            git_ref=_declared_git_ref(ev),
         )
         if item.kind == "figure":
-            item.figure = figures_by_path.get(path)
+            item.figure = lookups.figures_by_path.get(path)
         elif item.kind == "publication":
-            item.publication = publications_by_path.get(path)
+            item.publication = lookups.publications_by_path.get(path)
         elif item.kind in ("result", "table"):
             # A declared table answers table evidence first; a result at
             # the same path answers result evidence. Falling through to
@@ -2312,14 +2360,14 @@ def _build_question_evidence(
             # description on a value it says nothing about. Keyless
             # evidence already looks up (path, None).
             if item.kind == "table":
-                item.result = tables_by_path.get(path)
+                item.result = lookups.tables_by_path.get(path)
             if item.result is None:
-                item.result = results_by_path.get((path, item.key))
+                item.result = lookups.results_by_path.get((path, item.key))
             if item.key:
                 item.value = _resolve_result_value(
                     project=project,
                     repo=repo,
-                    ref=ref,
+                    ref=ev_ref,
                     path=path,
                     key=item.key,
                     cache=result_value_cache,
@@ -2343,61 +2391,94 @@ def _build_questions_public(
     def _evidence_of(q: str | dict) -> list:
         return q.get("evidence") or [] if isinstance(q, dict) else []
 
-    kinds = {
-        ev.get("kind")
-        for q in questions_ck
-        for ev in _evidence_of(q)
-        if isinstance(ev, dict)
-    }
-    figures_by_path: dict[str, Figure] = {}
-    if "figure" in kinds:
-        # Only the figures actually cited as evidence need their content
-        # resolved; resolving every figure in the project would make this
-        # scale with the project rather than with the questions.
-        evidence_fig_paths = {
-            ev.get("path")
-            for q in questions_ck
-            for ev in _evidence_of(q)
-            if isinstance(ev, dict) and ev.get("kind") == "figure"
-        }
-        fig_ctx = _discover_figures(project=project, repo=repo, ref=ref)
-        cited = [f for f in fig_ctx.figures if f["path"] in evidence_fig_paths]
-        figures_by_path = {
-            fig.path: fig
-            for fig in _resolve_figures(
-                project=project,
-                repo=repo,
-                session=session,
-                ref=ref,
-                ctx=fig_ctx,
-                figures=cited,
+    def _build_lookups(
+        ev_ref: str | None, entries: list[dict]
+    ) -> _EvidenceLookups:
+        """Resolve everything ``entries`` cites, all of it at ``ev_ref``."""
+        kinds = {ev.get("kind") for ev in entries}
+        figures_by_path: dict[str, Figure] = {}
+        if "figure" in kinds:
+            # Only the figures actually cited as evidence need their content
+            # resolved; resolving every figure in the project would make this
+            # scale with the project rather than with the questions.
+            evidence_fig_paths = {
+                ev.get("path") for ev in entries if ev.get("kind") == "figure"
+            }
+            fig_ctx = _discover_figures(project=project, repo=repo, ref=ev_ref)
+            cited = [
+                f for f in fig_ctx.figures if f["path"] in evidence_fig_paths
+            ]
+            figures_by_path = {
+                fig.path: fig
+                for fig in _resolve_figures(
+                    project=project,
+                    repo=repo,
+                    session=session,
+                    ref=ev_ref,
+                    ctx=fig_ctx,
+                    figures=cited,
+                )
+            }
+        results_by_path: dict[tuple[str, str | None], Result] = {}
+        if kinds & {"result", "table"}:
+            # Keyed by (path, key), since several results can point at one
+            # file. A keyless result lands under (path, None), which is what
+            # keyless evidence resolves against; a keyed one must not stand in
+            # for it, or evidence citing an undeclared key would show that
+            # value under an unrelated result's title.
+            for res in _build_results(project=project, repo=repo, ref=ev_ref):
+                results_by_path[(res.path, res.key)] = res
+        # Kept apart from results rather than merged into them. A project can
+        # declare a table and a result at one path, and they are different
+        # things with different titles: folding them into one lookup means
+        # whichever is built second decides what the other one is called.
+        tables_by_path: dict[str, Result] = {}
+        if "table" in kinds:
+            for tbl in _build_declared_tables(
+                project=project, repo=repo, ref=ev_ref
+            ):
+                tables_by_path[tbl.path] = tbl
+        publications_by_path: dict[str, Publication] = {}
+        if "publication" in kinds:
+            publications_by_path = {
+                pub.path: pub
+                for pub in _build_publications(
+                    project=project, repo=repo, ref=ev_ref
+                )
+            }
+        return _EvidenceLookups(
+            figures_by_path=figures_by_path,
+            results_by_path=results_by_path,
+            tables_by_path=tables_by_path,
+            publications_by_path=publications_by_path,
+        )
+
+    # Group the citations by the ref each resolves at, so a project whose
+    # evidence all sits on the ref being browsed still reads its figures,
+    # results and publications once, and one citing an older commit pays for
+    # that commit only.
+    entries_by_ref: dict[str | None, list[dict]] = {}
+    for q_ck in questions_ck:
+        for ev in _evidence_of(q_ck):
+            if not isinstance(ev, dict):
+                continue
+            entries_by_ref.setdefault(_evidence_ref(ev, ref), []).append(ev)
+    lookups_by_ref: dict[str | None, _EvidenceLookups] = {}
+    for ev_ref, entries in entries_by_ref.items():
+        try:
+            lookups_by_ref[ev_ref] = _build_lookups(ev_ref, entries)
+        except HTTPException as e:
+            # A ref that isn't there is a stale citation, not a broken
+            # project: leave its evidence unresolved and keep serving the
+            # rest of the questions rather than failing the whole page.
+            if e.status_code != 404 or ev_ref == ref:
+                raise
+            logger.warning(
+                f"Could not resolve question evidence at ref {ev_ref}: "
+                f"{e.detail}"
             )
-        }
-    results_by_path: dict[tuple[str, str | None], Result] = {}
-    if kinds & {"result", "table"}:
-        # Keyed by (path, key), since several results can point at one file.
-        # A keyless result lands under (path, None), which is what keyless
-        # evidence resolves against; a keyed one must not stand in for it,
-        # or evidence citing an undeclared key would show that value under
-        # an unrelated result's title.
-        for res in _build_results(project=project, repo=repo, ref=ref):
-            results_by_path[(res.path, res.key)] = res
-    # Kept apart from results rather than merged into them. A project can
-    # declare a table and a result at one path, and they are different
-    # things with different titles: folding them into one lookup means
-    # whichever is built second decides what the other one is called.
-    tables_by_path: dict[str, Result] = {}
-    if "table" in kinds:
-        for tbl in _build_declared_tables(project=project, repo=repo, ref=ref):
-            tables_by_path[tbl.path] = tbl
-    publications_by_path: dict[str, Publication] = {}
-    if "publication" in kinds:
-        publications_by_path = {
-            pub.path: pub
-            for pub in _build_publications(project=project, repo=repo, ref=ref)
-        }
     db_questions = sorted(project.questions, key=lambda q: q.number)
-    result_value_cache: dict[str, dict | None] = {}
+    result_value_cache: dict[tuple[str | None, str], dict | None] = {}
     questions_public = []
     for q_ck, q_db in zip(questions_ck, db_questions):
         hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
@@ -2407,10 +2488,7 @@ def _build_questions_public(
             repo=repo,
             ref=ref,
             evidence_ck=_evidence_of(q_ck),
-            figures_by_path=figures_by_path,
-            results_by_path=results_by_path,
-            tables_by_path=tables_by_path,
-            publications_by_path=publications_by_path,
+            lookups_by_ref=lookups_by_ref,
             result_value_cache=result_value_cache,
         )
         questions_public.append(
@@ -2557,6 +2635,8 @@ def _apply_question_update(
             entry["key"] = ev.key
         if ev.explanation:
             entry["explanation"] = ev.explanation
+        if ev.git_ref:
+            entry["git_ref"] = ev.git_ref
         evidence.append(entry)
     if evidence:
         question["evidence"] = evidence
@@ -3177,11 +3257,18 @@ def _build_tables(
     # Evidence declares what it points at inline, so a question can cite a
     # table nobody listed up top. That's still a table, and this page is
     # where a reader goes looking for it.
+    #
+    # Evidence naming a ref of its own is the exception: this listing is of
+    # one ref, and that table lives at another, where the path may not exist
+    # at all. It's reachable from the question that cites it, which is the
+    # only place it's a table.
     for question in ck_info.get("questions") or []:
         if not isinstance(question, dict):
             continue
         for ev in question.get("evidence") or []:
             if not isinstance(ev, dict) or ev.get("kind") != "table":
+                continue
+            if _evidence_ref(ev, ref) != ref:
                 continue
             path = ev.get("path")
             if path and path not in known_paths:

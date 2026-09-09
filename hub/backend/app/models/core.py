@@ -1513,6 +1513,11 @@ class QuestionEvidence(SQLModel):
     path: str
     key: str | None = None
     explanation: str | None = None
+    # The ref the evidence itself names, if any: evidence can cite a branch,
+    # tag, or commit other than the one being browsed, e.g. an answer backed
+    # by the figure as it stood when the answer was written. Carried through
+    # unresolved, since it's what links to the artifact have to point at.
+    git_ref: str | None = None
     # Resolved artifact the evidence points to, if it could be found
     figure: Figure | None = None
     result: Result | None = None
@@ -1527,6 +1532,7 @@ class QuestionEvidencePost(SQLModel):
     path: str
     key: str | None = None
     explanation: str | None = None
+    git_ref: str | None = None
 
 
 class QuestionPublic(SQLModel):

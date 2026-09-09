@@ -6901,6 +6901,17 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Explanation",
     },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
+    },
     figure: {
       anyOf: [
         {
@@ -6980,6 +6991,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Explanation",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
     },
   },
   type: "object",

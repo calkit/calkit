@@ -50,6 +50,10 @@ interface EvidenceRow {
   selection: string
   key: string
   explanation: string
+  // Not editable here: evidence can name the ref it was written against,
+  // and the form rewrites the whole list, so a row that carries one has to
+  // hand it back or saving an unrelated edit would quietly drop it.
+  gitRef?: string
 }
 
 interface EditQuestionForm {
@@ -145,6 +149,7 @@ const EditQuestion = ({
         selection: rowToSelection(ev.kind, ev.path),
         key: ev.key ?? "",
         explanation: ev.explanation ?? "",
+        gitRef: ev.git_ref ?? undefined,
       })),
     })
   }, [question, reset])
@@ -169,6 +174,7 @@ const EditQuestion = ({
                 path: parsed.path,
                 key: parsed.kind === "result" && row.key ? row.key : undefined,
                 explanation: row.explanation ? row.explanation : undefined,
+                git_ref: row.gitRef ? row.gitRef : undefined,
               },
             ]
           }),
@@ -280,7 +286,18 @@ const EditQuestion = ({
                   p={3}
                   mb={2}
                 >
-                  <Flex justify="flex-end">
+                  {/* Registered so the ref this row was written against
+                      survives a save; there is nothing to edit here. */}
+                  <input
+                    type="hidden"
+                    {...register(`evidence.${index}.gitRef`)}
+                  />
+                  <Flex justify="flex-end" align="center" gap={2}>
+                    {field.gitRef ? (
+                      <Text fontSize="xs" color="gray.500" mr="auto">
+                        at {field.gitRef}
+                      </Text>
+                    ) : null}
                     <IconButton
                       aria-label="Remove evidence"
                       icon={<FaTrash />}

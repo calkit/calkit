@@ -103,6 +103,15 @@ function EvidenceItem({
 }) {
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const bg = useColorModeValue("white", "gray.800")
+  // Evidence can name a ref of its own, e.g. the tag an answer was written
+  // against. That's where the artifact was resolved from, so it's where the
+  // link has to go; without it the card shows one version and opens another.
+  const evidenceRef = evidence.git_ref ?? gitRef
+  const refBadge = evidence.git_ref ? (
+    <Text fontSize="xs" color="gray.500" noOfLines={1}>
+      at {evidence.git_ref}
+    </Text>
+  ) : null
   if (evidence.kind === "figure") {
     const fig = evidence.figure
     const ext = evidence.path.toLowerCase().split(".").pop() ?? ""
@@ -145,9 +154,9 @@ function EvidenceItem({
       <Link
         as={RouterLink}
         to={`/${accountName}/${projectName}/figures`}
-        // Preserve the global ref so the figure opens at the same git ref the
-        // project is being browsed at.
-        search={{ path: evidence.path, ref: gitRef } as any}
+        // Open the figure at the ref the evidence resolved from: its own if
+        // it names one, otherwise the ref the project is being browsed at.
+        search={{ path: evidence.path, ref: evidenceRef } as any}
         _hover={{ textDecoration: "none" }}
       >
         <Box
@@ -174,6 +183,11 @@ function EvidenceItem({
               {evidence.path}
             </Text>
           )}
+          {refBadge ? (
+            <Box px={2} pb={1}>
+              {refBadge}
+            </Box>
+          ) : null}
         </Box>
       </Link>
     )
@@ -186,7 +200,7 @@ function EvidenceItem({
       <Link
         as={RouterLink}
         to={`/${accountName}/${projectName}/tables`}
-        search={{ path: evidence.path, ref: gitRef } as any}
+        search={{ path: evidence.path, ref: evidenceRef } as any}
         _hover={{ textDecoration: "none" }}
       >
         <Box
@@ -209,6 +223,7 @@ function EvidenceItem({
           <Text fontSize="xs" color="gray.500" noOfLines={1}>
             {evidence.path}
           </Text>
+          {refBadge}
           {evidence.explanation ? (
             <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
               {evidence.explanation}
@@ -224,7 +239,7 @@ function EvidenceItem({
       <Link
         as={RouterLink}
         to={`/${accountName}/${projectName}/publications`}
-        search={{ path: evidence.path, ref: gitRef } as any}
+        search={{ path: evidence.path, ref: evidenceRef } as any}
         _hover={{ textDecoration: "none" }}
       >
         <Box
@@ -247,6 +262,7 @@ function EvidenceItem({
           <Text fontSize="xs" color="gray.500" noOfLines={1}>
             {evidence.path}
           </Text>
+          {refBadge}
           {evidence.explanation ? (
             <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
               {evidence.explanation}
@@ -271,7 +287,7 @@ function EvidenceItem({
       <Link
         as={RouterLink}
         to={`/${accountName}/${projectName}/files`}
-        search={{ path: evidence.path, ref: gitRef } as any}
+        search={{ path: evidence.path, ref: evidenceRef } as any}
         fontSize="xs"
         fontWeight="semibold"
         noOfLines={1}
@@ -280,6 +296,7 @@ function EvidenceItem({
         {evidence.path}
         {evidence.key ? `:${evidence.key}` : ""}
       </Link>
+      {refBadge}
       {evidence.value != null ? (
         <Text
           fontSize="xl"

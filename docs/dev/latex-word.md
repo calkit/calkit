@@ -257,7 +257,7 @@ acceptable since by then it's the lead's decision.
 The `.docx` is the contract, and the parts that must not change later:
 
 - **The custom XML part.**
-  `customXml/item1.xml` in a `https://calkit.org/review` namespace,
+  `customXml/item1.xml` in a `https://calkit.org/latex-export` namespace,
   related from `document.xml.rels` with the standard `customXml`
   relationship type.
   It holds the export UUID, the rev, the tex path, and the sent text
@@ -265,7 +265,7 @@ The `.docx` is the contract, and the parts that must not change later:
   Tested: Word preserved it, and the bookmarks, through accepting all
   revisions and saving.
   The rev and path also go in the core properties (`identifier` as
-  `calkit-review:<id>:<rev>:<tex path>`) so they're visible in a
+  `calkit-latex-export:<id>:<rev>:<tex path>`) so they're visible in a
   file dialog; those survived a save too.
   The UUID is unused in v1 and exists so sessions and hub delivery can
   key on it without touching the file format.

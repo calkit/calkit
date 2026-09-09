@@ -11,7 +11,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-class DocxExport(BaseModel):
+class LatexDocxExport(BaseModel):
     id: str = Field(description="Identifier carried inside the .docx.")
     created: datetime
     source: str = Field(description="Main .tex file the PDF came from.")
@@ -40,7 +40,7 @@ class DocxExport(BaseModel):
     )
 
 
-class DocxMergeChange(BaseModel):
+class LatexDocxMergeChange(BaseModel):
     path: str
     lineno: int
     status: str = Field(
@@ -55,7 +55,7 @@ class DocxMergeChange(BaseModel):
     )
 
 
-class DocxMerge(BaseModel):
+class LatexDocxMerge(BaseModel):
     export_id: str = Field(description="Export the merged document came from.")
     created: datetime
     docx: str
@@ -67,7 +67,7 @@ class DocxMerge(BaseModel):
     last_modified_by: str | None = Field(
         default=None, description="Who last saved the document, per Word."
     )
-    changes: list[DocxMergeChange] = []
+    changes: list[LatexDocxMergeChange] = []
     comments_added: int = 0
     comments_updated: int = 0
     files: dict[str, str] = Field(

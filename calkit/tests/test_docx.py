@@ -19,7 +19,7 @@ import pytest
 import calkit.cli.latex
 import calkit.docx
 import calkit.latex
-from calkit.models.docx import DocxExport, DocxMerge
+from calkit.models.docx import LatexDocxExport, LatexDocxMerge
 
 FIXTURES = Path(__file__).parent.parent.parent / "test" / "docx"
 
@@ -206,8 +206,8 @@ def test_docx_round_trip(
     assert original is not None
     assert original.source == "paper/main.tex"
     assert original.id
-    assert doc.tracking() and doc.protection() is None
-    paras = doc.paragraphs()
+    assert doc.tracking and doc.protection is None
+    paras = doc.paragraphs
     assert sum(p.bookmark is not None for p in paras) == len(
         original.paragraphs
     )
@@ -215,14 +215,14 @@ def test_docx_round_trip(
         original.paragraphs[p.bookmark] == p.text for p in paras if p.bookmark
     )
     # The .tex thread went out as a Word comment with its reply linked
-    comments = doc.comments()
+    comments = doc.comments
     assert [c.author for c in comments] == ["T. Author", "P. Bachant"]
     assert comments[1].parent_id == comments[0].para_id
     model = next(p for p in paras if p.text.startswith("The mean velocity"))
     assert comments[0].bookmark == model.bookmark
     records = os.listdir(calkit.latex.DOCX_EXPORTS_DIR)
     assert records == [f"{original.id}.json"]
-    export = DocxExport.model_validate_json(
+    export = LatexDocxExport.model_validate_json(
         Path(calkit.latex.DOCX_EXPORTS_DIR, records[0]).read_text()
     )
     assert set(export.files) == {
@@ -238,8 +238,8 @@ def test_docx_round_trip(
     # like this one and edited in Word
     returned = calkit.docx.Document(str(FIXTURES / "returned.docx"))
     assert returned.read_original() is not None
-    assert sum(p.pending for p in returned.paragraphs()) == 2
-    assert returned.comments()[-1].author == "A. Reviewer"
+    assert sum(p.pending for p in returned.paragraphs) == 2
+    assert returned.comments[-1].author == "A. Reviewer"
     # Merging with changes still tracked warns and applies only comments
     os.makedirs("reviews")
     for name in ["returned", "accepted", "resolved"]:
@@ -303,7 +303,7 @@ def test_docx_round_trip(
     # in both directions
     doc = calkit.docx.Document("reviews/accepted.docx")
     intro = next(
-        p for p in doc.paragraphs() if p.text.startswith("Wakes matter")
+        p for p in doc.paragraphs if p.text.startswith("Wakes matter")
     )
     assert intro.element is not None
     doc.add_comments(
@@ -311,12 +311,12 @@ def test_docx_round_trip(
     )
     doc.save("reviews/highlight.docx")
     again = calkit.docx.Document("reviews/highlight.docx")
-    assert [
-        (c.author, c.highlight, c.highlight_occ) for c in again.comments()
-    ][-1] == ("R. Viewer", "layout", 0)
+    assert [(c.author, c.highlight, c.highlight_occ) for c in again.comments][
+        -1
+    ] == ("R. Viewer", "layout", 0)
     assert (
         next(
-            p for p in again.paragraphs() if p.text.startswith("Wakes matter")
+            p for p in again.paragraphs if p.text.startswith("Wakes matter")
         ).text
         == intro.text
     )
@@ -334,7 +334,7 @@ def test_docx_round_trip(
     # A table value edited in Word lands in the tabular row, and a figure
     # swapped in Word is warned about, since figures come from the pipeline
     doc = calkit.docx.Document("reviews/accepted.docx")
-    for para in doc.paragraphs():
+    for para in doc.paragraphs:
         assert para.element is not None
         for t in para.element.iter(f"{{{calkit.docx.W}}}t"):
             if t.text and "0.05" in t.text:
@@ -364,7 +364,7 @@ def test_docx_round_trip(
     assert [c.resolved for c in parsed] == [True]
     os.remove("paper/main-for-review.docx")
     calkit.cli.latex.to_docx("paper/main.pdf")
-    exported = calkit.docx.Document("paper/main-for-review.docx").comments()
+    exported = calkit.docx.Document("paper/main-for-review.docx").comments
     assert [c.done for c in exported if c.author == "T. Author"] == [True]
     assert Path("paper/main.tex").read_text(encoding="utf-8") == main
     merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
@@ -373,7 +373,7 @@ def test_docx_round_trip(
     assert fixture is not None
     fixture_id = fixture.id
     assert merges[0].startswith(fixture_id) and merges[0].endswith(".json")
-    merge = DocxMerge.model_validate_json(
+    merge = LatexDocxMerge.model_validate_json(
         Path(calkit.latex.DOCX_MERGES_DIR, merges[-1]).read_text()
     )
     assert set(merge.files) == {

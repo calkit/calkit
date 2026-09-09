@@ -1,4 +1,4 @@
-"""Reading and writing Word documents for LaTeX review round trips."""
+"""Reading and writing Word documents in .docx format."""
 
 from __future__ import annotations
 
@@ -12,13 +12,20 @@ import zipfile
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
+# XML namespaces, named by the prefixes Word gives them: w is the main
+# WordprocessingML namespace, w14 and w15 are Word 2010 and 2013
+# extensions (paragraph IDs, comment threads), r and the package
+# relationships link parts to each other, and dc is Dublin Core for
+# the document properties
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 W14 = "http://schemas.microsoft.com/office/word/2010/wordml"
 W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 DC = "http://purl.org/dc/elements/1.1/"
-CK_NS = "https://calkit.org/review"
+# Namespace of the custom XML part in which Calkit records where a
+# document came from
+CALKIT_NS = "https://calkit.org/latex-export"
 # Where Word looks up a comment's thread and resolved state
 COMMENTS_EX_TYPE = (
     "http://schemas.microsoft.com/office/2011/relationships/commentsExtended"
@@ -155,6 +162,7 @@ class Document:
             for name, data in self.parts.items():
                 z.writestr(name, data)
 
+    @property
     def paragraphs(self) -> list[Paragraph]:
         out = []
         for p in self.doc.iter(_tag(W, "p")):
@@ -196,17 +204,17 @@ class Document:
 
     # Custom XML part carrying the original text and export identity
     def write_original(self, original: Original) -> None:
-        root = ET.Element(_tag(CK_NS, "review"))
+        root = ET.Element(_tag(CALKIT_NS, "review"))
         root.set("id", original.id)
         root.set("source", original.source)
         if original.rev:
             root.set("rev", original.rev)
         for name, text in original.paragraphs.items():
-            p = ET.SubElement(root, _tag(CK_NS, "p"))
+            p = ET.SubElement(root, _tag(CALKIT_NS, "p"))
             p.set("id", name)
             p.text = text
         for name, digest in original.media.items():
-            m = ET.SubElement(root, _tag(CK_NS, "media"))
+            m = ET.SubElement(root, _tag(CALKIT_NS, "media"))
             m.set("name", name)
             m.set("sha1", digest)
         self.parts["customXml/item1.xml"] = ET.tostring(
@@ -217,7 +225,7 @@ class Document:
             '<ds:datastoreItem ds:itemID="{%s}" xmlns:ds="http://schemas.'
             'openxmlformats.org/officeDocument/2006/customXml"><ds:schemaRefs>'
             '<ds:schemaRef ds:uri="%s"/></ds:schemaRefs></ds:datastoreItem>'
-            % (original.id.upper(), CK_NS)
+            % (original.id.upper(), CALKIT_NS)
         ).encode()
         self.parts["customXml/_rels/item1.xml.rels"] = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -233,7 +241,7 @@ class Document:
         if data is None:
             return None
         root = ET.fromstring(data)
-        if root.tag != _tag(CK_NS, "review"):
+        if root.tag != _tag(CALKIT_NS, "review"):
             return None
         return Original(
             id=root.get("id", ""),
@@ -241,14 +249,15 @@ class Document:
             source=root.get("source", ""),
             paragraphs={
                 p.get("id", ""): p.text or ""
-                for p in root.iter(_tag(CK_NS, "p"))
+                for p in root.iter(_tag(CALKIT_NS, "p"))
             },
             media={
                 m.get("name", ""): m.get("sha1", "")
-                for m in root.iter(_tag(CK_NS, "media"))
+                for m in root.iter(_tag(CALKIT_NS, "media"))
             },
         )
 
+    @property
     def media_hashes(self) -> dict[str, str]:
         """Images and other embedded media, by part name."""
         return {
@@ -257,6 +266,7 @@ class Document:
             if name.startswith("word/media/")
         }
 
+    @property
     def last_modified_by(self) -> str | None:
         core = ET.fromstring(self.parts["docProps/core.xml"])
         el = core.find(
@@ -311,6 +321,7 @@ class Document:
         """Turn Track Changes on, so it's on when the document opens."""
         self._settings_insert(ET.Element(_tag(W, "trackRevisions")))
 
+    @property
     def tracking(self) -> bool:
         settings = ET.fromstring(self.parts["word/settings.xml"])
         return settings.find(_tag(W, "trackRevisions")) is not None
@@ -334,6 +345,7 @@ class Document:
         el.set(_tag(W, "enforcement"), "1")
         self._settings_insert(el)
 
+    @property
     def protection(self) -> str | None:
         """The edit restriction in force, or None if none or unenforced."""
         settings = ET.fromstring(self.parts["word/settings.xml"])
@@ -342,6 +354,7 @@ class Document:
             return None
         return el.get(_tag(W, "edit"))
 
+    @property
     def comments(self) -> list[Comment]:
         data = self.parts.get("word/comments.xml")
         if data is None:

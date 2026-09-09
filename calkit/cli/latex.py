@@ -659,7 +659,7 @@ def to_docx(
     import calkit.docx
     import calkit.git
     import calkit.pipeline
-    from calkit.models.docx import DocxExport
+    from calkit.models.docx import LatexDocxExport
     from calkit.models.pipeline import LatexStage
 
     ck_info = calkit.load_calkit_info()
@@ -703,7 +703,7 @@ def to_docx(
     doc = calkit.docx.Document(output)
     lines = calkit.latex.flatten(source)
     blks = calkit.latex.blocks(lines)
-    paras = doc.paragraphs()
+    paras = doc.paragraphs
     matched = calkit.latex.align([p.text for p in paras], blks)
     # Bookmark each anchored paragraph; a block rendering as several
     # paragraphs gets numbered suffixes
@@ -752,12 +752,12 @@ def to_docx(
     export_id = str(uuid.uuid4())
     doc.write_original(
         calkit.docx.Original(
-            export_id, rev, source, original, doc.media_hashes()
+            export_id, rev, source, original, doc.media_hashes
         )
     )
-    doc.set_identifier(f"calkit-review:{export_id}:{rev or ''}:{source}")
+    doc.set_identifier(f"calkit-latex-export:{export_id}:{rev or ''}:{source}")
     doc.save()
-    record = DocxExport(
+    record = LatexDocxExport(
         id=export_id,
         created=datetime.datetime.now(datetime.timezone.utc),
         source=source,
@@ -816,7 +816,7 @@ def merge_docx(
     import calkit.docx
     import calkit.git
     from calkit.cli.core import warn
-    from calkit.models.docx import DocxMerge, DocxMergeChange
+    from calkit.models.docx import LatexDocxMerge, LatexDocxMergeChange
 
     doc = calkit.docx.Document(docx_path)
     original = doc.read_original()
@@ -829,7 +829,7 @@ def merge_docx(
         raise_error(f"Source {original.source} does not exist")
     # Figures come from the pipeline, so a picture swapped or edited in
     # Word can't be merged
-    media = doc.media_hashes()
+    media = doc.media_hashes
     changed = sorted(
         name
         for name in set(media) | set(original.media)
@@ -847,8 +847,8 @@ def merge_docx(
         for p in {ln.path for ln in lines}
     }
     edits: dict[str, list[tuple[int, int, list[str]]]] = {}
-    changes: list[DocxMergeChange] = []
-    for para in doc.paragraphs():
+    changes: list[LatexDocxMergeChange] = []
+    for para in doc.paragraphs:
         if para.bookmark is None or para.bookmark not in original.paragraphs:
             continue
         sent = original.paragraphs[para.bookmark]
@@ -862,14 +862,16 @@ def merge_docx(
         if blk is None:
             warn(f"Can't place an edit from {path}:{lineno}: {para.text[:60]}")
             changes.append(
-                DocxMergeChange(path=path, lineno=lineno, status="unplaced")
+                LatexDocxMergeChange(
+                    path=path, lineno=lineno, status="unplaced"
+                )
             )
             continue
         loc = f"{blk.path}:{blk.lineno}"
         if para.pending:
             warn(f"Tracked change at {loc} not yet accepted or rejected")
             changes.append(
-                DocxMergeChange(
+                LatexDocxMergeChange(
                     path=blk.path,
                     lineno=blk.lineno,
                     status="pending",
@@ -881,7 +883,7 @@ def merge_docx(
         new_tex = calkit.latex.from_word_text(para.text)
         if calkit.latex.already_applied(blk, sent_tex, new_tex):
             changes.append(
-                DocxMergeChange(
+                LatexDocxMergeChange(
                     path=blk.path, lineno=blk.lineno, status="already-applied"
                 )
             )
@@ -892,7 +894,7 @@ def merge_docx(
                 f"Edit at {loc} touches markup; apply it by hand: {para.text[:60]}"
             )
             changes.append(
-                DocxMergeChange(
+                LatexDocxMergeChange(
                     path=blk.path, lineno=blk.lineno, status="unplaced"
                 )
             )
@@ -901,7 +903,9 @@ def merge_docx(
             (blk.lineno, len(blk.lines), new_lines)
         )
         changes.append(
-            DocxMergeChange(path=blk.path, lineno=blk.lineno, status="applied")
+            LatexDocxMergeChange(
+                path=blk.path, lineno=blk.lineno, status="applied"
+            )
         )
         typer.echo(f"Applied edit at {loc}")
     files = {
@@ -914,7 +918,7 @@ def merge_docx(
     added = updated = 0
     if not no_comments:
         # Threads keyed by root, anchored through the root's bookmark
-        comments = doc.comments()
+        comments = doc.comments
         by_id = {c.para_id: c for c in comments}
         roots = [c for c in comments if not c.parent_id]
         # Resolve every thread to a block first, then edit each file from
@@ -997,15 +1001,15 @@ def merge_docx(
         rev = calkit.git.get_repo().head.commit.hexsha
     except Exception:
         pass
-    seen = {a for p in doc.paragraphs() for a in p.authors}
-    seen |= {c.author for c in doc.comments()}
-    record = DocxMerge(
+    seen = {a for p in doc.paragraphs for a in p.authors}
+    seen |= {c.author for c in doc.comments}
+    record = LatexDocxMerge(
         export_id=original.id,
         created=datetime.datetime.now(datetime.timezone.utc),
         docx=Path(docx_path).as_posix(),
         rev=rev,
         authors=sorted(seen),
-        last_modified_by=doc.last_modified_by(),
+        last_modified_by=doc.last_modified_by,
         changes=changes,
         comments_added=added,
         comments_updated=updated,

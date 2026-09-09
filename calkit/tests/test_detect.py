@@ -932,6 +932,9 @@ using DataFrames
 using CSV
 using Plots
 
+import ClimaCalibrate
+import EnsembleKalmanProcesses as EKP
+
 # Read data
 data = CSV.read("data.csv", DataFrame)
 """
@@ -943,18 +946,48 @@ data = CSV.read("data.csv", DataFrame)
     assert "DataFrames" in deps
     assert "CSV" in deps
     assert "Plots" in deps
+    assert "ClimaCalibrate" in deps
+    assert "EnsembleKalmanProcesses" in deps
+    assert "EKP" not in deps
 
 
 def test_detect_julia_dependencies_from_code():
-    """Test detection of Julia dependencies from code string."""
     code = """
 using LinearAlgebra
 using Statistics
+using DataFrames, CSV
+using Interpolations: linear_interpolation
+import Plots as plt
+using Distributions.Normal
+using .LocalModule
+import ..ParentModule
+import Base: show
+x = 1; using Random
+# using Commented
 """
     deps = detect_julia_dependencies(code=code)
 
     assert "LinearAlgebra" in deps
     assert "Statistics" in deps
+    # Comma-separated names all count
+    assert "DataFrames" in deps
+    assert "CSV" in deps
+    # Only what precedes a colon is a package
+    assert "Interpolations" in deps
+    assert "linear_interpolation" not in deps
+    # An alias isn't a package
+    assert "Plots" in deps
+    assert "plt" not in deps
+    # A submodule comes from its top-level package
+    assert "Distributions" in deps
+    assert "Normal" not in deps
+    # Relative modules are local, and Base isn't a dependency
+    assert "LocalModule" not in deps
+    assert "ParentModule" not in deps
+    assert "Base" not in deps
+    # A statement can follow a semicolon, but not a comment
+    assert "Random" in deps
+    assert "Commented" not in deps
 
 
 def test_detect_dependencies_from_python_notebook(tmp_dir):

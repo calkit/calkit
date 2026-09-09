@@ -1803,10 +1803,29 @@ def detect_julia_dependencies(
     dependencies = set()
     # Remove comments
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-    # Pattern for using statements
-    pattern = r"using\s+([a-zA-Z0-9._]+)"
-    matches = re.findall(pattern, code)
-    dependencies.update(matches)
+    # Both `using` and `import` load a package, and either can start a line or
+    # follow a semicolon
+    clauses = re.findall(
+        r"(?:^|;)[ \t]*(?:using|import)[ \t]+([^\n;]+)",
+        code,
+        flags=re.MULTILINE,
+    )
+    for clause in clauses:
+        # In `using Foo: bar, baz` only what precedes the colon is a package
+        clause = clause.split(":")[0]
+        for part in clause.split(","):
+            # Drop an `as` alias, e.g., `import Foo as F`
+            name = re.split(r"\s+as\s+", part.strip())[0].strip()
+            # A leading dot means a module local to this file, not a package
+            if not name or name.startswith("."):
+                continue
+            # Submodules like `Foo.Bar` come from the `Foo` package
+            name = name.split(".")[0]
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_!]*", name):
+                continue
+            if name in ("Base", "Core", "Main"):
+                continue
+            dependencies.add(name)
     return sorted(list(dependencies))
 
 

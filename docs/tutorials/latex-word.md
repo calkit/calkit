@@ -136,6 +136,30 @@ It's possible to disable comments merging back into LaTeX with `--no-comments`.
 Note that merging is idempotent, meaning it can be called again
 and content won't be duplicated.
 
+## Merging on the Calkit Hub instead
+
+If the project is on the Calkit Hub, the round trip doesn't need a
+laptop with Word on it at the merging end.
+Open the publication, and in the **Word reviews** panel upload the
+document that came back.
+It's saved to the project under `reviews/`, tracked with DVC and
+committed, so the review is part of the project's record just as it
+would be with `calkit save`.
+
+The hub then shows everything the reviewer did, one item at a time:
+each changed paragraph as a word-level diff, and each comment thread.
+Tracked changes the reviewer left pending can be accepted or rejected
+right there, without opening Word,
+and comments can be written to the source or dismissed.
+**Merge** writes the decisions to the LaTeX source in one commit.
+Rejected edits and dismissed comments are remembered, so they aren't
+offered again, and anything left undecided stays open for a later pass.
+
+It's the same merge as `calkit latex merge-docx`, reading the same
+document and writing the same record under `.calkit/latex/`,
+so a review can be started on the hub and finished on a laptop or the
+other way round.
+
 ## Multiple reviewers
 
 It's okay to send the same copy out to multiple collaborators.

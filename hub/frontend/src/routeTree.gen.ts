@@ -19,6 +19,7 @@ import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LoginIndexRouteImport } from './routes/login/index'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
+import { Route as ReviewTokenRouteImport } from './routes/review/$token'
 import { Route as LoginDeviceRouteImport } from './routes/login/device'
 import { Route as JoinTokenRouteImport } from './routes/join/$token'
 import { Route as AuthZoteroRouteImport } from './routes/auth/zotero'
@@ -96,6 +97,11 @@ const LayoutIndexRoute = LayoutIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => LayoutRoute,
+} as any)
+const ReviewTokenRoute = ReviewTokenRouteImport.update({
+  id: '/review/$token',
+  path: '/review/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const LoginDeviceRoute = LoginDeviceRouteImport.update({
   id: '/login/device',
@@ -312,6 +318,7 @@ export interface FileRoutesByFullPath {
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
   '/login/device': typeof LoginDeviceRoute
+  '/review/$token': typeof ReviewTokenRoute
   '/': typeof LayoutIndexRoute
   '/login': typeof LoginIndexRoute
   '/$accountName': typeof LayoutAccountNameIndexRoute
@@ -355,6 +362,7 @@ export interface FileRoutesByTo {
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
   '/login/device': typeof LoginDeviceRoute
+  '/review/$token': typeof ReviewTokenRoute
   '/': typeof LayoutIndexRoute
   '/login': typeof LoginIndexRoute
   '/$accountName': typeof LayoutAccountNameIndexRoute
@@ -398,6 +406,7 @@ export interface FileRoutesById {
   '/auth/zotero': typeof AuthZoteroRoute
   '/join/$token': typeof JoinTokenRoute
   '/login/device': typeof LoginDeviceRoute
+  '/review/$token': typeof ReviewTokenRoute
   '/_layout/': typeof LayoutIndexRoute
   '/login/': typeof LoginIndexRoute
   '/_layout/$accountName/': typeof LayoutAccountNameIndexRoute
@@ -444,6 +453,7 @@ export interface FileRouteTypes {
     | '/auth/zotero'
     | '/join/$token'
     | '/login/device'
+    | '/review/$token'
     | '/'
     | '/login'
     | '/$accountName'
@@ -487,6 +497,7 @@ export interface FileRouteTypes {
     | '/auth/zotero'
     | '/join/$token'
     | '/login/device'
+    | '/review/$token'
     | '/'
     | '/login'
     | '/$accountName'
@@ -529,6 +540,7 @@ export interface FileRouteTypes {
     | '/auth/zotero'
     | '/join/$token'
     | '/login/device'
+    | '/review/$token'
     | '/_layout/'
     | '/login/'
     | '/_layout/$accountName/'
@@ -569,6 +581,7 @@ export interface RootRouteChildren {
   AuthZoteroRoute: typeof AuthZoteroRoute
   JoinTokenRoute: typeof JoinTokenRoute
   LoginDeviceRoute: typeof LoginDeviceRoute
+  ReviewTokenRoute: typeof ReviewTokenRoute
   LoginIndexRoute: typeof LoginIndexRoute
 }
 
@@ -629,6 +642,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof LayoutIndexRouteImport
       parentRoute: typeof LayoutRoute
+    }
+    '/review/$token': {
+      id: '/review/$token'
+      path: '/review/$token'
+      fullPath: '/review/$token'
+      preLoaderRoute: typeof ReviewTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/login/device': {
       id: '/login/device'
@@ -1020,6 +1040,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthZoteroRoute: AuthZoteroRoute,
   JoinTokenRoute: JoinTokenRoute,
   LoginDeviceRoute: LoginDeviceRoute,
+  ReviewTokenRoute: ReviewTokenRoute,
   LoginIndexRoute: LoginIndexRoute,
 }
 export const routeTree = rootRouteImport

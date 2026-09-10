@@ -101,6 +101,52 @@ export const Body_login_login_access_tokenSchema = {
   title: "Body_login-login_access_token",
 } as const
 
+export const Body_projects_post_contrib_request_responseSchema = {
+  properties: {
+    file: {
+      type: "string",
+      format: "binary",
+      title: "File",
+    },
+    responder_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Responder Name",
+    },
+    responder_email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Responder Email",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["file"],
+  title: "Body_projects-post_contrib_request_response",
+} as const
+
 export const Body_projects_post_project_dataset_uploadSchema = {
   properties: {
     path: {
@@ -854,6 +900,1313 @@ export const ContentsItemSchema = {
   type: "object",
   required: ["name", "path", "type", "size", "in_repo"],
   title: "ContentsItem",
+} as const
+
+export const ContribAttachmentPublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    filename: {
+      type: "string",
+      title: "Filename",
+    },
+    content_type: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content Type",
+    },
+    size_bytes: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Size Bytes",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+  },
+  type: "object",
+  required: ["id", "filename", "content_type", "size_bytes", "created"],
+  title: "ContribAttachmentPublic",
+} as const
+
+export const ContribRequestCreatedSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    direction: {
+      type: "string",
+      title: "Direction",
+    },
+    in_response_to_request_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "In Response To Request Id",
+    },
+    target_kind: {
+      type: "string",
+      title: "Target Kind",
+    },
+    target_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Target Path",
+    },
+    document_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Document Path",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    permission: {
+      type: "string",
+      title: "Permission",
+    },
+    identity_requirement: {
+      type: "string",
+      title: "Identity Requirement",
+    },
+    due_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Due At",
+    },
+    round: {
+      type: "integer",
+      title: "Round",
+    },
+    supersedes_request_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Supersedes Request Id",
+    },
+    email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email",
+    },
+    contributor_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Contributor Name",
+    },
+    approval_status: {
+      type: "string",
+      title: "Approval Status",
+    },
+    approved_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approved At",
+    },
+    denial_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Denial Reason",
+    },
+    public: {
+      type: "boolean",
+      title: "Public",
+    },
+    expires_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Expires At",
+    },
+    max_responses: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Max Responses",
+    },
+    response_count: {
+      type: "integer",
+      title: "Response Count",
+    },
+    closed_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Closed At",
+    },
+    revoked: {
+      type: "boolean",
+      title: "Revoked",
+    },
+    github_issue_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Issue Url",
+    },
+    view_count: {
+      type: "integer",
+      title: "View Count",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    responses: {
+      items: {
+        $ref: "#/components/schemas/ContribResponsePublic",
+      },
+      type: "array",
+      title: "Responses",
+    },
+    token: {
+      type: "string",
+      title: "Token",
+    },
+    url: {
+      type: "string",
+      title: "Url",
+    },
+    email_sent: {
+      type: "boolean",
+      title: "Email Sent",
+      default: false,
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "title",
+    "message",
+    "direction",
+    "in_response_to_request_id",
+    "target_kind",
+    "target_path",
+    "document_path",
+    "git_ref",
+    "git_rev",
+    "permission",
+    "identity_requirement",
+    "due_at",
+    "round",
+    "supersedes_request_id",
+    "email",
+    "contributor_name",
+    "approval_status",
+    "approved_at",
+    "denial_reason",
+    "public",
+    "expires_at",
+    "max_responses",
+    "response_count",
+    "closed_at",
+    "revoked",
+    "github_issue_url",
+    "view_count",
+    "created",
+    "token",
+    "url",
+  ],
+  title: "ContribRequestCreated",
+  description:
+    "Returned once at mint time; carries the raw token and its link.",
+} as const
+
+export const ContribRequestPatchSchema = {
+  properties: {
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    due_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Due At",
+    },
+    expires_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Expires At",
+    },
+    max_responses: {
+      anyOf: [
+        {
+          type: "integer",
+          minimum: 1,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Max Responses",
+    },
+    closed: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Closed",
+    },
+    revoked: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Revoked",
+    },
+  },
+  type: "object",
+  title: "ContribRequestPatch",
+  description:
+    "Fields a lead may change after a request has gone out.\n\nDeliberately narrow: the target, revision, and permission are what the\nrecipient was told they were looking at, so changing them would\nretroactively rewrite the ask.",
+} as const
+
+export const ContribRequestPostSchema = {
+  properties: {
+    title: {
+      type: "string",
+      maxLength: 255,
+      minLength: 1,
+      title: "Title",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    direction: {
+      type: "string",
+      enum: ["outbound", "inbound"],
+      title: "Direction",
+      default: "outbound",
+    },
+    in_response_to_request_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "In Response To Request Id",
+    },
+    target_kind: {
+      type: "string",
+      enum: [
+        "project",
+        "publication",
+        "figure",
+        "figures",
+        "presentation",
+        "dataset",
+        "notebook",
+        "stage",
+        "release",
+        "path",
+      ],
+      title: "Target Kind",
+      default: "project",
+    },
+    target_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Target Path",
+    },
+    document_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Document Path",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
+    },
+    permission: {
+      type: "string",
+      enum: ["view", "comment", "suggest", "edit", "submit"],
+      title: "Permission",
+      default: "suggest",
+    },
+    identity_requirement: {
+      type: "string",
+      enum: ["anonymous", "email", "account"],
+      title: "Identity Requirement",
+      default: "anonymous",
+    },
+    due_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Due At",
+    },
+    supersedes_request_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Supersedes Request Id",
+    },
+    email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email",
+    },
+    contributor_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Contributor Name",
+    },
+    public: {
+      type: "boolean",
+      title: "Public",
+      default: false,
+    },
+    expires_days: {
+      anyOf: [
+        {
+          type: "integer",
+          maximum: 365,
+          minimum: 1,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Expires Days",
+    },
+    max_responses: {
+      anyOf: [
+        {
+          type: "integer",
+          minimum: 1,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Max Responses",
+    },
+    create_github_issue: {
+      type: "boolean",
+      title: "Create Github Issue",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["title"],
+  title: "ContribRequestPost",
+} as const
+
+export const ContribRequestPublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    direction: {
+      type: "string",
+      title: "Direction",
+    },
+    in_response_to_request_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "In Response To Request Id",
+    },
+    target_kind: {
+      type: "string",
+      title: "Target Kind",
+    },
+    target_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Target Path",
+    },
+    document_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Document Path",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    permission: {
+      type: "string",
+      title: "Permission",
+    },
+    identity_requirement: {
+      type: "string",
+      title: "Identity Requirement",
+    },
+    due_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Due At",
+    },
+    round: {
+      type: "integer",
+      title: "Round",
+    },
+    supersedes_request_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Supersedes Request Id",
+    },
+    email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email",
+    },
+    contributor_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Contributor Name",
+    },
+    approval_status: {
+      type: "string",
+      title: "Approval Status",
+    },
+    approved_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approved At",
+    },
+    denial_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Denial Reason",
+    },
+    public: {
+      type: "boolean",
+      title: "Public",
+    },
+    expires_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Expires At",
+    },
+    max_responses: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Max Responses",
+    },
+    response_count: {
+      type: "integer",
+      title: "Response Count",
+    },
+    closed_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Closed At",
+    },
+    revoked: {
+      type: "boolean",
+      title: "Revoked",
+    },
+    github_issue_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Issue Url",
+    },
+    view_count: {
+      type: "integer",
+      title: "View Count",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    responses: {
+      items: {
+        $ref: "#/components/schemas/ContribResponsePublic",
+      },
+      type: "array",
+      title: "Responses",
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "title",
+    "message",
+    "direction",
+    "in_response_to_request_id",
+    "target_kind",
+    "target_path",
+    "document_path",
+    "git_ref",
+    "git_rev",
+    "permission",
+    "identity_requirement",
+    "due_at",
+    "round",
+    "supersedes_request_id",
+    "email",
+    "contributor_name",
+    "approval_status",
+    "approved_at",
+    "denial_reason",
+    "public",
+    "expires_at",
+    "max_responses",
+    "response_count",
+    "closed_at",
+    "revoked",
+    "github_issue_url",
+    "view_count",
+    "created",
+  ],
+  title: "ContribRequestPublic",
+  description:
+    "A request as the project lead sees it -- never includes the token.",
+} as const
+
+export const ContribRequestViewSchema = {
+  properties: {
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    direction: {
+      type: "string",
+      title: "Direction",
+    },
+    target_kind: {
+      type: "string",
+      title: "Target Kind",
+    },
+    target_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Target Path",
+    },
+    document_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Document Path",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
+    },
+    git_rev_abbrev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev Abbrev",
+    },
+    permission: {
+      type: "string",
+      title: "Permission",
+    },
+    identity_requirement: {
+      type: "string",
+      title: "Identity Requirement",
+    },
+    approval_status: {
+      type: "string",
+      title: "Approval Status",
+    },
+    due_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Due At",
+    },
+    round: {
+      type: "integer",
+      title: "Round",
+    },
+    expires_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Expires At",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    owner_account_name: {
+      type: "string",
+      title: "Owner Account Name",
+    },
+    owner_account_display_name: {
+      type: "string",
+      title: "Owner Account Display Name",
+    },
+    project_name: {
+      type: "string",
+      title: "Project Name",
+    },
+    project_title: {
+      type: "string",
+      title: "Project Title",
+    },
+    requester_name: {
+      type: "string",
+      title: "Requester Name",
+    },
+    responder_email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Responder Email",
+    },
+    identity_confirmed: {
+      type: "boolean",
+      title: "Identity Confirmed",
+      default: false,
+    },
+    can_respond: {
+      type: "boolean",
+      title: "Can Respond",
+      default: true,
+    },
+  },
+  type: "object",
+  required: [
+    "title",
+    "message",
+    "direction",
+    "target_kind",
+    "target_path",
+    "document_path",
+    "git_ref",
+    "git_rev_abbrev",
+    "permission",
+    "identity_requirement",
+    "approval_status",
+    "due_at",
+    "round",
+    "expires_at",
+    "created",
+    "owner_account_name",
+    "owner_account_display_name",
+    "project_name",
+    "project_title",
+    "requester_name",
+  ],
+  title: "ContribRequestView",
+  description:
+    "A request as the responder sees it on the respond page.\n\nOmits internal identifiers and the requester's private metadata; exposes\nwhat's needed to render the ask, the target, and the response form.\n``can_respond`` folds together expiry, closure, and the response cap so\nthe page doesn't have to re-derive them.",
+} as const
+
+export const ContribResponsePublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    request_id: {
+      type: "string",
+      format: "uuid",
+      title: "Request Id",
+    },
+    responder_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Responder Name",
+    },
+    responder_email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Responder Email",
+    },
+    email_verified: {
+      type: "boolean",
+      title: "Email Verified",
+    },
+    status: {
+      type: "string",
+      title: "Status",
+    },
+    via: {
+      type: "string",
+      title: "Via",
+    },
+    external_thread_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "External Thread Url",
+    },
+    decline_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Decline Reason",
+    },
+    recommendation: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Recommendation",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    confidential_note: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Confidential Note",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    branch_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch Name",
+    },
+    github_pr_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Pr Url",
+    },
+    submitted_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Submitted At",
+    },
+    reviewed_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Reviewed At",
+    },
+    review_note: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Review Note",
+    },
+    task_count: {
+      type: "integer",
+      title: "Task Count",
+    },
+    accepted_count: {
+      type: "integer",
+      title: "Accepted Count",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    tasks: {
+      items: {
+        $ref: "#/components/schemas/TaskPublic",
+      },
+      type: "array",
+      title: "Tasks",
+    },
+    attachments: {
+      items: {
+        $ref: "#/components/schemas/ContribAttachmentPublic",
+      },
+      type: "array",
+      title: "Attachments",
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "request_id",
+    "responder_name",
+    "responder_email",
+    "email_verified",
+    "status",
+    "via",
+    "external_thread_url",
+    "decline_reason",
+    "recommendation",
+    "message",
+    "git_rev",
+    "branch_name",
+    "github_pr_url",
+    "submitted_at",
+    "reviewed_at",
+    "review_note",
+    "task_count",
+    "accepted_count",
+    "created",
+  ],
+  title: "ContribResponsePublic",
 } as const
 
 export const CreatorPostSchema = {
@@ -10158,6 +11511,290 @@ export const TableTextSchema = {
   title: "TableText",
   description:
     "A window of a table as CSV, which is what the table viewer reads.\n\nA table can be wider or longer than a browser can hold (a 2D array in\nan HDF5 file with thousands of columns, say), so the response is a\nwindow in both dimensions and says where it sits in the whole.",
+} as const
+
+export const TaskPublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    project_id: {
+      type: "string",
+      format: "uuid",
+      title: "Project Id",
+    },
+    response_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Response Id",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    source: {
+      type: "string",
+      title: "Source",
+    },
+    source_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Source Ref",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    anchor_status: {
+      type: "string",
+      title: "Anchor Status",
+    },
+    anchor_line: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Anchor Line",
+    },
+    attachment_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Attachment Id",
+    },
+    context_before: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Context Before",
+    },
+    context_after: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Context After",
+    },
+    path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Path",
+    },
+    original_text: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Original Text",
+    },
+    suggested_text: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Suggested Text",
+    },
+    highlight: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Highlight",
+    },
+    body: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Body",
+    },
+    status: {
+      type: "string",
+      title: "Status",
+    },
+    verdict: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Verdict",
+    },
+    assigned_to_user_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Assigned To User Id",
+    },
+    board_position: {
+      type: "number",
+      title: "Board Position",
+    },
+    due: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Due",
+    },
+    github_issue_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Issue Url",
+    },
+    from_contribution: {
+      type: "boolean",
+      title: "From Contribution",
+    },
+    decided_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Decided At",
+    },
+    applied_git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Applied Git Rev",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "project_id",
+    "response_id",
+    "title",
+    "kind",
+    "source",
+    "source_ref",
+    "stage",
+    "anchor_status",
+    "anchor_line",
+    "attachment_id",
+    "context_before",
+    "context_after",
+    "path",
+    "original_text",
+    "suggested_text",
+    "highlight",
+    "body",
+    "status",
+    "verdict",
+    "assigned_to_user_id",
+    "board_position",
+    "due",
+    "github_issue_url",
+    "from_contribution",
+    "decided_at",
+    "applied_git_rev",
+    "created",
+  ],
+  title: "TaskPublic",
 } as const
 
 export const TemplatePublicSchema = {

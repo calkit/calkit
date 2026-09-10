@@ -15,6 +15,7 @@ import type {
   AddOrgMemberErrors,
   AddOrgMemberResponses,
   BodyLoginLoginAccessToken,
+  BodyProjectsPostContribRequestResponse,
   BodyProjectsPostProjectDatasetUpload,
   BodyProjectsPostProjectFigure,
   BodyProjectsPostProjectLatexReview,
@@ -24,6 +25,8 @@ import type {
   BodyProjectsPutProjectContents,
   CommentReply,
   ContentPatch,
+  ContribRequestPatch,
+  ContribRequestPost,
   CreateReleaseGithubReleaseErrors,
   CreateReleaseGithubReleaseResponses,
   CreateReleaseShareErrors,
@@ -86,6 +89,10 @@ import type {
   GetAccountResponses,
   GetArxivPdfErrors,
   GetArxivPdfResponses,
+  GetContribRequestByTokenErrors,
+  GetContribRequestByTokenResponses,
+  GetContribRequestDocumentErrors,
+  GetContribRequestDocumentResponses,
   GetCurrentUserResponses,
   GetDatasetsErrors,
   GetDatasetsResponses,
@@ -126,6 +133,8 @@ import type {
   GetProjectContents2Responses,
   GetProjectContentsErrors,
   GetProjectContentsResponses,
+  GetProjectContribRequestsErrors,
+  GetProjectContribRequestsResponses,
   GetProjectDatasetCsvErrors,
   GetProjectDatasetCsvResponses,
   GetProjectDatasetErrors,
@@ -287,6 +296,8 @@ import type {
   PatchProjectCommentResponses,
   PatchProjectContentsErrors,
   PatchProjectContentsResponses,
+  PatchProjectContribRequestErrors,
+  PatchProjectContribRequestResponses,
   PatchProjectErrors,
   PatchProjectIssueErrors,
   PatchProjectIssueResponses,
@@ -295,6 +306,8 @@ import type {
   PatchUserTokenResponses,
   PipelineStageEdit,
   PipelineStagePut,
+  PostContribRequestResponseErrors,
+  PostContribRequestResponseResponses,
   PostDiscountCodeErrors,
   PostDiscountCodeResponses,
   PostExternalReleaseErrors,
@@ -317,6 +330,8 @@ import type {
   PostProjectCommentReplyErrors,
   PostProjectCommentReplyResponses,
   PostProjectCommentResponses,
+  PostProjectContribRequestErrors,
+  PostProjectContribRequestResponses,
   PostProjectDatasetErrors,
   PostProjectDatasetResponses,
   PostProjectDatasetUploadErrors,
@@ -7708,6 +7723,261 @@ export class ProjectsService {
       ...params,
       headers: {
         "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Contrib Requests
+   */
+  public static getProjectContribRequests<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      target_path?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectContribRequestsResponses,
+    GetProjectContribRequestsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "target_path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectContribRequestsResponses,
+      GetProjectContribRequestsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/contrib-requests",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Contrib Request
+   *
+   * Send a request for a review of a publication.
+   *
+   * Records it in the repo, mints the link, and emails it if there's a
+   * recipient and email is configured. The raw token comes back once.
+   */
+  public static postProjectContribRequest<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      contribRequestPost: ContribRequestPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectContribRequestResponses,
+    PostProjectContribRequestErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "contribRequestPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectContribRequestResponses,
+      PostProjectContribRequestErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/contrib-requests",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Patch Project Contrib Request
+   *
+   * Close or revoke a request, or change its message or dates.
+   *
+   * The change is committed to the request's record in the repo too.
+   */
+  public static patchProjectContribRequest<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      request_id: string
+      contribRequestPatch: ContribRequestPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PatchProjectContribRequestResponses,
+    PatchProjectContribRequestErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "request_id" },
+            { key: "contribRequestPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      PatchProjectContribRequestResponses,
+      PatchProjectContribRequestErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/contrib-requests/{request_id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Contrib Request By Token
+   *
+   * What the recipient of a link sees: the ask, and whether they can
+   * still answer it.
+   */
+  public static getContribRequestByToken<ThrowOnError extends boolean = true>(
+    parameters: {
+      token: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetContribRequestByTokenResponses,
+    GetContribRequestByTokenErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "token" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetContribRequestByTokenResponses,
+      GetContribRequestByTokenErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/contrib-requests/{token}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Contrib Request Document
+   *
+   * The document that went out with the request, e.g., the Word copy.
+   */
+  public static getContribRequestDocument<ThrowOnError extends boolean = true>(
+    parameters: {
+      token: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetContribRequestDocumentResponses,
+    GetContribRequestDocumentErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "token" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetContribRequestDocumentResponses,
+      GetContribRequestDocumentErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      url: "/contrib-requests/{token}/document",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Contrib Request Response
+   *
+   * Hand a reviewed document back.
+   *
+   * It's saved to the project under ``reviews/`` and committed on behalf
+   * of whoever sent the request, authored by the reviewer, and recorded
+   * against the request in the repo and here.
+   */
+  public static postContribRequestResponse<ThrowOnError extends boolean = true>(
+    parameters: {
+      token: string
+      bodyProjectsPostContribRequestResponse: BodyProjectsPostContribRequestResponse
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostContribRequestResponseResponses,
+    PostContribRequestResponseErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "token" },
+            { key: "bodyProjectsPostContribRequestResponse", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostContribRequestResponseResponses,
+      PostContribRequestResponseErrors,
+      ThrowOnError
+    >({
+      ...formDataBodySerializer,
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/contrib-requests/{token}/responses",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": null,
         ...options?.headers,
         ...params.headers,
       },

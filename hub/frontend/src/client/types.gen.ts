@@ -61,6 +61,28 @@ export type BodyLoginLoginAccessToken = {
 }
 
 /**
+ * Body_projects-post_contrib_request_response
+ */
+export type BodyProjectsPostContribRequestResponse = {
+  /**
+   * File
+   */
+  file: Blob | File
+  /**
+   * Responder Name
+   */
+  responder_name?: string | null
+  /**
+   * Responder Email
+   */
+  responder_email?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
  * Body_projects-post_project_dataset_upload
  */
 export type BodyProjectsPostProjectDatasetUpload = {
@@ -470,6 +492,631 @@ export type ContentsItem = {
    * Dir Items
    */
   dir_items?: Array<ContentsItemBase> | null
+}
+
+/**
+ * ContribAttachmentPublic
+ */
+export type ContribAttachmentPublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Filename
+   */
+  filename: string
+  /**
+   * Content Type
+   */
+  content_type: string | null
+  /**
+   * Size Bytes
+   */
+  size_bytes: number | null
+  /**
+   * Created
+   */
+  created: string
+}
+
+/**
+ * ContribRequestCreated
+ *
+ * Returned once at mint time; carries the raw token and its link.
+ */
+export type ContribRequestCreated = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Message
+   */
+  message: string | null
+  /**
+   * Direction
+   */
+  direction: string
+  /**
+   * In Response To Request Id
+   */
+  in_response_to_request_id: string | null
+  /**
+   * Target Kind
+   */
+  target_kind: string
+  /**
+   * Target Path
+   */
+  target_path: string | null
+  /**
+   * Document Path
+   */
+  document_path: string | null
+  /**
+   * Git Ref
+   */
+  git_ref: string | null
+  /**
+   * Git Rev
+   */
+  git_rev: string | null
+  /**
+   * Permission
+   */
+  permission: string
+  /**
+   * Identity Requirement
+   */
+  identity_requirement: string
+  /**
+   * Due At
+   */
+  due_at: string | null
+  /**
+   * Round
+   */
+  round: number
+  /**
+   * Supersedes Request Id
+   */
+  supersedes_request_id: string | null
+  /**
+   * Email
+   */
+  email: string | null
+  /**
+   * Contributor Name
+   */
+  contributor_name: string | null
+  /**
+   * Approval Status
+   */
+  approval_status: string
+  /**
+   * Approved At
+   */
+  approved_at: string | null
+  /**
+   * Denial Reason
+   */
+  denial_reason: string | null
+  /**
+   * Public
+   */
+  public: boolean
+  /**
+   * Expires At
+   */
+  expires_at: string | null
+  /**
+   * Max Responses
+   */
+  max_responses: number | null
+  /**
+   * Response Count
+   */
+  response_count: number
+  /**
+   * Closed At
+   */
+  closed_at: string | null
+  /**
+   * Revoked
+   */
+  revoked: boolean
+  /**
+   * Github Issue Url
+   */
+  github_issue_url: string | null
+  /**
+   * View Count
+   */
+  view_count: number
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Responses
+   */
+  responses?: Array<ContribResponsePublic>
+  /**
+   * Token
+   */
+  token: string
+  /**
+   * Url
+   */
+  url: string
+  /**
+   * Email Sent
+   */
+  email_sent?: boolean
+}
+
+/**
+ * ContribRequestPatch
+ *
+ * Fields a lead may change after a request has gone out.
+ *
+ * Deliberately narrow: the target, revision, and permission are what the
+ * recipient was told they were looking at, so changing them would
+ * retroactively rewrite the ask.
+ */
+export type ContribRequestPatch = {
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+  /**
+   * Due At
+   */
+  due_at?: string | null
+  /**
+   * Expires At
+   */
+  expires_at?: string | null
+  /**
+   * Max Responses
+   */
+  max_responses?: number | null
+  /**
+   * Closed
+   */
+  closed?: boolean | null
+  /**
+   * Revoked
+   */
+  revoked?: boolean | null
+}
+
+/**
+ * ContribRequestPost
+ */
+export type ContribRequestPost = {
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Message
+   */
+  message?: string | null
+  /**
+   * Direction
+   */
+  direction?: "outbound" | "inbound"
+  /**
+   * In Response To Request Id
+   */
+  in_response_to_request_id?: string | null
+  /**
+   * Target Kind
+   */
+  target_kind?:
+    | "project"
+    | "publication"
+    | "figure"
+    | "figures"
+    | "presentation"
+    | "dataset"
+    | "notebook"
+    | "stage"
+    | "release"
+    | "path"
+  /**
+   * Target Path
+   */
+  target_path?: string | null
+  /**
+   * Document Path
+   */
+  document_path?: string | null
+  /**
+   * Git Ref
+   */
+  git_ref?: string | null
+  /**
+   * Permission
+   */
+  permission?: "view" | "comment" | "suggest" | "edit" | "submit"
+  /**
+   * Identity Requirement
+   */
+  identity_requirement?: "anonymous" | "email" | "account"
+  /**
+   * Due At
+   */
+  due_at?: string | null
+  /**
+   * Supersedes Request Id
+   */
+  supersedes_request_id?: string | null
+  /**
+   * Email
+   */
+  email?: string | null
+  /**
+   * Contributor Name
+   */
+  contributor_name?: string | null
+  /**
+   * Public
+   */
+  public?: boolean
+  /**
+   * Expires Days
+   */
+  expires_days?: number | null
+  /**
+   * Max Responses
+   */
+  max_responses?: number | null
+  /**
+   * Create Github Issue
+   */
+  create_github_issue?: boolean
+}
+
+/**
+ * ContribRequestPublic
+ *
+ * A request as the project lead sees it -- never includes the token.
+ */
+export type ContribRequestPublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Message
+   */
+  message: string | null
+  /**
+   * Direction
+   */
+  direction: string
+  /**
+   * In Response To Request Id
+   */
+  in_response_to_request_id: string | null
+  /**
+   * Target Kind
+   */
+  target_kind: string
+  /**
+   * Target Path
+   */
+  target_path: string | null
+  /**
+   * Document Path
+   */
+  document_path: string | null
+  /**
+   * Git Ref
+   */
+  git_ref: string | null
+  /**
+   * Git Rev
+   */
+  git_rev: string | null
+  /**
+   * Permission
+   */
+  permission: string
+  /**
+   * Identity Requirement
+   */
+  identity_requirement: string
+  /**
+   * Due At
+   */
+  due_at: string | null
+  /**
+   * Round
+   */
+  round: number
+  /**
+   * Supersedes Request Id
+   */
+  supersedes_request_id: string | null
+  /**
+   * Email
+   */
+  email: string | null
+  /**
+   * Contributor Name
+   */
+  contributor_name: string | null
+  /**
+   * Approval Status
+   */
+  approval_status: string
+  /**
+   * Approved At
+   */
+  approved_at: string | null
+  /**
+   * Denial Reason
+   */
+  denial_reason: string | null
+  /**
+   * Public
+   */
+  public: boolean
+  /**
+   * Expires At
+   */
+  expires_at: string | null
+  /**
+   * Max Responses
+   */
+  max_responses: number | null
+  /**
+   * Response Count
+   */
+  response_count: number
+  /**
+   * Closed At
+   */
+  closed_at: string | null
+  /**
+   * Revoked
+   */
+  revoked: boolean
+  /**
+   * Github Issue Url
+   */
+  github_issue_url: string | null
+  /**
+   * View Count
+   */
+  view_count: number
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Responses
+   */
+  responses?: Array<ContribResponsePublic>
+}
+
+/**
+ * ContribRequestView
+ *
+ * A request as the responder sees it on the respond page.
+ *
+ * Omits internal identifiers and the requester's private metadata; exposes
+ * what's needed to render the ask, the target, and the response form.
+ * ``can_respond`` folds together expiry, closure, and the response cap so
+ * the page doesn't have to re-derive them.
+ */
+export type ContribRequestView = {
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Message
+   */
+  message: string | null
+  /**
+   * Direction
+   */
+  direction: string
+  /**
+   * Target Kind
+   */
+  target_kind: string
+  /**
+   * Target Path
+   */
+  target_path: string | null
+  /**
+   * Document Path
+   */
+  document_path: string | null
+  /**
+   * Git Ref
+   */
+  git_ref: string | null
+  /**
+   * Git Rev Abbrev
+   */
+  git_rev_abbrev: string | null
+  /**
+   * Permission
+   */
+  permission: string
+  /**
+   * Identity Requirement
+   */
+  identity_requirement: string
+  /**
+   * Approval Status
+   */
+  approval_status: string
+  /**
+   * Due At
+   */
+  due_at: string | null
+  /**
+   * Round
+   */
+  round: number
+  /**
+   * Expires At
+   */
+  expires_at: string | null
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Owner Account Name
+   */
+  owner_account_name: string
+  /**
+   * Owner Account Display Name
+   */
+  owner_account_display_name: string
+  /**
+   * Project Name
+   */
+  project_name: string
+  /**
+   * Project Title
+   */
+  project_title: string
+  /**
+   * Requester Name
+   */
+  requester_name: string
+  /**
+   * Responder Email
+   */
+  responder_email?: string | null
+  /**
+   * Identity Confirmed
+   */
+  identity_confirmed?: boolean
+  /**
+   * Can Respond
+   */
+  can_respond?: boolean
+}
+
+/**
+ * ContribResponsePublic
+ */
+export type ContribResponsePublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Request Id
+   */
+  request_id: string
+  /**
+   * Responder Name
+   */
+  responder_name: string | null
+  /**
+   * Responder Email
+   */
+  responder_email: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
+  /**
+   * Status
+   */
+  status: string
+  /**
+   * Via
+   */
+  via: string
+  /**
+   * External Thread Url
+   */
+  external_thread_url: string | null
+  /**
+   * Decline Reason
+   */
+  decline_reason: string | null
+  /**
+   * Recommendation
+   */
+  recommendation: string | null
+  /**
+   * Message
+   */
+  message: string | null
+  /**
+   * Confidential Note
+   */
+  confidential_note?: string | null
+  /**
+   * Git Rev
+   */
+  git_rev: string | null
+  /**
+   * Branch Name
+   */
+  branch_name: string | null
+  /**
+   * Github Pr Url
+   */
+  github_pr_url: string | null
+  /**
+   * Submitted At
+   */
+  submitted_at: string | null
+  /**
+   * Reviewed At
+   */
+  reviewed_at: string | null
+  /**
+   * Review Note
+   */
+  review_note: string | null
+  /**
+   * Task Count
+   */
+  task_count: number
+  /**
+   * Accepted Count
+   */
+  accepted_count: number
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Tasks
+   */
+  tasks?: Array<TaskPublic>
+  /**
+   * Attachments
+   */
+  attachments?: Array<ContribAttachmentPublic>
 }
 
 /**
@@ -5898,6 +6545,126 @@ export type TableText = {
    * Truncated
    */
   truncated: boolean
+}
+
+/**
+ * TaskPublic
+ */
+export type TaskPublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Project Id
+   */
+  project_id: string
+  /**
+   * Response Id
+   */
+  response_id: string | null
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Source Ref
+   */
+  source_ref: string | null
+  /**
+   * Stage
+   */
+  stage: string | null
+  /**
+   * Anchor Status
+   */
+  anchor_status: string
+  /**
+   * Anchor Line
+   */
+  anchor_line: number | null
+  /**
+   * Attachment Id
+   */
+  attachment_id: string | null
+  /**
+   * Context Before
+   */
+  context_before: string | null
+  /**
+   * Context After
+   */
+  context_after: string | null
+  /**
+   * Path
+   */
+  path: string | null
+  /**
+   * Original Text
+   */
+  original_text: string | null
+  /**
+   * Suggested Text
+   */
+  suggested_text: string | null
+  /**
+   * Highlight
+   */
+  highlight: {
+    [key: string]: unknown
+  } | null
+  /**
+   * Body
+   */
+  body: string | null
+  /**
+   * Status
+   */
+  status: string
+  /**
+   * Verdict
+   */
+  verdict: string | null
+  /**
+   * Assigned To User Id
+   */
+  assigned_to_user_id: string | null
+  /**
+   * Board Position
+   */
+  board_position: number
+  /**
+   * Due
+   */
+  due: string | null
+  /**
+   * Github Issue Url
+   */
+  github_issue_url: string | null
+  /**
+   * From Contribution
+   */
+  from_contribution: boolean
+  /**
+   * Decided At
+   */
+  decided_at: string | null
+  /**
+   * Applied Git Rev
+   */
+  applied_git_rev: string | null
+  /**
+   * Created
+   */
+  created: string
 }
 
 /**
@@ -13402,6 +14169,218 @@ export type PostProjectLatexReviewMergeResponses = {
 
 export type PostProjectLatexReviewMergeResponse =
   PostProjectLatexReviewMergeResponses[keyof PostProjectLatexReviewMergeResponses]
+
+export type GetProjectContribRequestsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Target Path
+     */
+    target_path?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/contrib-requests"
+}
+
+export type GetProjectContribRequestsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectContribRequestsError =
+  GetProjectContribRequestsErrors[keyof GetProjectContribRequestsErrors]
+
+export type GetProjectContribRequestsResponses = {
+  /**
+   * Response Projects-Get Project Contrib Requests
+   *
+   * Successful Response
+   */
+  200: Array<ContribRequestPublic>
+}
+
+export type GetProjectContribRequestsResponse =
+  GetProjectContribRequestsResponses[keyof GetProjectContribRequestsResponses]
+
+export type PostProjectContribRequestData = {
+  body: ContribRequestPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/contrib-requests"
+}
+
+export type PostProjectContribRequestErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectContribRequestError =
+  PostProjectContribRequestErrors[keyof PostProjectContribRequestErrors]
+
+export type PostProjectContribRequestResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContribRequestCreated
+}
+
+export type PostProjectContribRequestResponse =
+  PostProjectContribRequestResponses[keyof PostProjectContribRequestResponses]
+
+export type PatchProjectContribRequestData = {
+  body: ContribRequestPatch
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Request Id
+     */
+    request_id: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/contrib-requests/{request_id}"
+}
+
+export type PatchProjectContribRequestErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PatchProjectContribRequestError =
+  PatchProjectContribRequestErrors[keyof PatchProjectContribRequestErrors]
+
+export type PatchProjectContribRequestResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContribRequestPublic
+}
+
+export type PatchProjectContribRequestResponse =
+  PatchProjectContribRequestResponses[keyof PatchProjectContribRequestResponses]
+
+export type GetContribRequestByTokenData = {
+  body?: never
+  path: {
+    /**
+     * Token
+     */
+    token: string
+  }
+  query?: never
+  url: "/contrib-requests/{token}"
+}
+
+export type GetContribRequestByTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetContribRequestByTokenError =
+  GetContribRequestByTokenErrors[keyof GetContribRequestByTokenErrors]
+
+export type GetContribRequestByTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContribRequestView
+}
+
+export type GetContribRequestByTokenResponse =
+  GetContribRequestByTokenResponses[keyof GetContribRequestByTokenResponses]
+
+export type GetContribRequestDocumentData = {
+  body?: never
+  path: {
+    /**
+     * Token
+     */
+    token: string
+  }
+  query?: never
+  url: "/contrib-requests/{token}/document"
+}
+
+export type GetContribRequestDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetContribRequestDocumentError =
+  GetContribRequestDocumentErrors[keyof GetContribRequestDocumentErrors]
+
+export type GetContribRequestDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
+
+export type PostContribRequestResponseData = {
+  body: BodyProjectsPostContribRequestResponse
+  path: {
+    /**
+     * Token
+     */
+    token: string
+  }
+  query?: never
+  url: "/contrib-requests/{token}/responses"
+}
+
+export type PostContribRequestResponseErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostContribRequestResponseError =
+  PostContribRequestResponseErrors[keyof PostContribRequestResponseErrors]
+
+export type PostContribRequestResponseResponses = {
+  /**
+   * Successful Response
+   */
+  200: ContribResponsePublic
+}
+
+export type PostContribRequestResponseResponse =
+  PostContribRequestResponseResponses[keyof PostContribRequestResponseResponses]
 
 export type GetReferencesData = {
   body?: never

@@ -717,6 +717,7 @@ function Publications() {
                     <DocxReviews
                       ownerName={accountName}
                       projectName={projectName}
+                      publicationPath={selectedPub.path}
                       source={texPath}
                       userHasWriteAccess={userHasWriteAccess}
                     />

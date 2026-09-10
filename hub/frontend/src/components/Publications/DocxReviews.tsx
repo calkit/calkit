@@ -6,6 +6,14 @@ import {
   Checkbox,
   Code,
   Flex,
+  FormControl,
+  FormHelperText,
+  FormLabel,
+  Input,
+  Radio,
+  RadioGroup,
+  Select,
+  Textarea,
   HStack,
   Heading,
   Icon,
@@ -20,6 +28,7 @@ import {
   Spinner,
   Text,
   VStack,
+  useClipboard,
   useColorModeValue,
   useDisclosure,
 } from "@chakra-ui/react"
@@ -27,9 +36,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { AxiosError } from "axios"
 import { useMemo, useRef, useState } from "react"
 import { FaUpload } from "react-icons/fa"
-import { FiFileText } from "react-icons/fi"
+import { FiFileText, FiSend } from "react-icons/fi"
 
 import {
+  type ContribRequestCreated,
+  type ContribRequestPublic,
   type LatexDocxComment,
   type LatexDocxEdit,
   type LatexReview,
@@ -43,6 +54,8 @@ import Tooltip from "../Common/Tooltip"
 interface DocxReviewsProps {
   ownerName: string
   projectName: string
+  // The publication itself, which review requests are made against
+  publicationPath: string
   // The main .tex the publication is built from; reviews are listed for it
   source: string
   userHasWriteAccess: boolean
@@ -448,9 +461,202 @@ function ReviewTriage({
   )
 }
 
+interface RequestReviewProps {
+  ownerName: string
+  projectName: string
+  publicationPath: string
+  isOpen: boolean
+  onClose: () => void
+}
+
+function RequestReviewModal({
+  ownerName,
+  projectName,
+  publicationPath,
+  isOpen,
+  onClose,
+}: RequestReviewProps) {
+  const showToast = useCustomToast()
+  const queryClient = useQueryClient()
+  const [email, setEmail] = useState("")
+  const [name, setName] = useState("")
+  const [message, setMessage] = useState("")
+  const [permission, setPermission] = useState("suggest")
+  const [document, setDocument] = useState("")
+  const [created, setCreated] = useState<ContribRequestCreated | null>(null)
+  const { onCopy, hasCopied } = useClipboard(created?.url ?? "")
+  const pathsQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "contents-paths"],
+    queryFn: () =>
+      ProjectsService.getProjectContentPaths({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((r) => r.data),
+    enabled: isOpen,
+  })
+  // Word copies in the repo, whether tracked by Git or by a DVC pointer
+  const docxPaths = Array.from(
+    new Set(
+      (pathsQuery.data ?? [])
+        .map((p) => (p.endsWith(".dvc") ? p.slice(0, -4) : p))
+        .filter((p) => p.toLowerCase().endsWith(".docx")),
+    ),
+  ).sort()
+  const mutation = useMutation({
+    mutationFn: () =>
+      ProjectsService.postProjectContribRequest({
+        owner_name: ownerName,
+        project_name: projectName,
+        contribRequestPost: {
+          title: `Review ${publicationPath.split("/").pop()}`,
+          message: message.trim() || null,
+          target_kind: "publication",
+          target_path: publicationPath,
+          document_path: document || null,
+          permission: permission as "comment" | "suggest",
+          email: email.trim() || null,
+          contributor_name: name.trim() || null,
+          expires_days: 90,
+        },
+      }).then((r) => r.data),
+    onSuccess: (data) => {
+      setCreated(data)
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "contrib-requests"],
+      })
+    },
+    onError: (err: AxiosError) => handleError(err, showToast),
+  })
+  const close = () => {
+    setCreated(null)
+    setEmail("")
+    setName("")
+    setMessage("")
+    setDocument("")
+    onClose()
+  }
+  return (
+    <Modal isOpen={isOpen} onClose={close} size="lg">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>Request a review</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          {created ? (
+            <VStack align="stretch" spacing={3}>
+              <Text fontSize="sm">
+                {created.email_sent
+                  ? `An email with the link went to ${created.email}.`
+                  : "Send this link to your reviewer. It's shown once."}
+              </Text>
+              <HStack>
+                <Input value={created.url} isReadOnly fontSize="sm" />
+                <Button size="sm" onClick={onCopy} flexShrink={0}>
+                  {hasCopied ? "Copied" : "Copy"}
+                </Button>
+              </HStack>
+              <Text fontSize="xs" color="gray.500">
+                Whoever opens it can download the Word copy and upload it back
+                marked up, with no account. It expires in 90 days, and you can
+                close it any time from this panel.
+              </Text>
+            </VStack>
+          ) : (
+            <VStack align="stretch" spacing={3}>
+              <FormControl>
+                <FormLabel fontSize="sm">Reviewer's email</FormLabel>
+                <Input
+                  size="sm"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="pi@university.edu"
+                />
+                <FormHelperText fontSize="xs">
+                  Optional. Without one you get a link to send yourself.
+                </FormHelperText>
+              </FormControl>
+              <FormControl>
+                <FormLabel fontSize="sm">Reviewer's name</FormLabel>
+                <Input
+                  size="sm"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel fontSize="sm">Word copy to send</FormLabel>
+                <Select
+                  size="sm"
+                  value={document}
+                  onChange={(e) => setDocument(e.target.value)}
+                  placeholder={
+                    docxPaths.length
+                      ? "None (they already have it)"
+                      : "No .docx in the project"
+                  }
+                >
+                  {docxPaths.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </Select>
+                <FormHelperText fontSize="xs">
+                  Export one with{" "}
+                  <Code fontSize="xs">calkit latex to-docx</Code> and save it to
+                  the project.
+                </FormHelperText>
+              </FormControl>
+              <FormControl>
+                <FormLabel fontSize="sm">They may</FormLabel>
+                <RadioGroup value={permission} onChange={setPermission}>
+                  <HStack spacing={4}>
+                    <Radio value="suggest" size="sm">
+                      Suggest changes and comment
+                    </Radio>
+                    <Radio value="comment" size="sm">
+                      Comment only
+                    </Radio>
+                  </HStack>
+                </RadioGroup>
+              </FormControl>
+              <FormControl>
+                <FormLabel fontSize="sm">Message</FormLabel>
+                <Textarea
+                  size="sm"
+                  rows={3}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder="What you'd like them to look at, and by when."
+                />
+              </FormControl>
+            </VStack>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="ghost" mr={3} onClick={close}>
+            {created ? "Done" : "Cancel"}
+          </Button>
+          {!created && (
+            <Button
+              variant="primary"
+              isLoading={mutation.isPending}
+              onClick={() => mutation.mutate()}
+            >
+              {email.trim() ? "Send request" : "Create link"}
+            </Button>
+          )}
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  )
+}
+
 export default function DocxReviews({
   ownerName,
   projectName,
+  publicationPath,
   source,
   userHasWriteAccess,
 }: DocxReviewsProps) {
@@ -458,6 +664,37 @@ export default function DocxReviews({
   const queryClient = useQueryClient()
   const fileInput = useRef<HTMLInputElement>(null)
   const triage = useDisclosure()
+  const requestModal = useDisclosure()
+  const requestsQuery = useQuery({
+    queryKey: [
+      "projects",
+      ownerName,
+      projectName,
+      "contrib-requests",
+      { target_path: publicationPath },
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectContribRequests({
+        owner_name: ownerName,
+        project_name: projectName,
+        target_path: publicationPath,
+      }).then((r) => r.data),
+    enabled: userHasWriteAccess,
+  })
+  const closeRequestMutation = useMutation({
+    mutationFn: (requestId: string) =>
+      ProjectsService.patchProjectContribRequest({
+        owner_name: ownerName,
+        project_name: projectName,
+        request_id: requestId,
+        contribRequestPatch: { closed: true },
+      }).then((r) => r.data),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "contrib-requests"],
+      }),
+    onError: (err: AxiosError) => handleError(err, showToast),
+  })
   const [selected, setSelected] = useState<string | null>(null)
   const reviewsQuery = useQuery({
     queryKey: ["projects", ownerName, projectName, "latex-reviews", { source }],
@@ -518,6 +755,16 @@ export default function DocxReviews({
             ev.target.value = ""
           }}
         />
+        <Tooltip label="Ask someone to review this by link">
+          <IconButton
+            aria-label="Request a review"
+            icon={<FiSend />}
+            size="xs"
+            variant="ghost"
+            ml={1}
+            onClick={requestModal.onOpen}
+          />
+        </Tooltip>
       </Flex>
       {reviewsQuery.isPending ? (
         <Spinner size="sm" />
@@ -562,6 +809,64 @@ export default function DocxReviews({
           })}
         </VStack>
       )}
+      {(requestsQuery.data ?? []).filter((r) => !r.revoked).length > 0 && (
+        <Box mt={3}>
+          <Text fontSize="xs" fontWeight="semibold" mb={1}>
+            Requests sent
+          </Text>
+          <VStack align="stretch" spacing={1}>
+            {(requestsQuery.data ?? [])
+              .filter((r: ContribRequestPublic) => !r.revoked)
+              .map((r: ContribRequestPublic) => {
+                const who =
+                  r.contributor_name || r.email || "Anyone with the link"
+                const done = r.closed_at !== null
+                const answered = r.response_count > 0
+                return (
+                  <HStack key={r.id} spacing={2}>
+                    <Box minW={0} flex={1}>
+                      <Text fontSize="sm" noOfLines={1}>
+                        {who}
+                      </Text>
+                      <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                        {new Date(r.created).toLocaleDateString()}
+                        {r.view_count > 0 ? " · opened" : " · not opened yet"}
+                      </Text>
+                    </Box>
+                    <Badge
+                      flexShrink={0}
+                      colorScheme={
+                        done ? "gray" : answered ? "green" : "orange"
+                      }
+                    >
+                      {done ? "Closed" : answered ? "Returned" : "Waiting"}
+                    </Badge>
+                    {!done && (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        isLoading={
+                          closeRequestMutation.isPending &&
+                          closeRequestMutation.variables === r.id
+                        }
+                        onClick={() => closeRequestMutation.mutate(r.id)}
+                      >
+                        Close
+                      </Button>
+                    )}
+                  </HStack>
+                )
+              })}
+          </VStack>
+        </Box>
+      )}
+      <RequestReviewModal
+        ownerName={ownerName}
+        projectName={projectName}
+        publicationPath={publicationPath}
+        isOpen={requestModal.isOpen}
+        onClose={requestModal.onClose}
+      />
       {selected && (
         <ReviewTriage
           ownerName={ownerName}

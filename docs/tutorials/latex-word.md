@@ -160,6 +160,25 @@ document and writing the same record under `.calkit/latex/`,
 so a review can be started on the hub and finished on a laptop or the
 other way round.
 
+### Asking for a review by link
+
+The reviewer doesn't need an account, or even to be emailed the file by
+hand.
+Save the exported Word copy to the project, then from the same panel
+choose **Request a review**, pick the copy, and enter the reviewer's
+email address.
+They get a link to a page that shows what you're asking, lets them
+download the document, and takes the marked-up copy back when they're
+done.
+Their upload lands in `reviews/` and appears in the panel, ready to
+triage, and the commit is authored in their name.
+
+The request itself is recorded in the project under `.calkit/requests/`,
+together with what came back,
+so who was asked to review what, and when, is part of the repository's
+history rather than something only the hub remembers.
+Requests can be closed from the panel once you have what you need.
+
 ## Multiple reviewers
 
 It's okay to send the same copy out to multiple collaborators.

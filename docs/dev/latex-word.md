@@ -389,11 +389,21 @@ the lead's end, and nothing of it lives only in the hub:
   A pass that decides nothing writes no record, so the history is of
   decisions rather than page loads.
 
-What isn't there: the request link.
-Upload needs write access, so today's reviewer is a collaborator.
-The token-scoped upload page is a thin layer on top, once the request
-routes exist, since the response it produces is the same file in the
-same place.
+The request link is the thin layer on top of that.
+A lead creates a review request against a publication, naming a
+recipient and optionally the Word copy to send, and the hub mints a
+token whose hash it keeps.
+The request's own record, everything the lead decided about it and
+every response it received, is a YAML file under `.calkit/requests/`
+committed to the repo, so the hub row is an index over repo data
+rather than the only copy.
+The recipient's page needs no account: it shows the ask, serves the
+document, and takes the marked-up copy back, which goes through the
+same upload path as a collaborator's and is committed on behalf of the
+lead with the reviewer as author.
+Only outbound requests to a named recipient, targeting a publication,
+are built; the model already carries the rest (public calls, inbound
+asks, other artifact kinds) for the branch-based path below.
 
 ## Direct editing in the browser: the branch is the `.docx`
 

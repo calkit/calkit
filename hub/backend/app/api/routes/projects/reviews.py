@@ -21,9 +21,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
+import git
 import yaml
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from sqlmodel import Session
 
 import app.projects
 import calkit.docx
@@ -238,6 +240,88 @@ def _plan(
     return plan, review
 
 
+def read_upload(file: UploadFile) -> bytes:
+    data = file.file.read(MAX_REVIEW_BYTES + 1)
+    if len(data) > MAX_REVIEW_BYTES:
+        raise HTTPException(413, "Document is too large")
+    if not data:
+        raise HTTPException(400, "Document is empty")
+    return data
+
+
+def default_review_path(filename: str | None, suffix: str = "") -> str:
+    stem, _ = os.path.splitext(os.path.basename(filename or ""))
+    stem = re.sub(r"[^\w.\-]+", "-", stem).strip("-") or "review"
+    if suffix:
+        stem += "-" + re.sub(r"[^\w.\-]+", "-", suffix).strip("-")
+    return f"{REVIEWS_DIR}/{stem}.docx"
+
+
+def stage_review(
+    project: Project, repo: git.Repo, path: str, data: bytes
+) -> tuple[str, str]:
+    """Put a reviewed document in the working tree under DVC, staged.
+
+    Checks it's a Calkit export whose source is in the project before it
+    touches anything, stores the bytes in the project's storage, and
+    stages the pointer for the caller to commit. Returns the path and
+    the working directory.
+    """
+    path = _safe_review_path(path)
+    wdir = str(repo.working_dir)
+    full = os.path.join(wdir, path)
+    with tempfile.NamedTemporaryFile(suffix=".docx") as tmp:
+        tmp.write(data)
+        tmp.flush()
+        try:
+            original = calkit.docx.Document(tmp.name).read_original()
+        except Exception:
+            original = None
+    if original is None:
+        raise HTTPException(
+            422,
+            "This document wasn't exported by Calkit, or its metadata was "
+            "stripped by another application",
+        )
+    if not os.path.isfile(os.path.join(wdir, original.source)):
+        raise HTTPException(
+            422, f"Its source {original.source} is not in the project"
+        )
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "wb") as f:
+        f.write(data)
+    if not os.path.isdir(os.path.join(wdir, ".dvc")):
+        run_dvc_command(["init"], wdir=wdir, check=True)
+    run_dvc_command(["add", path], wdir=wdir, check=True)
+    to_stage = [path + ".dvc"]
+    gitignore = posixpath.join(posixpath.dirname(path), ".gitignore")
+    if os.path.isfile(os.path.join(wdir, gitignore)):
+        to_stage.append(gitignore)
+    repo.git.add(to_stage)
+    out = _pointer(wdir, path) or {}
+    _store(project, str(out.get("md5") or _md5(full)), data)
+    return path, wdir
+
+
+def commit_staged(
+    project: Project,
+    repo: git.Repo,
+    session: Session,
+    message: str,
+    author: str | None = None,
+) -> str | None:
+    """Commit and push whatever is staged, if anything, returning the SHA."""
+    if not repo.git.diff(["--staged", "--name-only"]):
+        return None
+    args = ["-m", message]
+    if author:
+        args += ["--author", author]
+    repo.git.commit(args)
+    repo.git.push(["origin", repo.active_branch.name])
+    record_project_update(project, repo, session)
+    return repo.head.commit.hexsha
+
+
 @router.get("/projects/{owner_name}/{project_name}/latex-reviews")
 def get_project_latex_reviews(
     owner_name: str,
@@ -298,59 +382,14 @@ def post_project_latex_review(
         current_user=current_user,
         min_access_level="write",
     )
-    data = file.file.read(MAX_REVIEW_BYTES + 1)
-    if len(data) > MAX_REVIEW_BYTES:
-        raise HTTPException(413, "Document is too large")
-    if not data:
-        raise HTTPException(400, "Document is empty")
+    data = read_upload(file)
     if path is None:
-        name = re.sub(r"[^\w.\-]+", "-", os.path.basename(file.filename or ""))
-        path = f"{REVIEWS_DIR}/{name or 'review.docx'}"
-    path = _safe_review_path(path)
+        path = default_review_path(file.filename)
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    wdir = str(repo.working_dir)
-    full = os.path.join(wdir, path)
-    # Refuse anything that can't be merged before it touches the repo
-    with tempfile.NamedTemporaryFile(suffix=".docx") as tmp:
-        tmp.write(data)
-        tmp.flush()
-        try:
-            original = calkit.docx.Document(tmp.name).read_original()
-        except Exception:
-            original = None
-    if original is None:
-        raise HTTPException(
-            422,
-            "This document wasn't exported by Calkit, or its metadata was "
-            "stripped by another application",
-        )
-    if not os.path.isfile(os.path.join(wdir, original.source)):
-        raise HTTPException(
-            422, f"Its source {original.source} is not in the project"
-        )
-    os.makedirs(os.path.dirname(full), exist_ok=True)
-    existed = os.path.isfile(full) or os.path.isfile(full + ".dvc")
-    with open(full, "wb") as f:
-        f.write(data)
-    if not os.path.isdir(os.path.join(wdir, ".dvc")):
-        run_dvc_command(["init"], wdir=wdir, check=True)
-    run_dvc_command(["add", path], wdir=wdir, check=True)
-    to_stage = [path + ".dvc"]
-    gitignore = posixpath.join(posixpath.dirname(path), ".gitignore")
-    if os.path.isfile(os.path.join(wdir, gitignore)):
-        to_stage.append(gitignore)
-    repo.git.add(to_stage)
-    out = _pointer(wdir, path) or {}
-    md5 = str(out.get("md5") or _md5(full))
-    _store(project, md5, data)
-    if repo.git.diff(["--staged", "--name-only"]):
-        repo.git.commit(
-            ["-m", message or f"{'Update' if existed else 'Add'} {path}"]
-        )
-        repo.git.push(["origin", repo.active_branch.name])
-        record_project_update(project, repo, session)
+    path, wdir = stage_review(project, repo, path, data)
+    commit_staged(project, repo, session, message or f"Add {path}")
     plan, review = _plan(project, wdir, path, "dvc")
     return LatexReviewPlan(
         **review.model_dump(), edits=plan.edits, comments=plan.comments

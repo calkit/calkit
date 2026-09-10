@@ -51,6 +51,11 @@ def upgrade():
             nullable=True,
         ),
         sa.Column(
+            "document_path",
+            sqlmodel.sql.sqltypes.AutoString(length=512),
+            nullable=True,
+        ),
+        sa.Column(
             "git_ref",
             sqlmodel.sql.sqltypes.AutoString(length=256),
             nullable=True,

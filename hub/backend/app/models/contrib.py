@@ -191,6 +191,10 @@ class ContribRequest(SQLModel, table=True):
     target_kind: str = Field(default="project", max_length=32)
     # Path to the targeted artifact, or None/"." for the whole project.
     target_path: str | None = Field(default=None, max_length=512)
+    # A copy of the target that went out with the ask, as a path in the
+    # repo: the Word export of a manuscript, which the recipient downloads
+    # from the response page and sends back marked up.
+    document_path: str | None = Field(default=None, max_length=512)
     # The revision being asked about, pinned at creation so feedback stays
     # attached to what the recipient actually saw. ``git_ref`` is the
     # human-readable ref it was cut from.
@@ -425,6 +429,7 @@ class ContribRequestPost(SQLModel):
     in_response_to_request_id: uuid.UUID | None = None
     target_kind: ContribTargetKind = "project"
     target_path: str | None = None
+    document_path: str | None = None
     # If None, the project's default branch HEAD is pinned at creation.
     git_ref: str | None = None
     permission: ContribPermission = "suggest"
@@ -469,6 +474,7 @@ class ContribRequestPublic(SQLModel):
     in_response_to_request_id: uuid.UUID | None
     target_kind: str
     target_path: str | None
+    document_path: str | None
     git_ref: str | None
     git_rev: str | None
     permission: str
@@ -490,6 +496,7 @@ class ContribRequestPublic(SQLModel):
     github_issue_url: str | None
     view_count: int
     created: datetime
+    responses: list["ContribResponsePublic"] = Field(default_factory=list)
 
 
 class ContribRequestCreated(ContribRequestPublic):
@@ -517,6 +524,8 @@ class ContribRequestView(SQLModel):
     direction: str
     target_kind: str
     target_path: str | None
+    # The file to download, if one went out with the request
+    document_path: str | None
     git_ref: str | None
     git_rev_abbrev: str | None
     permission: str

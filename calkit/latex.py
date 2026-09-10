@@ -324,19 +324,25 @@ class Block:
         return detex("\n".join(ln.text for ln in self.lines))
 
 
-def flatten(main_path: str) -> list[SourceLine]:
-    """Inline \\input and friends, keeping each line's file and number."""
+def flatten(main_path: str, wdir: str | None = None) -> list[SourceLine]:
+    """Inline \\input and friends, keeping each line's file and number.
+
+    Paths are recorded as given, relative to ``wdir`` (the current
+    directory by default), since bookmark names are derived from them.
+    """
     main = Path(main_path)
+    root = Path(wdir) if wdir else Path(".")
     out: list[SourceLine] = []
     seen: set[str] = set()
 
     def visit(path: Path, base: Path) -> None:
-        key = path.resolve().as_posix()
-        if key in seen or not path.is_file():
+        full = root / path
+        key = full.resolve().as_posix()
+        if key in seen or not full.is_file():
             return
         seen.add(key)
         rel = path.as_posix()
-        text = path.read_text(encoding="utf-8")
+        text = full.read_text(encoding="utf-8")
         for i, line in enumerate(text.split("\n"), 1):
             m = _INCLUDE_RE.match(line.split("%")[0])
             if m:

@@ -811,232 +811,31 @@ def merge_docx(
     comment blocks above the paragraph; threads resolved in Word are
     marked resolved.
     """
-    import datetime
-
-    import calkit.docx
-    import calkit.git
+    import calkit.review
     from calkit.cli.core import warn
-    from calkit.models.docx import LatexDocxMerge, LatexDocxMergeChange
 
-    doc = calkit.docx.Document(docx_path)
-    original = doc.read_original()
-    if original is None:
-        raise_error(
-            f"{docx_path} was not exported by Calkit, or its metadata was "
-            "stripped by another application"
-        )
-    if not os.path.isfile(original.source):
-        raise_error(f"Source {original.source} does not exist")
-    # Figures come from the pipeline, so a picture swapped or edited in
-    # Word can't be merged
-    media = doc.media_hashes
-    changed = sorted(
-        name
-        for name in set(media) | set(original.media)
-        if media.get(name) != original.media.get(name)
-    )
-    if changed:
+    try:
+        plan = calkit.review.plan(docx_path)
+    except (calkit.review.NotAnExportError, FileNotFoundError) as e:
+        raise_error(str(e))
+    if plan.media_changed:
         warn(
             "Figures were changed in Word and can't be merged; edit the "
-            "pipeline instead: " + ", ".join(changed)
+            "pipeline instead: " + ", ".join(plan.media_changed)
         )
-    lines = calkit.latex.flatten(original.source)
-    blks = calkit.latex.blocks(lines)
-    path_for_hash = {
-        calkit.latex.make_bookmark_name(p, 0).split("_")[1]: p
-        for p in {ln.path for ln in lines}
-    }
-    edits: dict[str, list[tuple[int, int, list[str]]]] = {}
-    changes: list[LatexDocxMergeChange] = []
-    for para in doc.paragraphs:
-        if para.bookmark is None or para.bookmark not in original.paragraphs:
-            continue
-        sent = original.paragraphs[para.bookmark]
-        if para.text == sent:
-            continue
-        parts = para.bookmark.split("_")
-        path, lineno = path_for_hash.get(parts[1], ""), int(parts[2])
-        blk = calkit.latex.find_block(
-            blks, path, lineno, sent
-        ) or calkit.latex.find_block(blks, path, lineno, para.text)
-        if blk is None:
-            warn(f"Can't place an edit from {path}:{lineno}: {para.text[:60]}")
-            changes.append(
-                LatexDocxMergeChange(
-                    path=path, lineno=lineno, status="unplaced"
-                )
-            )
-            continue
-        loc = f"{blk.path}:{blk.lineno}"
-        if para.pending:
+    for edit in plan.edits:
+        loc = f"{edit.path}:{edit.lineno}"
+        if edit.status == "unplaced":
+            warn(f"Can't place an edit from {loc}: {edit.proposed[:60]}")
+        elif edit.status == "pending":
             warn(f"Tracked change at {loc} not yet accepted or rejected")
-            changes.append(
-                LatexDocxMergeChange(
-                    path=blk.path,
-                    lineno=blk.lineno,
-                    status="pending",
-                    author=", ".join(para.authors) or None,
-                )
-            )
-            continue
-        sent_tex = calkit.latex.from_word_text(sent)
-        new_tex = calkit.latex.from_word_text(para.text)
-        if calkit.latex.already_applied(blk, sent_tex, new_tex):
-            changes.append(
-                LatexDocxMergeChange(
-                    path=blk.path, lineno=blk.lineno, status="already-applied"
-                )
-            )
-            continue
-        new_lines = calkit.latex.apply_edit(blk, sent_tex, new_tex)
-        if new_lines is None:
-            warn(
-                f"Edit at {loc} touches markup; apply it by hand: {para.text[:60]}"
-            )
-            changes.append(
-                LatexDocxMergeChange(
-                    path=blk.path, lineno=blk.lineno, status="unplaced"
-                )
-            )
-            continue
-        edits.setdefault(blk.path, []).append(
-            (blk.lineno, len(blk.lines), new_lines)
-        )
-        changes.append(
-            LatexDocxMergeChange(
-                path=blk.path, lineno=blk.lineno, status="applied"
-            )
-        )
-        typer.echo(f"Applied edit at {loc}")
-    files = {
-        p: Path(p).read_text(encoding="utf-8").split("\n")
-        for p in {ln.path for ln in lines}
-    }
-    for path, updates in edits.items():
-        for lineno, count, new_lines in sorted(updates, reverse=True):
-            files[path][lineno - 1 : lineno - 1 + count] = new_lines
-    added = updated = 0
-    if not no_comments:
-        # Threads keyed by root, anchored through the root's bookmark
-        comments = doc.comments
-        by_id = {c.para_id: c for c in comments}
-        roots = [c for c in comments if not c.parent_id]
-        # Resolve every thread to a block first, then edit each file from
-        # the bottom up so earlier line numbers stay valid
-        placed: list[tuple[calkit.latex.Block, calkit.latex.TexComment]] = []
-        for root in roots:
-            thread = [root] + [
-                c
-                for c in comments
-                if c.parent_id and by_id.get(c.parent_id) is root
-            ]
-            tc = calkit.latex.TexComment(
-                [
-                    calkit.latex.Entry(
-                        c.author, c.text, date=calkit.latex.word_date(c.date)
-                    )
-                    for c in thread
-                ],
-                highlight=root.highlight,
-                highlight_occ=root.highlight_occ,
-                resolved=root.done,
-            )
-            if root.bookmark is None:
-                warn(
-                    f"Comment by {root.author} has no anchor: {root.text[:60]}"
-                )
-                continue
-            parts = root.bookmark.split("_")
-            path, lineno = path_for_hash.get(parts[1], ""), int(parts[2])
-            blk = calkit.latex.find_block(
-                blks, path, lineno, original.paragraphs.get(root.bookmark, "")
-            )
-            if blk is None:
-                warn(
-                    f"Can't place a comment by {root.author}: {root.text[:60]}"
-                )
-                continue
-            placed.append((blk, tc))
-        for blk, tc in sorted(
-            placed, key=lambda x: (x[0].path, x[0].lineno), reverse=True
-        ):
-            content = files[blk.path]
-            at = blk.lineno
-            existing = next(
-                (
-                    e
-                    for e in calkit.latex.parse_comments(content)
-                    if e.author == tc.author and e.text == tc.text
-                ),
-                None,
-            )
-            if existing is not None:
-                if (
-                    existing.messages() == tc.messages()
-                    and existing.resolved == tc.resolved
-                ):
-                    continue
-                # Word knows neither emails nor what the source already
-                # recorded, so carry those over for unchanged messages
-                known = {(e.author, e.text): e for e in existing.entries}
-                for e in tc.entries:
-                    old_e = known.get((e.author, e.text))
-                    if old_e is not None:
-                        e.email = old_e.email
-                        e.date = old_e.date or e.date
-                del content[
-                    existing.lineno - 1 : existing.lineno - 1 + existing.nlines
-                ]
-                if existing.lineno < at:
-                    at -= existing.nlines
-            content[at - 1 : at - 1] = tc.render()
-            added += existing is None
-            updated += existing is not None
-    for path, content in files.items():
-        new = "\n".join(content)
-        if new != Path(path).read_text(encoding="utf-8"):
-            Path(path).write_text(new, encoding="utf-8")
-    rev = None
-    try:
-        rev = calkit.git.get_repo().head.commit.hexsha
-    except Exception:
-        pass
-    seen = {a for p in doc.paragraphs for a in p.authors}
-    seen |= {c.author for c in doc.comments}
-    record = LatexDocxMerge(
-        export_id=original.id,
-        created=datetime.datetime.now(datetime.timezone.utc),
-        docx=Path(docx_path).as_posix(),
-        rev=rev,
-        authors=sorted(seen),
-        last_modified_by=doc.last_modified_by,
-        changes=changes,
-        comments_added=added,
-        comments_updated=updated,
-        files={
-            p: "md5:" + calkit.get_md5(p)
-            for p in sorted(
-                {ln.path for ln in lines} | {Path(docx_path).as_posix()}
-            )
-        },
-    )
-    os.makedirs(calkit.latex.DOCX_MERGES_DIR, exist_ok=True)
-    stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
-    with open(
-        os.path.join(
-            calkit.latex.DOCX_MERGES_DIR, f"{original.id}-{stamp}.json"
-        ),
-        "w",
-        encoding="utf-8",
-        newline="\n",
-    ) as f:
-        f.write(record.model_dump_json(indent=2))
-    counts = {
-        s: sum(1 for c in changes if c.status == s)
-        for s in ("applied", "already-applied", "pending", "unplaced")
-    }
-    typer.echo(
-        f"Applied {counts['applied']} edits ({counts['already-applied']} "
-        f"already there, {counts['pending']} pending, {counts['unplaced']} "
-        f"unplaced); {added} comments added, {updated} updated"
-    )
+        elif edit.status == "applicable":
+            typer.echo(f"Applied edit at {loc}")
+    for comment in plan.comments:
+        if comment.status == "unplaced":
+            who = comment.entries[0].author if comment.entries else "?"
+            what = comment.entries[0].text if comment.entries else ""
+            warn(f"Can't place a comment by {who}: {what[:60]}")
+    record = calkit.review.apply(plan, write_comments=not no_comments)
+    calkit.review.write_record(record)
+    typer.echo(calkit.review.summary(record))

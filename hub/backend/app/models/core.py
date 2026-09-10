@@ -607,9 +607,7 @@ class ProjectBase(SQLModel):
     # "collaborators" restricts it to members, and turns the comment box on
     # an artifact into a "request to comment" affordance for everyone else,
     # which raises an inbound ContribRequest rather than a dead end.
-    comment_access: Literal["viewers", "collaborators"] = Field(
-        default="viewers", max_length=32
-    )
+    comment_access: str = Field(default="viewers", max_length=32)
     created: datetime | None = Field(default_factory=utcnow)
     updated: datetime | None = Field(default_factory=utcnow)
     git_repo_url: str = Field(max_length=2048)

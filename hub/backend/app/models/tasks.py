@@ -34,7 +34,7 @@ than a translation.
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Optional
 
 import sqlalchemy
 from pydantic import computed_field
@@ -182,7 +182,7 @@ class Task(SQLModel, table=True):
     created: datetime = Field(default_factory=utcnow)
     # Relationships (the three user FKs have to be disambiguated)
     project: Project = Relationship(back_populates="tasks")
-    response: "ContribRequestResponse | None" = Relationship(
+    response: Optional["ContribRequestResponse"] = Relationship(
         back_populates="tasks"
     )
     assigned_to: User | None = Relationship(

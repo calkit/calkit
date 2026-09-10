@@ -36,7 +36,7 @@ module is imported from ``app.models`` (it is, via ``__init__``).
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
 import sqlalchemy
 from pydantic import BaseModel, computed_field
@@ -248,19 +248,23 @@ class ContribRequest(SQLModel, table=True):
     created: datetime = Field(default_factory=utcnow)
     # Relationships
     project: Project = Relationship(back_populates="contrib_requests")
-    in_response_to: "ContribRequest | None" = Relationship(
+    in_response_to: Optional["ContribRequest"] = Relationship(
         sa_relationship_kwargs=dict(
             remote_side="ContribRequest.id",
             foreign_keys="[ContribRequest.in_response_to_request_id]",
         )
     )
-    supersedes: "ContribRequest | None" = Relationship(
+    supersedes: Optional["ContribRequest"] = Relationship(
         sa_relationship_kwargs=dict(
             remote_side="ContribRequest.id",
             foreign_keys="[ContribRequest.supersedes_request_id]",
         )
     )
-    created_by: User = Relationship()
+    created_by: Optional[User] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[ContribRequest.created_by_user_id]"
+        }
+    )
     responses: list["ContribRequestResponse"] = Relationship(
         back_populates="request", cascade_delete=True
     )

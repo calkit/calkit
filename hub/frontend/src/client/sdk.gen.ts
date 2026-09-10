@@ -17,6 +17,7 @@ import type {
   BodyLoginLoginAccessToken,
   BodyProjectsPostProjectDatasetUpload,
   BodyProjectsPostProjectFigure,
+  BodyProjectsPostProjectLatexReview,
   BodyProjectsPostProjectOverleafPublication,
   BodyProjectsPostProjectPublication,
   BodyProjectsPostProjectUpload,
@@ -168,6 +169,10 @@ import type {
   GetProjectInvitationsResponses,
   GetProjectIssuesErrors,
   GetProjectIssuesResponses,
+  GetProjectLatexReviewErrors,
+  GetProjectLatexReviewResponses,
+  GetProjectLatexReviewsErrors,
+  GetProjectLatexReviewsResponses,
   GetProjectNotebooksErrors,
   GetProjectNotebooksResponses,
   GetProjectOverleafSyncStatusErrors,
@@ -247,6 +252,7 @@ import type {
   ImportGithubReleasesResponses,
   IssuePatch,
   IssuePost,
+  LatexReviewMergePost,
   ListReleaseSharesErrors,
   ListReleaseSharesResponses,
   LoginAccessTokenErrors,
@@ -338,6 +344,10 @@ import type {
   PostProjectInvitationResponses,
   PostProjectIssueErrors,
   PostProjectIssueResponses,
+  PostProjectLatexReviewErrors,
+  PostProjectLatexReviewMergeErrors,
+  PostProjectLatexReviewMergeResponses,
+  PostProjectLatexReviewResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
   PostProjectMiscErrors,
@@ -7507,6 +7517,200 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/activity",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get Project Latex Reviews
+   *
+   * Reviewed documents in the project, optionally for one .tex source.
+   *
+   * Documents that can't be read as Calkit exports, or whose source is
+   * gone, are left out rather than failing the whole list.
+   */
+  public static getProjectLatexReviews<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      source?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectLatexReviewsResponses,
+    GetProjectLatexReviewsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "source" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectLatexReviewsResponses,
+      GetProjectLatexReviewsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-reviews",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Latex Review
+   *
+   * Add a reviewed document to the project.
+   *
+   * It lands under ``reviews/`` tracked by DVC, so the repo records that
+   * the review happened without carrying the binary, and comes back with
+   * what merging it would do.
+   */
+  public static postProjectLatexReview<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      bodyProjectsPostProjectLatexReview: BodyProjectsPostProjectLatexReview
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexReviewResponses,
+    PostProjectLatexReviewErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "bodyProjectsPostProjectLatexReview", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexReviewResponses,
+      PostProjectLatexReviewErrors,
+      ThrowOnError
+    >({
+      ...formDataBodySerializer,
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-reviews",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": null,
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Latex Review
+   *
+   * What merging a reviewed document would do to the source now.
+   */
+  public static getProjectLatexReview<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectLatexReviewResponses,
+    GetProjectLatexReviewErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectLatexReviewResponses,
+      GetProjectLatexReviewErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-reviews/{path}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Latex Review Merge
+   *
+   * Write the lead's decisions into the source and commit them.
+   *
+   * Only what's named is decided; anything else stays open for a later
+   * pass, here or with the CLI. Rejected and dismissed items are recorded
+   * in the merge record so they aren't offered again.
+   */
+  public static postProjectLatexReviewMerge<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      latexReviewMergePost: LatexReviewMergePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexReviewMergeResponses,
+    PostProjectLatexReviewMergeErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "path" },
+            { key: "latexReviewMergePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexReviewMergeResponses,
+      PostProjectLatexReviewMergeErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-reviews/{path}/merge",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

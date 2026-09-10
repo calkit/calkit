@@ -236,6 +236,41 @@ export const Body_projects_post_project_figureSchema = {
   title: "Body_projects-post_project_figure",
 } as const
 
+export const Body_projects_post_project_latex_reviewSchema = {
+  properties: {
+    file: {
+      type: "string",
+      format: "binary",
+      title: "File",
+    },
+    path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Path",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["file"],
+  title: "Body_projects-post_project_latex_review",
+} as const
+
 export const Body_projects_post_project_overleaf_publicationSchema = {
   properties: {
     path: {
@@ -3716,6 +3751,645 @@ export const ItemLockSchema = {
   title: "ItemLock",
 } as const
 
+export const LatexDocxCommentSchema = {
+  properties: {
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    lineno: {
+      type: "integer",
+      title: "Lineno",
+    },
+    status: {
+      type: "string",
+      title: "Status",
+    },
+    entries: {
+      items: {
+        $ref: "#/components/schemas/LatexDocxCommentEntry",
+      },
+      type: "array",
+      title: "Entries",
+    },
+    highlight: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Highlight",
+    },
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+      default: false,
+    },
+    source: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Source",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["key", "path", "lineno", "status", "entries"],
+  title: "LatexDocxComment",
+  description:
+    "A comment thread from the document, and what merging does with it.\n\n``status`` is ``new`` for a thread the source doesn't have, ``updated``\nwhen the source has it but replies or resolution changed, ``unchanged``\nwhen it's already there as is, ``unplaced`` when its paragraph can't be\nfound, and ``dismissed`` when an earlier merge declined it.",
+} as const
+
+export const LatexDocxCommentEntrySchema = {
+  properties: {
+    author: {
+      type: "string",
+      title: "Author",
+    },
+    text: {
+      type: "string",
+      title: "Text",
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+  },
+  type: "object",
+  required: ["author", "text"],
+  title: "LatexDocxCommentEntry",
+} as const
+
+export const LatexDocxEditSchema = {
+  properties: {
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    lineno: {
+      type: "integer",
+      title: "Lineno",
+    },
+    status: {
+      type: "string",
+      title: "Status",
+    },
+    sent: {
+      type: "string",
+      title: "Sent",
+      description: "The paragraph as it was exported.",
+    },
+    proposed: {
+      type: "string",
+      title: "Proposed",
+    },
+    authors: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Authors",
+      default: [],
+    },
+    reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Reason",
+    },
+    source: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Source",
+      description: "The source lines the paragraph came from.",
+      default: [],
+    },
+    result: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Result",
+      description: "Those lines after the edit, if placeable.",
+    },
+  },
+  type: "object",
+  required: ["key", "path", "lineno", "status", "sent", "proposed"],
+  title: "LatexDocxEdit",
+  description:
+    "A paragraph the reviewer changed, as one decision for the lead.\n\n``proposed`` is the paragraph as it reads with every tracked change\naccepted, which is what applying it writes. ``status`` says whether\nthat can happen:\n\n- ``applicable``: accepted in Word or made with tracking off; applied\n  by a merge unless rejected.\n- ``pending``: still a tracked change in Word; applied only when\n  accepted explicitly.\n- ``already-applied``: the source already reads this way.\n- ``unplaced``: the paragraph or its edited words can't be found in\n  the source; ``reason`` says which. Apply by hand.\n- ``rejected``: declined in an earlier merge of this document.",
+} as const
+
+export const LatexDocxMergeSchema = {
+  properties: {
+    export_id: {
+      type: "string",
+      title: "Export Id",
+      description: "Export the merged document came from.",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    docx: {
+      type: "string",
+      title: "Docx",
+    },
+    rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Rev",
+      description: "Git commit at merge.",
+    },
+    authors: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Authors",
+      description: "Everyone named on a tracked change or comment.",
+      default: [],
+    },
+    last_modified_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Modified By",
+      description: "Who last saved the document, per Word.",
+    },
+    changes: {
+      items: {
+        $ref: "#/components/schemas/LatexDocxMergeChange",
+      },
+      type: "array",
+      title: "Changes",
+      default: [],
+    },
+    comments: {
+      items: {
+        $ref: "#/components/schemas/LatexDocxMergeComment",
+      },
+      type: "array",
+      title: "Comments",
+      default: [],
+    },
+    comments_added: {
+      type: "integer",
+      title: "Comments Added",
+      default: 0,
+    },
+    comments_updated: {
+      type: "integer",
+      title: "Comments Updated",
+      default: 0,
+    },
+    files: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Files",
+      description:
+        "Hash of the .docx and every .tex file after merging, as 'md5:<hex>'.",
+      default: {},
+    },
+  },
+  type: "object",
+  required: ["export_id", "created", "docx"],
+  title: "LatexDocxMerge",
+} as const
+
+export const LatexDocxMergeChangeSchema = {
+  properties: {
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+      description:
+        "Bookmark of the paragraph the change was made in, stable for the life of the export, so a decision can be remembered.",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    lineno: {
+      type: "integer",
+      title: "Lineno",
+    },
+    status: {
+      type: "string",
+      title: "Status",
+      description:
+        "'applied', 'already-applied', 'pending', 'unplaced', or 'rejected'.",
+    },
+    author: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Author",
+      description:
+        "Who made the change, known only while it's still tracked; Word drops the author when a change is accepted.",
+    },
+  },
+  type: "object",
+  required: ["path", "lineno", "status"],
+  title: "LatexDocxMergeChange",
+} as const
+
+export const LatexDocxMergeCommentSchema = {
+  properties: {
+    key: {
+      type: "string",
+      title: "Key",
+      description: "Word's paragraph ID for the thread root.",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    lineno: {
+      type: "integer",
+      title: "Lineno",
+    },
+    status: {
+      type: "string",
+      title: "Status",
+      description: "'added', 'updated', 'unchanged', 'unplaced', 'dismissed'.",
+    },
+    author: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Author",
+    },
+  },
+  type: "object",
+  required: ["key", "path", "lineno", "status"],
+  title: "LatexDocxMergeComment",
+} as const
+
+export const LatexReviewSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    export_id: {
+      type: "string",
+      title: "Export Id",
+    },
+    source: {
+      type: "string",
+      title: "Source",
+      description: "Main .tex file it was exported from.",
+    },
+    rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Rev",
+      description: "Commit it was exported at.",
+    },
+    size: {
+      type: "integer",
+      title: "Size",
+    },
+    storage: {
+      type: "string",
+      title: "Storage",
+      description: "'git' or 'dvc'.",
+    },
+    last_modified_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Modified By",
+    },
+    authors: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Authors",
+    },
+    open_edits: {
+      type: "integer",
+      title: "Open Edits",
+    },
+    open_comments: {
+      type: "integer",
+      title: "Open Comments",
+    },
+    unplaced: {
+      type: "integer",
+      title: "Unplaced",
+    },
+    media_changed: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Media Changed",
+      default: [],
+    },
+    last_merged: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Merged",
+    },
+  },
+  type: "object",
+  required: [
+    "path",
+    "export_id",
+    "source",
+    "rev",
+    "size",
+    "storage",
+    "last_modified_by",
+    "authors",
+    "open_edits",
+    "open_comments",
+    "unplaced",
+  ],
+  title: "LatexReview",
+  description: "A reviewed Word document in the project, and where it stands.",
+} as const
+
+export const LatexReviewMergePostSchema = {
+  properties: {
+    accept: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Accept",
+      description: "Edit keys to apply.",
+      default: [],
+    },
+    reject: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Reject",
+      description: "Edit keys to decline for good.",
+      default: [],
+    },
+    dismiss: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Dismiss",
+      description: "Comment thread keys to keep out.",
+      default: [],
+    },
+    write_comments: {
+      type: "boolean",
+      title: "Write Comments",
+      default: true,
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  title: "LatexReviewMergePost",
+} as const
+
+export const LatexReviewMergeResultSchema = {
+  properties: {
+    record: {
+      $ref: "#/components/schemas/LatexDocxMerge",
+    },
+    commit: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit",
+      description: "The commit made, or None when nothing changed.",
+    },
+    review: {
+      $ref: "#/components/schemas/LatexReview",
+    },
+  },
+  type: "object",
+  required: ["record", "commit", "review"],
+  title: "LatexReviewMergeResult",
+} as const
+
+export const LatexReviewPlanSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    export_id: {
+      type: "string",
+      title: "Export Id",
+    },
+    source: {
+      type: "string",
+      title: "Source",
+      description: "Main .tex file it was exported from.",
+    },
+    rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Rev",
+      description: "Commit it was exported at.",
+    },
+    size: {
+      type: "integer",
+      title: "Size",
+    },
+    storage: {
+      type: "string",
+      title: "Storage",
+      description: "'git' or 'dvc'.",
+    },
+    last_modified_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Modified By",
+    },
+    authors: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Authors",
+    },
+    open_edits: {
+      type: "integer",
+      title: "Open Edits",
+    },
+    open_comments: {
+      type: "integer",
+      title: "Open Comments",
+    },
+    unplaced: {
+      type: "integer",
+      title: "Unplaced",
+    },
+    media_changed: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Media Changed",
+      default: [],
+    },
+    last_merged: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Merged",
+    },
+    edits: {
+      items: {
+        $ref: "#/components/schemas/LatexDocxEdit",
+      },
+      type: "array",
+      title: "Edits",
+    },
+    comments: {
+      items: {
+        $ref: "#/components/schemas/LatexDocxComment",
+      },
+      type: "array",
+      title: "Comments",
+    },
+  },
+  type: "object",
+  required: [
+    "path",
+    "export_id",
+    "source",
+    "rev",
+    "size",
+    "storage",
+    "last_modified_by",
+    "authors",
+    "open_edits",
+    "open_comments",
+    "unplaced",
+    "edits",
+    "comments",
+  ],
+  title: "LatexReviewPlan",
+} as const
+
 export const MapPathEntrySchema = {
   properties: {
     src: {
@@ -5913,6 +6587,12 @@ export const ProjectOptionalExtendedSchema = {
       title: "Is Public",
       default: false,
     },
+    comment_access: {
+      type: "string",
+      maxLength: 32,
+      title: "Comment Access",
+      default: "viewers",
+    },
     created: {
       anyOf: [
         {
@@ -6137,6 +6817,12 @@ export const ProjectPostSchema = {
       title: "Is Public",
       default: false,
     },
+    comment_access: {
+      type: "string",
+      maxLength: 32,
+      title: "Comment Access",
+      default: "viewers",
+    },
     created: {
       anyOf: [
         {
@@ -6286,6 +6972,12 @@ export const ProjectPublicSchema = {
       type: "boolean",
       title: "Is Public",
       default: false,
+    },
+    comment_access: {
+      type: "string",
+      maxLength: 32,
+      title: "Comment Access",
+      default: "viewers",
     },
     created: {
       anyOf: [

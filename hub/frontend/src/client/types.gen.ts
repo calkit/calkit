@@ -133,6 +133,24 @@ export type BodyProjectsPostProjectFigure = {
 }
 
 /**
+ * Body_projects-post_project_latex_review
+ */
+export type BodyProjectsPostProjectLatexReview = {
+  /**
+   * File
+   */
+  file: Blob | File
+  /**
+   * Path
+   */
+  path?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
  * Body_projects-post_project_overleaf_publication
  */
 export type BodyProjectsPostProjectOverleafPublication = {
@@ -2171,6 +2189,444 @@ export type ItemLock = {
 }
 
 /**
+ * LatexDocxComment
+ *
+ * A comment thread from the document, and what merging does with it.
+ *
+ * ``status`` is ``new`` for a thread the source doesn't have, ``updated``
+ * when the source has it but replies or resolution changed, ``unchanged``
+ * when it's already there as is, ``unplaced`` when its paragraph can't be
+ * found, and ``dismissed`` when an earlier merge declined it.
+ */
+export type LatexDocxComment = {
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Lineno
+   */
+  lineno: number
+  /**
+   * Status
+   */
+  status: string
+  /**
+   * Entries
+   */
+  entries: Array<LatexDocxCommentEntry>
+  /**
+   * Highlight
+   */
+  highlight?: string | null
+  /**
+   * Resolved
+   */
+  resolved?: boolean
+  /**
+   * Source
+   */
+  source?: Array<string>
+}
+
+/**
+ * LatexDocxCommentEntry
+ */
+export type LatexDocxCommentEntry = {
+  /**
+   * Author
+   */
+  author: string
+  /**
+   * Text
+   */
+  text: string
+  /**
+   * Date
+   */
+  date?: string | null
+}
+
+/**
+ * LatexDocxEdit
+ *
+ * A paragraph the reviewer changed, as one decision for the lead.
+ *
+ * ``proposed`` is the paragraph as it reads with every tracked change
+ * accepted, which is what applying it writes. ``status`` says whether
+ * that can happen:
+ *
+ * - ``applicable``: accepted in Word or made with tracking off; applied
+ * by a merge unless rejected.
+ * - ``pending``: still a tracked change in Word; applied only when
+ * accepted explicitly.
+ * - ``already-applied``: the source already reads this way.
+ * - ``unplaced``: the paragraph or its edited words can't be found in
+ * the source; ``reason`` says which. Apply by hand.
+ * - ``rejected``: declined in an earlier merge of this document.
+ */
+export type LatexDocxEdit = {
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Lineno
+   */
+  lineno: number
+  /**
+   * Status
+   */
+  status: string
+  /**
+   * Sent
+   *
+   * The paragraph as it was exported.
+   */
+  sent: string
+  /**
+   * Proposed
+   */
+  proposed: string
+  /**
+   * Authors
+   */
+  authors?: Array<string>
+  /**
+   * Reason
+   */
+  reason?: string | null
+  /**
+   * Source
+   *
+   * The source lines the paragraph came from.
+   */
+  source?: Array<string>
+  /**
+   * Result
+   *
+   * Those lines after the edit, if placeable.
+   */
+  result?: Array<string> | null
+}
+
+/**
+ * LatexDocxMerge
+ */
+export type LatexDocxMerge = {
+  /**
+   * Export Id
+   *
+   * Export the merged document came from.
+   */
+  export_id: string
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Docx
+   */
+  docx: string
+  /**
+   * Rev
+   *
+   * Git commit at merge.
+   */
+  rev?: string | null
+  /**
+   * Authors
+   *
+   * Everyone named on a tracked change or comment.
+   */
+  authors?: Array<string>
+  /**
+   * Last Modified By
+   *
+   * Who last saved the document, per Word.
+   */
+  last_modified_by?: string | null
+  /**
+   * Changes
+   */
+  changes?: Array<LatexDocxMergeChange>
+  /**
+   * Comments
+   */
+  comments?: Array<LatexDocxMergeComment>
+  /**
+   * Comments Added
+   */
+  comments_added?: number
+  /**
+   * Comments Updated
+   */
+  comments_updated?: number
+  /**
+   * Files
+   *
+   * Hash of the .docx and every .tex file after merging, as 'md5:<hex>'.
+   */
+  files?: {
+    [key: string]: string
+  }
+}
+
+/**
+ * LatexDocxMergeChange
+ */
+export type LatexDocxMergeChange = {
+  /**
+   * Key
+   *
+   * Bookmark of the paragraph the change was made in, stable for the life of the export, so a decision can be remembered.
+   */
+  key?: string | null
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Lineno
+   */
+  lineno: number
+  /**
+   * Status
+   *
+   * 'applied', 'already-applied', 'pending', 'unplaced', or 'rejected'.
+   */
+  status: string
+  /**
+   * Author
+   *
+   * Who made the change, known only while it's still tracked; Word drops the author when a change is accepted.
+   */
+  author?: string | null
+}
+
+/**
+ * LatexDocxMergeComment
+ */
+export type LatexDocxMergeComment = {
+  /**
+   * Key
+   *
+   * Word's paragraph ID for the thread root.
+   */
+  key: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Lineno
+   */
+  lineno: number
+  /**
+   * Status
+   *
+   * 'added', 'updated', 'unchanged', 'unplaced', 'dismissed'.
+   */
+  status: string
+  /**
+   * Author
+   */
+  author?: string | null
+}
+
+/**
+ * LatexReview
+ *
+ * A reviewed Word document in the project, and where it stands.
+ */
+export type LatexReview = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Export Id
+   */
+  export_id: string
+  /**
+   * Source
+   *
+   * Main .tex file it was exported from.
+   */
+  source: string
+  /**
+   * Rev
+   *
+   * Commit it was exported at.
+   */
+  rev: string | null
+  /**
+   * Size
+   */
+  size: number
+  /**
+   * Storage
+   *
+   * 'git' or 'dvc'.
+   */
+  storage: string
+  /**
+   * Last Modified By
+   */
+  last_modified_by: string | null
+  /**
+   * Authors
+   */
+  authors: Array<string>
+  /**
+   * Open Edits
+   */
+  open_edits: number
+  /**
+   * Open Comments
+   */
+  open_comments: number
+  /**
+   * Unplaced
+   */
+  unplaced: number
+  /**
+   * Media Changed
+   */
+  media_changed?: Array<string>
+  /**
+   * Last Merged
+   */
+  last_merged?: string | null
+}
+
+/**
+ * LatexReviewMergePost
+ */
+export type LatexReviewMergePost = {
+  /**
+   * Accept
+   *
+   * Edit keys to apply.
+   */
+  accept?: Array<string>
+  /**
+   * Reject
+   *
+   * Edit keys to decline for good.
+   */
+  reject?: Array<string>
+  /**
+   * Dismiss
+   *
+   * Comment thread keys to keep out.
+   */
+  dismiss?: Array<string>
+  /**
+   * Write Comments
+   */
+  write_comments?: boolean
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
+ * LatexReviewMergeResult
+ */
+export type LatexReviewMergeResult = {
+  record: LatexDocxMerge
+  /**
+   * Commit
+   *
+   * The commit made, or None when nothing changed.
+   */
+  commit: string | null
+  review: LatexReview
+}
+
+/**
+ * LatexReviewPlan
+ */
+export type LatexReviewPlan = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Export Id
+   */
+  export_id: string
+  /**
+   * Source
+   *
+   * Main .tex file it was exported from.
+   */
+  source: string
+  /**
+   * Rev
+   *
+   * Commit it was exported at.
+   */
+  rev: string | null
+  /**
+   * Size
+   */
+  size: number
+  /**
+   * Storage
+   *
+   * 'git' or 'dvc'.
+   */
+  storage: string
+  /**
+   * Last Modified By
+   */
+  last_modified_by: string | null
+  /**
+   * Authors
+   */
+  authors: Array<string>
+  /**
+   * Open Edits
+   */
+  open_edits: number
+  /**
+   * Open Comments
+   */
+  open_comments: number
+  /**
+   * Unplaced
+   */
+  unplaced: number
+  /**
+   * Media Changed
+   */
+  media_changed?: Array<string>
+  /**
+   * Last Merged
+   */
+  last_merged?: string | null
+  /**
+   * Edits
+   */
+  edits: Array<LatexDocxEdit>
+  /**
+   * Comments
+   */
+  comments: Array<LatexDocxComment>
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -3462,6 +3918,10 @@ export type ProjectOptionalExtended = {
    */
   is_public?: boolean
   /**
+   * Comment Access
+   */
+  comment_access?: string
+  /**
    * Created
    */
   created?: string | null
@@ -3562,6 +4022,10 @@ export type ProjectPost = {
    */
   is_public?: boolean
   /**
+   * Comment Access
+   */
+  comment_access?: string
+  /**
    * Created
    */
   created?: string | null
@@ -3623,6 +4087,10 @@ export type ProjectPublic = {
    * Is Public
    */
   is_public?: boolean
+  /**
+   * Comment Access
+   */
+  comment_access?: string
   /**
    * Created
    */
@@ -12775,6 +13243,165 @@ export type GetProjectActivityResponses = {
 
 export type GetProjectActivityResponse =
   GetProjectActivityResponses[keyof GetProjectActivityResponses]
+
+export type GetProjectLatexReviewsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Source
+     */
+    source?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-reviews"
+}
+
+export type GetProjectLatexReviewsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectLatexReviewsError =
+  GetProjectLatexReviewsErrors[keyof GetProjectLatexReviewsErrors]
+
+export type GetProjectLatexReviewsResponses = {
+  /**
+   * Response Projects-Get Project Latex Reviews
+   *
+   * Successful Response
+   */
+  200: Array<LatexReview>
+}
+
+export type GetProjectLatexReviewsResponse =
+  GetProjectLatexReviewsResponses[keyof GetProjectLatexReviewsResponses]
+
+export type PostProjectLatexReviewData = {
+  body: BodyProjectsPostProjectLatexReview
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-reviews"
+}
+
+export type PostProjectLatexReviewErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexReviewError =
+  PostProjectLatexReviewErrors[keyof PostProjectLatexReviewErrors]
+
+export type PostProjectLatexReviewResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexReviewPlan
+}
+
+export type PostProjectLatexReviewResponse =
+  PostProjectLatexReviewResponses[keyof PostProjectLatexReviewResponses]
+
+export type GetProjectLatexReviewData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Path
+     */
+    path: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-reviews/{path}"
+}
+
+export type GetProjectLatexReviewErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectLatexReviewError =
+  GetProjectLatexReviewErrors[keyof GetProjectLatexReviewErrors]
+
+export type GetProjectLatexReviewResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexReviewPlan
+}
+
+export type GetProjectLatexReviewResponse =
+  GetProjectLatexReviewResponses[keyof GetProjectLatexReviewResponses]
+
+export type PostProjectLatexReviewMergeData = {
+  body: LatexReviewMergePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Path
+     */
+    path: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-reviews/{path}/merge"
+}
+
+export type PostProjectLatexReviewMergeErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexReviewMergeError =
+  PostProjectLatexReviewMergeErrors[keyof PostProjectLatexReviewMergeErrors]
+
+export type PostProjectLatexReviewMergeResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexReviewMergeResult
+}
+
+export type PostProjectLatexReviewMergeResponse =
+  PostProjectLatexReviewMergeResponses[keyof PostProjectLatexReviewMergeResponses]
 
 export type GetReferencesData = {
   body?: never

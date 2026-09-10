@@ -18,6 +18,8 @@ from .fs import *  # noqa: F401,F403
 from .fs import router as fs_router
 from .pipeline import *  # noqa: F401,F403
 from .pipeline import router as pipeline_router
+from .reviews import *  # noqa: F401,F403
+from .reviews import router as reviews_router
 
 router = APIRouter()
 router.include_router(core_router)
@@ -27,3 +29,4 @@ router.include_router(pipeline_router)
 router.include_router(figures_router)
 router.include_router(datasets_router)
 router.include_router(activity_router)
+router.include_router(reviews_router)

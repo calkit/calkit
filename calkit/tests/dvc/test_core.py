@@ -1,16 +1,21 @@
 """Tests for the ``dvc`` module."""
 
+import logging
 import os
+import stat
 import subprocess
 
 import dvc.repo
 import git
+import pytest
+import zc.lockfile
 from configobj import ConfigObj
 from dvc.config_schema import SCHEMA, Invalid
 from dvc_objects.fs import known_implementations
 
 import calkit
 from calkit.dvc import register_ck_scheme
+from calkit.dvc.core import _tolerate_lock_release_failures
 
 
 def test_get_remotes(tmp_dir):
@@ -107,6 +112,40 @@ def test_stale_rwlock_warning_is_suppressed(caplog):
     messages = [r.getMessage() for r in caplog.records]
     assert not any("Auto removed it from the lock file" in m for m in messages)
     assert any("must pass through" in m for m in messages)
+
+
+def test_tolerate_lock_release_failures(tmp_dir, caplog):
+    # Stand in for Windows' msvcrt unlock, which can fail while another
+    # process contends for the same lock. It's applied at import time there,
+    # so install it over a failing unlock here to test on any platform.
+    def failing_unlock(file):
+        raise zc.lockfile.LockError(f"Couldn't unlock {file.name!r}")
+
+    original = zc.lockfile._unlock_file
+    zc.lockfile._unlock_file = failing_unlock
+    try:
+        # Without the fix, closing raises and leaks the still-locked handle
+        lock = zc.lockfile.LockFile("untolerated.lock")
+        fp = lock._fp
+        with pytest.raises(zc.lockfile.LockError):
+            lock.close()
+        assert not fp.closed
+        fp.close()
+        # With it, closing succeeds and the handle is closed, which is what
+        # actually releases the lock
+        _tolerate_lock_release_failures()
+        lock = zc.lockfile.LockFile("tolerated.lock")
+        fp = lock._fp
+        with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+            lock.close()
+        assert fp.closed
+        assert lock._fp is None
+        assert any(
+            "Ignoring failure to release DVC lock" in r.getMessage()
+            for r in caplog.records
+        )
+    finally:
+        zc.lockfile._unlock_file = original
 
 
 def test_register_ck_scheme_updates_schema_and_registry():
@@ -238,9 +277,9 @@ def test_add_external_remote(monkeypatch):
         "set_remote_auth",
         lambda name: auth_calls.append(name),
     )
-    # HTTP case: builds URL from cloud base, sets custom auth
+    # HTTP case: builds URL from hub base, sets custom auth
     monkeypatch.setattr(
-        calkit.cloud, "get_base_url", lambda: "https://example.com"
+        calkit.hub, "get_base_url", lambda: "https://example.com"
     )
     out = calkit.dvc.add_external_remote("o", "p", use_ck=False)
     http_name = f"{calkit.dvc.make_remote_name(use_ck=False)}:o/p"
@@ -396,3 +435,94 @@ def test_run_dvc_command_lock_timeout(monkeypatch):
     rc = calkit.dvc.run_dvc_command(["pull"])
     assert rc == 0
     assert seen["timeout"] == base
+
+
+def test_init_detects_subdir(tmp_path, monkeypatch):
+    # DVC won't initialize inside a Git repo unless told it's a subdir. A
+    # self-contained project living within a larger repo is exactly that
+    # case, and getting it wrong leaves the user with a Git error.
+    import calkit.dvc
+    import calkit.dvc.core
+
+    ran = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda argv, cwd=None, **kw: ran.append((argv, cwd)) or 0,
+    )
+
+    def _init_args(**kwargs):
+        assert calkit.dvc.init(**kwargs) == 0
+        return ran.pop()
+
+    monkeypatch.chdir(tmp_path)
+    # No Git repo at all: the caller creates one here, so this is the root
+    assert _init_args() == (["init"], None)
+    subprocess.check_call(["git", "init", "-q", "."])
+    assert _init_args() == (["init"], None)
+    assert _init_args(force=True, quiet=True) == (
+        ["init", "--force", "--quiet"],
+        None,
+    )
+    sub = tmp_path / "examples" / "demo"
+    sub.mkdir(parents=True)
+    monkeypatch.chdir(sub)
+    assert _init_args() == (["init", "--subdir"], None)
+    # An explicit wdir is honored rather than the process's cwd
+    monkeypatch.chdir(tmp_path)
+    assert _init_args(wdir=str(sub)) == (["init", "--subdir"], str(sub))
+    # A directory the enclosing repo ignores needs its own repo. Scratch
+    # and test project directories are routinely ignored by the repo
+    # holding them, and DVC refuses to initialize into an ignored path, so
+    # treating one as a subdirectory project fails outright.
+    (tmp_path / ".gitignore").write_text("/scratch\n")
+    tracked = tmp_path / "tracked"
+    tracked.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    # A tracked subdirectory is part of the repo, so DVC is told so
+    assert not calkit.dvc.enclosing_repo_ignores(str(tracked))
+    assert _init_args(wdir=str(tracked))[0] == ["init", "--subdir"]
+    # An ignored one is not, so it becomes its own root instead
+    assert calkit.dvc.enclosing_repo_ignores(str(scratch))
+    assert _init_args(wdir=str(scratch))[0] == ["init"]
+    # The repo root itself is never "ignored by" its own repo
+    assert not calkit.dvc.enclosing_repo_ignores(str(tmp_path))
+
+
+def test_commit_path_with_missing_dep(tmp_dir):
+    # We should be able to commit a deleted output whose stage has a
+    # dependency that is missing from the workspace, which DVC's own commit
+    # fails to do, since saving to the run cache requires hashing all of the
+    # stage's dependencies
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    with open("input.txt", "w") as f:
+        f.write("sup")
+    with open("output.txt", "w") as f:
+        f.write("sup")
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  my-stage:\n"
+            "    cmd: echo sup\n"
+            "    deps:\n"
+            "      - input.txt\n"
+            "    outs:\n"
+            "      - output.txt\n"
+        )
+    subprocess.check_call(["dvc", "commit", "-f"])
+    # Delete both the dependency and the output, e.g., as if neither had been
+    # pulled to this machine, chmod'ing first since DVC can leave committed
+    # outputs read-only, which stops them from being deleted on Windows
+    for fpath in ["input.txt", "output.txt"]:
+        os.chmod(fpath, stat.S_IWRITE | stat.S_IREAD)
+        os.remove(fpath)
+    with pytest.raises(FileNotFoundError):
+        dvc.repo.Repo().commit("output.txt", force=True, allow_missing=True)
+    calkit.dvc.commit_path(dvc.repo.Repo(), "output.txt")
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)
+    # The output's hash should be kept, since there's nothing new to hash
+    assert lock["stages"]["my-stage"]["outs"][0]["path"] == "output.txt"
+    assert "md5" in lock["stages"]["my-stage"]["outs"][0]

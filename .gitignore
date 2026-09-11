@@ -9,7 +9,7 @@ site
 coverage.xml
 import.log
 tsconfig.tsbuildinfo
-lib
+jupyterlab-ext/lib
 node_modules
 .yarn
 *.eslintcache
@@ -17,7 +17,7 @@ node_modules
 calkit/labextension
 coverage
 junit.xml
-calk9
+ck9
 dist
 *.vsix
 vscode-ext/out

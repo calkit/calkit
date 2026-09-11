@@ -1,0 +1,72 @@
+name: Warm the Julia depot cache
+
+# A run can only restore caches created on its own branch or on the default
+# branch. The test workflow is `on: pull_request`, so every depot it saves
+# lands in `refs/pull/N/merge` and no other pull request can ever read it,
+# leaving each one to precompile Pkg from scratch (measured at ~70s per Julia
+# process, in every test that isolates itself in a throwaway depot). This
+# writes the depot in the default branch's scope, where the tests' restore
+# keys can reach it.
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  # The depot goes stale as Julia versions roll forward, and GitHub evicts
+  # caches untouched for 7 days
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Install Juliaup
+        uses: julia-actions/install-juliaup@1cc1b0ecfb06c04ff09fe24cab1476106460750e # v3.1.5
+        with:
+          channel: "1" # Installs the latest v1 Julia version via Juliaup
+      # Restore what's already there so a run that changes nothing is cheap,
+      # and only the new work gets precompiled
+      - name: Restore the Julia depot
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/compiled
+            ~/.julia/packages
+            ~/.julia/registries
+          key: julia-depot-${{ runner.os }}-
+          restore-keys: julia-depot-${{ runner.os }}-
+      # Precompiling Pkg is the dominant cost, and it lands in ~/.julia
+      # regardless of the project. Example is what the environment checks
+      # install, so it's precompiled here too.
+      - name: Warm the depot
+        shell: bash
+        run: |
+          mkdir -p warm
+          printf '[deps]\nExample = "7876af07-990d-54b4-ab0e-23690620f79a"\n\n[compat]\njulia = "1"\n' > warm/Project.toml
+          julia --startup-file=no --project=warm -e '
+            using Pkg
+            Pkg.Registry.add("General")
+            Pkg.instantiate()
+            Pkg.precompile()
+          '
+      # A fixed key per run number so each run publishes a fresh entry the
+      # pull request restore keys can find, without a content hash that would
+      # never match what a test happens to need
+      - name: Save the Julia depot
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/compiled
+            ~/.julia/packages
+            ~/.julia/registries
+          key: julia-depot-${{ runner.os }}-${{ github.run_id }}

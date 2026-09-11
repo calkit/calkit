@@ -1,6 +1,6 @@
 """Registry of native install scripts for common Calkit dependencies.
 
-When an ``app`` dependency is missing during ``calkit check dependencies``
+When an ``app`` requirement is missing during ``calkit check reqs``
 (or ``calkit run`` preflight), we look up the app here and -- on an
 interactive TTY -- offer to run the upstream installer for the current
 platform so users don't have to leave the terminal to satisfy a fresh

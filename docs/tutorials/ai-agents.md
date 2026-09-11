@@ -37,32 +37,62 @@ import numpy as np
 
 # Data representing a decade of cumulative growth trends in Los Angeles County (Indexed to 2012 = 100%)
 # Based on California EDD (Employment) and US Census/HUD/SCAG housing production data tracking.
-years = np.array([2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022])
+years = np.array(
+    [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022]
+)
 
 # Cumulative Job Growth (%)
-job_growth = np.array([0.0, 2.3, 4.8, 7.5, 9.8, 11.4, 13.1, 14.5, 6.2, 10.1, 13.8])
+job_growth = np.array(
+    [0.0, 2.3, 4.8, 7.5, 9.8, 11.4, 13.1, 14.5, 6.2, 10.1, 13.8]
+)
 
 # Cumulative Housing Unit Growth (%)
-housing_growth = np.array([0.0, 0.4, 0.9, 1.5, 2.2, 3.0, 3.8, 4.6, 5.3, 6.1, 6.8])
+housing_growth = np.array(
+    [0.0, 0.4, 0.9, 1.5, 2.2, 3.0, 3.8, 4.6, 5.3, 6.1, 6.8]
+)
 
 plt.figure(figsize=(10, 6))
-plt.plot(years, job_growth, label='Cumulative Job Growth (%)', color='#1f77b4', linewidth=2.5, marker='o')
-plt.plot(years, housing_growth, label='Cumulative Housing Growth (%)', color='#ff7f0e', linewidth=2.5, marker='s')
+plt.plot(
+    years,
+    job_growth,
+    label="Cumulative Job Growth (%)",
+    color="#1f77b4",
+    linewidth=2.5,
+    marker="o",
+)
+plt.plot(
+    years,
+    housing_growth,
+    label="Cumulative Housing Growth (%)",
+    color="#ff7f0e",
+    linewidth=2.5,
+    marker="s",
+)
 
-plt.title('The Jobs-Housing Mismatch in Los Angeles County\n(Cumulative Growth % Baseline: 2012)', fontsize=14, fontweight='bold', pad=15)
-plt.xlabel('Year', fontsize=12)
-plt.ylabel('Cumulative Growth (%)', fontsize=12)
+plt.title(
+    "The Jobs-Housing Mismatch in Los Angeles County\n(Cumulative Growth % Baseline: 2012)",
+    fontsize=14,
+    fontweight="bold",
+    pad=15,
+)
+plt.xlabel("Year", fontsize=12)
+plt.ylabel("Cumulative Growth (%)", fontsize=12)
 plt.xticks(years)
-plt.grid(True, linestyle='--', alpha=0.6)
-plt.legend(fontsize=11, loc='upper left')
+plt.grid(True, linestyle="--", alpha=0.6)
+plt.legend(fontsize=11, loc="upper left")
 
 # Annotating the visual divergence point
-plt.annotate('COVID-19 Job Shocks', xy=(2020, 6.2), xytext=(2017, 7.5),
-             arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=6),
-             fontsize=10, bbox=dict(boxstyle="round,pad=0.3", fc="yellow", alpha=0.3))
+plt.annotate(
+    "COVID-19 Job Shocks",
+    xy=(2020, 6.2),
+    xytext=(2017, 7.5),
+    arrowprops=dict(facecolor="black", shrink=0.05, width=1, headwidth=6),
+    fontsize=10,
+    bbox=dict(boxstyle="round,pad=0.3", fc="yellow", alpha=0.3),
+)
 
 plt.tight_layout()
-plt.savefig('la_jobs_vs_housing.png', dpi=300)
+plt.savefig("la_jobs_vs_housing.png", dpi=300)
 print("Plot successfully created and saved as la_jobs_vs_housing.png")
 ```
 

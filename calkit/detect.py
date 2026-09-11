@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
@@ -450,6 +451,15 @@ def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
                 inputs.append(_resolve(match))
     # Filter and deduplicate inputs
     inputs = [p for p in inputs if _is_valid_project_path(p)]
+    # The patterns above miss everything LaTeX resolves by name rather than
+    # by path: the document class, local style files, the bibliography
+    # style, and figures written without an extension. Those come from
+    # calkit.latex, which resolves against the project and follows the
+    # files it finds, so a class that loads its own styles contributes
+    # them too.
+    import calkit.latex
+
+    inputs += calkit.latex.detect_inputs(tex_path)
     inputs = list(dict.fromkeys(inputs))
     return {"inputs": inputs, "outputs": outputs}
 
@@ -685,6 +695,35 @@ def _resolve_variable_in_call(
                             return base_path
                     return base_path
     return None
+
+
+def filter_covered_inputs(
+    detected: Iterable[str], existing: Iterable[str]
+) -> list[str]:
+    """Drop detected paths an existing input already covers.
+
+    A stage input can be a whole directory: with ``figures`` declared,
+    everything inside it is already a dependency, so listing those files
+    one by one adds noise without adding coverage -- and goes stale the
+    moment one is renamed. An exact repeat of an existing input is covered
+    by the same rule.
+
+    Order is preserved, and duplicates within ``detected`` are dropped.
+    """
+    covered = {
+        path.rstrip("/") for path in existing if isinstance(path, str) and path
+    }
+    out: list[str] = []
+    for path in detected:
+        if not isinstance(path, str) or not path:
+            continue
+        parts = path.rstrip("/").split("/")
+        ancestors = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+        if any(ancestor in covered for ancestor in ancestors):
+            continue
+        out.append(path)
+        covered.add(path.rstrip("/"))
+    return out
 
 
 def _is_valid_project_path(path: str) -> bool:
@@ -1734,8 +1773,17 @@ def detect_r_dependencies(
 def detect_julia_dependencies(
     script_path: str | None = None,
     code: str | None = None,
+    script_dir: str | None = None,
+    project_dir: str = ".",
 ) -> list[str]:
     """Detect package dependencies from a Julia script or code string.
+
+    Julia's ``include`` splices a file in as source text, so any package used
+    by an included file must be declared by the project that includes it.
+    Includes with a literal path that resolve inside the project are therefore
+    followed. Ones pointing outside it are not, since that code declares its
+    dependencies in its own project file, e.g., a package's own source in the
+    depot reached via ``pkgdir``.
 
     Parameters
     ----------
@@ -1743,31 +1791,101 @@ def detect_julia_dependencies(
         Path to Julia script. Either this or code must be provided.
     code : str | None
         Julia code string. Either this or script_path must be provided.
+    script_dir : str | None
+        Directory the code came from, against which its includes resolve.
+        Only used with ``code``; defaults to ``project_dir``.
+    project_dir : str
+        Project root, outside of which includes are not followed.
 
     Returns
     -------
     list[str]
         List of Julia package names.
     """
+
+    def parse_dependencies(code: str) -> set[str]:
+        deps = set()
+        # Both `using` and `import` load a package, either can start a line or
+        # follow a semicolon, and either can be prefixed by macros, e.g.,
+        # `@everywhere using Foo`
+        clauses = re.findall(
+            r"(?:^|;)[ \t]*(?:@[A-Za-z_][A-Za-z0-9_!]*[ \t]+)*"
+            r"(?:using|import)[ \t]+([^\n;]+)",
+            code,
+            flags=re.MULTILINE,
+        )
+        for clause in clauses:
+            # In `using Foo: bar, baz` only what precedes the colon is a
+            # package
+            clause = clause.split(":")[0]
+            for part in clause.split(","):
+                # Drop an `as` alias, e.g., `import Foo as F`
+                name = re.split(r"\s+as\s+", part.strip())[0].strip()
+                # A leading dot means a module local to this file, not a
+                # package
+                if not name or name.startswith("."):
+                    continue
+                # Submodules like `Foo.Bar` come from the `Foo` package
+                name = name.split(".")[0]
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_!]*", name):
+                    continue
+                if name in ("Base", "Core", "Main"):
+                    continue
+                deps.add(name)
+        return deps
+
+    def find_includes(code: str, from_dir: str) -> list[str]:
+        paths = []
+        for match in re.findall(
+            r'include\s*\(\s*["\']([^"\']+\.jl)["\']\s*\)', code
+        ):
+            if os.path.isabs(match):
+                continue
+            path = os.path.realpath(os.path.join(from_dir, match))
+            if not path.startswith(root + os.sep) or not os.path.isfile(path):
+                continue
+            paths.append(path)
+        return paths
+
+    def read(path: str) -> str | None:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+        except (UnicodeDecodeError, IOError):
+            return None
+
     if script_path is None and code is None:
         raise ValueError("Either script_path or code must be provided")
+    root = os.path.realpath(project_dir)
     if code is None:
         assert script_path is not None  # Type guard
         if not os.path.exists(script_path):
             return []
-        try:
-            with open(script_path, "r", encoding="utf-8") as f:
-                code = f.read()
-        except (UnicodeDecodeError, IOError):
+        code = read(script_path)
+        if code is None:
             return []
-    assert code is not None  # Type guard
-    dependencies = set()
+        from_dir = os.path.dirname(script_path) or "."
+        seen = {os.path.realpath(script_path)}
+    else:
+        from_dir = script_dir if script_dir is not None else project_dir
+        seen = set()
     # Remove comments
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-    # Pattern for using statements
-    pattern = r"using\s+([a-zA-Z0-9._]+)"
-    matches = re.findall(pattern, code)
-    dependencies.update(matches)
+    dependencies = parse_dependencies(code)
+    # Walk the include tree, resolving each file's includes against its own
+    # directory the way Julia does
+    queue = find_includes(code, from_dir)
+    while queue:
+        path = queue.pop(0)
+        if path in seen:
+            continue
+        seen.add(path)
+        included = read(path)
+        if included is None:
+            continue
+        included = re.sub(r"#.*$", "", included, flags=re.MULTILINE)
+        dependencies |= parse_dependencies(included)
+        queue += find_includes(included, os.path.dirname(path))
     return sorted(list(dependencies))
 
 
@@ -1816,7 +1934,10 @@ def detect_dependencies_from_notebook(
     if language == "python":
         return detect_python_dependencies(code=combined_code)
     elif language == "julia":
-        return detect_julia_dependencies(code=combined_code)
+        return detect_julia_dependencies(
+            code=combined_code,
+            script_dir=os.path.dirname(notebook_path) or ".",
+        )
     elif language == "r":
         return detect_r_dependencies(code=combined_code)
     return []
@@ -1896,7 +2017,7 @@ def create_r_description_file(
 # Figure/dataset auto-detection
 # A file is only treated as an auto-detected figure or dataset when it lives in
 # a directory whose name signals its kind. These sets are intentionally narrow
-# (and kept in sync with Calkit Cloud) so we don't flag arbitrary images or
+# (and kept in sync with the Calkit hub) so we don't flag arbitrary images or
 # data files scattered around a repository.
 FIGURE_EXTENSIONS = {
     ".png",
@@ -2302,7 +2423,7 @@ def _reserved_artifact_paths(
         ck_info = calkit.load_calkit_info(wdir=wdir)
     paths: list[str] = []
     for kind in ("figures", "datasets", "results", "presentations"):
-        for obj in ck_info.get(kind, []) or []:
+        for obj in ck_info.get(kind) or []:
             if isinstance(obj, dict) and isinstance(obj.get("path"), str):
                 paths.append(obj["path"])
     return [p.replace("\\", "/") for p in paths]

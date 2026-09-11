@@ -27,6 +27,15 @@ This guide will help you get started.
    - [Miniforge](https://conda-forge.org/download/)
    - [uv](https://docs.astral.sh/uv/getting-started/installation/)
    - [Pixi](https://pixi.sh/latest/)
+1. **Create the virtual environment:**
+   ```bash
+   uv sync --all-packages
+   ```
+   This repo is a uv workspace: the hub backend is a member, and both it
+   and the `calkit` package share a single `.venv` at the repo root.
+   Always pass `--all-packages`, since a bare `uv sync` installs only one
+   member and uninstalls the other's dependencies, leaving either the
+   `calkit` CLI or the hub backend unable to import its dependencies.
 1. **Run tests** to ensure everything is working:
    ```bash
    uv run pytest
@@ -88,6 +97,33 @@ This guide will help you get started.
 - Link the PR to the issue it resolves by adding "resolves #{issue number}"
   to the description.
 - Wait for a review and make necessary changes.
+
+## Releasing the browser extension
+
+Publishing a GitHub release tagged `browser-ext/vX.Y.Z` builds and tests the
+extension, stamps that version into `manifest.json` and `package.json`,
+strips source maps, and attaches a store-ready zip to the release.
+The version comes from the tag because the Chrome Web Store rejects an
+upload whose manifest version isn't higher than the last one, and a version
+kept in sync by hand eventually isn't.
+Uncheck "set as the latest release" for these, since they aren't
+calkit-python releases.
+
+The same workflow uploads to the Chrome Web Store once the
+`CHROME_EXTENSION_ID` repository variable is set, using the
+`CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, and `CHROME_REFRESH_TOKEN`
+secrets (an OAuth client for the Web Store API, authorized for the
+publishing account).
+Until that variable exists the upload step is skipped and the zip on the
+release is uploaded by hand.
+
+`make browser-ext` builds and packages the same zip locally.
+The packaged manifest drops the local development hub's host permission,
+which is why it is built from a staged copy rather than from `dist`, the
+directory loaded unpacked during development.
+The store listing's text lives in `browser-ext/store/listing.md`, and its
+screenshots are generated from `docs/img/browser-ext` by
+`browser-ext/scripts/store-screenshots.py`.
 
 ## 💡 Other ways to contribute
 

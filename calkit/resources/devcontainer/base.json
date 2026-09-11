@@ -1,0 +1,25 @@
+{
+  "image": "ghcr.io/calkit/devcontainer:latest",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/julialang/devcontainer-features/julia:1": {
+      "channel": "release"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.terminal.activateEnvironment": false,
+        "python.terminal.activateEnvInCurrentTerminal": false,
+        "redhat.telemetry.enabled": true,
+        "window.menuBarVisibility": "classic",
+        "workbench.colorTheme": "Atom One Dark",
+        "editor.minimap.enabled": false
+      }
+    }
+  },
+  "initializeCommand": "mkdir -p .calkit/temp && echo '*' > .calkit/temp/.gitignore",
+  "postCreateCommand": "bash $INIT_SCRIPTS_DIR/post-create.sh",
+  "updateContentCommand": "bash $INIT_SCRIPTS_DIR/update-content.sh",
+  "postStartCommand": "bash $INIT_SCRIPTS_DIR/post-start.sh"
+}

@@ -5,10 +5,28 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from typing import TYPE_CHECKING, NoReturn
+from enum import Enum
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
-from typer.core import TyperGroup
+from typer.core import TyperCommand, TyperGroup
+
+
+class EnvDefaultsModeChoice(str, Enum):
+    """How a stage's own list combines with an environment's defaults.
+
+    The same three values as ``calkit.models.pipeline.EnvDefaultsMode``,
+    which stays a ``Literal`` because that is what puts them inline in the
+    published JSON schema. Typer needs an ``Enum`` to list them in
+    ``--help`` and reject anything else itself, and it has to be importable
+    without pulling in the models, which are loaded lazily to keep CLI
+    startup fast. A test holds the two spellings together.
+    """
+
+    ignore = "ignore"
+    replace = "replace"
+    merge = "merge"
+
 
 if TYPE_CHECKING:
     import click
@@ -29,6 +47,43 @@ class AliasGroup(TyperGroup):
             if name and default_name in self._CMD_SPLIT_P.split(name):
                 return name
         return default_name
+
+
+class OptionalValueCommand(TyperCommand):
+    """TyperCommand allowing certain options to be passed without a value.
+
+    Click no longer supports options with optional values (a bare
+    ``--opt`` either errors or, worse, swallows the next token), so
+    subclasses declare ``optional_value_options`` mapping option names to
+    the value to assume when the option appears bare, i.e., followed by
+    another option or by nothing. Everything after a ``--`` separator is
+    left untouched.
+    """
+
+    optional_value_options: dict[str, str] = {}
+
+    # The context is whatever Typer built, which since 0.26 is its own
+    # vendored Click rather than the one importable here. Nothing below
+    # reads it, so it is passed straight through rather than annotated
+    # against a private module.
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        new_args = []
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--":
+                new_args += args[i:]
+                break
+            if arg in self.optional_value_options:
+                nxt = args[i + 1] if i + 1 < len(args) else None
+                if nxt is None or nxt.startswith("-"):
+                    value = self.optional_value_options[arg]
+                    new_args.append(f"{arg}={value}")
+                    i += 1
+                    continue
+            new_args.append(arg)
+            i += 1
+        return super().parse_args(ctx, new_args)
 
 
 def complete_stage_names(
@@ -96,10 +151,30 @@ def run_cmd(cmd: list[str]):
         pty.spawn(cmd, lambda fd: os.read(fd, 1024))
 
 
+def echo_json(obj: Any) -> None:
+    """Print an object as a single line of JSON.
+
+    Values that aren't JSON-native are stringified, since YAML parsing can
+    produce things like dates from ``calkit.yaml``.
+    """
+    import json
+
+    typer.echo(json.dumps(obj, default=str))
+
+
 def raise_error(txt: str) -> NoReturn:
     typer.echo(typer.style("Error: " + str(txt), fg="red"), err=True)
     raise typer.Exit(1)
 
 
-def warn(txt: str, prefix: str = "Warning: "):
-    typer.echo(typer.style(prefix + str(txt), fg="yellow"))
+def warn(txt: str, prefix: str = "Warning: ", err: bool = False):
+    # Callers emitting machine-readable output on stdout should set err=True
+    # so warnings don't corrupt it. Imported here rather than at module
+    # scope, since calkit imports this module while it is still being
+    # defined.
+    from calkit.core import encode_safe
+
+    typer.echo(
+        typer.style(prefix + encode_safe(str(txt), err=err), fg="yellow"),
+        err=err,
+    )

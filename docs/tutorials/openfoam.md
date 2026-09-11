@@ -44,7 +44,7 @@ generate one for use with the API, and copy it to your clipboard.
 Then we can set that token in our Calkit configuration with:
 
 ```sh
-calkit config set token YOUR_TOKEN_HERE
+calkit hub config set token YOUR_TOKEN_HERE
 ```
 
 Next, clone the repo to your local machine with (filling in your username):
@@ -59,7 +59,7 @@ GitHub.
 ![Cloning the repo.](img/openfoam/clone.png)
 
 `calkit clone` is a simple wrapper around `git clone` that sets up the
-necessary configuration to use the Calkit Cloud as a DVC remote,
+necessary configuration to use the Calkit hub as a DVC remote,
 the place where we're going to push our data,
 while our code goes to GitHub.
 
@@ -133,7 +133,7 @@ You'll notice there is a new `.calkit/env-locks` folder
 in the repo,
 which is how Calkit determines if the image needs to be rebuilt.
 We should now
-commit and push this file to the cloud so it is backed up and accessible to our
+commit and push this file to the hub so it is backed up and accessible to our
 collaborators.
 We can do this with the `calkit save` command:
 
@@ -204,10 +204,10 @@ calkit save -am "Run simulations"
 ```
 
 In this case, the outputs of the simulations were pushed up to the DVC remote
-in the Calkit Cloud.
+on the hub.
 
 We are defining an output for each simulation as the `postProcessing` folder,
-which we will cache and push to the cloud for backup,
+which we will cache and push to the hub for backup,
 so others (including our future self),
 can pull down the results and work with them without needing to rerun
 the simulations.
@@ -295,7 +295,7 @@ Reviewer 2 will be so happy 😀
 We created a project that runs OpenFOAM simulations reproducibly,
 produces a figure comparing against an imported dataset,
 and ensures these are kept in version control
-and backed up to the cloud.
+and backed up to the hub.
 This is of course a simplified example for demonstration,
 but you could imagine expanding the pipeline
 to include more operations, such as:

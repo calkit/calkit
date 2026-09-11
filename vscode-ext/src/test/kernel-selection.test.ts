@@ -15,7 +15,7 @@ const REGISTRATION_KINDS: EnvKind[] = [
   "julia",
 ];
 
-const SERVER_KINDS: EnvKind[] = ["docker", "slurm", "ssh", "_system"];
+const SERVER_KINDS: EnvKind[] = ["docker", "slurm", "system", "_system"];
 
 test("kernelRegistrationKinds includes all local env types", () => {
   for (const kind of REGISTRATION_KINDS) {

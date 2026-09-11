@@ -932,6 +932,9 @@ using DataFrames
 using CSV
 using Plots
 
+import ClimaCalibrate
+import EnsembleKalmanProcesses as EKP
+
 # Read data
 data = CSV.read("data.csv", DataFrame)
 """
@@ -943,18 +946,88 @@ data = CSV.read("data.csv", DataFrame)
     assert "DataFrames" in deps
     assert "CSV" in deps
     assert "Plots" in deps
+    assert "ClimaCalibrate" in deps
+    assert "EnsembleKalmanProcesses" in deps
+    assert "EKP" not in deps
 
 
 def test_detect_julia_dependencies_from_code():
-    """Test detection of Julia dependencies from code string."""
     code = """
 using LinearAlgebra
 using Statistics
+using DataFrames, CSV
+using Interpolations: linear_interpolation
+import Plots as plt
+using Distributions.Normal
+using .LocalModule
+import ..ParentModule
+import Base: show
+x = 1; using Random
+@everywhere using Distributed
+@eval import SparseArrays
+# using Commented
 """
     deps = detect_julia_dependencies(code=code)
 
     assert "LinearAlgebra" in deps
     assert "Statistics" in deps
+    # Comma-separated names all count
+    assert "DataFrames" in deps
+    assert "CSV" in deps
+    # Only what precedes a colon is a package
+    assert "Interpolations" in deps
+    assert "linear_interpolation" not in deps
+    # An alias isn't a package
+    assert "Plots" in deps
+    assert "plt" not in deps
+    # A submodule comes from its top-level package
+    assert "Distributions" in deps
+    assert "Normal" not in deps
+    # Relative modules are local, and Base isn't a dependency
+    assert "LocalModule" not in deps
+    assert "ParentModule" not in deps
+    assert "Base" not in deps
+    # A statement can follow a semicolon, but not a comment
+    assert "Random" in deps
+    assert "Commented" not in deps
+    # A macro can prefix the statement
+    assert "Distributed" in deps
+    assert "SparseArrays" in deps
+
+
+def test_detect_julia_dependencies_follows_includes(tmp_dir):
+    os.makedirs("src")
+    os.makedirs("scripts")
+    with open("scripts/run.jl", "w") as f:
+        f.write(
+            "using DataFrames\n"
+            'include("../src/helpers.jl")\n'
+            'include(joinpath(pkgdir(Foo), "experiments", "utils.jl"))\n'
+            'include("/elsewhere/outside.jl")\n'
+            'include("src/missing.jl")\n'
+        )
+    # Included files resolve their own includes relative to themselves, and a
+    # cycle back to the entry script must not hang
+    with open("src/helpers.jl", "w") as f:
+        f.write(
+            'import JLD2\ninclude("nested.jl")\ninclude("../scripts/run.jl")\n'
+        )
+    with open("src/nested.jl", "w") as f:
+        f.write("using CairoMakie\n")
+    # Outside the project, so its dependencies belong to its own project
+    os.makedirs("../outside_project", exist_ok=True)
+    with open("../outside_project/escaped.jl", "w") as f:
+        f.write("using ShouldNotAppear\n")
+    with open("src/reaches_out.jl", "w") as f:
+        f.write('include("../../outside_project/escaped.jl")\n')
+
+    deps = detect_julia_dependencies(script_path="scripts/run.jl")
+
+    assert deps == ["CairoMakie", "DataFrames", "JLD2"]
+    # A dynamic or absolute include path isn't followed, and neither is one
+    # escaping the project
+    escaped = detect_julia_dependencies(script_path="src/reaches_out.jl")
+    assert escaped == []
 
 
 def test_detect_dependencies_from_python_notebook(tmp_dir):
@@ -1353,3 +1426,58 @@ def test_detection_ignore(tmp_dir):
     in_dir = "notebooks/scratch/data/raw.parquet"
     assert detect_artifact_kind(in_dir) == "dataset"
     assert detect_artifact_kind(in_dir, ignore=ignore) is None
+
+
+def test_filter_covered_inputs():
+    from calkit.detect import filter_covered_inputs
+
+    # A declared directory covers everything inside it, at any depth
+    assert filter_covered_inputs(
+        ["figures/a.png", "figures/sub/b.png", "refs.bib"], ["figures"]
+    ) == ["refs.bib"]
+    # A trailing slash on either side means the same directory
+    assert filter_covered_inputs(["figures/a.png"], ["figures/"]) == []
+    # An exact repeat is covered too, and duplicates within the detected
+    # list collapse
+    assert filter_covered_inputs(
+        ["refs.bib", "refs.bib", "paper/x.cls"], ["refs.bib"]
+    ) == ["paper/x.cls"]
+    # A partial name segment is not a parent directory
+    assert filter_covered_inputs(["figures-old/a.png"], ["figures"]) == [
+        "figures-old/a.png"
+    ]
+    # Nothing declared means nothing filtered, and order is preserved
+    assert filter_covered_inputs(["b.png", "a.png"], []) == ["b.png", "a.png"]
+
+
+def test_detect_latex_io_finds_class_and_style_files(tmp_dir):
+    # What LaTeX resolves by name rather than by path: the document class,
+    # a local style file the class itself loads, the bibliography style,
+    # and a figure written without its extension
+    with open("jfm.cls", "w") as f:
+        f.write("\\usepackage{upmath}\n")
+    with open("upmath.sty", "w") as f:
+        f.write("% nothing\n")
+    with open("jfm.bst", "w") as f:
+        f.write("% nothing\n")
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/fig.pdf", "wb") as f:
+        f.write(b"%PDF-1.4")
+    with open("refs.bib", "w") as f:
+        f.write("@article{a, title={A}}\n")
+    with open("paper.tex", "w") as f:
+        f.write(
+            "\\documentclass{jfm}\n"
+            "\\usepackage{graphicx}\n"
+            "\\bibliographystyle{jfm}\n"
+            "\\includegraphics{figures/fig}\n"
+            "\\bibliography{refs}\n"
+        )
+    inputs = detect_latex_io("paper.tex")["inputs"]
+    assert "jfm.cls" in inputs
+    assert "upmath.sty" in inputs
+    assert "jfm.bst" in inputs
+    assert "figures/fig.pdf" in inputs
+    assert "refs.bib" in inputs
+    # graphicx comes from TeX Live, not the project
+    assert "graphicx.sty" not in inputs

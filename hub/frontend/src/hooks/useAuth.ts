@@ -1,0 +1,209 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
+import { useState } from "react"
+
+import type { AxiosError } from "axios"
+import {
+  type BodyLoginLoginAccessToken as AccessToken,
+  LoginService,
+  type UserPublic,
+  type UserRegister,
+  UsersService,
+} from "../client"
+import {
+  clearTokens,
+  forceRefreshAccessToken,
+  getAccessToken,
+  isAuthenticationError,
+  popPostLoginRedirect,
+  storeTokens,
+} from "../lib/auth"
+import useCustomToast from "./useCustomToast"
+
+const isLoggedIn = () => {
+  return getAccessToken() !== null
+}
+
+const useAuth = () => {
+  const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const showToast = useCustomToast()
+  const queryClient = useQueryClient()
+  const {
+    data: user,
+    isLoading,
+    error: getUserError,
+  } = useQuery<UserPublic | null, Error>({
+    queryKey: ["currentUser"],
+    // On a token error, force one fresh refresh and retry before concluding the
+    // session is dead. This recovers from an expired token that slipped through
+    // (clock skew, a refresh/rotation race) instead of logging the user out.
+    queryFn: async () => {
+      try {
+        return await UsersService.getCurrentUser().then(
+          (response) => response.data,
+        )
+      } catch (error) {
+        if (isAuthenticationError(error)) {
+          const token = await forceRefreshAccessToken()
+          if (token) {
+            return await UsersService.getCurrentUser().then(
+              (response) => response.data,
+            )
+          }
+        }
+        throw error
+      }
+    },
+    enabled: isLoggedIn(),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: (failureCount, error: any) => {
+      const status = error?.status ?? error?.response?.status
+      if (status >= 400 && status < 500) return false
+      return failureCount < 3
+    },
+  })
+
+  const signUpMutation = useMutation({
+    mutationFn: (data: UserRegister) =>
+      UsersService.registerUser({ userRegister: data }).then(
+        (response) => response.data,
+      ),
+    onSuccess: () => {
+      navigate({ to: "/login" })
+      showToast(
+        "Account created.",
+        "Your account has been created successfully.",
+        "success",
+      )
+    },
+    onError: (err: AxiosError) => {
+      const errDetail = (err.response?.data as any)?.detail ?? err.message
+      showToast("Something went wrong.", errDetail, "error")
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] })
+    },
+  })
+
+  const login = async (data: AccessToken) => {
+    const response = await LoginService.loginAccessToken({
+      bodyLoginLoginAccessToken: data,
+    }).then((response) => response.data)
+    storeTokens(response.access_token, response.refresh_token)
+  }
+
+  const loginMutation = useMutation({
+    mutationFn: login,
+    onSuccess: () => {
+      const redirectTo = popPostLoginRedirect()
+      navigate({ to: redirectTo || "/" })
+    },
+    onError: (err: AxiosError) => {
+      let errDetail = (err.response?.data as any)?.detail ?? err.message
+      if (Array.isArray(errDetail)) {
+        errDetail = "Something went wrong"
+      }
+      setError(errDetail)
+    },
+  })
+
+  const loginGithub = async (data: { code: string; redirectUri: string }) => {
+    const response = await LoginService.loginWithGithub({
+      oAuthCodeExchange: {
+        code: data.code,
+        redirect_uri: data.redirectUri,
+      },
+    }).then((response) => response.data)
+    storeTokens(response.access_token, response.refresh_token)
+  }
+
+  const loginGitHubMutation = useMutation({
+    mutationFn: loginGithub,
+    onSuccess: () => {
+      const redirectTo = popPostLoginRedirect()
+      navigate({ to: redirectTo || "/" })
+    },
+    onError: (err: AxiosError) => {
+      let errDetail = (err.response?.data as any)?.detail ?? err.message
+      if (Array.isArray(errDetail)) {
+        errDetail = "Something went wrong"
+      }
+      showToast("Something went wrong.", errDetail, "error")
+      setError(errDetail)
+    },
+  })
+
+  const loginGoogle = async (data: { code: string; redirectUri: string }) => {
+    const response = await LoginService.loginWithGoogle({
+      oAuthCodeExchange: {
+        code: data.code,
+        redirect_uri: data.redirectUri,
+      },
+    }).then((response) => response.data)
+    storeTokens(response.access_token, response.refresh_token)
+  }
+
+  const loginGoogleMutation = useMutation({
+    mutationFn: loginGoogle,
+    onSuccess: () => {
+      const redirectTo = popPostLoginRedirect()
+      navigate({ to: redirectTo || "/" })
+    },
+    onError: (err: AxiosError) => {
+      let errDetail = (err.response?.data as any)?.detail ?? err.message
+      if (Array.isArray(errDetail)) {
+        errDetail = "Something went wrong"
+      }
+      showToast("Something went wrong.", errDetail, "error")
+      setError(errDetail)
+    },
+  })
+
+  const logout = () => {
+    clearTokens()
+    mixpanel.reset()
+    localStorage.removeItem("post_login_redirect")
+    if (typeof window !== "undefined") {
+      window.location.replace("/")
+    } else {
+      navigate({ to: "/" })
+    }
+  }
+
+  if (getUserError && isLoggedIn()) {
+    if (isAuthenticationError(getUserError)) {
+      // Capture the trigger durably: logout() navigates away and wipes the
+      // console, so persist to localStorage (read it back after a logout) and
+      // send it to Mixpanel so we can see these across users.
+      const err = getUserError as any
+      const info = {
+        status: err?.status ?? err?.response?.status,
+        detail: err?.response?.data?.detail,
+        at: new Date().toISOString(),
+      }
+      console.warn("Session invalid, logging out", info)
+      try {
+        localStorage.setItem("last_auto_logout", JSON.stringify(info))
+      } catch {}
+      mixpanel.track("Session auto-logout", info)
+      logout()
+    }
+  }
+
+  return {
+    signUpMutation,
+    loginMutation,
+    loginGitHubMutation,
+    loginGoogleMutation,
+    logout,
+    user,
+    isLoading,
+    error,
+    resetError: () => setError(null),
+  }
+}
+
+export { isLoggedIn }
+export default useAuth

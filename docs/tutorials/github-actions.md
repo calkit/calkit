@@ -13,6 +13,10 @@ calkit update github-actions
 
 Note that this command can be run at any time to update to the latest
 recommended workflow configuration.
+The action is pinned to the version of Calkit that wrote the workflow,
+so after upgrading Calkit, rerun the command to move the pin.
+If the workflow has been customized, only the action's version is updated,
+and everything else in it is left alone.
 
 Inside `.github/workflows/run-calkit.yml` you'll then see something like:
 
@@ -55,7 +59,7 @@ jobs:
       - name: Install Calkit
         run: uv tool install calkit-python
       - name: Run Calkit
-        uses: calkit/run-action@v2
+        uses: calkit/calkit/actions/run@main
 ```
 
 This particular example installs Calkit with uv,
@@ -75,5 +79,6 @@ to the same branch at the same time.
 
 It's possible to configure the action to not save results, e.g., if you
 just want to check that the pipeline can run without errors.
-See the [documentation](https://github.com/marketplace/actions/run-calkit)
+See the
+[documentation](https://github.com/calkit/calkit/tree/main/actions/run)
 for all available options.

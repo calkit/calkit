@@ -216,7 +216,7 @@ The pipeline is out-of-date after adding a stage.
 After the pipeline has been run we can see there are some uncommitted
 changes in the repo, so let's commit them with a message that makes sense,
 e.g., "Extract figure from data.xlsx".
-We should again be in our happy state, with a clean repo synced with the cloud,
+We should again be in our happy state, with a clean repo synced with the hub,
 and a pipeline that's up-to-date.
 
 To wrap things up, we're going to use this figure in a paper,

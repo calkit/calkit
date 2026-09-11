@@ -36,6 +36,10 @@ we can focus on three rules:
    Git commits.
    This can be done by installing `nbstripout` and running
    `nbstripout --install` in the project directory.
+   Note that the notebooks Calkit generates as pipeline outputs (those under
+   `.calkit/notebooks`) are exempted from stripping automatically when the
+   pipeline is compiled, since their outputs are the pipeline's results and
+   stripping them would commit content that doesn't match what DVC hashed.
 1. A notebook must run in one of the project's [environments](environments.md).
 1. Notebooks should be incorporated into the project's
    [pipeline](pipeline/index.md).
@@ -110,7 +114,7 @@ pipeline:
       html_storage: dvc
       executed_ipynb_storage: null
       cleaned_ipynb_storage: git
-# Optional: Add to project notebooks so they can be viewed on Calkit Cloud
+# Optional: Add to project notebooks so they can be viewed on the hub
 notebooks:
   - path: notebooks/get-data.ipynb
     title: Get data
@@ -230,7 +234,7 @@ cells below.
 Now, the kernel can be restarted and we can use "run all cells above"
 when working on the figure,
 and we'll have `result` nearly instantaneously.
-`result` will also be versioned with DVC and pushed to the cloud by default,
+`result` will also be versioned with DVC and pushed to the hub by default,
 so our collaborators can also take advantage of the caching
 without bloating the Git repo.
 Execution as part of the project's pipeline will also take advantage of

@@ -1,0 +1,95 @@
+{
+  "manifest_version": 3,
+  "name": "Calkit",
+  "description": "Work with your Calkit projects from GitHub and Overleaf.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "114",
+  "icons": {
+    "16": "icons/calkit-16.png",
+    "32": "icons/calkit-32.png",
+    "48": "icons/calkit-48.png",
+    "128": "icons/calkit-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Calkit",
+    "default_icon": {
+      "16": "icons/calkit-16.png",
+      "32": "icons/calkit-32.png",
+      "48": "icons/calkit-48.png",
+      "128": "icons/calkit-128.png"
+    }
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://api.calkit.io/*",
+    "https://api.staging.calkit.io/*",
+    "http://api.localhost/*",
+    "https://storage.googleapis.com/*",
+    "https://s3.amazonaws.com/*",
+    "https://*.s3.amazonaws.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["content/github.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.overleaf.com/project/*",
+        "https://overleaf.com/project/*"
+      ],
+      "js": ["content/overleaf.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://arxiv.org/*",
+        "https://*.biorxiv.org/*",
+        "https://*.medrxiv.org/*",
+        "https://www.preprints.org/*",
+        "https://doi.org/*",
+        "https://pubmed.ncbi.nlm.nih.gov/*",
+        "https://scholar.google.com/*",
+        "https://academic.oup.com/*",
+        "https://arc.aiaa.org/*",
+        "https://asmedigitalcollection.asme.org/*",
+        "https://dl.acm.org/*",
+        "https://elifesciences.org/*",
+        "https://ieeexplore.ieee.org/*",
+        "https://iopscience.iop.org/*",
+        "https://journals.aps.org/*",
+        "https://link.springer.com/*",
+        "https://pubs.acs.org/*",
+        "https://pubs.aip.org/*",
+        "https://pubs.rsc.org/*",
+        "https://royalsocietypublishing.org/*",
+        "https://www.cell.com/*",
+        "https://www.frontiersin.org/*",
+        "https://www.nature.com/*",
+        "https://www.pnas.org/*",
+        "https://www.science.org/*",
+        "https://www.sciencedirect.com/*",
+        "https://www.tandfonline.com/*",
+        "https://*.cambridge.org/*",
+        "https://*.mdpi.com/*",
+        "https://*.onlinelibrary.wiley.com/*",
+        "https://*.plos.org/*"
+      ],
+      "js": ["content/references.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["viewer.html"],
+      "matches": ["https://github.com/*"]
+    }
+  ]
+}

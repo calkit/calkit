@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: backend
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          service: backend
+
+  - job_name: backend-dvc
+    static_configs:
+      - targets: ['backend-dvc:8000']
+        labels:
+          service: backend-dvc
+
+  # The warm queue: depth, job outcomes, and whether a worker is alive.
+  # See hub/backend/app/warm.py for what it runs.
+  - job_name: rq
+    static_configs:
+      - targets: ['rq-exporter:9726']
+        labels:
+          service: worker
+
+  # The cache behind both the queue and everything derived from a commit.
+  - job_name: redis
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: cache

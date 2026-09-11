@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-import arithmetic_eval
-import requests
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Discriminator, model_validator
 
 DTYPES = {"int": int, "float": float, "str": str}
 DEFAULT_IN_TYPE = "float"
@@ -131,10 +129,12 @@ class FormulaParams(BaseModel):
 
 
 class Formula(Calculation):
-    kind: str = "formula"
+    kind: Literal["formula"] = "formula"
     params: FormulaParams
 
     def calculate(self, **inputs):
+        import arithmetic_eval
+
         inputs = self.check_inputs(**inputs)
         return arithmetic_eval.evaluate(self.params.formula, inputs)
 
@@ -147,7 +147,7 @@ class LinearParams(BaseModel):
 class Linear(Calculation):
     """Calculation for a simple linear relationship."""
 
-    kind: str = "linear"
+    kind: Literal["linear"] = "linear"
     params: LinearParams
 
     @model_validator(mode="after")
@@ -172,7 +172,7 @@ class LookupTableParams(BaseModel):
 class LookupTable(Calculation):
     """A 1-D lookup table."""
 
-    kind: str = "lookup-table"
+    kind: Literal["lookup-table"] = "lookup-table"
     params: LookupTableParams
 
 
@@ -191,15 +191,17 @@ class HttpRequest(Calculation):
     sensitive data.
     """
 
-    kind: str = "http"
+    kind: Literal["http"] = "http"
     params: HttpRequestParams
 
     def calculate(self, **inputs):
+        import requests
+
         func = getattr(requests, self.params.method)
         if self.params.inputs_as_params:
             kws = {"params": inputs}
         else:
-            kws = {"json", inputs}
+            kws = {"json": inputs}
         resp: requests.Response = func(url=self.params.url, **kws)
         resp.raise_for_status()
         if self.params.as_json:
@@ -222,7 +224,7 @@ class XGBoostModel(Calculation):
     ``predict`` method.
     """
 
-    kind: str = "xgboost"
+    kind: Literal["xgboost"] = "xgboost"
     params: XGBoostModelParams
 
     def calculate(self, **inputs):
@@ -230,13 +232,20 @@ class XGBoostModel(Calculation):
         import xgboost
 
         # Convert model path to something that can be loaded if running on the
-        # Calkit Cloud
+        # Calkit hub
         types = {
             "classifier": xgboost.XGBClassifier,
             "regressor": xgboost.XGBRegressor,
         }
         model = types[self.params.type]().load_model(self.params.path)
         return model.predict(**inputs)
+
+
+# The calculation kinds that ``parse`` can run, as a discriminated union so
+# ``calkit.yaml`` gets per-kind validation and autocompletion of ``params``
+CalculationType = Annotated[
+    Formula | Linear | LookupTable, Discriminator("kind")
+]
 
 
 def parse(data: dict) -> Calculation:

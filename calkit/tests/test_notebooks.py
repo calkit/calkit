@@ -91,3 +91,36 @@ def test_determine_storage(tmp_dir):
         )
     assert calkit.notebooks.determine_storage(notebook_path) == "git"
     assert calkit.notebooks.determine_storage("missing.ipynb") == "dvc"
+
+
+def test_is_marimo_notebook():
+    # What marimo itself writes at the top of every notebook it generates
+    generated = (
+        "import marimo\n"
+        "\n"
+        '__generated_with = "0.19.4"\n'
+        "app = marimo.App()\n"
+        "\n"
+        "\n"
+        "@app.cell\n"
+        "def _():\n"
+        "    print(1)\n"
+        "    return\n"
+    )
+    assert calkit.notebooks.is_marimo_notebook(generated)
+    # Options in the constructor call, and a license banner ahead of it,
+    # don't change the answer
+    assert calkit.notebooks.is_marimo_notebook(
+        '"""Copyright.\n\nA long banner.\n"""\n'
+        "import marimo\n"
+        'app = marimo.App(width="medium")\n'
+    )
+    # A script that merely imports or mentions marimo isn't a notebook, which
+    # is the case a plain 'marimo' substring check gets wrong
+    for not_a_notebook in [
+        "import marimo\nprint('not a notebook')\n",
+        "# Convert this to marimo someday\nprint(1)\n",
+        '"""Utilities for our marimo apps."""\nimport pandas as pd\n',
+        "",
+    ]:
+        assert not calkit.notebooks.is_marimo_notebook(not_a_notebook)

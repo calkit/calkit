@@ -37,27 +37,35 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quickstart: quickstart.md
-  - Cloud integration: cloud-integration.md
+  - Sharing, collaboration, and backup (Calkit hub):
+      - hub/index.md
+      - Running your own: hub/self-hosting.md
   - Use with AI tools: ai-tools.md
   - Questions, hypotheses, answers, and evidence: questions.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
-  - Dependencies, configuration, and secrets: dependencies.md
+  - Requirements, configuration, and secrets: requirements.md
   - Environments: environments.md
   - The pipeline:
       - pipeline/index.md
+      - pipeline/markdown.md
       - pipeline/running-and-logging.md
       - pipeline/manual-steps.md
   - Notebooks: notebooks.md
   - JupyterLab: jupyterlab.md
   - High performance computing (HPC): hpc.md
   - Datasets: datasets.md
+  - Provenance: provenance.md
   - References: references.md
   - Calculations: calculations.md
   - Apps: apps.md
   - Releasing/archiving projects and artifacts: releases.md
   - Local server (GUI interaction): local-server.md
+  - LaTeX documents: latex.md
   - Overleaf integration: overleaf.md
+  - Browser extension:
+      - browser-ext/index.md
+      - Privacy policy: browser-ext/privacy.md
   - Subprojects: subprojects.md
   - Examples: examples.md
   - Tutorials:
@@ -68,19 +76,27 @@ nav:
       - tutorials/openfoam.md
       - tutorials/adding-latex-pub-docker.md
       - tutorials/latex-codespaces.md
+      - tutorials/latex-word.md
       - tutorials/notebook-pipeline.md
       - tutorials/procedures.md
       - tutorials/conda-envs.md
       - tutorials/office.md
       - tutorials/matlab.md
       - tutorials/github-actions.md
+      - tutorials/runnable-readme.md
       - tutorials/vscode-slurm-notebook.md
       - tutorials/ai-agents.md
+      - tutorials/writing-first.md
   - CLI reference: cli-reference.md
   - Help and support: help.md
   - Reproducibility: reproducibility.md
   - Governance: governance.md
   - Acknowledgements: acknowledgements.md
+# Internal design notes live in docs/dev; they're for contributors, not
+# users, so they're built out of the site rather than shown unlinked.
+exclude_docs: |
+  dev/
+
 markdown_extensions:
   - admonition
   - attr_list

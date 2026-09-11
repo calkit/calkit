@@ -25,11 +25,31 @@ Features:
 
 Features:
 
-- An automatically-managed Conda environment for data processing and
+- An automatically-managed uv virtual environment for data processing and
   visualization
 - A LaTeX publication built with a Docker container
 - A dev container spec to enable editing and collaboration with GitHub
   Codespaces
+
+## Runnable README
+
+[GitHub repo](https://github.com/calkit/calkit/tree/main/examples/markdown)
+
+Features:
+
+- A pipeline declared entirely in the README's code blocks,
+  with Python, Julia, and R stages
+- Environments declared by the install commands the README shows
+- Output printed by each stage written back into the README
+
+Create a copy with:
+
+```sh
+calkit new project my-readme \
+    --from https://github.com/calkit/calkit/examples/markdown
+```
+
+See [Runnable Markdown](pipeline/markdown.md) for how it works.
 
 ## MATLAB
 
@@ -40,6 +60,43 @@ Features:
 
 - Dependency checking before pipeline execution
 - MATLAB scripts run in batch mode
+
+## Julia
+
+[Project page](https://calkit.io/calkit/example-julia) |
+[GitHub repo](https://github.com/calkit/example-julia)
+
+Features:
+
+- A Julia environment declared with a `Project.toml`
+- A flow simulation script run with WaterLily.jl
+- A Jupyter notebook run in the same Julia environment
+- A LaTeX conference paper built with a Docker container from the script's
+  figures
+
+## R
+
+[Project page](https://calkit.io/calkit/example-r) |
+[GitHub repo](https://github.com/calkit/example-r)
+
+Features:
+
+- An `renv` environment declared with a `DESCRIPTION` file
+- R scripts for analysis and plotting, with the processed data and figures
+  versioned in Git
+
+## Analytics
+
+[Project page](https://calkit.io/calkit/example-analytics) |
+[GitHub repo](https://github.com/calkit/example-analytics)
+
+Features:
+
+- A Jupyter notebook as the whole pipeline, run in a uv environment
+- A dataset imported from Zenodo, with its license recorded
+- A notebook adapted from Kaggle, with its provenance and license recorded
+- Figures, tables, and results produced by the notebook and shown in the
+  project showcase
 
 ## Strava analysis
 
@@ -85,3 +142,23 @@ Features:
 
 - A publication linked to an Overleaf project, which syncs changes to the
   text from Overleaf, and pushes figures generated locally to Overleaf.
+
+## LaTeX with Word review
+
+[GitHub repo](https://github.com/calkit/calkit/tree/main/examples/latex-word)
+
+Features:
+
+- A LaTeX paper split across multiple source files, built with a Docker
+  container from a figure generated in a uv environment
+- A Word copy exported for reviewers, whose edits and comments merge back
+  into the LaTeX source
+
+Create a copy with:
+
+```sh
+calkit new project my-paper \
+    --from https://github.com/calkit/calkit/examples/latex-word
+```
+
+See the [LaTeX and Word tutorial](tutorials/latex-word.md) for the workflow.

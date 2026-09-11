@@ -148,6 +148,9 @@ def conda_env_name():
 @skipif_windows_conda
 def test_check_env(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
+    # Note the specs here use trivial packages, since what matters is that
+    # there's one in the conda section and one in the pip section, not which
+    # ones---heavier packages cost tens of seconds each to install
     subprocess.check_call(
         [
             "calkit",
@@ -158,9 +161,9 @@ def test_check_env(tmp_dir, conda_env_name):
             "--no-check",
             "python=3.13",
             "pip",
-            "h5py",
+            "six",
             "--pip",
-            "pxl",
+            "iniconfig",
         ]
     )
     res = check_env()
@@ -184,7 +187,7 @@ def test_check_env(tmp_dir, conda_env_name):
             "python=3.11.0",
             "pip",
             "--pip",
-            "pxl",
+            "iniconfig",
         ]
     )
     res = check_env()
@@ -388,7 +391,7 @@ setup(
             "--no-check",
             "python=3.12",
             "pip",
-            "h5py",
+            "six",
             "--pip",
             "-e .",
         ]

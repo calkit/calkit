@@ -75,12 +75,12 @@ test("makeEnvironmentCandidates returns standalone notebook envs and nested slur
     slurmOuter: { kind: "slurm", host: "cluster.school.edu" },
     juliaEnv: { kind: "julia", path: "Project.toml", julia: "1.11" },
     pyEnv: { kind: "uv", path: "pyproject.toml" },
-    sshEnv: { kind: "ssh", host: "example.org" },
+    systemEnv: { kind: "system", host: "example.org" },
   });
 
   assert.ok(candidates.some((c) => c.label === "juliaEnv"));
   assert.ok(candidates.some((c) => c.label === "pyEnv"));
-  assert.ok(!candidates.some((c) => c.label === "sshEnv"));
+  assert.ok(!candidates.some((c) => c.label === "systemEnv"));
 
   const nestedLabels = candidates
     .filter((c) => c.outerSlurmEnvironment === "slurmOuter")
@@ -90,7 +90,7 @@ test("makeEnvironmentCandidates returns standalone notebook envs and nested slur
   assert.deepEqual(nestedLabels, [
     "slurmOuter:juliaEnv",
     "slurmOuter:pyEnv",
-    "slurmOuter:sshEnv",
+    "slurmOuter:systemEnv",
   ]);
 });
 

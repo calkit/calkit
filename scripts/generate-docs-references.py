@@ -3,39 +3,62 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 import types
+from collections.abc import Sequence
+from enum import Enum
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Union, cast, get_args, get_origin
 
-import click
 import typer
+from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
+from typer.core import TyperArgument, TyperCommand, TyperGroup, TyperOption
 
 from calkit.cli.main.core import app
 from calkit.models.core import (
-    CondaEnvironment,
-    DockerEnvironment,
     Environment,
-    JuliaEnvironment,
-    MatlabEnvironment,
-    NixEnvironment,
-    PixiEnvironment,
-    REnvironment,
-    SlurmEnvironment,
-    SSHEnvironment,
-    UvEnvironment,
-    UvVenvEnvironment,
-    VenvEnvironment,
 )
 from calkit.models.pipeline import Stage
 
+SYSTEM_LOCK_START = "<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:START -->"
+SYSTEM_LOCK_END = "<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:END -->"
 ENV_START = "<!-- AUTO-GENERATED: ENV-KINDS:START -->"
 ENV_END = "<!-- AUTO-GENERATED: ENV-KINDS:END -->"
 STAGE_START = "<!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:START -->"
 STAGE_END = "<!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:END -->"
 LEGACY_START = "<!-- AUTO-GENERATED: ENV-AND-STAGE-KINDS:START -->"
 LEGACY_END = "<!-- AUTO-GENERATED: ENV-AND-STAGE-KINDS:END -->"
+KEYS_START = "<!-- AUTO-GENERATED: CALKIT-YAML-KEYS:START -->"
+KEYS_END = "<!-- AUTO-GENERATED: CALKIT-YAML-KEYS:END -->"
+
+
+def rst_to_markdown(text: str) -> str:
+    """Convert RST-style inline markup in a docstring to markdown.
+
+    Everything generated here is written back into a file that prettier
+    then formats. Emitting markup prettier disagrees with means every
+    ``make format`` run reports the generated file as modified, so the
+    conversion has to produce what prettier would produce, not merely
+    something that renders the same.
+
+    Docstrings are read as Python source as well as rendered as docs, so
+    the RST spellings are what belongs in them; normalizing here keeps
+    authors from having to write markdown by hand in a docstring.
+    """
+    # ``double backticks`` are RST inline code; markdown uses one
+    text = text.replace("``", "`")
+    # *emphasis* is RST (and the natural thing to type); prettier
+    # normalizes single-asterisk emphasis to underscores, but leaves
+    # **strong** alone. Bounded to one line, and the delimiters exclude
+    # '*' and whitespace on both sides so '**strong**' isn't mangled into
+    # '_*strong*_' and a '* ' bullet isn't read as an opening delimiter.
+    return re.sub(
+        r"(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])",
+        r"_\1_",
+        text,
+    )
 
 
 def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
@@ -66,15 +89,14 @@ def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
-def _command_text(cmd: click.Command) -> str:
-    # CLI helps written in RST style use ``double backticks`` for inline
-    # code; convert to markdown single backticks so prettier doesn't
+def _command_text(cmd: TyperCommand) -> str:
+    # CLI helps are written in RST style; convert so prettier doesn't
     # rewrite the generated file and fail the pre-commit hook.
     text = (cmd.help or cmd.short_help or "").strip()
-    return text.replace("``", "`")
+    return rst_to_markdown(text)
 
 
-def _command_desc(cmd: click.Command) -> str:
+def _command_desc(cmd: TyperCommand) -> str:
     text = _command_text(cmd)
     if not text:
         return ""
@@ -84,7 +106,7 @@ def _command_desc(cmd: click.Command) -> str:
     return m.group(1) if m else first_para
 
 
-def _command_desc_full(cmd: click.Command) -> str:
+def _command_desc_full(cmd: TyperCommand) -> str:
     text = _command_text(cmd)
     if not text:
         return ""
@@ -96,16 +118,16 @@ def _command_desc_full(cmd: click.Command) -> str:
     return "\n\n".join(paragraphs)
 
 
-def _list_commands(group: click.Group) -> list[tuple[str, click.Command]]:
+def _list_commands(group: TyperGroup) -> list[tuple[str, TyperCommand]]:
     names = list(group.commands.keys())
     return [(name, group.commands[name]) for name in names]
 
 
 def _list_unique_commands(
-    group: click.Group,
-) -> list[tuple[list[str], click.Command]]:
+    group: TyperGroup,
+) -> list[tuple[list[str], TyperCommand]]:
     alias_re = re.compile(r"\balias for ['\"]([^'\"]+)['\"]", re.IGNORECASE)
-    commands: list[tuple[list[str], click.Command]] = []
+    commands: list[tuple[list[str], TyperCommand]] = []
     for name, cmd in _list_commands(group):
         desc = _command_text(cmd)
         if alias_re.search(desc):
@@ -114,40 +136,54 @@ def _list_unique_commands(
     return commands
 
 
-def _type_name(param_type: click.ParamType) -> str:
-    if isinstance(param_type, click.types.Choice):
-        return "choice(" + ", ".join(str(c) for c in param_type.choices) + ")"
+def _type_name(param_type: Any) -> str:
+    # Asked for rather than type-checked: the parameter type is Click's
+    # Choice or Typer's vendored one depending on the version, and what
+    # the reference needs from either is the list of values. Without it
+    # the table says 'choice' and leaves the reader to guess them.
+    choices = getattr(param_type, "choices", None)
+    if choices is not None:
+        return "choice(" + ", ".join(str(c) for c in choices) + ")"
     return getattr(param_type, "name", str(param_type))
 
 
-def _default_value(param: click.Parameter) -> str:
+def _default_value(param: TyperOption | TyperArgument) -> str:
     default = getattr(param, "default", None)
     if default is None:
         return ""
     if callable(default):
         return "<dynamic>"
     if isinstance(default, (list, tuple)):
-        return ", ".join(str(v) for v in default)
-    return str(default)
+        return ", ".join(_scalar_default(v) for v in default)
+    return _scalar_default(default)
 
 
-def _param_help(param: click.Parameter) -> str:
+def _scalar_default(value: object) -> str:
+    # An option whose type is an Enum has an Enum member as its default,
+    # whose str() is 'ClassName.member'. What the user types is the value,
+    # which is also what the choices in the same row are written as.
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
+
+
+def _param_help(param: TyperOption | TyperArgument) -> str:
     help_text = getattr(param, "help", "") or ""
     return " ".join(help_text.split())
 
 
-def _usage(command_path: str, cmd_obj: click.Command) -> str:
+def _usage(command_path: str, cmd_obj: TyperCommand) -> str:
     parts = [command_path]
 
     has_visible_options = any(
-        isinstance(param, click.Option) and not getattr(param, "hidden", False)
+        isinstance(param, TyperOption) and not getattr(param, "hidden", False)
         for param in cmd_obj.params
     )
     if has_visible_options:
         parts.append("[OPTIONS]")
 
     for param in cmd_obj.params:
-        if not isinstance(param, click.Argument):
+        if not isinstance(param, TyperArgument):
             continue
         arg_name = (param.name or "arg").upper().replace("_", "-")
         if param.nargs != 1:
@@ -156,16 +192,16 @@ def _usage(command_path: str, cmd_obj: click.Command) -> str:
             arg_name = f"[{arg_name}]"
         parts.append(arg_name)
 
-    if isinstance(cmd_obj, click.Group) and cmd_obj.commands:
+    if isinstance(cmd_obj, TyperGroup) and cmd_obj.commands:
         parts.extend(["COMMAND", "[ARGS]..."])
 
     return " ".join(parts)
 
 
-def _args_table(cmd_obj: click.Command) -> str:
+def _args_table(cmd_obj: TyperCommand) -> str:
     rows: list[list[str]] = []
     for param in cmd_obj.params:
-        if not isinstance(param, click.Argument):
+        if not isinstance(param, TyperArgument):
             continue
         name = f"`{param.name}`"
         ptype = _type_name(param.type)
@@ -183,14 +219,14 @@ def _args_table(cmd_obj: click.Command) -> str:
     )
 
 
-def _has_args(cmd_obj: click.Command) -> bool:
-    return any(isinstance(param, click.Argument) for param in cmd_obj.params)
+def _has_args(cmd_obj: TyperCommand) -> bool:
+    return any(isinstance(param, TyperArgument) for param in cmd_obj.params)
 
 
-def _opts_table(cmd_obj: click.Command) -> str:
+def _opts_table(cmd_obj: TyperCommand) -> str:
     rows: list[list[str]] = []
     for param in cmd_obj.params:
-        if not isinstance(param, click.Option):
+        if not isinstance(param, TyperOption):
             continue
         if getattr(param, "hidden", False):
             continue
@@ -211,9 +247,9 @@ def _opts_table(cmd_obj: click.Command) -> str:
     )
 
 
-def _has_visible_options(cmd_obj: click.Command) -> bool:
+def _has_visible_options(cmd_obj: TyperCommand) -> bool:
     for param in cmd_obj.params:
-        if not isinstance(param, click.Option):
+        if not isinstance(param, TyperOption):
             continue
         if getattr(param, "hidden", False):
             continue
@@ -227,7 +263,7 @@ def _has_visible_options(cmd_obj: click.Command) -> bool:
 def _append_command_details(
     lines: list[str],
     command_path: str,
-    cmd_obj: click.Command,
+    cmd_obj: TyperCommand,
     heading: str = "###",
     anchor: str | None = None,
 ) -> None:
@@ -290,8 +326,8 @@ def _command_link_label(names: list[str], anchor: str) -> str:
 
 def generate_cli_markdown() -> str:
     root_cmd = typer.main.get_command(app)
-    if not isinstance(root_cmd, click.Group):
-        raise TypeError("Expected root CLI command to be a Click Group")
+    if not isinstance(root_cmd, TyperGroup):
+        raise TypeError("Expected root CLI command to be a Typer group")
     top_summary = _command_desc(root_cmd)
     top_commands = [
         (names, cmd_obj, _command_desc(cmd_obj))
@@ -315,8 +351,8 @@ def generate_cli_markdown() -> str:
     lines.append("## Top-level commands")
     lines.append("")
 
-    def _top_table_anchor(names: list[str], cmd_obj: click.Command) -> str:
-        is_group_with_subcommands = isinstance(cmd_obj, click.Group) and bool(
+    def _top_table_anchor(names: list[str], cmd_obj: TyperCommand) -> str:
+        is_group_with_subcommands = isinstance(cmd_obj, TyperGroup) and bool(
             cmd_obj.commands
         )
         return (
@@ -343,7 +379,7 @@ def generate_cli_markdown() -> str:
     lines.append("## Top-level command details")
     lines.append("")
     for cmd_names, cmd_obj, _ in top_commands:
-        if isinstance(cmd_obj, click.Group) and cmd_obj.commands:
+        if isinstance(cmd_obj, TyperGroup) and cmd_obj.commands:
             continue
         _append_command_details(
             lines,
@@ -356,7 +392,7 @@ def generate_cli_markdown() -> str:
     lines.append("")
     found_group = False
     for cmd_names, cmd_obj, cmd_desc in top_commands:
-        if not isinstance(cmd_obj, click.Group):
+        if not isinstance(cmd_obj, TyperGroup):
             continue
         subcommands = _list_unique_commands(cmd_obj)
         if not subcommands:
@@ -401,16 +437,18 @@ def generate_cli_markdown() -> str:
 
 
 def _annotation_to_text(annotation: Any) -> str:
+    # Unwrap Annotated first, else pydantic's metadata (e.g. the repr of a
+    # Discriminator) leaks into the table. Checked via __metadata__ rather
+    # than the origin, which stringifies as "<class 'typing.Annotated'>".
+    if hasattr(annotation, "__metadata__"):
+        return _annotation_to_text(annotation.__origin__)
     origin = get_origin(annotation)
     if origin is None:
         if annotation is type(None):
             return "None"
         if hasattr(annotation, "__name__"):
-            return annotation.__name__
+            return str(annotation.__name__)
         return str(annotation).replace("typing.", "")
-    if str(origin).endswith("Annotated"):
-        args = get_args(annotation)
-        return _annotation_to_text(args[0]) if args else "Any"
     args = get_args(annotation)
     if origin is list:
         return f"list[{_annotation_to_text(args[0]) if args else 'Any'}]"
@@ -443,6 +481,14 @@ def _default_to_text(default: Any) -> str:
     return repr(default)
 
 
+def _description_to_text(field: Any) -> str:
+    """Render a field's description as a single-line table cell."""
+    description = getattr(field, "description", None)
+    if not description:
+        return ""
+    return " ".join(description.split())
+
+
 def _is_required(field: Any) -> bool:
     is_required = getattr(field, "is_required", None)
     if callable(is_required):
@@ -454,7 +500,10 @@ def _docstring_text(obj: Any) -> str:
     doc = getattr(obj, "__doc__", None)
     if not doc:
         return ""
-    lines = [line.strip() for line in doc.strip().splitlines()]
+    # cleandoc removes the uniform indentation Python docstrings carry while
+    # keeping any relative indentation, which markdown needs for things like
+    # wrapped list items
+    lines = inspect.cleandoc(doc).splitlines()
     cleaned: list[str] = []
     prev_blank = False
     for line in lines:
@@ -467,8 +516,7 @@ def _docstring_text(obj: Any) -> str:
         cleaned.append(line)
         prev_blank = False
     text = "\n".join(cleaned).strip()
-    # Convert common RST-style inline code markup to markdown.
-    return text.replace("``", "`")
+    return rst_to_markdown(text)
 
 
 def _kind_for_model_class(cls: type[Any]) -> str:
@@ -498,17 +546,51 @@ def _class_doc_lines(cls: type[Any] | None) -> list[str]:
     return lines
 
 
+# A union of more than this many model types is summarized by the base class
+# they share, if any. Spelling out all thirteen environment kinds makes a
+# table column unreadable and says less than the name of the concept does.
+_MAX_UNION_MEMBERS = 4
+
+
+def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
+    """Return the model base every one of ``types_`` derives from, if any.
+
+    ``BaseModel`` itself doesn't count: it's shared by everything, so it
+    would summarize a union as nothing at all.
+    """
+    if not all(
+        isinstance(t, type) and issubclass(t, BaseModel) for t in types_
+    ):
+        return None
+    # Walk the first member's bases from most to least specific, so the
+    # narrowest shared base wins
+    for base in types_[0].__mro__[1:]:
+        if base is BaseModel:
+            break
+        if all(issubclass(t, base) for t in types_):
+            return cast(type[BaseModel], base)
+    return None
+
+
 def _render_field_type(ann: Any) -> str:
     """Render a Pydantic field annotation as it should appear in the docs.
 
     Optionality is conveyed by the separate "Required" column, so ``X | None``
     is rendered as ``X``.
     """
+    # Unwrap Annotated, else pydantic's metadata (e.g. Discriminator(...))
+    # leaks into the docs as the repr of an internal object
+    if hasattr(ann, "__metadata__"):
+        return _render_field_type(ann.__origin__)
     origin = get_origin(ann)
     if origin is Union or isinstance(ann, types.UnionType):
         non_none = [a for a in get_args(ann) if a is not type(None)]
         if len(non_none) == 1:
             return _render_field_type(non_none[0])
+        if len(non_none) > _MAX_UNION_MEMBERS:
+            shared = _shared_model_base(non_none)
+            if shared is not None:
+                return shared.__name__
         return " | ".join(_render_field_type(a) for a in non_none)
     if origin is not None and str(origin).endswith("Literal"):
         return "Literal[" + "|".join(repr(v) for v in get_args(ann)) + "]"
@@ -530,7 +612,7 @@ def _render_field_type(ann: Any) -> str:
 _ENV_META_FIELDS = ("description",)
 
 
-def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, str, str]]:
+def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, ...]]:
     """Derive doc table rows directly from a Pydantic environment model."""
     fields = cls.model_fields
     kind_specific = [
@@ -538,45 +620,49 @@ def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, str, str]]:
     ]
     meta = [name for name in _ENV_META_FIELDS if name in fields]
     ordered = (["kind"] if "kind" in fields else []) + kind_specific + meta
-    rows = []
+    rows: list[tuple[str, ...]] = []
     for name in ordered:
         field = fields[name]
         # ``kind`` carries a default for convenience but is always required in
         # a definition, so it's the one field we don't infer from the default.
         required = name == "kind" or field.is_required()
+        # Use the alias when there is one, since that's the key actually
+        # written in calkit.yaml
+        param = field.alias or name
         rows.append(
             (
-                name,
+                param,
                 _render_field_type(field.annotation),
                 "required" if required else "optional",
+                # Subclasses narrow ``kind`` without restating what it means,
+                # so fall back to the base environment's description
+                _description_to_text(field)
+                or _description_to_text(Environment.model_fields.get(name)),
             )
         )
     return rows
 
 
 def generate_environment_kinds_markdown() -> str:
-    env_classes = [
-        Environment,
-        CondaEnvironment,
-        UvEnvironment,
-        VenvEnvironment,
-        UvVenvEnvironment,
-        PixiEnvironment,
-        DockerEnvironment,
-        JuliaEnvironment,
-        MatlabEnvironment,
-        NixEnvironment,
-        SlurmEnvironment,
-        REnvironment,
-        SSHEnvironment,
-    ]
+    # Derived from the models rather than listed by hand, the same way the
+    # stage kinds are. A hand-kept list is a list that silently omits a
+    # kind -- 'pbs' was missing from the reference entirely for exactly
+    # that reason.
+    env_classes = [Environment] + sorted(
+        (
+            cls
+            for cls in Environment.__subclasses__()
+            if _kind_for_model_class(cls)
+        ),
+        key=_kind_for_model_class,
+    )
     env_classes_by_kind = {
         _kind_for_model_class(cls): cls
         for cls in env_classes
         if _kind_for_model_class(cls)
     }
 
-    env_kinds: dict[str, list[tuple[str, str, str]]] = {
+    env_kinds: dict[str, list[tuple[str, ...]]] = {
         kind: _env_rows_from_model(cls)
         for kind, cls in env_classes_by_kind.items()
     }
@@ -595,17 +681,109 @@ def generate_environment_kinds_markdown() -> str:
                 param,
                 typ,
                 "yes" if requirement.strip().lower() == "required" else "no",
+                description,
             )
-            for param, typ, requirement in rows
+            for param, typ, requirement, description in rows
         ]
         lines.append(
             make_table(
                 normalized_rows,
-                ["Parameter", "Type", "Required"],
+                ["Parameter", "Type", "Required", "Description"],
             ).rstrip()
         )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _models_in_annotation(annotation: Any) -> list[type[BaseModel]]:
+    """Find the Pydantic models a field annotation refers to.
+
+    Containers, unions, and ``Annotated`` are all unwrapped, so
+    ``list[str | PathOutput] | None`` yields ``PathOutput``.
+    """
+    found: list[type[BaseModel]] = []
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        found.append(annotation)
+    for arg in get_args(annotation):
+        found.extend(_models_in_annotation(arg))
+    return found
+
+
+def _collect_nested_models(
+    classes: Sequence[type[BaseModel]],
+    exclude: Sequence[type[BaseModel]] = (),
+) -> list[type[BaseModel]]:
+    """Walk out from some models to every model reachable from their fields.
+
+    Breadth-first, so the models named directly in the parameter tables come
+    before the ones only reachable through them. Excluding a model also stops
+    the walk there, which is how a key documented on its own page keeps its
+    whole subtree off this table.
+    """
+    queue = [
+        model
+        for cls in classes
+        for field in cls.model_fields.values()
+        for model in _models_in_annotation(field.annotation)
+    ]
+    ordered: list[type[BaseModel]] = []
+    seen = set(classes) | set(exclude)
+    while queue:
+        cls = queue.pop(0)
+        if cls in seen:
+            continue
+        seen.add(cls)
+        ordered.append(cls)
+        for field in cls.model_fields.values():
+            queue.extend(_models_in_annotation(field.annotation))
+    return ordered
+
+
+def _nested_type_markdown(
+    classes: Sequence[type[BaseModel]],
+    title: str = "Nested parameter types",
+    intro: str = (
+        "Some parameters above take objects rather than plain values. The "
+        "properties of each are described below."
+    ),
+    exclude: Sequence[type[BaseModel]] = (),
+) -> list[str]:
+    """Document the models that the tables above are built out of.
+
+    Those tables can only name a type like ``PathOutput``; this is where a
+    reader finds out what actually goes inside one.
+    """
+    lines = [
+        f"### {title}",
+        "",
+        intro,
+        "",
+    ]
+    for cls in _collect_nested_models(classes, exclude=exclude):
+        lines.append(f"#### `{cls.__name__}`")
+        lines.append("")
+        docstring = _docstring_text(cls)
+        if docstring:
+            lines.append(docstring)
+            lines.append("")
+        rows = [
+            (
+                f"`{field.alias or name}`",
+                _annotation_to_text(field.annotation),
+                "yes" if _is_required(field) else "no",
+                _default_to_text(field.default),
+                _description_to_text(field),
+            )
+            for name, field in cls.model_fields.items()
+        ]
+        lines.append(
+            make_table(
+                rows,
+                ["Parameter", "Type", "Required", "Default", "Description"],
+            ).rstrip()
+        )
+        lines.append("")
+    return lines
 
 
 def generate_stage_kinds_markdown() -> str:
@@ -625,7 +803,7 @@ def generate_stage_kinds_markdown() -> str:
         "",
     ]
 
-    common_rows: list[tuple[str, str, str]] = []
+    common_rows: list[tuple[str, ...]] = []
     for name, field in base_fields.items():
         if name in {"kind", "name"}:
             continue
@@ -635,13 +813,20 @@ def generate_stage_kinds_markdown() -> str:
                 _annotation_to_text(field.annotation),
                 "yes" if _is_required(field) else "no",
                 _default_to_text(field.default),
-            )  # type: ignore
+                _description_to_text(field),
+            )
         )
     lines.append(
         make_table(
             common_rows,
-            ["Parameter", "Type", "Required", "Default"],
+            ["Parameter", "Type", "Required", "Default", "Description"],
         ).rstrip()
+    )
+    lines.append("")
+    lines.append(
+        "Parameters whose type is a named object, like `PathOutput`, are "
+        "described under "
+        "[nested parameter types](#nested-parameter-types)."
     )
     lines.append("")
 
@@ -650,7 +835,7 @@ def generate_stage_kinds_markdown() -> str:
         lines.append(f"### `{kind}`")
         lines.append("")
         lines.extend(_class_doc_lines(cls))
-        extra_rows: list[tuple[str, str, str]] = []
+        extra_rows: list[tuple[str, ...]] = []
         for name, field in cls.model_fields.items():
             if name == "kind":
                 continue
@@ -671,7 +856,12 @@ def generate_stage_kinds_markdown() -> str:
                     _annotation_to_text(field.annotation),
                     "yes" if _is_required(field) else "no",
                     _default_to_text(field.default),
-                )  # type: ignore
+                    # A subclass that overrides a field only to change its
+                    # default doesn't restate the description, so fall back to
+                    # the base stage's
+                    _description_to_text(field)
+                    or _description_to_text(base_field),
+                )
             )
         if extra_rows:
             lines.append(
@@ -682,12 +872,71 @@ def generate_stage_kinds_markdown() -> str:
                         "Type",
                         "Required",
                         "Default",
+                        "Description",
                     ],
                 ).rstrip()
             )
         else:
             lines.append("No additional kind-specific parameters.")
         lines.append("")
+    lines.extend(_nested_type_markdown([Stage] + stage_classes))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+# Keys whose contents are big enough to have earned their own page, which
+# says far more than a type name in a table can
+_KEY_DOC_PAGES = {
+    "requirements": "requirements.md",
+    "dependencies": "requirements.md",
+    "environments": "environments.md",
+    "pipeline": "pipeline/index.md",
+    "questions": "questions.md",
+    "datasets": "datasets.md",
+    "references": "references.md",
+    "procedures": "tutorials/procedures.md",
+    "releases": "releases.md",
+}
+
+
+def generate_top_level_keys_markdown() -> str:
+    """Document the top-level keys of calkit.yaml, from ``ProjectInfo``."""
+    from calkit.models.core import ProjectInfo
+
+    rows: list[tuple[str, ...]] = []
+    for name, field in ProjectInfo.model_fields.items():
+        key = field.alias or name
+        page = _KEY_DOC_PAGES.get(name)
+        rows.append(
+            (
+                f"[`{key}`]({page})" if page else f"`{key}`",
+                _render_field_type(field.annotation),
+                "yes" if _is_required(field) else "no",
+                _description_to_text(field),
+            )
+        )
+    lines = [
+        make_table(rows, ["Key", "Type", "Required", "Description"]).rstrip(),
+        "",
+    ]
+    # A key with its own page is described there, so neither it nor anything
+    # underneath it belongs in the table below
+    documented_elsewhere = [
+        model
+        for name, field in ProjectInfo.model_fields.items()
+        if name in _KEY_DOC_PAGES
+        for model in _models_in_annotation(field.annotation)
+    ]
+    lines.extend(
+        _nested_type_markdown(
+            [ProjectInfo],
+            title="Nested types",
+            intro=(
+                "Keys above whose type is a named object, like `Figure`, "
+                "hold the properties described below."
+            ),
+            exclude=documented_elsewhere,
+        )
+    )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -713,6 +962,35 @@ def _remove_legacy_combined_block(content: str) -> str:
     return content
 
 
+def generate_system_lock_properties_markdown() -> str:
+    """Table of the machine properties a ``system`` environment can lock."""
+    from calkit.environments import (
+        SYSTEM_LOCK_PROPERTIES,
+        SYSTEM_LOCK_PROPERTY_DESCRIPTIONS,
+        SYSTEM_LOCK_PROPERTY_PLATFORMS,
+    )
+
+    rows = []
+    for prop in SYSTEM_LOCK_PROPERTIES:
+        description = SYSTEM_LOCK_PROPERTY_DESCRIPTIONS.get(prop, "")
+        only_on = SYSTEM_LOCK_PROPERTY_PLATFORMS.get(prop)
+        if only_on:
+            # platform.system() names, spelled the way people say them
+            friendly = {"Darwin": "macOS"}.get(only_on, only_on)
+            description = f"{description} {friendly} only.".strip()
+        rows.append((f"`{prop}`", description))
+    # No leading newline: _replace_marked_block already separates the block
+    # from its markers, and an extra blank line here is one Prettier strips
+    # right back out -- leaving the generator and the formatter undoing each
+    # other on every commit.
+    return (
+        "The properties that can be locked are:\n\n"
+        + make_table(rows, ["Property", "Description"]).rstrip()
+        + "\n\nRun `calkit describe system` to see what these are on the "
+        "machine you're on.\n"
+    )
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
 
@@ -729,6 +1007,12 @@ def main() -> None:
         ENV_END,
         generate_environment_kinds_markdown(),
     )
+    env_content = _replace_marked_block(
+        env_content,
+        SYSTEM_LOCK_START,
+        SYSTEM_LOCK_END,
+        generate_system_lock_properties_markdown(),
+    )
     env_doc.write_text(env_content, encoding="utf-8")
 
     pipeline_doc = repo_root / "docs" / "pipeline" / "index.md"
@@ -739,6 +1023,15 @@ def main() -> None:
         generate_stage_kinds_markdown(),
     )
     pipeline_doc.write_text(pipeline_content, encoding="utf-8")
+
+    keys_doc = repo_root / "docs" / "calkit-yaml.md"
+    keys_content = _replace_marked_block(
+        keys_doc.read_text(encoding="utf-8"),
+        KEYS_START,
+        KEYS_END,
+        generate_top_level_keys_markdown(),
+    )
+    keys_doc.write_text(keys_content, encoding="utf-8")
 
 
 if __name__ == "__main__":

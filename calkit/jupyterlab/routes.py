@@ -94,7 +94,7 @@ class ProjectRouteHandler(APIHandler):
                 json.dumps({"error": "Request body must be valid JSON"})
             )
             return
-        ck_info = calkit.load_calkit_info(process_includes=False)
+        ck_info = calkit.load_calkit_info()
         # Update top-level fields from body
         for field in ["name", "title", "description", "git_repo_url", "owner"]:
             if field in body:

@@ -275,3 +275,41 @@ def test_check_system_deps_setup_kind(tmp_dir):
     ck_info["dependencies"][1]["check_command"] = "false"
     with pytest.raises(ValueError, match="auth-thing"):
         calkit.check_system_deps(ck_info=ck_info, interactive=False)
+
+
+def test_resolve_env_var_deps(tmp_dir, monkeypatch):
+    from calkit.dependencies import resolve_env_var_deps
+
+    ck_info = {
+        "dependencies": [
+            {"kind": "env-var", "name": "CK_A"},
+            {"kind": "env-var", "name": "CK_B", "default": "fallback"},
+            "git",
+        ]
+    }
+    monkeypatch.delenv("CK_A", raising=False)
+    monkeypatch.delenv("CK_B", raising=False)
+    # Nobody to answer: report what's missing rather than prompting into a
+    # void, so a caller can decide whether that's fatal
+    assert resolve_env_var_deps(ck_info, interactive=False) == ["CK_A", "CK_B"]
+    # On a terminal, ask. A declared default is offered, and an empty answer
+    # takes it.
+    answers = iter(["from-user", ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    assert resolve_env_var_deps(ck_info, interactive=True) == []
+    assert os.environ["CK_A"] == "from-user"
+    assert os.environ["CK_B"] == "fallback"
+    # Stored, so the question isn't asked twice
+    with open(".env") as f:
+        stored = f.read()
+    assert "CK_A" in stored and "CK_B" in stored
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("asked"))
+    assert resolve_env_var_deps(ck_info, interactive=True) == []
+    # Declining leaves it missing rather than storing an empty value
+    monkeypatch.delenv("CK_A", raising=False)
+
+    def eof(*a):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    assert resolve_env_var_deps(ck_info, interactive=True) == ["CK_A"]

@@ -85,9 +85,20 @@ export interface CalkitInfo {
   results?: ArtifactEntry[];
   publications?: ArtifactEntry[];
   presentations?: ArtifactEntry[];
+  apps?: Record<string, AppEntry>;
   pipeline?: {
     stages?: Record<string, PipelineStage>;
   };
+}
+
+// An app in the project's ``apps`` mapping. ``stage`` is what ties it back
+// to the notebook or script that builds it.
+export interface AppEntry {
+  kind?: string;
+  path?: string;
+  title?: string;
+  description?: string;
+  stage?: string;
 }
 
 export interface EnvDescription {

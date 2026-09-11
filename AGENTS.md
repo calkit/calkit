@@ -37,6 +37,10 @@ breaks rendering.
 
 Agents should never make commits to Git.
 
+Tests belong in the test module named after the module the exercised code
+lives in, e.g., tests for `calkit/cli/new.py` go in
+`calkit/tests/cli/test_new.py`. Don't create a new test module for a feature.
+
 Prefer tests that include multiple scenarios to comprehensively test
 a feature in one function over many different test functions.
 

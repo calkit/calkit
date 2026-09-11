@@ -479,6 +479,7 @@ def zip_paths(
     """Create a compressed ZIP from a list of file or directory paths."""
     if overrides is None:
         overrides = {}
+    written = set()
     with zipfile.ZipFile(
         zip_path,
         "w",
@@ -486,23 +487,26 @@ def zip_paths(
     ) as zipf:
         for path in paths:
             if os.path.isdir(path):
-                for root, _, files in os.walk(path):
-                    for filename in files:
-                        fpath = os.path.join(root, filename)
-                        posix_path = Path(fpath).as_posix()
-                        if posix_path in overrides:
-                            zipf.writestr(posix_path, overrides[posix_path])
-                        else:
-                            zipf.write(fpath)
+                fpaths = [
+                    os.path.join(root, filename)
+                    for root, _, files in os.walk(path)
+                    for filename in files
+                ]
             else:
-                posix_path = Path(path).as_posix()
+                fpaths = [path]
+            for fpath in fpaths:
+                posix_path = Path(fpath).as_posix()
+                if posix_path in written:
+                    continue
+                written.add(posix_path)
                 if posix_path in overrides:
                     zipf.writestr(posix_path, overrides[posix_path])
                 else:
-                    zipf.write(path)
-        # Also write any overrides that weren't in the paths list
+                    zipf.write(fpath)
+        # Write any overrides for paths that weren't in the list, e.g., a
+        # pruned dvc.lock in a project that doesn't track one
         for posix_path, content in overrides.items():
-            if posix_path not in paths:
+            if posix_path not in written:
                 zipf.writestr(posix_path, content)
 
 
@@ -715,68 +719,75 @@ def fetch_archived_docker_image(
     return True
 
 
-def prune_for_target(
-    ck_info: dict, target: str
+def prune_for_stage(
+    ck_info: dict, stage_name: str
 ) -> tuple[dict[str, str], list[str]]:
-    """Prune ck_info and determine needed files for a target.
+    """Prune a project down to what's needed to reproduce one stage.
 
-    Returns (overrides, needed_files) where overrides is a mapping of file
-    paths to their rewritten contents (calkit.yaml, dvc.yaml, dvc.lock) and
-    needed_files is a list of POSIX paths to include in the release.
+    Returns ``(overrides, paths)``, where ``paths`` are the files to put in
+    the release archive and ``overrides`` maps a path to replacement content
+    for the project files that describe the pipeline, since those need their
+    dropped stages removed rather than being copied verbatim.
     """
-    import os
-    from pathlib import Path
+    import io
 
     import calkit.pipeline
 
-    required_stages = calkit.pipeline.get_upstream_stages(target)
-    overrides = {}
+    required_stages = calkit.pipeline.get_upstream_stages(stage_name)
 
-    # Prune ck_info
-    pipeline = ck_info.get("pipeline", {})
-    stages = pipeline.get("stages", {})
-    pruned_stages = {
-        k: v
-        for k, v in stages.items()
-        if k in required_stages or (k.split("@")[0] in required_stages)
-    }
+    def is_required(name: str) -> bool:
+        # Foreach/matrix stages are keyed by base name in calkit.yaml but
+        # generated as "stage@item" in dvc.yaml and dvc.lock
+        return name in required_stages or name.split("@")[0] in required_stages
+
+    # Drop the stages we don't need, along with any environment that only
+    # those stages used
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    kept_stages = {k: v for k, v in stages.items() if is_required(k)}
     if "pipeline" in ck_info:
-        ck_info["pipeline"]["stages"] = pruned_stages
-
-    used_envs = {v.get("environment") for v in pruned_stages.values()}
+        ck_info["pipeline"]["stages"] = kept_stages
+    used_envs = {
+        v.get("environment")
+        for v in kept_stages.values()
+        if isinstance(v, dict)
+    }
+    all_envs = ck_info.get("environments") or {}
+    kept_envs = {k: v for k, v in all_envs.items() if k in used_envs}
     if "environments" in ck_info:
-        ck_info["environments"] = {
-            k: v for k, v in ck_info["environments"].items() if k in used_envs
-        }
-
-    import io
-
+        ck_info["environments"] = kept_envs
+    overrides = {}
     buf = io.StringIO()
     calkit.ryaml.dump(ck_info, buf)
     overrides["calkit.yaml"] = buf.getvalue()
-
-    dvc_yaml = {"stages": calkit.pipeline.to_dvc(ck_info=ck_info)}
-    buf2 = io.StringIO()
-    calkit.ryaml.dump(dvc_yaml, buf2)
-    overrides["dvc.yaml"] = buf2.getvalue()
-
-    # Prune dvc.lock
-    if os.path.exists("dvc.lock"):
+    # Regenerate dvc.yaml from the pruned project so the release ships a
+    # pipeline matching its calkit.yaml
+    buf = io.StringIO()
+    calkit.ryaml.dump({"stages": calkit.pipeline.to_dvc(ck_info=ck_info)}, buf)
+    overrides["dvc.yaml"] = buf.getvalue()
+    # Prune dvc.lock to match, so the released pipeline is already
+    # up-to-date and `calkit run` in the archive is a no-op
+    dir_md5s = set()
+    if os.path.isfile("dvc.lock"):
         with open("dvc.lock") as f:
             dvc_lock = calkit.ryaml.load(f)
         if isinstance(dvc_lock, dict) and "stages" in dvc_lock:
             dvc_lock["stages"] = {
-                k: v
-                for k, v in dvc_lock["stages"].items()
-                if k in required_stages or (k.split("@")[0] in required_stages)
+                k: v for k, v in dvc_lock["stages"].items() if is_required(k)
             }
-            buf3 = io.StringIO()
-            calkit.ryaml.dump(dvc_lock, buf3)
-            overrides["dvc.lock"] = buf3.getvalue()
-
-    # Determine needed files
-    dvc_repo = calkit.dvc.get_dvc_repo()
-    needed_files = {
+            for stage in dvc_lock["stages"].values():
+                for key in ["deps", "outs"]:
+                    for item in stage.get(key) or []:
+                        md5 = (
+                            item.get("md5") if isinstance(item, dict) else None
+                        )
+                        if md5 and md5.endswith(".dir"):
+                            dir_md5s.add(md5)
+            buf = io.StringIO()
+            calkit.ryaml.dump(dvc_lock, buf)
+            overrides["dvc.lock"] = buf.getvalue()
+    # Work out which files the kept stages actually touch, on top of the
+    # project-level files any release needs to stand on its own
+    needed = {
         "calkit.yaml",
         "dvc.yaml",
         "dvc.lock",
@@ -784,42 +795,45 @@ def prune_for_target(
         "CITATION.cff",
         "LICENSE",
         ".gitignore",
+        ".dvcignore",
+        ".dvc",
+        ".calkit",
     }
-    for s in dvc_repo.index.stages:
-        name = getattr(s, "name", None)
-        if name in required_stages or (
-            name and name.split("@")[0] in required_stages
-        ):
-            for dep in s.deps:
-                try:
-                    needed_files.add(
-                        Path(dep.fs_path)
-                        .relative_to(dvc_repo.root_dir)
-                        .as_posix()
-                    )
-                except ValueError:
-                    pass
-            for out in s.outs:
-                try:
-                    needed_files.add(
-                        Path(out.fs_path)
-                        .relative_to(dvc_repo.root_dir)
-                        .as_posix()
-                    )
-                except ValueError:
-                    pass
-
-    # Filter ls_files based on needed_files
-    all_paths = ls_files()
-    pruned_paths = []
-    for p in all_paths:
+    for env in kept_envs.values():
+        env_path = env.get("path") if isinstance(env, dict) else None
+        if env_path:
+            needed.add(Path(env_path).as_posix())
+    dvc_repo = calkit.dvc.get_dvc_repo()
+    root = dvc_repo.root_dir
+    for stage in dvc_repo.index.stages:
+        name = getattr(stage, "name", None)
+        if not name or not is_required(name):
+            continue
+        for item in list(stage.deps) + list(stage.outs):
+            try:
+                needed.add(Path(item.fs_path).relative_to(root).as_posix())
+            except ValueError:
+                # Outside the repo, so it can't go in the archive anyway
+                pass
+    # The cache is shared across the whole project, so keep only the objects
+    # backing the files we're shipping; without them DVC can't restore the
+    # outputs on the other end
+    cache_md5s = set(dir_md5s)
+    for dvc_file in calkit.dvc.list_files():
+        fpath = Path(dvc_file["path"]).as_posix()
+        if any(fpath == n or fpath.startswith(n + "/") for n in needed):
+            if dvc_file.get("md5"):
+                cache_md5s.add(dvc_file["md5"])
+    cache_paths = {
+        f".dvc/cache/files/md5/{md5[:2]}/{md5[2:]}" for md5 in cache_md5s
+    }
+    cache_prefix = ".dvc/cache/"
+    paths = []
+    for p in ls_files():
         p_posix = Path(p).as_posix()
-        is_needed = False
-        for needed in needed_files:
-            if p_posix == needed or p_posix.startswith(needed + "/"):
-                is_needed = True
-                break
-        if is_needed:
-            pruned_paths.append(p)
-
-    return overrides, pruned_paths
+        if p_posix.startswith(cache_prefix):
+            if p_posix in cache_paths:
+                paths.append(p)
+        elif any(p_posix == n or p_posix.startswith(n + "/") for n in needed):
+            paths.append(p)
+    return overrides, paths

@@ -3434,16 +3434,18 @@ def new_release(
         str | None,
         typer.Option("--date", help="Release date. Will default to today."),
     ] = None,
-    target: Annotated[
-        str | None,
+    include_pipeline: Annotated[
+        bool,
         typer.Option(
-            "--target",
+            "--pipeline",
             help=(
-                "A pipeline target to release. If specified, only the target "
-                "and its dependencies will be included in the release."
+                "Include everything needed to reproduce the released path, "
+                "i.e., the pipeline, its lock file, and the stages, inputs, "
+                "and environments the path depends on. Stages unrelated to "
+                "the path are left out."
             ),
         ),
-    ] = None,
+    ] = False,
     no_docker_images: Annotated[
         bool,
         typer.Option(
@@ -3599,10 +3601,24 @@ def new_release(
     # that produces the released artifact when releasing a single path.
     typer.echo("Checking pipeline is up-to-date for release")
     targets = None
+    # The stage that builds the released path, whose upstream stages define
+    # what a --pipeline release carries
+    pipeline_stage = ""
     if path != ".":
         stage_name = calkit.pipeline.get_stage_for_output(path, ck_info)
-        if stage_name is not None:
+        if stage_name is None:
+            if include_pipeline:
+                raise_error(
+                    f"No pipeline stage produces '{path}', "
+                    "so there is no pipeline to release along with it"
+                )
+        else:
             targets = [stage_name]
+            pipeline_stage = stage_name
+    elif include_pipeline:
+        # A project release carries the whole pipeline already
+        typer.echo("Project releases already include the pipeline")
+        include_pipeline = False
     status = calkit.pipeline.get_status(
         ck_info=ck_info,
         targets=targets,
@@ -3646,9 +3662,15 @@ def new_release(
             stored_filename = f"{project_name}-{name}.zip"
             is_zip = True
         elif os.path.isfile(path):
-            _, ext = os.path.splitext(os.path.basename(path))
-            stored_filename = f"{project_name}-{name}{ext}"
-            is_zip = False
+            # Releasing the pipeline along with the artifact means shipping
+            # more than one file, so the artifact gets zipped up with it
+            if include_pipeline:
+                stored_filename = f"{project_name}-{name}.zip"
+                is_zip = True
+            else:
+                _, ext = os.path.splitext(os.path.basename(path))
+                stored_filename = f"{project_name}-{name}{ext}"
+                is_zip = False
         else:
             raise_error(f"Release path '{path}' does not exist")
         stored_path = os.path.join(release_dir, stored_filename)
@@ -3658,31 +3680,35 @@ def new_release(
             typer.echo(f"Would {action} {path} to {stored_path_posix}")
         else:
             os.makedirs(release_dir, exist_ok=True)
-            overrides = {}
-            if target:
+            overrides: dict[str, str] = {}
+            if include_pipeline:
+                typer.echo(f"Pruning project to what builds {path}")
                 try:
-                    overrides, paths = calkit.releases.prune_for_target(
-                        ck_info, target
+                    overrides, paths = calkit.releases.prune_for_stage(
+                        ck_info, pipeline_stage
                     )
                 except Exception as e:
-                    raise_error(f"Failed to prune for target '{target}': {e}")
-                if is_zip and path != ".":
-                    paths = [
-                        path
-                    ]  # Re-override if releasing a specific directory
-            else:
-                if is_zip:
-                    paths = (
-                        calkit.releases.ls_files() if path == "." else [path]
+                    raise_error(
+                        f"Failed to prune project for stage "
+                        f"'{pipeline_stage}': {e}"
                     )
-                else:
-                    paths = []
-
+            elif is_zip:
+                paths = calkit.releases.ls_files() if path == "." else [path]
+            else:
+                paths = []
             if is_zip:
                 typer.echo(f"Archiving {path} to {stored_path_posix}")
                 calkit.releases.zip_paths(
                     stored_path, paths, overrides=overrides
                 )
+                if include_pipeline:
+                    typer.echo("Checking extracted release archive")
+                    try:
+                        calkit.releases.check_project_release_archive(
+                            stored_path, verbose=verbose
+                        )
+                    except Exception as e:
+                        raise_error(str(e))
             else:
                 typer.echo(f"Copying {path} to {stored_path_posix}")
                 shutil.copy2(path, stored_path)
@@ -3711,20 +3737,9 @@ def new_release(
             if release_kind is None:
                 release_kind = "project"
             zip_path = release_files_dir + "/archive.zip"
-
-            overrides = {}
-            if target:
-                try:
-                    overrides, all_paths = calkit.releases.prune_for_target(
-                        ck_info, target
-                    )
-                except Exception as e:
-                    raise_error(f"Failed to prune for target '{target}': {e}")
-            else:
-                all_paths = calkit.releases.ls_files()
-
+            all_paths = calkit.releases.ls_files()
             typer.echo(f"Adding files to {zip_path}")
-            calkit.releases.zip_paths(zip_path, all_paths, overrides=overrides)
+            calkit.releases.zip_paths(zip_path, all_paths)
             typer.echo("Checking extracted project release archive")
             try:
                 calkit.releases.check_project_release_archive(
@@ -3766,9 +3781,37 @@ def new_release(
                 )
             if title is None:
                 raise_error(f"{release_kind} at {path} has no title")
+            # Ship the artifact's provenance beside it: the stages that
+            # build it, their inputs and environments, and a pipeline and
+            # lock file pruned to match
+            if include_pipeline:
+                zip_path = release_files_dir + "/archive.zip"
+                typer.echo(f"Pruning project to what builds {path}")
+                try:
+                    overrides, all_paths = calkit.releases.prune_for_stage(
+                        ck_info, pipeline_stage
+                    )
+                except Exception as e:
+                    raise_error(
+                        f"Failed to prune project for stage "
+                        f"'{pipeline_stage}': {e}"
+                    )
+                typer.echo(f"Adding files to {zip_path}")
+                calkit.releases.zip_paths(
+                    zip_path, all_paths, overrides=overrides
+                )
+                typer.echo("Checking extracted project release archive")
+                try:
+                    calkit.releases.check_project_release_archive(
+                        zip_path, verbose=verbose
+                    )
+                except Exception as e:
+                    raise_error(str(e))
         # Save a metadata file with each DVC file's MD5 checksum
         dvc_md5s = calkit.releases.make_dvc_md5s(
-            zipfile="archive.zip" if path == "." else None,
+            zipfile=(
+                "archive.zip" if path == "." or include_pipeline else None
+            ),
             paths=None if path == "." else [path],
         )
         dvc_md5s_path = release_dir + "/dvc-md5s.yaml"
@@ -3780,7 +3823,7 @@ def new_release(
         # Archive the project's Docker images, so reproducing it doesn't
         # depend on a registry keeping them around, and leave breadcrumbs
         # behind so the environment check can fetch them back
-        if path == "." and not no_docker_images:
+        if (path == "." or include_pipeline) and not no_docker_images:
             typer.echo("Archiving Docker images")
             docker_images = calkit.releases.save_docker_images(
                 release_files_dir
@@ -4156,6 +4199,7 @@ def new_release(
         description=release_description,
         internal=internal_release,
         stored_path=stored_path_posix,
+        includes_pipeline=include_pipeline,
     ).model_dump()
     releases[name] = release
     ck_info["releases"] = releases

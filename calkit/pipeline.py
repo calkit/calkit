@@ -2331,33 +2331,21 @@ def translate_run_targets(
 
 
 def get_upstream_stages(target: str, wdir: str | None = None) -> set[str]:
-    """Get all upstream stage names for a given target stage using the DVC graph."""
-    import networkx as nx
+    """Get a stage's name plus the names of all stages it depends on.
 
+    DVC already knows how to walk its own graph, including foreach/matrix
+    groups and stages defined in subdirectories, so we let it collect the
+    target with its dependencies rather than reimplementing the traversal.
+    Names of generated foreach stages come back as ``stage@item``, and both
+    ``calkit.yaml`` and ``dvc.yaml`` key off the base name, so we keep both.
+    """
     import calkit.dvc
 
     repo = calkit.dvc.get_dvc_repo(wdir)
-    target_node = None
-    for s in repo.index.stages:
-        name = getattr(s, "name", None)
-        if (
-            name == target
-            or name == target + "@"
-            or (name and name.startswith(target + "@"))
-        ):
-            target_node = s
-            break
-
-    if target_node is None:
-        return set()
-
-    upstreams = nx.descendants(repo.index.graph, target_node)
-    result = {target}
-    for u in upstreams:
-        name = getattr(u, "name", None)
+    names = set()
+    for stage in repo.stage.collect(target, with_deps=True):
+        name = getattr(stage, "name", None)
         if name:
-            # If it's a matrix item like "stage@a", also include the base name "stage"
-            base_name = name.split("@")[0]
-            result.add(name)
-            result.add(base_name)
-    return result
+            names.add(name)
+            names.add(name.split("@")[0])
+    return names

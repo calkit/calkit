@@ -27,7 +27,7 @@ import {
   createFileRoute,
   useSearch,
 } from "@tanstack/react-router"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FaCheck, FaPlus, FaRegSquare } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
@@ -40,8 +40,7 @@ import FileEditorModal from "../../../../../components/Files/FileEditorModal"
 import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
-import EditQuestion from "../../../../../components/Projects/EditQuestion"
-import QuestionModal, {
+import {
   isEvidenceMissing,
   isEvidenceStale,
 } from "../../../../../components/Projects/QuestionModal"
@@ -70,11 +69,9 @@ export const Route = createFileRoute(
       .object({
         // Whole-project "New release" modal open state, so a link reopens it.
         new_release: z.boolean().optional(),
-        // Number of the question whose edit modal is open, so a link reopens it.
+        // Questions have their own URLs; these are kept so links made before
+        // they did still land on the right one, and are forwarded on arrival.
         edit_question: z.number().optional(),
-        // Number of the question whose detail modal is open, and the index of
-        // the evidence item open within it, so a link reproduces exactly what
-        // is on screen and the back button steps out of it.
         question: z.number().optional(),
         evidence: z.number().optional(),
         // LaTeX editor open state (from a showcase publication), so a link
@@ -191,32 +188,36 @@ function ProjectView() {
     navigate({
       search: (prev) => ({ ...prev, new_release: open || undefined }),
     })
-  // Which question's edit modal is open also lives in the URL.
-  const setEditQuestion = (number?: number) =>
-    navigate({
-      search: (prev) => ({ ...prev, edit_question: number }),
-    })
-  const editingQuestion =
-    questionsRequest.data?.find((q) => q.number === editQuestionNumber) ?? null
-  // Which question's detail modal is open, and which of its evidence items,
-  // both live in the URL. Closing the question drops the evidence with it, so
-  // a stale index can't outlive the question it indexed into.
   const questions = questionsRequest.data ?? []
-  const openQuestion =
-    questions.find((q) => q.number === openQuestionNumber) ?? null
-  const setOpenQuestion = (number?: number) =>
+  // A question has its own URL now. Links made before it did -- a comment
+  // notification, a bookmark -- arrive here with the number in the query,
+  // so send them on rather than dropping them.
+  const legacyQuestion = openQuestionNumber ?? editQuestionNumber
+  useEffect(() => {
+    if (legacyQuestion === undefined) {
+      return
+    }
     navigate({
-      search: (prev) => ({ ...prev, question: number, evidence: undefined }),
+      to: "/$accountName/$projectName/questions/$questionNumber",
+      params: {
+        accountName,
+        projectName,
+        questionNumber: String(legacyQuestion),
+      },
+      search: {
+        evidence: openEvidenceIndex,
+        edit: editQuestionNumber !== undefined || undefined,
+      },
+      replace: true,
     })
-  const setOpenEvidence = (index?: number) =>
-    navigate({ search: (prev) => ({ ...prev, evidence: index }) })
-  // Stepping between questions works off list order rather than number, so a
-  // project whose questions aren't numbered contiguously still walks them all.
-  const openQuestionIdx = openQuestion ? questions.indexOf(openQuestion) : -1
-  const stepQuestion = (delta: number) => {
-    const next = questions[openQuestionIdx + delta]
-    return next ? () => setOpenQuestion(next.number) : undefined
-  }
+  }, [
+    legacyQuestion,
+    editQuestionNumber,
+    openEvidenceIndex,
+    accountName,
+    projectName,
+    navigate,
+  ])
 
   return (
     <>
@@ -377,7 +378,24 @@ function ProjectView() {
                       // reads as a link to the question.
                       cursor="pointer"
                       sx={{ "& p": { my: 0 } }}
-                      onClick={() => setOpenQuestion(question.number)}
+                      onClick={() =>
+                        navigate({
+                          to: "/$accountName/$projectName/questions/$questionNumber",
+                          params: {
+                            accountName,
+                            projectName,
+                            questionNumber: String(question.number),
+                          },
+                          // Keeps the ref being browsed; drops what was only
+                          // ever here to forward an old link.
+                          search: (prev) => ({
+                            ...prev,
+                            question: undefined,
+                            evidence: undefined,
+                            edit_question: undefined,
+                          }),
+                        })
+                      }
                     >
                       <Box
                         minW={0}
@@ -402,37 +420,6 @@ function ProjectView() {
                 No research questions defined yet.
               </Text>
             )}
-            <QuestionModal
-              question={openQuestion}
-              // Only open once the target question has resolved, so a
-              // deep-linked ?question= can't render an empty modal.
-              isOpen={openQuestion !== null}
-              onClose={() => setOpenQuestion(undefined)}
-              accountName={accountName}
-              projectName={projectName}
-              gitRef={ref}
-              evidenceIndex={openEvidenceIndex}
-              onEvidenceIndexChange={setOpenEvidence}
-              // Stepping is off while the editor is open on top: the arrows
-              // it reads are the same ones the editor's own fields see.
-              onPrevQuestion={editingQuestion ? undefined : stepQuestion(-1)}
-              onNextQuestion={editingQuestion ? undefined : stepQuestion(1)}
-              // The editor opens over the detail view rather than replacing
-              // it, so cancelling lands back on the question.
-              onEdit={
-                userHasWriteAccess && openQuestion
-                  ? () => setEditQuestion(openQuestion.number)
-                  : undefined
-              }
-            />
-            <EditQuestion
-              question={editingQuestion}
-              // Only open once the target question has actually resolved, so a
-              // deep-linked ?edit_question= can't render a null-question modal.
-              isOpen={editingQuestion !== null}
-              onClose={() => setEditQuestion(undefined)}
-              gitRef={ref}
-            />
           </Box>
           {/* To-dos (issues) */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>

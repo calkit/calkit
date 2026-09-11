@@ -91,9 +91,31 @@ const pre = ({ children, ...props }: any) => {
 
 const code = ({ insidePre = false, ...props }: codeProps) => {
   if (insidePre) {
-    return <Code my={2} whiteSpace={"pre"} display={"block"} p={2} {...props} />
+    // A block keeps its own line breaks; the <pre> around it scrolls.
+    return (
+      <Code
+        my={2}
+        whiteSpace={"pre"}
+        display={"block"}
+        p={2}
+        fontSize="0.9em"
+        {...props}
+      />
+    )
   }
-  return <Code my={0} whiteSpace={"pre"} px={1} {...props} />
+  // Wraps rather than running out of its container, and sized relative to
+  // the text it sits in -- Chakra's own size is absolute, which reads as
+  // much bigger than the words around it wherever that text is small.
+  return (
+    <Code
+      my={0}
+      whiteSpace={"pre-wrap"}
+      wordBreak="break-word"
+      px={1}
+      fontSize="0.9em"
+      {...props}
+    />
+  )
 }
 
 const Markdown = ({

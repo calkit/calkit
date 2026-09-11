@@ -2937,7 +2937,7 @@ Check things.
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
-| [`questions`](#subcommand-check-questions)                  | Check that answered questions are consistent with their evidence.                                            |
+| [`questions`](#subcommand-check-questions)                  | Check that answered questions are backed by current evidence.                                                |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3261,9 +3261,11 @@ Options:
 
 #### `calkit check questions`
 
-Check that answered questions are consistent with their evidence.
+Check that answered questions are backed by current evidence.
 
-A question is stale if any of its evidence changed after the commit that last edited the question, in Git history for Git-tracked outputs or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value keys must resolve, every placeholder in the text must render, and a publication label must still be present in the LaTeX source. Exits with an error if any answered question is stale or broken.
+Reports, worst first: evidence that isn't there (never run, never pushed, or pinned to a Git ref that doesn't exist); broken references (a key that doesn't resolve, a placeholder that names no evidence, a label missing from the LaTeX); evidence the pipeline would rebuild; and evidence from a frozen stage, or downstream of one, which nothing will ever report out of date unless the citation pins a git_ref.
+
+Evidence pinned with a git_ref is checked at that ref rather than in the working tree. Exits with an error if any answered question is missing evidence, broken, or out of date with the pipeline.
 
 Usage:
 
@@ -3273,11 +3275,12 @@ calkit check questions [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                         |
-| ----------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------- |
-| `--wdir`          | str     | no       | .       | Project working directory.                                                          |
-| `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention. |
-| `--json`          | boolean | no       | False   | Output the report as JSON.                                                          |
+| Option            | Type    | Required | Default | Description                                                                           |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------- |
+| `--wdir`          | str     | no       | .       | Project working directory.                                                            |
+| `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention.   |
+| `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
+| `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
 
 <a id="command-group-latex-tex"></a>
 

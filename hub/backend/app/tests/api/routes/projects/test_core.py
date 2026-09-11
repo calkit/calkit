@@ -231,9 +231,9 @@ def test_comment_artifact_route_and_label() -> None:
         comment_artifact_route,
     )
 
-    # A question is identified by number and lives on the project home page,
-    # where a link has to reopen its modal; everything else is a path.
-    assert comment_artifact_route("question", "3") == "?question=3"
+    # A question is identified by number and has a page of its own;
+    # everything else is a path on a section page.
+    assert comment_artifact_route("question", "3") == "questions/3"
     assert comment_artifact_label("question", "3") == "question 3"
     assert comment_artifact_route("release", "v1 0") == "releases/v1%200"
     assert (

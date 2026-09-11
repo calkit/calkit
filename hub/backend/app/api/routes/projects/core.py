@@ -3848,10 +3848,9 @@ def comment_artifact_route(
     encoded = quote(artifact_path, safe="")
     if artifact_type == "release":
         return f"releases/{encoded}"
-    # Questions are listed on the project home page and open in a modal
-    # there, which is the same thing a link to one has to do.
+    # A question has a page of its own, addressed by number.
     if artifact_type == "question":
-        return f"?question={encoded}"
+        return f"questions/{encoded}"
     route_map = {
         "figure": "figures",
         "publication": "publications",

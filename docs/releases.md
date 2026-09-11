@@ -173,6 +173,38 @@ calkit new release \
     path/to/the/publication.pdf
 ```
 
+### Including what reproduces the artifact
+
+By default this releases the artifact on its own.
+In a project that builds more than one thing,
+you may want to ship a single publication together with everything
+needed to rebuild it,
+and nothing else.
+Adding the `--pipeline` option does that:
+
+```sh
+calkit new release \
+    --name my-publication-v1 \
+    --kind publication \
+    --pipeline \
+    path/to/the/publication.pdf
+```
+
+Calkit finds the pipeline stage that produces the path,
+walks back through the stages it depends on,
+and archives the artifact alongside those stages,
+their inputs and environments,
+and a `calkit.yaml`, `dvc.yaml`, and `dvc.lock` pruned to match.
+Stages that have nothing to do with the artifact are left out.
+Before the release goes out,
+the archive is extracted and run to check it reproduces on its own.
+
+<!-- prettier-ignore -->
+!!! note
+
+    The pipeline must be up-to-date before releasing,
+    since the release records the state that produced the artifact.
+
 ## Releasing to CaltechDATA
 
 [CaltechDATA](https://data.caltech.edu/)

@@ -65,19 +65,37 @@ const evidenceRefOf = (evidence: QuestionEvidence, gitRef?: string) =>
 
 /** Whether what an evidence item cites can be taken at face value.
  *
- * An answer resting on an artifact the pipeline considers out of date is
- * worth flagging: the code or data behind it has moved since it was made,
- * so what the reader is looking at isn't what the project would produce now.
- * The backend works out which of the two ways that can happen applies.
+ * An answer resting on an artifact that isn't there, or that the pipeline
+ * considers out of date, is worth flagging: what the reader is looking at
+ * isn't what the project would produce now, if it's there to look at at
+ * all. The backend works out which of the ways that can happen applies.
  */
 export const isEvidenceStale = (evidence: QuestionEvidence) =>
   evidence.stale_reason != null
 
-const STALE_TIPS: Record<string, string> = {
-  pipeline:
-    "This is out of date with respect to the pipeline. Re-run the pipeline to rebuild it.",
-  frozen:
-    "This comes from a frozen stage, or one downstream of a frozen stage, so the pipeline will never report it out of date no matter how far its inputs have moved. Cite it at a Git ref to pin which version this refers to.",
+/** Whether the cited artifact resolves to nothing at all. */
+export const isEvidenceMissing = (evidence: QuestionEvidence) =>
+  evidence.stale_reason === "missing"
+
+const STALE_MARKS: Record<
+  string,
+  { badge: string; colorScheme: string; tip: string }
+> = {
+  missing: {
+    badge: "Missing",
+    colorScheme: "red",
+    tip: "Nothing was found here. It may never have been pushed, or the Git ref this cites may not exist.",
+  },
+  pipeline: {
+    badge: "Stale",
+    colorScheme: "orange",
+    tip: "This is out of date with respect to the pipeline. Re-run the pipeline to rebuild it.",
+  },
+  frozen: {
+    badge: "Frozen",
+    colorScheme: "orange",
+    tip: "This comes from a frozen stage, or one downstream of a frozen stage, so the pipeline will never report it out of date no matter how far its inputs have moved. Cite it at a Git ref to pin which version this refers to.",
+  },
 }
 
 /** The page an evidence item has its own full view on. */
@@ -105,11 +123,11 @@ const evidenceTitle = (evidence: QuestionEvidence) => {
 }
 
 function StaleBadge({ evidence }: { evidence: QuestionEvidence }) {
-  const frozen = evidence.stale_reason === "frozen"
+  const mark = STALE_MARKS[evidence.stale_reason ?? "pipeline"]
   return (
-    <Tooltip label={STALE_TIPS[evidence.stale_reason ?? "pipeline"]}>
-      <Badge colorScheme="orange" fontSize="2xs" flexShrink={0}>
-        {frozen ? "Frozen" : "Stale"}
+    <Tooltip label={mark.tip}>
+      <Badge colorScheme={mark.colorScheme} fontSize="2xs" flexShrink={0}>
+        {mark.badge}
       </Badge>
     </Tooltip>
   )
@@ -136,6 +154,7 @@ function EvidenceCard({
 }) {
   const defaultBorderColor = useColorModeValue("gray.200", "gray.600")
   const staleBorderColor = useColorModeValue("orange.400", "orange.300")
+  const missingBorderColor = useColorModeValue("red.400", "red.300")
   const bg = useColorModeValue("white", "gray.800")
   const subtleColor = useColorModeValue("gray.600", "gray.400")
   const stale = isEvidenceStale(evidence)
@@ -273,7 +292,11 @@ function EvidenceCard({
     // since the whole card is what the answer is leaning on. Color rather
     // than a thicker border, so nothing shifts when a card goes stale.
     borderWidth: 1,
-    borderColor: stale ? staleBorderColor : defaultBorderColor,
+    borderColor: isEvidenceMissing(evidence)
+      ? missingBorderColor
+      : stale
+        ? staleBorderColor
+        : defaultBorderColor,
     borderRadius: "md",
     overflow: "hidden",
     bg,
@@ -289,6 +312,7 @@ function EvidenceCard({
       as="button"
       type="button"
       onClick={onOpen}
+      cursor="pointer"
       _hover={{ shadow: "md" }}
       {...cardProps}
     >
@@ -610,6 +634,9 @@ function QuestionModal({
       size="6xl"
       scrollBehavior="inside"
       isCentered
+      // See EditQuestion: it opens over this one, and both have to agree on
+      // the scrollbar or the page jumps as the second lock goes on and off.
+      preserveScrollBarGap
     >
       <ModalOverlay />
       {/* Fixed height so stepping between evidence items doesn't resize the

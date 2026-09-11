@@ -6978,7 +6978,7 @@ export const QuestionEvidenceSchema = {
       anyOf: [
         {
           type: "string",
-          enum: ["pipeline", "frozen"],
+          enum: ["missing", "pipeline", "frozen"],
         },
         {
           type: "null",

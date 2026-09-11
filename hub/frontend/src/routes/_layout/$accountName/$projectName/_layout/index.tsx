@@ -28,7 +28,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import { useRef, useState } from "react"
-import { FaPlus } from "react-icons/fa"
+import { FaCheck, FaPlus, FaRegSquare } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
@@ -42,6 +42,7 @@ import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
 import EditQuestion from "../../../../../components/Projects/EditQuestion"
 import QuestionModal, {
+  isEvidenceMissing,
   isEvidenceStale,
 } from "../../../../../components/Projects/QuestionModal"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
@@ -318,55 +319,83 @@ function ProjectView() {
               <LoadingSpinner height="100px" />
             ) : questions.length ? (
               <Box>
-                {questions.map((question) => (
-                  <Flex key={question.id} align="center">
-                    {/* The whole row opens the question, since the answer and
-                        its evidence are the point of listing it -- editing
-                        included, which is why there's no edit button here. */}
-                    <Box
+                {questions.map((question) => {
+                  // One mark per row, worst first: no answer, then an answer
+                  // with nothing behind it, then evidence that can't be found
+                  // at all, then evidence that has merely drifted --
+                  // staleness that only shows once a question is open is
+                  // staleness nobody sees. All four are icons of the same
+                  // size, so they land on one line down the list.
+                  const mark = !question.answer
+                    ? {
+                        icon: FaRegSquare,
+                        color: "red.400",
+                        label: "Not yet answered",
+                      }
+                    : !question.evidence?.length
+                      ? {
+                          icon: FaRegSquare,
+                          color: "orange.300",
+                          label:
+                            "Answered, but nothing is linked to back it up",
+                        }
+                      : question.evidence.some(isEvidenceMissing)
+                        ? {
+                            icon: FaCheck,
+                            color: "red.400",
+                            label:
+                              "Answered, but some of its evidence can't be found -- it may never have been pushed, or it cites a Git ref that doesn't exist.",
+                          }
+                        : question.evidence.some(isEvidenceStale)
+                          ? {
+                              icon: FaCheck,
+                              color: "orange.300",
+                              label:
+                                "Answered, but some of its evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.",
+                            }
+                          : {
+                              icon: FaCheck,
+                              color: "green.400",
+                              label:
+                                "Answered, and every piece of its evidence is up to date",
+                            }
+                  return (
+                    // The whole row opens the question, mark included, since
+                    // the answer and its evidence are the point of listing it
+                    // -- editing included, which is why there's no edit
+                    // button here.
+                    <Flex
+                      key={question.id}
                       as="button"
                       type="button"
-                      flex="1"
-                      minW={0}
+                      role="group"
+                      align="center"
+                      w="100%"
                       textAlign="left"
                       py={1}
+                      // A <button> doesn't get one on its own, and this one
+                      // reads as a link to the question.
+                      cursor="pointer"
                       sx={{ "& p": { my: 0 } }}
-                      _hover={{ textDecoration: "underline" }}
                       onClick={() => setOpenQuestion(question.number)}
                     >
-                      <Markdown>
-                        {`${question.number}. ${question.question}`}
-                      </Markdown>
-                    </Box>
-                    {/* Dots rather than words: what a reader wants off the
-                        list is which questions still need work, and the
-                        question itself should keep the width. Staleness that
-                        only shows once a question is open is staleness nobody
-                        sees, so it's flagged here too. */}
-                    {!question.answer ? (
-                      <Tooltip label="Not yet answered">
-                        <Box
-                          ml={2}
-                          flexShrink={0}
-                          boxSize="8px"
-                          borderRadius="full"
-                          bg="red.400"
-                        />
+                      <Box
+                        minW={0}
+                        flex="1"
+                        _groupHover={{ textDecoration: "underline" }}
+                      >
+                        <Markdown>
+                          {`${question.number}. ${question.question}`}
+                        </Markdown>
+                      </Box>
+                      <Tooltip label={mark.label}>
+                        <Flex ml={2} flexShrink={0} align="center">
+                          <Icon as={mark.icon} color={mark.color} />
+                        </Flex>
                       </Tooltip>
-                    ) : null}
-                    {question.evidence?.some(isEvidenceStale) ? (
-                      <Tooltip label="Some of this question's evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.">
-                        <Box
-                          ml={2}
-                          flexShrink={0}
-                          boxSize="8px"
-                          borderRadius="full"
-                          bg="yellow.400"
-                        />
-                      </Tooltip>
-                    ) : null}
-                  </Flex>
-                ))}
+                    </Flex>
+                  )
+                })}
               </Box>
             ) : (
               <Text fontSize="sm" color="gray.500">

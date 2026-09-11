@@ -225,6 +225,7 @@ RESULT_EXTS = {
     ".tsv",
     ".yaml",
     ".yml",
+    ".toml",
     ".parquet",
     ".h5",
     ".hdf5",
@@ -2238,10 +2239,10 @@ def _resolve_result_value(
 ) -> str | None:
     """Read a result file and return the value at ``key`` as a string.
 
-    Supports JSON and YAML result files and dot-separated nested keys (e.g.
-    ``metrics.mean``). ``cache`` memoizes parsed files across evidence items,
-    keyed by ref as well as path: two evidence entries can cite one file at
-    two refs, and they are not the same file.
+    Supports JSON, YAML and TOML result files and dot-separated nested keys
+    (e.g. ``metrics.mean``). ``cache`` memoizes parsed files across evidence
+    items, keyed by ref as well as path: two evidence entries can cite one
+    file at two refs, and they are not the same file.
     Returns None if the file or key cannot be resolved.
     """
     cache_key = (ref, path)
@@ -2258,6 +2259,10 @@ def _resolve_result_value(
                     data = json.loads(text)
                 elif lower.endswith((".yaml", ".yml")):
                     data = ryaml.load(text)
+                elif lower.endswith(".toml"):
+                    import tomllib
+
+                    data = tomllib.loads(text)
         except Exception as e:
             logger.warning(f"Failed to read result {path} at {ref}: {e}")
         cache[cache_key] = data if isinstance(data, dict) else None
@@ -2310,6 +2315,23 @@ def _evidence_ref(ev: dict, ref: str | None) -> str | None:
     Its own ``git_ref`` when it names one, otherwise the ref being browsed.
     """
     return _declared_git_ref(ev) or ref
+
+
+def _evidence_missing(item: QuestionEvidence) -> bool:
+    """Whether the citation resolves to anything the reader can look at.
+
+    Matches what the question modal would draw: a figure or publication that
+    didn't resolve, or a cited value that couldn't be read, shows "nothing
+    was found" there, whether the path is gone, the artifact was never
+    pushed, or the ref it names doesn't exist. Keyless result and table
+    evidence is left alone -- its content comes from the listings rather
+    than from here, so not resolving a title says nothing about it.
+    """
+    if item.kind == "figure":
+        return item.figure is None
+    if item.kind == "publication":
+        return item.publication is None
+    return bool(item.key) and item.value is None
 
 
 def _set_evidence_stage(
@@ -2419,6 +2441,10 @@ def _build_question_evidence(
                     cache=result_value_cache,
                 )
         _set_evidence_stage(item, lookups)
+        # Last word: an answer resting on something nobody can see is worse
+        # off than one resting on something merely out of date.
+        if _evidence_missing(item):
+            item.stale_reason = "missing"
         evidence.append(item)
     return evidence
 

@@ -3958,7 +3958,7 @@ export type QuestionEvidence = {
   /**
    * Stale Reason
    */
-  stale_reason?: "pipeline" | "frozen" | null
+  stale_reason?: "missing" | "pipeline" | "frozen" | null
 }
 
 /**

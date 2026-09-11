@@ -1527,7 +1527,18 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
                 dvc_lock=dvc_lock,
                 stage_statuses=stage_statuses,
                 frozen_stages={"plot-frozen"},
-            )
+            ),
+            # The pinned citation resolves at its own ref, where the stage is
+            # just as frozen -- the ref is what settles it, not the status.
+            "v1.0": _EvidenceLookups(
+                figures_by_path={frozen.path: frozen},
+                results_by_path={},
+                tables_by_path={},
+                publications_by_path={},
+                dvc_lock=dvc_lock,
+                stage_statuses=stage_statuses,
+                frozen_stages={"plot-frozen"},
+            ),
         },
         result_value_cache={},
     )
@@ -1542,7 +1553,9 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
     assert evidence[2].stage_status is None
     assert evidence[0].stale_reason is None
     assert evidence[1].stale_reason == "pipeline"
-    assert evidence[2].stale_reason is None
+    # Nothing resolved for the orphan, so it's missing rather than merely
+    # unattributed -- worse news than a stale stage, and it wins.
+    assert evidence[2].stale_reason == "missing"
     assert evidence[3].stale_reason == "frozen"
     assert evidence[4].stale_reason is None
 

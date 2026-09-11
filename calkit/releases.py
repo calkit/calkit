@@ -88,6 +88,27 @@ def create_bibtex(
     )
 
 
+def parse_bibtex(text: str) -> list[dict]:
+    """Parse BibTeX text into a list of entries.
+
+    bibtexparser 2 dropped ``loads`` for ``parse_string`` and returns objects
+    instead of dicts, so normalize whichever version is installed to the
+    shape version 1 produced: a dict of fields per entry, with the citation
+    key under ``ID`` and the entry type under ``ENTRYTYPE``.
+    """
+    import bibtexparser  # type: ignore[import-untyped]
+
+    if hasattr(bibtexparser, "loads"):
+        return list(bibtexparser.loads(text).entries)
+    entries = []
+    for entry in bibtexparser.parse_string(text).entries:
+        fields = {field.key: field.value for field in entry.fields}
+        fields["ID"] = entry.key
+        fields["ENTRYTYPE"] = entry.entry_type
+        entries.append(fields)
+    return entries
+
+
 def _find_bibtex_entry_span(
     text: str, entry_id: str
 ) -> tuple[int, int] | None:

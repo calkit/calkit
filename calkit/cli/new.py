@@ -3533,7 +3533,6 @@ def new_release(
     ] = False,
 ):
     """Create a new release."""
-    import bibtexparser
     import dotenv
 
     import calkit.pipeline
@@ -4265,7 +4264,7 @@ def new_release(
                 record_id=record_id,  # type: ignore
                 service=to,  # type: ignore
             )
-            new_entries = bibtexparser.loads(invenio_bibtex).entries
+            new_entries = calkit.releases.parse_bibtex(invenio_bibtex)
             if not new_entries:
                 raise ValueError("Failed to parse generated BibTeX entry")
             new_entry = new_entries[0]
@@ -4277,9 +4276,9 @@ def new_release(
             replace_ids = []
             if new_doi:
                 try:
-                    existing_entries = bibtexparser.loads(
+                    existing_entries = calkit.releases.parse_bibtex(
                         existing_text
-                    ).entries
+                    )
                 except Exception as e:
                     warn(f"Could not parse existing references to dedupe: {e}")
                     existing_entries = []

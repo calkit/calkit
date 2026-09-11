@@ -5,7 +5,6 @@ import subprocess
 import sys
 import zipfile
 
-import bibtexparser
 import git
 import pytest
 
@@ -18,6 +17,7 @@ from calkit.releases import (
     create_bibtex,
     create_citation_cff,
     ls_files,
+    parse_bibtex,
     read_authors_from_cff,
     set_cff_authors,
     zip_paths,
@@ -143,7 +143,7 @@ def test_create_bibtex():
         doi="10.1234/example",
         record_id="123",
     )
-    entries = bibtexparser.loads(entry).entries
+    entries = parse_bibtex(entry)
     assert len(entries) == 1
     entry = create_bibtex(
         authors=[{"first_name": "A", "last_name": "van der Waals"}],
@@ -152,7 +152,7 @@ def test_create_bibtex():
         doi="10.1234/example",
         record_id="abc-123",
     )
-    entries = bibtexparser.loads(entry).entries
+    entries = parse_bibtex(entry)
     assert len(entries) == 1
     entry = create_bibtex(
         authors=[{"first_name": "A", "last_name": "Smith"}],
@@ -161,8 +161,55 @@ def test_create_bibtex():
         doi=None,
         record_id=None,
     )
-    entries = bibtexparser.loads(entry).entries
+    entries = parse_bibtex(entry)
     assert len(entries) == 1
+
+
+def test_parse_bibtex(monkeypatch):
+    entry = create_bibtex(
+        authors=[{"first_name": "Jane", "last_name": "Doe"}],
+        release_date="2026-06-03",
+        title="New release",
+        doi="10.5281/zenodo.999",
+        record_id="999",
+    )
+    # Whichever version of bibtexparser is installed, entries come back in
+    # the same shape
+    parsed = parse_bibtex(entry)
+    assert len(parsed) == 1
+    assert parsed[0]["ID"] == "Doe2026_999"
+    assert parsed[0]["ENTRYTYPE"] == "misc"
+    assert parsed[0]["doi"] == "10.5281/zenodo.999"
+    assert parsed[0]["title"] == "New release"
+    # Version 2 dropped `loads` in favor of `parse_string` and returns
+    # objects, which is what broke releases before this was normalized
+    import types
+
+    class MockField:
+        def __init__(self, key, value):
+            self.key = key
+            self.value = value
+
+    class MockEntry:
+        key = "Doe2026_999"
+        entry_type = "misc"
+        fields = [
+            MockField("doi", "10.5281/zenodo.999"),
+            MockField("title", "New release"),
+        ]
+
+    v2 = types.ModuleType("bibtexparser")
+    v2.parse_string = lambda text: types.SimpleNamespace(entries=[MockEntry()])
+    monkeypatch.setitem(sys.modules, "bibtexparser", v2)
+    parsed = parse_bibtex(entry)
+    assert parsed == [
+        {
+            "doi": "10.5281/zenodo.999",
+            "title": "New release",
+            "ID": "Doe2026_999",
+            "ENTRYTYPE": "misc",
+        }
+    ]
 
 
 def test_add_bibtex_entry():
@@ -187,7 +234,7 @@ def test_add_bibtex_entry():
     assert appended.startswith(existing)
     assert appended == existing + "\n" + new_entry.strip() + "\n"
     assert appended.count("@misc{Doe2026_999,") == 1
-    assert bibtexparser.loads(appended).entries[0]["doi"] == "10.1/abc"
+    assert parse_bibtex(appended)[0]["doi"] == "10.1/abc"
     # Appending to an empty/nonexistent file yields just the new entry
     from_empty = add_bibtex_entry("", new_entry, replace_ids=[])
     assert from_empty.strip().startswith("@misc{Doe2026_999,")

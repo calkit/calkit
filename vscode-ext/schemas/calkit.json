@@ -6058,6 +6058,11 @@
           "description": "Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to.",
           "title": "Git Rev"
         },
+        "includes_pipeline": {
+          "default": false,
+          "title": "Includes Pipeline",
+          "type": "boolean"
+        },
         "internal": {
           "default": false,
           "title": "Internal",

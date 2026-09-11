@@ -1290,6 +1290,20 @@ def get_default_venv_prefix(envs: dict, path: str, name: str) -> str:
     return Path(base).as_posix()
 
 
+def get_venv_activate_cmd(prefix: str, system: str | None = None) -> str:
+    """Get the shell command that activates the virtualenv at ``prefix``.
+
+    Prefixes are kept POSIX-style, but cmd reads a forward slash as the start
+    of a switch, so it takes ``.calkit/envs/x/.venv`` for a command named
+    ``.calkit``. Hand Windows native separators instead.
+    """
+    if system is None:
+        system = platform.system()
+    if system == "Windows":
+        return prefix.replace("/", "\\") + "\\Scripts\\activate"
+    return f". {prefix}/bin/activate"
+
+
 def env_from_name_or_path(
     name_or_path: str | None = None,
     ck_info: dict | None = None,

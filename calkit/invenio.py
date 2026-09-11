@@ -1,6 +1,7 @@
 """Functionality for working with InvenioRDM instances like Zenodo."""
 
 import os
+import time
 from functools import partial
 from typing import Literal
 
@@ -57,6 +58,24 @@ def get_base_url(service: ServiceName = DEFAULT_SERVICE) -> str:
         raise ValueError(f"Unknown archival service '{service}'")
 
 
+# Pushing a release can mean sending hundreds of megabytes over a slow or
+# distant link, so give a response plenty of time to arrive rather than
+# letting requests wait forever with no timeout at all.
+CONNECT_TIMEOUT = 30
+READ_TIMEOUT = 600
+# Gateways in front of InvenioRDM return these when they're busy, which says
+# nothing about whether the request itself was valid, so it's worth sending
+# again after a pause.
+RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_ATTEMPTS = 4
+
+
+def get_timeout() -> tuple[float, float]:
+    """Get the connect and read timeouts to use for requests."""
+    read = os.getenv("CALKIT_INVENIO_TIMEOUT")
+    return CONNECT_TIMEOUT, float(read) if read else READ_TIMEOUT
+
+
 def _request(
     kind: Literal["get", "post", "put", "patch", "delete"],
     path: str,
@@ -73,15 +92,31 @@ def _request(
         params = {}
     if auth and "access_token" not in params:
         params = params | {"access_token": get_token(service=service)}
+    kwargs.setdefault("timeout", get_timeout())
     func = getattr(requests, kind)
-    resp = func(
-        get_base_url(service=service) + path,
-        params=params,
-        json=json,
-        data=data,
-        headers=headers,
-        **kwargs,
-    )
+    # A POST that timed out may still have been carried out on the far end,
+    # e.g., leaving a draft record behind, so only repeat requests that are
+    # safe to send twice
+    max_attempts = 1 if kind == "post" else MAX_ATTEMPTS
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = func(
+                get_base_url(service=service) + path,
+                params=params,
+                json=json,
+                data=data,
+                headers=headers,
+                **kwargs,
+            )
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt == max_attempts:
+                raise
+            time.sleep(2**attempt)
+            continue
+        if resp.status_code in RETRY_STATUS_CODES and attempt < max_attempts:
+            time.sleep(2**attempt)
+            continue
+        break
     if resp.status_code >= 400:
         msg = f"{resp.status_code}: "
         try:
@@ -92,6 +127,14 @@ def _request(
                 msg += f"\nErrors:\n{resp_json['errors']}"
         except ValueError:
             msg += resp.text
+        if kind == "post" and resp.status_code in RETRY_STATUS_CODES:
+            # The far end may have done the work anyway, and a blind retry
+            # would duplicate it, so say so rather than papering over it
+            msg += (
+                f"\nThis request was not retried automatically, since "
+                f"{service} may have carried it out despite the error. "
+                "Check for a leftover draft record before trying again."
+            )
         raise HTTPError(msg)
     resp.raise_for_status()
     if as_json:

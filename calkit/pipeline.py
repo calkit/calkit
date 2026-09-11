@@ -2328,3 +2328,24 @@ def translate_run_targets(
             else:
                 parent_targets.append(f"{sp}/dvc.yaml")
     return parent_targets, isolated_sp_targets
+
+
+def get_upstream_stages(target: str, wdir: str | None = None) -> set[str]:
+    """Get a stage's name plus the names of all stages it depends on.
+
+    DVC already knows how to walk its own graph, including foreach/matrix
+    groups and stages defined in subdirectories, so we let it collect the
+    target with its dependencies rather than reimplementing the traversal.
+    Names of generated foreach stages come back as ``stage@item``, and both
+    ``calkit.yaml`` and ``dvc.yaml`` key off the base name, so we keep both.
+    """
+    import calkit.dvc
+
+    repo = calkit.dvc.get_dvc_repo(wdir)
+    names = set()
+    for stage in repo.stage.collect(target, with_deps=True):
+        name = getattr(stage, "name", None)
+        if name:
+            names.add(name)
+            names.add(name.split("@")[0])
+    return names

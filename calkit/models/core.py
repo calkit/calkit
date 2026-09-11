@@ -1554,6 +1554,9 @@ class Release(BaseModel):
     # ".calkit/releases/v0/my-project-slides-v0.pdf". Only set for internal
     # releases, which store the artifact in the repo rather than ignoring it.
     stored_path: str | None = None
+    # Whether the release bundles the pipeline and inputs needed to
+    # rebuild its path, rather than just the artifact itself.
+    includes_pipeline: bool = False
 
 
 class StaticHtmlApp(BaseModel):

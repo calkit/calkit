@@ -452,7 +452,8 @@ services:
   # COMPOSE_PROFILES includes 'objects'; either way the app reaches it
   # through OBJECT_STORAGE_ENDPOINT_URL.
   minio:
-    image: minio/minio:RELEASE.2025-05-24T17-08-30Z
+    # Pulled from Quay since MinIO's Docker Hub repo no longer exists
+    image: quay.io/minio/minio:RELEASE.2025-05-24T17-08-30Z
     command: server /data --console-address ":9001"
     restart: always
     profiles:

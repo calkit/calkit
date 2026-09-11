@@ -9,7 +9,7 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { Box } from "@chakra-ui/react"
-import React from "react"
+import React, { useMemo } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
@@ -78,6 +78,14 @@ const BlueLink = (props: any) => {
   return <Link variant="blue" {...props} />
 }
 
+const inlineParagraph = ({ children, ...props }: any) => {
+  return (
+    <Text as="span" my={0} {...props}>
+      {children}
+    </Text>
+  )
+}
+
 // Send prop to children of <pre> to differentiate if they are block code or not
 const pre = ({ children, ...props }: any) => {
   return (
@@ -129,89 +137,91 @@ const Markdown = ({
   const tableHeaderText = useColorModeValue("gray.700", "gray.100")
   const tableRowAltBg = useColorModeValue("blackAlpha.50", "whiteAlpha.50")
 
-  const table = ({ children, ...props }: any) => {
-    return (
-      <Box
-        my={4}
-        overflowX="auto"
-        borderWidth="1px"
-        borderColor={tableBorderColor}
-        borderRadius="md"
-      >
+  // Built once per color scheme rather than per render: the memo below
+  // is only as stable as what goes into it.
+  const tableComponents = useMemo(() => {
+    const table = ({ children, ...props }: any) => {
+      return (
         <Box
-          as="table"
-          width="full"
-          borderCollapse="separate"
-          borderSpacing={0}
-          {...props}
+          my={4}
+          overflowX="auto"
+          borderWidth="1px"
+          borderColor={tableBorderColor}
+          borderRadius="md"
         >
-          {children}
+          <Box
+            as="table"
+            width="full"
+            borderCollapse="separate"
+            borderSpacing={0}
+            {...props}
+          >
+            {children}
+          </Box>
         </Box>
-      </Box>
-    )
-  }
+      )
+    }
 
-  const tr = ({ ...props }: any) => {
-    return <Box as="tr" _even={{ bg: tableRowAltBg }} {...props} />
-  }
+    const tr = ({ ...props }: any) => {
+      return <Box as="tr" _even={{ bg: tableRowAltBg }} {...props} />
+    }
 
-  const th = ({ ...props }: any) => {
-    return (
-      <Box
-        as="th"
-        px={3}
-        py={2}
-        textAlign="left"
-        fontWeight="semibold"
-        bg={tableHeaderBg}
-        color={tableHeaderText}
-        borderBottomWidth="1px"
-        borderColor={tableBorderColor}
-        whiteSpace="normal"
-        {...props}
-      />
-    )
-  }
+    const th = ({ ...props }: any) => {
+      return (
+        <Box
+          as="th"
+          px={3}
+          py={2}
+          textAlign="left"
+          fontWeight="semibold"
+          bg={tableHeaderBg}
+          color={tableHeaderText}
+          borderBottomWidth="1px"
+          borderColor={tableBorderColor}
+          whiteSpace="normal"
+          {...props}
+        />
+      )
+    }
 
-  const td = ({ ...props }: any) => {
-    return (
-      <Box
-        as="td"
-        px={3}
-        py={2}
-        borderBottomWidth="1px"
-        borderColor={tableBorderColor}
-        verticalAlign="top"
-        whiteSpace="normal"
-        {...props}
-      />
-    )
-  }
+    const td = ({ ...props }: any) => {
+      return (
+        <Box
+          as="td"
+          px={3}
+          py={2}
+          borderBottomWidth="1px"
+          borderColor={tableBorderColor}
+          verticalAlign="top"
+          whiteSpace="normal"
+          {...props}
+        />
+      )
+    }
+    return { table, tr, th, td }
+  }, [tableBorderColor, tableHeaderBg, tableHeaderText, tableRowAltBg])
 
-  const inlineParagraph = ({ children, ...props }: any) => {
-    return (
-      <Text as="span" my={0} {...props}>
-        {children}
-      </Text>
-    )
-  }
-
-  const components = {
-    h1: H1,
-    h2: H2,
-    h3: H3,
-    li: ListItem,
-    ol: OrderedList,
-    ul: UnorderedList,
-    p: inline ? inlineParagraph : p,
-    pre,
-    code,
-    a: BlueLink,
-    table,
-    tr,
-    th,
-    td,
-  }
+  // Memoized as one object, and every member of it with it: React compares
+  // component *identity* to decide whether to update a subtree or replace
+  // it, so a map rebuilt each render tears down and re-creates everything
+  // this Markdown rendered. That reads as a flash wherever something else
+  // on the page re-renders -- opening a modal over it, say.
+  const components = useMemo(
+    () => ({
+      h1: H1,
+      h2: H2,
+      h3: H3,
+      li: ListItem,
+      ol: OrderedList,
+      ul: UnorderedList,
+      p: inline ? inlineParagraph : p,
+      pre,
+      code,
+      a: BlueLink,
+      ...tableComponents,
+    }),
+    [inline, tableComponents],
+  )
 
   return (
     <Box

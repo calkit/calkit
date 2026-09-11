@@ -208,8 +208,14 @@ const EditQuestion = ({
       // This opens on top of the question's own modal, which already holds
       // the page still. A second scroll lock takes the scrollbar away and
       // puts it back, shifting everything underneath for a frame -- keeping
-      // the gap is what stops the flash.
+      // the gap is what stops that.
       preserveScrollBarGap
+      // No fade. The overlay's fade is a Web Animation whose final value is
+      // committed to the element a frame after the animation ends, and the
+      // form's own first render lands in exactly that gap -- so the page
+      // paints one frame undimmed before the overlay settles, which reads
+      // as a flash. Nothing to animate, nothing to race.
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent

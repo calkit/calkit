@@ -199,7 +199,8 @@ def test_release_detached_head(tmp_dir):
     assert "HEAD is detached" in res.stdout + str(res.stderr)
     # Nothing was written for the release before bailing out
     assert not os.path.exists(".calkit/releases/v1")
-    # Skipping the commit means there's nothing to push, so it goes ahead
+    # Skipping the commit means there's nothing to push, so it goes ahead,
+    # even though that leaves the release unrecorded in the repo
     res = runner.invoke(
         app,
         [

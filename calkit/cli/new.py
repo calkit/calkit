@@ -3554,10 +3554,12 @@ def new_release(
         not dry_run and not no_push and not no_commit and not draft_only
     )
     if repo.head.is_detached and will_push:
+        # Suggest creating a branch rather than checking one out, since in a
+        # worktree the branch they'd want may be checked out elsewhere
         raise_error(
             "HEAD is detached, so there is no branch to commit the release "
-            "to and push; check out a branch first, or pass --no-commit to "
-            "release without recording it in the repo"
+            "record to and push; create a branch at this revision first, "
+            "e.g., with `git switch -c <branch>`"
         )
     # Detect the release kind from the path unless it was given with --kind. A
     # "." path is always a project release; otherwise prefer a declared

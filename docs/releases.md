@@ -75,6 +75,24 @@ When this is called, Calkit will:
   the project (see [Archiving Docker images](#archiving-docker-images)).
 - Create a GitHub release with a link to the Zenodo record.
 
+Releasing the same path again creates a **new version** of the same Zenodo
+record rather than a separate one,
+so all versions share a concept DOI and cite as one thing.
+Calkit works out which record to add a version to by looking up the previous
+release in the `releases` section of `calkit.yaml`.
+
+<!-- prettier-ignore -->
+!!! warning
+
+    This means the release record has to make it back to the branch you
+    release from.
+    If you skip committing it with `--no-commit`,
+    or commit it to a branch that never gets merged,
+    the next release won't find the earlier record
+    and will mint a brand new Zenodo record instead of a new version of the
+    existing one.
+    Zenodo has no way to merge two records after the fact.
+
 ## Archiving Docker images
 
 A registry makes no promise to keep an image forever,

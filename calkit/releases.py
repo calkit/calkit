@@ -88,16 +88,25 @@ def create_bibtex(
     )
 
 
-def create_release_note(release_kind: str, name: str, git_rev: str) -> str:
-    """Describe what produced a release, for whoever opens it later.
+def create_release_readme(
+    release_kind: str, name: str, git_rev: str, title: str | None = None
+) -> str:
+    """Describe a release and what produced it, for whoever opens it later.
 
-    The Git tag is the handle anyone wanting to get back to the state this
-    was built from will reach for, so name it alongside the revision it
-    points at and the version of Calkit that did the building.
+    A project's releases and its Git tags are the same thing, so point back
+    at the release by name and let the revision it resolves to ride along
+    for anyone wanting to get to exactly this state.
     """
+    # "the project from project release x" reads badly, so only name the
+    # artifact separately when the release is of something more specific
+    if release_kind == "project":
+        what = f"This is project release {name}"
+    else:
+        what = f"This is the {release_kind} from project release {name}"
     return (
-        f"This is a {release_kind} release generated with Calkit "
-        f"v{calkit.__version__} from Git tag {name} (rev {git_rev}).\n"
+        f"# {title or name}\n\n"
+        f"{what} (Git rev: {git_rev}), "
+        f"generated with Calkit v{calkit.__version__}.\n"
     )
 
 

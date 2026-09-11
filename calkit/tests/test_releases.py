@@ -16,6 +16,7 @@ from calkit.releases import (
     check_project_release_archive,
     create_bibtex,
     create_citation_cff,
+    create_release_readme,
     ls_files,
     parse_bibtex,
     read_authors_from_cff,
@@ -163,6 +164,31 @@ def test_create_bibtex():
     )
     entries = parse_bibtex(entry)
     assert len(entries) == 1
+
+
+def test_create_release_readme():
+    # An artifact release points back at the project release that built it
+    readme = create_release_readme(
+        release_kind="publication",
+        name="thesis-v1",
+        git_rev="a1b2c3d",
+        title="A Dissertation",
+    )
+    assert readme.startswith("# A Dissertation\n\n")
+    assert "This is the publication from project release thesis-v1" in readme
+    assert "(Git rev: a1b2c3d)" in readme
+    assert f"Calkit v{calkit.__version__}" in readme
+    # A project release says so without repeating itself
+    readme = create_release_readme(
+        release_kind="project", name="v1", git_rev="a1b2c3d", title="Proj"
+    )
+    assert "This is project release v1 (Git rev: a1b2c3d)" in readme
+    assert "from project release" not in readme
+    # With no title, the release name heads it instead
+    readme = create_release_readme(
+        release_kind="project", name="v1", git_rev="a1b2c3d"
+    )
+    assert readme.startswith("# v1\n\n")
 
 
 def test_parse_bibtex(monkeypatch):

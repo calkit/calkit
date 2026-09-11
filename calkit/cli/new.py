@@ -3654,15 +3654,15 @@ def new_release(
         release_date = str(calkit.utcnow().date())
     typer.echo(f"Using release date: {release_date}")
     git_rev = repo.git.rev_parse(["--short", "HEAD"])
-    # Release archives carry the project's own README, so add a note of their
-    # own; whoever extracts one later can then see what produced it without
-    # having to go back to where they downloaded it from
-    archive_note = {
-        "CALKIT-RELEASE.md": f"# {name}\n\n"
-        + calkit.releases.create_release_note(
-            release_kind=release_kind, name=name, git_rev=git_rev
-        )
-    }
+    # This goes both beside the archive, which is the copy the archival
+    # service displays, and inside it, so an extracted copy still says what
+    # produced it. Rebuilt below once a more specific title is known.
+    release_readme = calkit.releases.create_release_readme(
+        release_kind=release_kind,
+        name=name,
+        git_rev=git_rev,
+        title=ck_info.get("title"),
+    )
     # Fields below are populated only for external (archival) releases;
     # internal releases leave them empty.
     doi = None
@@ -3719,7 +3719,10 @@ def new_release(
             if is_zip:
                 typer.echo(f"Archiving {path} to {stored_path_posix}")
                 calkit.releases.zip_paths(
-                    stored_path, paths, overrides=overrides | archive_note
+                    stored_path,
+                    paths,
+                    overrides=overrides
+                    | {"CALKIT-RELEASE.md": release_readme},
                 )
                 if include_pipeline:
                     typer.echo("Checking extracted release archive")
@@ -3756,19 +3759,8 @@ def new_release(
         if path == ".":
             if release_kind is None:
                 release_kind = "project"
-            zip_path = release_files_dir + "/archive.zip"
-            all_paths = calkit.releases.ls_files()
-            typer.echo(f"Adding files to {zip_path}")
-            calkit.releases.zip_paths(
-                zip_path, all_paths, overrides=archive_note
-            )
-            typer.echo("Checking extracted project release archive")
-            try:
-                calkit.releases.check_project_release_archive(
-                    zip_path, verbose=verbose
-                )
-            except Exception as e:
-                raise_error(str(e))
+            # Settle the title before building the archive, since the README
+            # that goes inside it is headed with the title
             title = ck_info.get("title")
             if title is None:
                 warn("Project has no title")
@@ -3777,6 +3769,27 @@ def new_release(
                 if not dry_run:
                     with open("calkit.yaml", "w") as f:
                         calkit.ryaml.dump(ck_info, f)
+            release_readme = calkit.releases.create_release_readme(
+                release_kind=release_kind,
+                name=name,
+                git_rev=git_rev,
+                title=title,
+            )
+            zip_path = release_files_dir + "/archive.zip"
+            all_paths = calkit.releases.ls_files()
+            typer.echo(f"Adding files to {zip_path}")
+            calkit.releases.zip_paths(
+                zip_path,
+                all_paths,
+                overrides={"CALKIT-RELEASE.md": release_readme},
+            )
+            typer.echo("Checking extracted project release archive")
+            try:
+                calkit.releases.check_project_release_archive(
+                    zip_path, verbose=verbose
+                )
+            except Exception as e:
+                raise_error(str(e))
         else:
             # TODO: Handle directories, e.g., datasets
             if not os.path.isfile(path):
@@ -3803,6 +3816,12 @@ def new_release(
                 )
             if title is None:
                 raise_error(f"{release_kind} at {path} has no title")
+            release_readme = calkit.releases.create_release_readme(
+                release_kind=release_kind,
+                name=name,
+                git_rev=git_rev,
+                title=title,
+            )
             # Ship the artifact's provenance beside it: the stages that
             # build it, their inputs and environments, and a pipeline and
             # lock file pruned to match
@@ -3820,7 +3839,10 @@ def new_release(
                     )
                 typer.echo(f"Adding files to {zip_path}")
                 calkit.releases.zip_paths(
-                    zip_path, all_paths, overrides=overrides | archive_note
+                    zip_path,
+                    all_paths,
+                    overrides=overrides
+                    | {"CALKIT-RELEASE.md": release_readme},
                 )
                 typer.echo("Checking extracted project release archive")
                 try:
@@ -3859,13 +3881,11 @@ def new_release(
                     calkit.ryaml.dump(docker_images, f)
                 if not dry_run:
                     repo.git.add(docker_images_path)
-        # Create a README for the Zenodo release
-        readme_txt = f"# {title}\n\n" + calkit.releases.create_release_note(
-            release_kind=release_kind, name=name, git_rev=git_rev
-        )
+        # Write the same README beside the archive, since this is the copy
+        # the archival service renders on the record page
         readme_path = release_files_dir + "/README.md"
         with open(readme_path, "w") as f:
-            f.write(readme_txt)
+            f.write(release_readme)
         # Check size of files dir
         size = calkit.get_size(release_files_dir)
         typer.echo(f"Release size: {(size / 1e6):.1f} MB")

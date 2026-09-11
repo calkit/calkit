@@ -167,3 +167,44 @@ def test_release_with_pipeline(tmp_dir):
         assert set(ck_yaml["environments"]) == {"used"}
         # The release record notes that it carries its own pipeline
         assert ck_yaml["releases"]["plain"]["includes_pipeline"] is False
+
+
+def test_release_detached_head(tmp_dir):
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"title": "Test", "description": "Test"}, f)
+    with open("out.txt", "w") as f:
+        f.write("hi\n")
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "test@test.com"])
+    subprocess.check_call(["git", "config", "user.name", "Test"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(["dvc", "config", "core.analytics", "false"])
+    subprocess.check_call(["git", "add", "."])
+    subprocess.check_call(["git", "commit", "-m", "init"])
+    subprocess.check_call(["git", "checkout", "--detach", "HEAD"])
+    # A release that would push has no branch to push from, and says so
+    # before anything gets uploaded
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v1", "--internal", "--kind", "dataset", "."],
+    )
+    assert res.exit_code != 0
+    assert "HEAD is detached" in res.stdout + str(res.stderr)
+    # Nothing was written for the release before bailing out
+    assert not os.path.exists(".calkit/releases/v1")
+    # Skipping the commit means there's nothing to push, so it goes ahead
+    res = runner.invoke(
+        app,
+        [
+            "new",
+            "release",
+            "-n",
+            "v1",
+            "--internal",
+            "--kind",
+            "dataset",
+            "--no-commit",
+            ".",
+        ],
+    )
+    assert res.exit_code == 0, res.stdout

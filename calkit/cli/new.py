@@ -3548,6 +3548,18 @@ def new_release(
     repo = calkit.git.get_repo()
     if name in repo.tags:
         raise_error(f"Git tag with name '{name}' already exists")
+    # A release commits to calkit.yaml and pushes the branch it's on, neither
+    # of which works from a detached HEAD. Check before anything is uploaded,
+    # so a release can't get published and then fail on the way out.
+    will_push = (
+        not dry_run and not no_push and not no_commit and not draft_only
+    )
+    if repo.head.is_detached and will_push:
+        raise_error(
+            "HEAD is detached, so there is no branch to commit the release "
+            "to and push; check out a branch first, or pass --no-commit to "
+            "release without recording it in the repo"
+        )
     # Detect the release kind from the path unless it was given with --kind. A
     # "." path is always a project release; otherwise prefer a declared
     # artifact in calkit.yaml, falling back to auto-detection from the path
@@ -4306,7 +4318,7 @@ def new_release(
     if not dry_run and calkit.git.get_staged_files() and not no_commit:
         repo.git.commit(["-m", f"Create new {release_kind} release {name}"])
     # Push with Git
-    if not dry_run and not no_push and not no_commit and not draft_only:
+    if will_push:
         repo.git.push(["origin", repo.active_branch.name, "--tags"])
         # Now create GitHub release (external releases only)
         if not internal_release and not no_github_release:

@@ -1531,6 +1531,12 @@ class QuestionEvidence(SQLModel):
     # worth knowing before trusting it as an answer.
     stage: str | None = None
     stage_status: "StageStatus | None" = None
+    # Why this citation shouldn't be taken at face value, if it shouldn't.
+    # 'pipeline': the stage that made it is out of date. 'frozen': the stage
+    # is frozen, or downstream of one that is, so the pipeline will never
+    # call it stale however far its inputs have moved -- and the citation
+    # doesn't name a Git ref that would pin what it actually refers to.
+    stale_reason: Literal["pipeline", "frozen"] | None = None
 
 
 class QuestionEvidencePost(SQLModel):

@@ -63,17 +63,22 @@ const IMG_MIME: Record<string, string> = {
 const evidenceRefOf = (evidence: QuestionEvidence, gitRef?: string) =>
   evidence.git_ref ?? gitRef
 
-/** Whether the pipeline would rebuild what an evidence item cites.
+/** Whether what an evidence item cites can be taken at face value.
  *
  * An answer resting on an artifact the pipeline considers out of date is
  * worth flagging: the code or data behind it has moved since it was made,
  * so what the reader is looking at isn't what the project would produce now.
+ * The backend works out which of the two ways that can happen applies.
  */
 export const isEvidenceStale = (evidence: QuestionEvidence) =>
-  evidence.stage_status?.status === "stale"
+  evidence.stale_reason != null
 
-const STALE_TIP =
-  "This is out of date with respect to the pipeline. Re-run the pipeline to rebuild it."
+const STALE_TIPS: Record<string, string> = {
+  pipeline:
+    "This is out of date with respect to the pipeline. Re-run the pipeline to rebuild it.",
+  frozen:
+    "This comes from a frozen stage, or one downstream of a frozen stage, so the pipeline will never report it out of date no matter how far its inputs have moved. Cite it at a Git ref to pin which version this refers to.",
+}
 
 /** The page an evidence item has its own full view on. */
 const evidencePage = (evidence: QuestionEvidence) => {
@@ -99,11 +104,12 @@ const evidenceTitle = (evidence: QuestionEvidence) => {
   return evidence.result?.title ?? evidence.path
 }
 
-function StaleBadge() {
+function StaleBadge({ evidence }: { evidence: QuestionEvidence }) {
+  const frozen = evidence.stale_reason === "frozen"
   return (
-    <Tooltip label={STALE_TIP}>
+    <Tooltip label={STALE_TIPS[evidence.stale_reason ?? "pipeline"]}>
       <Badge colorScheme="orange" fontSize="2xs" flexShrink={0}>
-        Stale
+        {frozen ? "Frozen" : "Stale"}
       </Badge>
     </Tooltip>
   )
@@ -247,7 +253,7 @@ function EvidenceCard({
         <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
           <Markdown inline>{evidenceTitle(evidence)}</Markdown>
         </Text>
-        {stale ? <StaleBadge /> : null}
+        {stale ? <StaleBadge evidence={evidence} /> : null}
       </Flex>
       {pathLine}
       {stageLine}
@@ -642,7 +648,9 @@ function QuestionModal({
                   <Heading size="md" noOfLines={1}>
                     <Markdown inline>{evidenceTitle(openEvidence)}</Markdown>
                   </Heading>
-                  {isEvidenceStale(openEvidence) ? <StaleBadge /> : null}
+                  {isEvidenceStale(openEvidence) ? (
+                    <StaleBadge evidence={openEvidence} />
+                  ) : null}
                 </Flex>
                 <Flex align="center" gap={3} fontSize="xs" color={subtleColor}>
                   <Link

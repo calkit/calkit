@@ -355,7 +355,7 @@ function ProjectView() {
                       </Tooltip>
                     ) : null}
                     {question.evidence?.some(isEvidenceStale) ? (
-                      <Tooltip label="Some of this question's evidence is out of date with respect to the pipeline.">
+                      <Tooltip label="Some of this question's evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.">
                         <Box
                           ml={2}
                           flexShrink={0}

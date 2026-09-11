@@ -6974,6 +6974,18 @@ export const QuestionEvidenceSchema = {
         },
       ],
     },
+    stale_reason: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["pipeline", "frozen"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Reason",
+    },
   },
   type: "object",
   required: ["kind", "path"],

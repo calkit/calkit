@@ -3955,6 +3955,10 @@ export type QuestionEvidence = {
    */
   stage?: string | null
   stage_status?: StageStatus | null
+  /**
+   * Stale Reason
+   */
+  stale_reason?: "pipeline" | "frozen" | null
 }
 
 /**

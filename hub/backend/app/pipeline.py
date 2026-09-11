@@ -690,6 +690,70 @@ def compute_stage_statuses(
     return result
 
 
+def find_frozen_tainted_stages(dvc_yaml: dict, dvc_lock: dict) -> set[str]:
+    """Stages that are frozen, plus everything downstream of one.
+
+    A frozen stage (``dvc freeze``) is never stale, because DVC won't re-run
+    it however much its inputs change -- which is precisely why its outputs
+    can't be taken at face value, and why neither can anything computed from
+    them. Staleness detection has nothing to say about either, so name them
+    here and let callers decide what to do about it.
+
+    Returns stage names as they appear in ``dvc.lock``, matching the keys of
+    ``compute_stage_statuses``.
+    """
+    lock_stages = dvc_lock.get("stages") or {}
+    yaml_stages = dvc_yaml.get("stages") or {}
+    current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
+    live = _get_live_lock_stages(lock_stages, yaml_stages, current_expansions)
+
+    def _paths(stage: dict, key: str) -> list[str]:
+        out = []
+        for item in stage.get(key) or []:
+            path = item.get("path") if isinstance(item, dict) else None
+            if path:
+                out.append(path.rstrip("/"))
+        return out
+
+    # Who makes what, so a dep can be traced back to the stage that wrote it.
+    producers: dict[str, set[str]] = {}
+    for stage_name, lock_stage in live.items():
+        for out_path in _paths(lock_stage, "outs"):
+            producers.setdefault(out_path, set()).add(stage_name)
+    # Consumers, keyed by the stage they consume from. A dep matches an out
+    # either way around the directory: a stage writing ``figures`` feeds one
+    # reading ``figures/x.png``, and one writing ``figures/x.png`` feeds one
+    # reading the whole ``figures`` directory.
+    consumers: dict[str, set[str]] = {}
+    for stage_name, lock_stage in live.items():
+        for dep_path in _paths(lock_stage, "deps"):
+            for out_path, producing in producers.items():
+                if (
+                    out_path == dep_path
+                    or dep_path.startswith(out_path + "/")
+                    or out_path.startswith(dep_path + "/")
+                ):
+                    for producer in producing:
+                        if producer != stage_name:
+                            consumers.setdefault(producer, set()).add(
+                                stage_name
+                            )
+    tainted = {
+        stage_name
+        for stage_name in live
+        if (yaml_stages.get(_get_base_stage_name(stage_name)) or {}).get(
+            "frozen"
+        )
+    }
+    queue = list(tainted)
+    while queue:
+        for consumer in consumers.get(queue.pop(), set()):
+            if consumer not in tainted:
+                tainted.add(consumer)
+                queue.append(consumer)
+    return tainted
+
+
 def calc_overall_pipeline_status(
     stage_statuses: dict[str, StageStatus],
 ) -> OverallStatusLiteral:

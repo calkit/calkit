@@ -184,6 +184,7 @@ from app.pipeline import (
     calc_overall_pipeline_status,
     color_mermaid_by_status,
     compute_stage_statuses,
+    find_frozen_tainted_stages,
     find_stage_for_path,
 )
 from app.security import generate_refresh_token, hash_refresh_token
@@ -2287,6 +2288,7 @@ class _EvidenceLookups(NamedTuple):
     publications_by_path: dict[str, Publication]
     dvc_lock: dict[str, Any]
     stage_statuses: dict[str, PipelineStageStatus]
+    frozen_stages: set[str]
 
 
 def _declared_git_ref(ev: dict) -> str | None:
@@ -2313,13 +2315,20 @@ def _evidence_ref(ev: dict, ref: str | None) -> str | None:
 def _set_evidence_stage(
     item: QuestionEvidence, lookups: _EvidenceLookups
 ) -> None:
-    """Attach the stage that produces the cited path, and its status.
+    """Attach the stage that produces the cited path, and what it's worth.
 
     The resolved artifact's own declaration wins, since a project that names
     a figure's stage knows better than a path match does; otherwise the path
     is matched against the pipeline's outs the way every other listing does
     it. Both are at the evidence's ref, so a citation pinned to an older
     commit reports the pipeline as it stood there.
+
+    A frozen stage is the case staleness can't speak to: DVC won't re-run it
+    whatever its inputs do, so it reports up to date forever, and so does
+    everything built from its outputs. Naming a Git ref settles it -- the
+    citation then refers to one version of the artifact rather than to
+    whatever the frozen stage last happened to leave behind -- so only an
+    unpinned one is flagged.
     """
     stage = (
         (item.figure.stage if item.figure else None)
@@ -2337,6 +2346,10 @@ def _set_evidence_stage(
     status = lookups.stage_statuses.get(stage)
     if status is not None:
         item.stage_status = StageStatus.model_validate(status.model_dump())
+    if status is not None and status.status == "stale":
+        item.stale_reason = "pipeline"
+    elif stage in lookups.frozen_stages and not item.git_ref:
+        item.stale_reason = "frozen"
 
 
 def _build_question_evidence(
@@ -2355,7 +2368,7 @@ def _build_question_evidence(
     evidence cites; a ref missing from it is one that could not be read, and
     its evidence comes back unresolved rather than failing the question.
     """
-    empty = _EvidenceLookups({}, {}, {}, {}, {}, {})
+    empty = _EvidenceLookups({}, {}, {}, {}, {}, {}, set())
     evidence = []
     for ev in evidence_ck:
         if not isinstance(ev, dict) or ev.get("kind") not in (
@@ -2483,6 +2496,7 @@ def _build_questions_public(
         # Staleness is best-effort: never let it block the questions.
         dvc_lock: dict[str, Any] = {}
         stage_statuses: dict[str, PipelineStageStatus] = {}
+        frozen_stages: set[str] = set()
         try:
             tree = get_repo_tree_for_ref(repo, ev_ref)
             if tree.is_file("dvc.lock"):
@@ -2499,6 +2513,7 @@ def _build_questions_public(
                 fs=get_object_fs(),
                 cache_token=resolve_commit_sha(repo, ev_ref),
             )
+            frozen_stages = find_frozen_tainted_stages(dvc_yaml, dvc_lock)
         except Exception as e:
             logger.warning(
                 f"Failed to compute pipeline status for questions at "
@@ -2511,6 +2526,7 @@ def _build_questions_public(
             publications_by_path=publications_by_path,
             dvc_lock=dvc_lock,
             stage_statuses=stage_statuses,
+            frozen_stages=frozen_stages,
         )
 
     # Group the citations by the ref each resolves at, so a project whose

@@ -1444,6 +1444,7 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
                     publications_by_path={pub.path: pub},
                     dvc_lock={},
                     stage_statuses={},
+                    frozen_stages=set(),
                 )
             },
             result_value_cache={},
@@ -1480,10 +1481,15 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
         path="figures/declared.png", title="Declared", stage="plot-declared"
     )
     matched = Figure(path="figures/matched.png", title="Matched")
+    frozen = Figure(path="figures/frozen.png", title="Frozen")
     evidence_ck = [
         {"kind": "figure", "path": "figures/declared.png"},
         {"kind": "figure", "path": "figures/matched.png"},
         {"kind": "figure", "path": "figures/orphan.png"},
+        {"kind": "figure", "path": "figures/frozen.png"},
+        # The same frozen output, pinned: the ref says which version is
+        # meant, so there's nothing left for the freeze to hide.
+        {"kind": "figure", "path": "figures/frozen.png", "git_ref": "v1.0"},
     ]
     dvc_lock = {
         "stages": {
@@ -1491,6 +1497,7 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
             # Also produces the declared figure, and must lose to what the
             # figure itself says.
             "plot-by-path": {"outs": [{"path": "figures/declared.png"}]},
+            "plot-frozen": {"outs": [{"path": "figures/frozen.png"}]},
         }
     }
     stage_statuses = {
@@ -1499,6 +1506,8 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
             status="stale", modified_inputs=["scripts/plot.py"]
         ),
         "plot-by-path": StageStatus(status="stale"),
+        # Frozen reads as up-to-date forever, which is the whole problem.
+        "plot-frozen": StageStatus(status="frozen"),
     }
     evidence = _build_question_evidence(
         project=SimpleNamespace(),  # type: ignore
@@ -1510,12 +1519,14 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
                 figures_by_path={
                     declared.path: declared,
                     matched.path: matched,
+                    frozen.path: frozen,
                 },
                 results_by_path={},
                 tables_by_path={},
                 publications_by_path={},
                 dvc_lock=dvc_lock,
                 stage_statuses=stage_statuses,
+                frozen_stages={"plot-frozen"},
             )
         },
         result_value_cache={},
@@ -1529,6 +1540,11 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
     assert evidence[1].stage_status.modified_inputs == ["scripts/plot.py"]
     assert evidence[2].stage is None
     assert evidence[2].stage_status is None
+    assert evidence[0].stale_reason is None
+    assert evidence[1].stale_reason == "pipeline"
+    assert evidence[2].stale_reason is None
+    assert evidence[3].stale_reason == "frozen"
+    assert evidence[4].stale_reason is None
 
 
 def test_apply_question_update_builds_object() -> None:
@@ -3596,6 +3612,7 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
                     publications_by_path={},
                     dvc_lock={},
                     stage_statuses={},
+                    frozen_stages=set(),
                 )
             },
             result_value_cache={},
@@ -3675,6 +3692,7 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
                     publications_by_path={},
                     dvc_lock={},
                     stage_statuses={},
+                    frozen_stages=set(),
                 )
             },
             result_value_cache={},
@@ -3718,6 +3736,7 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
                     publications_by_path={},
                     dvc_lock={},
                     stage_statuses={},
+                    frozen_stages=set(),
                 )
             },
             result_value_cache={},
@@ -3789,6 +3808,7 @@ def test_evidence_resolves_at_its_own_git_ref() -> None:
                     publications_by_path={},
                     dvc_lock={},
                     stage_statuses={},
+                    frozen_stages=set(),
                 ),
                 "v1.0": _EvidenceLookups(
                     figures_by_path={there_fig.path: there_fig},
@@ -3797,6 +3817,7 @@ def test_evidence_resolves_at_its_own_git_ref() -> None:
                     publications_by_path={},
                     dvc_lock={},
                     stage_statuses={},
+                    frozen_stages=set(),
                 ),
             },
             result_value_cache={},

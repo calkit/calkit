@@ -6,7 +6,6 @@ import csv
 import json
 import logging
 import os
-import platform as _platform
 import posixpath
 import shlex
 import shutil
@@ -3543,10 +3542,7 @@ def run_in_env(
                 envs, path, env_name
             )
         shell_cmd = _to_shell_cmd(cmd)
-        if _platform.system() == "Windows":
-            activate_cmd = f"{prefix}\\Scripts\\activate"
-        else:
-            activate_cmd = f". {prefix}/bin/activate"
+        activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
         if verbose:
             typer.echo(f"Raw command: {cmd}")
             typer.echo(f"Shell command: {shell_cmd}")

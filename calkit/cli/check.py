@@ -1802,10 +1802,7 @@ def check_venv(
                 if verbose:
                     typer.echo(f"Using legacy lock file: {legacy_fpath}")
                 break
-    if _platform.system() == "Windows":
-        activate_cmd = f"{prefix}\\Scripts\\activate"
-    else:
-        activate_cmd = f". {prefix}/bin/activate"
+    activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
 
     def pip_install_and_freeze(reqs_arg: str) -> None:
         check_cmd = (

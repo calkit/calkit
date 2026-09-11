@@ -3654,6 +3654,15 @@ def new_release(
         release_date = str(calkit.utcnow().date())
     typer.echo(f"Using release date: {release_date}")
     git_rev = repo.git.rev_parse(["--short", "HEAD"])
+    # Release archives carry the project's own README, so add a note of their
+    # own; whoever extracts one later can then see what produced it without
+    # having to go back to where they downloaded it from
+    archive_note = {
+        "CALKIT-RELEASE.md": f"# {name}\n\n"
+        + calkit.releases.create_release_note(
+            release_kind=release_kind, name=name, git_rev=git_rev
+        )
+    }
     # Fields below are populated only for external (archival) releases;
     # internal releases leave them empty.
     doi = None
@@ -3710,7 +3719,7 @@ def new_release(
             if is_zip:
                 typer.echo(f"Archiving {path} to {stored_path_posix}")
                 calkit.releases.zip_paths(
-                    stored_path, paths, overrides=overrides
+                    stored_path, paths, overrides=overrides | archive_note
                 )
                 if include_pipeline:
                     typer.echo("Checking extracted release archive")
@@ -3750,7 +3759,9 @@ def new_release(
             zip_path = release_files_dir + "/archive.zip"
             all_paths = calkit.releases.ls_files()
             typer.echo(f"Adding files to {zip_path}")
-            calkit.releases.zip_paths(zip_path, all_paths)
+            calkit.releases.zip_paths(
+                zip_path, all_paths, overrides=archive_note
+            )
             typer.echo("Checking extracted project release archive")
             try:
                 calkit.releases.check_project_release_archive(
@@ -3809,7 +3820,7 @@ def new_release(
                     )
                 typer.echo(f"Adding files to {zip_path}")
                 calkit.releases.zip_paths(
-                    zip_path, all_paths, overrides=overrides
+                    zip_path, all_paths, overrides=overrides | archive_note
                 )
                 typer.echo("Checking extracted project release archive")
                 try:
@@ -3849,11 +3860,8 @@ def new_release(
                 if not dry_run:
                     repo.git.add(docker_images_path)
         # Create a README for the Zenodo release
-        readme_txt = f"# {title}\n"
-        git_rev = repo.git.rev_parse(["--short", "HEAD"])
-        readme_txt += (
-            f"\nThis is a {release_kind} release ({name}) generated with "
-            f"Calkit v{calkit.__version__} from Git rev {git_rev}.\n"
+        readme_txt = f"# {title}\n\n" + calkit.releases.create_release_note(
+            release_kind=release_kind, name=name, git_rev=git_rev
         )
         readme_path = release_files_dir + "/README.md"
         with open(readme_path, "w") as f:

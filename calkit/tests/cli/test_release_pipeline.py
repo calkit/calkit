@@ -167,6 +167,12 @@ def test_release_with_pipeline(tmp_dir):
         assert set(ck_yaml["environments"]) == {"used"}
         # The release record notes that it carries its own pipeline
         assert ck_yaml["releases"]["plain"]["includes_pipeline"] is False
+        # The archive says what produced it, naming the Git tag to get back
+        # to, without disturbing the project's own README
+        note = z.read("CALKIT-RELEASE.md").decode()
+        assert f"Calkit v{calkit.__version__}" in note
+        assert "Git tag v1" in note
+        assert "README.md" not in names or z.read("README.md") != note
 
 
 def test_release_detached_head(tmp_dir):

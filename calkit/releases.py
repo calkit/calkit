@@ -88,6 +88,19 @@ def create_bibtex(
     )
 
 
+def create_release_note(release_kind: str, name: str, git_rev: str) -> str:
+    """Describe what produced a release, for whoever opens it later.
+
+    The Git tag is the handle anyone wanting to get back to the state this
+    was built from will reach for, so name it alongside the revision it
+    points at and the version of Calkit that did the building.
+    """
+    return (
+        f"This is a {release_kind} release generated with Calkit "
+        f"v{calkit.__version__} from Git tag {name} (rev {git_rev}).\n"
+    )
+
+
 def parse_bibtex(text: str) -> list[dict]:
     """Parse BibTeX text into a list of entries.
 

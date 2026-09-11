@@ -100,6 +100,7 @@ from app.dvc import (
 )
 from app.git import (
     RepoTree,
+    expire_shared_read_clone,
     get_ck_info,
     get_ck_info_from_repo,
     get_commit_history,
@@ -178,6 +179,7 @@ from app.models.projects import (
     ShowcaseYaml,
     ShowcaseYamlFileInput,
 )
+from app.pipeline import StageStatus as PipelineStageStatus
 from app.pipeline import (
     calc_overall_pipeline_status,
     color_mermaid_by_status,
@@ -2283,6 +2285,8 @@ class _EvidenceLookups(NamedTuple):
     results_by_path: dict[tuple[str, str | None], Result]
     tables_by_path: dict[str, Result]
     publications_by_path: dict[str, Publication]
+    dvc_lock: dict[str, Any]
+    stage_statuses: dict[str, PipelineStageStatus]
 
 
 def _declared_git_ref(ev: dict) -> str | None:
@@ -2306,6 +2310,35 @@ def _evidence_ref(ev: dict, ref: str | None) -> str | None:
     return _declared_git_ref(ev) or ref
 
 
+def _set_evidence_stage(
+    item: QuestionEvidence, lookups: _EvidenceLookups
+) -> None:
+    """Attach the stage that produces the cited path, and its status.
+
+    The resolved artifact's own declaration wins, since a project that names
+    a figure's stage knows better than a path match does; otherwise the path
+    is matched against the pipeline's outs the way every other listing does
+    it. Both are at the evidence's ref, so a citation pinned to an older
+    commit reports the pipeline as it stood there.
+    """
+    stage = (
+        (item.figure.stage if item.figure else None)
+        or (item.result.stage if item.result else None)
+        or (item.publication.stage if item.publication else None)
+        or find_stage_for_path(
+            item.path,
+            lookups.dvc_lock,
+            valid_stages=set(lookups.stage_statuses),
+        )
+    )
+    if stage is None:
+        return
+    item.stage = stage
+    status = lookups.stage_statuses.get(stage)
+    if status is not None:
+        item.stage_status = StageStatus.model_validate(status.model_dump())
+
+
 def _build_question_evidence(
     project: Project,
     repo: git.Repo,
@@ -2322,7 +2355,7 @@ def _build_question_evidence(
     evidence cites; a ref missing from it is one that could not be read, and
     its evidence comes back unresolved rather than failing the question.
     """
-    empty = _EvidenceLookups({}, {}, {}, {})
+    empty = _EvidenceLookups({}, {}, {}, {}, {}, {})
     evidence = []
     for ev in evidence_ck:
         if not isinstance(ev, dict) or ev.get("kind") not in (
@@ -2372,6 +2405,7 @@ def _build_question_evidence(
                     key=item.key,
                     cache=result_value_cache,
                 )
+        _set_evidence_stage(item, lookups)
         evidence.append(item)
     return evidence
 
@@ -2446,11 +2480,37 @@ def _build_questions_public(
                     project=project, repo=repo, ref=ev_ref
                 )
             }
+        # Staleness is best-effort: never let it block the questions.
+        dvc_lock: dict[str, Any] = {}
+        stage_statuses: dict[str, PipelineStageStatus] = {}
+        try:
+            tree = get_repo_tree_for_ref(repo, ev_ref)
+            if tree.is_file("dvc.lock"):
+                dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+            dvc_yaml: dict[str, Any] = {}
+            if tree.is_file("dvc.yaml"):
+                dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
+            stage_statuses = compute_stage_statuses(
+                dvc_yaml=dvc_yaml,
+                dvc_lock=dvc_lock,
+                tree=tree,
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                fs=get_object_fs(),
+                cache_token=resolve_commit_sha(repo, ev_ref),
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to compute pipeline status for questions at "
+                f"{ev_ref}: {e}"
+            )
         return _EvidenceLookups(
             figures_by_path=figures_by_path,
             results_by_path=results_by_path,
             tables_by_path=tables_by_path,
             publications_by_path=publications_by_path,
+            dvc_lock=dvc_lock,
+            stage_statuses=stage_statuses,
         )
 
     # Group the citations by the ref each resolves at, so a project whose
@@ -2591,6 +2651,9 @@ def post_project_question(
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
     repo.git.push(["origin", repo.active_branch.name])
+    # The question was pushed from this clone; readers share another one,
+    # and without this they'd keep serving the project as it was before.
+    expire_shared_read_clone(project, repo.active_branch.name)
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
     )
@@ -2680,6 +2743,7 @@ def put_project_question(
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
         repo.git.push(["origin", repo.active_branch.name])
+        expire_shared_read_clone(project, repo.active_branch.name)
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
     )
@@ -3715,6 +3779,20 @@ def get_project_comments(
     return comments
 
 
+def comment_artifact_label(
+    artifact_type: str | None, artifact_path: str
+) -> str:
+    """How the artifact a comment is about reads in a sentence.
+
+    A path names itself. A question doesn't have one -- it's identified by
+    its number -- so say what the number is, or "commented on 3" is the
+    whole notification.
+    """
+    if artifact_type == "question":
+        return f"question {artifact_path}"
+    return artifact_path
+
+
 def comment_artifact_route(
     artifact_type: str | None, artifact_path: str
 ) -> str:
@@ -3728,6 +3806,10 @@ def comment_artifact_route(
     encoded = quote(artifact_path, safe="")
     if artifact_type == "release":
         return f"releases/{encoded}"
+    # Questions are listed on the project home page and open in a modal
+    # there, which is the same thing a link to one has to do.
+    if artifact_type == "question":
+        return f"?question={encoded}"
     route_map = {
         "figure": "figures",
         "publication": "publications",
@@ -3781,6 +3863,12 @@ def post_project_comment(
                 repo.head.commit.tree[comment_in.artifact_path]
             except KeyError:
                 raise HTTPException(404)
+    # Question comments are keyed by number rather than path, so check the
+    # question is real -- nothing else would catch a bad one.
+    if comment_in.artifact_type == "question" and comment_in.artifact_path:
+        numbers = {str(q.number) for q in project.questions}
+        if comment_in.artifact_path not in numbers:
+            raise HTTPException(404)
     # Resolve the commit hash for the git context at comment time
     try:
         if comment_in.git_ref:
@@ -3816,8 +3904,11 @@ def post_project_comment(
             comment_in.artifact_type,
             comment_in.artifact_path,
         )
+        label = comment_artifact_label(
+            comment_in.artifact_type, comment_in.artifact_path
+        )
         body_lines = [
-            f"Comment on [{comment_in.artifact_path}]({artifact_link}):",
+            f"Comment on [{label}]({artifact_link}):",
             "",
             comment_in.comment,
         ]
@@ -3840,7 +3931,12 @@ def post_project_comment(
             session=session,
             project=project,
             commenter_id=current_user.id,
-            message=f"{commenter_name} commented on {comment_in.artifact_path}",
+            message=(
+                f"{commenter_name} commented on "
+                + comment_artifact_label(
+                    comment_in.artifact_type, comment_in.artifact_path
+                )
+            ),
             link=_make_comment_artifact_link(
                 owner_name,
                 project_name,

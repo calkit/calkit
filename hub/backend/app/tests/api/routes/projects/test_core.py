@@ -225,6 +225,26 @@ def test_project_routes_are_case_insensitive(client: TestClient) -> None:
     )
 
 
+def test_comment_artifact_route_and_label() -> None:
+    from app.api.routes.projects.core import (
+        comment_artifact_label,
+        comment_artifact_route,
+    )
+
+    # A question is identified by number and lives on the project home page,
+    # where a link has to reopen its modal; everything else is a path.
+    assert comment_artifact_route("question", "3") == "?question=3"
+    assert comment_artifact_label("question", "3") == "question 3"
+    assert comment_artifact_route("release", "v1 0") == "releases/v1%200"
+    assert (
+        comment_artifact_route("figure", "figures/x.png")
+        == "figures?path=figures%2Fx.png"
+    )
+    assert comment_artifact_label("figure", "figures/x.png") == "figures/x.png"
+    # An unknown type falls back to the files page.
+    assert comment_artifact_route(None, "a.txt") == "files?path=a.txt"
+
+
 def test_get_project_comments_uses_all_results() -> None:
     fake_project = SimpleNamespace(id="project-id")
     fake_comment = SimpleNamespace(id="comment-id")
@@ -1422,6 +1442,8 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
                     results_by_path={(res.path, res.key): res},
                     tables_by_path={},
                     publications_by_path={pub.path: pub},
+                    dvc_lock={},
+                    stage_statuses={},
                 )
             },
             result_value_cache={},
@@ -1442,6 +1464,71 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
     assert evidence[2].publication.title == "Paper"
     # An unresolved figure path leaves the resolved figure as None.
     assert evidence[3].figure is None
+
+
+def test_question_evidence_carries_pipeline_stage_status() -> None:
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
+    from app.models.core import Figure
+    from app.pipeline import StageStatus
+
+    # One figure declaring its own stage, one the pipeline claims by path, and
+    # one nothing produces.
+    declared = Figure(
+        path="figures/declared.png", title="Declared", stage="plot-declared"
+    )
+    matched = Figure(path="figures/matched.png", title="Matched")
+    evidence_ck = [
+        {"kind": "figure", "path": "figures/declared.png"},
+        {"kind": "figure", "path": "figures/matched.png"},
+        {"kind": "figure", "path": "figures/orphan.png"},
+    ]
+    dvc_lock = {
+        "stages": {
+            "plot-matched": {"outs": [{"path": "figures/matched.png"}]},
+            # Also produces the declared figure, and must lose to what the
+            # figure itself says.
+            "plot-by-path": {"outs": [{"path": "figures/declared.png"}]},
+        }
+    }
+    stage_statuses = {
+        "plot-declared": StageStatus(status="up-to-date"),
+        "plot-matched": StageStatus(
+            status="stale", modified_inputs=["scripts/plot.py"]
+        ),
+        "plot-by-path": StageStatus(status="stale"),
+    }
+    evidence = _build_question_evidence(
+        project=SimpleNamespace(),  # type: ignore
+        repo=SimpleNamespace(),
+        ref=None,
+        evidence_ck=evidence_ck,
+        lookups_by_ref={
+            None: _EvidenceLookups(
+                figures_by_path={
+                    declared.path: declared,
+                    matched.path: matched,
+                },
+                results_by_path={},
+                tables_by_path={},
+                publications_by_path={},
+                dvc_lock=dvc_lock,
+                stage_statuses=stage_statuses,
+            )
+        },
+        result_value_cache={},
+    )
+    assert evidence[0].stage == "plot-declared"
+    assert evidence[0].stage_status is not None
+    assert evidence[0].stage_status.status == "up-to-date"
+    assert evidence[1].stage == "plot-matched"
+    assert evidence[1].stage_status is not None
+    assert evidence[1].stage_status.status == "stale"
+    assert evidence[1].stage_status.modified_inputs == ["scripts/plot.py"]
+    assert evidence[2].stage is None
+    assert evidence[2].stage_status is None
 
 
 def test_apply_question_update_builds_object() -> None:
@@ -3507,6 +3594,8 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
                     results_by_path={(mean.path, mean.key): mean},
                     tables_by_path={table.path: table},
                     publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
                 )
             },
             result_value_cache={},
@@ -3584,6 +3673,8 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
                     results_by_path={(result.path, None): result},
                     tables_by_path={table.path: table},
                     publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
                 )
             },
             result_value_cache={},
@@ -3625,6 +3716,8 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
                     results_by_path={(whole.path, None): whole},
                     tables_by_path={},
                     publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
                 )
             },
             result_value_cache={},
@@ -3694,12 +3787,16 @@ def test_evidence_resolves_at_its_own_git_ref() -> None:
                     results_by_path={(here_res.path, "mean"): here_res},
                     tables_by_path={},
                     publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
                 ),
                 "v1.0": _EvidenceLookups(
                     figures_by_path={there_fig.path: there_fig},
                     results_by_path={(there_res.path, "mean"): there_res},
                     tables_by_path={},
                     publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
                 ),
             },
             result_value_cache={},

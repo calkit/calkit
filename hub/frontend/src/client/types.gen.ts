@@ -3950,6 +3950,11 @@ export type QuestionEvidence = {
    * Value
    */
   value?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  stage_status?: StageStatus | null
 }
 
 /**

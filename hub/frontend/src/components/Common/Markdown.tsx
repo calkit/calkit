@@ -36,7 +36,27 @@ interface MarkdownProps {
   inline?: boolean
   /** Truncate with an ellipsis after this many lines. */
   noOfLines?: number
+  /**
+   * Text that came out of a YAML folded block (``>``), e.g. prose written in
+   * calkit.yaml. Folding collapses the blank line between paragraphs into a
+   * single newline, which Markdown then reads as a soft break and joins back
+   * into one wall of text. Set this to get the paragraphs back.
+   */
+  foldedProse?: boolean
 }
+
+/** Restore paragraph breaks YAML folding collapsed into single newlines.
+ *
+ * Fenced code is left alone: a blank line inside one is content, not a
+ * break.
+ */
+const expandFoldedParagraphs = (text: string) =>
+  text
+    .split(/(```[\s\S]*?```)/g)
+    .map((part, i) =>
+      i % 2 === 1 ? part : part.replace(/([^\n])\n(?!\n)/g, "$1\n\n"),
+    )
+    .join("")
 
 interface codeProps extends React.HTMLAttributes<HTMLElement> {
   insidePre?: boolean
@@ -76,7 +96,12 @@ const code = ({ insidePre = false, ...props }: codeProps) => {
   return <Code my={0} whiteSpace={"pre"} px={1} {...props} />
 }
 
-const Markdown = ({ children, inline = false, noOfLines }: MarkdownProps) => {
+const Markdown = ({
+  children,
+  inline = false,
+  noOfLines,
+  foldedProse = false,
+}: MarkdownProps) => {
   const tableBorderColor = useColorModeValue("gray.200", "whiteAlpha.300")
   const tableHeaderBg = useColorModeValue("gray.50", "whiteAlpha.100")
   const tableHeaderText = useColorModeValue("gray.700", "gray.100")
@@ -214,7 +239,7 @@ const Markdown = ({ children, inline = false, noOfLines }: MarkdownProps) => {
           rehypeKatex,
         ]}
       >
-        {children}
+        {foldedProse ? expandFoldedParagraphs(children) : children}
       </ReactMarkdown>
     </Box>
   )

@@ -35,12 +35,15 @@ import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import { ReleasesService } from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
+import Tooltip from "../../../../../components/Common/Tooltip"
 import FileEditorModal from "../../../../../components/Files/FileEditorModal"
 import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
 import EditQuestion from "../../../../../components/Projects/EditQuestion"
-import QuestionModal from "../../../../../components/Projects/QuestionModal"
+import QuestionModal, {
+  isEvidenceStale,
+} from "../../../../../components/Projects/QuestionModal"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
 import RecentChanges from "../../../../../components/Projects/RecentChanges"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
@@ -206,6 +209,13 @@ function ProjectView() {
     })
   const setOpenEvidence = (index?: number) =>
     navigate({ search: (prev) => ({ ...prev, evidence: index }) })
+  // Stepping between questions works off list order rather than number, so a
+  // project whose questions aren't numbered contiguously still walks them all.
+  const openQuestionIdx = openQuestion ? questions.indexOf(openQuestion) : -1
+  const stepQuestion = (delta: number) => {
+    const next = questions[openQuestionIdx + delta]
+    return next ? () => setOpenQuestion(next.number) : undefined
+  }
 
   return (
     <>
@@ -311,7 +321,8 @@ function ProjectView() {
                 {questions.map((question) => (
                   <Flex key={question.id} align="center">
                     {/* The whole row opens the question, since the answer and
-                        its evidence are the point of listing it. */}
+                        its evidence are the point of listing it -- editing
+                        included, which is why there's no edit button here. */}
                     <Box
                       as="button"
                       type="button"
@@ -327,20 +338,32 @@ function ProjectView() {
                         {`${question.number}. ${question.question}`}
                       </Markdown>
                     </Box>
-                    {question.evidence?.length ? (
-                      <Text fontSize="xs" color="gray.500" ml={2}>
-                        {question.evidence.length} evidence
-                      </Text>
+                    {/* Dots rather than words: what a reader wants off the
+                        list is which questions still need work, and the
+                        question itself should keep the width. Staleness that
+                        only shows once a question is open is staleness nobody
+                        sees, so it's flagged here too. */}
+                    {!question.answer ? (
+                      <Tooltip label="Not yet answered">
+                        <Box
+                          ml={2}
+                          flexShrink={0}
+                          boxSize="8px"
+                          borderRadius="full"
+                          bg="red.400"
+                        />
+                      </Tooltip>
                     ) : null}
-                    {userHasWriteAccess ? (
-                      <IconButton
-                        aria-label="Edit question"
-                        icon={<MdEdit />}
-                        size="xs"
-                        variant="ghost"
-                        ml={1}
-                        onClick={() => setEditQuestion(question.number)}
-                      />
+                    {question.evidence?.some(isEvidenceStale) ? (
+                      <Tooltip label="Some of this question's evidence is out of date with respect to the pipeline.">
+                        <Box
+                          ml={2}
+                          flexShrink={0}
+                          boxSize="8px"
+                          borderRadius="full"
+                          bg="yellow.400"
+                        />
+                      </Tooltip>
                     ) : null}
                   </Flex>
                 ))}
@@ -361,12 +384,15 @@ function ProjectView() {
               gitRef={ref}
               evidenceIndex={openEvidenceIndex}
               onEvidenceIndexChange={setOpenEvidence}
+              // Stepping is off while the editor is open on top: the arrows
+              // it reads are the same ones the editor's own fields see.
+              onPrevQuestion={editingQuestion ? undefined : stepQuestion(-1)}
+              onNextQuestion={editingQuestion ? undefined : stepQuestion(1)}
+              // The editor opens over the detail view rather than replacing
+              // it, so cancelling lands back on the question.
               onEdit={
                 userHasWriteAccess && openQuestion
-                  ? () => {
-                      setOpenQuestion(undefined)
-                      setEditQuestion(openQuestion.number)
-                    }
+                  ? () => setEditQuestion(openQuestion.number)
                   : undefined
               }
             />

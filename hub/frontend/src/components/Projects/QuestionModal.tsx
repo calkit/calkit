@@ -1,5 +1,7 @@
 import {
+  Badge,
   Box,
+  Code,
   Flex,
   Heading,
   Icon,
@@ -16,19 +18,28 @@ import {
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 import { FaArrowLeft, FaChevronLeft, FaChevronRight } from "react-icons/fa"
 import { FaExternalLinkAlt, FaRegFileAlt } from "react-icons/fa"
 import { FiGrid } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
+import { TiFlowMerge } from "react-icons/ti"
 
+import { ProjectsService } from "../../client"
 import type { QuestionEvidence, QuestionPublic } from "../../client"
+import useAuth from "../../hooks/useAuth"
 import {
   useProjectPublications,
   useProjectTables,
 } from "../../hooks/useProject"
+import CommentsPanel, {
+  projectCommentToPanelComment,
+} from "../Common/CommentsPanel"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
+import Tooltip from "../Common/Tooltip"
 import FigureView from "../Figures/FigureView"
 import PublicationView from "../Publications/PublicationView"
 import TableView from "../Tables/TableView"
@@ -51,6 +62,18 @@ const IMG_MIME: Record<string, string> = {
  */
 const evidenceRefOf = (evidence: QuestionEvidence, gitRef?: string) =>
   evidence.git_ref ?? gitRef
+
+/** Whether the pipeline would rebuild what an evidence item cites.
+ *
+ * An answer resting on an artifact the pipeline considers out of date is
+ * worth flagging: the code or data behind it has moved since it was made,
+ * so what the reader is looking at isn't what the project would produce now.
+ */
+export const isEvidenceStale = (evidence: QuestionEvidence) =>
+  evidence.stage_status?.status === "stale"
+
+const STALE_TIP =
+  "This is out of date with respect to the pipeline. Re-run the pipeline to rebuild it."
 
 /** The page an evidence item has its own full view on. */
 const evidencePage = (evidence: QuestionEvidence) => {
@@ -76,6 +99,16 @@ const evidenceTitle = (evidence: QuestionEvidence) => {
   return evidence.result?.title ?? evidence.path
 }
 
+function StaleBadge() {
+  return (
+    <Tooltip label={STALE_TIP}>
+      <Badge colorScheme="orange" fontSize="2xs" flexShrink={0}>
+        Stale
+      </Badge>
+    </Tooltip>
+  )
+}
+
 /** One evidence item in the question's grid.
  *
  * A card opens the item in place rather than linking away: the question is
@@ -84,14 +117,72 @@ const evidenceTitle = (evidence: QuestionEvidence) => {
  */
 function EvidenceCard({
   evidence,
+  accountName,
+  projectName,
+  gitRef,
   onOpen,
 }: {
   evidence: QuestionEvidence
+  accountName: string
+  projectName: string
+  gitRef?: string
   onOpen: () => void
 }) {
-  const borderColor = useColorModeValue("gray.200", "gray.600")
+  const defaultBorderColor = useColorModeValue("gray.200", "gray.600")
+  const staleBorderColor = useColorModeValue("orange.400", "orange.300")
   const bg = useColorModeValue("white", "gray.800")
   const subtleColor = useColorModeValue("gray.600", "gray.400")
+  const stale = isEvidenceStale(evidence)
+  // A cited value is the whole artifact -- there is nothing to open that the
+  // card doesn't already show -- so it links out to the file it was read
+  // from instead of expanding, and names the stage that wrote it.
+  const isValue = evidence.value != null
+  const pathLabel = `${evidence.path}${evidence.key ? `:${evidence.key}` : ""}`
+  const pathLine = isValue ? (
+    <Link
+      as={RouterLink}
+      to={`/${accountName}/${projectName}/${evidencePage(evidence)}`}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      search={
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        {
+          path: evidence.path,
+          ref: evidenceRefOf(evidence, gitRef),
+        } as any
+      }
+      fontSize="xs"
+      color={subtleColor}
+      noOfLines={1}
+    >
+      {pathLabel} <Icon as={FaExternalLinkAlt} boxSize={2.5} />
+    </Link>
+  ) : (
+    <Text fontSize="xs" color={subtleColor} noOfLines={1}>
+      {pathLabel}
+    </Text>
+  )
+  const stageLine =
+    isValue && evidence.stage ? (
+      <Flex align="center" gap={1} mt={1} fontSize="xs" color={subtleColor}>
+        <Icon as={TiFlowMerge} flexShrink={0} />
+        <Link
+          as={RouterLink}
+          to={`/${accountName}/${projectName}/pipeline`}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          search={
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            {
+              stage: evidence.stage,
+              ref: evidenceRefOf(evidence, gitRef),
+            } as any
+          }
+        >
+          <Code fontSize="2xs" cursor="pointer" noOfLines={1}>
+            {evidence.stage}
+          </Code>
+        </Link>
+      </Flex>
+    ) : null
   const refBadge = evidence.git_ref ? (
     <Text fontSize="xs" color={subtleColor} noOfLines={1}>
       at {evidence.git_ref}
@@ -148,37 +239,54 @@ function EvidenceCard({
   } else if (evidence.kind === "publication") {
     icon = <Icon as={FaRegFileAlt} color="gray.500" flexShrink={0} />
   }
-  return (
-    <Box
-      as="button"
-      type="button"
-      textAlign="left"
-      onClick={onOpen}
-      borderWidth={1}
-      borderColor={borderColor}
-      borderRadius="md"
-      overflow="hidden"
-      bg={bg}
-      p={3}
-      _hover={{ shadow: "md" }}
-    >
+  const body = (
+    <>
       {preview}
       <Flex align="center" gap={1.5}>
         {icon}
         <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
-          {evidenceTitle(evidence)}
+          <Markdown inline>{evidenceTitle(evidence)}</Markdown>
         </Text>
+        {stale ? <StaleBadge /> : null}
       </Flex>
-      <Text fontSize="xs" color={subtleColor} noOfLines={1}>
-        {evidence.path}
-        {evidence.key ? `:${evidence.key}` : ""}
-      </Text>
+      {pathLine}
+      {stageLine}
       {refBadge}
       {evidence.explanation ? (
         <Box fontSize="xs" color={subtleColor} mt={1}>
-          <Markdown noOfLines={3}>{evidence.explanation}</Markdown>
+          <Markdown noOfLines={3} foldedProse>
+            {evidence.explanation}
+          </Markdown>
         </Box>
       ) : null}
+    </>
+  )
+  const cardProps = {
+    textAlign: "left" as const,
+    // A stale item keeps its place in the grid but says so at a glance,
+    // since the whole card is what the answer is leaning on. Color rather
+    // than a thicker border, so nothing shifts when a card goes stale.
+    borderWidth: 1,
+    borderColor: stale ? staleBorderColor : defaultBorderColor,
+    borderRadius: "md",
+    overflow: "hidden",
+    bg,
+    p: 3,
+  }
+  // A value card holds links of its own and has nothing more to show when
+  // opened, so it isn't a button.
+  if (isValue) {
+    return <Box {...cardProps}>{body}</Box>
+  }
+  return (
+    <Box
+      as="button"
+      type="button"
+      onClick={onOpen}
+      _hover={{ shadow: "md" }}
+      {...cardProps}
+    >
+      {body}
     </Box>
   )
 }
@@ -222,9 +330,16 @@ function EvidenceDetail({
       return <NotFound evidence={evidence} />
     }
     return (
-      <Box height="100%">
-        <FigureView figure={evidence.figure} fillHeight />
-      </Box>
+      <Flex direction="column" height="100%" minH={0}>
+        <Box flex="1" minH={0}>
+          <FigureView figure={evidence.figure} fillHeight />
+        </Box>
+        {evidence.figure.description ? (
+          <Box mt={2} fontSize="sm">
+            <Markdown foldedProse>{evidence.figure.description}</Markdown>
+          </Box>
+        ) : null}
+      </Flex>
     )
   }
   if (evidence.kind === "table") {
@@ -264,7 +379,7 @@ function EvidenceDetail({
       )}
       {evidence.result?.description ? (
         <Box mt={2} fontSize="sm">
-          <Markdown>{evidence.result.description}</Markdown>
+          <Markdown foldedProse>{evidence.result.description}</Markdown>
         </Box>
       ) : null}
     </Box>
@@ -281,6 +396,121 @@ function NotFound({ evidence }: { evidence: QuestionEvidence }) {
   )
 }
 
+/** The discussion on one question.
+ *
+ * Questions are the one artifact identified by number rather than path, so
+ * that number is what a comment hangs off of. Everything else about the
+ * thread -- replies, resolving, GitHub issues -- is the shared panel.
+ */
+function QuestionComments({
+  accountName,
+  projectName,
+  questionNumber,
+  gitRef,
+}: {
+  accountName: string
+  projectName: string
+  questionNumber: number
+  gitRef?: string
+}) {
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const [showResolved, setShowResolved] = useState(false)
+  const artifactPath = String(questionNumber)
+  const commentsKey = [
+    "projects",
+    accountName,
+    projectName,
+    "comments",
+    "question",
+    artifactPath,
+  ]
+  const commentsQuery = useQuery({
+    queryKey: commentsKey,
+    queryFn: () =>
+      ProjectsService.getProjectComments({
+        owner_name: accountName,
+        project_name: projectName,
+        artifact_type: "question",
+        artifact_path: artifactPath,
+      }).then((response) => response.data),
+  })
+  const invalidateComments = () =>
+    queryClient.invalidateQueries({ queryKey: commentsKey })
+  const postCommentMutation = useMutation({
+    mutationFn: (vars: { body: string; createIssue: boolean }) =>
+      ProjectsService.postProjectComment({
+        owner_name: accountName,
+        project_name: projectName,
+        projectCommentPost: {
+          artifact_path: artifactPath,
+          artifact_type: "question",
+          comment: vars.body,
+          create_github_issue: vars.createIssue,
+          git_ref: gitRef ?? null,
+        },
+      }).then((response) => response.data),
+    onSuccess: invalidateComments,
+  })
+  const replyCommentMutation = useMutation({
+    mutationFn: (vars: { commentId: string; body: string }) =>
+      ProjectsService.postProjectCommentReply({
+        owner_name: accountName,
+        project_name: projectName,
+        comment_id: vars.commentId,
+        commentReply: { body: vars.body },
+      }).then((response) => response.data),
+    onSuccess: invalidateComments,
+  })
+  const resolveCommentMutation = useMutation({
+    mutationFn: (vars: { commentId: string; resolved: boolean }) =>
+      ProjectsService.patchProjectComment({
+        owner_name: accountName,
+        project_name: projectName,
+        comment_id: vars.commentId,
+        projectCommentPatch: { resolved: vars.resolved },
+      }).then((response) => response.data),
+    onSuccess: invalidateComments,
+  })
+  const comments = commentsQuery.data ?? []
+  return (
+    <CommentsPanel
+      comments={comments.map(projectCommentToPanelComment)}
+      isLoading={commentsQuery.isPending}
+      canComment={!!user}
+      canResolve={!!user}
+      showResolved={showResolved}
+      onShowResolvedChange={setShowResolved}
+      showCreateIssueCheckbox
+      heading="Discussion"
+      emptyText="No comments on this question yet."
+      onPostComment={(body, opts) =>
+        postCommentMutation.mutateAsync({
+          body,
+          createIssue: opts.createIssue,
+        })
+      }
+      postingComment={postCommentMutation.isPending}
+      onPostReply={(parentId, body) =>
+        replyCommentMutation.mutateAsync({ commentId: parentId, body })
+      }
+      postingReplyForId={
+        replyCommentMutation.isPending
+          ? replyCommentMutation.variables?.commentId ?? null
+          : null
+      }
+      onResolve={(id, resolved) =>
+        resolveCommentMutation.mutate({ commentId: id, resolved })
+      }
+      resolvingId={
+        resolveCommentMutation.isPending
+          ? resolveCommentMutation.variables?.commentId ?? null
+          : null
+      }
+    />
+  )
+}
+
 interface QuestionModalProps {
   question: QuestionPublic | null
   isOpen: boolean
@@ -293,6 +523,9 @@ interface QuestionModalProps {
   evidenceIndex?: number
   onEvidenceIndexChange: (index?: number) => void
   onEdit?: () => void
+  // Step to the neighboring question; undefined at either end of the list.
+  onPrevQuestion?: () => void
+  onNextQuestion?: () => void
 }
 
 /** The detail view of one question: its hypothesis, answer, and evidence.
@@ -311,12 +544,59 @@ function QuestionModal({
   evidenceIndex,
   onEvidenceIndexChange,
   onEdit,
+  onPrevQuestion,
+  onNextQuestion,
 }: QuestionModalProps) {
   const subtleColor = useColorModeValue("gray.600", "gray.400")
+  const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   const evidence = question?.evidence ?? []
   const openEvidence =
     evidenceIndex !== undefined ? evidence[evidenceIndex] : undefined
   const openRef = openEvidence ? evidenceRefOf(openEvidence, gitRef) : undefined
+  const evidenceCount = evidence.length
+  // Left and right step through whatever is on screen: the evidence items
+  // when one is open, the questions themselves otherwise. Both are also
+  // buttons in the header, since a keyboard shortcut nobody is told about
+  // isn't a way to get around.
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+        return
+      }
+      // Never steal an arrow from someone typing, e.g. in the comment box.
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+      const back = event.key === "ArrowLeft"
+      if (evidenceIndex !== undefined) {
+        const next = evidenceIndex + (back ? -1 : 1)
+        if (next >= 0 && next < evidenceCount) {
+          onEvidenceIndexChange(next)
+        }
+        return
+      }
+      const step = back ? onPrevQuestion : onNextQuestion
+      step?.()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [
+    isOpen,
+    evidenceIndex,
+    evidenceCount,
+    onEvidenceIndexChange,
+    onPrevQuestion,
+    onNextQuestion,
+  ])
   return (
     <Modal
       isOpen={isOpen}
@@ -328,8 +608,10 @@ function QuestionModal({
       <ModalOverlay />
       {/* Fixed height so stepping between evidence items doesn't resize the
           dialog under the reader's cursor */}
-      <ModalContent maxW={{ base: "100%", lg: "92vw" }} h="92vh" maxH="92vh">
-        <ModalHeader pb={2}>
+      <ModalContent maxW={{ base: "100%", lg: "72vw" }} h="88vh" maxH="88vh">
+        {/* Right padding clears the close button, so the header's own
+            buttons don't end up crowded against it */}
+        <ModalHeader pb={2} pr={20}>
           {openEvidence ? (
             <Flex align="center" gap={2}>
               <IconButton
@@ -356,9 +638,12 @@ function QuestionModal({
                 onClick={() => onEvidenceIndexChange((evidenceIndex ?? 0) + 1)}
               />
               <Box minW={0}>
-                <Heading size="md" noOfLines={1}>
-                  <Markdown inline>{evidenceTitle(openEvidence)}</Markdown>
-                </Heading>
+                <Flex align="center" gap={2} minW={0}>
+                  <Heading size="md" noOfLines={1}>
+                    <Markdown inline>{evidenceTitle(openEvidence)}</Markdown>
+                  </Heading>
+                  {isEvidenceStale(openEvidence) ? <StaleBadge /> : null}
+                </Flex>
                 <Flex align="center" gap={3} fontSize="xs" color={subtleColor}>
                   <Link
                     as={RouterLink}
@@ -383,6 +668,22 @@ function QuestionModal({
             </Flex>
           ) : (
             <Flex align="center" gap={2}>
+              <IconButton
+                aria-label="Previous question"
+                icon={<FaChevronLeft />}
+                size="sm"
+                variant="ghost"
+                isDisabled={!onPrevQuestion}
+                onClick={onPrevQuestion}
+              />
+              <IconButton
+                aria-label="Next question"
+                icon={<FaChevronRight />}
+                size="sm"
+                variant="ghost"
+                isDisabled={!onNextQuestion}
+                onClick={onNextQuestion}
+              />
               <Box minW={0} flex="1" sx={{ "& p": { my: 0 } }}>
                 <Heading size="md" as="div">
                   <Markdown>
@@ -390,25 +691,30 @@ function QuestionModal({
                   </Markdown>
                 </Heading>
               </Box>
-              {onEdit ? (
-                <IconButton
-                  aria-label="Edit question"
-                  icon={<MdEdit />}
-                  size="sm"
-                  variant="ghost"
-                  onClick={onEdit}
-                />
-              ) : null}
             </Flex>
           )}
         </ModalHeader>
         <ModalCloseButton />
+        {/* Up on the close button's row rather than in the title, so the
+            question keeps the full width of the header */}
+        {onEdit && !openEvidence ? (
+          <IconButton
+            aria-label="Edit question"
+            icon={<MdEdit />}
+            size="sm"
+            variant="ghost"
+            position="absolute"
+            top={2}
+            insetEnd={12}
+            onClick={onEdit}
+          />
+        ) : null}
         <ModalBody pt={0} pb={4}>
           {openEvidence ? (
             <Box height="100%">
               {openEvidence.explanation ? (
                 <Box fontSize="sm" color={subtleColor} mb={3}>
-                  <Markdown>{openEvidence.explanation}</Markdown>
+                  <Markdown foldedProse>{openEvidence.explanation}</Markdown>
                 </Box>
               ) : null}
               <EvidenceDetail
@@ -422,56 +728,80 @@ function QuestionModal({
               />
             </Box>
           ) : (
-            <>
-              {question?.hypothesis ? (
-                <Box mb={4}>
-                  <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
-                    Hypothesis
-                  </Text>
-                  <Box mt={1}>
-                    <Markdown>{question.hypothesis}</Markdown>
+            // The answer and the discussion of it are what's read, so they
+            // get the width; the evidence is what's glanced at and clicked,
+            // so it sits in a column beside them.
+            <Flex
+              direction={{ base: "column", md: "row" }}
+              align="flex-start"
+              gap={6}
+            >
+              <Box flex="2" minW={0} w="100%">
+                {question?.hypothesis ? (
+                  <Box mb={4}>
+                    <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+                      Hypothesis
+                    </Text>
+                    <Box mt={1}>
+                      <Markdown foldedProse>{question.hypothesis}</Markdown>
+                    </Box>
                   </Box>
-                </Box>
-              ) : null}
-              {question?.answer ? (
-                <Box mb={4}>
-                  <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
-                    Answer
-                  </Text>
-                  <Box mt={1}>
-                    <Markdown>{question.answer}</Markdown>
+                ) : null}
+                {question?.answer ? (
+                  <Box mb={4}>
+                    <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+                      Answer
+                    </Text>
+                    <Box mt={1}>
+                      <Markdown foldedProse>{question.answer}</Markdown>
+                    </Box>
                   </Box>
-                </Box>
-              ) : (
-                <Text fontSize="sm" color={subtleColor} mb={4}>
-                  Not yet answered.
+                ) : (
+                  <Text fontSize="sm" color={subtleColor} mb={4}>
+                    Not yet answered.
+                  </Text>
+                )}
+                {question ? (
+                  // Set off from the answer rather than running on from it:
+                  // what the project concluded and what people are saying
+                  // about it are different things.
+                  <Box bg={secBgColor} borderRadius="lg" px={4} py={3} mt={6}>
+                    <QuestionComments
+                      // Per question, so switching questions doesn't carry a
+                      // half-written comment onto the next one.
+                      key={question.number}
+                      accountName={accountName}
+                      projectName={projectName}
+                      questionNumber={question.number}
+                      gitRef={gitRef}
+                    />
+                  </Box>
+                ) : null}
+              </Box>
+              <Box flex="1" minW={0} w="100%">
+                <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+                  Evidence
                 </Text>
-              )}
-              {evidence.length ? (
-                <Box>
-                  <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
-                    Evidence
-                  </Text>
-                  <SimpleGrid
-                    columns={{ base: 1, md: 2, xl: 3 }}
-                    spacing={3}
-                    mt={2}
-                  >
+                {evidence.length ? (
+                  <SimpleGrid columns={1} spacing={3} mt={2}>
                     {evidence.map((ev, i) => (
                       <EvidenceCard
                         key={`${ev.kind}:${ev.path}:${i}`}
                         evidence={ev}
+                        accountName={accountName}
+                        projectName={projectName}
+                        gitRef={gitRef}
                         onOpen={() => onEvidenceIndexChange(i)}
                       />
                     ))}
                   </SimpleGrid>
-                </Box>
-              ) : (
-                <Text fontSize="sm" color={subtleColor}>
-                  No evidence linked yet.
-                </Text>
-              )}
-            </>
+                ) : (
+                  <Text fontSize="sm" color={subtleColor} mt={1}>
+                    None linked yet.
+                  </Text>
+                )}
+              </Box>
+            </Flex>
           )}
         </ModalBody>
       </ModalContent>

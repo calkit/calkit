@@ -1525,6 +1525,12 @@ class QuestionEvidence(SQLModel):
     # For result evidence with a key, the value read from the result file so it
     # can be shown dashboard-style
     value: str | None = None
+    # The pipeline stage that produces the cited path, and its status, both
+    # resolved at the evidence's own ref. Evidence whose stage is stale is
+    # citing an artifact the pipeline would rebuild differently, which is
+    # worth knowing before trusting it as an answer.
+    stage: str | None = None
+    stage_status: "StageStatus | None" = None
 
 
 class QuestionEvidencePost(SQLModel):

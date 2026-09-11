@@ -9,7 +9,10 @@ import subprocess
 import pytest
 
 import calkit
+from calkit.pipeline import frozen_tainted_stage_names
 from calkit.questions import (
+    QuestionsStatus,
+    check_question,
     check_questions,
     format_status,
     placeholders,
@@ -265,18 +268,25 @@ def test_check_questions(tmp_dir):
     _commit("Re-run the pipeline")
     status = check_questions(ck_info=ck_info, wdir=".")
     q4 = status.questions[3]
-    assert q4.status == "stale"
+    # A number moving after the answer was written is worth a reader's
+    # attention, not a failure: the prose can still hold, and a templated
+    # number rewrites itself
+    assert q4.status == "ok"
     assert q4.commit == sha1
     assert q4.evidence[0].status == "changed"
     assert "n_top was 8 at" in (q4.evidence[0].message or "")
     assert q4.evidence[1].status == "ok"
-    # Advice does not fail the check; only stale and broken do
     assert q4.evidence[4].status == "unattributed"
-    assert not status.ok
+    assert status.ok
+    assert [ev.path for ev in status.changed] == ["results/findings.json"]
     report = format_status(status)
-    assert "[stale] Do the top structures use the rectifier?" in report
-    assert "edit the question" in report
-    assert "Answers whose evidence changed since: 1" in report
+    # It still earns a block, since nothing else would say it
+    assert "[ok] Do the top structures use the rectifier?" in report
+    assert "editing the question" in report
+    assert (
+        "Evidence that changed after the answer was written: 1 (worth a look)"
+        in report
+    )
     assert "Answers given without evidence: 1 (worth a look)" in report
     assert "Questions answered: 2/4" in report
     assert "Evidence with nothing recorded behind it: 1" in report
@@ -300,7 +310,7 @@ def test_check_questions(tmp_dir):
     with open("results/findings.json", "w") as f:
         json.dump({"n_top": 1, "ratio": 5.1014, "nested": {"best": "a"}}, f)
     status = check_questions(ck_info=ck_info, wdir=".")
-    assert status.questions[3].status == "stale"
+    assert status.questions[3].evidence[0].status == "changed"
     assert "now 1" in (status.questions[3].evidence[0].message or "")
     _commit("Change it again")
     # A second review has to be a real edit, so it says something new
@@ -317,7 +327,7 @@ def test_check_questions(tmp_dir):
         )
     _commit("Re-run fit")
     status = check_questions(ck_info=ck_info, wdir=".")
-    assert status.questions[3].status == "stale"
+    assert status.questions[3].evidence[5].status == "changed"
     assert "dvc.lock" in (status.questions[3].evidence[5].message or "")
     # Broken references and templates are errors, not staleness
     ck_info["questions"][3]["notes"] = "Reread after the fit changed."
@@ -336,6 +346,7 @@ def test_check_questions(tmp_dir):
     ck_info["questions"][3]["evidence"][1]["key"] = "nope"
     status = check_questions(ck_info=ck_info, wdir=".")
     assert status.questions[3].evidence[1].status == "error"
+    assert status.questions[3].status == "error"
     ck_info["questions"][3]["evidence"][1]["key"] = "ratio"
     ck_info["questions"][3]["evidence"][2]["name"] = "n_top"
     status = check_questions(ck_info=ck_info, wdir=".")
@@ -356,3 +367,166 @@ def test_check_questions(tmp_dir):
     assert "publication paper/main.pdf [skipped]" in format_status(
         status, verbose=True
     )
+
+
+def test_check_questions_pipeline_and_pins(tmp_dir):
+    # Four ways an answer can rest on something it shouldn't: a stage that
+    # needs re-running, one frozen out of reach, one downstream of the
+    # freeze, and a citation pinned to a ref that isn't there. The pinned
+    # ones are checked at their ref, so the working tree can't fix or break
+    # them.
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    for name, value in [("fresh", 1), ("drifted", 2), ("pinned", 3)]:
+        with open(f"results/{name}.json", "w") as f:
+            json.dump({"v": value}, f)
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "collect": {"outs": [{"path": "results/pinned.json"}]},
+                    "derive": {
+                        "deps": [{"path": "results/pinned.json"}],
+                        "outs": [{"path": "results/fresh.json"}],
+                    },
+                    "drift": {"outs": [{"path": "results/drifted.json"}]},
+                }
+            },
+            f,
+        )
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                # Frozen, so DVC will never call it or its consumers stale
+                "collect": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "c.py",
+                    "outputs": [{"path": "results/pinned.json"}],
+                    "frozen": True,
+                },
+                "derive": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "d.py",
+                    "inputs": ["results/pinned.json"],
+                    "outputs": [{"path": "results/fresh.json"}],
+                },
+                "drift": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": [{"path": "results/drifted.json"}],
+                },
+            }
+        },
+        "questions": [
+            {
+                "question": "Does the drifted stage still say so?",
+                "answer": "It says {drifted}.",
+                "evidence": [
+                    {
+                        "kind": "value",
+                        "path": "results/drifted.json",
+                        "key": "v",
+                        "name": "drifted",
+                    }
+                ],
+            },
+            {
+                "question": "And the frozen one?",
+                "answer": "Frozen at {pinned}.",
+                "evidence": [
+                    {
+                        "kind": "value",
+                        "path": "results/pinned.json",
+                        "key": "v",
+                        "name": "pinned",
+                    }
+                ],
+            },
+            {
+                "question": "And what the freeze feeds?",
+                "answer": "Downstream reads {fresh}.",
+                "evidence": [
+                    {
+                        "kind": "value",
+                        "path": "results/fresh.json",
+                        "key": "v",
+                        "name": "fresh",
+                    }
+                ],
+            },
+            {
+                "question": "And one pinned to a ref that never existed?",
+                "answer": "It said something once.",
+                "evidence": [
+                    {
+                        "kind": "value",
+                        "path": "results/drifted.json",
+                        "key": "v",
+                        "git_ref": "exp/never-pushed",
+                    }
+                ],
+            },
+        ],
+    }
+    _write_yaml(ck_info)
+    sha = _commit("Everything")
+    # Stand in for DVC: only 'drift' needs re-running
+    status = check_questions(ck_info=ck_info, wdir=".", check_pipeline=False)
+    stale, frozen = (
+        {"drift"},
+        frozen_tainted_stage_names(ck_info=ck_info, wdir="."),
+    )
+    # The freeze taints itself and everything reading what it wrote
+    assert frozen == {"collect", "derive"}
+    status = QuestionsStatus(
+        questions=[
+            check_question(
+                n,
+                q,
+                ck_info,
+                ".",
+                calkit.git.get_repo("."),
+                stale_stages=stale,
+                frozen_stages=frozen,
+            )
+            for n, q in enumerate(ck_info["questions"], start=1)
+        ]
+    )
+    assert [q.status for q in status.questions] == [
+        "stale",
+        "frozen",
+        "frozen",
+        "missing",
+    ]
+    assert "out of date" in (status.questions[0].evidence[0].message or "")
+    assert "git_ref" in (status.questions[1].evidence[0].message or "")
+    assert "exp/never-pushed" in (
+        status.questions[3].evidence[0].message or ""
+    )
+    # Missing and stale fail the check; a freeze is only worth a look
+    assert not status.ok
+    report = format_status(status)
+    assert "Answers citing evidence that isn't there: 1" in report
+    assert "Answers whose evidence the pipeline would rebuild: 1" in report
+    assert "Answers resting on a frozen stage, unpinned: 2 (worth a look)" in (
+        report
+    )
+    # Pinned to a ref that does exist: read there, and nothing the working
+    # tree does afterwards touches it
+    ck_info["questions"][3]["evidence"][0]["git_ref"] = sha
+    os.remove("results/drifted.json")
+    checked = check_question(
+        4,
+        ck_info["questions"][3],
+        ck_info,
+        ".",
+        calkit.git.get_repo("."),
+        stale_stages=stale,
+        frozen_stages=frozen,
+    )
+    assert checked.status == "ok"
+    assert checked.evidence[0].current == 2
+    assert checked.evidence[0].git_ref == sha

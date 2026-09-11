@@ -278,10 +278,10 @@ function EvidenceCard({
       {stageLine}
       {refBadge}
       {evidence.explanation ? (
+        // In full: the cards sit in a column of their own now, and an
+        // explanation clipped at three lines had nowhere to be read.
         <Box fontSize="xs" color={subtleColor} mt={1}>
-          <Markdown noOfLines={3} foldedProse>
-            {evidence.explanation}
-          </Markdown>
+          <Markdown foldedProse>{evidence.explanation}</Markdown>
         </Box>
       ) : null}
     </>

@@ -6901,6 +6901,17 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Explanation",
     },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
+    },
     figure: {
       anyOf: [
         {
@@ -6942,6 +6953,39 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Value",
     },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    stale_reason: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["missing", "pipeline", "frozen"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Reason",
+    },
   },
   type: "object",
   required: ["kind", "path"],
@@ -6980,6 +7024,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Explanation",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
     },
   },
   type: "object",

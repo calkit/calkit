@@ -1689,6 +1689,13 @@ class FigureEvidence(BaseModel):
     kind: Literal["figure"] = "figure"
     path: str
     explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the figure can be found."
+        ),
+    )
 
 
 class ResultsEvidence(BaseModel):
@@ -1707,6 +1714,13 @@ class ResultsEvidence(BaseModel):
         ),
     )
     explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the result can be found."
+        ),
+    )
 
 
 _KEY_DESCRIPTION = (
@@ -1738,6 +1752,13 @@ class ValueEvidence(BaseModel):
         ),
     )
     explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the value can be found."
+        ),
+    )
 
 
 class TableEvidence(BaseModel):
@@ -1746,6 +1767,13 @@ class TableEvidence(BaseModel):
     kind: Literal["table"] = "table"
     path: str
     explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the table can be found."
+        ),
+    )
 
 
 class PublicationEvidence(BaseModel):
@@ -1777,6 +1805,13 @@ class PublicationEvidence(BaseModel):
         ),
     )
     explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the publication can be found."
+        ),
+    )
 
 
 class Question(BaseModel):

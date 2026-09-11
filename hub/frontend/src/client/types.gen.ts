@@ -3939,6 +3939,10 @@ export type QuestionEvidence = {
    * Explanation
    */
   explanation?: string | null
+  /**
+   * Git Ref
+   */
+  git_ref?: string | null
   figure?: Figure | null
   result?: Result | null
   publication?: Publication | null
@@ -3946,6 +3950,15 @@ export type QuestionEvidence = {
    * Value
    */
   value?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  stage_status?: StageStatus | null
+  /**
+   * Stale Reason
+   */
+  stale_reason?: "missing" | "pipeline" | "frozen" | null
 }
 
 /**
@@ -3968,6 +3981,10 @@ export type QuestionEvidencePost = {
    * Explanation
    */
   explanation?: string | null
+  /**
+   * Git Ref
+   */
+  git_ref?: string | null
 }
 
 /**

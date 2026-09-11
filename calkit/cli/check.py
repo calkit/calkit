@@ -2060,20 +2060,32 @@ def check_questions(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output the report as JSON.")
     ] = False,
+    no_pipeline: Annotated[
+        bool,
+        typer.Option(
+            "--no-pipeline",
+            help="Skip asking DVC which stages are out of date, which is "
+            "the slowest part of the check.",
+        ),
+    ] = False,
 ) -> None:
-    """Check that answered questions are consistent with their evidence.
+    """Check that answered questions are backed by current evidence.
 
-    A question is stale if any of its evidence changed after the commit
-    that last edited the question, in Git history for Git-tracked outputs
-    or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value
-    keys must resolve, every placeholder in the text must render, and a
-    publication label must still be present in the LaTeX source. Exits
-    with an error if any answered question is stale or broken.
+    Reports, worst first: evidence that isn't there (never run, never
+    pushed, or pinned to a Git ref that doesn't exist); broken references
+    (a key that doesn't resolve, a placeholder that names no evidence, a
+    label missing from the LaTeX); evidence the pipeline would rebuild;
+    and evidence from a frozen stage, or downstream of one, which nothing
+    will ever report out of date unless the citation pins a git_ref.
+
+    Evidence pinned with a git_ref is checked at that ref rather than in
+    the working tree. Exits with an error if any answered question is
+    missing evidence, broken, or out of date with the pipeline.
     """
     from calkit.questions import check_questions as _check_questions
     from calkit.questions import format_status
 
-    status = _check_questions(wdir=wdir)
+    status = _check_questions(wdir=wdir, check_pipeline=not no_pipeline)
     if json_output:
         calkit.echo(json.dumps(status.model_dump(mode="json"), indent=2))
     else:

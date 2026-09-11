@@ -1,10 +1,7 @@
 """Checking a project's questions against their evidence.
 
-An answer is a claim about the evidence as it was when the answer was last
-edited. The pipeline keeps the evidence current, but nothing keeps the prose
-current: re-run a stage, and a number an answer relies on can change without
-anything noticing. Two things close that gap here, and neither copies a
-value into ``calkit.yaml``.
+An answer is a claim about evidence, and the check asks whether that
+evidence is there and current. Nothing here judges the prose.
 
 Numbers are templated, not retyped. A ``value`` evidence entry names one
 value in a results file, and the question's text can refer to it with
@@ -12,19 +9,25 @@ Python format syntax, ``"about {improvement:.1f}x"``; the text is rendered
 from the file whenever it is shown, so a number in an answer is always the
 pipeline's own.
 
-Staleness comes from history, not from a record. Git already knows when a
-question was last edited: the commit at which its entry in ``calkit.yaml``
-last changed. If any of its evidence changed after that commit -- in Git
-history for Git-tracked outputs, in ``dvc.lock`` for DVC-tracked ones --
-the answer was written against evidence that no longer exists, and the
-check reports it as stale until someone reads it again and edits the
-question, which for an answer that still holds means editing it after
-reading it again.
+What can go wrong, worst first: the evidence isn't there at all (never run,
+never pushed, or pinned to a Git ref that doesn't exist); a reference is
+broken (a key that doesn't resolve, a placeholder that names no evidence, a
+label missing from the LaTeX); the stage that produces it is out of date, so
+what's on disk isn't what the project would produce now; or the stage is
+frozen, or downstream of one, in which case the pipeline will never call it
+out of date however far its inputs have moved -- and only a ``git_ref`` on
+the citation says which version is meant.
 
-Both checks are deterministic and cheap. Judging whether the prose still
-follows from changed evidence is neither, and is left to the reader or to
-the ``check-questions`` agent skill, which uses this module's report to know
-which questions to read.
+Evidence pinned with ``git_ref`` is checked at that ref rather than in the
+working tree. A pin is a claim about one version, so nothing about the
+current pipeline can make it stale; what can go wrong is the ref or the
+path not being there.
+
+Git history is read for context, not for a verdict: when a cited value
+changed after the commit that last edited the question, the report says so
+and what it was, since that is worth a reader's attention. It is not a
+failure -- prose can stay true while a number moves, and a templated number
+updates itself.
 """
 
 from __future__ import annotations
@@ -42,9 +45,24 @@ from pydantic import BaseModel, Field
 import calkit
 
 EvidenceStatus = Literal[
-    "ok", "changed", "missing", "error", "skipped", "unattributed"
+    "ok",
+    "changed",
+    "missing",
+    "stale",
+    "frozen",
+    "error",
+    "skipped",
+    "unattributed",
 ]
-QuestionStatus = Literal["ok", "stale", "error", "unanswered", "no-evidence"]
+QuestionStatus = Literal[
+    "ok",
+    "stale",
+    "frozen",
+    "missing",
+    "error",
+    "unanswered",
+    "no-evidence",
+]
 CALKIT_YAML = "calkit.yaml"
 
 
@@ -61,6 +79,8 @@ class EvidenceCheck(BaseModel):
     current: Any = None
     #: The pipeline stage that produces the path, if any
     stage: str | None = None
+    #: The Git ref this citation pins itself to, if any
+    git_ref: str | None = None
 
 
 class QuestionCheck(BaseModel):
@@ -84,7 +104,18 @@ class QuestionsStatus(BaseModel):
 
     @property
     def stale(self) -> list[QuestionCheck]:
+        """Answers whose evidence the pipeline would rebuild."""
         return [q for q in self.questions if q.status == "stale"]
+
+    @property
+    def frozen(self) -> list[QuestionCheck]:
+        """Answers resting on a frozen stage, with no ref pinning them."""
+        return [q for q in self.questions if q.status == "frozen"]
+
+    @property
+    def missing(self) -> list[QuestionCheck]:
+        """Answers citing evidence that isn't there."""
+        return [q for q in self.questions if q.status == "missing"]
 
     @property
     def errors(self) -> list[QuestionCheck]:
@@ -95,9 +126,27 @@ class QuestionsStatus(BaseModel):
         return [q for q in self.questions if q.answered]
 
     @property
+    def changed(self) -> list[EvidenceCheck]:
+        """Evidence that moved after the question was last edited.
+
+        Context rather than a verdict: a number can change without making
+        the sentence around it wrong, and a templated one rewrites itself.
+        """
+        return [
+            ev
+            for q in self.questions
+            for ev in q.evidence
+            if ev.status == "changed"
+        ]
+
+    @property
     def ok(self) -> bool:
-        """True if no answered question is stale or broken."""
-        return not self.stale and not self.errors
+        """True if no answered question is missing, stale, or broken.
+
+        Frozen evidence doesn't fail the check: nothing can be re-run to fix
+        it, and whether a pin is wanted is the author's call.
+        """
+        return not self.missing and not self.stale and not self.errors
 
     @property
     def unattributed(self) -> list[EvidenceCheck]:
@@ -123,18 +172,27 @@ class QuestionsStatus(BaseModel):
 # -- values and templates ---------------------------------------------------
 
 
+def parse_evidence_text(text: str, path: str) -> Any:
+    """Parse the contents of a results file, by the extension of ``path``."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".yaml", ".yml"):
+        return calkit.ryaml.load(text)
+    if ext == ".json":
+        return json.loads(text)
+    if ext == ".toml":
+        import tomllib
+
+        return tomllib.loads(text)
+    raise ValueError(
+        f"Cannot read a value from {path}: only JSON, YAML, and TOML "
+        "results files are supported"
+    )
+
+
 def read_evidence_file(path: str) -> Any:
     """Read a results file, by extension."""
-    ext = os.path.splitext(path)[1].lower()
     with open(path, encoding="utf-8") as f:
-        if ext in (".yaml", ".yml"):
-            return calkit.ryaml.load(f)
-        if ext == ".json":
-            return json.load(f)
-    raise ValueError(
-        f"Cannot read a value from {path}: only JSON and YAML results "
-        "files are supported"
-    )
+        return parse_evidence_text(f.read(), path)
 
 
 def resolve_key(data: Any, key: str) -> Any:
@@ -572,10 +630,97 @@ def _is_attributed(
     return False
 
 
-def check_evidence(
-    ev: dict, ck_info: dict, wdir: str, repo: Any, since: str | None
+def _declared_git_ref(ev: dict) -> str | None:
+    """The ``git_ref`` an evidence entry declares, as a string.
+
+    calkit.yaml is hand-written, and YAML reads an all-digit short SHA as an
+    int. That's still a ref, so coerce rather than refusing it.
+    """
+    git_ref = ev.get("git_ref")
+    if git_ref is None or git_ref == "":
+        return None
+    return git_ref if isinstance(git_ref, str) else str(git_ref)
+
+
+def _read_at_ref(repo: Any, git_ref: str, path: str) -> str | None:
+    """The text of ``path`` at ``git_ref``, or None if it isn't there."""
+    try:
+        return str(repo.git.show(f"{git_ref}:{path}"))
+    except Exception:
+        return None
+
+
+def check_pinned_evidence(
+    out: EvidenceCheck, ev: dict, repo: Any, wdir: str
 ) -> EvidenceCheck:
-    """Check one evidence entry against the working tree and history."""
+    """Check evidence pinned to a Git ref, at that ref.
+
+    A pin is a claim about one version of an artifact, so the working tree
+    and the current pipeline have nothing to say about it -- only whether
+    the ref and the path are there, and whether a cited value still reads.
+    A DVC-tracked path won't be in the tree at all; the lock naming it is as
+    much as can be checked without fetching the content.
+    """
+    git_ref = out.git_ref or ""
+    if repo is None:
+        out.status = "skipped"
+        out.message = f"no repo to resolve {git_ref} against"
+        return out
+    try:
+        repo.commit(git_ref)
+    except Exception:
+        out.status = "missing"
+        out.message = f"Git ref {git_ref!r} was not found; push it or fix it"
+        return out
+    text = _read_at_ref(repo, git_ref, out.path)
+    if text is None:
+        lock = _read_at_ref(repo, git_ref, "dvc.lock")
+        if lock is not None and _lock_hash(lock, out.path) is not None:
+            # Tracked by DVC at that commit: present, but its content lives
+            # in storage, so a cited value can't be read from here.
+            if is_value_evidence(ev):
+                out.status = "skipped"
+                out.message = (
+                    f"DVC-tracked at {git_ref}; value not read from storage"
+                )
+            return out
+        out.status = "missing"
+        out.message = f"not found at {git_ref}; run the pipeline or push it"
+        return out
+    if is_value_evidence(ev):
+        try:
+            out.current = resolve_key(
+                parse_evidence_text(text, out.path), out.key or ""
+            )
+        except KeyError:
+            out.status = "error"
+            out.message = (
+                f"key {out.key!r} not found in {out.path} at {git_ref}"
+            )
+        except Exception as e:
+            out.status = "error"
+            out.message = (
+                f"cannot read {out.path} at {git_ref}: "
+                f"{e.__class__.__name__}: {e}"
+            )
+    return out
+
+
+def check_evidence(
+    ev: dict,
+    ck_info: dict,
+    wdir: str,
+    repo: Any,
+    since: str | None,
+    stale_stages: set[str] | None = None,
+    frozen_stages: set[str] | None = None,
+) -> EvidenceCheck:
+    """Check one evidence entry against the working tree and history.
+
+    ``stale_stages`` and ``frozen_stages`` are base stage names from the
+    pipeline: the ones DVC would re-run, and the ones it never will because
+    they're frozen or downstream of a freeze.
+    """
     from calkit.pipeline import get_stage_for_output
 
     kind = ev.get("kind", "result")
@@ -588,11 +733,14 @@ def check_evidence(
         name=evidence_name(ev) if is_value_evidence(ev) else None,
         status="ok",
         stage=get_stage_for_output(path, ck_info) if path else None,
+        git_ref=_declared_git_ref(ev),
     )
     if not path:
         out.status = "error"
         out.message = "evidence has no path"
         return out
+    if out.git_ref is not None:
+        return check_pinned_evidence(out, ev, repo, wdir)
     if not os.path.exists(os.path.join(wdir, path)):
         out.status = "missing"
         out.message = "path does not exist; run the pipeline or pull"
@@ -634,6 +782,32 @@ def check_evidence(
             # still worth migrating, and the hint is the only place it is
             # said
             out.message = "; ".join(filter(None, [out.message, change]))
+    base = (out.stage or "").split("@")[0]
+    if out.status in ("ok", "changed") and base:
+        if base in (stale_stages or set()):
+            out.status = "stale"
+            out.message = "; ".join(
+                filter(
+                    None,
+                    [
+                        out.message,
+                        f"stage '{base}' is out of date; run the pipeline",
+                    ],
+                )
+            )
+        elif base in (frozen_stages or set()):
+            out.status = "frozen"
+            out.message = "; ".join(
+                filter(
+                    None,
+                    [
+                        out.message,
+                        f"stage '{base}' is frozen, or downstream of one, so "
+                        "nothing will report it out of date; cite a git_ref "
+                        "to pin which version this is",
+                    ],
+                )
+            )
     if out.status == "ok" and not _is_attributed(
         path, out.stage, ck_info, wdir
     ):
@@ -653,6 +827,8 @@ def check_question(
     wdir: str,
     repo: Any = None,
     history: CalkitYamlHistory | None = None,
+    stale_stages: set[str] | None = None,
+    frozen_stages: set[str] | None = None,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
     if isinstance(question, str):
@@ -676,7 +852,16 @@ def check_question(
         else None
     )
     checks = [
-        check_evidence(ev, ck_info, wdir, repo, since) for ev in evidence
+        check_evidence(
+            ev,
+            ck_info,
+            wdir,
+            repo,
+            since,
+            stale_stages=stale_stages,
+            frozen_stages=frozen_stages,
+        )
+        for ev in evidence
     ]
     messages: list[str] = []
     # Every placeholder in the prose must name a value and format with it
@@ -700,15 +885,25 @@ def check_question(
             )
         except (ValueError, IndexError) as e:
             messages.append(f"cannot render {t[:40]!r}...: {e}")
+    # Worst first, matching what the hub shows against each question: an
+    # answer resting on nothing anyone can find is worse off than one
+    # resting on something merely out of date.
     statuses = {c.status for c in checks}
     status: QuestionStatus = "ok"
-    if messages or statuses & {"error", "missing"}:
+    if "missing" in statuses:
+        status = "missing"
+    elif messages or "error" in statuses:
         status = "error"
-    elif "changed" in statuses:
+    elif "stale" in statuses:
         status = "stale"
+    elif "frozen" in statuses:
+        status = "frozen"
+    if "changed" in statuses:
+        # Said either way, since it is the one thing here that asks for a
+        # reader rather than a command.
         messages.append(
-            "evidence changed since the answer was last edited; re-read it "
-            "and edit the question if it still holds"
+            "evidence changed since the answer was last edited; worth "
+            "re-reading, and editing the question if it no longer holds"
         )
     if since is None and repo is not None:
         messages.append("not yet committed, so history cannot be checked")
@@ -723,10 +918,50 @@ def check_question(
     )
 
 
+def pipeline_stage_sets(
+    ck_info: dict, wdir: str, check_pipeline: bool = True
+) -> tuple[set[str], set[str]]:
+    """The stages that are out of date, and the ones frozen out of reach.
+
+    Best-effort: a pipeline that can't be read leaves both empty rather than
+    failing the whole check, since most of what it reports doesn't depend on
+    the pipeline at all.
+    """
+    from calkit.pipeline import frozen_tainted_stage_names, get_status
+
+    if not check_pipeline:
+        return set(), set()
+    stale: set[str] = set()
+    frozen: set[str] = set()
+    try:
+        status = get_status(
+            ck_info=ck_info,
+            wdir=wdir,
+            check_environments=False,
+            clean_notebooks=False,
+            compile_to_dvc=False,
+        )
+        stale = {n.split("@")[0] for n in status.stale_stage_names}
+    except Exception:
+        pass
+    try:
+        frozen = frozen_tainted_stage_names(ck_info=ck_info, wdir=wdir)
+    except Exception:
+        pass
+    return stale, frozen
+
+
 def check_questions(
-    ck_info: dict | None = None, wdir: str | None = None
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    check_pipeline: bool = True,
 ) -> QuestionsStatus:
-    """Check every question in a project against its evidence."""
+    """Check every question in a project against its evidence.
+
+    ``check_pipeline`` asks DVC which stages are out of date, which is the
+    slowest thing here; turning it off skips that and the frozen check with
+    it, leaving the rest of the report intact.
+    """
     wdir = wdir or os.getcwd()
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -735,11 +970,24 @@ def check_questions(
     except Exception:
         repo = None
     questions = ck_info.get("questions", []) or []
-    # One reading of calkit.yaml's history for all of them
+    # One reading of calkit.yaml's history, and one of the pipeline, for all
+    # of them
     history = CalkitYamlHistory(repo, wdir) if repo is not None else None
+    stale_stages, frozen_stages = pipeline_stage_sets(
+        ck_info, wdir, check_pipeline
+    )
     return QuestionsStatus(
         questions=[
-            check_question(n, q, ck_info, wdir, repo, history)
+            check_question(
+                n,
+                q,
+                ck_info,
+                wdir,
+                repo,
+                history,
+                stale_stages=stale_stages,
+                frozen_stages=frozen_stages,
+            )
             for n, q in enumerate(questions, start=1)
         ]
     )
@@ -757,9 +1005,12 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     for q in status.questions:
         # An unattributed entry is advisory rather than a failure, but it
         # is only ever said here, so it earns the question a block
-        needs_attention = q.status in ("stale", "error") or any(
-            ev.status == "unattributed" for ev in q.evidence
-        )
+        needs_attention = q.status in (
+            "missing",
+            "error",
+            "stale",
+            "frozen",
+        ) or any(ev.status in ("unattributed", "changed") for ev in q.evidence)
         if not verbose and not needs_attention:
             continue
         lines.append(f"{q.index}. [{q.status}] {q.question}")
@@ -779,22 +1030,36 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     )
     if answered:
         lines.append(
-            f"Answers consistent with their evidence: {n_ok}/{len(answered)} "
+            f"Answers backed by current evidence: {n_ok}/{len(answered)} "
             f"{calkit.check_or_x(n_ok == len(answered))}"
         )
         lines.append(
-            f"Answers whose evidence changed since: {len(status.stale)} "
-            f"{calkit.check_or_x(not status.stale)}"
+            f"Answers citing evidence that isn't there: "
+            f"{len(status.missing)} {calkit.check_or_x(not status.missing)}"
         )
         lines.append(
             f"Answers with broken references: {len(status.errors)} "
             f"{calkit.check_or_x(not status.errors)}"
         )
+        lines.append(
+            f"Answers whose evidence the pipeline would rebuild: "
+            f"{len(status.stale)} {calkit.check_or_x(not status.stale)}"
+        )
     # No check mark either way on the rest: worth a look, not a verdict
+    if status.frozen:
+        lines.append(
+            f"Answers resting on a frozen stage, unpinned: "
+            f"{len(status.frozen)} (worth a look)"
+        )
     no_evidence = sum(1 for q in answered if q.status == "no-evidence")
     if no_evidence:
         lines.append(
             f"Answers given without evidence: {no_evidence} (worth a look)"
+        )
+    if status.changed:
+        lines.append(
+            f"Evidence that changed after the answer was written: "
+            f"{len(status.changed)} (worth a look)"
         )
     if status.unattributed:
         lines.append(

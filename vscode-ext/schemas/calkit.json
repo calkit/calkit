@@ -1083,6 +1083,19 @@
           "default": null,
           "title": "Explanation"
         },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the figure can be found.",
+          "title": "Git Ref"
+        },
         "kind": {
           "const": "figure",
           "default": "figure",
@@ -5072,6 +5085,19 @@
           "default": null,
           "title": "Explanation"
         },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the publication can be found.",
+          "title": "Git Ref"
+        },
         "kind": {
           "const": "publication",
           "default": "publication",
@@ -6432,6 +6458,19 @@
           ],
           "default": null,
           "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the result can be found.",
+          "title": "Git Ref"
         },
         "key": {
           "anyOf": [
@@ -8109,6 +8148,19 @@
           "default": null,
           "title": "Explanation"
         },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the table can be found.",
+          "title": "Git Ref"
+        },
         "kind": {
           "const": "table",
           "default": "table",
@@ -8232,6 +8284,19 @@
           ],
           "default": null,
           "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the value can be found.",
+          "title": "Git Ref"
         },
         "key": {
           "description": "Key of the value within the results file. A key present at the top level is used as-is; otherwise it is split on dots and walked into nested objects, with integers indexing lists.",

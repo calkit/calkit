@@ -208,6 +208,36 @@ def shared_reader_root() -> str:
     return os.path.join(settings.CLONE_ROOT, SHARED_READER_DIR)
 
 
+def expire_shared_read_clone(
+    project: Project, branch: str | None = None
+) -> None:
+    """Make the next read of *project* fetch, after a push through the API.
+
+    Readers share one checkout, kept on a TTL and guarded by a cached answer
+    for what the remote's head is. Neither knows about a push made from a
+    writer's own clone, so without this a write lands and reads keep serving
+    the project as it was until the TTL lapses -- a question added through
+    the app comes back missing, and the DB sync then deletes it.
+    """
+    if branch:
+        git_plain_url = project.git_repo_url or ""
+        if git_plain_url and not git_plain_url.endswith(".git"):
+            git_plain_url += ".git"
+        cache.delete(cache.make_key("remote-head", git_plain_url, branch))
+    # Dated to the epoch rather than removed: its absence means "no complete
+    # clone here", which 503s every read until one finishes.
+    marker = os.path.join(
+        shared_reader_root(),
+        project.owner_github_name,
+        project.name,
+        "updated.txt",
+    )
+    try:
+        os.utime(marker, (0, 0))
+    except OSError as e:
+        logger.info(f"Could not expire shared read clone: {e}")
+
+
 def is_shared_read_checkout(repo: git.Repo) -> bool:
     """Whether this repo is the checkout everybody reads from.
 
@@ -1901,6 +1931,38 @@ class GitTree(RepoTree):
             return [posixpath.basename(item.path) for item in t]
 
 
+# When a ref fetch came up empty, keyed by (repo_dir, ref). A ref that isn't
+# on the remote costs a full round trip to find that out, and a page naming
+# one names it on every load -- e.g. question evidence pinned to a tag that
+# was never pushed. Short-lived, so a ref pushed a moment ago still appears.
+_MISSING_REF_CACHE: OrderedDict[tuple[str, str], float] = OrderedDict()
+_MISSING_REF_CACHE_MAX = 512
+_MISSING_REF_CACHE_TTL_S = 60
+_MISSING_REF_CACHE_LOCK = threading.Lock()
+
+
+def _missing_ref_fetched_recently(repo: git.Repo, ref: str) -> bool:
+    """Whether fetching ``ref`` already came up empty, recently enough."""
+    key = (str(repo.working_dir), ref)
+    with _MISSING_REF_CACHE_LOCK:
+        fetched_at = _MISSING_REF_CACHE.get(key)
+        if fetched_at is None:
+            return False
+        if time.time() - fetched_at > _MISSING_REF_CACHE_TTL_S:
+            del _MISSING_REF_CACHE[key]
+            return False
+        return True
+
+
+def _remember_missing_ref(repo: git.Repo, ref: str) -> None:
+    key = (str(repo.working_dir), ref)
+    with _MISSING_REF_CACHE_LOCK:
+        _MISSING_REF_CACHE[key] = time.time()
+        _MISSING_REF_CACHE.move_to_end(key)
+        while len(_MISSING_REF_CACHE) > _MISSING_REF_CACHE_MAX:
+            _MISSING_REF_CACHE.popitem(last=False)
+
+
 def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
     """Resolve a branch, tag, or commit hash to a Commit object.
 
@@ -1923,7 +1985,9 @@ def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
         return commit
     # Anything that isn't a plain ref name is not worth handing to git,
     # if only to keep a leading dash from being read as an option
-    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", ref):
+    if re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._/-]*", ref
+    ) and not _missing_ref_fetched_recently(repo, ref):
         try:
             # By SHA as well as by name: GitHub serves a commit that's
             # reachable from any ref, which covers a pull request head
@@ -1939,6 +2003,7 @@ def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
             commit = resolve()
             if commit is not None:
                 return commit
+        _remember_missing_ref(repo, ref)
     raise HTTPException(404, f"Git ref '{ref}' was not found")
 
 

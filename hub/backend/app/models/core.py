@@ -1513,6 +1513,11 @@ class QuestionEvidence(SQLModel):
     path: str
     key: str | None = None
     explanation: str | None = None
+    # The ref the evidence itself names, if any: evidence can cite a branch,
+    # tag, or commit other than the one being browsed, e.g. an answer backed
+    # by the figure as it stood when the answer was written. Carried through
+    # unresolved, since it's what links to the artifact have to point at.
+    git_ref: str | None = None
     # Resolved artifact the evidence points to, if it could be found
     figure: Figure | None = None
     result: Result | None = None
@@ -1520,6 +1525,20 @@ class QuestionEvidence(SQLModel):
     # For result evidence with a key, the value read from the result file so it
     # can be shown dashboard-style
     value: str | None = None
+    # The pipeline stage that produces the cited path, and its status, both
+    # resolved at the evidence's own ref. Evidence whose stage is stale is
+    # citing an artifact the pipeline would rebuild differently, which is
+    # worth knowing before trusting it as an answer.
+    stage: str | None = None
+    stage_status: "StageStatus | None" = None
+    # Why this citation shouldn't be taken at face value, if it shouldn't.
+    # 'missing': it resolves to nothing -- never pushed, deleted, or at a ref
+    # that isn't there. 'pipeline': the stage that made it is out of date.
+    # 'frozen': the stage is frozen, or downstream of one that is, so the
+    # pipeline will never call it stale however far its inputs have moved --
+    # and the citation doesn't name a Git ref that would pin what it refers
+    # to.
+    stale_reason: Literal["missing", "pipeline", "frozen"] | None = None
 
 
 class QuestionEvidencePost(SQLModel):
@@ -1527,6 +1546,7 @@ class QuestionEvidencePost(SQLModel):
     path: str
     key: str | None = None
     explanation: str | None = None
+    git_ref: str | None = None
 
 
 class QuestionPublic(SQLModel):

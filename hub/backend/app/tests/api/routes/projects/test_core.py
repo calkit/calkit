@@ -225,6 +225,26 @@ def test_project_routes_are_case_insensitive(client: TestClient) -> None:
     )
 
 
+def test_comment_artifact_route_and_label() -> None:
+    from app.api.routes.projects.core import (
+        comment_artifact_label,
+        comment_artifact_route,
+    )
+
+    # A question is identified by number and has a page of its own;
+    # everything else is a path on a section page.
+    assert comment_artifact_route("question", "3") == "questions/3"
+    assert comment_artifact_label("question", "3") == "question 3"
+    assert comment_artifact_route("release", "v1 0") == "releases/v1%200"
+    assert (
+        comment_artifact_route("figure", "figures/x.png")
+        == "figures?path=figures%2Fx.png"
+    )
+    assert comment_artifact_label("figure", "figures/x.png") == "figures/x.png"
+    # An unknown type falls back to the files page.
+    assert comment_artifact_route(None, "a.txt") == "files?path=a.txt"
+
+
 def test_get_project_comments_uses_all_results() -> None:
     fake_project = SimpleNamespace(id="project-id")
     fake_comment = SimpleNamespace(id="comment-id")
@@ -1367,7 +1387,10 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
     import base64
     import json
 
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Figure, Publication, Result
 
     fig = Figure(path="figures/x.png", title="X")
@@ -1413,10 +1436,17 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={fig.path: fig},
-            results_by_path={(res.path, res.key): res},
-            tables_by_path={},
-            publications_by_path={pub.path: pub},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={fig.path: fig},
+                    results_by_path={(res.path, res.key): res},
+                    tables_by_path={},
+                    publications_by_path={pub.path: pub},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert len(evidence) == 4
@@ -1435,6 +1465,99 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
     assert evidence[2].publication.title == "Paper"
     # An unresolved figure path leaves the resolved figure as None.
     assert evidence[3].figure is None
+
+
+def test_question_evidence_carries_pipeline_stage_status() -> None:
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
+    from app.models.core import Figure
+    from app.pipeline import StageStatus
+
+    # One figure declaring its own stage, one the pipeline claims by path, and
+    # one nothing produces.
+    declared = Figure(
+        path="figures/declared.png", title="Declared", stage="plot-declared"
+    )
+    matched = Figure(path="figures/matched.png", title="Matched")
+    frozen = Figure(path="figures/frozen.png", title="Frozen")
+    evidence_ck = [
+        {"kind": "figure", "path": "figures/declared.png"},
+        {"kind": "figure", "path": "figures/matched.png"},
+        {"kind": "figure", "path": "figures/orphan.png"},
+        {"kind": "figure", "path": "figures/frozen.png"},
+        # The same frozen output, pinned: the ref says which version is
+        # meant, so there's nothing left for the freeze to hide.
+        {"kind": "figure", "path": "figures/frozen.png", "git_ref": "v1.0"},
+    ]
+    dvc_lock = {
+        "stages": {
+            "plot-matched": {"outs": [{"path": "figures/matched.png"}]},
+            # Also produces the declared figure, and must lose to what the
+            # figure itself says.
+            "plot-by-path": {"outs": [{"path": "figures/declared.png"}]},
+            "plot-frozen": {"outs": [{"path": "figures/frozen.png"}]},
+        }
+    }
+    stage_statuses = {
+        "plot-declared": StageStatus(status="up-to-date"),
+        "plot-matched": StageStatus(
+            status="stale", modified_inputs=["scripts/plot.py"]
+        ),
+        "plot-by-path": StageStatus(status="stale"),
+        # Frozen reads as up-to-date forever, which is the whole problem.
+        "plot-frozen": StageStatus(status="frozen"),
+    }
+    evidence = _build_question_evidence(
+        project=SimpleNamespace(),  # type: ignore
+        repo=SimpleNamespace(),
+        ref=None,
+        evidence_ck=evidence_ck,
+        lookups_by_ref={
+            None: _EvidenceLookups(
+                figures_by_path={
+                    declared.path: declared,
+                    matched.path: matched,
+                    frozen.path: frozen,
+                },
+                results_by_path={},
+                tables_by_path={},
+                publications_by_path={},
+                dvc_lock=dvc_lock,
+                stage_statuses=stage_statuses,
+                frozen_stages={"plot-frozen"},
+            ),
+            # The pinned citation resolves at its own ref, where the stage is
+            # just as frozen -- the ref is what settles it, not the status.
+            "v1.0": _EvidenceLookups(
+                figures_by_path={frozen.path: frozen},
+                results_by_path={},
+                tables_by_path={},
+                publications_by_path={},
+                dvc_lock=dvc_lock,
+                stage_statuses=stage_statuses,
+                frozen_stages={"plot-frozen"},
+            ),
+        },
+        result_value_cache={},
+    )
+    assert evidence[0].stage == "plot-declared"
+    assert evidence[0].stage_status is not None
+    assert evidence[0].stage_status.status == "up-to-date"
+    assert evidence[1].stage == "plot-matched"
+    assert evidence[1].stage_status is not None
+    assert evidence[1].stage_status.status == "stale"
+    assert evidence[1].stage_status.modified_inputs == ["scripts/plot.py"]
+    assert evidence[2].stage is None
+    assert evidence[2].stage_status is None
+    assert evidence[0].stale_reason is None
+    assert evidence[1].stale_reason == "pipeline"
+    # Nothing resolved for the orphan, so it's missing rather than merely
+    # unattributed -- worse news than a stale stage, and it wins.
+    assert evidence[2].stale_reason == "missing"
+    assert evidence[3].stale_reason == "frozen"
+    assert evidence[4].stale_reason is None
 
 
 def test_apply_question_update_builds_object() -> None:
@@ -3462,7 +3585,10 @@ def test_get_project_tables_declares_detects_and_resolves(
 
 
 def test_build_question_evidence_keyed_results_and_tables() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # Two results share a file, told apart only by their keys
@@ -3491,10 +3617,17 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={},
-            results_by_path={(mean.path, mean.key): mean},
-            tables_by_path={table.path: table},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(mean.path, mean.key): mean},
+                    tables_by_path={table.path: table},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is None
@@ -3540,7 +3673,10 @@ def test_declared_tables_reach_the_evidence_lookup() -> None:
 
 
 def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # A project can declare both at one path. They are different things
@@ -3561,10 +3697,17 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={},
-            results_by_path={(result.path, None): result},
-            tables_by_path={table.path: table},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(result.path, None): result},
+                    tables_by_path={table.path: table},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is not None
@@ -3574,7 +3717,10 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
 
 
 def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # A result is identified by (path, key). Falling back to the whole-file
@@ -3595,13 +3741,187 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
                     "key": "metrics.p95",
                 }
             ],
-            figures_by_path={},
-            results_by_path={(whole.path, None): whole},
-            tables_by_path={},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(whole.path, None): whole},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is None
+
+
+def test_evidence_resolves_at_its_own_git_ref() -> None:
+    import base64
+    import json
+
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
+    from app.models.core import ContentsItem, Figure, Result
+
+    # The same paths exist at both refs and mean different things there, so
+    # an entry naming a ref must resolve against that ref's artifacts and
+    # not against the ones for the ref being browsed.
+    here_fig = Figure(path="figures/x.png", title="X now")
+    there_fig = Figure(path="figures/x.png", title="X at v1")
+    here_res = Result(path="results/summary.json", title="Now", key="mean")
+    there_res = Result(path="results/summary.json", title="At v1", key="mean")
+    evidence_ck = [
+        {"kind": "figure", "path": "figures/x.png"},
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "v1.0"},
+        {"kind": "result", "path": "results/summary.json", "key": "mean"},
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "key": "mean",
+            "git_ref": "v1.0",
+        },
+        # A ref nothing could be built for: the entry still comes back, with
+        # its git_ref intact, just unresolved.
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "gone"},
+    ]
+    values = {None: 2.0, "v1.0": 1.0}
+
+    def fake_contents(project, repo, path, ref):
+        return ContentsItem(
+            name="summary.json",
+            path=path,
+            type="file",
+            size=1,
+            in_repo=True,
+            content=base64.b64encode(
+                json.dumps({"mean": values[ref]}).encode()
+            ).decode(),
+            url=None,
+            storage="git",
+        )
+
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        side_effect=fake_contents,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={here_fig.path: here_fig},
+                    results_by_path={(here_res.path, "mean"): here_res},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                ),
+                "v1.0": _EvidenceLookups(
+                    figures_by_path={there_fig.path: there_fig},
+                    results_by_path={(there_res.path, "mean"): there_res},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                ),
+            },
+            result_value_cache={},
+        )
+    assert evidence[0].git_ref is None
+    assert evidence[0].figure is not None
+    assert evidence[0].figure.title == "X now"
+    assert evidence[1].git_ref == "v1.0"
+    assert evidence[1].figure is not None
+    assert evidence[1].figure.title == "X at v1"
+    assert evidence[2].result is not None
+    assert evidence[2].result.title == "Now"
+    # The value is read from the file at the entry's own ref, and the cache
+    # is keyed by ref, so one ref's value can't be served for the other's.
+    assert evidence[2].value == "2.0"
+    assert evidence[3].result is not None
+    assert evidence[3].result.title == "At v1"
+    assert evidence[3].value == "1.0"
+    assert evidence[4].git_ref == "gone"
+    assert evidence[4].figure is None
+
+
+def test_evidence_git_ref_round_trips_through_calkit_yaml() -> None:
+    from app.api.routes.projects.core import _apply_question_update
+    from app.models.core import QuestionEvidencePost, QuestionPut
+
+    req = QuestionPut(
+        question="q?",
+        evidence=[
+            QuestionEvidencePost(
+                kind="figure", path="figures/x.png", git_ref="v1.0"
+            ),
+            QuestionEvidencePost(kind="table", path="tables/t.csv"),
+        ],
+    )
+    out = _apply_question_update("q?", req)
+    assert isinstance(out, dict)
+    assert out["evidence"] == [
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "v1.0"},
+        # Nothing written for an entry that names no ref, so calkit.yaml
+        # stays as clean as it was.
+        {"kind": "table", "path": "tables/t.csv"},
+    ]
+
+
+def test_tables_listing_skips_evidence_at_another_ref() -> None:
+    from app.api.routes.projects.core import _build_tables
+
+    # A table cited only at another ref isn't a table of this one: the path
+    # may not even exist here, so listing it gives the reader a dead link.
+    ck_info = {
+        "questions": [
+            {
+                "question": "q?",
+                "evidence": [
+                    {"kind": "table", "path": "tables/here.csv"},
+                    {
+                        "kind": "table",
+                        "path": "tables/elsewhere.csv",
+                        "git_ref": "v1.0",
+                    },
+                ],
+            }
+        ]
+    }
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo_tree_for_ref",
+            return_value=SimpleNamespace(is_file=lambda path: False),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=({}, {}, {}, {}),
+        ),
+    ):
+        tables = _build_tables(
+            project=SimpleNamespace(
+                owner_account_name="someone", name="proj", file_locks=[]
+            ),
+            repo=SimpleNamespace(),
+            ref=None,
+            resolve_content=False,
+        )
+    paths = [t.path for t in tables]
+    assert "tables/here.csv" in paths
+    assert "tables/elsewhere.csv" not in paths
 
 
 def test_get_featured_projects(client: TestClient, db: Session) -> None:

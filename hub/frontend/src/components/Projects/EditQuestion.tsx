@@ -50,6 +50,10 @@ interface EvidenceRow {
   selection: string
   key: string
   explanation: string
+  // Not editable here: evidence can name the ref it was written against,
+  // and the form rewrites the whole list, so a row that carries one has to
+  // hand it back or saving an unrelated edit would quietly drop it.
+  gitRef?: string
 }
 
 interface EditQuestionForm {
@@ -145,6 +149,7 @@ const EditQuestion = ({
         selection: rowToSelection(ev.kind, ev.path),
         key: ev.key ?? "",
         explanation: ev.explanation ?? "",
+        gitRef: ev.git_ref ?? undefined,
       })),
     })
   }, [question, reset])
@@ -169,6 +174,7 @@ const EditQuestion = ({
                 path: parsed.path,
                 key: parsed.kind === "result" && row.key ? row.key : undefined,
                 explanation: row.explanation ? row.explanation : undefined,
+                git_ref: row.gitRef ? row.gitRef : undefined,
               },
             ]
           }),
@@ -199,6 +205,17 @@ const EditQuestion = ({
       onClose={onClose}
       size={{ base: "sm", md: "lg" }}
       isCentered
+      // This opens on top of the question's own modal, which already holds
+      // the page still. A second scroll lock takes the scrollbar away and
+      // puts it back, shifting everything underneath for a frame -- keeping
+      // the gap is what stops that.
+      preserveScrollBarGap
+      // No fade. The overlay's fade is a Web Animation whose final value is
+      // committed to the element a frame after the animation ends, and the
+      // form's own first render lands in exactly that gap -- so the page
+      // paints one frame undimmed before the overlay settles, which reads
+      // as a flash. Nothing to animate, nothing to race.
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent
@@ -280,7 +297,18 @@ const EditQuestion = ({
                   p={3}
                   mb={2}
                 >
-                  <Flex justify="flex-end">
+                  {/* Registered so the ref this row was written against
+                      survives a save; there is nothing to edit here. */}
+                  <input
+                    type="hidden"
+                    {...register(`evidence.${index}.gitRef`)}
+                  />
+                  <Flex justify="flex-end" align="center" gap={2}>
+                    {field.gitRef ? (
+                      <Text fontSize="xs" color="gray.500" mr="auto">
+                        at {field.gitRef}
+                      </Text>
+                    ) : null}
                     <IconButton
                       aria-label="Remove evidence"
                       icon={<FaTrash />}

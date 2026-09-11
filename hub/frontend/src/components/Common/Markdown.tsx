@@ -9,7 +9,7 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { Box } from "@chakra-ui/react"
-import React from "react"
+import React, { useMemo } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
@@ -36,7 +36,27 @@ interface MarkdownProps {
   inline?: boolean
   /** Truncate with an ellipsis after this many lines. */
   noOfLines?: number
+  /**
+   * Text that came out of a YAML folded block (``>``), e.g. prose written in
+   * calkit.yaml. Folding collapses the blank line between paragraphs into a
+   * single newline, which Markdown then reads as a soft break and joins back
+   * into one wall of text. Set this to get the paragraphs back.
+   */
+  foldedProse?: boolean
 }
+
+/** Restore paragraph breaks YAML folding collapsed into single newlines.
+ *
+ * Fenced code is left alone: a blank line inside one is content, not a
+ * break.
+ */
+const expandFoldedParagraphs = (text: string) =>
+  text
+    .split(/(```[\s\S]*?```)/g)
+    .map((part, i) =>
+      i % 2 === 1 ? part : part.replace(/([^\n])\n(?!\n)/g, "$1\n\n"),
+    )
+    .join("")
 
 interface codeProps extends React.HTMLAttributes<HTMLElement> {
   insidePre?: boolean
@@ -58,6 +78,14 @@ const BlueLink = (props: any) => {
   return <Link variant="blue" {...props} />
 }
 
+const inlineParagraph = ({ children, ...props }: any) => {
+  return (
+    <Text as="span" my={0} {...props}>
+      {children}
+    </Text>
+  )
+}
+
 // Send prop to children of <pre> to differentiate if they are block code or not
 const pre = ({ children, ...props }: any) => {
   return (
@@ -71,100 +99,129 @@ const pre = ({ children, ...props }: any) => {
 
 const code = ({ insidePre = false, ...props }: codeProps) => {
   if (insidePre) {
-    return <Code my={2} whiteSpace={"pre"} display={"block"} p={2} {...props} />
+    // A block keeps its own line breaks; the <pre> around it scrolls.
+    return (
+      <Code
+        my={2}
+        whiteSpace={"pre"}
+        display={"block"}
+        p={2}
+        fontSize="0.9em"
+        {...props}
+      />
+    )
   }
-  return <Code my={0} whiteSpace={"pre"} px={1} {...props} />
+  // Wraps rather than running out of its container, and sized relative to
+  // the text it sits in -- Chakra's own size is absolute, which reads as
+  // much bigger than the words around it wherever that text is small.
+  return (
+    <Code
+      my={0}
+      whiteSpace={"pre-wrap"}
+      wordBreak="break-word"
+      px={1}
+      fontSize="0.9em"
+      {...props}
+    />
+  )
 }
 
-const Markdown = ({ children, inline = false, noOfLines }: MarkdownProps) => {
+const Markdown = ({
+  children,
+  inline = false,
+  noOfLines,
+  foldedProse = false,
+}: MarkdownProps) => {
   const tableBorderColor = useColorModeValue("gray.200", "whiteAlpha.300")
   const tableHeaderBg = useColorModeValue("gray.50", "whiteAlpha.100")
   const tableHeaderText = useColorModeValue("gray.700", "gray.100")
   const tableRowAltBg = useColorModeValue("blackAlpha.50", "whiteAlpha.50")
 
-  const table = ({ children, ...props }: any) => {
-    return (
-      <Box
-        my={4}
-        overflowX="auto"
-        borderWidth="1px"
-        borderColor={tableBorderColor}
-        borderRadius="md"
-      >
+  // Built once per color scheme rather than per render: the memo below
+  // is only as stable as what goes into it.
+  const tableComponents = useMemo(() => {
+    const table = ({ children, ...props }: any) => {
+      return (
         <Box
-          as="table"
-          width="full"
-          borderCollapse="separate"
-          borderSpacing={0}
-          {...props}
+          my={4}
+          overflowX="auto"
+          borderWidth="1px"
+          borderColor={tableBorderColor}
+          borderRadius="md"
         >
-          {children}
+          <Box
+            as="table"
+            width="full"
+            borderCollapse="separate"
+            borderSpacing={0}
+            {...props}
+          >
+            {children}
+          </Box>
         </Box>
-      </Box>
-    )
-  }
+      )
+    }
 
-  const tr = ({ ...props }: any) => {
-    return <Box as="tr" _even={{ bg: tableRowAltBg }} {...props} />
-  }
+    const tr = ({ ...props }: any) => {
+      return <Box as="tr" _even={{ bg: tableRowAltBg }} {...props} />
+    }
 
-  const th = ({ ...props }: any) => {
-    return (
-      <Box
-        as="th"
-        px={3}
-        py={2}
-        textAlign="left"
-        fontWeight="semibold"
-        bg={tableHeaderBg}
-        color={tableHeaderText}
-        borderBottomWidth="1px"
-        borderColor={tableBorderColor}
-        whiteSpace="normal"
-        {...props}
-      />
-    )
-  }
+    const th = ({ ...props }: any) => {
+      return (
+        <Box
+          as="th"
+          px={3}
+          py={2}
+          textAlign="left"
+          fontWeight="semibold"
+          bg={tableHeaderBg}
+          color={tableHeaderText}
+          borderBottomWidth="1px"
+          borderColor={tableBorderColor}
+          whiteSpace="normal"
+          {...props}
+        />
+      )
+    }
 
-  const td = ({ ...props }: any) => {
-    return (
-      <Box
-        as="td"
-        px={3}
-        py={2}
-        borderBottomWidth="1px"
-        borderColor={tableBorderColor}
-        verticalAlign="top"
-        whiteSpace="normal"
-        {...props}
-      />
-    )
-  }
+    const td = ({ ...props }: any) => {
+      return (
+        <Box
+          as="td"
+          px={3}
+          py={2}
+          borderBottomWidth="1px"
+          borderColor={tableBorderColor}
+          verticalAlign="top"
+          whiteSpace="normal"
+          {...props}
+        />
+      )
+    }
+    return { table, tr, th, td }
+  }, [tableBorderColor, tableHeaderBg, tableHeaderText, tableRowAltBg])
 
-  const inlineParagraph = ({ children, ...props }: any) => {
-    return (
-      <Text as="span" my={0} {...props}>
-        {children}
-      </Text>
-    )
-  }
-
-  const components = {
-    h1: H1,
-    h2: H2,
-    h3: H3,
-    li: ListItem,
-    ol: OrderedList,
-    ul: UnorderedList,
-    p: inline ? inlineParagraph : p,
-    pre,
-    code,
-    a: BlueLink,
-    table,
-    tr,
-    th,
-    td,
-  }
+  // Memoized as one object, and every member of it with it: React compares
+  // component *identity* to decide whether to update a subtree or replace
+  // it, so a map rebuilt each render tears down and re-creates everything
+  // this Markdown rendered. That reads as a flash wherever something else
+  // on the page re-renders -- opening a modal over it, say.
+  const components = useMemo(
+    () => ({
+      h1: H1,
+      h2: H2,
+      h3: H3,
+      li: ListItem,
+      ol: OrderedList,
+      ul: UnorderedList,
+      p: inline ? inlineParagraph : p,
+      pre,
+      code,
+      a: BlueLink,
+      ...tableComponents,
+    }),
+    [inline, tableComponents],
+  )
 
   return (
     <Box
@@ -214,7 +271,7 @@ const Markdown = ({ children, inline = false, noOfLines }: MarkdownProps) => {
           rehypeKatex,
         ]}
       >
-        {children}
+        {foldedProse ? expandFoldedParagraphs(children) : children}
       </ReactMarkdown>
     </Box>
   )

@@ -59,6 +59,79 @@ def frozen_stage_base_names(
     return names
 
 
+def frozen_tainted_stage_names(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> set[str]:
+    """Base names of frozen stages, plus every stage downstream of one.
+
+    A frozen stage doesn't re-run when its inputs change, so DVC never calls
+    it out of date -- and never calls anything built from its outputs out of
+    date either. Nothing in a status report will say so, which is the point
+    of naming them here: an answer resting on one of those outputs is
+    resting on whatever the stage last happened to produce.
+
+    Read from ``dvc.lock`` where there is one, since its deps and outs are
+    concrete, falling back to ``dvc.yaml``. Names come back without their
+    ``@`` expansion, matching :func:`frozen_stage_base_names`.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    tainted = frozen_stage_base_names(ck_info=ck_info, wdir=wdir)
+    if not tainted:
+        return set()
+    stages: dict = {}
+    for fname in ("dvc.lock", "dvc.yaml"):
+        fpath = os.path.join(wdir or ".", fname)
+        if os.path.isfile(fpath):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+            except Exception:
+                stages = {}
+            if stages:
+                break
+    if not stages:
+        return tainted
+
+    def _paths(stage: object, key: str) -> list[str]:
+        if not isinstance(stage, dict):
+            return []
+        out = []
+        for item in stage.get(key) or []:
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str):
+                out.append(path.rstrip("/"))
+        return out
+
+    producers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        for path in _paths(stage, "outs"):
+            producers.setdefault(path, set()).add(name.split("@")[0])
+    # A dep matches an out either way around the directory: a stage writing
+    # ``figures`` feeds one reading ``figures/x.png``, and one writing
+    # ``figures/x.png`` feeds one reading the whole ``figures`` directory.
+    consumers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        base = name.split("@")[0]
+        for dep in _paths(stage, "deps"):
+            for out, names in producers.items():
+                if (
+                    out == dep
+                    or dep.startswith(out + "/")
+                    or out.startswith(dep + "/")
+                ):
+                    for producer in names:
+                        if producer != base:
+                            consumers.setdefault(producer, set()).add(base)
+    queue = list(tainted)
+    while queue:
+        for consumer in consumers.get(queue.pop(), set()):
+            if consumer not in tainted:
+                tainted.add(consumer)
+                queue.append(consumer)
+    return tainted
+
+
 class PipelineStatus(BaseModel):
     """Current status of the project pipeline."""
 

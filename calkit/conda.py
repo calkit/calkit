@@ -207,6 +207,42 @@ def _normalize_git_dep_url(dep: str) -> str:
     return url.rstrip("/")
 
 
+def _unparseable_version_satisfies(
+    req_spec: str, actual_vers: str
+) -> bool | None:
+    """Check a requirement spec against a version string PEP 440 rejects.
+
+    Returns ``True`` or ``False`` when every clause in ``req_spec`` is a plain
+    equality or inequality (``==``, ``===`` or ``!=``), since those can be
+    decided by comparing the version strings directly. Returns ``None`` when
+    the spec needs version ordering (``<``, ``<=``, ``>``, ``>=``, ``~=``) or
+    contains a wildcard, both of which need a parsed version.
+
+    An empty spec means any version satisfies the requirement.
+
+    The comparison is an exact string match: without a parsed version there is
+    no zero-padding, so ``==1.0`` will not match an installed ``1.0.0``.
+    """
+    if not req_spec:
+        return True
+    clauses = [clause for clause in req_spec.split(",") if clause]
+    for clause in clauses:
+        for op in ("===", "==", "!="):
+            if not clause.startswith(op):
+                continue
+            value = clause[len(op) :]
+            if "*" in value:
+                # Wildcards need normalised versions to expand.
+                return None
+            if (actual_vers == value) == (op == "!="):
+                return False
+            break
+        else:
+            # An ordering operator, or something unrecognized.
+            return None
+    return True
+
+
 def _check_single(
     req: str, actual: str, env_spec_dir: str, conda: bool = False
 ) -> bool:
@@ -248,7 +284,10 @@ def _check_single(
         return _pkg_name_from_dep(req) == _pkg_name_from_dep(actual)
     if req_is_git:
         req = _GIT_RE.split(req)[0].strip()
-    req_name = re.split("[=<>]", req)[0].strip()
+    # Split on the first version operator. "!" and "~" are in the class so
+    # that "!=" and "~=" requirements yield the bare package name instead of a
+    # name with the operator's leading character stuck to it.
+    req_name = re.split("[=<>!~]", req)[0].strip()
     req_spec = req.removeprefix(req_name).strip().replace(" ", "")
     if "[" in req_name:
         warnings.warn(f"Cannot check optional dependencies for {req_name}")
@@ -266,7 +305,7 @@ def _check_single(
     if actual_is_git:
         # Spec has no git URL but installed dep does; name match is sufficient
         actual = _GIT_RE.split(actual)[0].strip()
-    actual_parts = re.split("[=<>]+", actual, maxsplit=1)
+    actual_parts = re.split("[=<>!~]+", actual, maxsplit=1)
     actual_name = actual_parts[0]
     actual_vers = actual_parts[1] if len(actual_parts) > 1 else ""
     if actual_name.strip().lower() != req_name.lower():
@@ -279,22 +318,33 @@ def _check_single(
     try:
         version = Version(actual_vers)
     except InvalidVersion:
-        # An unparseable actual version (e.g. conda's "9e") can't be compared
-        # against a version constraint. If the requirement pins a specific
-        # version we can't confirm it matches, so treat it as not satisfied
-        # rather than silently passing. Only a bare package name with no
-        # version constraint is safe to accept, since any version is allowed.
-        has_specifier = any(c in req_spec for c in "=<>!~")
-        if has_specifier:
+        # An unparseable actual version (e.g. conda's "9e") can't go through
+        # SpecifierSet, which needs a parsed version to order by. Equality
+        # comparisons don't need ordering, so decide those from the version
+        # strings directly.
+        exact = _unparseable_version_satisfies(req_spec, actual_vers)
+        if exact is None:
+            # Ordering constraints and wildcards are genuinely undecidable
+            # here. A bare package name accepts any version; a pinned
+            # constraint we can't confirm counts as not satisfied rather than
+            # silently passing.
+            if not req_spec:
+                warnings.warn(
+                    f"Cannot properly check {actual_name} version "
+                    f"{actual_vers}"
+                )
+                return True
             warnings.warn(
                 f"Cannot properly check {actual_name} version {actual_vers} "
                 f"against constraint '{req_spec}'"
             )
             return False
-        warnings.warn(
-            f"Cannot properly check {actual_name} version {actual_vers}"
-        )
-        return True
+        if not exact:
+            warnings.warn(
+                f"Installed {actual_name} version {actual_vers} does not "
+                f"satisfy '{req_spec}'"
+            )
+        return exact
     spec = SpecifierSet(req_spec)
     return spec.contains(version, prereleases=editable)
 

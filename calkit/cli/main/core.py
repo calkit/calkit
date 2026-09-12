@@ -1672,17 +1672,13 @@ def push(
             git_cmd = ["git", "push"]
             if not no_recursive and "--recurse-submodules" not in git_args:
                 git_cmd.append("--recurse-submodules=on-demand")
-            # Annotated tags travel with the commits they mark. A plain
-            # `git push` leaves them behind, so a project that tags results
-            # ends up with tags that exist only on the machine that made
-            # them, and anyone cloning gets the history without the labels.
-            # `--follow-tags` is the conservative form: only annotated tags
-            # reachable from what is being pushed, so unannotated scratch
-            # tags and tags on other branches stay local.
-            if not any(
-                arg.startswith(("--follow-tags", "--no-follow-tags", "--tags"))
-                for arg in git_args
-            ):
+            # A plain `git push` leaves tags behind, so annotated tags end
+            # up only on the machine that made them
+            if not {
+                "--follow-tags",
+                "--no-follow-tags",
+                "--tags",
+            }.intersection(git_args):
                 git_cmd.append("--follow-tags")
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:

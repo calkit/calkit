@@ -1,0 +1,26 @@
+stages:
+  README.md/usage:
+    cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/usage.py
+    deps:
+      - .calkit/markdown/README.md/usage.py
+      - .calkit/markdown/outputs/README.md/usage.txt
+      - uv.lock
+      - .python-version
+      - src/wavetools
+    outs: []
+    desc: Automatically generated from the 'README.md/usage' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  README.md/figure:
+    cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/figure.py
+    deps:
+      - .calkit/markdown/README.md/figure.py
+      - .calkit/markdown/outputs/README.md/figure.txt
+      - uv.lock
+      - .python-version
+      - src/wavetools
+    outs:
+      - figures/waves.png:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'README.md/figure' stage in calkit.yaml.
+      Changes made here will be overwritten.

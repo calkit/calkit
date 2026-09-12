@@ -119,6 +119,7 @@ const NewToken = ({ isOpen, onClose }: NewTokenProps) => {
                     Expiration (days)
                   </FormLabel>
                   <Input
+                    autoComplete="off"
                     id="expires_days"
                     min={1}
                     max={365 * 3}
@@ -133,6 +134,7 @@ const NewToken = ({ isOpen, onClose }: NewTokenProps) => {
                 <FormControl mt={4} isInvalid={!!errors.description}>
                   <FormLabel htmlFor="description">Description</FormLabel>
                   <Input
+                    autoComplete="off"
                     id="description"
                     placeholder="Ex: For my MacBook Pro"
                     {...register("description")}

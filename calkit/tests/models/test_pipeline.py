@@ -488,7 +488,7 @@ def test_mappathsstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        "calkit map-paths --file-to-file 'data/input.txt->data/output.txt'"
+        'calkit map-paths --file-to-file "data/input.txt->data/output.txt"'
     )
     assert "data/input.txt" in sd["deps"]
     assert {"data/output.txt": {"cache": False, "persist": True}} in sd["outs"]

@@ -16,7 +16,9 @@ import { shell } from "@codemirror/legacy-modes/mode/shell"
 import { stex } from "@codemirror/legacy-modes/mode/stex"
 import { toml } from "@codemirror/legacy-modes/mode/toml"
 import { yaml } from "@codemirror/legacy-modes/mode/yaml"
+import { Prec } from "@codemirror/state"
 import { oneDarkTheme } from "@codemirror/theme-one-dark"
+import { keymap } from "@codemirror/view"
 import { tags as t } from "@lezer/highlight"
 import { EditorView, basicSetup } from "codemirror"
 import { type MutableRefObject, useEffect, useRef } from "react"
@@ -115,6 +117,12 @@ interface CodeEditorPaneProps {
   path: string
   viewRef: MutableRefObject<EditorView | null>
   onChange: (text: string) => void
+  // Cmd/Ctrl+Enter, when the caller has a "run" for it. CodeMirror's
+  // default binding inserts a blank line, which is wrong in an editor whose
+  // surroundings treat the chord as "go".
+  onModEnter?: () => void
+  // Shift+Enter, for "run and move on" in a notebook.
+  onShiftEnter?: () => void
 }
 
 const CodeEditorPane = ({
@@ -122,8 +130,14 @@ const CodeEditorPane = ({
   path,
   viewRef,
   onChange,
+  onModEnter,
+  onShiftEnter,
 }: CodeEditorPaneProps) => {
   const ref = useRef<HTMLDivElement>(null)
+  const onModEnterRef = useRef(onModEnter)
+  onModEnterRef.current = onModEnter
+  const onShiftEnterRef = useRef(onShiftEnter)
+  onShiftEnterRef.current = onShiftEnter
   // The listener below is built once and would otherwise close over the first
   // render's onChange, so callbacks reading state (e.g. an auto-compile
   // toggle) would keep seeing that render's values. Go through a ref instead.
@@ -139,6 +153,27 @@ const CodeEditorPane = ({
     const view = new EditorView({
       doc: initialDoc,
       extensions: [
+        // Ahead of basicSetup's keymap so it wins over insertBlankLine.
+        Prec.highest(
+          keymap.of([
+            {
+              key: "Mod-Enter",
+              run: () => {
+                if (!onModEnterRef.current) return false
+                onModEnterRef.current()
+                return true
+              },
+            },
+            {
+              key: "Shift-Enter",
+              run: () => {
+                if (!onShiftEnterRef.current) return false
+                onShiftEnterRef.current()
+                return true
+              },
+            },
+          ]),
+        ),
         basicSetup,
         oneDarkTheme,
         // Ahead of the language so it wins over any highlight style the mode

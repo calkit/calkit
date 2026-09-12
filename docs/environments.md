@@ -282,14 +282,198 @@ environments:
   foam2:
     kind: docker
     image: foam2
-    deps:
+    inputs:
       - src/mySolver.C
 ```
+
+<!-- prettier-ignore -->
+!!! note
+
+    This key used to be called `deps`, and is still read under that name so
+    projects that predate the rename keep working, though Calkit will ask
+    you to rename it and support will be dropped in a future release.
+    `inputs` is the documented spelling, and is what `system`, `slurm`, and
+    `pbs` environments use for the files their setup commands read.
 
 This highlights Calkit's declarative design philosophy.
 Simply declare the environment and use it in a pipeline stage
 and Calkit will ensure it is built and up to date.
 There is no need to think about building images as a separate step.
+
+#### Caching images in a registry
+
+An image built from a Dockerfile can take a long time to build,
+and once it's gone from the local Docker image store,
+rebuilding it is the only way to get it back.
+Worse, a rebuild isn't guaranteed to produce the same image,
+since the packages the Dockerfile installs move on over time.
+
+Setting `registry` on the environment lets `calkit push` publish the
+image, so that Calkit can pull it back by digest whenever it's missing
+rather than rebuilding it:
+
+```yaml
+# In calkit.yaml
+environments:
+  foam2:
+    kind: docker
+    path: Dockerfile
+    image: foam2
+    registry: ghcr.io
+```
+
+`image` can be left out when there's a `path` to build from,
+in which case the image is named after the project and the environment,
+e.g., `someone/some-project.foam2`,
+matching how the environment's Jupyter kernel is named.
+An environment defined purely by someone else's image has to name it.
+
+That name comes from `owner` and `name` in `calkit.yaml`,
+or from the Git remote if they're not set.
+A project with neither says nothing about what it's called,
+and Calkit asks for `image`, or for `owner` and `name`, rather than
+naming the image after the directory the project happens to sit in,
+which would rename the image whenever the directory moved.
+
+`ghcr.io` on its own resolves to the project's namespace in the GitHub
+Container Registry, e.g., `ghcr.io/someone/some-project`,
+naming the registry rather than leaving it to be worked out,
+but any registry prefix works,
+and leaving `registry` unset or null keeps images local.
+The lock file records the image's digest,
+so what gets pulled back is exactly what was built,
+and Calkit checks the image's layers against the lock after pulling.
+
+<!-- prettier-ignore -->
+!!! note
+
+    Pushing to a registry requires being logged into it. When the GitHub
+    Container Registry refuses a push, Calkit logs in with the token it
+    already holds for the GitHub API and tries again, which is usually
+    enough: Calkit's GitHub App is granted permission to write packages.
+    Only if that push is refused too does it open GitHub to create a token
+    with the `write:packages` scope, saving that token once a push has
+    actually succeeded with it, so it only has to be done once. In GitHub
+    Actions, the `calkit/calkit/actions/run` action logs in automatically,
+    so long as the workflow grants the `packages: write` permission.
+
+<!-- prettier-ignore -->
+!!! note
+
+    The token is kept in the system keyring as
+    `github_packages_token`, not in `~/.calkit/config.yaml`. Read or replace
+    it with `calkit config get`/`set github_packages_token`. Logging in also
+    leaves a copy in Docker's own credential store, which
+    `docker logout ghcr.io` clears.
+
+`calkit push` sends the images of every environment with a `registry` set,
+alongside Git and DVC, skipping any the registry already has.
+An environment built before its registry was configured is pushed as-is,
+without being rebuilt first.
+A project with no image to send never reaches a registry at all:
+an environment with no `registry`, or one whose image was never built on
+this machine, is settled locally rather than with a round-trip and a
+request for credentials.
+Writing digests into lock files is a check's job, not a push's,
+so a push leaves the lock files alone.
+Pass `--no-docker` to skip images, or name what to send:
+`calkit push docker` publishes the images and nothing else, which is
+handy mid-work when the code isn't ready to go out with them.
+Checking an environment builds or pulls whatever the project needs to
+run, and leaves publishing to `calkit push`.
+The digest goes into the lock file as soon as the image is built, since a
+manifest is content-addressed: the digest an image is built with is the
+one it has once it's pushed, so pushing it leaves the lock alone.
+
+<!-- prettier-ignore -->
+!!! note
+
+    That holds where the Docker daemon uses the containerd image store,
+    which writes a manifest for an image as it builds it. The older image
+    store writes none until the image is pushed, so there's no digest to
+    record before then, and checking pushes the image itself to get one.
+    With no registry set there's nowhere to push and nothing to record:
+    the lock file names no image to pull, so everyone else rebuilds it,
+    which Calkit warns about after building. `docker info` reports which
+    store is in use, the containerd one as a driver type of
+    `io.containerd.snapshotter.v1`.
+
+To rebuild or repull an image and write fresh lock files, e.g., after an
+image's tag has been moved out from under the digest in the lock, run:
+
+```sh
+calkit update docker-env --name foam2 --lock
+```
+
+#### Locking multiple platforms
+
+A Docker environment is locked per architecture, in
+`.calkit/env-locks/{name}`.
+Calkit reads the image's manifest from the registry and writes a lock file
+for each platform it provides, not just the one it's running on,
+so moving a project between an `arm64` laptop and an `amd64` server doesn't
+invalidate every stage in the environment.
+
+Images from a registry are multi-platform already.
+An image built from a Dockerfile is built for one platform by default;
+to build and lock more than one, declare them:
+
+```yaml
+# In calkit.yaml
+environments:
+  foam2:
+    kind: docker
+    path: Dockerfile
+    image: foam2
+    registry: ghcr.io
+    build_platforms:
+      - linux/amd64
+      - linux/arm64
+```
+
+Building for multiple platforms requires a registry,
+since a multi-platform image can only be kept in one.
+
+#### How images are fetched
+
+The lock file for a Docker environment records the exact image its stages
+ran in: its layers, and the digests it can be pulled back by.
+Whenever an environment is checked, e.g., as part of `calkit run`,
+Calkit works from that record rather than assuming a rebuild will do,
+since building the same Dockerfile again produces a different image once
+the packages it installs have moved on.
+
+If the image named in `calkit.yaml` is already in the local Docker image
+store and its layers match the lock, there's nothing to do.
+Otherwise Calkit tries, in order:
+
+1. **Pull the digest in the lock**, from the environment's registry if it
+   has one, or from wherever the image came from originally. This is the
+   usual case for an image deleted by a `docker system prune`, or for a
+   collaborator who's never built it. The layers of whatever comes back are
+   checked against the lock, so a tag that's been moved out from under the
+   digest can't quietly substitute a different image.
+2. **Fetch it from a project release.** Releases record the images they
+   archived (see
+   [Archiving Docker images](releases.md#archiving-docker-images)), so if
+   no registry can serve the image, Calkit looks through the project's
+   releases for one whose layers match the lock, downloads it from Zenodo,
+   loads it into Docker, and checks its layers again. This is what keeps an
+   old version of a project reproducible after a registry has dropped the
+   image, or after the account that published it is gone.
+3. **Build it**, for an environment with a Dockerfile, or **pull it by
+   tag** for one named after an existing image. Only at this point does the
+   environment get an image that isn't the one the lock describes, and the
+   lock is rewritten to record what was actually built.
+
+The effect is that deleting an image locally costs a download rather than a
+rebuild, and doesn't invalidate any stage that used it, since the lock file
+doesn't change.
+
+A downloaded release image is cached under `.calkit/local/container-images`
+so it isn't fetched twice.
+Fetching from a release needs the release to have been published, since
+that's where the file is downloaded from.
 
 ### uv
 
@@ -919,24 +1103,26 @@ Model class: `CondaEnvironment`
 
 Model class: `DockerEnvironment`
 
-| Parameter      | Type                           | Required | Description                                                                                                                                       |
-| -------------- | ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind           | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                 |
-| path           | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                    |
-| image          | str                            | yes      | Name of the Docker image.                                                                                                                         |
-| layers         | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                             |
-| shell          | Literal['bash'\|'sh']          | no       | Shell used to run commands in the image.                                                                                                          |
-| command_mode   | Literal['shell'\|'entrypoint'] | no       | Whether commands run through a shell or the image's entrypoint.                                                                                   |
-| platform       | str                            | no       | Platform to run as, e.g., 'linux/amd64'.                                                                                                          |
-| wdir           | str                            | no       | Working directory inside the container. Defaults to '/work'.                                                                                      |
-| user           | str                            | no       | User to run the container as. Defaults to the host user.                                                                                          |
-| deps           | list[str]                      | no       | Files added to the container as dependencies.                                                                                                     |
-| env_vars       | dict[str, str]                 | no       | Environmental variables to set in the container.                                                                                                  |
-| ports          | list[str]                      | no       | Ports to expose, e.g., '8080:80'.                                                                                                                 |
-| gpus           | str                            | no       | GPUs to make available, passed to 'docker run --gpus'.                                                                                            |
-| args           | list[str]                      | no       | Extra arguments passed to 'docker run'.                                                                                                           |
-| jupyter_kernel | str                            | no       | Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images. |
-| description    | str                            | no       | A description of the environment.                                                                                                                 |
+| Parameter       | Type                           | Required | Description                                                                                                                                                                                                                                                         |
+| --------------- | ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind            | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                                                                                                                                   |
+| path            | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                                                                                                                                      |
+| image           | str                            | no       | Name of the Docker image. Optional for an environment with a Dockerfile, which is named after the project and environment it belongs to, e.g., 'someone/some-project.my-env'. Required for one defined purely by an image.                                          |
+| registry        | str                            | no       | Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. Images are kept local if this is unset or null. |
+| build_platforms | list[str]                      | no       | Platforms to build the image for, e.g., ['linux/amd64', 'linux/arm64'], as opposed to 'platform', which is the one it's pulled and run as. Building for more than one requires a registry, since a multi-platform image can only be kept in one.                    |
+| layers          | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                                                                                                                                               |
+| shell           | Literal['bash'\|'sh']          | no       | Shell used to run commands in the image.                                                                                                                                                                                                                            |
+| command_mode    | Literal['shell'\|'entrypoint'] | no       | Whether commands run through a shell or the image's entrypoint.                                                                                                                                                                                                     |
+| platform        | str                            | no       | Platform to run as, e.g., 'linux/amd64'.                                                                                                                                                                                                                            |
+| wdir            | str                            | no       | Working directory inside the container. Defaults to '/work'.                                                                                                                                                                                                        |
+| user            | str                            | no       | User to run the container as. Defaults to the host user.                                                                                                                                                                                                            |
+| inputs          | list[str]                      | no       | Files added to the container as dependencies. Their checksums are recorded in the environment's lock file, so editing one rebuilds the image and reruns the stages that use it.                                                                                     |
+| env_vars        | dict[str, str]                 | no       | Environmental variables to set in the container.                                                                                                                                                                                                                    |
+| ports           | list[str]                      | no       | Ports to expose, e.g., '8080:80'.                                                                                                                                                                                                                                   |
+| gpus            | str                            | no       | GPUs to make available, passed to 'docker run --gpus'.                                                                                                                                                                                                              |
+| args            | list[str]                      | no       | Extra arguments passed to 'docker run'.                                                                                                                                                                                                                             |
+| jupyter_kernel  | str                            | no       | Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images.                                                                                                                   |
+| description     | str                            | no       | A description of the environment.                                                                                                                                                                                                                                   |
 
 #### `julia`
 
@@ -975,14 +1161,15 @@ Model class: `NixEnvironment`
 
 Model class: `PBSEnvironment`
 
-| Parameter           | Type           | Required | Description                                                                                             |
-| ------------------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------- |
-| kind                | Literal['pbs'] | yes      | What kind of environment this is.                                                                       |
-| host                | str            | no       | Host on which to submit jobs, over SSH if not localhost.                                                |
-| default_options     | list[str]      | no       | Options passed to qsub by default.                                                                      |
-| default_setup       | list[str]      | no       | Commands run at the start of every job script.                                                          |
-| max_concurrent_jobs | int            | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit. |
-| description         | str            | no       | A description of the environment.                                                                       |
+| Parameter           | Type           | Required | Description                                                                                                                                                                                                                                                  |
+| ------------------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| kind                | Literal['pbs'] | yes      | What kind of environment this is.                                                                                                                                                                                                                            |
+| host                | str            | no       | Host on which to submit jobs, over SSH if not localhost.                                                                                                                                                                                                     |
+| default_options     | list[str]      | no       | Options passed to qsub by default.                                                                                                                                                                                                                           |
+| default_setup       | list[str]      | no       | Commands run at the start of every job script.                                                                                                                                                                                                               |
+| inputs              | list[str]      | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry. |
+| max_concurrent_jobs | int            | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit.                                                                                                                                                      |
+| description         | str            | no       | A description of the environment.                                                                                                                                                                                                                            |
 
 #### `pixi`
 
@@ -1016,6 +1203,7 @@ Model class: `SlurmEnvironment`
 | host                | str              | no       | Host on which to submit jobs, over SSH if not localhost.                                                                                                                                                                                                        |
 | default_options     | list[str]        | no       | Options passed to sbatch by default.                                                                                                                                                                                                                            |
 | default_setup       | list[str]        | no       | Commands run at the start of every job script.                                                                                                                                                                                                                  |
+| inputs              | list[str]        | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.    |
 | max_concurrent_jobs | int              | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit. |
 | description         | str              | no       | A description of the environment.                                                                                                                                                                                                                               |
 
@@ -1043,6 +1231,21 @@ A requirement that fails stops the run and says how to fix it; a locked
 property that changes silently invalidates a cached result. One gates,
 the other pins, so a property that matters both ways is written in both
 places.
+
+`default_setup` is what has to be _done_ on this machine before a
+stage can run: sourcing a site setup script, loading modules, putting a
+hand-built toolchain on the `PATH`. It runs in the same shell as the
+stage's own command, so a variable it sets or a function it defines is
+in scope for the stage, whether or not it was exported -- only a child
+process needs that. This is why it can't be a `setup` requirement:
+those run in a shell of their own and are cached, since they check
+whether something has been done rather than doing it every time.
+
+It is not recorded in the environment's lock file. The pipeline
+compiler merges it with each stage's own `setup` and writes the
+result beside the pipeline, which the stage depends on -- so changing
+it reruns exactly the stages that run it, and not the ones whose
+`env_default_setup` means they never do.
 
 `host` names the machine. SSH is how a machine is reached, not a kind
 of environment, so there is no separate `ssh` kind: a system env whose
@@ -1081,17 +1284,20 @@ here. An environment doesn't know which files a stage reads, so a list
 kept alongside it can fall behind the pipeline and quietly run against
 stale inputs; the paths are taken from the stage instead.
 
-| Parameter    | Type                                                                                                                                                                                                                                                                                                                                         | Required | Description                                                                                                                                                                                                                                                                                                               |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind         | Literal['system']                                                                                                                                                                                                                                                                                                                            | yes      | What kind of environment this is.                                                                                                                                                                                                                                                                                         |
-| host         | str                                                                                                                                                                                                                                                                                                                                          | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                                                                                                                                                                                      |
-| machine_id   | str                                                                                                                                                                                                                                                                                                                                          | no       | Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that. |
-| user         | str                                                                                                                                                                                                                                                                                                                                          | no       | User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.                                                                                                                                                                                                       |
-| ssh_key      | str                                                                                                                                                                                                                                                                                                                                          | no       | Path to the SSH private key used to reach another host. Left to SSH and its agent by default.                                                                                                                                                                                                                             |
-| wdir         | str                                                                                                                                                                                                                                                                                                                                          | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.                                                                                                                                      |
-| lock         | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.                                                                                                                                                             |
-| requirements | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                                                                                                                                                                                                             | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                                                                            |
-| description  | str                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                                                                                                                                                                                         |
+| Parameter     | Type                                                                                                                                                                                                                                                                                                                                         | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| kind          | Literal['system']                                                                                                                                                                                                                                                                                                                            | yes      | What kind of environment this is.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| host          | str                                                                                                                                                                                                                                                                                                                                          | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| machine_id    | str                                                                                                                                                                                                                                                                                                                                          | no       | Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that.                                                                                                                                                                                                                        |
+| user          | str                                                                                                                                                                                                                                                                                                                                          | no       | User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ssh_key       | str                                                                                                                                                                                                                                                                                                                                          | no       | Path to the SSH private key used to reach another host. Left to SSH and its agent by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| wdir          | str                                                                                                                                                                                                                                                                                                                                          | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.                                                                                                                                                                                                                                                                                                                                                             |
+| default_setup | list[str]                                                                                                                                                                                                                                                                                                                                    | no       | Commands run in the same shell, before every stage that uses this environment, e.g. 'module load cuda' or a site setup script that exports compiler paths. Merged with each stage's own 'setup' when the pipeline is compiled and written beside it, which the stage depends on, so changing them reruns the stages that actually run them.                                                                                                                                                                                                      |
+| shell         | Literal['sh'\|'bash'\|'zsh']                                                                                                                                                                                                                                                                                                                 | no       | Shell in which setup commands run, both 'default_setup' and a stage's own 'setup', together with the stage's command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to have setup commands. Ignored when neither this environment nor any stage using it has setup commands. Setting it to anything but 'bash' is recorded in the environment's lock file -- unlike the commands themselves, the shell isn't in the compiled command -- so stages that run setup commands rerun when it changes. |
+| inputs        | list[str]                                                                                                                                                                                                                                                                                                                                    | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.                                                                                                                                                                                                                                                                                     |
+| lock          | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.                                                                                                                                                                                                                                                                                                                                                                                    |
+| requirements  | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                                                                                                                                                                                                             | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                                                                                                                                                                                                                                                                                                   |
+| description   | str                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 #### `uv`
 

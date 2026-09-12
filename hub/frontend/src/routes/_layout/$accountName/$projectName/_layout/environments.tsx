@@ -1,6 +1,4 @@
 import {
-  Alert,
-  AlertIcon,
   Badge,
   Box,
   Button,
@@ -8,6 +6,7 @@ import {
   Code,
   Flex,
   Heading,
+  IconButton,
   Icon,
   Link,
   SimpleGrid,
@@ -19,16 +18,23 @@ import {
   useNavigate,
 } from "@tanstack/react-router"
 import { AiOutlinePython } from "react-icons/ai"
-import { FaCube, FaDocker } from "react-icons/fa"
+import { FaCube, FaDocker, FaPlus } from "react-icons/fa"
 import { SiAnaconda } from "react-icons/si"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
+import NewEnvironment from "../../../../../components/Environments/NewEnvironment"
 
 import type { Environment } from "../../../../../client"
 import ViewEnvironment from "../../../../../components/Environments/ViewEnvironment"
-import { useProjectEnvironments } from "../../../../../hooks/useProject"
+import useProject, {
+  useProjectEnvironments,
+} from "../../../../../hooks/useProject"
 
 const environmentsSearchSchema = z.object({
+  // Creating an environment is a form worth several minutes; a refresh or a
+  // back button shouldn't discard it, and a link can open it directly.
+  new_env_open: z.boolean().optional(),
   ref: z.string().optional(),
   name: z.string().optional(),
 })
@@ -116,18 +122,17 @@ const EnvCard = ({ environment, onView }: EnvCardProps) => {
           ""
         )}
         <Flex mt={1.5}>
-          {environment.file_content ? (
-            <Button
-              variant="primary"
-              size="xs"
-              mr={2}
-              onClick={() => onView(environment.name)}
-            >
-              View
-            </Button>
-          ) : (
-            ""
-          )}
+          {/* Every kind is viewable: the ones with no spec file of their own
+              (Docker by image, Slurm, PBS) still have a calkit.yaml entry
+              and often a lock. */}
+          <Button
+            variant="primary"
+            size="xs"
+            mr={2}
+            onClick={() => onView(environment.name)}
+          >
+            View
+          </Button>
         </Flex>
       </Card>
     </>
@@ -136,13 +141,22 @@ const EnvCard = ({ environment, onView }: EnvCardProps) => {
 
 function ProjectEnvsView() {
   const { accountName, projectName } = Route.useParams()
-  const { ref, name: selectedEnvName } = Route.useSearch()
+  const {
+    ref,
+    name: selectedEnvName,
+    new_env_open: newEnvOpen,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { environmentsRequest } = useProjectEnvironments(
     accountName,
     projectName,
     ref,
   )
+  const { userHasWriteAccess } = useProject(accountName, projectName, ref)
+  const openNewEnv = () =>
+    navigate({ search: (prev) => ({ ...prev, new_env_open: true }) })
+  const closeNewEnv = () =>
+    navigate({ search: (prev) => ({ ...prev, new_env_open: undefined }) })
   const { isPending: environmentsPending, data: environments } =
     environmentsRequest
 
@@ -155,8 +169,25 @@ function ProjectEnvsView() {
 
   return (
     <>
-      <Flex align="center" mb={2}>
+      <Flex align="center" mb={4} gap={2} wrap="wrap">
         <Heading size="md">Environments</Heading>
+        {userHasWriteAccess && !ref ? (
+          <>
+            <IconButton
+              aria-label="New environment"
+              variant="primary"
+              height="25px"
+              width="9px"
+              px={1}
+              icon={<Icon as={FaPlus} fontSize="xs" />}
+              onClick={openNewEnv}
+            />
+            <NewEnvironment
+              isOpen={Boolean(newEnvOpen)}
+              onClose={closeNewEnv}
+            />
+          </>
+        ) : null}
       </Flex>
       {environmentsPending ? (
         <LoadingSpinner height="100vh" />
@@ -173,10 +204,20 @@ function ProjectEnvsView() {
           </SimpleGrid>
         </Box>
       ) : (
-        <Alert mt={2} status="warning" borderRadius="xl">
-          <AlertIcon />
-          This project has no environments defined.
-        </Alert>
+        <NoArtifactFound
+          icon={FaCube}
+          title="No environments found"
+          hint="An environment precisely describes what dependencies your code needs to run, so a collaborator, a reviewer, or future you can easily run it later without lots of manual setup."
+          docsUrl="https://docs.calkit.org/environments/"
+        >
+          {/* The modal only mounts at the default ref, so the button
+              would do nothing on a historical view */}
+          {userHasWriteAccess && !ref ? (
+            <Button mt={3} size="sm" variant="primary" onClick={openNewEnv}>
+              Create an environment
+            </Button>
+          ) : null}
+        </NoArtifactFound>
       )}
       {selectedEnv && (
         <ViewEnvironment

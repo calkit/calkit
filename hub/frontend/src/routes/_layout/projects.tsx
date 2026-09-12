@@ -32,6 +32,11 @@ const projectsSearchSchema = z.object({
   page: z.number().catch(1),
 })
 
+// A calendar date, as 2026-08-21, is what "last updated" means in a list;
+// the project's history page has the full timestamps.
+const formatDate = (value?: string | null) =>
+  value ? new Date(value).toISOString().slice(0, 10) : ""
+
 const PER_PAGE = 10
 
 function getAllProjectsQueryOptions({
@@ -102,12 +107,13 @@ function PublicProjectsTable() {
               <Th>Title</Th>
               <Th>GitHub URL</Th>
               <Th>Description</Th>
+              <Th>Last updated</Th>
             </Tr>
           </Thead>
           {isPending ? (
             <Tbody>
               <Tr>
-                {new Array(4).fill(null).map((_, index) => (
+                {new Array(5).fill(null).map((_, index) => (
                   <Td key={index}>
                     <SkeletonText noOfLines={1} paddingBlock="16px" />
                   </Td>
@@ -140,6 +146,9 @@ function PublicProjectsTable() {
                     maxWidth="150px"
                   >
                     {project.description || "N/A"}
+                  </Td>
+                  <Td whiteSpace="nowrap">
+                    {formatDate(project.updated ?? project.created)}
                   </Td>
                 </Tr>
               ))}

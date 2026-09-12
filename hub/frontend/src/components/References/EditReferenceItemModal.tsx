@@ -127,6 +127,10 @@ const EditReferenceItemModal = ({
     const v = entry?.attrs?.[name]
     return v != null ? cleanLatex(String(v)) : ""
   }
+  // A BibTeX entry with no fields doesn't survive being read back, so a new
+  // item needs at least one, which in practice is the title.
+  const hasField = Object.values(fields).some((v) => (v ?? "").trim())
+  const canSubmit = Boolean(key.trim()) && (isEdit || hasField)
   const isDirty =
     !isEdit ||
     type !== (entry?.type ?? "article") ||
@@ -187,13 +191,13 @@ const EditReferenceItemModal = ({
         autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault()
-          if (key.trim() && isDirty) mutation.mutate()
+          if (canSubmit && isDirty) mutation.mutate()
         }}
         onKeyDown={(e) => {
           if (
             (e.metaKey || e.ctrlKey) &&
             e.key === "Enter" &&
-            key.trim() &&
+            canSubmit &&
             isDirty
           ) {
             e.preventDefault()
@@ -246,7 +250,7 @@ const EditReferenceItemModal = ({
           <Button
             variant="primary"
             type="submit"
-            isDisabled={!key.trim() || !isDirty}
+            isDisabled={!canSubmit || !isDirty}
             isLoading={mutation.isPending}
           >
             {isEdit ? "Save" : "Add"}

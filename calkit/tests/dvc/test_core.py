@@ -2,6 +2,7 @@
 
 import logging
 import os
+import stat
 import subprocess
 
 import dvc.repo
@@ -434,3 +435,94 @@ def test_run_dvc_command_lock_timeout(monkeypatch):
     rc = calkit.dvc.run_dvc_command(["pull"])
     assert rc == 0
     assert seen["timeout"] == base
+
+
+def test_init_detects_subdir(tmp_path, monkeypatch):
+    # DVC won't initialize inside a Git repo unless told it's a subdir. A
+    # self-contained project living within a larger repo is exactly that
+    # case, and getting it wrong leaves the user with a Git error.
+    import calkit.dvc
+    import calkit.dvc.core
+
+    ran = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda argv, cwd=None, **kw: ran.append((argv, cwd)) or 0,
+    )
+
+    def _init_args(**kwargs):
+        assert calkit.dvc.init(**kwargs) == 0
+        return ran.pop()
+
+    monkeypatch.chdir(tmp_path)
+    # No Git repo at all: the caller creates one here, so this is the root
+    assert _init_args() == (["init"], None)
+    subprocess.check_call(["git", "init", "-q", "."])
+    assert _init_args() == (["init"], None)
+    assert _init_args(force=True, quiet=True) == (
+        ["init", "--force", "--quiet"],
+        None,
+    )
+    sub = tmp_path / "examples" / "demo"
+    sub.mkdir(parents=True)
+    monkeypatch.chdir(sub)
+    assert _init_args() == (["init", "--subdir"], None)
+    # An explicit wdir is honored rather than the process's cwd
+    monkeypatch.chdir(tmp_path)
+    assert _init_args(wdir=str(sub)) == (["init", "--subdir"], str(sub))
+    # A directory the enclosing repo ignores needs its own repo. Scratch
+    # and test project directories are routinely ignored by the repo
+    # holding them, and DVC refuses to initialize into an ignored path, so
+    # treating one as a subdirectory project fails outright.
+    (tmp_path / ".gitignore").write_text("/scratch\n")
+    tracked = tmp_path / "tracked"
+    tracked.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    # A tracked subdirectory is part of the repo, so DVC is told so
+    assert not calkit.dvc.enclosing_repo_ignores(str(tracked))
+    assert _init_args(wdir=str(tracked))[0] == ["init", "--subdir"]
+    # An ignored one is not, so it becomes its own root instead
+    assert calkit.dvc.enclosing_repo_ignores(str(scratch))
+    assert _init_args(wdir=str(scratch))[0] == ["init"]
+    # The repo root itself is never "ignored by" its own repo
+    assert not calkit.dvc.enclosing_repo_ignores(str(tmp_path))
+
+
+def test_commit_path_with_missing_dep(tmp_dir):
+    # We should be able to commit a deleted output whose stage has a
+    # dependency that is missing from the workspace, which DVC's own commit
+    # fails to do, since saving to the run cache requires hashing all of the
+    # stage's dependencies
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    with open("input.txt", "w") as f:
+        f.write("sup")
+    with open("output.txt", "w") as f:
+        f.write("sup")
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  my-stage:\n"
+            "    cmd: echo sup\n"
+            "    deps:\n"
+            "      - input.txt\n"
+            "    outs:\n"
+            "      - output.txt\n"
+        )
+    subprocess.check_call(["dvc", "commit", "-f"])
+    # Delete both the dependency and the output, e.g., as if neither had been
+    # pulled to this machine, chmod'ing first since DVC can leave committed
+    # outputs read-only, which stops them from being deleted on Windows
+    for fpath in ["input.txt", "output.txt"]:
+        os.chmod(fpath, stat.S_IWRITE | stat.S_IREAD)
+        os.remove(fpath)
+    with pytest.raises(FileNotFoundError):
+        dvc.repo.Repo().commit("output.txt", force=True, allow_missing=True)
+    calkit.dvc.commit_path(dvc.repo.Repo(), "output.txt")
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)
+    # The output's hash should be kept, since there's nothing new to hash
+    assert lock["stages"]["my-stage"]["outs"][0]["path"] == "output.txt"
+    assert "md5" in lock["stages"]["my-stage"]["outs"][0]

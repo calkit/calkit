@@ -48,7 +48,7 @@ If you want to use Calkit without installing it,
 you can use uv's `uvx` command to run it directly:
 
 ```sh
-uvx calk9 --help
+uvx ck9 --help
 ```
 
 ## Nix

@@ -230,6 +230,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
             <FormControl isRequired isInvalid={!!errors.name} mb={2}>
               <FormLabel htmlFor="name">Name</FormLabel>
               <Input
+                autoComplete="off"
                 id="name"
                 {...register("name", {})}
                 placeholder="Ex: run-my-script"
@@ -257,6 +258,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
               <FormControl isRequired isInvalid={!!errors.scriptPath} mb={2}>
                 <FormLabel htmlFor="script-path">Script path</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="scriptPath"
                   {...register("scriptPath", {})}
                   placeholder="Ex: scripts/my-script.py"
@@ -270,6 +272,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
               <FormControl isRequired isInvalid={!!errors.inputFilePath} mb={2}>
                 <FormLabel htmlFor="inputFilePath">Excel file path</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="inputFilePath"
                   {...register("inputFilePath", {})}
                   placeholder="Ex: my-excel-file.xlsx"
@@ -285,6 +288,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
                   Word document file path
                 </FormLabel>
                 <Input
+                  autoComplete="off"
                   id="inputFilePath"
                   {...register("inputFilePath", {})}
                   placeholder="Ex: my-document.docx"
@@ -298,6 +302,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
             <FormControl isRequired isInvalid={!!errors.out} mb={2}>
               <FormLabel htmlFor="out">Output path</FormLabel>
               <Input
+                autoComplete="off"
                 id="out"
                 {...register("out", {})}
                 placeholder={getOutputPathPlaceholder()}
@@ -310,6 +315,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
             <FormControl isRequired isInvalid={!!errors.cmd} mb={2}>
               <FormLabel htmlFor="cmd">Command</FormLabel>
               <Input
+                autoComplete="off"
                 id="cmd"
                 {...register("cmd", {})}
                 placeholder="Ex: calkit xenv -n main python scripts/my-script.py"
@@ -323,6 +329,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
                 Input dependencies (comma-separated paths)
               </FormLabel>
               <Input
+                autoComplete="off"
                 id="deps"
                 {...register("deps", {})}
                 placeholder="Ex: scripts/my-script.py,data/my-data.csv"
@@ -357,6 +364,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
               >
                 <FormLabel htmlFor="outputObject.title">Title</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="outputObject.title"
                   {...register("outputObject.title", {})}
                   placeholder="Enter title..."

@@ -5,7 +5,6 @@ import subprocess
 import sys
 import zipfile
 
-import bibtexparser
 import git
 import pytest
 
@@ -17,7 +16,9 @@ from calkit.releases import (
     check_project_release_archive,
     create_bibtex,
     create_citation_cff,
+    create_release_readme,
     ls_files,
+    parse_bibtex,
     read_authors_from_cff,
     set_cff_authors,
     zip_paths,
@@ -143,7 +144,7 @@ def test_create_bibtex():
         doi="10.1234/example",
         record_id="123",
     )
-    entries = bibtexparser.loads(entry).entries
+    entries = parse_bibtex(entry)
     assert len(entries) == 1
     entry = create_bibtex(
         authors=[{"first_name": "A", "last_name": "van der Waals"}],
@@ -152,7 +153,7 @@ def test_create_bibtex():
         doi="10.1234/example",
         record_id="abc-123",
     )
-    entries = bibtexparser.loads(entry).entries
+    entries = parse_bibtex(entry)
     assert len(entries) == 1
     entry = create_bibtex(
         authors=[{"first_name": "A", "last_name": "Smith"}],
@@ -161,8 +162,80 @@ def test_create_bibtex():
         doi=None,
         record_id=None,
     )
-    entries = bibtexparser.loads(entry).entries
+    entries = parse_bibtex(entry)
     assert len(entries) == 1
+
+
+def test_create_release_readme():
+    # An artifact release points back at the project release that built it
+    readme = create_release_readme(
+        release_kind="publication",
+        name="thesis-v1",
+        git_rev="a1b2c3d",
+        title="A Dissertation",
+    )
+    assert readme.startswith("# A Dissertation\n\n")
+    assert "This is the publication from project release thesis-v1" in readme
+    assert "(Git rev: a1b2c3d)" in readme
+    assert f"Calkit v{calkit.__version__}" in readme
+    # A project release says so without repeating itself
+    readme = create_release_readme(
+        release_kind="project", name="v1", git_rev="a1b2c3d", title="Proj"
+    )
+    assert "This is project release v1 (Git rev: a1b2c3d)" in readme
+    assert "from project release" not in readme
+    # With no title, the release name heads it instead
+    readme = create_release_readme(
+        release_kind="project", name="v1", git_rev="a1b2c3d"
+    )
+    assert readme.startswith("# v1\n\n")
+
+
+def test_parse_bibtex(monkeypatch):
+    entry = create_bibtex(
+        authors=[{"first_name": "Jane", "last_name": "Doe"}],
+        release_date="2026-06-03",
+        title="New release",
+        doi="10.5281/zenodo.999",
+        record_id="999",
+    )
+    # Whichever version of bibtexparser is installed, entries come back in
+    # the same shape
+    parsed = parse_bibtex(entry)
+    assert len(parsed) == 1
+    assert parsed[0]["ID"] == "Doe2026_999"
+    assert parsed[0]["ENTRYTYPE"] == "misc"
+    assert parsed[0]["doi"] == "10.5281/zenodo.999"
+    assert parsed[0]["title"] == "New release"
+    # Version 2 dropped `loads` in favor of `parse_string` and returns
+    # objects, which is what broke releases before this was normalized
+    import types
+
+    class MockField:
+        def __init__(self, key, value):
+            self.key = key
+            self.value = value
+
+    class MockEntry:
+        key = "Doe2026_999"
+        entry_type = "misc"
+        fields = [
+            MockField("doi", "10.5281/zenodo.999"),
+            MockField("title", "New release"),
+        ]
+
+    v2 = types.ModuleType("bibtexparser")
+    v2.parse_string = lambda text: types.SimpleNamespace(entries=[MockEntry()])
+    monkeypatch.setitem(sys.modules, "bibtexparser", v2)
+    parsed = parse_bibtex(entry)
+    assert parsed == [
+        {
+            "doi": "10.5281/zenodo.999",
+            "title": "New release",
+            "ID": "Doe2026_999",
+            "ENTRYTYPE": "misc",
+        }
+    ]
 
 
 def test_add_bibtex_entry():
@@ -187,7 +260,7 @@ def test_add_bibtex_entry():
     assert appended.startswith(existing)
     assert appended == existing + "\n" + new_entry.strip() + "\n"
     assert appended.count("@misc{Doe2026_999,") == 1
-    assert bibtexparser.loads(appended).entries[0]["doi"] == "10.1/abc"
+    assert parse_bibtex(appended)[0]["doi"] == "10.1/abc"
     # Appending to an empty/nonexistent file yields just the new entry
     from_empty = add_bibtex_entry("", new_entry, replace_ids=[])
     assert from_empty.strip().startswith("@misc{Doe2026_999,")
@@ -375,3 +448,67 @@ def test_zip_paths(tmp_dir):
         assert "data/sub/file.txt" in names
         assert "root.txt" in names
         assert zipf.getinfo("root.txt").compress_type == zipfile.ZIP_DEFLATED
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_archive_docker_images(tmp_dir):
+    import calkit
+    from calkit.releases import (
+        DOCKER_IMAGES_FNAME,
+        find_archived_docker_image,
+        get_release_dir,
+        save_docker_images,
+    )
+
+    image = "calkit-release-archive-test"
+    with open("Dockerfile", "w") as f:
+        f.write("FROM alpine:3.18\nRUN echo archived > /hi.txt\n")
+    subprocess.check_call(["docker", "build", "-t", image, "."])
+    try:
+        calkit.save_calkit_info(
+            {
+                "environments": {
+                    "main": {
+                        "kind": "docker",
+                        "path": "Dockerfile",
+                        "image": image,
+                    },
+                    "py": {"kind": "uv-venv", "path": "pyproject.toml"},
+                    # An environment named after someone else's image is
+                    # one anyone can pull, and archiving it would put
+                    # gigabytes no one owns into every release
+                    "tex": {"kind": "docker", "image": "alpine:3.18"},
+                },
+                "releases": {
+                    "v1": {"kind": "project", "record_id": 12345},
+                },
+            }
+        )
+        os.makedirs("files", exist_ok=True)
+        images = save_docker_images("files")
+        # Only Docker environments built from the project's own Dockerfile
+        # are archived, and each carries enough to be matched back to a lock
+        # file
+        assert len(images) == 1
+        image_id, entry = next(iter(images.items()))
+        assert entry["environment"] == "main"
+        assert entry["image"] == image
+        assert entry["layers"]
+        assert os.path.isfile(os.path.join("files", entry["path"]))
+        release_dir = get_release_dir("v1")
+        os.makedirs(release_dir, exist_ok=True)
+        with open(os.path.join(release_dir, DOCKER_IMAGES_FNAME), "w") as f:
+            calkit.ryaml.dump(images, f)
+        # Layers identify the image exactly, so a lock file's layers are
+        # enough to find the release that archived it
+        found = find_archived_docker_image(entry["layers"])
+        assert found is not None
+        assert found[0] == "v1"
+        assert found[1] == image_id
+        assert find_archived_docker_image(["sha256:nope"]) is None
+        assert find_archived_docker_image([]) is None
+    finally:
+        subprocess.run(["docker", "rmi", "-f", image], capture_output=True)

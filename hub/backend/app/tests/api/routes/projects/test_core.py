@@ -50,7 +50,7 @@ def test_get_project_contents_forwards_ref(client: TestClient) -> None:
     ):
         response = client.get(
             (
-                f"{settings.API_V1_STR}/projects/test-owner/test-project/contents"
+                "/projects/test-owner/test-project/contents"
                 "?path=README.md&ref=v1.2.3"
             )
         )
@@ -110,7 +110,6 @@ def test_get_project_content_paths_merges_git_and_dvc(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}"
             "/projects/test-owner/test-project/contents-paths"
         )
     assert response.status_code == 200
@@ -158,7 +157,7 @@ def test_get_project_file_history_endpoint(client: TestClient) -> None:
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project"
+            "/projects/test-owner/test-project"
             "/git/file-history?path=figures/my-figure.png"
         )
     assert response.status_code == 200
@@ -173,8 +172,7 @@ def test_get_project_file_history_rejects_absolute_path(
     client: TestClient,
 ) -> None:
     response = client.get(
-        f"{settings.API_V1_STR}/projects/test-owner/test-project"
-        "/git/file-history?path=/etc/passwd"
+        "/projects/test-owner/test-project/git/file-history?path=/etc/passwd"
     )
     assert response.status_code == 400
 
@@ -183,7 +181,7 @@ def test_get_project_file_history_rejects_traversal(
     client: TestClient,
 ) -> None:
     response = client.get(
-        f"{settings.API_V1_STR}/projects/test-owner/test-project"
+        "/projects/test-owner/test-project"
         "/git/file-history?path=../secrets.txt"
     )
     assert response.status_code == 400
@@ -215,8 +213,7 @@ def test_project_routes_are_case_insensitive(client: TestClient) -> None:
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/MyOrg/My-Project/contents"
-            "?path=README.md"
+            "/projects/MyOrg/My-Project/contents?path=README.md"
         )
     assert response.status_code == 200
     mock_get_project.assert_called_once_with(
@@ -226,6 +223,26 @@ def test_project_routes_are_case_insensitive(client: TestClient) -> None:
         current_user=None,
         min_access_level="read",
     )
+
+
+def test_comment_artifact_route_and_label() -> None:
+    from app.api.routes.projects.core import (
+        comment_artifact_label,
+        comment_artifact_route,
+    )
+
+    # A question is identified by number and has a page of its own;
+    # everything else is a path on a section page.
+    assert comment_artifact_route("question", "3") == "questions/3"
+    assert comment_artifact_label("question", "3") == "question 3"
+    assert comment_artifact_route("release", "v1 0") == "releases/v1%200"
+    assert (
+        comment_artifact_route("figure", "figures/x.png")
+        == "figures?path=figures%2Fx.png"
+    )
+    assert comment_artifact_label("figure", "figures/x.png") == "figures/x.png"
+    # An unknown type falls back to the files page.
+    assert comment_artifact_route(None, "a.txt") == "files?path=a.txt"
 
 
 def test_get_project_comments_uses_all_results() -> None:
@@ -299,7 +316,7 @@ def test_get_project_figures_paginates(client: TestClient) -> None:
         url=None,
         storage=None,
     )
-    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+    url = "/projects/test-owner/test-project/figures"
     with (
         patch(
             "app.api.routes.projects.core.app.projects.get_project",
@@ -385,7 +402,7 @@ def test_get_project_figures_search_content_and_single(
         url="https://example.com/fig.png",
         storage="git",
     )
-    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+    url = "/projects/test-owner/test-project/figures"
     with (
         patch(
             "app.api.routes.projects.core.app.projects.get_project",
@@ -529,8 +546,7 @@ def test_get_project_figures_autodetects_deeply_nested(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -621,8 +637,7 @@ def test_get_project_figures_autodetects_dvc_stored(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -697,8 +712,7 @@ def test_get_project_figures_dvc_no_duplicates_with_git(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -779,8 +793,7 @@ def test_get_project_figures_autodetects_dvc_pointer_files(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -863,8 +876,7 @@ def test_get_project_figures_dvc_pointer_no_duplicates_with_dvc_lock(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -916,8 +928,7 @@ def test_get_project_pipeline_reads_at_ref(client: TestClient) -> None:
         ) as mock_get_ck_info,
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/pipeline"
-            "?ref=some-branch"
+            "/projects/test-owner/test-project/pipeline?ref=some-branch"
         )
 
     assert response.status_code == 200
@@ -976,9 +987,7 @@ def test_get_project_pipeline_reports_invalid_pipeline(
             return_value={},
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/pipeline"
-        )
+        response = client.get("/projects/test-owner/test-project/pipeline")
     assert response.status_code == 200
     body = response.json()
     # The reason is reported, and names the conflict so it's actionable.
@@ -997,23 +1006,16 @@ class _EmptyTree:
         return []
 
 
-def _ref_aware_endpoint_reads_declared_at_ref(
-    client: TestClient, endpoint: str, ck_key: str
-) -> None:
-    """Shared assertions: declared metadata + pipeline read at the ref.
-
-    get_repo only fetches a ref, it does not check it out, so the declared
-    publications/presentations list and the DVC pipeline must be read via
-    the ref-aware helpers rather than the live working tree.
-    """
+def _get_declared_at_ref(
+    client: TestClient, endpoint: str, ck_key: str, declared: list
+):
+    """GET an artifact listing at a ref with ``declared`` in calkit.yaml."""
     fake_project = SimpleNamespace(owner_account_name="o", name="p")
     fake_repo = SimpleNamespace(
         working_dir="/tmp/nonexistent",
         commit=lambda _ref: SimpleNamespace(tree=_EmptyTree()),
         head=SimpleNamespace(commit=SimpleNamespace(tree=_EmptyTree())),
     )
-    declared = [{"path": f"declared/from-{ck_key}.pdf", "title": "Declared"}]
-
     with (
         patch(
             "app.api.routes.projects.core.app.projects.get_project",
@@ -1025,7 +1027,11 @@ def _ref_aware_endpoint_reads_declared_at_ref(
         ) as mock_get_repo,
         patch(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
-            return_value={ck_key: [dict(d) for d in declared]},
+            return_value={
+                ck_key: [
+                    dict(d) if isinstance(d, dict) else d for d in declared
+                ]
+            },
         ) as mock_ck_for_ref,
         patch(
             "app.api.routes.projects.core.app.projects"
@@ -1061,10 +1067,31 @@ def _ref_aware_endpoint_reads_declared_at_ref(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/"
-            f"{endpoint}?ref=some-branch"
+            f"/projects/test-owner/test-project/{endpoint}?ref=some-branch"
         )
+    return response, mock_get_repo, mock_ck_for_ref, mock_pipeline_for_ref
 
+
+def _ref_aware_endpoint_reads_declared_at_ref(
+    client: TestClient, endpoint: str, ck_key: str
+) -> None:
+    """Shared assertions: declared metadata + pipeline read at the ref.
+
+    get_repo only fetches a ref, it does not check it out, so the declared
+    publications/presentations list and the DVC pipeline must be read via
+    the ref-aware helpers rather than the live working tree.
+    """
+    (
+        response,
+        mock_get_repo,
+        mock_ck_for_ref,
+        mock_pipeline_for_ref,
+    ) = _get_declared_at_ref(
+        client,
+        endpoint,
+        ck_key,
+        [{"path": f"declared/from-{ck_key}.pdf", "title": "Declared"}],
+    )
     assert response.status_code == 200, response.text
     paths = [item["path"] for item in response.json()]
     assert f"declared/from-{ck_key}.pdf" in paths
@@ -1092,6 +1119,66 @@ def test_get_project_presentations_reads_declared_at_ref(
     _ref_aware_endpoint_reads_declared_at_ref(
         client, "presentations", "presentations"
     )
+
+
+def test_get_project_publications_tolerates_odd_declarations(
+    client: TestClient,
+) -> None:
+    # calkit.yaml is hand-written, so one odd entry can't 500 the listing. A
+    # publication with no title, one whose kind the hub doesn't know, and a
+    # list item that isn't a mapping at all all showed up in real projects; a
+    # strict model turned any of them into a failed page
+    response, _, _, _ = _get_declared_at_ref(
+        client,
+        "publications",
+        "publications",
+        [
+            {"path": "pubs/joss/paper.md"},
+            {"path": "pubs/JFM/my-paper.pdf", "kind": "journal-article"},
+            {"path": "pubs/legacy.pdf", "type": "report"},
+            {"path": "pubs/thesis.pdf", "kind": "made-up"},
+            {"path": "pubs/poster.pdf", "kind": "poster"},
+            "not-a-mapping",
+            {"title": "No path"},
+        ],
+    )
+    assert response.status_code == 200, response.text
+    pubs = {pub["path"]: pub for pub in response.json()}
+    # A missing title falls back to the file name
+    assert pubs["pubs/joss/paper.md"]["title"] == "Paper"
+    assert pubs["pubs/joss/paper.md"]["kind"] is None
+    assert pubs["pubs/JFM/my-paper.pdf"]["kind"] == "journal-article"
+    assert pubs["pubs/JFM/my-paper.pdf"]["title"] == "My paper"
+    # The hub wrote `type` before this was renamed to `kind`
+    assert pubs["pubs/legacy.pdf"]["kind"] == "report"
+    # An unrecognized kind is dropped rather than refused, as is one that
+    # belongs to a different artifact: posters are presentations
+    assert pubs["pubs/thesis.pdf"]["kind"] is None
+    assert pubs["pubs/poster.pdf"]["kind"] is None
+    # Entries that name no file are skipped rather than raising
+    assert len(pubs) == 5
+
+
+def test_get_project_presentations_tolerates_odd_declarations(
+    client: TestClient,
+) -> None:
+    # Presentations read the same hand-written declarations
+    response, _, _, _ = _get_declared_at_ref(
+        client,
+        "presentations",
+        "presentations",
+        [
+            {"path": "slides/talk.pdf"},
+            {"path": "slides/legacy.pdf", "type": "slides"},
+            {"path": "slides/odd.pdf", "kind": "talk"},
+        ],
+    )
+    assert response.status_code == 200, response.text
+    pres = {p["path"]: p for p in response.json()}
+    assert pres["slides/talk.pdf"]["title"] == "Talk"
+    assert pres["slides/legacy.pdf"]["kind"] == "slides"
+    # "talk" was a hub-only kind the CLI refuses, so it's no longer one here
+    assert pres["slides/odd.pdf"]["kind"] is None
 
 
 def _make_owner_with_project(
@@ -1131,7 +1218,7 @@ def test_invitation_create_and_redeem_grants_access(
 ) -> None:
     project, owner_headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     # A GitHub-less user has no access to the private project yet.
     ghless = create_random_user(db)
     assert ghless.account.github_name is None
@@ -1154,7 +1241,7 @@ def test_invitation_create_and_redeem_grants_access(
     token = invite["token"]
     # The GitHub-less user redeems it and gains write membership.
     r = client.post(
-        f"{settings.API_V1_STR}/project-invitations/{token}",
+        f"/project-invitations/{token}",
         headers=ghless_headers,
     )
     assert r.status_code == 200, r.text
@@ -1185,8 +1272,7 @@ def test_invitation_create_requires_admin(
         client=client, email=other.email, db=db
     )
     r = client.post(
-        f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
-        "/invitations",
+        f"/projects/{owner_name}/{project.name}/invitations",
         headers=other_headers,
         json={"role": "write"},
     )
@@ -1198,7 +1284,7 @@ def test_redeem_revoked_invitation_fails(
 ) -> None:
     project, owner_headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     r = client.post(
         f"{base}/invitations", headers=owner_headers, json={"role": "read"}
     )
@@ -1215,7 +1301,7 @@ def test_redeem_revoked_invitation_fails(
         client=client, email=redeemer.email, db=db
     )
     r = client.post(
-        f"{settings.API_V1_STR}/project-invitations/{invite['token']}",
+        f"/project-invitations/{invite['token']}",
         headers=redeemer_headers,
     )
     assert r.status_code == 410
@@ -1272,8 +1358,7 @@ def test_get_project_results_autodetects_and_reads_ref(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/results"
-            "?ref=some-branch"
+            "/projects/test-owner/test-project/results?ref=some-branch"
         )
     assert response.status_code == 200, response.text
     paths = {res["path"] for res in response.json()}
@@ -1302,7 +1387,10 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
     import base64
     import json
 
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Figure, Publication, Result
 
     fig = Figure(path="figures/x.png", title="X")
@@ -1348,10 +1436,17 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={fig.path: fig},
-            results_by_path={(res.path, res.key): res},
-            tables_by_path={},
-            publications_by_path={pub.path: pub},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={fig.path: fig},
+                    results_by_path={(res.path, res.key): res},
+                    tables_by_path={},
+                    publications_by_path={pub.path: pub},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert len(evidence) == 4
@@ -1370,6 +1465,99 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
     assert evidence[2].publication.title == "Paper"
     # An unresolved figure path leaves the resolved figure as None.
     assert evidence[3].figure is None
+
+
+def test_question_evidence_carries_pipeline_stage_status() -> None:
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
+    from app.models.core import Figure
+    from app.pipeline import StageStatus
+
+    # One figure declaring its own stage, one the pipeline claims by path, and
+    # one nothing produces.
+    declared = Figure(
+        path="figures/declared.png", title="Declared", stage="plot-declared"
+    )
+    matched = Figure(path="figures/matched.png", title="Matched")
+    frozen = Figure(path="figures/frozen.png", title="Frozen")
+    evidence_ck = [
+        {"kind": "figure", "path": "figures/declared.png"},
+        {"kind": "figure", "path": "figures/matched.png"},
+        {"kind": "figure", "path": "figures/orphan.png"},
+        {"kind": "figure", "path": "figures/frozen.png"},
+        # The same frozen output, pinned: the ref says which version is
+        # meant, so there's nothing left for the freeze to hide.
+        {"kind": "figure", "path": "figures/frozen.png", "git_ref": "v1.0"},
+    ]
+    dvc_lock = {
+        "stages": {
+            "plot-matched": {"outs": [{"path": "figures/matched.png"}]},
+            # Also produces the declared figure, and must lose to what the
+            # figure itself says.
+            "plot-by-path": {"outs": [{"path": "figures/declared.png"}]},
+            "plot-frozen": {"outs": [{"path": "figures/frozen.png"}]},
+        }
+    }
+    stage_statuses = {
+        "plot-declared": StageStatus(status="up-to-date"),
+        "plot-matched": StageStatus(
+            status="stale", modified_inputs=["scripts/plot.py"]
+        ),
+        "plot-by-path": StageStatus(status="stale"),
+        # Frozen reads as up-to-date forever, which is the whole problem.
+        "plot-frozen": StageStatus(status="frozen"),
+    }
+    evidence = _build_question_evidence(
+        project=SimpleNamespace(),  # type: ignore
+        repo=SimpleNamespace(),
+        ref=None,
+        evidence_ck=evidence_ck,
+        lookups_by_ref={
+            None: _EvidenceLookups(
+                figures_by_path={
+                    declared.path: declared,
+                    matched.path: matched,
+                    frozen.path: frozen,
+                },
+                results_by_path={},
+                tables_by_path={},
+                publications_by_path={},
+                dvc_lock=dvc_lock,
+                stage_statuses=stage_statuses,
+                frozen_stages={"plot-frozen"},
+            ),
+            # The pinned citation resolves at its own ref, where the stage is
+            # just as frozen -- the ref is what settles it, not the status.
+            "v1.0": _EvidenceLookups(
+                figures_by_path={frozen.path: frozen},
+                results_by_path={},
+                tables_by_path={},
+                publications_by_path={},
+                dvc_lock=dvc_lock,
+                stage_statuses=stage_statuses,
+                frozen_stages={"plot-frozen"},
+            ),
+        },
+        result_value_cache={},
+    )
+    assert evidence[0].stage == "plot-declared"
+    assert evidence[0].stage_status is not None
+    assert evidence[0].stage_status.status == "up-to-date"
+    assert evidence[1].stage == "plot-matched"
+    assert evidence[1].stage_status is not None
+    assert evidence[1].stage_status.status == "stale"
+    assert evidence[1].stage_status.modified_inputs == ["scripts/plot.py"]
+    assert evidence[2].stage is None
+    assert evidence[2].stage_status is None
+    assert evidence[0].stale_reason is None
+    assert evidence[1].stale_reason == "pipeline"
+    # Nothing resolved for the orphan, so it's missing rather than merely
+    # unattributed -- worse news than a stale stage, and it wins.
+    assert evidence[2].stale_reason == "missing"
+    assert evidence[3].stale_reason == "frozen"
+    assert evidence[4].stale_reason is None
 
 
 def test_apply_question_update_builds_object() -> None:
@@ -1460,7 +1648,7 @@ def test_post_project_zotero_import_whole_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -1558,7 +1746,7 @@ def test_post_project_zotero_import_subset_creates_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -1623,7 +1811,7 @@ def test_post_project_zotero_sync_pulls_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     _write_zotero_link(tmp_path)
     with (
@@ -1681,7 +1869,7 @@ def test_post_project_zotero_sync_requires_link(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -1732,7 +1920,7 @@ def test_get_project_zotero_item_pdf(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # An items map with a PDF attachment for citekey "a".
     zotero.write_items_info(
@@ -1791,7 +1979,7 @@ def test_put_project_zotero_item_notes(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{a,\n  title = {A},\n}\n"
@@ -1869,7 +2057,7 @@ def test_get_project_reference_notes_from_comment(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{a,\n  comment = {first note\n\n---\n\nsecond note},\n}\n"
@@ -1891,7 +2079,7 @@ def test_reference_note_highlight_round_trip(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{a,\n  title = {A},\n}\n"
@@ -1947,7 +2135,7 @@ def test_reference_notes_non_linked_use_comment_field(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # A plain .bib with no Zotero link.
     (tmp_path / "references.bib").write_text(
@@ -2080,7 +2268,7 @@ def test_post_and_put_reference_item(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # An existing entry with a note in its comment field.
     (tmp_path / "references.bib").write_text(
@@ -2109,7 +2297,11 @@ def test_post_and_put_reference_item(
         r = client.post(
             f"{base}/references/items",
             headers=headers,
-            json={"path": "references.bib", "key": "smith2020"},
+            json={
+                "path": "references.bib",
+                "key": "smith2020",
+                "fields": {"title": "Another"},
+            },
         )
         assert r.status_code == 409
         # Edit the original entry, renaming its key and a field; its note
@@ -2139,7 +2331,7 @@ def test_put_reference_item_no_change_does_not_error(
     # must skip the commit rather than 500 on an empty commit.
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     fake_repo.git.diff = lambda *a, **k: ""  # nothing staged -> no commit
     (tmp_path / "references.bib").write_text(
@@ -2167,7 +2359,7 @@ def test_delete_project_reference_item(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{keep,\n  title = {Keep},\n}\n\n"
@@ -2198,7 +2390,7 @@ def test_add_reference_creates_zotero_item_when_linked(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text("")
     _write_zotero_link(tmp_path)
@@ -2244,7 +2436,7 @@ def test_delete_reference_deletes_zotero_item_when_linked(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{gone,\n  title = {Gone},\n}\n"
@@ -2284,7 +2476,7 @@ def test_zotero_sync_merges_changes_per_item(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # A locally-keyed entry mapped to a Zotero item, plus one to be deleted.
     (tmp_path / "references.bib").write_text(
@@ -2367,7 +2559,7 @@ def test_zotero_sync_pulls_note_edits(
     # version is untouched), so sync must still refresh the parent's notes.
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{localkey,\n  title = {T},\n  comment = {Old note},\n}\n"
@@ -2449,7 +2641,7 @@ def test_post_project_zotero_import_rejects_both_modes(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -2477,7 +2669,7 @@ def test_post_project_zotero_import_conflict_then_overwrite(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # A .bib already present on disk.
     (tmp_path / "references.bib").write_text("@article{old}\n")
@@ -2541,7 +2733,7 @@ def test_post_project_references_creates_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -2568,7 +2760,7 @@ def test_post_project_references_existing_path_conflicts(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # A file on disk that isn't declared in calkit.yaml, alongside an empty
     # "references:" key, which parses to None. Creating over it must 409, not
@@ -2595,7 +2787,7 @@ def test_post_project_references_labels_existing_file(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # An existing .bib file that isn't yet declared in calkit.yaml.
     (tmp_path / "references.bib").write_text("@article{x}\n")
@@ -2624,7 +2816,7 @@ def test_post_project_references_label_existing_missing_file(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -2647,7 +2839,7 @@ def test_delete_project_references_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{a,\n  title = {A},\n}\n"
@@ -2688,7 +2880,7 @@ def test_delete_project_references_collection_missing(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -2718,7 +2910,7 @@ def test_project_pipeline_stage_edit(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     stages_url = f"{base}/pipeline/stages"
     fake_repo = _make_stage_repo(str(tmp_path))
     # A paper whose class file is only discoverable by reading the source,
@@ -2763,6 +2955,9 @@ def test_project_pipeline_stage_edit(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
             side_effect=fake_ck_info,
         ),
+        # Saving recompiles dvc.yaml from the whole project, which this
+        # stand-in repo can't support; the compile has its own tests
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
     ):
         # Reading a stage hands it back as written: nothing reordered and
         # nothing removed, since tidying is the user's call
@@ -2971,16 +3166,13 @@ def test_get_project_apps(client: TestClient) -> None:
             return_value=ck_info,
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
-        )
+        response = client.get("/projects/test-owner/test-project/apps")
     assert response.status_code == 200
     apps = {a["name"]: a for a in response.json()}
     assert list(apps) == ["naca0012"]
     # The URL is ours and derived, never read from calkit.yaml
     assert apps["naca0012"]["url"] == (
-        f"{settings.API_V1_STR}/projects/test-owner/test-project"
-        "/apps/naca0012/serve/"
+        "/projects/test-owner/test-project/apps/naca0012/serve/"
     )
     assert apps["naca0012"]["path"] == "app/index.html"
     assert apps["naca0012"]["stage"] == "build-app"
@@ -3000,9 +3192,7 @@ def test_get_project_apps(client: TestClient) -> None:
             return_value={"app": {"url": "https://old.hf.space"}},
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
-        )
+        response = client.get("/projects/test-owner/test-project/apps")
     assert response.status_code == 200
     assert response.json() == []
     # A project with no apps returns an empty list rather than erroring
@@ -3020,9 +3210,7 @@ def test_get_project_apps(client: TestClient) -> None:
             return_value={},
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
-        )
+        response = client.get("/projects/test-owner/test-project/apps")
     assert response.status_code == 200
     assert response.json() == []
 
@@ -3055,9 +3243,7 @@ def test_get_project_apps_skips_unusable_paths(client: TestClient) -> None:
             return_value=ck_info,
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
-        )
+        response = client.get("/projects/test-owner/test-project/apps")
     assert response.status_code == 200
     apps = response.json()
     assert [a["name"] for a in apps] == ["good"]
@@ -3067,7 +3253,7 @@ def test_get_project_apps_skips_unusable_paths(client: TestClient) -> None:
 
 def test_serve_project_app_file(client: TestClient) -> None:
     ck_info = {"apps": {"myapp": {"path": "app/index.html"}}}
-    base = f"{settings.API_V1_STR}/projects/test-owner/test-project"
+    base = "/projects/test-owner/test-project"
 
     def get(path: str, is_public: bool = True):
         with (
@@ -3178,9 +3364,7 @@ def test_get_project_notebooks_finds_marimo_notebook(
             return_value=repo,
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/notebooks"
-        )
+        response = client.get("/projects/test-owner/test-project/notebooks")
     assert response.status_code == 200
     notebooks = response.json()
     # A .py notebook can't be found by scanning for the .ipynb extension, so
@@ -3233,10 +3417,7 @@ def test_get_project_notebooks_respects_ref(
             ),
             patch("app.api.routes.projects.core.get_repo", return_value=repo),
         ):
-            url = (
-                f"{settings.API_V1_STR}/projects/test-owner/test-project"
-                "/notebooks"
-            )
+            url = "/projects/test-owner/test-project/notebooks"
             return client.get(url, params={"ref": ref} if ref else None)
 
     # Undeclared notebooks are scanned from the requested ref, not from
@@ -3344,7 +3525,7 @@ def test_get_project_tables_declares_detects_and_resolves(
         url=None,
         storage="git",
     )
-    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/tables"
+    url = "/projects/test-owner/test-project/tables"
     with (
         patch(
             "app.api.routes.projects.core.app.projects.get_project",
@@ -3404,7 +3585,10 @@ def test_get_project_tables_declares_detects_and_resolves(
 
 
 def test_build_question_evidence_keyed_results_and_tables() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # Two results share a file, told apart only by their keys
@@ -3433,10 +3617,17 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={},
-            results_by_path={(mean.path, mean.key): mean},
-            tables_by_path={table.path: table},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(mean.path, mean.key): mean},
+                    tables_by_path={table.path: table},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is None
@@ -3482,7 +3673,10 @@ def test_declared_tables_reach_the_evidence_lookup() -> None:
 
 
 def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # A project can declare both at one path. They are different things
@@ -3503,10 +3697,17 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={},
-            results_by_path={(result.path, None): result},
-            tables_by_path={table.path: table},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(result.path, None): result},
+                    tables_by_path={table.path: table},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is not None
@@ -3516,7 +3717,10 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
 
 
 def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # A result is identified by (path, key). Falling back to the whole-file
@@ -3537,10 +3741,785 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
                     "key": "metrics.p95",
                 }
             ],
-            figures_by_path={},
-            results_by_path={(whole.path, None): whole},
-            tables_by_path={},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(whole.path, None): whole},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is None
+
+
+def test_evidence_resolves_at_its_own_git_ref() -> None:
+    import base64
+    import json
+
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
+    from app.models.core import ContentsItem, Figure, Result
+
+    # The same paths exist at both refs and mean different things there, so
+    # an entry naming a ref must resolve against that ref's artifacts and
+    # not against the ones for the ref being browsed.
+    here_fig = Figure(path="figures/x.png", title="X now")
+    there_fig = Figure(path="figures/x.png", title="X at v1")
+    here_res = Result(path="results/summary.json", title="Now", key="mean")
+    there_res = Result(path="results/summary.json", title="At v1", key="mean")
+    evidence_ck = [
+        {"kind": "figure", "path": "figures/x.png"},
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "v1.0"},
+        {"kind": "result", "path": "results/summary.json", "key": "mean"},
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "key": "mean",
+            "git_ref": "v1.0",
+        },
+        # A ref nothing could be built for: the entry still comes back, with
+        # its git_ref intact, just unresolved.
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "gone"},
+    ]
+    values = {None: 2.0, "v1.0": 1.0}
+
+    def fake_contents(project, repo, path, ref):
+        return ContentsItem(
+            name="summary.json",
+            path=path,
+            type="file",
+            size=1,
+            in_repo=True,
+            content=base64.b64encode(
+                json.dumps({"mean": values[ref]}).encode()
+            ).decode(),
+            url=None,
+            storage="git",
+        )
+
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        side_effect=fake_contents,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={here_fig.path: here_fig},
+                    results_by_path={(here_res.path, "mean"): here_res},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                ),
+                "v1.0": _EvidenceLookups(
+                    figures_by_path={there_fig.path: there_fig},
+                    results_by_path={(there_res.path, "mean"): there_res},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                ),
+            },
+            result_value_cache={},
+        )
+    assert evidence[0].git_ref is None
+    assert evidence[0].figure is not None
+    assert evidence[0].figure.title == "X now"
+    assert evidence[1].git_ref == "v1.0"
+    assert evidence[1].figure is not None
+    assert evidence[1].figure.title == "X at v1"
+    assert evidence[2].result is not None
+    assert evidence[2].result.title == "Now"
+    # The value is read from the file at the entry's own ref, and the cache
+    # is keyed by ref, so one ref's value can't be served for the other's.
+    assert evidence[2].value == "2.0"
+    assert evidence[3].result is not None
+    assert evidence[3].result.title == "At v1"
+    assert evidence[3].value == "1.0"
+    assert evidence[4].git_ref == "gone"
+    assert evidence[4].figure is None
+
+
+def test_evidence_git_ref_round_trips_through_calkit_yaml() -> None:
+    from app.api.routes.projects.core import _apply_question_update
+    from app.models.core import QuestionEvidencePost, QuestionPut
+
+    req = QuestionPut(
+        question="q?",
+        evidence=[
+            QuestionEvidencePost(
+                kind="figure", path="figures/x.png", git_ref="v1.0"
+            ),
+            QuestionEvidencePost(kind="table", path="tables/t.csv"),
+        ],
+    )
+    out = _apply_question_update("q?", req)
+    assert isinstance(out, dict)
+    assert out["evidence"] == [
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "v1.0"},
+        # Nothing written for an entry that names no ref, so calkit.yaml
+        # stays as clean as it was.
+        {"kind": "table", "path": "tables/t.csv"},
+    ]
+
+
+def test_tables_listing_skips_evidence_at_another_ref() -> None:
+    from app.api.routes.projects.core import _build_tables
+
+    # A table cited only at another ref isn't a table of this one: the path
+    # may not even exist here, so listing it gives the reader a dead link.
+    ck_info = {
+        "questions": [
+            {
+                "question": "q?",
+                "evidence": [
+                    {"kind": "table", "path": "tables/here.csv"},
+                    {
+                        "kind": "table",
+                        "path": "tables/elsewhere.csv",
+                        "git_ref": "v1.0",
+                    },
+                ],
+            }
+        ]
+    }
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo_tree_for_ref",
+            return_value=SimpleNamespace(is_file=lambda path: False),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=({}, {}, {}, {}),
+        ),
+    ):
+        tables = _build_tables(
+            project=SimpleNamespace(
+                owner_account_name="someone", name="proj", file_locks=[]
+            ),
+            repo=SimpleNamespace(),
+            ref=None,
+            resolve_content=False,
+        )
+    paths = [t.path for t in tables]
+    assert "tables/here.csv" in paths
+    assert "tables/elsewhere.csv" not in paths
+
+
+def test_get_featured_projects(client: TestClient, db: Session) -> None:
+    """Curated order, public only, and unknown slugs skipped."""
+    public_project, _ = _make_owner_with_project(db, client)
+    public_project.is_public = True
+    private_project, _ = _make_owner_with_project(db, client)
+    private_project.is_public = False
+    db.add(public_project)
+    db.add(private_project)
+    db.commit()
+    db.refresh(public_project)
+    db.refresh(private_project)
+    public_slug = f"{public_project.owner_account.name}/{public_project.name}"
+    private_slug = (
+        f"{private_project.owner_account.name}/{private_project.name}"
+    )
+    # A slug for a project nobody can see, and one that doesn't exist at
+    # all, both drop out rather than erroring or leaking their existence.
+    with patch.object(
+        settings,
+        "FEATURED_PROJECTS",
+        [private_slug, public_slug, "nobody/nothing"],
+    ):
+        response = client.get("/projects/featured")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [f"{p['owner_account_name']}/{p['name']}" for p in body["data"]]
+    assert slugs == [public_slug]
+    assert body["count"] == 1
+    # Configured order is the order returned, not creation order.
+    second_public, _ = _make_owner_with_project(db, client)
+    second_public.is_public = True
+    db.add(second_public)
+    db.commit()
+    db.refresh(second_public)
+    second_slug = f"{second_public.owner_account.name}/{second_public.name}"
+    with patch.object(
+        settings, "FEATURED_PROJECTS", [second_slug, public_slug]
+    ):
+        response = client.get("/projects/featured")
+    assert [
+        f"{p['owner_account_name']}/{p['name']}"
+        for p in response.json()["data"]
+    ] == [second_slug, public_slug]
+    # An empty configuration is an empty section, not an error.
+    with patch.object(settings, "FEATURED_PROJECTS", []):
+        response = client.get("/projects/featured")
+    assert response.status_code == 200
+    assert response.json() == {"data": [], "count": 0}
+
+
+def test_post_project_when_account_name_differs_from_github(
+    client: TestClient, db: Session
+) -> None:
+    """A private project for yourself isn't mistaken for one for an org.
+
+    Linking GitHub to an account created through Google or email leaves the
+    Calkit account name alone, so the two names routinely differ. Deciding
+    ownership from the account name sent those users down the org path,
+    where creating a project for themselves failed on an org lookup.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"mismatch-{suffix}@example.com",
+            password="testpassword123",
+            # The two names deliberately differ, as they do after linking.
+            account_name=f"account{suffix}",
+            github_username=f"ghname{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    repo = f"https://github.com/ghname{suffix}/proj-{suffix}"
+    with (
+        patch(
+            "app.api.routes.projects.core.users.get_github_token",
+            return_value="gh-token",
+        ),
+        patch(
+            "app.api.routes.projects.core.orgs.get_org_by_github_name"
+        ) as get_org,
+        # A 404 from GitHub means "repo doesn't exist yet", and the create
+        # that follows is where this test stops caring.
+        patch(
+            "app.api.routes.projects.core.requests.get",
+            return_value=SimpleNamespace(
+                status_code=404, json=lambda: {}, text=""
+            ),
+        ),
+        patch(
+            "app.api.routes.projects.core.requests.post",
+            return_value=SimpleNamespace(
+                status_code=500, json=lambda: {}, text="stop here"
+            ),
+        ),
+    ):
+        resp = client.post(
+            "/projects",
+            headers=headers,
+            json={
+                "name": f"proj-{suffix}",
+                "title": "A private project for myself",
+                "is_public": False,
+                "git_repo_url": repo,
+            },
+        )
+    # The org path is never taken, so no org lookup and no "Could not fetch
+    # org from GitHub". What it fails on instead is the stubbed repo create.
+    get_org.assert_not_called()
+    assert "org" not in resp.text.lower()
+
+
+def test_post_project_dataset_provenance(
+    client: TestClient, db: Session
+) -> None:
+    """Each way a dataset joins a project writes the right calkit.yaml."""
+    project, headers = _make_owner_with_project(db, client)
+    url = f"/projects/{project.owner_account.name}/{project.name}/datasets"
+    written: list[dict] = []
+
+    class FakeRepo:
+        working_dir = "/tmp/does-not-matter"
+        git = SimpleNamespace(
+            add=lambda *a, **k: None,
+            commit=lambda *a, **k: None,
+            push=lambda *a, **k: None,
+        )
+        active_branch = SimpleNamespace(name="main")
+
+    def post(body: dict, existing_path: bool = False):
+        ck_info: dict = {"datasets": list(written)}
+        with (
+            patch(
+                "app.api.routes.projects.core.get_repo",
+                return_value=FakeRepo(),
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "get_ck_info_from_repo",
+                return_value=ck_info,
+            ),
+            # This test is about what gets written to calkit.yaml; the
+            # fetching of imports has its own test with a real repo
+            patch(
+                "app.api.routes.projects.core.app.imports.fetch_files",
+                side_effect=lambda files, wdir, path: (path, [path]),
+            ),
+            patch(
+                "app.api.routes.projects.core.app.imports.fetch_git_path",
+                return_value="c0ffee0123456789c0ffee0123456789c0ffee01",
+            ),
+            patch(
+                "app.api.routes.projects.core.app.imports.resolve_doi_files",
+                return_value={"x.csv": "https://example.org/x.csv"},
+            ),
+            patch(
+                "app.api.routes.projects.core.calkit.get_size",
+                return_value=0,
+            ),
+            patch(
+                "app.api.routes.projects.core.get_zip_path_map_from_repo",
+                return_value={},
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "get_repo_tree_for_ref",
+                return_value=None,
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "dvc_outputs_from_tree",
+                return_value={},
+            ),
+            patch(
+                "app.api.routes.projects.core.os.path.isfile",
+                return_value=existing_path,
+            ),
+            patch("builtins.open", new_callable=lambda: _fake_open),
+            patch("app.api.routes.projects.core.mixpanel.track"),
+        ):
+            resp = client.post(url, headers=headers, json=body)
+        if resp.status_code == 200:
+            written[:] = ck_info["datasets"]
+        return resp
+
+    import contextlib
+    import io
+
+    @contextlib.contextmanager
+    def _fake_open(*args, **kwargs):
+        yield io.StringIO()
+
+    # A DOI, the most durable provenance there is.
+    resp = post(
+        {
+            "path": "data/doi.csv",
+            "imported_from": {
+                "doi": "10.5281/zenodo.1",
+                "date": "2026-01-02",
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert written[-1]["imported_from"] == {
+        "doi": "10.5281/zenodo.1",
+        "date": "2026-01-02",
+    }
+    # The DB shape holds this as a string, so the response carries it as
+    # JSON a client can parse rather than a Python repr.
+    import json
+
+    assert (
+        json.loads(resp.json()["imported_from"])
+        == written[-1]["imported_from"]
+    )
+    # A Git repo pinned to a revision.
+    resp = post(
+        {
+            "path": "data/repo.csv",
+            "imported_from": {
+                "git_repo_url": "https://github.com/a/b",
+                "git_ref": "deadbeef",
+                "path": "out.csv",
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    # What was actually fetched is what's written, whatever was asked for
+    assert (
+        written[-1]["imported_from"]["git_rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
+    # No revision means the default branch's head, recorded by its commit
+    resp = post(
+        {
+            "path": "data/head.csv",
+            "imported_from": {
+                "git_repo_url": "https://github.com/a/b",
+                "path": "h.csv",
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert (
+        written[-1]["imported_from"]["git_rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
+    # A branch or tag moves, so it can't be what's recorded; asked for, it
+    # is resolved at fetch time and the commit it pointed at is written
+    resp = post(
+        {
+            "path": "data/branch.csv",
+            "imported_from": {
+                "git_repo_url": "https://github.com/a/b",
+                "git_ref": "main",
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert (
+        written[-1]["imported_from"]["git_rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
+    # A plain URL.
+    resp = post(
+        {
+            "path": "data/url.csv",
+            "imported_from": {"url": "https://example.org/d.csv"},
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert written[-1]["imported_from"] == {"url": "https://example.org/d.csv"}
+    # Data created here: needs a title and description, and the path has
+    # to already exist, since nothing will fetch it.
+    resp = post(
+        {"path": "data/mine.csv", "created_by": [{"email": "me@x.edu"}]}
+    )
+    assert resp.status_code == 400
+    resp = post(
+        {
+            "path": "data/mine.csv",
+            "created_by": [{"email": "me@x.edu"}],
+            "title": "Mine",
+            "description": "Collected in the lab",
+        }
+    )
+    # Not tracked by Git or DVC, so there is nothing to label.
+    assert resp.status_code == 400
+    assert "not tracked by Git or DVC" in resp.text
+    resp = post(
+        {
+            "path": "data/mine.csv",
+            "created_by": [{"email": "me@x.edu"}],
+            "title": "Mine",
+            "description": "Collected in the lab",
+        },
+        existing_path=True,
+    )
+    assert resp.status_code == 200, resp.text
+    # One creator reads better as a mapping than a one-item list.
+    assert written[-1]["created_by"] == {"email": "me@x.edu"}
+    assert "imported_from" not in written[-1]
+    # Produced by a stage: doesn't exist until the pipeline runs.
+    resp = post(
+        {
+            "path": "data/derived.csv",
+            "stage": "collect",
+            "title": "Derived",
+            "description": "From the pipeline",
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    # Two sources at once is ambiguous provenance, which is worse than none.
+    resp = post(
+        {
+            "path": "data/ambiguous.csv",
+            "imported_from": {
+                "doi": "10.1/x",
+                "url": "https://example.org/x",
+            },
+        }
+    )
+    assert resp.status_code == 422
+    # Collected here and imported from elsewhere can't both be true.
+    resp = post(
+        {
+            "path": "data/both.csv",
+            "created_by": [{"email": "me@x.edu"}],
+            "imported_from": {"doi": "10.1/x"},
+        }
+    )
+    assert resp.status_code == 422
+    # The same path twice would make the entry ambiguous.
+    resp = post(
+        {
+            "path": "data/url.csv",
+            "imported_from": {"url": "https://example.org/again.csv"},
+        }
+    )
+    assert resp.status_code == 400
+
+
+def test_extract_project_zip(tmp_path) -> None:
+    """Unpacking is confined to the target directory."""
+    import io
+    import zipfile
+
+    from fastapi import HTTPException
+
+    from app.api.routes.projects.core import _extract_project_zip
+
+    def make_zip(entries: dict[str, str]) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for name, content in entries.items():
+                z.writestr(name, content)
+        return buf.getvalue()
+
+    dest = tmp_path / "repo"
+    dest.mkdir()
+    _extract_project_zip(
+        make_zip({"data/raw.csv": "a,b\n", "analyze.py": "print(1)\n"}),
+        str(dest),
+    )
+    assert (dest / "data" / "raw.csv").read_text() == "a,b\n"
+    assert (dest / "analyze.py").exists()
+    # A zip of a project usually has one folder at the top; keeping it would
+    # bury the project a level deeper than the user meant.
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _extract_project_zip(
+        make_zip({"my-project/README.md": "hi", "my-project/src/a.py": "x"}),
+        str(nested),
+    )
+    assert (nested / "README.md").read_text() == "hi"
+    assert (nested / "src" / "a.py").exists()
+    assert not (nested / "my-project").exists()
+    # Git's own data belongs to the repo that already exists.
+    skipped = tmp_path / "skipped"
+    skipped.mkdir()
+    _extract_project_zip(
+        make_zip({".git/config": "nope", "keep.txt": "yes"}), str(skipped)
+    )
+    assert not (skipped / ".git").exists()
+    assert (skipped / "keep.txt").exists()
+    # macOS resource forks are noise, not project files.
+    mac = tmp_path / "mac"
+    mac.mkdir()
+    _extract_project_zip(
+        make_zip({"__MACOSX/._x": "junk", "x": "real"}), str(mac)
+    )
+    assert not (mac / "__MACOSX").exists()
+    # A zip naming a path outside the destination is refused outright: this
+    # runs on our server, against a directory we control.
+    escape = tmp_path / "escape"
+    escape.mkdir()
+    with pytest.raises(HTTPException) as excinfo:
+        _extract_project_zip(
+            make_zip({"../../escaped.txt": "pwned"}), str(escape)
+        )
+    assert excinfo.value.status_code == 400
+    assert not (tmp_path.parent / "escaped.txt").exists()
+    # Something that isn't a zip is a message, not a traceback.
+    with pytest.raises(HTTPException) as excinfo:
+        _extract_project_zip(b"not a zip at all", str(escape))
+    assert excinfo.value.status_code == 400
+
+
+def test_post_project_upload_validates_before_creating(
+    client: TestClient, db: Session
+) -> None:
+    """A bad archive is refused before any project exists for it."""
+    import io
+    import zipfile
+
+    suffix = uuid.uuid4().hex[:8]
+    owner = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"upload-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"upload{suffix}",
+            github_username=f"upload{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=owner.email, db=db
+    )
+    url = "/projects/upload"
+
+    def upload(name: str, content: bytes):
+        with patch(
+            "app.api.routes.projects.core.post_project"
+        ) as post_project:
+            resp = client.post(
+                url,
+                headers=headers,
+                data={"title": "Uploaded", "name": name},
+                files={"file": (f"{name}.zip", content, "application/zip")},
+            )
+        return resp, post_project
+
+    def no_project(name: str) -> bool:
+        return (
+            db.exec(select(Project).where(Project.name == name)).first()
+            is None
+        )
+
+    # Not a zip at all.
+    name = f"notzip-{suffix}"
+    resp, post_project = upload(name, b"this is not a zip archive")
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+    # A zip naming a path outside the project.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("../../escaped.txt", "pwned")
+    name = f"escape-{suffix}"
+    resp, post_project = upload(name, buf.getvalue())
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+    # One whose members declare more than the unpacked cap allows.
+    from app.api.routes.projects import core as core_mod
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("big.bin", "x")
+    name = f"bomb-{suffix}"
+    with patch.object(core_mod, "MAX_PROJECT_UNPACKED_BYTES", 0):
+        resp, post_project = upload(name, buf.getvalue())
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+
+
+def test_get_project_environments_stays_inside_repo(
+    client: TestClient, tmp_path
+) -> None:
+    """Spec and lock reads stay in the clone, whatever calkit.yaml says."""
+    # The repo is one directory under tmp_path, so tmp_path itself is what
+    # a traversal lands in.
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not yours\n")
+    (repo_dir / "pyproject.toml").write_text("[project]\n")
+    (repo_dir / "uv.lock").write_text("version = 1\n")
+    lock_dir = repo_dir / ".calkit" / "env-locks" / "py"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / "linux-64.txt").write_text("numpy==2.0\n")
+    # A symlink in the locks directory pointing out of the repo.
+    (lock_dir / "osx-arm64.txt").symlink_to(secret)
+    envs = {
+        # Legitimate: spec in the repo, lock next to it.
+        "main": {"kind": "uv", "path": "pyproject.toml"},
+        # Legitimate directory of locks, one entry of which is a symlink out.
+        "py": {"kind": "venv", "path": "requirements.txt"},
+        # A Docker env named to make its lock "directory" the repo's parent.
+        "../../..": {"kind": "docker", "image": "x"},
+        # A spec path that is absolute and exists, plus the classic.
+        "abs": {"kind": "uv", "path": str(secret)},
+        "passwd": {"kind": "uv", "path": "/etc/passwd"},
+        # A relative spec path climbing out of the repo.
+        "climb": {"kind": "uv", "path": "../secret.txt"},
+    }
+    fake_project = SimpleNamespace(
+        owner_account_name="o", name="p", file_locks=[]
+    )
+    fake_repo = SimpleNamespace(working_dir=str(repo_dir))
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={"environments": envs},
+        ),
+    ):
+        resp = client.get("/projects/o/p/environments")
+    assert resp.status_code == 200, resp.text
+    by_name = {e["name"]: e for e in resp.json()}
+    assert by_name["main"]["file_content"] == "[project]\n"
+    assert [lk["path"] for lk in by_name["main"]["locks"]] == ["uv.lock"]
+    # Only the lock that's really in the repo is returned.
+    assert [lk["path"] for lk in by_name["py"]["locks"]] == [
+        ".calkit/env-locks/py/linux-64.txt"
+    ]
+    assert by_name["../../.."]["locks"] == []
+    for name in ["abs", "passwd", "climb"]:
+        assert by_name[name]["file_content"] is None, name
+        assert by_name[name]["locks"] == [], name
+    # Nothing anywhere in the response came from outside the clone.
+    assert "not yours" not in resp.text
+    assert "root:" not in resp.text
+
+
+def test_push_dvc_cache_to_storage(tmp_path) -> None:
+    """Every cached object is copied, directory outputs included."""
+    import io as _io
+
+    from app.api.routes.projects.core import _push_dvc_cache_to_storage
+
+    repo_dir = tmp_path / "repo"
+    cache = repo_dir / ".dvc" / "cache" / "files" / "md5"
+    (cache / "ab").mkdir(parents=True)
+    (cache / "cd").mkdir(parents=True)
+    (cache / "ab" / "cdef0123").write_bytes(b"file contents")
+    # A directory output's listing is an object too, and a pointer to it
+    # dangles without this.
+    (cache / "cd" / "ef456789.dir").write_bytes(b'[{"md5": "abcdef0123"}]')
+    written: dict[str, bytes] = {}
+
+    class FakeFS:
+        def open(self, path, mode="rb"):
+            buf = _io.BytesIO()
+            original_close = buf.close
+
+            def close():
+                written[path] = buf.getvalue()
+                original_close()
+
+            buf.close = close  # type: ignore[method-assign]
+            return buf
+
+    with (
+        patch(
+            "app.api.routes.projects.core.get_object_fs",
+            return_value=FakeFS(),
+        ),
+        patch("app.config.settings.ENVIRONMENT", "local"),
+    ):
+        count = _push_dvc_cache_to_storage(
+            repo_dir=str(repo_dir),
+            owner_name="someone",
+            project_name="a-project",
+        )
+    assert count == 2
+    assert sorted(p.split("/")[-2:] for p in written) == [
+        ["ab", "cdef0123"],
+        ["cd", "ef456789.dir"],
+    ]
+    assert list(written.values())[0] == b"file contents"
+    # A repo with nothing in DVC has nothing to push, and that isn't an error.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with patch("app.api.routes.projects.core.get_object_fs") as fs:
+        assert (
+            _push_dvc_cache_to_storage(
+                repo_dir=str(empty), owner_name="a", project_name="b"
+            )
+            == 0
+        )
+    fs.assert_not_called()

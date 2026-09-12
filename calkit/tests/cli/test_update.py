@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 import calkit
+import calkit.docker
 import calkit.resources
 from calkit.cli.update import update_app
 
@@ -49,6 +50,121 @@ def test_update_project_config(tmp_dir, monkeypatch):
     assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
     assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     assert not repo.git.status("--porcelain")
+
+
+def test_update_dataset(tmp_dir):
+    from datetime import date
+
+    from calkit.models.core import ProjectInfo
+
+    subprocess.check_call(["calkit", "init"])
+    # A DOI is normalized and the date is kept as a date, not a string
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/a.csv",
+            "--imported-from-doi",
+            "https://doi.org/10.5281/zenodo.1234567",
+            "--imported-from-date",
+            "2026-01-02",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"] == [
+        {
+            "path": "data/a.csv",
+            "imported_from": {
+                "doi": "10.5281/zenodo.1234567",
+                "date": date(2026, 1, 2),
+            },
+        }
+    ]
+    # A branch in the deprecated 'rev' is still the mistake worth
+    # catching --- what moves goes in 'ref'
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/b.csv",
+            "--imported-from-git-url",
+            "https://github.com/a/b",
+            "--imported-from-git-rev",
+            "main",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "commit hash" in result.output
+    # A repo alone is a complete declaration: what it resolves to is
+    # recorded in .calkit/imports.json by 'calkit sync import', not here
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/b.csv",
+            "--imported-from-git-url",
+            "https://github.com/a/b",
+            "--imported-from-git-ref",
+            "main",
+            "--imported-from-git-path",
+            "data/x.csv",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][1]["imported_from"] == {
+        "git_repo_url": "https://github.com/a/b",
+        "path": "data/x.csv",
+        "git_ref": "main",
+    }
+    # Only one source, and the extras need a source to go with
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/c.csv",
+            "--imported-from-url",
+            "https://x.org/c.csv",
+            "--imported-from-doi",
+            "10.5281/zenodo.1",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "only one of" in result.output
+    result = runner.invoke(
+        update_app,
+        ["dataset", "data/c.csv", "--imported-from-date", "2026-01-02"],
+    )
+    assert result.exit_code != 0
+    assert "go with one of" in result.output
+    # Existing entries are updated in place, and a stage can be set alone
+    result = runner.invoke(
+        update_app, ["dataset", "data/a.csv", "--stage", "fetch"]
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][0]["stage"] == "fetch"
+    assert ck_info["datasets"][0]["imported_from"]["doi"] == (
+        "10.5281/zenodo.1234567"
+    )
+    assert len(ck_info["datasets"]) == 2
+    # An import can't be added to a dataset someone collected
+    ck_info["datasets"].append(
+        {"path": "data/raw.csv", "created_by": {"email": "me@x.edu"}}
+    )
+    calkit.save_calkit_info(ck_info)
+    result = runner.invoke(
+        update_app,
+        ["dataset", "data/raw.csv", "--imported-from-url", "https://x"],
+    )
+    assert result.exit_code != 0
+    assert "cannot also be imported" in result.output
+    ck_info = calkit.load_calkit_info()
+    assert "imported_from" not in ck_info["datasets"][2]
+    # What was written validates as a whole, dates included
+    info = ProjectInfo.model_validate(ck_info)
+    assert info.datasets[0].imported_from.date == date(2026, 1, 2)
 
 
 def test_update_github_actions(tmp_dir):
@@ -336,3 +452,83 @@ def test_update_agent_skills_can_be_run_twice(fake_home):
     assert result2.exit_code == 0
     # Existing custom files should be preserved by copytree dirs_exist_ok.
     assert (skills_dir / "calkit-conventions" / "SKILL.md").exists()
+
+
+def test_update_docker_env_registry(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "main": {"kind": "docker", "path": "Dockerfile", "image": "img"}
+    }
+    calkit.save_calkit_info(ck_info)
+    result = runner.invoke(
+        update_app, ["docker-env", "-n", "main", "--registry", "ghcr.io"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (
+        calkit.load_calkit_info()["environments"]["main"]["registry"]
+        == "ghcr.io"
+    )
+    # A shell can't pass YAML's null, so 'none' is how it's asked for, but
+    # what lands in calkit.yaml is the null the field is documented with,
+    # not a string that only happens to be read as one
+    result = runner.invoke(
+        update_app, ["docker-env", "-n", "main", "--registry", "none"]
+    )
+    assert result.exit_code == 0, result.output
+    env = calkit.load_calkit_info()["environments"]["main"]
+    assert env["registry"] is None
+    assert calkit.docker.resolve_registry_prefix(env) is None
+    with open("calkit.yaml") as f:
+        assert "registry: none" not in f.read()
+    # Nothing to update is a mistake worth reporting, not a no-op
+    result = runner.invoke(update_app, ["docker-env", "-n", "main"])
+    assert result.exit_code != 0
+
+
+def test_update_imported_from_detects_the_kind(tmp_dir):
+    # 'calkit update <kind> --imported-from' takes a source written one
+    # way and works out which it is, so the VS Code extension's "define
+    # source" prompt --- which invites a URL, a project, or prose --- no
+    # longer records all three as a URL
+    import calkit
+    from calkit.cli.update import update_app
+
+    runner = CliRunner()
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"figures": [{"path": "f.png", "title": "F"}]}, f)
+    cases = {
+        "Provided by a colleague": {"description": "Provided by a colleague"},
+        "someone/some-project/fig.png": {
+            "project": "someone/some-project",
+            "path": "fig.png",
+        },
+        "https://doi.org/10.5281/zenodo.123": {"doi": "10.5281/zenodo.123"},
+        "https://github.com/o/r/blob/main/fig.png": {
+            "git_repo_url": "https://github.com/o/r.git",
+            "path": "fig.png",
+            "git_ref": "main",
+        },
+        "https://example.com/f.png": {"url": "https://example.com/f.png"},
+    }
+    for written, expected in cases.items():
+        result = runner.invoke(
+            update_app, ["figure", "f.png", "--imported-from", written]
+        )
+        assert result.exit_code == 0, result.output
+        got = calkit.load_calkit_info()["figures"][0]["imported_from"]
+        assert got == expected, written
+    # It says where something came from on its own
+    result = runner.invoke(
+        update_app,
+        [
+            "figure",
+            "f.png",
+            "--imported-from",
+            "https://x/a",
+            "--imported-from-url",
+            "https://y/b",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "on its own" in result.output

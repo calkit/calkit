@@ -1,0 +1,55 @@
+stages:
+  README.md/analysis:
+    cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/analysis.py
+    deps:
+      - .calkit/markdown/README.md/analysis.py
+      - .calkit/markdown/outputs/README.md/analysis.txt
+      - .calkit/envs/py/uv.lock
+      - .calkit/envs/py/.python-version
+    outs:
+      - data/data.csv:
+          cache: false
+          persist: false
+      - results/fit.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'README.md/analysis' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  README.md/figure:
+    cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/figure.py
+    deps:
+      - .calkit/markdown/README.md/figure.py
+      - data/data.csv
+      - .calkit/envs/py/uv.lock
+      - .calkit/envs/py/.python-version
+    outs:
+      - figures/figure.png:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'README.md/figure' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  README.md/julia:
+    cmd: calkit xenv -n jl --no-check -- ".calkit/markdown/README.md/julia.jl"
+    deps:
+      - .calkit/markdown/README.md/julia.jl
+      - .calkit/markdown/outputs/README.md/julia.txt
+      - .calkit/envs/jl/Manifest.toml
+    outs:
+      - data/data2.csv:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'README.md/julia' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  README.md/r:
+    cmd: calkit xenv -n r --no-check -- Rscript .calkit/markdown/README.md/r.R
+    deps:
+      - .calkit/markdown/README.md/r.R
+      - data/data2.csv
+      - .calkit/markdown/outputs/README.md/r.txt
+      - .calkit/envs/r/renv.lock
+    outs:
+      - figures/data2.png:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'README.md/r' stage in calkit.yaml.
+      Changes made here will be overwritten.

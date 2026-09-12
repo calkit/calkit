@@ -1,7 +1,5 @@
 import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
-import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
-import axios from "axios"
 import type { IconType } from "react-icons"
 import { FaLaptop } from "react-icons/fa"
 import { FaCubes } from "react-icons/fa"
@@ -23,6 +21,9 @@ import { MdOutlineDashboard } from "react-icons/md"
 import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
 import useAuth from "../../hooks/useAuth"
+import { useLocalServer } from "../../hooks/useOnboarding"
+import { TIPS, type TipId } from "../../lib/tips"
+import TipBubble from "../Onboarding/TipBubble"
 
 export interface ProjectNavItem {
   icon: IconType
@@ -68,6 +69,11 @@ interface SidebarItemsProps {
   basePath: string
 }
 
+// Sidebar items that a first-project tip points at from other pages
+const TIP_FOR_NAV: Partial<Record<string, TipId>> = Object.fromEntries(
+  TIPS.map((t) => [t.nav, t.id]),
+)
+
 const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
   const textColor = useColorModeValue("ui.main", "ui.light")
   const bgActive = useColorModeValue("#E2E8F0", "#4A5568")
@@ -81,33 +87,17 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     strict: false,
   }) as any
   const currentRef: string | undefined = layoutSearch?.ref
-  const {
-    isPending: localServerPending,
-    error: localServerError,
-    data: localServerData,
-  } = useQuery({
-    queryKey: ["local-server-sidebar", accountName, projectName],
-    queryFn: () =>
-      // The Calkit local server is usually not running. Fail fast so a
-      // silently-dropped connection can't leave a request hanging; the
-      // result only controls the sidebar "running locally" icon color.
-      axios.get(
-        `http://localhost:8866/projects/${accountName}/${projectName}`,
-        { timeout: 2000 },
-      ),
-    retry: false,
-  })
-  const localMachineColor =
-    localServerError || localServerPending || !localServerData
-      ? "gray"
-      : "ui.success"
+  // Only controls the "running locally" icon color; the hook shares its
+  // query with the onboarding checklist so the page asks localhost once.
+  const { projectConnected } = useLocalServer(accountName, projectName)
+  const localMachineColor = projectConnected ? "ui.success" : "gray"
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {
       return null
     }
 
-    return (
+    const item = (
       <Flex
         key={title}
         as={Link}
@@ -133,6 +123,20 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
         />
         <Text ml={2}>{title}</Text>
       </Flex>
+    )
+    const tipId = TIP_FOR_NAV[title]
+    return tipId ? (
+      <TipBubble
+        key={title}
+        tip={tipId}
+        where="nav"
+        placement="right"
+        display="block"
+      >
+        {item}
+      </TipBubble>
+    ) : (
+      item
     )
   })
 

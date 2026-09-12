@@ -110,6 +110,7 @@ const CreateIssue = ({ isOpen, onClose, onCreated }: CreateIssueProps) => {
             <FormControl isRequired isInvalid={!!errors.title}>
               <FormLabel htmlFor="title">Title</FormLabel>
               <Input
+                autoComplete="off"
                 id="title"
                 {...titleField}
                 ref={(e) => {

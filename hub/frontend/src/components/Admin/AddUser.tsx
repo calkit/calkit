@@ -92,6 +92,7 @@ const AddUser = ({ isOpen, onClose }: AddUserProps) => {
             <FormControl isRequired isInvalid={!!errors.email}>
               <FormLabel htmlFor="email">Email</FormLabel>
               <Input
+                autoComplete="off"
                 id="email"
                 {...register("email", {
                   required: "Email is required",
@@ -107,6 +108,7 @@ const AddUser = ({ isOpen, onClose }: AddUserProps) => {
             <FormControl mt={4} isInvalid={!!errors.full_name}>
               <FormLabel htmlFor="name">Full name</FormLabel>
               <Input
+                autoComplete="off"
                 id="name"
                 {...register("full_name")}
                 placeholder="Full name"

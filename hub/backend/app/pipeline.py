@@ -26,8 +26,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 import ruamel.yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+import calkit.notebooks
+from app import cache
 from app.dvc import get_data_fpath_for_md5
 from app.git import RepoTree
 from app.storage import get_data_prefix_for_owner
@@ -250,14 +252,34 @@ def _build_stage_status_cache_key(
 def _stage_status_cache_get(cache_key: str) -> dict[str, StageStatus] | None:
     with _stage_status_cache_lock:
         cached = _stage_status_cache.get(cache_key)
-        if cached is None:
-            return None
-        cached_at, value = cached
-        if time.monotonic() - cached_at > _STAGE_STATUS_CACHE_TTL_S:
+        if cached is not None:
+            cached_at, value = cached
+            if time.monotonic() - cached_at <= _STAGE_STATUS_CACHE_TTL_S:
+                _stage_status_cache.move_to_end(cache_key)
+                return value
             del _stage_status_cache[cache_key]
-            return None
+    # Missing from this worker's memory doesn't mean nobody has computed it:
+    # with several workers, the odds are it was another one. Fall through to
+    # the shared cache before paying for the object-storage checks again.
+    shared_key = cache.make_key("stage-status", cache_key)
+    shared = cache.get_json(shared_key)
+    if shared is None:
+        return None
+    try:
+        value = {k: StageStatus.model_validate(v) for k, v in shared.items()}
+    except (ValidationError, AttributeError) as e:
+        # Written by an older shape of StageStatus. Drop it rather than
+        # step over it: leaving it means warning and recomputing on every
+        # request until it expires.
+        logger.warning(f"Discarding unreadable cached stage statuses: {e}")
+        cache.delete(shared_key)
+        return None
+    with _stage_status_cache_lock:
+        _stage_status_cache[cache_key] = (time.monotonic(), value)
         _stage_status_cache.move_to_end(cache_key)
-        return value
+        if len(_stage_status_cache) > _STAGE_STATUS_CACHE_MAX:
+            _stage_status_cache.popitem(last=False)
+    return value
 
 
 def _stage_status_cache_put(
@@ -268,6 +290,11 @@ def _stage_status_cache_put(
         _stage_status_cache.move_to_end(cache_key)
         if len(_stage_status_cache) > _STAGE_STATUS_CACHE_MAX:
             _stage_status_cache.popitem(last=False)
+    cache.set_json(
+        cache.make_key("stage-status", cache_key),
+        {k: v.model_dump() for k, v in value.items()},
+        ttl=_STAGE_STATUS_CACHE_TTL_S,
+    )
 
 
 def _build_outs_index(lock_stages: dict) -> dict[str, str | None]:
@@ -343,7 +370,37 @@ def _resolve_current_dep_md5(
         return _hash_tree_file(tree, path)
     if path in outs_index:
         return outs_index[path]
+    cleaned = _cleaned_notebook_md5(path, tree)
+    if cleaned is not None:
+        return cleaned
     return None
+
+
+CLEANED_NOTEBOOKS_DIR = ".calkit/notebooks/cleaned/"
+
+
+def _cleaned_notebook_md5(path: str, tree: RepoTree) -> str | None:
+    """The md5 a cleaned-notebook dep would have, from the source notebook.
+
+    Cleaned notebooks are generated on the fly by ``calkit run`` and never
+    committed, so the dep can't be read; but its content is a function of
+    the committed notebook, so its hash can be computed. Without this an
+    edit to a notebook in the app never showed its stage as stale.
+    """
+    if not path.startswith(CLEANED_NOTEBOOKS_DIR):
+        return None
+    source = path[len(CLEANED_NOTEBOOKS_DIR) :]
+    if not tree.is_file(source):
+        return None
+    try:
+        nb = json.loads(tree.read_bytes(source))
+    except Exception as e:
+        logger.warning(f"Could not parse notebook {source}: {e}")
+        return None
+    # The same cleaning and the same ``json.dump(indent=2)`` as ``calkit
+    # run`` uses, which is what makes this hash match the lock's
+    text = json.dumps(calkit.notebooks.clean_notebook(nb), indent=2)
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
 def _get_nested(data: dict | None, dotted_key: str):
@@ -631,6 +688,70 @@ def compute_stage_statuses(
         if not storage_dependent:
             _stage_status_cache_put(cache_key, result)
     return result
+
+
+def find_frozen_tainted_stages(dvc_yaml: dict, dvc_lock: dict) -> set[str]:
+    """Stages that are frozen, plus everything downstream of one.
+
+    A frozen stage (``dvc freeze``) is never stale, because DVC won't re-run
+    it however much its inputs change -- which is precisely why its outputs
+    can't be taken at face value, and why neither can anything computed from
+    them. Staleness detection has nothing to say about either, so name them
+    here and let callers decide what to do about it.
+
+    Returns stage names as they appear in ``dvc.lock``, matching the keys of
+    ``compute_stage_statuses``.
+    """
+    lock_stages = dvc_lock.get("stages") or {}
+    yaml_stages = dvc_yaml.get("stages") or {}
+    current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
+    live = _get_live_lock_stages(lock_stages, yaml_stages, current_expansions)
+
+    def _paths(stage: dict, key: str) -> list[str]:
+        out = []
+        for item in stage.get(key) or []:
+            path = item.get("path") if isinstance(item, dict) else None
+            if path:
+                out.append(path.rstrip("/"))
+        return out
+
+    # Who makes what, so a dep can be traced back to the stage that wrote it.
+    producers: dict[str, set[str]] = {}
+    for stage_name, lock_stage in live.items():
+        for out_path in _paths(lock_stage, "outs"):
+            producers.setdefault(out_path, set()).add(stage_name)
+    # Consumers, keyed by the stage they consume from. A dep matches an out
+    # either way around the directory: a stage writing ``figures`` feeds one
+    # reading ``figures/x.png``, and one writing ``figures/x.png`` feeds one
+    # reading the whole ``figures`` directory.
+    consumers: dict[str, set[str]] = {}
+    for stage_name, lock_stage in live.items():
+        for dep_path in _paths(lock_stage, "deps"):
+            for out_path, producing in producers.items():
+                if (
+                    out_path == dep_path
+                    or dep_path.startswith(out_path + "/")
+                    or out_path.startswith(dep_path + "/")
+                ):
+                    for producer in producing:
+                        if producer != stage_name:
+                            consumers.setdefault(producer, set()).add(
+                                stage_name
+                            )
+    tainted = {
+        stage_name
+        for stage_name in live
+        if (yaml_stages.get(_get_base_stage_name(stage_name)) or {}).get(
+            "frozen"
+        )
+    }
+    queue = list(tainted)
+    while queue:
+        for consumer in consumers.get(queue.pop(), set()):
+            if consumer not in tainted:
+                tainted.add(consumer)
+                queue.append(consumer)
+    return tainted
 
 
 def calc_overall_pipeline_status(

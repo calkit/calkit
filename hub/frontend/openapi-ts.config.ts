@@ -2,7 +2,11 @@ import { defineConfig } from "@hey-api/openapi-ts"
 
 export default defineConfig({
   input: "./openapi.json",
-  output: "./src/client",
+  // Write into the existing directory rather than deleting and recreating
+  // it: the dev server watches src/client, and a recreated directory is a
+  // new inode the watcher never re-attaches to, so nothing it serves
+  // updates until the server restarts.
+  output: { path: "./src/client", clean: false },
   plugins: [
     {
       name: "@hey-api/client-axios",

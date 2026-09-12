@@ -2,6 +2,7 @@ import { Outlet, createRootRoute } from "@tanstack/react-router"
 import React, { Suspense } from "react"
 
 import NotFound from "../components/Common/NotFound"
+import useSubmitOnCmdEnter from "../hooks/useSubmitOnCmdEnter"
 
 const loadDevtools = () =>
   Promise.all([
@@ -21,14 +22,19 @@ const loadDevtools = () =>
 const TanStackDevtools =
   process.env.NODE_ENV === "production" ? () => null : React.lazy(loadDevtools)
 
-export const Route = createRootRoute({
-  component: () => (
+function Root() {
+  useSubmitOnCmdEnter()
+  return (
     <>
       <Outlet />
       <Suspense>
         <TanStackDevtools />
       </Suspense>
     </>
-  ),
+  )
+}
+
+export const Route = createRootRoute({
+  component: Root,
   notFoundComponent: () => <NotFound />,
 })

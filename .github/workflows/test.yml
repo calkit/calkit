@@ -80,7 +80,7 @@ jobs:
           auto-activate-base: true
           conda-remove-defaults: true
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
+        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
         with:
           run-install: false
       - name: Install Juliaup
@@ -92,17 +92,21 @@ jobs:
       # Tests that isolate themselves in a throwaway depot append this one,
       # so whatever is here is read rather than rebuilt -- measured at 65s
       # cold vs 1s warm for a single `Pkg.instantiate` on an empty project.
-      - name: Cache the Julia depot
-        uses: actions/cache@v6
+      # Restore only. This workflow is `on: pull_request`, so anything it
+      # saved would land in `refs/pull/N/merge`, where no other pull request
+      # can read it---25+ such entries piled up on one pull request alone,
+      # evicting useful caches against the repository's 10 GB limit while
+      # every run still started cold. warm-julia-depot.yml publishes the
+      # entry these keys restore, in the default branch's scope.
+      - name: Restore the Julia depot
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.julia/artifacts
             ~/.julia/compiled
             ~/.julia/packages
             ~/.julia/registries
-          # A new entry each run, restoring the newest previous one, so the
-          # depot keeps up with whatever the tests install
-          key: julia-depot-${{ runner.os }}-${{ github.run_id }}
+          key: julia-depot-${{ runner.os }}-
           restore-keys: julia-depot-${{ runner.os }}-
       # Cheap on a cache hit, and on a miss it pays the precompile once here
       # rather than inside whichever test happens to reach Julia first
@@ -113,7 +117,7 @@ jobs:
         with:
           node-version: "20"
       - name: Setup R
-        uses: r-lib/actions/setup-r@d3c5be51b12e724e68f33216ca3c148b66d5f0b6 # v2
+        uses: r-lib/actions/setup-r@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
         with:
           r-version: latest
       - name: Run tests
@@ -134,6 +138,13 @@ jobs:
         working-directory: jupyterlab-ext
     steps:
       - uses: actions/checkout@v7
+      # The UI tests initialize a project from inside JupyterLab, which
+      # commits, and Git refuses to commit without an identity
+      - name: Configure Git Credentials
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config --global init.defaultBranch main
       - name: Setup uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:

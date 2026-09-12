@@ -77,6 +77,7 @@ const AddMember = ({ isOpen, onClose, orgName }: AddMemberProps) => {
             <FormControl isRequired isInvalid={!!errors.username}>
               <FormLabel htmlFor="username">Username</FormLabel>
               <Input
+                autoComplete="off"
                 id="username"
                 {...register("username", { required: "Username is required" })}
                 placeholder="Ex: someuser"

@@ -27,7 +27,12 @@ from sqlitedict import SqliteDict
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli import (
+    AliasGroup,
+    EnvDefaultsModeChoice,
+    raise_error,
+    warn,
+)
 
 scheduler_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -827,7 +832,7 @@ def run_batch(
         ),
     ] = None,
     env_default_options: Annotated[
-        str,
+        EnvDefaultsModeChoice,
         typer.Option(
             "--env-default-options",
             help=(
@@ -838,9 +843,9 @@ def run_batch(
                 "still override); 'ignore' never applies env defaults."
             ),
         ),
-    ] = "replace",
+    ] = EnvDefaultsModeChoice.replace,
     env_default_setup: Annotated[
-        str,
+        EnvDefaultsModeChoice,
         typer.Option(
             "--env-default-setup",
             help=(
@@ -850,7 +855,7 @@ def run_batch(
                 "defaults; 'ignore' never applies env defaults."
             ),
         ),
-    ] = "replace",
+    ] = EnvDefaultsModeChoice.replace,
 ) -> None:
     """Submit a batch job through the scheduler associated with the env.
 
@@ -866,17 +871,6 @@ def run_batch(
     """
     if args is None:
         args = []
-    valid_modes = ("ignore", "replace", "merge")
-    if env_default_options not in valid_modes:
-        raise_error(
-            f"Invalid --env-default-options value '{env_default_options}'; "
-            f"expected one of {', '.join(valid_modes)}"
-        )
-    if env_default_setup not in valid_modes:
-        raise_error(
-            f"Invalid --env-default-setup value '{env_default_setup}'; "
-            f"expected one of {', '.join(valid_modes)}"
-        )
     if environment == "_system":
         raise_error(
             "Scheduler batch submission requires a scheduler environment; "

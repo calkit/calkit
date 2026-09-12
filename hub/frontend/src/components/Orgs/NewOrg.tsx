@@ -112,6 +112,7 @@ const NewOrg = ({ isOpen, onClose }: NewOrgProps) => {
                 <FormControl isRequired isInvalid={!!errors.github_name}>
                   <FormLabel htmlFor="github_name">Name (on GitHub)</FormLabel>
                   <Input
+                    autoComplete="off"
                     id="github_name"
                     {...register("github_name", {
                       required: "Name is required.",

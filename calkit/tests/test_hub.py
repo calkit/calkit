@@ -511,3 +511,48 @@ def test_concurrent_refresh_fires_only_once(monkeypatch):
         t.join()
     assert refresh_call_count["n"] == 1
     assert all(r == fresh for r in results)
+
+
+def test_request_can_skip_retries_and_login(monkeypatch):
+    import calkit.hub
+
+    # A background report is worth making but not worth waiting on, so a
+    # caller can turn off both the backoff and the login prompt
+    attempts = {"n": 0}
+
+    class _Resp:
+        status_code = 503
+
+        def json(self):
+            return {"detail": "unavailable"}
+
+        def raise_for_status(self):
+            raise calkit.hub.HTTPError("503")
+
+    def fake_post(*a, **k):
+        attempts["n"] += 1
+        return _Resp()
+
+    monkeypatch.setattr(calkit.hub.requests, "post", fake_post)
+    monkeypatch.setattr(calkit.hub, "get_headers", lambda h, auth=True: {})
+    monkeypatch.setattr(calkit.hub, "get_base_url", lambda: "http://x")
+    with pytest.raises(calkit.hub.HTTPError):
+        calkit.hub.post("/p", max_retries=0)
+    # One attempt, not eleven: a transient 5xx is not retried when asked not
+    # to, so the caller isn't held up by a hub that's down
+    assert attempts["n"] == 1
+
+    # And with no token, allow_login=False raises rather than prompting
+    def no_token(h, auth=True):
+        raise ValueError("No token found")
+
+    monkeypatch.setattr(calkit.hub, "get_headers", no_token)
+    prompted = {"n": 0}
+    monkeypatch.setattr(
+        calkit.hub,
+        "run_device_flow",
+        lambda: prompted.__setitem__("n", prompted["n"] + 1),
+    )
+    with pytest.raises(ValueError):
+        calkit.hub.post("/p", max_retries=0, allow_login=False)
+    assert prompted["n"] == 0

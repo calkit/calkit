@@ -9,6 +9,9 @@ import emails  # type: ignore
 from jinja2 import Template
 
 from app.config import settings
+from app.security import EMAIL_VERIFICATION_LINK_HOURS
+
+EMAIL_VERIFICATION_CODE_MINUTES = 15
 
 
 @dataclass
@@ -84,6 +87,26 @@ def generate_reset_password_email(
             "username": email,
             "email": email_to,
             "valid_hours": settings.EMAIL_RESET_TOKEN_EXPIRE_HOURS,
+            "link": link,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_verify_email_email(
+    email_to: str, code: str, token: str
+) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your verification code is {code}"
+    link = f"{settings.frontend_host}/verify-email?token={token}"
+    html_content = render_email_template(
+        template_name="verify_email.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "code": code,
+            "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
+            "valid_hours": EMAIL_VERIFICATION_LINK_HOURS,
             "link": link,
         },
     )

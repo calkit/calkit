@@ -9,6 +9,7 @@ from app.pipeline import (
     _precompute_storage_presence,
     calc_overall_pipeline_status,
     compute_stage_statuses,
+    find_frozen_tainted_stages,
     find_stage_for_path,
 )
 
@@ -895,3 +896,148 @@ def test_find_stage_for_path_prefers_current_stages():
     )
     # Omitting valid_stages keeps the old any-match behaviour.
     assert find_stage_for_path("figures/a.png", dvc_lock) == "plot"
+
+
+def test_cleaned_notebook_dep_tracks_the_notebook(tmp_path):
+    import json
+
+    # The stage depends on the cleaned copy calkit makes on the fly, which
+    # is never committed; its hash has to come from the notebook itself
+    def notebook(source: str, outputs: list) -> str:
+        return json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "source": [source],
+                        "outputs": outputs,
+                        "execution_count": 3,
+                        "metadata": {"tags": ["keep"], "scrolled": True},
+                    }
+                ],
+                "metadata": {"kernelspec": {"name": "python3"}},
+                "nbformat": 4,
+            }
+        )
+
+    cleaned_dep = ".calkit/notebooks/cleaned/notebook.ipynb"
+    lock_md5 = hashlib.md5(
+        json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "source": ["x = 1"],
+                        "outputs": [],
+                        "execution_count": None,
+                        "metadata": {"tags": ["keep"]},
+                    }
+                ],
+                "metadata": {},
+                "nbformat": 4,
+            },
+            indent=2,
+        ).encode()
+    ).hexdigest()
+    repo = _init_repo(tmp_path / "repo")
+    dvc_yaml = {
+        "stages": {
+            "run": {
+                "cmd": "calkit nb execute notebook.ipynb",
+                "deps": [cleaned_dep],
+                "outs": ["out.txt"],
+            }
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            "run": {
+                "cmd": "calkit nb execute notebook.ipynb",
+                "deps": [{"path": cleaned_dep, "md5": lock_md5}],
+                "outs": [{"path": "out.txt", "md5": _md5("result\n")}],
+            }
+        }
+    }
+    # Same code, new outputs: the cleaned copy is unchanged, so not stale
+    _commit(
+        repo,
+        {
+            "notebook.ipynb": notebook("x = 1", [{"output_type": "stream"}]),
+            "out.txt": "result\n",
+        },
+        "init",
+    )
+    tree = get_repo_tree_for_ref(repo, None)
+    statuses = compute_stage_statuses(
+        dvc_yaml, dvc_lock, tree, "o", "p", FakeFS()
+    )
+    assert statuses["run"].status == "up-to-date"
+    # An edit to a cell changes the cleaned copy, so the stage is stale
+    _commit(repo, {"notebook.ipynb": notebook("x = 2", [])}, "edit")
+    tree = get_repo_tree_for_ref(repo, None)
+    statuses = compute_stage_statuses(
+        dvc_yaml, dvc_lock, tree, "o", "p", FakeFS()
+    )
+    assert statuses["run"].status == "stale"
+    assert cleaned_dep in statuses["run"].modified_inputs
+
+
+def test_find_frozen_tainted_stages() -> None:
+    # collect (frozen) -> clean -> plot, with the plot reading the directory
+    # rather than the file, and a summarize stage off on its own. A stage
+    # dropped from dvc.yaml and one whose out nobody reads are both left out.
+    dvc_yaml = {
+        "stages": {
+            "collect": {"cmd": "collect", "frozen": True},
+            "clean": {"cmd": "clean"},
+            "plot": {"cmd": "plot"},
+            "summarize": {"cmd": "summarize"},
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            "collect": {"outs": [{"path": "data/raw.csv"}]},
+            "clean": {
+                "deps": [{"path": "data/raw.csv"}],
+                "outs": [{"path": "data/clean"}],
+            },
+            "plot": {
+                # Reads the whole directory the upstream stage writes into.
+                "deps": [{"path": "data/clean/values.csv"}],
+                "outs": [{"path": "figures/plot.png"}],
+            },
+            "summarize": {
+                "deps": [{"path": "notes.md"}],
+                "outs": [{"path": "results/summary.json"}],
+            },
+            "removed": {
+                "deps": [{"path": "data/raw.csv"}],
+                "outs": [{"path": "old.txt"}],
+            },
+        }
+    }
+    assert find_frozen_tainted_stages(dvc_yaml, dvc_lock) == {
+        "collect",
+        "clean",
+        "plot",
+    }
+    # Nothing frozen, nothing tainted -- including a cycle's worth of stages,
+    # which the walk must not loop on.
+    assert (
+        find_frozen_tainted_stages(
+            {"stages": {k: {"cmd": k} for k in ("a", "b")}},
+            {
+                "stages": {
+                    "a": {
+                        "deps": [{"path": "b.txt"}],
+                        "outs": [{"path": "a.txt"}],
+                    },
+                    "b": {
+                        "deps": [{"path": "a.txt"}],
+                        "outs": [{"path": "b.txt"}],
+                    },
+                }
+            },
+        )
+        == set()
+    )

@@ -2,6 +2,7 @@ import {
   Button,
   FormControl,
   FormErrorMessage,
+  FormHelperText,
   FormLabel,
   Input,
   Modal,
@@ -14,13 +15,13 @@ import {
   Select,
   Textarea,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import type { AxiosError } from "axios"
-import { ProjectsService } from "../../client"
+import { MiscService, ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -37,11 +38,13 @@ interface PublicationPostWithFile {
   kind:
     | "journal-article"
     | "conference-paper"
-    | "presentation"
-    | "poster"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
-  template?: "latex/article" | "latex/jfm"
+    | "thesis"
+    | "phd-thesis"
+  template?: string
   stage?: string
   environment?: string
   file?: FileList
@@ -70,11 +73,30 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
       environment: variant === "template" ? "tex" : undefined,
     },
   })
+  // The template registry lives in the calkit package, so the list comes
+  // from the API rather than being repeated here.
+  const templatesQuery = useQuery({
+    queryKey: ["templates", "latex"],
+    queryFn: () =>
+      MiscService.getTemplates({ kind: "latex" }).then(
+        (response) => response.data,
+      ),
+    enabled: variant === "template",
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const templates = templatesQuery.data ?? []
+  const selectedTemplate = templates.find((t) => t.name === watch("template"))
   // Prefill the stage name from the path until the user edits it directly
   const path = watch("path")
   useEffect(() => {
     if (variant === "template" && !dirtyFields.stage) {
-      setValue("stage", path)
+      // A stage name, not a path: "pubs/ieee" becomes "build-pubs-ieee",
+      // the same convention the backend uses when it names one itself.
+      const slug = (path ?? "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+      setValue("stage", slug ? `build-${slug}` : "")
     }
   }, [variant, path, dirtyFields.stage, setValue])
   const mutation = useMutation({
@@ -134,6 +156,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                 Path (relative to project folder)
               </FormLabel>
               <Input
+                autoComplete="off"
                 id="path"
                 {...register("path", {
                   required: "Path is required",
@@ -157,19 +180,35 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
 
                 <Select
                   id="template"
-                  placeholder="Select template"
+                  placeholder={
+                    templatesQuery.isPending
+                      ? "Loading templates..."
+                      : templates.length === 0
+                        ? "No templates available"
+                        : "Select template"
+                  }
+                  isDisabled={
+                    templatesQuery.isPending || templates.length === 0
+                  }
                   {...register("template", {
                     required: "Template is required",
                   })}
                 >
-                  <option value="latex/article">latex/article</option>
-                  <option value="latex/jfm">latex/jfm</option>
+                  {templates.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.title}
+                    </option>
+                  ))}
                 </Select>
-                {errors.template && (
+                {errors.template ? (
                   <FormErrorMessage>
                     {errors.template?.message}
                   </FormErrorMessage>
-                )}
+                ) : selectedTemplate?.description ? (
+                  <FormHelperText>
+                    {selectedTemplate.description}
+                  </FormHelperText>
+                ) : null}
               </FormControl>
             ) : (
               ""
@@ -184,16 +223,19 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                 })}
               >
                 <option value="journal-article">Journal article</option>
-                <option value="presentation">Presentation</option>
                 <option value="conference-paper">Conference paper</option>
-                <option value="poster">Poster</option>
+                <option value="proposal">Proposal</option>
                 <option value="report">Report</option>
+                <option value="blog">Blog</option>
                 <option value="book">Book</option>
+                <option value="thesis">Thesis</option>
+                <option value="phd-thesis">PhD thesis</option>
               </Select>
             </FormControl>
             <FormControl mt={4} isRequired isInvalid={!!errors.title}>
               <FormLabel htmlFor="title">Title</FormLabel>
               <Input
+                autoComplete="off"
                 id="title"
                 {...register("title")}
                 placeholder="Title"
@@ -223,6 +265,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                   Docker environment name
                 </FormLabel>
                 <Input
+                  autoComplete="off"
                   id="environment"
                   {...register("environment")}
                   placeholder="Ex: tex"
@@ -242,6 +285,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
               <FormControl mt={4} isRequired isInvalid={!!errors.stage}>
                 <FormLabel htmlFor="title">Pipeline stage name</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="stage"
                   {...register("stage")}
                   placeholder="Ex: build-paper"

@@ -37,3 +37,19 @@ export const getGoogleRedirectUri = () => {
   }
   return "https://calkit.io/auth/google"
 }
+
+// Send the browser to Google to authorize. The callback lands on /auth/google,
+// which signs the user in (creating the account if needed) or, when already
+// signed in, connects Google to the existing account.
+export const startGoogleOAuth = (): void => {
+  const params = new URLSearchParams({
+    client_id: String(import.meta.env.VITE_GOOGLE_CLIENT_ID),
+    redirect_uri: getGoogleRedirectUri(),
+    response_type: "code",
+    scope: "openid email profile",
+    state: createGoogleOAuthState(),
+    access_type: "offline",
+    prompt: "consent",
+  })
+  location.href = `${getGoogleAuthUrl()}?${params.toString()}`
+}

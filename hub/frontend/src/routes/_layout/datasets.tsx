@@ -131,9 +131,11 @@ function PublicDatasetsTable() {
                     </Link>
                   </Td>
                   <Td isTruncated maxWidth="150px">
+                    {/* Straight into that dataset's viewer in its project */}
                     <Link
                       as={RouterLink}
                       to={`/${dataset.project.owner_account_name}/${dataset.project.name}/datasets`}
+                      search={{ view: dataset.path } as any}
                     >
                       <Tooltip label={dataset.path}>
                         <Text isTruncated>{dataset.path}</Text>
@@ -144,6 +146,7 @@ function PublicDatasetsTable() {
                     <Link
                       as={RouterLink}
                       to={`/${dataset.project.owner_account_name}/${dataset.project.name}/datasets`}
+                      search={{ view: dataset.path } as any}
                     >
                       {dataset.title}
                     </Link>

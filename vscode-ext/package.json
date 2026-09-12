@@ -148,6 +148,11 @@
         "icon": "$(play)"
       },
       {
+        "command": "calkit-vscode.runMarkdownStage",
+        "title": "Calkit: Run Markdown Stage",
+        "icon": "$(play)"
+      },
+      {
         "command": "calkit-vscode.openStagePdf",
         "title": "Open Rendered PDF",
         "category": "Calkit",
@@ -291,7 +296,7 @@
       },
       {
         "command": "calkit-vscode.disableAutoRefresh",
-        "title": "\u2713 Auto-refresh status",
+        "title": "✓ Auto-refresh status",
         "category": "Calkit"
       },
       {
@@ -749,6 +754,10 @@
         {
           "command": "calkit-vscode.clearSidebarSearch",
           "when": "calkit-vscode.hasProject"
+        },
+        {
+          "command": "calkit-vscode.runMarkdownStage",
+          "when": "false"
         }
       ]
     },

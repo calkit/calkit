@@ -6,6 +6,7 @@ import re
 import warnings
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
@@ -58,6 +59,79 @@ def frozen_stage_base_names(
     return names
 
 
+def frozen_tainted_stage_names(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> set[str]:
+    """Base names of frozen stages, plus every stage downstream of one.
+
+    A frozen stage doesn't re-run when its inputs change, so DVC never calls
+    it out of date -- and never calls anything built from its outputs out of
+    date either. Nothing in a status report will say so, which is the point
+    of naming them here: an answer resting on one of those outputs is
+    resting on whatever the stage last happened to produce.
+
+    Read from ``dvc.lock`` where there is one, since its deps and outs are
+    concrete, falling back to ``dvc.yaml``. Names come back without their
+    ``@`` expansion, matching :func:`frozen_stage_base_names`.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    tainted = frozen_stage_base_names(ck_info=ck_info, wdir=wdir)
+    if not tainted:
+        return set()
+    stages: dict = {}
+    for fname in ("dvc.lock", "dvc.yaml"):
+        fpath = os.path.join(wdir or ".", fname)
+        if os.path.isfile(fpath):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+            except Exception:
+                stages = {}
+            if stages:
+                break
+    if not stages:
+        return tainted
+
+    def _paths(stage: object, key: str) -> list[str]:
+        if not isinstance(stage, dict):
+            return []
+        out = []
+        for item in stage.get(key) or []:
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str):
+                out.append(path.rstrip("/"))
+        return out
+
+    producers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        for path in _paths(stage, "outs"):
+            producers.setdefault(path, set()).add(name.split("@")[0])
+    # A dep matches an out either way around the directory: a stage writing
+    # ``figures`` feeds one reading ``figures/x.png``, and one writing
+    # ``figures/x.png`` feeds one reading the whole ``figures`` directory.
+    consumers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        base = name.split("@")[0]
+        for dep in _paths(stage, "deps"):
+            for out, names in producers.items():
+                if (
+                    out == dep
+                    or dep.startswith(out + "/")
+                    or out.startswith(dep + "/")
+                ):
+                    for producer in names:
+                        if producer != base:
+                            consumers.setdefault(producer, set()).add(base)
+    queue = list(tainted)
+    while queue:
+        for consumer in consumers.get(queue.pop(), set()):
+            if consumer not in tainted:
+                tainted.add(consumer)
+                queue.append(consumer)
+    return tainted
+
+
 class PipelineStatus(BaseModel):
     """Current status of the project pipeline."""
 
@@ -66,6 +140,15 @@ class PipelineStatus(BaseModel):
     cleaned_notebooks: list[str] = Field(default_factory=list)
     stale_stages: dict[str, "StaleStage"] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
+    # Git-ignored files inside directory inputs of stages that are not
+    # currently stale on that input: {stage_name: {input_path: [file, ...]}}.
+    # DVC hashes them along with the rest of the directory, but Git doesn't
+    # carry them to other machines, so the stage will look stale elsewhere,
+    # e.g., in CI. Inputs currently reported as modified are annotated on the
+    # StaleStage instead, so the two never overlap.
+    ignored_files_in_inputs: dict[str, dict[str, list[str]]] = Field(
+        default_factory=dict
+    )
 
     @field_validator("stale_stages", mode="before")
     @classmethod
@@ -153,6 +236,11 @@ class StaleStage(BaseModel):
     modified_outputs: list[str] = Field(default_factory=list)
     modified_command: bool = False
     always_run: bool = False
+    # Git-ignored files inside modified directory inputs, keyed by the entry
+    # in ``modified_inputs``. DVC hashes a directory as a whole, so an ignored
+    # file can change the hash without anything showing in Git status; these
+    # are the usual suspects when a stage looks stale for no visible reason.
+    ignored_files_in_inputs: dict[str, list[str]] = Field(default_factory=dict)
     # True for stages that originate from a subproject (either an individual
     # "{sp}:{stage}" stage or a kept "{sp} (subproject)" wrapper). Subproject
     # wrapper stages are marked always-changed purely as a delegation
@@ -656,6 +744,7 @@ def get_status(
     check pipeline environments, then query DVC for out-of-date stages.
     """
     import calkit.environments
+    import calkit.markdown
 
     prev_cwd = os.getcwd()
     if wdir is not None:
@@ -666,7 +755,7 @@ def get_status(
         has_pipeline = bool(ck_info.get("pipeline", {}).get("stages", {}))
         has_pipeline = has_pipeline or os.path.isfile("dvc.yaml")
         has_subprojects = bool(ck_info.get("subprojects"))
-        result = {
+        result: dict[str, Any] = {
             "has_pipeline": has_pipeline or has_subprojects,
             "environment_checks": {},
             "cleaned_notebooks": [],
@@ -674,6 +763,16 @@ def get_status(
             "errors": [],
         }
         if not has_pipeline and not has_subprojects:
+            return PipelineStatus.model_validate(result)
+        # Environment checking and status filtering both read stages and
+        # environments straight off this dict, so markdown stages have to
+        # become ordinary ones before either runs.
+        try:
+            ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
+        except Exception as e:
+            result["errors"].append(
+                f"Failed to read markdown stages: {e.__class__.__name__}: {e}"
+            )
             return PipelineStatus.model_validate(result)
         if check_environments:
             try:
@@ -857,13 +956,13 @@ def get_status(
                 pass
         # Build stage ordering from root dvc.yaml; subproject stages sort after.
         dvc_yaml_stages: list[str] = []
+        dvc_yaml_stage_defs: dict[str, dict] = {}
         if os.path.isfile("dvc.yaml"):
             try:
                 with open("dvc.yaml") as f:
                     dvc_yaml = calkit.ryaml.load(f)
-                dvc_yaml_stages = list(
-                    (dvc_yaml or {}).get("stages", {}).keys()
-                )
+                dvc_yaml_stage_defs = (dvc_yaml or {}).get("stages", {})
+                dvc_yaml_stages = list(dvc_yaml_stage_defs.keys())
             except Exception:
                 pass
         ordered_stale_stages = {}
@@ -962,6 +1061,124 @@ def get_status(
                     for target in targets
                 )
             }
+        # Git-ignored files inside directory inputs. DVC hashes a directory
+        # input as a whole without consulting .gitignore, so a stray ignored
+        # file (scratch data, an editor backup) changes the hash yet shows up
+        # in neither Git status nor DVC's file-level status. The stage then
+        # looks stale for no visible reason, and since Git doesn't carry the
+        # file to other machines, a fresh checkout such as CI hashes the
+        # directory differently and the stage flips between stale and
+        # up-to-date depending on where it's run (calkit#1036). Scan the
+        # compiled dvc.yaml deps rather than calkit.yaml inputs: stage kinds
+        # add deps of their own (a notebook's include_paths, say) and dvc.yaml
+        # is exactly what DVC hashes. Only directories are inspected, so file
+        # deps like cleaned notebooks or environment lock files are never
+        # considered. Files DVC tracks (e.g., an upstream stage's outputs) are
+        # ignored by Git on purpose and are excluded, as is anything matched
+        # by .dvcignore, which DVC skips when hashing.
+        stale_by_base: dict[str, list[StaleStage]] = {}
+        for display_name, stale_stage in ordered_stale_stages.items():
+            bare_name, subproject, _ = raw_stale_stages[display_name]
+            # Only root stages are scanned; iterated stages are keyed
+            # "name@param" in DVC status, so match on the base name
+            if subproject is None:
+                stale_by_base.setdefault(bare_name.split("@")[0], []).append(
+                    stale_stage
+                )
+        ignored_files_in_inputs: dict[str, dict[str, list[str]]] = {}
+        # Directories are shared between stages, so list each one only once.
+        # The Git repo and DVC index are only resolved once a directory
+        # actually needs listing, so a pipeline without directory inputs
+        # never pays for them.
+        ignored_files_by_dir: dict[str, list[str]] = {}
+        git_repo = None
+        git_root = ""
+        dvc_out_paths: list[str] = []
+        for name, stage_def in dvc_yaml_stage_defs.items():
+            if not isinstance(stage_def, dict):
+                continue
+            for dep in stage_def.get("deps", []) or []:
+                if not isinstance(dep, str):
+                    continue
+                # Deps are relative to the stage's wdir, if it has one
+                dep_path = Path(
+                    os.path.normpath(
+                        os.path.join(stage_def.get("wdir", ""), dep)
+                    )
+                ).as_posix()
+                if not os.path.isdir(dep_path):
+                    continue
+                if targets and not any(
+                    target in {name, f"dvc.yaml:{name}"}
+                    or _paths_overlap(Path(target).as_posix(), dep_path)
+                    for target in targets
+                ):
+                    continue
+                if dep_path not in ignored_files_by_dir:
+                    if git_repo is None:
+                        git_repo = calkit.git.get_repo()
+                        git_root = str(git_repo.working_tree_dir)
+                        dvc_out_paths = [
+                            Path(os.path.relpath(out.fs_path)).as_posix()
+                            for out in dvc_repo.index.outs
+                        ]
+                    # Git prints paths relative to the repo root, which may be
+                    # above the project, so make them project-relative; -z
+                    # keeps unusual file names from being quoted
+                    listing = git_repo.git.ls_files(
+                        "-z",
+                        "--others",
+                        "--ignored",
+                        "--exclude-standard",
+                        "--",
+                        os.path.abspath(dep_path),
+                    )
+                    files: list[str] = []
+                    for ignored_path in listing.split("\0"):
+                        if not ignored_path:
+                            continue
+                        ignored_path = Path(
+                            os.path.relpath(
+                                os.path.join(git_root, ignored_path)
+                            )
+                        ).as_posix()
+                        if any(
+                            ignored_path == out
+                            or ignored_path.startswith(out + "/")
+                            for out in dvc_out_paths
+                        ):
+                            continue
+                        if dvc_repo.dvcignore.is_ignored_file(
+                            os.path.abspath(ignored_path)
+                        ):
+                            continue
+                        files.append(ignored_path)
+                    ignored_files_by_dir[dep_path] = files
+                files = ignored_files_by_dir[dep_path]
+                if not files:
+                    continue
+                # When DVC reports the directory (or, if the dep was expanded
+                # around a subproject, a path inside it) as modified, annotate
+                # that input on the stale stage; otherwise it goes in the
+                # status-wide list as something that will bite elsewhere
+                annotated = False
+                for stale_stage in stale_by_base.get(name, []):
+                    for modified_input in stale_stage.modified_inputs:
+                        inside = [
+                            p
+                            for p in files
+                            if p == modified_input
+                            or p.startswith(modified_input.rstrip("/") + "/")
+                        ]
+                        if inside:
+                            stale_stage.ignored_files_in_inputs[
+                                modified_input
+                            ] = inside
+                            annotated = True
+                if not annotated:
+                    ignored_files_in_inputs.setdefault(name, {})[dep_path] = (
+                        files
+                    )
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
@@ -969,6 +1186,7 @@ def get_status(
             cleaned_notebooks=result["cleaned_notebooks"],
             stale_stages=result["stale_stages"],
             errors=result["errors"],
+            ignored_files_in_inputs=ignored_files_in_inputs,
         )
     finally:
         if wdir is not None:
@@ -1134,6 +1352,50 @@ def _warn_on_latexmkrc_out_dir_mismatch(
     )
 
 
+def _ensure_calkit_gitattributes(wdir: str | None = None) -> bool:
+    """Pin the line endings of Calkit's own generated files to LF.
+
+    Several of them are committed *and* hashed by DVC as stage
+    dependencies -- an environment's lock file most of all. Git rewrites
+    text files to CRLF on checkout when ``core.autocrlf`` is on, which is
+    the default for Git for Windows, and DVC hashes the working tree, so a
+    Windows collaborator's checkout disagrees with everyone else's
+    ``dvc.lock`` and the stage reads stale forever. Writing the file with
+    LF is not enough: the rewrite happens on the way out of Git, after we
+    are done.
+
+    DVC recommends the same mechanism for cross-platform work, but applied
+    to everything (``* text=auto eol=lf``, plus ``core.autocrlf false``);
+    see its guide to running on Windows. This rule is deliberately
+    narrower, since normalizing a project's own files is the project's
+    call and doing it unasked would renormalize files nobody meant to
+    touch. The two agree in direction, so a project that follows DVC's
+    advice as well loses nothing.
+
+    ``.gitattributes`` outranks ``core.autocrlf``, so this holds however
+    the user has Git configured.
+
+    Scoped to ``.calkit`` --- everything Calkit generates, and nothing a
+    project writes for itself. Deliberately not narrower than that: the
+    files here that are both committed and hashed are spread across
+    ``env-locks`` and ``envs``, in ``.json``, ``.yml`` and ``.txt``, and
+    an allowlist of those would silently stop covering the next one
+    added. Ignored files inside ``.calkit`` pick up the rule too, which
+    costs nothing, since Git never rewrites what it isn't tracking.
+
+    Locks a project keeps outside ``.calkit`` --- ``uv.lock``,
+    ``pixi.lock``, a ``.python-version`` beside an environment spec ---
+    are not covered. They are written by their own tools, and normalizing
+    a project's own files is the project's call; DVC's guide to running on
+    Windows covers them.
+    """
+    return _write_managed_gitignore_block(
+        os.path.join(wdir, ".gitattributes") if wdir else ".gitattributes",
+        marker="calkit generated files",
+        lines=["/.calkit/** text eol=lf"],
+    )
+
+
 def _ensure_latex_aux_gitignore(
     stage: LatexStage, wdir: str | None = None
 ) -> bool:
@@ -1174,6 +1436,86 @@ def _ensure_latex_aux_gitignore(
     return _write_managed_gitignore_block(
         gitignore_path, marker="calkit latex aux files", lines=aux_globs
     )
+
+
+def sync_markdown(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> "calkit.markdown.MarkdownExpansion":
+    """Extract what the project's Markdown files declare, and persist envs.
+
+    Run as preprocessing, before environments are checked, because an
+    environment declared in Markdown has to be in ``calkit.yaml`` before
+    anything tries to create or enter it.
+    """
+    import calkit.markdown
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    markdown = calkit.markdown.expand_ck_info(ck_info, wdir=wdir)
+    if markdown.environments:
+        _write_markdown_environments(markdown, wdir=wdir)
+    return markdown
+
+
+def _write_markdown_environments(
+    markdown: "calkit.markdown.MarkdownExpansion", wdir: str | None = None
+) -> bool:
+    """Persist Markdown-declared environments into ``calkit.yaml``.
+
+    A stage's command runs ``calkit xenv -n <env>`` as a subprocess, which
+    reads environments back off disk, so an environment that lives only in
+    memory can't be entered. Writing it here keeps every existing
+    environment code path working unchanged.
+
+    The Markdown stays authoritative: these entries are rewritten from it
+    on every compile, and each carries a ``description`` saying so.
+
+    Returns True if ``calkit.yaml`` was modified.
+    """
+    import calkit.markdown
+
+    ck_yaml_path = os.path.join(wdir, "calkit.yaml") if wdir else "calkit.yaml"
+    if not os.path.isfile(ck_yaml_path):
+        return False
+    with open(ck_yaml_path) as f:
+        data = calkit.ryaml.load(f) or {}
+    created_envs_key = (
+        "environments" not in data or data["environments"] is None
+    )
+    if created_envs_key:
+        data["environments"] = {}
+    envs = data["environments"]
+    changed = False
+    for env_name, env in markdown.environments.items():
+        if envs.get(env_name) == env:
+            continue
+        envs[env_name] = env
+        changed = True
+    # An environment a file declared on an earlier compile and no longer
+    # does---renamed, or removed---would otherwise stay behind for good.
+    # The generated description is what marks an entry as one of these,
+    # so a user's own environments are never touched.
+    for env_name in list(envs):
+        if env_name in markdown.environments:
+            continue
+        source = calkit.markdown.env_source_path(envs[env_name])
+        if source is not None and source in markdown.markdown_paths:
+            del envs[env_name]
+            changed = True
+    if changed:
+        # Separate a newly created 'environments' section from what comes
+        # before it, the way the rest of the file is written
+        if created_envs_key and hasattr(
+            data, "yaml_set_comment_before_after_key"
+        ):
+            try:
+                data.yaml_set_comment_before_after_key(
+                    "environments", before="\n"
+                )
+            except Exception:
+                pass
+        _dump_yaml_if_changed(data, ck_yaml_path)
+    return changed
 
 
 def _write_managed_gitignore_block(
@@ -1268,12 +1610,60 @@ def to_dvc(
     a subproject that is a library with no defined pipeline stages).
     """
     import calkit.dvc.zip
-    from calkit.environments import get_env_lock_fpath
+    import calkit.markdown
+    from calkit.environments import get_env_input_paths, get_env_lock_fpath
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info and "subprojects" not in ck_info:
         return {}
+    # Replace markdown stages with the stages and environments their blocks
+    # declare, before anything else reads this, so env locks, scheduler
+    # options and iteration need no knowledge of Markdown.
+    markdown = calkit.markdown.expand_ck_info(ck_info, wdir=wdir)
+    ck_info = markdown.ck_info
+    if write and markdown.environments:
+        _write_markdown_environments(markdown, wdir=wdir)
+    # Everything Markdown derives is rewritten on every compile, so it
+    # stays out of Git: the extracted scripts, and the spec file and
+    # virtualenv of any environment the Markdown declares. One managed
+    # block covers them all, which avoids a git check-ignore subprocess
+    # per path.
+    if write and manage_gitignore and markdown.script_paths:
+        # Specs and locks are committed---that is how a Calkit project
+        # records its environments---and so is the tooling's own bootstrap
+        # (renv's activate.R and .Rprofile, which renv expects in version
+        # control). What can't be committed is the installed environment
+        # itself: it is large and holds absolute paths from the machine
+        # that built it. renv ignores its own library via renv/.gitignore;
+        # a virtualenv has nothing equivalent, so name it here.
+        def _env_dir(path: str) -> str:
+            # An environment described by a spec file in the project
+            # directory has no directory of its own, and its virtualenv
+            # sits beside that file
+            return Path(os.path.dirname(path) or ".").as_posix()
+
+        env_dirs = set()
+        for env in markdown.environments.values():
+            env_dirs.add(_env_dir(env["path"]))
+        # An environment the Markdown only references can live under
+        # .calkit/envs too---that is where xr puts one it builds from the
+        # code's imports---and its virtualenv needs ignoring just the same.
+        for env in (ck_info.get("environments") or {}).values():
+            if not isinstance(env, dict) or not env.get("path"):
+                continue
+            env_dir = _env_dir(env["path"])
+            if env_dir.startswith(".calkit/envs/"):
+                env_dirs.add(env_dir)
+        ignore_lines = ["/.calkit/markdown/"] + [
+            "/.venv/" if env_dir == "." else f"/{env_dir}/.venv/"
+            for env_dir in sorted(env_dirs)
+        ]
+        _write_managed_gitignore_block(
+            os.path.join(wdir or ".", ".gitignore"),
+            marker="calkit markdown derived files",
+            lines=ignore_lines,
+        )
     # Compile subproject pipelines recursively.
     # For isolated subprojects (those with their own .dvc/ directory), DVC
     # won't cross the .dvc/ boundary during --all-pipelines discovery, so we
@@ -1380,11 +1770,25 @@ def to_dvc(
     for stage in pipeline.stages.values():
         used_envs.add(stage.inner_environment)
         used_envs.add(stage.outer_environment)
-    env_lock_fpaths = {}
+    env_lock_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
+        # An env that runs setup commands can name the files they read---a
+        # setup script it sources, most often. Those are inputs to every
+        # stage using the env, in the same way its lock file is: editing
+        # how a build is set up changes what the build produces. Declared
+        # rather than parsed out of the commands, since a shell command
+        # doesn't reliably say which of its words is a path. Only the kinds
+        # with a ``default_setup``: a Docker env's ``inputs`` are files
+        # copied into the image, and their checksums already ride along in
+        # its lock file, which stages depend on.
+        if env.get("kind") in ("system", "slurm", "pbs"):
+            for env_input in get_env_input_paths(env, env_name):
+                env_lock_fpaths.setdefault(env_name, []).append(
+                    Path(env_input).as_posix()
+                )
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=True, for_dvc=True, wdir=wdir
         )
@@ -1399,7 +1803,32 @@ def to_dvc(
                 lock_fpath = Path(lock_fpath).relative_to(wdir).as_posix()
             except ValueError:
                 pass
-        env_lock_fpaths[env_name] = lock_fpath
+        env_lock_fpaths.setdefault(env_name, []).append(lock_fpath)
+        # A uv environment's interpreter comes from a .python-version next
+        # to its spec, not from the lock, which records only a
+        # requires-python floor. Without it as a dependency, changing the
+        # pin would leave every stage in this environment looking current.
+        if env.get("kind") == "uv":
+            spec_dir = os.path.dirname(env.get("path", ""))
+            pv_path = Path(
+                os.path.join(spec_dir, ".python-version")
+            ).as_posix()
+            pv_full = os.path.join(wdir, pv_path) if wdir else pv_path
+            if os.path.isfile(pv_full):
+                env_lock_fpaths[env_name].append(pv_path)
+        # An environment that installs the project itself---by pointing at
+        # the project's own spec file, or by naming the project root as a
+        # path dependency---is a pointer to the working tree, so the lock
+        # says nothing about the code it resolves to: the source has to be
+        # a dependency in its own right or editing the package would leave
+        # its stages looking current.
+        language = calkit.markdown.env_local_source_language(env, wdir=wdir)
+        if language is not None:
+            for source_path in calkit.markdown.local_package_source_paths(
+                language, wdir=wdir
+            ):
+                if source_path not in env_lock_fpaths[env_name]:
+                    env_lock_fpaths[env_name].append(source_path)
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Convert legacy sbatch stages to shell-script + scheduler and rename
     # old `slurm:` stage fields to `scheduler:`, updating calkit.yaml
@@ -1436,6 +1865,40 @@ def to_dvc(
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
+    # Tell procedure stages where their procedure is written down, which
+    # only calkit.yaml knows
+    pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
+    if write:
+        # The resolved setup commands each stage runs, written beside the
+        # pipeline so the compiled command can name a path instead of
+        # carrying shell-quoted text, which no single quoting survives on
+        # both cmd.exe and a POSIX shell. Written after the merge above,
+        # which is what works out the list.
+        setup_files = [
+            path
+            for stage in pipeline.stages.values()
+            if (path := stage.write_setup_file(wdir=wdir)) is not None
+        ]
+        # Not committed: unlike an import's lock, this is derived from
+        # calkit.yaml and rewritten by every compile, which is to say by
+        # every 'calkit run' and 'calkit status' -- the same reason a
+        # cleaned notebook isn't committed either.
+        if manage_gitignore and setup_files:
+            _write_managed_gitignore_block(
+                os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
+                marker="calkit stage setup",
+                lines=["/.calkit/stage-setup/"],
+            )
+        # Only when there is a lock file to protect. A project with no
+        # environment that locks under .calkit has nothing whose hash a
+        # line-ending rewrite could change, and shouldn't get a
+        # .gitattributes it never needed.
+        if manage_gitignore and any(
+            Path(p).as_posix().startswith(".calkit/env-locks/")
+            for paths in env_lock_fpaths.values()
+            for p in paths
+        ):
+            _ensure_calkit_gitattributes(wdir=wdir)
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
@@ -1556,6 +2019,18 @@ def to_dvc(
         # spawning a git subprocess per output (~100 ms each).
         if write and manage_gitignore:
             repo = calkit.git.get_repo(wdir)
+            # A subproject is usually a plain subdirectory rather than its
+            # own git repo, so an output path relative to it (``wdir``) must
+            # be re-based onto the enclosing repo's root before it's handed
+            # to the ignore helpers below, or they'd write the rule into the
+            # top-level .gitignore under the wrong, subproject-relative path.
+            repo_root = Path(repo.working_dir).resolve()
+            wdir_rel = Path(wdir or ".").resolve().relative_to(repo_root)
+            wdir_rel_posix = wdir_rel.as_posix()
+
+            def _repo_rel(p: str) -> str:
+                return f"{wdir_rel_posix}/{p}" if wdir_rel_posix != "." else p
+
             # Ensure we catch any Jupyter Notebook outputs
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
@@ -1575,13 +2050,19 @@ def to_dvc(
             old_stage = existing_dvc_stages.get(stage_name, {})
             for old_path in calkit.dvc.out_paths_from_stage(old_stage):
                 if old_path not in current_out_paths:
-                    calkit.git.ensure_path_is_not_ignored(repo, path=old_path)
+                    calkit.git.ensure_path_is_not_ignored(
+                        repo, path=_repo_rel(old_path)
+                    )
             # Deal with any gitignore changes necessary
             for out in outputs:
                 if isinstance(out, PathOutput) and out.storage is None:
-                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                 elif isinstance(out, PathOutput) and out.storage == "git":
-                    calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_not_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                     if out.path.endswith(".ipynb"):
                         # A notebook stage's storage is declared here, in the
                         # pipeline, so a clean filter installed in the clone
@@ -1590,10 +2071,12 @@ def to_dvc(
                         # commit bytes that don't match what DVC hashed, with
                         # nothing showing as modified locally.
                         calkit.git.ensure_path_is_not_filtered(
-                            repo, path=out.path
+                            repo, path=_repo_rel(out.path)
                         )
                 elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
-                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                     calkit.dvc.zip.add(out.path, is_stage_output=True)
         # For LaTeX stages, warn on a latexmkrc/output_dir mismatch and keep
         # the generated aux files out of Git via a managed .gitignore block.
@@ -1794,6 +2277,8 @@ def translate_run_targets(
         ``isolated_sp_targets`` is a list of ``(sp_path, stage_or_None)``
         pairs that must be reproduced by chdiring into the subproject.
     """
+    import calkit.markdown
+
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
     subprojects = ck_info.get("subprojects", [])
@@ -1804,6 +2289,20 @@ def translate_run_targets(
         sp = Path(sp_cfg["path"]).as_posix()
         sp_map[sp] = sp_cfg
         sp_map[Path(sp).name] = sp_cfg
+    # A markdown stage stands in for the stages its blocks declare, so a
+    # target naming it has to become the stages DVC actually knows about.
+    # Done before subproject handling because a Markdown path contains no
+    # ':' and so can't be a subproject shorthand.
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    if md_stages:
+        expanded: list[str] = []
+        for target in targets:
+            md_path = md_stages.get(target)
+            if md_path is None:
+                expanded.append(target)
+                continue
+            expanded += calkit.markdown.get_stage_names(md_path, target)
+        targets = expanded
     parent_targets: list[str] = []
     isolated_sp_targets: list[tuple[str, str | None]] = []
     for target in targets:
@@ -1829,3 +2328,24 @@ def translate_run_targets(
             else:
                 parent_targets.append(f"{sp}/dvc.yaml")
     return parent_targets, isolated_sp_targets
+
+
+def get_upstream_stages(target: str, wdir: str | None = None) -> set[str]:
+    """Get a stage's name plus the names of all stages it depends on.
+
+    DVC already knows how to walk its own graph, including foreach/matrix
+    groups and stages defined in subdirectories, so we let it collect the
+    target with its dependencies rather than reimplementing the traversal.
+    Names of generated foreach stages come back as ``stage@item``, and both
+    ``calkit.yaml`` and ``dvc.yaml`` key off the base name, so we keep both.
+    """
+    import calkit.dvc
+
+    repo = calkit.dvc.get_dvc_repo(wdir)
+    names = set()
+    for stage in repo.stage.collect(target, with_deps=True):
+        name = getattr(stage, "name", None)
+        if name:
+            names.add(name)
+            names.add(name.split("@")[0])
+    return names

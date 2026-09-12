@@ -30,6 +30,7 @@ export default function ClearableInput({
       {...(flex !== undefined ? { flex } : {})}
     >
       <Input
+        autoComplete="off"
         {...inputRest}
         ref={inputRef}
         value={value}

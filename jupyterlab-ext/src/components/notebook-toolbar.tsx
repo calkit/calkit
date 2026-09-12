@@ -620,14 +620,17 @@ const PipelineStageBadge: React.FC<{
         );
         setHtmlStorage(notebookInfo.stage?.html_storage || "git");
 
-        // If no stage is set, generate a default name from the notebook filename
+        // If no stage is set, generate a default name from the notebook
+        // filename. This fetch can resolve after the user has started
+        // typing a name (it reruns when the kernel changes, for one), so
+        // it only fills an empty input rather than replacing what's there.
         if (!stage) {
           const filename = notebookPath.split("/").pop() || "";
           const nameWithoutExt = filename.replace(/\.ipynb$/, "");
           const generatedStageName = `${nameWithoutExt}-notebook`;
-          setStageName(generatedStageName);
+          setStageName((prev) => prev || generatedStageName);
         } else {
-          setStageName(stage);
+          setStageName((prev) => prev || stage);
         }
 
         setCurrentEnv(env);

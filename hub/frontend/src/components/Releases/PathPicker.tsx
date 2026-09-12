@@ -19,7 +19,7 @@ import {
   useDisclosure,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
-import { useMemo, useState } from "react"
+import { type ReactElement, useMemo, useState } from "react"
 import {
   FiChevronDown,
   FiChevronRight,
@@ -40,6 +40,9 @@ interface PathPickerProps {
   // implies zipping it (and DVC storage for internal releases), which the
   // backend doesn't do yet, so folders are browsable but not selectable.
   allowFolders?: boolean
+  // Something other than the default path button to open the picker from,
+  // e.g. an icon button next to a list the pick gets added to.
+  trigger?: ReactElement
 }
 
 // Parent directory of a path, e.g. "paper/figs/a.png" -> "paper/figs".
@@ -78,6 +81,7 @@ const PathPicker = ({
   projectName,
   value,
   onChange,
+  trigger,
   allowFolders = false,
 }: PathPickerProps) => {
   const { isOpen, onOpen, onClose } = useDisclosure()
@@ -139,30 +143,33 @@ const PathPicker = ({
       onOpen={handleOpen}
       onClose={onClose}
       placement="bottom-start"
-      matchWidth
+      matchWidth={!trigger}
     >
       <PopoverTrigger>
-        <Button
-          variant="outline"
-          w="full"
-          justifyContent="space-between"
-          rightIcon={<FiChevronDown />}
-          fontWeight="normal"
-        >
-          {value ? (
-            <Code bg="transparent" px={0}>
-              {value}
-            </Code>
-          ) : (
-            <Text color="gray.500">Whole project</Text>
-          )}
-        </Button>
+        {trigger ?? (
+          <Button
+            variant="outline"
+            w="full"
+            justifyContent="space-between"
+            rightIcon={<FiChevronDown />}
+            fontWeight="normal"
+          >
+            {value ? (
+              <Code bg="transparent" px={0}>
+                {value}
+              </Code>
+            ) : (
+              <Text color="gray.500">Whole project</Text>
+            )}
+          </Button>
+        )}
       </PopoverTrigger>
-      <PopoverContent w="full">
+      <PopoverContent w={trigger ? "400px" : "full"}>
         <PopoverArrow />
         <PopoverHeader>
           <InputGroup size="sm" mb={trimmedQuery ? 0 : 2}>
             <Input
+              autoComplete="off"
               autoFocus
               placeholder="Search or type a path…"
               value={query}

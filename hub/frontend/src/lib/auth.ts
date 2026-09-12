@@ -150,6 +150,12 @@ export const forceRefreshAccessToken = async (): Promise<string | null> => {
   }
 }
 
+/** Where to land after the next login; read back by popPostLoginRedirect. */
+export const setPostLoginRedirect = (target: string): void => {
+  if (typeof window === "undefined") return
+  localStorage.setItem("post_login_redirect", target)
+}
+
 /**
  * Retrieves and removes the stored post-login redirect path from localStorage.
  * Only returns paths that start with "/" and don't contain ".." to prevent

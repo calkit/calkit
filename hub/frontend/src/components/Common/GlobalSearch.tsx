@@ -174,6 +174,7 @@ export default function GlobalSearch() {
           )}
         </InputLeftElement>
         <Input
+          autoComplete="off"
           ref={inputRef}
           placeholder="Search…"
           value={query}

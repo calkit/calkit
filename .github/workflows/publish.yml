@@ -42,10 +42,10 @@ jobs:
           uv run jlpm run build:prod
       - name: Build a binary wheel and a source tarball
         run: python3 -m build
-      - name: Generate and build calk9 alias package
+      - name: Generate and build ck9 alias package
         run: |
-          bash scripts/make-calk9.sh
-          python3 -m build calk9 -o dist/
+          bash scripts/make-ck9.sh
+          python3 -m build ck9 -o dist/
       - name: Store the distribution packages
         uses: actions/upload-artifact@v7
         with:
@@ -110,7 +110,7 @@ jobs:
           echo "calkit-python ${{ steps.version.outputs.version }} never appeared on PyPI"
           exit 1
       - name: Log in to the container registry
-        uses: docker/login-action@af63523ba5f55733d817da0fdb813e660152c72c
+        uses: docker/login-action@0a596b2e7a325f0cedf8e9bd21ab002cbd3c9241
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

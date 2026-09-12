@@ -39,7 +39,7 @@ const ENGINE_BASE = (import.meta.env.VITE_TEX_ENGINE_URL || "/tex").replace(
 // is aggressively cached by the browser; without a version query, a rebuilt
 // engine (e.g. the remote-fetch/font patches) won't be picked up until a hard
 // refresh. Appended to the worker + engine URLs to bust the HTTP cache.
-const ENGINE_VERSION = "2026-07-09-fixed-point-2"
+const ENGINE_VERSION = "2026-08-21-keep-going"
 const V = `?v=${ENGINE_VERSION}`
 
 // Self-hosted texmf proxy. When set, the patched busytex engine fetches any TeX

@@ -58,6 +58,7 @@ import {
   type ReleaseSort,
   type SortKey,
 } from "./releaseSort"
+import TipBubble from "../Onboarding/TipBubble"
 
 // Columns that read most naturally as descending on first click.
 const DESC_FIRST: Set<SortKey> = new Set(["date", "views", "comments"])
@@ -275,15 +276,17 @@ const ReleasesTable = ({
         <Heading size="md">Releases</Heading>
         {userHasWriteAccess && (
           <>
-            <Button
-              variant="primary"
-              size="sm"
-              ml={4}
-              leftIcon={<Icon as={FaPlus} />}
-              onClick={openNewRelease}
-            >
-              New release
-            </Button>
+            <TipBubble tip="release" where="page">
+              <Button
+                variant="primary"
+                size="sm"
+                ml={4}
+                leftIcon={<Icon as={FaPlus} />}
+                onClick={openNewRelease}
+              >
+                New release
+              </Button>
+            </TipBubble>
             <Button
               size="sm"
               ml={2}

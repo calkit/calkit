@@ -1,10 +1,5 @@
 import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
-  Accordion,
-  AccordionButton,
-  AccordionIcon,
-  AccordionItem,
-  AccordionPanel,
   Box,
   Checkbox,
   Flex,
@@ -13,7 +8,6 @@ import {
   Heading,
   Icon,
   IconButton,
-  Image,
   Link,
   Spacer,
   Switch,
@@ -33,23 +27,26 @@ import {
   createFileRoute,
   useSearch,
 } from "@tanstack/react-router"
-import { useRef, useState } from "react"
-import { FaPlus, FaRegFileAlt } from "react-icons/fa"
-import { FiGrid } from "react-icons/fi"
+import { useEffect, useRef, useState } from "react"
+import { FaCheck, FaPlus, FaRegSquare } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
-import { type QuestionEvidence, ReleasesService } from "../../../../../client"
+import { ReleasesService } from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
-import FigureView from "../../../../../components/Figures/FigureView"
+import Tooltip from "../../../../../components/Common/Tooltip"
+import FileEditorModal from "../../../../../components/Files/FileEditorModal"
+import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
-import EditQuestion from "../../../../../components/Projects/EditQuestion"
+import {
+  isEvidenceMissing,
+  isEvidenceStale,
+} from "../../../../../components/Projects/QuestionModal"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
-import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
+import RecentChanges from "../../../../../components/Projects/RecentChanges"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
-import NewPublication from "../../../../../components/Publications/NewPublication"
 import NewRelease from "../../../../../components/Releases/NewRelease"
 import useProject, {
   useProjectIssues,
@@ -72,229 +69,21 @@ export const Route = createFileRoute(
       .object({
         // Whole-project "New release" modal open state, so a link reopens it.
         new_release: z.boolean().optional(),
-        // Number of the question whose edit modal is open, so a link reopens it.
+        // Questions have their own URLs; these are kept so links made before
+        // they did still land on the right one, and are forwarded on arrival.
         edit_question: z.number().optional(),
-        // Number of the question whose details are expanded, so the back
-        // button and links restore the expanded state.
-        expanded_question: z.number().optional(),
+        question: z.number().optional(),
+        evidence: z.number().optional(),
         // LaTeX editor open state (from a showcase publication), so a link
         // reopens it. editor_tex is the .tex source path.
         editor_open: z.boolean().optional(),
         editor_tex: z.string().optional(),
+        // Path of the file open in the text editor (README.md or
+        // calkit.yaml from the cards here), so a refresh keeps it open.
+        edit_file: z.string().optional(),
       })
       .parse(search),
 })
-
-/** Compact display of a single piece of question evidence. */
-function EvidenceItem({
-  evidence,
-  accountName,
-  projectName,
-  gitRef,
-}: {
-  evidence: QuestionEvidence
-  accountName: string
-  projectName: string
-  gitRef?: string
-}) {
-  const borderColor = useColorModeValue("gray.200", "gray.600")
-  const bg = useColorModeValue("white", "gray.800")
-  if (evidence.kind === "figure") {
-    const fig = evidence.figure
-    const ext = evidence.path.toLowerCase().split(".").pop() ?? ""
-    const imgMime: Record<string, string> = {
-      png: "image/png",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      gif: "image/gif",
-      svg: "image/svg+xml",
-    }
-    const imgSrc =
-      fig && ext in imgMime
-        ? fig.content
-          ? `data:${imgMime[ext]};base64,${fig.content}`
-          : fig.url ?? undefined
-        : undefined
-    let thumb
-    if (imgSrc) {
-      // Raster/SVG images render directly for reliable, cheap thumbnails.
-      thumb = (
-        <Image
-          src={imgSrc}
-          alt={fig?.title ?? evidence.path}
-          width="100%"
-          height="100%"
-          objectFit="contain"
-        />
-      )
-    } else if (fig && (fig.content || fig.url)) {
-      // Plotly JSON, PDFs, etc. go through the shared figure renderer.
-      thumb = <FigureView figure={fig} fillHeight />
-    } else {
-      thumb = (
-        <Flex height="100%" align="center" justify="center" color="gray.400">
-          <Icon as={ExternalLinkIcon} />
-        </Flex>
-      )
-    }
-    return (
-      <Link
-        as={RouterLink}
-        to={`/${accountName}/${projectName}/figures`}
-        // Preserve the global ref so the figure opens at the same git ref the
-        // project is being browsed at.
-        search={{ path: evidence.path, ref: gitRef } as any}
-        _hover={{ textDecoration: "none" }}
-      >
-        <Box
-          borderWidth={1}
-          borderColor={borderColor}
-          borderRadius="md"
-          overflow="hidden"
-          bg={bg}
-          width="150px"
-          _hover={{ shadow: "md" }}
-        >
-          {/* pointerEvents off so a click hits the link, not the Plotly plot */}
-          <Box height="90px" overflow="hidden" pointerEvents="none">
-            {thumb}
-          </Box>
-          {fig?.title ? (
-            <Box fontSize="xs" px={2} py={1}>
-              <Markdown inline noOfLines={1}>
-                {fig.title}
-              </Markdown>
-            </Box>
-          ) : (
-            <Text fontSize="xs" noOfLines={1} px={2} py={1}>
-              {evidence.path}
-            </Text>
-          )}
-        </Box>
-      </Link>
-    )
-  }
-  if (evidence.kind === "table") {
-    // The table's own page is where its rows are; this card carries what
-    // identifies it and why it was cited.
-    const table = evidence.result
-    return (
-      <Link
-        as={RouterLink}
-        to={`/${accountName}/${projectName}/tables`}
-        search={{ path: evidence.path, ref: gitRef } as any}
-        _hover={{ textDecoration: "none" }}
-      >
-        <Box
-          borderWidth={1}
-          borderColor={borderColor}
-          borderRadius="md"
-          bg={bg}
-          px={3}
-          py={2}
-          minW="130px"
-          maxW="100%"
-          _hover={{ shadow: "md" }}
-        >
-          <Flex align="center" gap={1.5}>
-            <Icon as={FiGrid} color="gray.500" flexShrink={0} />
-            <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
-              {table?.title ?? evidence.path}
-            </Text>
-          </Flex>
-          <Text fontSize="xs" color="gray.500" noOfLines={1}>
-            {evidence.path}
-          </Text>
-          {evidence.explanation ? (
-            <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
-              {evidence.explanation}
-            </Text>
-          ) : null}
-        </Box>
-      </Link>
-    )
-  }
-  if (evidence.kind === "publication") {
-    const pub = evidence.publication
-    return (
-      <Link
-        as={RouterLink}
-        to={`/${accountName}/${projectName}/publications`}
-        search={{ path: evidence.path, ref: gitRef } as any}
-        _hover={{ textDecoration: "none" }}
-      >
-        <Box
-          borderWidth={1}
-          borderColor={borderColor}
-          borderRadius="md"
-          bg={bg}
-          px={3}
-          py={2}
-          minW="130px"
-          maxW="100%"
-          _hover={{ shadow: "md" }}
-        >
-          <Flex align="center" gap={1.5}>
-            <Icon as={FaRegFileAlt} color="gray.500" flexShrink={0} />
-            <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
-              {pub?.title ?? evidence.path}
-            </Text>
-          </Flex>
-          <Text fontSize="xs" color="gray.500" noOfLines={1}>
-            {evidence.path}
-          </Text>
-          {evidence.explanation ? (
-            <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
-              {evidence.explanation}
-            </Text>
-          ) : null}
-        </Box>
-      </Link>
-    )
-  }
-  return (
-    <Box
-      borderWidth={1}
-      borderColor={borderColor}
-      borderRadius="md"
-      bg={bg}
-      px={3}
-      py={2}
-      minW="130px"
-      maxW="100%"
-    >
-      {/* `path:key` at the top links to the file and identifies the result. */}
-      <Link
-        as={RouterLink}
-        to={`/${accountName}/${projectName}/files`}
-        search={{ path: evidence.path, ref: gitRef } as any}
-        fontSize="xs"
-        fontWeight="semibold"
-        noOfLines={1}
-        display="block"
-      >
-        {evidence.path}
-        {evidence.key ? `:${evidence.key}` : ""}
-      </Link>
-      {evidence.value != null ? (
-        <Text
-          fontSize="xl"
-          fontWeight="bold"
-          lineHeight="1.1"
-          noOfLines={1}
-          my={0.5}
-        >
-          {evidence.value}
-        </Text>
-      ) : null}
-      {evidence.explanation ? (
-        <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
-          {evidence.explanation}
-        </Text>
-      ) : null}
-    </Box>
-  )
-}
 
 function ProjectView() {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
@@ -315,6 +104,15 @@ function ProjectView() {
   const visibleIssues = issuesRequest.data?.filter(
     (issue) => showClosedTodos || issue.state === "open",
   )
+  // The home page shows the top of the list; the full list, with labels,
+  // milestones, and search, is GitHub's own issues page.
+  const HOME_TODOS_LIMIT = 5
+  const topIssues = visibleIssues?.slice(0, HOME_TODOS_LIMIT)
+  const issuesUrl = projectRequest.data?.git_repo_url
+    ? `${projectRequest.data.git_repo_url}/issues${
+        showClosedTodos ? "?q=is%3Aissue" : ""
+      }`
+    : null
   const { readmeRequest } = useProjectReadme(accountName, projectName, ref)
   const { questionsRequest } = useProjectQuestions(
     accountName,
@@ -338,12 +136,6 @@ function ProjectView() {
     (b.date ?? "").localeCompare(a.date ?? ""),
   )
   const topReleases = sortedReleases.slice(0, HOME_RELEASES_LIMIT)
-  const gitRepoUrl = projectRequest.data?.git_repo_url
-  const codespacesUrl = `${String(gitRepoUrl).replace("://github.com/", "://codespaces.new/")}?quickstart=1`
-  const githubDevUrl = String(gitRepoUrl).replace(
-    "://github.com/",
-    "://github.dev/",
-  )
   const removeFirstLine = (txt: any) => {
     const lines = String(txt).split("\n")
     lines.splice(0, 1)
@@ -362,17 +154,19 @@ function ProjectView() {
   }
   const newIssueModal = useDisclosure()
   const newQuestionModal = useDisclosure()
-  const newPubTemplateModal = useDisclosure()
-  const overleafImportModal = useDisclosure()
   // New release modal open state lives in the URL so a link can reopen it.
   const navigate = Route.useNavigate()
   const {
     new_release: newReleaseOpen,
     edit_question: editQuestionNumber,
-    expanded_question: expandedQuestion,
+    question: openQuestionNumber,
+    evidence: openEvidenceIndex,
     editor_open: editorOpen,
     editor_tex: editorTexPath,
+    edit_file: editFile,
   } = Route.useSearch()
+  const setEditFile = (path?: string) =>
+    navigate({ search: (prev) => ({ ...prev, edit_file: path }) })
   // The editor open state (which .tex) lives in the URL; deps are a best-effort
   // optimization captured when the button is clicked (absent on a cold link).
   const latexDepsRef = useRef<string[] | null | undefined>(undefined)
@@ -394,52 +188,63 @@ function ProjectView() {
     navigate({
       search: (prev) => ({ ...prev, new_release: open || undefined }),
     })
-  // Which question's edit modal is open also lives in the URL.
-  const setEditQuestion = (number?: number) =>
-    navigate({
-      search: (prev) => ({ ...prev, edit_question: number }),
-    })
-  const editingQuestion =
-    questionsRequest.data?.find((q) => q.number === editQuestionNumber) ?? null
-  // Which question is expanded lives in the URL so the back button restores
-  // it. The Accordion works in list positions; translate to/from the question
-  // number, which is stable across reorders.
   const questions = questionsRequest.data ?? []
-  const expandedIndex = questions.findIndex(
-    (q) => q.number === expandedQuestion,
-  )
-  const setExpandedIndex = (index: number) =>
+  // A question has its own URL now. Links made before it did -- a comment
+  // notification, a bookmark -- arrive here with the number in the query,
+  // so send them on rather than dropping them.
+  const legacyQuestion = openQuestionNumber ?? editQuestionNumber
+  useEffect(() => {
+    if (legacyQuestion === undefined) {
+      return
+    }
     navigate({
-      search: (prev) => ({
-        ...prev,
-        expanded_question: index >= 0 ? questions[index]?.number : undefined,
-      }),
+      to: "/$accountName/$projectName/questions/$questionNumber",
+      params: {
+        accountName,
+        projectName,
+        questionNumber: String(legacyQuestion),
+      },
+      search: {
+        evidence: openEvidenceIndex,
+        edit: editQuestionNumber !== undefined || undefined,
+      },
+      replace: true,
     })
+  }, [
+    legacyQuestion,
+    editQuestionNumber,
+    openEvidenceIndex,
+    accountName,
+    projectName,
+    navigate,
+  ])
 
   return (
     <>
       <Flex mt={1}>
         <Box width="65%" mr={8}>
+          {/* What's left to set up, until it's done or dismissed */}
+          {userHasWriteAccess && !ref && projectRequest.data ? (
+            <ProjectChecklist
+              accountName={accountName}
+              projectName={projectName}
+              projectId={projectRequest.data.id}
+            />
+          ) : null}
           {/* Showcase */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">
               <Heading size="md">Showcase</Heading>
-              {userHasWriteAccess ? (
-                <>
-                  <Link
-                    href={`https://github.dev/${accountName}/${projectName}/blob/main/calkit.yaml`}
-                    isExternal
-                  >
-                    <IconButton
-                      aria-label="Edit calkit.yaml"
-                      height="25px"
-                      width="28px"
-                      ml={1.5}
-                      icon={<MdEdit />}
-                      size={"xs"}
-                    />
-                  </Link>
-                </>
+              {userHasWriteAccess && !ref ? (
+                <IconButton
+                  aria-label="Edit calkit.yaml"
+                  height="25px"
+                  width="28px"
+                  ml={1.5}
+                  icon={<MdEdit />}
+                  size={"xs"}
+                  onClick={() => setEditFile("calkit.yaml")}
+                />
               ) : (
                 ""
               )}
@@ -457,22 +262,16 @@ function ProjectView() {
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">
               <Heading size="md">README</Heading>
-              {userHasWriteAccess ? (
-                <>
-                  <Link
-                    href={`https://github.dev/${accountName}/${projectName}/blob/main/README.md`}
-                    isExternal
-                  >
-                    <IconButton
-                      aria-label="Edit README"
-                      height="25px"
-                      width="28px"
-                      ml={1.5}
-                      icon={<MdEdit />}
-                      size={"xs"}
-                    />
-                  </Link>
-                </>
+              {userHasWriteAccess && !ref ? (
+                <IconButton
+                  aria-label="Edit README"
+                  height="25px"
+                  width="28px"
+                  ml={1.5}
+                  icon={<MdEdit />}
+                  size={"xs"}
+                  onClick={() => setEditFile("README.md")}
+                />
               ) : (
                 ""
               )}
@@ -519,129 +318,108 @@ function ProjectView() {
             </Flex>
             {questionsRequest.isPending ? (
               <LoadingSpinner height="100px" />
-            ) : questionsRequest.data?.length ? (
-              <Accordion
-                allowToggle
-                index={expandedIndex}
-                onChange={(idx) =>
-                  setExpandedIndex(Array.isArray(idx) ? idx[0] ?? -1 : idx)
-                }
-              >
-                {questionsRequest.data.map((question) => {
-                  const hasDetails =
-                    !!question.hypothesis ||
-                    !!question.answer ||
-                    (question.evidence?.length ?? 0) > 0
+            ) : questions.length ? (
+              <Box>
+                {questions.map((question) => {
+                  // One mark per row, worst first: no answer, then an answer
+                  // with nothing behind it, then evidence that can't be found
+                  // at all, then evidence that has merely drifted --
+                  // staleness that only shows once a question is open is
+                  // staleness nobody sees. All four are icons of the same
+                  // size, so they land on one line down the list.
+                  const mark = !question.answer
+                    ? {
+                        icon: FaRegSquare,
+                        color: "red.400",
+                        label: "Not yet answered",
+                      }
+                    : !question.evidence?.length
+                      ? {
+                          icon: FaRegSquare,
+                          color: "orange.300",
+                          label:
+                            "Answered, but nothing is linked to back it up",
+                        }
+                      : question.evidence.some(isEvidenceMissing)
+                        ? {
+                            icon: FaCheck,
+                            color: "red.400",
+                            label:
+                              "Answered, but some of its evidence can't be found -- it may never have been pushed, or it cites a Git ref that doesn't exist.",
+                          }
+                        : question.evidence.some(isEvidenceStale)
+                          ? {
+                              icon: FaCheck,
+                              color: "orange.300",
+                              label:
+                                "Answered, but some of its evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.",
+                            }
+                          : {
+                              icon: FaCheck,
+                              color: "green.400",
+                              label:
+                                "Answered, and every piece of its evidence is up to date",
+                            }
                   return (
-                    <AccordionItem key={question.id} border="none">
-                      <Flex align="center">
-                        {hasDetails ? (
-                          <AccordionButton
-                            flex="1"
-                            px={0}
-                            py={1}
-                            _hover={{ bg: "transparent" }}
-                          >
-                            <Box
-                              flex="1"
-                              textAlign="left"
-                              sx={{ "& p": { my: 0 } }}
-                            >
-                              <Markdown>
-                                {`${question.number}. ${question.question}`}
-                              </Markdown>
-                            </Box>
-                            <AccordionIcon />
-                          </AccordionButton>
-                        ) : (
-                          <Box flex="1" py={1} sx={{ "& p": { my: 0 } }}>
-                            <Markdown>
-                              {`${question.number}. ${question.question}`}
-                            </Markdown>
-                          </Box>
-                        )}
-                        {userHasWriteAccess ? (
-                          <IconButton
-                            aria-label="Edit question"
-                            icon={<MdEdit />}
-                            size="xs"
-                            variant="ghost"
-                            ml={1}
-                            onClick={() => setEditQuestion(question.number)}
-                          />
-                        ) : null}
-                      </Flex>
-                      {hasDetails ? (
-                        <AccordionPanel px={0} pt={0}>
-                          {question.hypothesis ? (
-                            <Box mb={2}>
-                              <Text
-                                fontSize="xs"
-                                fontWeight="bold"
-                                color="gray.500"
-                              >
-                                Hypothesis
-                              </Text>
-                              <Box mt={0.5} sx={{ "& p": { my: 0 } }}>
-                                <Markdown>{question.hypothesis}</Markdown>
-                              </Box>
-                            </Box>
-                          ) : null}
-                          {question.answer ? (
-                            <Box mb={2}>
-                              <Text
-                                fontSize="xs"
-                                fontWeight="bold"
-                                color="gray.500"
-                              >
-                                Answer
-                              </Text>
-                              <Box mt={0.5} sx={{ "& p": { my: 0 } }}>
-                                <Markdown>{question.answer}</Markdown>
-                              </Box>
-                            </Box>
-                          ) : null}
-                          {question.evidence?.length ? (
-                            <Box>
-                              <Text
-                                fontSize="xs"
-                                fontWeight="bold"
-                                color="gray.500"
-                              >
-                                Evidence
-                              </Text>
-                              <Flex wrap="wrap" gap={2} mt={1}>
-                                {question.evidence.map((evidence, i) => (
-                                  <EvidenceItem
-                                    key={`${evidence.kind}:${evidence.path}:${i}`}
-                                    evidence={evidence}
-                                    accountName={accountName}
-                                    projectName={projectName}
-                                    gitRef={ref}
-                                  />
-                                ))}
-                              </Flex>
-                            </Box>
-                          ) : null}
-                        </AccordionPanel>
-                      ) : null}
-                    </AccordionItem>
+                    // The whole row opens the question, mark included, since
+                    // the answer and its evidence are the point of listing it
+                    // -- editing included, which is why there's no edit
+                    // button here.
+                    <Flex
+                      key={question.id}
+                      as="button"
+                      type="button"
+                      role="group"
+                      align="center"
+                      w="100%"
+                      textAlign="left"
+                      py={1}
+                      // A <button> doesn't get one on its own, and this one
+                      // reads as a link to the question.
+                      cursor="pointer"
+                      sx={{ "& p": { my: 0 } }}
+                      onClick={() =>
+                        navigate({
+                          to: "/$accountName/$projectName/questions/$questionNumber",
+                          params: {
+                            accountName,
+                            projectName,
+                            questionNumber: String(question.number),
+                          },
+                          // Keeps the ref being browsed; drops what was only
+                          // ever here to forward an old link.
+                          search: (prev) => ({
+                            ...prev,
+                            question: undefined,
+                            evidence: undefined,
+                            edit_question: undefined,
+                          }),
+                        })
+                      }
+                    >
+                      <Box
+                        minW={0}
+                        flex="1"
+                        _groupHover={{ textDecoration: "underline" }}
+                      >
+                        <Markdown>
+                          {`${question.number}. ${question.question}`}
+                        </Markdown>
+                      </Box>
+                      <Tooltip label={mark.label}>
+                        <Flex ml={2} flexShrink={0} align="center">
+                          <Icon as={mark.icon} color={mark.color} />
+                        </Flex>
+                      </Tooltip>
+                    </Flex>
                   )
                 })}
-              </Accordion>
+              </Box>
             ) : (
               <Text fontSize="sm" color="gray.500">
                 No research questions defined yet.
               </Text>
             )}
-            <EditQuestion
-              question={editingQuestion}
-              // Only open once the target question has actually resolved, so a
-              // deep-linked ?edit_question= can't render a null-question modal.
-              isOpen={editingQuestion !== null}
-              onClose={() => setEditQuestion(undefined)}
-              gitRef={ref}
-            />
           </Box>
           {/* To-dos (issues) */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
@@ -689,7 +467,7 @@ function ProjectView() {
               <LoadingSpinner />
             ) : (
               <>
-                {visibleIssues?.map((issue) => {
+                {topIssues?.map((issue) => {
                   const routeMap: Record<string, string> = {
                     figure: "figures",
                     publication: "publications",
@@ -730,9 +508,33 @@ function ProjectView() {
                     </Flex>
                   )
                 })}
+                {issuesUrl && (visibleIssues?.length ?? 0) > 0 ? (
+                  <Link
+                    isExternal
+                    href={issuesUrl}
+                    fontSize="sm"
+                    display="inline-block"
+                    mt={2}
+                  >
+                    {(visibleIssues?.length ?? 0) > HOME_TODOS_LIMIT
+                      ? `See all ${visibleIssues?.length} on GitHub`
+                      : "See all on GitHub"}{" "}
+                    <Icon as={ExternalLinkIcon} mb={0.5} />
+                  </Link>
+                ) : null}
               </>
             )}
           </Box>
+          {/* What moved since the last visit: pushes from the CLI, a
+              collaborator's commits, an Overleaf sync */}
+          {!ref ? (
+            <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+              <RecentChanges
+                accountName={accountName}
+                projectName={projectName}
+              />
+            </Box>
+          ) : null}
           {/* Releases */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex>
@@ -866,63 +668,6 @@ function ProjectView() {
               </Text>
             )}
           </Box>
-          {/* Quick actions */}
-          {userHasWriteAccess ? (
-            <>
-              <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-                <Heading size="md" mb={2}>
-                  Quick actions
-                </Heading>
-                <Text>
-                  📜{" "}
-                  <Link onClick={newPubTemplateModal.onOpen}>
-                    Create a new publication from a template
-                  </Link>
-                </Text>
-                <Text>
-                  🍃{" "}
-                  <Link onClick={overleafImportModal.onOpen}>
-                    Import/link a publication from Overleaf
-                  </Link>
-                </Text>
-                <Text>
-                  🚀{" "}
-                  <Link isExternal href={codespacesUrl}>
-                    Open in GitHub Codespace (edit and run){" "}
-                    <Icon height={"40%"} as={ExternalLinkIcon} pb={0.5} />
-                  </Link>
-                </Text>
-                <Text>
-                  ✏️{" "}
-                  <Link isExternal href={githubDevUrl}>
-                    Open in GitHub.dev (edit only){" "}
-                    <Icon height={"40%"} as={ExternalLinkIcon} pb={0.5} />
-                  </Link>
-                </Text>
-                <Text>
-                  🔒{" "}
-                  <Link
-                    as={RouterLink}
-                    to={"/settings"}
-                    search={{ tab: "tokens" } as any}
-                  >
-                    Manage Calkit personal access tokens
-                  </Link>
-                </Text>
-              </Box>
-              <NewPublication
-                isOpen={newPubTemplateModal.isOpen}
-                onClose={newPubTemplateModal.onClose}
-                variant="template"
-              />
-              <ImportOverleaf
-                isOpen={overleafImportModal.isOpen}
-                onClose={overleafImportModal.onClose}
-              />
-            </>
-          ) : (
-            ""
-          )}
         </Box>
       </Flex>
       {editorOpen && editorTexPath && (
@@ -935,6 +680,15 @@ function ProjectView() {
           deps={latexDepsRef.current}
         />
       )}
+      {editFile && userHasWriteAccess && !ref ? (
+        <FileEditorModal
+          isOpen
+          onClose={() => setEditFile(undefined)}
+          ownerName={accountName}
+          projectName={projectName}
+          path={editFile}
+        />
+      ) : null}
     </>
   )
 }

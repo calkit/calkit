@@ -8,6 +8,7 @@ import git
 import pytest
 from sqlmodel import Session
 
+import app.dvc
 import app.projects
 from app.models import Account, Project
 
@@ -734,3 +735,163 @@ def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
             app.projects.get_repo_tree_for_ref(repo, None)
         )
     )
+
+
+def test_drop_stale_lock_stages() -> None:
+    from app.dvc import drop_stale_lock_stages
+
+    lock = {
+        "schema": "2.0",
+        "stages": {
+            "baseline-nsys": {"outs": [{"path": "r/b.sqlite", "md5": "live"}]},
+            "baseline-nsys-to-sqlite": {
+                "outs": [{"path": "r/b.sqlite", "md5": "stale"}]
+            },
+            "plot@0": {"outs": [{"path": "f/0.png", "md5": "a"}]},
+            "plot@1": {"outs": [{"path": "f/1.png", "md5": "b"}]},
+            "gone@0": {"outs": [{"path": "f/x.png", "md5": "c"}]},
+        },
+    }
+    dvc_yaml = {"stages": {"baseline-nsys": {}, "plot": {"foreach": [0, 1]}}}
+    pruned = drop_stale_lock_stages(lock, dvc_yaml)
+    # Live stages stay, foreach instances count under their base name, and
+    # the renamed stage's leftover entry is gone, so the path resolves to
+    # the live hash
+    assert set(pruned["stages"]) == {"baseline-nsys", "plot@0", "plot@1"}
+    assert pruned["schema"] == "2.0"
+    # Nothing to prune returns the same object; odd inputs pass through
+    assert drop_stale_lock_stages(pruned, dvc_yaml) is pruned
+    assert drop_stale_lock_stages(lock, {}) is lock
+    assert drop_stale_lock_stages({}, dvc_yaml) == {}
+
+
+def test_object_fpath_for_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_lookup(owner_name: str, project_name: str, md5: str, fs) -> str:
+        calls.append((owner_name, project_name, md5))
+        return f"/{owner_name}/{project_name}/{md5}"
+
+    monkeypatch.setattr(app.dvc, "get_data_fpath_for_md5", fake_lookup)
+    # A plain output is looked up in the project's own storage
+    out = {"md5": "abc", "size": 3}
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
+        "/me/proj/abc"
+    )
+    # An import from another Calkit project is a pointer whose bytes only
+    # live in the source project's storage
+    out = {"md5": "def", "remote": "calkit:them/source", "push": False}
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
+        "/them/source/def"
+    )
+    # Other remotes (a plain DVC remote name) stay local, and no md5 means
+    # nothing to look up
+    out = {"md5": "ghi", "remote": "s3"}
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
+        "/me/proj/ghi"
+    )
+    assert app.dvc.object_fpath_for_out("me", "proj", {}, fs=None) is None
+    assert [c[:2] for c in calls] == [
+        ("me", "proj"),
+        ("them", "source"),
+        ("me", "proj"),
+    ]
+
+
+def test_dvc_dir_out_resolves_after_being_pushed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import json as json_mod
+
+    import app.cache
+    from app.git import get_repo_tree_for_ref
+    from app.storage import make_data_fpath
+
+    class _FakeFs:
+        def __init__(self) -> None:
+            self.objects: dict[str, bytes] = {}
+
+        def open(self, path: str, mode: str = "rb") -> io.BytesIO:
+            if path not in self.objects:
+                raise FileNotFoundError(path)
+            return io.BytesIO(self.objects[path])
+
+    class _Store:
+        def __init__(self) -> None:
+            self.data: dict[str, bytes] = {}
+
+        def get(self, key: str) -> bytes | None:
+            return self.data.get(key)
+
+        def set(self, key: str, value: bytes, ex: int | None = None) -> None:
+            self.data[key] = value
+
+        def delete(self, key: str) -> None:
+            self.data.pop(key, None)
+
+    dir_md5 = "cc7dd8ec500456353f3888c15721c1d4.dir"
+    file_md5 = "0ac9de94eb7bc991d60df6d4d8a7553c"
+    fs = _FakeFs()
+    store = _Store()
+    monkeypatch.setattr(app.cache, "_client", store)
+    monkeypatch.setattr(app.cache, "_client_ready", True)
+    monkeypatch.setattr(app.dvc, "get_object_fs", lambda: fs)
+    monkeypatch.setattr(app.projects, "get_object_fs", lambda: fs)
+    app.dvc._read_dvc_dir.cache_clear()
+    app.projects._ck_dvc_cache.clear()
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "dvc.yaml").write_text(
+        "stages:\n  app:\n    cmd: build\n    outs:\n    - app\n"
+    )
+    (repo_dir / "dvc.lock").write_text(
+        "schema: '2.0'\n"
+        "stages:\n"
+        "  app:\n"
+        "    cmd: build\n"
+        "    outs:\n"
+        "    - path: app\n"
+        "      hash: md5\n"
+        f"      md5: {dir_md5}\n"
+        "      size: 3\n"
+        "      nfiles: 1\n"
+    )
+    repo.git.add(["dvc.yaml", "dvc.lock"])
+    repo.git.commit(["-m", "Track app with DVC"])
+    project = _make_project()
+    tree = get_repo_tree_for_ref(repo, None)
+    # Unpushed, the directory expands to nothing, and that must not be
+    # shared under a key that a push won't change
+    res = app.projects.get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=tree
+    )
+    assert "app" not in res.dvc_lock_outs
+    assert "app/index.html" not in res.dvc_lock_outs
+    assert not [k for k in store.data if "ck-dvc" in k]
+    # Once pushed, the same tree resolves it: no sticky miss, no stale entry
+    dir_fpath = make_data_fpath(
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+        idx=dir_md5[:2],
+        md5=dir_md5[2:],
+    )
+    fs.objects[dir_fpath] = json_mod.dumps(
+        [{"relpath": "index.html", "md5": file_md5}]
+    ).encode()
+    app.projects._ck_dvc_cache.clear()
+    res = app.projects.get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=tree
+    )
+    assert res.dvc_lock_outs["app"]["type"] == "dir"
+    assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5
+    # A complete expansion is shared, and reads back the same
+    shared_keys = [k for k in store.data if "ck-dvc" in k]
+    assert len(shared_keys) == 1
+    app.projects._ck_dvc_cache.clear()
+    res = app.projects.get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=tree
+    )
+    assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5

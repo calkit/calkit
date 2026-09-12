@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     accounts,
     datasets,
-    feature_votes,
+    feedback,
     login,
     misc,
     orgs,
@@ -23,4 +23,4 @@ api_router.include_router(references.router, tags=["references"])
 api_router.include_router(releases.router, tags=["releases"])
 api_router.include_router(orgs.router, tags=["orgs"])
 api_router.include_router(datasets.router, tags=["datasets"])
-api_router.include_router(feature_votes.router, tags=["feature_votes"])
+api_router.include_router(feedback.router, tags=["feedback"])

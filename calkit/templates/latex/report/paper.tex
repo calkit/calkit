@@ -1,0 +1,64 @@
+% A report or thesis, with chapters and a table of contents
+\documentclass[11pt,a4paper]{report}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\title{This is the report}
+\author{The Author}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+One paragraph on the question, the approach, and the result.
+\end{abstract}
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+%--Paper--
+
+\chapter{Introduction}
+
+Lorem ipsum.
+
+\chapter{Background}
+
+Lorem ipsum.
+
+\chapter{Method}
+
+Lorem ipsum.
+
+\chapter{Results}
+
+% Figures come from the pipeline; reference them by their path in the repo.
+% \begin{figure}[htbp]
+%   \centering
+%   \includegraphics[width=0.8\textwidth]{figures/my-figure.png}
+%   \caption{What the figure shows.}
+%   \label{fig:my-figure}
+% \end{figure}
+
+Lorem ipsum.
+
+\chapter{Discussion}
+
+Lorem ipsum.
+
+\chapter{Conclusion}
+
+Lorem ipsum.
+
+%--/Paper--
+
+% \bibliographystyle{plain}
+% \bibliography{references}
+
+\end{document}

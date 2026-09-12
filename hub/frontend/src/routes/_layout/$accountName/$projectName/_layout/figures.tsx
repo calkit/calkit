@@ -2,6 +2,7 @@ import {
   Badge,
   Box,
   Button,
+  Code,
   Flex,
   Heading,
   Icon,
@@ -33,13 +34,17 @@ import { useDebounce } from "use-debounce"
 import { z } from "zod"
 import ClearableInput from "../../../../../components/Common/ClearableInput"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
+import { decodeBase64Utf8 } from "../../../../../lib/strings"
 
 import { type Figure, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import Markdown from "../../../../../components/Common/Markdown"
 import PdfCanvas from "../../../../../components/Common/PdfCanvas"
+import FigureEditor from "../../../../../components/Figures/FigureEditor"
 import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
 import UploadFigure from "../../../../../components/Figures/UploadFigure"
+import TipBubble from "../../../../../components/Onboarding/TipBubble"
 import useProject from "../../../../../hooks/useProject"
 
 const figuresSearchSchema = z.object({
@@ -48,12 +53,129 @@ const figuresSearchSchema = z.object({
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
+  // Whether the figure editor is open, so a refresh or a link can land
+  // on it directly.
+  editor: z.boolean().optional(),
+  // The figure editor, open on the figure at `path`
+  edit: z.boolean().optional(),
   q: z.string().optional(),
 })
 
-// Each figure's content is fetched and inlined by the API, so pages are kept
-// small; projects with hundreds of figures otherwise take minutes to load.
+// The grid asks for previews rather than the figures themselves: a page of
+// full-size plots is megabytes of base64 to draw images 140px tall.
 const FIGURES_PER_PAGE = 20
+
+// A Plotly figure is data, not pixels, so the API has nothing to rasterize and
+// the grid draws it here instead.
+//
+// It is drawn once into an image rather than left as a live plot: a tile is
+// 140px tall and a page holds twenty of them, and twenty Plotly instances
+// build twenty SVG scene graphs that stay on the page. Rendered to a data URL
+// the tile costs no more than any other thumbnail.
+//
+// At this size the chrome is what has to go -- the default margins alone are
+// most of a 140px canvas, before a title or tick labels. What makes a plot
+// recognisable that small is the shape of its traces.
+const thumbnailLayout = (layout: Record<string, unknown>) => {
+  // Every axis, not just the first: a figure with stacked subplots carries
+  // xaxis2, yaxis3 and so on, and each keeps its own ticks and title. Left
+  // in, they overlap the traces and each other at this size.
+  const hidden = { visible: false, title: undefined }
+  const axes: Record<string, unknown> = { xaxis: hidden, yaxis: hidden }
+  for (const key of Object.keys(layout)) {
+    if (/^[xy]axis\d*$/.test(key)) {
+      axes[key] = { ...(layout[key] as object), ...hidden }
+    }
+  }
+  return {
+    ...layout,
+    title: undefined,
+    showlegend: false,
+    margin: { l: 2, r: 2, t: 2, b: 2 },
+    ...axes,
+    // Subplot titles are annotations rather than titles, so they survive
+    // everything above and land on top of what they label.
+    annotations: [],
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+  }
+}
+
+function PlotlyThumbnail({ figure }: { figure: Figure }) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    // Start over whenever the figure's content does: this component is
+    // reused across a ref change or a refetch, and without the reset it
+    // would keep showing the previous image, or stay stuck on a failure
+    // that no longer applies.
+    setSrc(null)
+    setFailed(false)
+    if (!figure.content) {
+      setFailed(true)
+      return
+    }
+    let cancelled = false
+    const draw = async () => {
+      try {
+        const spec = JSON.parse(decodeBase64Utf8(String(figure.content)))
+        if (!spec.data || !spec.layout) throw new Error("not a Plotly figure")
+        // The prebuilt bundle, which is what react-plotly.js imports too --
+        // bare "plotly.js" resolves to its unbuilt source entry, which is a
+        // second copy of the library with different interop. It carries no
+        // types of its own; the API is the one "plotly.js" declares.
+        const Plotly =
+          // @ts-expect-error -- prebuilt bundle, untyped; see above
+          (await import("plotly.js/dist/plotly"))
+            .default as typeof import("plotly.js")
+        const url = await Plotly.toImage(
+          { data: spec.data, layout: thumbnailLayout(spec.layout) },
+          { format: "webp", width: 320, height: 200 },
+        )
+        if (!cancelled) setSrc(url)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    }
+    draw()
+    return () => {
+      cancelled = true
+    }
+  }, [figure.content])
+  // A .json that turns out not to be a Plotly figure, or one Plotly can't
+  // draw, falls back to the same icon as any other format with no preview.
+  if (failed) {
+    return (
+      <Flex
+        height="140px"
+        align="center"
+        justify="center"
+        color="gray.400"
+        fontSize="3xl"
+      >
+        <Icon as={getIcon(figure)} />
+      </Flex>
+    )
+  }
+  if (!src) {
+    return (
+      <Flex height="140px" align="center" justify="center">
+        <LoadingSpinner />
+      </Flex>
+    )
+  }
+  return (
+    <Flex height="140px" align="center" justify="center">
+      <Image
+        src={src}
+        alt={figure.title}
+        objectFit="contain"
+        maxW="100%"
+        maxH="140px"
+      />
+    </Flex>
+  )
+}
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/figures",
@@ -92,6 +214,25 @@ function FigureThumbnail({
 
   const renderThumb = () => {
     const lowerPath = figure.path.toLowerCase()
+    if (lowerPath.endsWith(".json") && figure.content) {
+      return <PlotlyThumbnail figure={figure} />
+    }
+    // A preview the API rendered: one image tag for every format that has
+    // one, including the PDFs that would otherwise each need a PDF renderer
+    // running in the page just to draw a 140px tile.
+    if (figure.thumbnail) {
+      return (
+        <Flex height="140px" align="center" justify="center">
+          <Image
+            src={`data:image/webp;base64,${figure.thumbnail}`}
+            alt={figure.title}
+            objectFit="contain"
+            maxW="100%"
+            maxH="140px"
+          />
+        </Flex>
+      )
+    }
     if (
       (lowerPath.endsWith(".png") ||
         lowerPath.endsWith(".jpg") ||
@@ -108,17 +249,22 @@ function FigureThumbnail({
       }
       const mime = mimeMap[ext] ?? "image/png"
       return (
-        <Image
-          src={
-            figure.content
-              ? `data:${mime};base64,${figure.content}`
-              : String(figure.url)
-          }
-          alt={figure.title}
-          objectFit="contain"
-          width="100%"
-          height="140px"
-        />
+        // Centred at no more than its own size: a plot scales down to fit,
+        // while a small icon stays small instead of being blown up to fill
+        // the tile and going soft.
+        <Flex height="140px" align="center" justify="center">
+          <Image
+            src={
+              figure.content
+                ? `data:${mime};base64,${figure.content}`
+                : String(figure.url)
+            }
+            alt={figure.title}
+            objectFit="contain"
+            maxW="100%"
+            maxH="140px"
+          />
+        </Flex>
       )
     }
     if (lowerPath.endsWith(".pdf") && (figure.content || figure.url)) {
@@ -230,6 +376,7 @@ function ProjectFigures() {
         project_name: projectName,
         ref,
         limit: FIGURES_PER_PAGE,
+        thumbnails: true,
         offset,
         // Filtering happens server-side, across every figure in the project
         // rather than just the ones on this page.
@@ -284,6 +431,13 @@ function ProjectFigures() {
 
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()
+  const { editor: editorOpen, edit: editOpen } = Route.useSearch()
+  const editorModal = {
+    isOpen: Boolean(editorOpen),
+    onOpen: () => navigate({ search: (prev) => ({ ...prev, editor: true }) }),
+    onClose: () =>
+      navigate({ search: (prev) => ({ ...prev, editor: undefined }) }),
+  }
 
   const selectedFigure = figures?.find((f) => f.path === selectedPath) ?? null
 
@@ -299,6 +453,7 @@ function ProjectFigures() {
         path: undefined,
         base_ref: undefined,
         compare_ref: undefined,
+        edit: undefined,
       }),
     })
 
@@ -402,6 +557,9 @@ function ProjectFigures() {
                   <Icon as={FaPlus} fontSize="xs" />
                 </MenuButton>
                 <MenuList>
+                  <MenuItem onClick={editorModal.onOpen}>
+                    New figure from data
+                  </MenuItem>
                   <MenuItem onClick={uploadFigureModal.onOpen}>
                     Upload new figure
                   </MenuItem>
@@ -418,6 +576,12 @@ function ProjectFigures() {
                 isOpen={labelFigureModal.isOpen}
                 onClose={labelFigureModal.onClose}
               />
+              {editorModal.isOpen ? (
+                <FigureEditor
+                  isOpen={editorModal.isOpen}
+                  onClose={editorModal.onClose}
+                />
+              ) : null}
             </>
           ) : null}
           <ClearableInput
@@ -438,25 +602,35 @@ function ProjectFigures() {
           <LoadingSpinner height="300px" />
         ) : pageSize === 0 ? (
           debouncedSearch ? (
-            <Flex
-              direction="column"
-              align="center"
-              justify="center"
+            <NoArtifactFound
+              icon={FaRegFileImage}
+              title={`No figures match "${debouncedSearch}"`}
               height="200px"
-              color="gray.500"
-            >
-              <Text>No figures match "{debouncedSearch}"</Text>
-            </Flex>
+            />
           ) : (
-            <Flex
-              direction="column"
-              align="center"
-              justify="center"
-              height="300px"
-              color="gray.500"
+            <NoArtifactFound
+              icon={FaRegFileImage}
+              title="No figures found"
+              hint={
+                <>
+                  Declare one in <Code>calkit.yaml</Code>, or add a pipeline
+                  stage that creates one.
+                </>
+              }
+              docsUrl="https://docs.calkit.org/calkit-yaml/"
             >
-              <Icon as={FaRegFileImage} fontSize="4xl" mb={3} />
-              <Text>No figures found</Text>
+              {/* The editor only mounts at the default ref, so the button
+                  would do nothing on a historical view */}
+              {userHasWriteAccess && !ref ? (
+                <Button
+                  mt={3}
+                  size="sm"
+                  variant="primary"
+                  onClick={editorModal.onOpen}
+                >
+                  New figure from data
+                </Button>
+              ) : null}
               {ref && (
                 <Button
                   mt={3}
@@ -467,7 +641,7 @@ function ProjectFigures() {
                   Clear ref filter
                 </Button>
               )}
-            </Flex>
+            </NoArtifactFound>
           )
         ) : (
           // The previous page stays mounted while the next one loads so the
@@ -483,12 +657,20 @@ function ProjectFigures() {
               pointerEvents={isPlaceholderData ? "none" : undefined}
               aria-busy={isPlaceholderData}
             >
-              {figures!.map((figure) => (
-                <FigureThumbnail
+              {figures!.map((figure, i) => (
+                <TipBubble
                   key={figure.path}
-                  figure={figure}
-                  onClick={() => openFigure(figure)}
-                />
+                  tip="edit-figure"
+                  where="page"
+                  when={i === 0 && !selectedPath}
+                  markOnClick={false}
+                  display="block"
+                >
+                  <FigureThumbnail
+                    figure={figure}
+                    onClick={() => openFigure(figure)}
+                  />
+                </TipBubble>
               ))}
             </SimpleGrid>
             {isPlaceholderData && (
@@ -560,6 +742,12 @@ function ProjectFigures() {
           initialRef={base_ref ?? ref}
           initialRef2={compare_ref}
           initialArtifact={selectedFigure ?? undefined}
+          editOpen={Boolean(editOpen)}
+          onEditOpenChange={(open) =>
+            navigate({
+              search: (prev) => ({ ...prev, edit: open || undefined }),
+            })
+          }
           onRefsChange={(r1, r2) =>
             navigate({
               search: (prev) => ({

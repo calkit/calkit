@@ -93,6 +93,7 @@ const UpdateOverleafToken = ({ isOpen, onClose }: UpdateOverleafTokenProps) => {
             <FormControl isRequired isInvalid={!!errors.token}>
               <FormLabel htmlFor="token">Token</FormLabel>
               <Input
+                autoComplete="off"
                 id="token"
                 {...register("token", {
                   required: "Token is required.",

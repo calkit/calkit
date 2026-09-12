@@ -3,15 +3,18 @@
 import functools
 import hashlib
 import logging
+import uuid
+from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from sqlmodel import Session, col, select
 
 import app.projects
-from app import mixpanel
+from app import mixpanel, utcnow
 from app.api.deps import CurrentUserDvcScope, SessionDep
 from app.config import settings
-from app.models import Message
+from app.models import Message, ProjectDvcPush, User
 from app.storage import (
     get_data_prefix,
     get_object_fs,
@@ -61,6 +64,7 @@ async def post_project_dvc_file(
     if owner is None or owner.subscription is None:
         raise HTTPException(400, "Project owner subscription not configured")
     storage_limit_gb = owner.subscription.storage_limit
+    project_id = project.id
     session.close()
     # Create bucket if it doesn't exist -- only necessary with MinIO
     if settings.ENVIRONMENT == "local" and not fs.exists(get_data_prefix()):
@@ -100,6 +104,9 @@ async def post_project_dvc_file(
             fs.mv(pending_fpath, fpath)
             upload_succeeded = True
             invalidate_storage_usage_cache(owner_name)
+            record_dvc_push(
+                session=session, project_id=project_id, user=current_user
+            )
         else:
             logger.warning("MD5 does not match")
             raise HTTPException(400, "MD5 does not match")
@@ -113,6 +120,49 @@ async def post_project_dvc_file(
                     "Failed to remove pending DVC upload %s", pending_fpath
                 )
     return Message(message="Success")
+
+
+DVC_PUSH_BURST_MINUTES = 10
+
+
+def record_dvc_push(
+    *, session: Session, project_id: uuid.UUID, user: User
+) -> None:
+    """Note an object upload for the project's activity feed.
+
+    A push of a directory arrives as one request per file, so an upload
+    within ``DVC_PUSH_BURST_MINUTES`` of the user's last one to this
+    project counts toward that burst rather than starting another. A
+    failure here only costs the feed an entry, never the upload.
+    """
+    try:
+        now = utcnow()
+        latest = session.exec(
+            select(ProjectDvcPush)
+            .where(ProjectDvcPush.project_id == project_id)
+            .where(ProjectDvcPush.user_id == user.id)
+            .order_by(col(ProjectDvcPush.updated).desc())
+            .limit(1)
+        ).first()
+        if latest is not None and (now - latest.updated) < timedelta(
+            minutes=DVC_PUSH_BURST_MINUTES
+        ):
+            latest.updated = now
+            latest.n_files += 1
+            session.add(latest)
+        else:
+            session.add(
+                ProjectDvcPush(
+                    project_id=project_id,
+                    user_id=user.id,
+                    created=now,
+                    updated=now,
+                )
+            )
+        session.commit()
+    except Exception as e:
+        logger.warning(f"Could not record DVC push: {e}")
+        session.rollback()
 
 
 @router.get("/projects/{owner_name}/{project_name}/dvc/files/md5/{idx}/{md5}")

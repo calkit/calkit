@@ -295,6 +295,14 @@ export class CalkitSidebarProvider
 
   getParent(element: SidebarItem): SidebarItem | undefined {
     if (element.nodeKind === "stage") {
+      // A stage declared in a Markdown file sits under that file's stage
+      // rather than directly under the pipeline section
+      const name = element.nodeId ?? "";
+      for (const [parent, children] of this.markdownStageChildren()) {
+        if (children.includes(name)) {
+          return this.stageItemCache.get(parent);
+        }
+      }
       return this.pipelineSectionItem;
     }
     if (element.nodeKind === "env") {
@@ -376,8 +384,18 @@ export class CalkitSidebarProvider
         return this.getQuestionProps(element.nodeId ?? "");
       case "env":
         return this.getEnvProps(element.nodeId ?? "");
-      case "stage":
-        return this.getStageProps(element.nodeId ?? "");
+      case "stage": {
+        const stageName = element.nodeId ?? "";
+        const children = this.markdownStageChildren().get(stageName);
+        if (children && children.length > 0) {
+          // Show what the file declares, labelled by block name; the full
+          // stage name stays the node id so running it still works
+          return children.map((child) =>
+            this.makeStageItem(child, child.slice(stageName.length + 1)),
+          );
+        }
+        return this.getStageProps(stageName);
+      }
       case "notebook":
         return this.getNotebookProps(element.nodeId ?? "");
       case "figure":
@@ -1049,50 +1067,101 @@ export class CalkitSidebarProvider
     return items;
   }
 
+  /**
+   * Map each Markdown stage to the stages its blocks declare.
+   *
+   * Those only exist in dvc.yaml---the blocks are in the Markdown file, not
+   * calkit.yaml---so listing them flat would bury the one stage the user
+   * actually wrote among the ones Calkit derived from it.
+   */
+  private markdownStageChildren(): Map<string, string[]> {
+    const calkitStages = this.calkitConfig?.pipeline?.stages ?? {};
+    const dvcStages = this.dvcYaml?.stages ?? {};
+    const children = new Map<string, string[]>();
+    for (const [name, stage] of Object.entries(calkitStages)) {
+      if (stage?.kind !== "markdown") {
+        continue;
+      }
+      const prefix = `${name}/`;
+      children.set(
+        name,
+        Object.keys(dvcStages)
+          .filter((n) => n.startsWith(prefix))
+          .sort(),
+      );
+    }
+    return children;
+  }
+
+  private makeStageItem(stageName: string, label?: string): SidebarItem {
+    const cached = this.stageItemCache.get(stageName);
+    if (cached) {
+      return cached;
+    }
+    // A Markdown stage stands in for the stages its blocks declare, so it
+    // reports their combined state rather than one of its own
+    const descendants = this.markdownStageChildren().get(stageName) ?? [];
+    const names = descendants.length ? descendants : [stageName];
+    const isRunning = names.some((n) => this.runningStageNames.has(n));
+    const isStale = names.some((n) => this.staleStageNames.has(n));
+    const item = new SidebarItem(
+      label ?? stageName,
+      vscode.TreeItemCollapsibleState.Collapsed,
+      "stage",
+      stageName,
+    );
+    item.description = isRunning ? "running" : isStale ? "stale" : undefined;
+    item.iconPath = isRunning
+      ? new vscode.ThemeIcon("loading~spin")
+      : isStale
+      ? new vscode.ThemeIcon(
+          "warning",
+          new vscode.ThemeColor("list.warningForeground"),
+        )
+      : new vscode.ThemeIcon(
+          "check",
+          new vscode.ThemeColor("testing.iconPassed"),
+        );
+    item.contextValue = "stage";
+    item.tooltip = isRunning
+      ? `${stageName} — running`
+      : isStale
+      ? `${stageName} — stage is stale`
+      : `${stageName} — up to date`;
+    this.stageItemCache.set(stageName, item);
+    return item;
+  }
+
   private getStageItems(): SidebarItem[] {
     const calkitStages = this.calkitConfig?.pipeline?.stages ?? {};
     const dvcStages = this.dvcYaml?.stages ?? {};
+    const mdChildren = this.markdownStageChildren();
+    const childToParent = new Map<string, string>();
+    for (const [parent, children] of mdChildren) {
+      for (const child of children) {
+        childToParent.set(child, parent);
+      }
+    }
     const allNames = [
       ...new Set([...Object.keys(calkitStages), ...Object.keys(dvcStages)]),
-    ].filter((name) => this.matchesFilter(name));
+    ].filter((name) => {
+      // Derived stages are shown nested under the Markdown stage they came
+      // from, so they must not also appear at the top level
+      if (childToParent.has(name)) {
+        return false;
+      }
+      if (this.matchesFilter(name)) {
+        return true;
+      }
+      // A search for a block's name should still surface its file
+      return (mdChildren.get(name) ?? []).some((child) =>
+        this.matchesFilter(child),
+      );
+    });
     if (allNames.length === 0) {
       return this.emptyOrNone("No pipeline stages defined");
     }
-    const items = allNames.map((stageName) => {
-      const cached = this.stageItemCache.get(stageName);
-      if (cached) {
-        return cached;
-      }
-      const isRunning = this.runningStageNames.has(stageName);
-      const isStale = this.staleStageNames.has(stageName);
-      const item = new SidebarItem(
-        stageName,
-        vscode.TreeItemCollapsibleState.Collapsed,
-        "stage",
-        stageName,
-      );
-      item.description = isRunning ? "running" : isStale ? "stale" : undefined;
-      item.iconPath = isRunning
-        ? new vscode.ThemeIcon("loading~spin")
-        : isStale
-        ? new vscode.ThemeIcon(
-            "warning",
-            new vscode.ThemeColor("list.warningForeground"),
-          )
-        : new vscode.ThemeIcon(
-            "check",
-            new vscode.ThemeColor("testing.iconPassed"),
-          );
-      item.contextValue = "stage";
-      item.tooltip = isRunning
-        ? `${stageName} — running`
-        : isStale
-        ? `${stageName} — stage is stale`
-        : `${stageName} — up to date`;
-      this.stageItemCache.set(stageName, item);
-      return item;
-    });
-    return items;
+    return allNames.map((stageName) => this.makeStageItem(stageName));
   }
 
   // The environment's spec/lock files (e.g. pyproject.toml + uv.lock), used to

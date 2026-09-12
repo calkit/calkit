@@ -4,13 +4,19 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
 
 import git
 import pytest
+import typer
+from typer.testing import CliRunner
 
 import calkit
 import calkit.schema
+from calkit.cli.main.core import app
 from calkit.environments import get_env_lock_fpath
+
+runner = CliRunner()
 
 
 def test_new_foreach_stage(tmp_dir):
@@ -133,6 +139,140 @@ def test_new_figure(tmp_dir):
     )
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["create-figure3"]["deps"] == ["myfigure2.png"]
+    # A figure drawn by hand names who drew it, and what they used
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "figure",
+            "schematic.png",
+            "--title",
+            "Schematic",
+            "--description",
+            "Drawn by hand.",
+            "--created-by-email",
+            "me@x.edu",
+            "--created-with-ai",
+            "Claude Opus 5",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    fig = [f for f in ck_info["figures"] if f["path"] == "schematic.png"][0]
+    assert fig["created_by"] == {
+        "email": "me@x.edu",
+        "with_ai": "Claude Opus 5",
+    }
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "figure",
+                "bad.png",
+                "--title",
+                "Bad",
+                "--description",
+                "Bad.",
+                "--created-by-orcid",
+                "0000-0002-1825-0098",
+            ]
+        )
+
+
+def test_new_dataset(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # A dataset someone collected names them, and the ORCID is normalized
+    # and checked on the way in rather than at the next validation
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/raw.csv",
+            "--title",
+            "Raw data",
+            "--description",
+            "Measured by hand.",
+            "--created-by-email",
+            "me@x.edu",
+            "--created-by-orcid",
+            "0000-0002-1825-0097",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    ds = ck_info["datasets"][0]
+    assert ds["path"] == "data/raw.csv"
+    assert ds["created_by"] == {
+        "email": "me@x.edu",
+        "orcid": "https://orcid.org/0000-0002-1825-0097",
+    }
+    assert "with_ai" not in ds["created_by"]
+    # The disclosure goes on the person, as a list when there are several
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/transcribed.csv",
+            "--title",
+            "Transcribed",
+            "--description",
+            "Transcribed from sheets.",
+            "--created-by-orcid",
+            "0000-0002-1694-233X",
+            "--created-with-ai",
+            "Claude Opus 5",
+            "--created-with-ai",
+            "Copilot",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][1]["created_by"] == {
+        "orcid": "https://orcid.org/0000-0002-1694-233X",
+        "with_ai": ["Claude Opus 5", "Copilot"],
+    }
+    # A mistyped ORCID, or a tool with nobody to answer for it, is refused
+    for bad_opts in [
+        [
+            "--created-by-email",
+            "me@x.edu",
+            "--created-by-orcid",
+            "0000-0002-1825-009X",
+        ],
+        ["--created-with-ai", "Claude Opus 5"],
+        ["--created-by-email", "not-an-email"],
+    ]:
+        with pytest.raises(subprocess.CalledProcessError):
+            subprocess.check_call(
+                [
+                    "calkit",
+                    "new",
+                    "dataset",
+                    "data/bad.csv",
+                    "--title",
+                    "Bad",
+                    "--description",
+                    "Bad.",
+                ]
+                + bad_opts
+            )
+    ck_info = calkit.load_calkit_info()
+    assert "data/bad.csv" not in [d["path"] for d in ck_info["datasets"]]
+    # Without any of the flags nothing is written, as before
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/plain.csv",
+            "--title",
+            "Plain",
+            "--description",
+            "Plain.",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "created_by" not in ck_info["datasets"][2]
 
 
 def test_new_result(tmp_dir):
@@ -966,6 +1106,10 @@ def test_new_nix_env_stages_flake(tmp_dir):
 def test_new_release(tmp_dir, monkeypatch, httpserver):
     # Set up a mock Zenodo API so the test doesn't depend on the real sandbox
     record_id = "test-record-abc123"
+    # A new version of a record gets its own ID, which the client must switch
+    # to; only the draft endpoints below are shared between the two
+    version_record_id = "test-record-def456"
+    any_record_id = f"(?:{record_id}|{version_record_id})"
     doi = "10.5072/zenodo.test123"
     # Point the Zenodo base URL at the local mock server and provide a dummy
     # token so no real credentials are needed.  Both env vars are inherited
@@ -981,26 +1125,27 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     ).respond_with_json({"id": record_id, "pids": {}})
     # POST /records/{id}/draft/files – initiate a file upload slot
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files$"), method="POST"
+        re.compile(rf"^/records/{any_record_id}/draft/files$"), method="POST"
     ).respond_with_json({"entries": []})
     # PUT /records/{id}/draft/files/{filename}/content – stream file bytes
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files/.+/content$"),
+        re.compile(rf"^/records/{any_record_id}/draft/files/.+/content$"),
         method="PUT",
     ).respond_with_data("", status=200)
     # POST /records/{id}/draft/files/{filename}/commit – finalise upload
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files/.+/commit$"),
+        re.compile(rf"^/records/{any_record_id}/draft/files/.+/commit$"),
         method="POST",
     ).respond_with_json({"key": "file", "status": "completed"})
     # POST /records/{id}/draft/pids/doi – reserve a DOI for a draft
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/pids/doi$"), method="POST"
+        re.compile(rf"^/records/{any_record_id}/draft/pids/doi$"),
+        method="POST",
     ).respond_with_json({"pids": {"doi": {"identifier": doi}}})
     # GET /records/{id}/draft/files – list files already in the draft
     # (used by --reupload to decide which files to delete first)
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files$"), method="GET"
+        re.compile(rf"^/records/{any_record_id}/draft/files$"), method="GET"
     ).respond_with_json({"entries": []})
     # POST /records/{id}/draft/actions/publish – publish the draft
     httpserver.expect_request(
@@ -1009,6 +1154,16 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     ).respond_with_json(
         {"id": record_id, "pids": {"doi": {"identifier": doi}}}
     )
+    # POST /records/{id}/versions – create a new version of a record, and
+    # PUT /records/{new_id}/draft – set that new version's metadata; the draft
+    # is only mocked under the new ID, so a client that failed to switch to it
+    # would get no response here
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/versions$"), method="POST"
+    ).respond_with_json({"id": version_record_id, "pids": {}})
+    httpserver.expect_request(
+        re.compile(rf"^/records/{version_record_id}/draft$"), method="PUT"
+    ).respond_with_json({"id": version_record_id, "pids": {}})
     # GET /records/{id} – fetch the published record for post-test assertions
     httpserver.expect_request(
         re.compile(rf"^/records/{record_id}$"), method="GET"
@@ -1133,7 +1288,6 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     git_tags = git.Repo().tags
     assert "v0.1.0" in [tag.name for tag in git_tags]
     # Check the license is correct
-    # TODO: It seems like we can't use multiple license IDs with the API
     record_id = release["record_id"]
     record = calkit.invenio.get(f"/records/{record_id}")
     metadata = record["metadata"]
@@ -1141,6 +1295,36 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     assert metadata["license"] == {"id": "cc-by-4.0"}
     related = metadata["related_identifiers"]
     assert related[0]["identifier"] == "https://github.com/calkit/test-project"
+    # Issue #1582: SPDX IDs are case-insensitive, but the InvenioRDM license
+    # vocabulary rejects anything but the lowercase form, so release again
+    # with the licenses spelled in uppercase to check they are normalized
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.2.0",
+            "--license",
+            "MIT",
+            "--license",
+            "CC-BY-4.0",
+            "--draft",
+            "--no-github",
+        ]
+    )
+    # Every set of metadata sent to the service should have carried both
+    # licenses as separate lowercase rights entries, rather than collapsing
+    # them into one: the first release detected them from the LICENSE file,
+    # the second took them from the uppercase --license options
+    rights_sent = [
+        body["metadata"]["rights"]
+        for request, _ in httpserver.log
+        if (body := request.get_json(silent=True)) and "metadata" in body
+    ]
+    expected_rights = [{"id": "mit"}, {"id": "cc-by-4.0"}]
+    assert len(rights_sent) >= 2
+    assert rights_sent == [expected_rights] * len(rights_sent)
     # TODO: Test that we can delete the release
     # This will fail if it's not a draft
     # subprocess.check_call(
@@ -1828,3 +2012,255 @@ def test_new_release_license_and_cff_authors(tmp_dir, monkeypatch):
     print(out)
     assert "Detected license(s): mit" in out
     assert "Read 1 author(s) from CITATION.cff" in out
+
+
+def test_parse_template():
+    from functools import partial
+
+    from calkit.cli.new import _parse_template as parse
+
+    _parse_template = partial(parse, hub_url="https://calkit.io")
+    gh = "https://github.com/"
+    # Shorthand, or the hub URL with or without its scheme, names a hub
+    # project, whose Git URL is looked up later
+    for t in [
+        "calkit/example-basic",
+        "https://calkit.io/calkit/example-basic",
+        "calkit.io/calkit/example-basic",
+    ]:
+        assert _parse_template(t) == ("calkit/example-basic", None, None)
+    assert _parse_template("owner/project/dir") == (
+        "owner/project/dir",
+        None,
+        "dir",
+    )
+    # URLs work on any host, HTTPS or SSH, with or without .git, and may
+    # name a directory inside the repo so one repo can hold several
+    # self-contained examples
+    assert _parse_template(gh + "calkit/calkit/examples/latex-word") == (
+        "calkit/calkit/examples/latex-word",
+        gh + "calkit/calkit",
+        "examples/latex-word",
+    )
+    assert _parse_template("https://gitlab.com/owner/repo.git") == (
+        "owner/repo",
+        "https://gitlab.com/owner/repo",
+        None,
+    )
+    assert _parse_template("git@codeberg.org:owner/repo.git/dir") == (
+        "owner/repo/dir",
+        "git@codeberg.org:owner/repo",
+        "dir",
+    )
+    # Other schemes have no owner/repo convention, so they're used as is
+    url = "file:///tmp/x/examples/demo"
+    assert _parse_template(url) == (url, url, None)
+    with pytest.raises(typer.Exit):
+        _parse_template("just-a-name")
+
+
+def test_release_with_pipeline(tmp_dir):
+    ck_info = {
+        "title": "Test Project",
+        "description": "Test",
+        "environments": {
+            "used": {"kind": "uv-venv", "path": "requirements.txt"},
+            "unused": {"kind": "uv-venv", "path": "other-requirements.txt"},
+        },
+        "publications": [
+            {
+                "path": "out2.txt",
+                "kind": "journal-article",
+                "title": "Test Publication",
+            }
+        ],
+        "pipeline": {
+            "stages": {
+                "upstream": {
+                    "kind": "command",
+                    "command": "echo '1' > out1.txt",
+                    "environment": "_system",
+                    "outputs": ["out1.txt"],
+                },
+                "target": {
+                    "kind": "command",
+                    "command": "cat out1.txt > out2.txt",
+                    "environment": "used",
+                    "inputs": ["out1.txt"],
+                    "outputs": ["out2.txt"],
+                },
+                "unrelated": {
+                    "kind": "command",
+                    "command": "echo '3' > out3.txt",
+                    "environment": "unused",
+                    "outputs": ["out3.txt"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("")
+    with open("other-requirements.txt", "w") as f:
+        f.write("")
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "test@test.com"])
+    subprocess.check_call(["git", "config", "user.name", "Test"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(["dvc", "config", "core.analytics", "false"])
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {"stages": calkit.pipeline.to_dvc(ck_info=ck_info)}, f
+        )
+    # Run through calkit rather than DVC directly so the environments get
+    # built and locked, which the generated stages depend on
+    subprocess.check_call([sys.executable, "-m", "calkit", "run"])
+    subprocess.check_call(["git", "add", "."])
+    subprocess.check_call(["git", "commit", "-m", "init"])
+
+    class MockStatus:
+        errors = []
+        failed_environment_checks = []
+        stale_stage_names = []
+        is_stale = False
+
+    original_get_status = calkit.pipeline.get_status
+    original_check = calkit.releases.check_project_release_archive
+    calkit.pipeline.get_status = lambda *args, **kwargs: MockStatus()
+    checked = []
+    calkit.releases.check_project_release_archive = lambda zip_path, **kwargs: (
+        checked.append(zip_path)
+    )
+    try:
+        # Without --pipeline, a single-file release stores just that file
+        res = runner.invoke(
+            app,
+            [
+                "new",
+                "release",
+                "-n",
+                "plain",
+                "--internal",
+                "--no-push",
+                "out2.txt",
+            ],
+        )
+        assert res.exit_code == 0, res.stdout
+        stored = os.listdir(".calkit/releases/plain")
+        assert any(f.endswith(".txt") for f in stored)
+        assert not any(f.endswith(".zip") for f in stored)
+        assert not checked
+        # With --pipeline, it becomes an archive holding the artifact plus
+        # what builds it, and the archive gets run before being released
+        res = runner.invoke(
+            app,
+            [
+                "new",
+                "release",
+                "-n",
+                "v1",
+                "--internal",
+                "--no-push",
+                "--pipeline",
+                "out2.txt",
+            ],
+        )
+        assert res.exit_code == 0, res.stdout
+        zip_names = [
+            f for f in os.listdir(".calkit/releases/v1") if f.endswith(".zip")
+        ]
+        assert len(zip_names) == 1
+        zip_path = os.path.join(".calkit/releases/v1", zip_names[0])
+        assert checked == [zip_path]
+        # --pipeline on a project release is redundant, not an error
+        res = runner.invoke(
+            app,
+            [
+                "new",
+                "release",
+                "-n",
+                "v2",
+                "--internal",
+                "--no-push",
+                "--dry-run",
+                "--pipeline",
+                ".",
+            ],
+        )
+        assert res.exit_code == 0, res.stdout
+        assert "already include the pipeline" in res.stdout
+    finally:
+        calkit.pipeline.get_status = original_get_status
+        calkit.releases.check_project_release_archive = original_check
+
+    with zipfile.ZipFile(zip_path) as z:
+        names = z.namelist()
+        assert "calkit.yaml" in names
+        assert "dvc.yaml" in names
+        assert "dvc.lock" in names
+        assert "requirements.txt" in names
+        # The target and its upstream are needed to rebuild it
+        assert "out1.txt" in names
+        assert "out2.txt" in names
+        # The unrelated stage's output and environment are not
+        assert "out3.txt" not in names
+        assert "other-requirements.txt" not in names
+        dvc_yaml = calkit.ryaml.load(z.read("dvc.yaml").decode())
+        assert set(dvc_yaml["stages"]) == {"upstream", "target"}
+        dvc_lock = calkit.ryaml.load(z.read("dvc.lock").decode())
+        assert set(dvc_lock["stages"]) == {"upstream", "target"}
+        ck_yaml = calkit.ryaml.load(z.read("calkit.yaml").decode())
+        assert set(ck_yaml["pipeline"]["stages"]) == {"upstream", "target"}
+        assert set(ck_yaml["environments"]) == {"used"}
+        # The release record notes that it carries its own pipeline
+        assert ck_yaml["releases"]["plain"]["includes_pipeline"] is False
+        # The archive says what produced it, pointing back at the project
+        # release, without disturbing the project's own README
+        note = z.read("CALKIT-RELEASE.md").decode()
+        assert f"Calkit v{calkit.__version__}" in note
+        assert "from project release v1" in note
+        assert "Git rev:" in note
+        assert "README.md" not in names or z.read("README.md") != note
+
+
+def test_release_detached_head(tmp_dir):
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"title": "Test", "description": "Test"}, f)
+    with open("out.txt", "w") as f:
+        f.write("hi\n")
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "test@test.com"])
+    subprocess.check_call(["git", "config", "user.name", "Test"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(["dvc", "config", "core.analytics", "false"])
+    subprocess.check_call(["git", "add", "."])
+    subprocess.check_call(["git", "commit", "-m", "init"])
+    subprocess.check_call(["git", "checkout", "--detach", "HEAD"])
+    # A release that would push has no branch to push from, and says so
+    # before anything gets uploaded
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v1", "--internal", "--kind", "dataset", "."],
+    )
+    assert res.exit_code != 0
+    assert "HEAD is detached" in res.stdout + str(res.stderr)
+    # Nothing was written for the release before bailing out
+    assert not os.path.exists(".calkit/releases/v1")
+    # Skipping the commit means there's nothing to push, so it goes ahead,
+    # even though that leaves the release unrecorded in the repo
+    res = runner.invoke(
+        app,
+        [
+            "new",
+            "release",
+            "-n",
+            "v1",
+            "--internal",
+            "--kind",
+            "dataset",
+            "--no-commit",
+            ".",
+        ],
+    )
+    assert res.exit_code == 0, res.stdout

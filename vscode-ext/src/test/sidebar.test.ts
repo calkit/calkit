@@ -92,3 +92,74 @@ test("sidebar provider does not throw on object-form inputs in getStageProps", (
   const hasRawCsv = children.some((c) => c.description === "data/raw.csv");
   assert.ok(hasRawCsv, "Should find input row with description data/raw.csv");
 });
+
+test("markdown stages nest the stages their blocks declare", () => {
+  // The blocks live in the Markdown file, not calkit.yaml, so listing them
+  // flat buries the one stage the user actually wrote
+  const provider = new CalkitSidebarProvider();
+  provider.refresh(
+    "/workspace",
+    {
+      pipeline: {
+        stages: {
+          "README.md": { kind: "markdown" },
+          other: { kind: "command", command: "echo hi" },
+        },
+      },
+    } as never,
+    {
+      stages: {
+        "README.md/analysis": { cmd: "python a.py" },
+        "README.md/figure": { cmd: "python f.py" },
+        other: { cmd: "echo hi" },
+      },
+    } as never,
+    new Set(["README.md/figure"]),
+  );
+
+  const top = provider.getChildren(
+    new SidebarItem("Pipeline", 1, "section-pipeline", "pipeline"),
+  ) as InstanceType<typeof SidebarItem>[];
+  const labels = top.map((i) => String(i.label)).sort();
+  assert.deepEqual(labels, ["README.md", "other"]);
+
+  // The Markdown stage reports its blocks' combined state
+  const mdItem = top.find((i) => String(i.label) === "README.md");
+  assert.equal(mdItem?.description, "stale");
+
+  // Expanding it shows the blocks, labelled by name but keeping the full
+  // stage name as the id so running them still works
+  const children = provider.getChildren(mdItem) as InstanceType<
+    typeof SidebarItem
+  >[];
+  assert.deepEqual(
+    children.map((i) => [String(i.label), i.nodeId]),
+    [
+      ["analysis", "README.md/analysis"],
+      ["figure", "README.md/figure"],
+    ],
+  );
+
+  // And they point back at the Markdown stage, not the section
+  assert.equal(provider.getParent(children[0])?.nodeId, "README.md");
+});
+
+test("a stage with no markdown parent still shows its properties", () => {
+  const provider = new CalkitSidebarProvider();
+  provider.refresh(
+    "/workspace",
+    {
+      pipeline: {
+        stages: { plain: { kind: "python-script", script_path: "a.py" } },
+      },
+    } as never,
+    { stages: { plain: { cmd: "python a.py" } } } as never,
+    new Set(),
+  );
+  const item = new SidebarItem("plain", 1, "stage", "plain");
+  const children = provider.getChildren(item) as InstanceType<
+    typeof SidebarItem
+  >[];
+  // Properties, not nested stages
+  assert.ok(children.every((c) => c.nodeKind !== "stage"));
+});

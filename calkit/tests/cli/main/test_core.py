@@ -2784,3 +2784,43 @@ def test_push_reports_what_was_pushed(monkeypatch, tmp_dir):
     assert sent[-1]["targets"] == ["dvc"]
     cli_core._tell_hub_we_pushed(["dvc", "docker", "git"], [])
     assert sent[-1]["targets"] == ["dvc", "docker", "git"]
+
+
+def test_push_carries_annotated_tags(tmp_dir):
+    """Annotated tags should reach the remote along with their commits.
+
+    A plain ``git push`` leaves tags behind, so a project that tags its
+    results ends up with labels that exist only on the machine that made
+    them.
+    """
+    remote = os.path.join(tmp_dir, "remote.git")
+    subprocess.check_call(["git", "init", "--bare", "-q", remote])
+    work = os.path.join(tmp_dir, "work")
+    os.makedirs(work)
+    os.chdir(work)
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "remote", "add", "origin", remote])
+    # ``calkit init`` commits what it creates, so there is a commit to tag
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(["git", "tag", "-a", "v0.1.0", "-m", "First"])
+    # An unannotated tag must stay local: --follow-tags is deliberately the
+    # conservative form, so scratch tags do not get published by accident
+    subprocess.check_call(["git", "tag", "scratch"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "push",
+            "git",
+            "--git-arg",
+            "-u",
+            "--git-arg",
+            "origin",
+            "--git-arg",
+            "HEAD",
+        ]
+    )
+    tags = subprocess.check_output(
+        ["git", "ls-remote", "--tags", remote], text=True
+    )
+    assert "v0.1.0" in tags
+    assert "scratch" not in tags

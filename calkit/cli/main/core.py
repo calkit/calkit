@@ -1672,6 +1672,14 @@ def push(
             git_cmd = ["git", "push"]
             if not no_recursive and "--recurse-submodules" not in git_args:
                 git_cmd.append("--recurse-submodules=on-demand")
+            # A plain `git push` leaves tags behind, so annotated tags end
+            # up only on the machine that made them
+            if not {
+                "--follow-tags",
+                "--no-follow-tags",
+                "--tags",
+            }.intersection(git_args):
+                git_cmd.append("--follow-tags")
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             raise_error("Git push failed")

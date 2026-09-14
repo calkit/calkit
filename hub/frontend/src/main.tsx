@@ -36,6 +36,10 @@ mixpanel.init(mixpanelToken, {
   // automated sessions can be tagged before any event is sent.
   track_pageview: false,
   persistence: "localStorage",
+  // Nothing is sent or stored until the visitor accepts analytics in the
+  // consent banner (see lib/analytics)
+  opt_out_tracking_by_default: true,
+  opt_out_persistence_by_default: true,
 })
 
 const queryClient = new QueryClient({

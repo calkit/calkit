@@ -9,6 +9,8 @@ const CONSENT_KEY = "analytics_consent"
 // to ask visitors about.
 export const analyticsEnabled = Boolean(import.meta.env.VITE_MIXPANEL_TOKEN)
 
+export const privacyPolicyUrl = "https://docs.calkit.org/privacy/"
+
 let lastTrackedHref: string | null = null
 
 function trackPageView(): void {

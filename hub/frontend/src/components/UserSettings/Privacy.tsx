@@ -1,6 +1,7 @@
 import {
   Container,
   Heading,
+  Link,
   Radio,
   RadioGroup,
   Stack,
@@ -12,6 +13,7 @@ import {
   type AnalyticsConsent,
   analyticsEnabled,
   getAnalyticsConsent,
+  privacyPolicyUrl,
   setAnalyticsConsent,
 } from "../../lib/analytics"
 
@@ -26,10 +28,14 @@ const Privacy = () => {
       {analyticsEnabled ? (
         <>
           <Text fontSize="sm" mb={4}>
-            Calkit can use Mixpanel to learn how the hub is used: the pages you
-            visit and features you use, along with your browser, device, and
-            approximate location, linked to your account. This setting applies
-            to this browser.
+            Calkit can record which pages you visit and which features you use,
+            so we can improve the features people rely on and remove the ones
+            nobody does. It's never sold or used for advertising. This setting
+            applies to this browser. See the{" "}
+            <Link href={privacyPolicyUrl} isExternal textDecoration="underline">
+              privacy policy
+            </Link>{" "}
+            for details.
           </Text>
           <RadioGroup
             value={consent ?? ""}

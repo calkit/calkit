@@ -3,6 +3,7 @@ import {
   Button,
   Flex,
   HStack,
+  Link,
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
@@ -15,6 +16,7 @@ import {
   type AnalyticsConsent,
   analyticsEnabled,
   getAnalyticsConsent,
+  privacyPolicyUrl,
   setAnalyticsConsent,
 } from "../lib/analytics"
 
@@ -71,12 +73,15 @@ function AnalyticsConsentBanner() {
         align={{ base: "stretch", md: "center" }}
       >
         <Text fontSize="sm" flex={1}>
-          With your permission, Calkit uses Mixpanel to learn how the hub is
-          used: the pages you visit and features you use, along with your
-          browser, device, and approximate location. If you're signed in, this
-          is linked to your account, including your name and email. It relies on
-          storage in your browser, so it stays off unless you accept. You can
-          change your choice at any time under Settings → Privacy.
+          With your permission, Calkit records which pages you visit and which
+          features you use, so we can improve the features people rely on and
+          remove the ones nobody does. It's never sold or used for advertising.
+          It relies on storage in your browser, so it stays off unless you
+          accept. You can change your choice at any time under Settings →
+          Privacy.{" "}
+          <Link href={privacyPolicyUrl} isExternal textDecoration="underline">
+            Privacy policy
+          </Link>
         </Text>
         <HStack spacing={2} justify="flex-end">
           <Button size="sm" onClick={() => answer("denied")}>

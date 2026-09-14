@@ -358,6 +358,7 @@ def test_marked_up_digest_ignores_the_header():
     assert _marked_up_digest(changed) != _marked_up_digest(first)
 
 
+@skipif_windows_docker
 def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     # Two revisions that resolve to the same commit is what a pull request
     # diff looks like from the default branch. The pipeline resolves both
@@ -400,4 +401,4 @@ def test_latex_diff_of_one_revision_against_itself(tmp_dir):
         text=True,
     )
     assert "Couldn't open" not in result.stderr
-    assert "latexdiff failed" not in result.stderr
+    assert result.returncode == 0, result.stderr

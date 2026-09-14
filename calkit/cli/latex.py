@@ -553,7 +553,7 @@ def _build_diff(
             path
             for side in (base_tex, head_tex)
             for path in calkit.latex.detect_inputs(side)
-            if Path(path).suffix in (".tex", ".sty", ".cls")
+            if Path(path).suffix in calkit.latex._SOURCE_EXTS
         ]
         if any(
             os.path.isfile(path)

@@ -65,40 +65,67 @@ def test_list_stages(tmp_dir):
                     "command": "echo Hello",
                     "environment": "_system",
                 },
+                "stage3": {
+                    "kind": "python-script",
+                    "script_path": "copy.py",
+                    "args": ["{value}"],
+                    "environment": "_system",
+                    "inputs": ["input-{value}.txt"],
+                    "outputs": ["output-{value}.txt"],
+                    "iterate_over": [
+                        {"arg_name": "value", "values": ["one", "two"]}
+                    ],
+                },
             }
         }
     }
     with open("train.py", "w") as f:
         f.write("print('Training...')\n")
+    with open("copy.py", "w") as f:
+        f.write(
+            "import shutil\n"
+            "import sys\n"
+            "value = sys.argv[1]\n"
+            "shutil.copyfile(f'input-{value}.txt', f'output-{value}.txt')\n"
+        )
+    for value in ("one", "two"):
+        with open(f"input-{value}.txt", "w") as f:
+            f.write(value)
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     out = subprocess.check_output("calkit list stages", shell=True, text=True)
     assert "stage1" in out
     assert "stage2" in out
+    assert "stage3" in out
     out = subprocess.check_output(
         "calkit list stages --kind python-script", shell=True, text=True
     )
     assert "stage1" in out
+    assert "stage3" in out
     assert "stage2" not in out
-    # Test the --stale option by making stage2 stale
+    # Test the --stale option with one stale parameterized stage instance
     subprocess.check_call(["ck", "run", "stage1"])
+    subprocess.check_call(["ck", "run", "stage3"])
+    with open("input-one.txt", "w") as f:
+        f.write("changed")
     out = subprocess.check_output(
         ["calkit", "list", "stages", "--stale"], text=True
     )
     assert "stage1" not in out
     assert "stage2" in out
+    assert "stage3" in out
     # JSON output includes each stage's definition, and respects the filters
     out = subprocess.check_output(
         ["calkit", "list", "stages", "--json"], text=True
     )
     stages_json = json.loads(out)
-    assert set(stages_json) == {"stage1", "stage2"}
+    assert set(stages_json) == {"stage1", "stage2", "stage3"}
     assert stages_json["stage2"]["command"] == "echo Hello"
     out = subprocess.check_output(
         ["calkit", "list", "stages", "--kind", "python-script", "--json"],
         text=True,
     )
-    assert set(json.loads(out)) == {"stage1"}
+    assert set(json.loads(out)) == {"stage1", "stage3"}
 
 
 def test_list_results(tmp_dir):

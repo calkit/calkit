@@ -34,7 +34,7 @@ export const START_PATHS: PathOption[] = [
     title: "Simplify a project in progress",
     description:
       "Notebooks on your laptop, data on a shared drive, figures pasted into " +
-      "Overleaf. Integrate them all into one project and reduce context switching.",
+      "Overleaf. Integrate them all into one project and iterate effortlessly.",
   },
   {
     path: "fresh",

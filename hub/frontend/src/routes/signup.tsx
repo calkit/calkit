@@ -79,8 +79,9 @@ function SignUp() {
         "Your account has been created.",
         "success",
       )
+      // Same destination as the GitHub and Google buttons
       const redirectTo = popPostLoginRedirect()
-      navigate({ to: redirectTo || "/" })
+      navigate({ to: redirectTo || "/new" })
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import string
 import subprocess
@@ -539,8 +540,44 @@ def _build_diff(
     try:
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
+        latexdiff_cmd = ["latexdiff", "--flatten", "--encoding=utf8"]
+        # latexdiff dies trying to open a verbatim input that's a macro
+        # parameter, e.g., \verbatiminput{#1.wcsum} in a \newcommand, so a
+        # filter breaks the line after the command, which TeX reads the same
+        # but latexdiff's pattern doesn't match
+        verbatim_param = re.compile(
+            r"\\(?:verbatiminput\*?|lstinputlisting)"
+            r"\s*(?:\[[^\]\n]*\])?\s*\{[^}\n]*#[0-9]"
+        )
+        sources = [base_tex, head_tex] + [
+            path
+            for side in (base_tex, head_tex)
+            for path in calkit.latex.detect_inputs(side)
+            if Path(path).suffix in calkit.latex._SOURCE_EXTS
+        ]
+        if any(
+            os.path.isfile(path)
+            and verbatim_param.search(
+                Path(path).read_text(encoding="utf-8", errors="replace")
+            )
+            for path in sources
+        ):
+            filter_path = Path(DIFF_TMP_DIR, "verbatim-param-filter.pl")
+            os.makedirs(filter_path.parent, exist_ok=True)
+            # latexdiff appends a newline to what it sends, so drop it
+            filter_path.write_text(
+                "local $/;\n"
+                "my $text = <STDIN>;\n"
+                "$text =~ s/\\n\\z//;\n"
+                "$text =~ s/(\\\\(?:verbatiminput\\*?|lstinputlisting))"
+                "(?=\\s*(?:\\[[^\\]\\n]*\\])?\\s*\\{[^}\\n]*#[0-9])/$1%\\n/g;\n"
+                "print $text;\n"
+            )
+            latexdiff_cmd.append(
+                f"--filter-script=perl {filter_path.as_posix()}"
+            )
         cmd = _tex_cmd(
-            ["latexdiff", "--flatten", "--encoding=utf8", base_tex, head_tex],
+            latexdiff_cmd + [base_tex, head_tex],
             environment=environment,
             no_check=no_check,
             verbose=verbose,

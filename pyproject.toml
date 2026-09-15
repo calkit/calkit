@@ -1,7 +1,9 @@
 [build-system]
 requires = [
   "hatchling>=1.5.0",
-  "jupyterlab>=4.0.0,<5",
+  # 4.6 builds with jupyter-builder, which needs @jupyter/builder or else
+  # fetches core-meta from GitHub's rate-limited API
+  "jupyterlab>=4.0.0,<4.6",
   "hatch-nodejs-version>=0.3.2",
   "hatch-vcs>=0.3.0",
 ]

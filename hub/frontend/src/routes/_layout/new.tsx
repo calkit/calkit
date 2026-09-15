@@ -232,13 +232,9 @@ function ChoosePathStep({
 }) {
   return (
     <>
-      <Heading size="lg" mb={2}>
+      <Heading size="lg" mb={6}>
         Where are you starting from?
       </Heading>
-      <Text color="ui.dim" mb={6}>
-        Unify an existing project, start fresh, or fill in the analysis behind
-        something you've been writing on Overleaf.
-      </Text>
       <StartPaths onSelect={onSelect} selected={path} source="wizard" />
     </>
   )

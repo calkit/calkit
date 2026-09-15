@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
 
 import type { ReproCheck } from "../client"
@@ -8,8 +9,31 @@ import {
   buildProjectSteps,
   isComplete,
   pipelineHasRun,
+  popProjectStart,
   progressPercent,
+  stashProjectStart,
 } from "./onboarding"
+
+describe("project start stash", () => {
+  it("returns what was stashed once, then nothing", () => {
+    stashProjectStart({
+      path: "existing",
+      repoUrl: "https://github.com/a/b",
+    })
+    expect(popProjectStart()).toEqual({
+      path: "existing",
+      repoUrl: "https://github.com/a/b",
+    })
+    expect(popProjectStart()).toBeNull()
+  })
+
+  it("drops anything that isn't a start path", () => {
+    sessionStorage.setItem("new_project_start", '{"path":"nope"}')
+    expect(popProjectStart()).toBeNull()
+    sessionStorage.setItem("new_project_start", "not json")
+    expect(popProjectStart()).toBeNull()
+  })
+})
 
 const emptyReproCheck = {
   has_pipeline: false,

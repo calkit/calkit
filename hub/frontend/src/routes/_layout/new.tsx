@@ -9,8 +9,8 @@ import {
   FormErrorMessage,
   FormHelperText,
   FormLabel,
-  Heading,
   HStack,
+  Heading,
   Icon,
   Image,
   Input,
@@ -25,9 +25,9 @@ import {
   Radio,
   RadioGroup,
   Select,
-  Stack,
   SimpleGrid,
   Spacer,
+  Stack,
   Text,
   Textarea,
   useColorModeValue,
@@ -43,10 +43,10 @@ import {
 import type { AxiosError } from "axios"
 import mixpanel from "mixpanel-browser"
 import { useState } from "react"
-import { useDebounce } from "use-debounce"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { FiCircle } from "react-icons/fi"
 import { SiOverleaf, SiZotero } from "react-icons/si"
+import { useDebounce } from "use-debounce"
 import { z } from "zod"
 
 import {
@@ -57,9 +57,9 @@ import {
   UsersService,
 } from "../../client"
 import ConnectGitHubPrompt from "../../components/Common/ConnectGitHubPrompt"
+import FilterableSelect from "../../components/Common/FilterableSelect"
 import BrowseDatasets from "../../components/Datasets/BrowseDatasets"
 import NewDataset from "../../components/Datasets/NewDataset"
-import FilterableSelect from "../../components/Common/FilterableSelect"
 import FigureEditor from "../../components/Figures/FigureEditor"
 import CommandBlock from "../../components/Onboarding/CommandBlock"
 import ReproAudit from "../../components/Onboarding/ReproAudit"
@@ -73,6 +73,7 @@ import useCustomToast from "../../hooks/useCustomToast"
 import { useLocalServer } from "../../hooks/useOnboarding"
 import { appName } from "../../lib/core"
 import { handleError } from "../../lib/errors"
+import { popProjectStart, stashProjectStart } from "../../lib/onboarding"
 
 // Each step's state lives in the URL so a refresh, a back button, or a trip
 // out to GitHub or Zotero to connect an account all come back to the same
@@ -85,6 +86,9 @@ const searchSchema = z.object({
   // "owner/name" once the project exists, which is what the later steps act
   // on. Present from step 2 onward.
   project: z.string().optional().catch(undefined),
+  // A GitHub repo URL the visitor already pointed at, e.g., from the public
+  // repo check on the landing page
+  repo: z.string().optional().catch(undefined),
   // Whether the existing project is coming from a GitHub repo or a zip.
   // In the URL because connecting GitHub leaves the page and comes back,
   // and losing the choice there means picking it again.
@@ -101,12 +105,6 @@ const searchSchema = z.object({
     .catch(undefined),
 })
 
-// Which start path the visitor picked before they had an account. The
-// post-login redirect is a bare pathname (the router's `to` doesn't parse a
-// query string), so the choice travels separately rather than being lost to
-// signing up.
-const PATH_STASH_KEY = "new_project_path"
-
 export const Route = createFileRoute("/_layout/new")({
   component: NewProjectWizard,
   validateSearch: (search) => searchSchema.parse(search),
@@ -115,19 +113,17 @@ export const Route = createFileRoute("/_layout/new")({
     if (!isLoggedIn()) {
       localStorage.setItem("post_login_redirect", "/new")
       if (search.path) {
-        sessionStorage.setItem(PATH_STASH_KEY, search.path)
+        stashProjectStart({ path: search.path, repoUrl: search.repo })
       }
       throw redirect({ to: "/signup" })
     }
     if (!search.path) {
-      const stashed = sessionStorage.getItem(PATH_STASH_KEY)
-      sessionStorage.removeItem(PATH_STASH_KEY)
-      if (
-        stashed === "existing" ||
-        stashed === "fresh" ||
-        stashed === "overleaf"
-      ) {
-        throw redirect({ to: "/new", search: { path: stashed, step: 1 } })
+      const stashed = popProjectStart()
+      if (stashed) {
+        throw redirect({
+          to: "/new",
+          search: { path: stashed.path, step: 1, repo: stashed.repoUrl },
+        })
       }
     }
   },
@@ -260,7 +256,7 @@ function NameItStep({
   // Plenty of "projects in progress" aren't on GitHub yet, which is the
   // whole situation this path exists for. The file itself can't live in the
   // URL, but which route the user chose can.
-  const { upload: fromUpload } = Route.useSearch()
+  const { upload: fromUpload, repo: presetRepoUrl } = Route.useSearch()
   const navigate = Route.useNavigate()
   const setFromUpload = (value: boolean) =>
     navigate({ search: (prev) => ({ ...prev, upload: value || undefined }) })
@@ -270,6 +266,16 @@ function NameItStep({
   const githubAppModal = useDisclosure()
   const currentUser = queryClient.getQueryData<UserPublic>(["currentUser"])
   const githubUsername = currentUser?.github_username ?? "your-name"
+  const presetMatch = isExisting
+    ? presetRepoUrl?.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/)
+    : null
+  const presetFullName = presetMatch
+    ? `${presetMatch[1]}/${presetMatch[2]}`
+    : ""
+  const presetName = presetMatch ? presetMatch[2].toLowerCase() : ""
+  const presetSpaced = presetMatch
+    ? presetMatch[2].replace(/[-_]+/g, " ").trim()
+    : ""
   // Creating a project needs a GitHub repo, which an account created through
   // Google or email can't have until it links a GitHub identity.
   const connectedAccountsQuery = useQuery({
@@ -284,7 +290,7 @@ function NameItStep({
   // list starts as the most recently updated repos; once a couple of
   // characters are typed, the question goes to GitHub's search so a repo
   // past the listing cap is found too.
-  const [repoSearch, setRepoSearch] = useState("")
+  const [repoSearch, setRepoSearch] = useState(presetFullName)
   const [debouncedRepoSearch] = useDebounce(repoSearch.trim(), 300)
   const serverSearch =
     debouncedRepoSearch.length >= 2 ? debouncedRepoSearch : undefined
@@ -309,12 +315,16 @@ function NameItStep({
     mode: "onBlur",
     criteriaMode: "all",
     defaultValues: {
-      title: "",
-      name: "",
+      title: presetSpaced
+        ? presetSpaced.charAt(0).toUpperCase() + presetSpaced.slice(1)
+        : "",
+      name: presetName,
       description: "",
       // The owner prefix is nearly always the user's own, so it's typed
       // for them; picking a repo from the list replaces it anyway.
-      git_repo_url: `https://github.com/${githubUsername}/`,
+      git_repo_url: presetFullName
+        ? `https://github.com/${presetFullName}`
+        : `https://github.com/${githubUsername}/`,
       is_public: false,
       template: isExisting ? null : "calkit/example-basic",
       keep_template_history: false,

@@ -31,27 +31,27 @@ export const START_PATHS: PathOption[] = [
   {
     path: "existing",
     icon: FaBroom,
-    title: "Take control of a project in progress",
+    title: "Simplify a project in progress",
     description:
       "Notebooks on your laptop, data on a shared drive, figures pasted into " +
-      "Overleaf. Bring it all under one roof and reduce context switching.",
+      "Overleaf. Integrate them all into one project and reduce context switching.",
   },
   {
     path: "fresh",
     icon: FaSeedling,
     title: "Start clean and stay that way",
     description:
-      "Environment, pipeline, and paper tied together from the first " +
-      "commit, so you spend your attention on the research questions instead of the " +
-      "plumbing.",
+      "Data, code, and writing connected from day one " +
+      "so you can focus on the research questions instead of " +
+      "logistics.",
   },
   {
     path: "overleaf",
     icon: FaLeaf,
     title: "Start from the paper you're writing",
     description:
-      "Link the Overleaf project you already have, then grow the analysis " +
-      "behind it so its figures and results stop drifting out of date.",
+      "Link the Overleaf project you already have, then build the analysis " +
+      "behind it so its figures and results automatically stay up to date.",
   },
 ]
 

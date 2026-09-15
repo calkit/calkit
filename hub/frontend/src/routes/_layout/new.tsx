@@ -155,9 +155,9 @@ const STEPS_BY_PATH: Record<StartPath, StepKey[]> = {
 }
 
 const STEP_TITLES: Record<StepKey, string> = {
-  path: "Where you're starting",
-  name: "Name it",
-  audit: "What we found",
+  path: "Starting point",
+  name: "A name",
+  audit: "Current status",
   question: "The question",
   data: "Your data",
   figure: "A figure",
@@ -472,8 +472,7 @@ function NameItStep({
           : path === "overleaf"
             ? "The repo is where the analysis behind the paper will live. " +
               "You'll link the Overleaf project to it in a moment, and its " +
-              "figures start coming from the pipeline instead of your " +
-              "downloads folder."
+              "figures will come from the pipeline instead of your manual uploads."
             : "You get a repo with an environment, a pipeline, and a paper " +
               "skeleton connected together, so the first thing you do " +
               "is research rather than setup."}

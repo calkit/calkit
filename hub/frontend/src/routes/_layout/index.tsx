@@ -224,15 +224,15 @@ const LOOP = [
   },
   {
     title: "Collect",
-    body: "Type data in, upload it, import it by DOI, URL, or Git repo, or create it as part of the pipeline. Every dataset keeps track of where it came from.",
+    body: "Type data in, upload, import by DOI, URL, or Git repo, or create it as part of the pipeline. Every dataset keeps track of where it came from.",
   },
   {
     title: "Analyze",
-    body: "Plot offline or in the browser, then save as a pipeline stage with a precisely defined environment. Figures trace back to code and data.",
+    body: "Plot offline with Python, R, or Julia, or in the browser, then save as a pipeline stage with a reproducible environment. Figures trace back to code and data.",
   },
   {
     title: "Write",
-    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have, linked so its figures and results never go stale.",
+    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have, linked to figures and results, which when updated, also trigger a rebuild of the paper.",
   },
 ]
 
@@ -246,11 +246,11 @@ function LandingPage() {
           Take control of your research project
         </Heading>
         <Text fontSize="lg" color="ui.dim" maxW="700px" mb={6}>
-          Scripts on a cluster, notebooks on a laptop, data on a shared drive, a
-          paper in Overleaf, a library in Zotero, and no one sure which figure
-          came from where. Calkit connects it all: lit review, data collection,
-          analysis, and writing, in one reproducible project, without asking you
-          to leave any of those tools behind.
+          Connect all the pieces of your research project with Calkit. Add the
+          scripts you run on a cluster, notebooks sitting on your laptop, data
+          on a shared drive, a paper in Overleaf, references in Zenodo, and
+          seamlessly move between tasks with minimal context switching and a
+          robust history recorded along the way.
         </Text>
         <HStack spacing={4} justify={{ base: "center", md: "flex-start" }}>
           <Button as={RouterLink} to="/new" variant="primary" size="lg">

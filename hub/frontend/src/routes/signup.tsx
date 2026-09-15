@@ -125,13 +125,8 @@ function SignUp() {
             {...register("email", { required: "Email is required" })}
             placeholder="you@example.com"
           />
-          {errors.email ? (
+          {errors.email && (
             <FormErrorMessage>{errors.email.message}</FormErrorMessage>
-          ) : (
-            <Text fontSize="xs" color="ui.dim" mt={1}>
-              Your account name starts as the part before the @ and switches to
-              your GitHub username when you connect GitHub.
-            </Text>
           )}
         </FormControl>
         <FormControl isInvalid={!!errors.password} mb={4}>

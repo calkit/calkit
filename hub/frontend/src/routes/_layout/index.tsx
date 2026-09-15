@@ -6,7 +6,6 @@ import {
   Container,
   Flex,
   Heading,
-  HStack,
   Link,
   SimpleGrid,
   SkeletonText,
@@ -241,10 +240,12 @@ function LandingPage() {
   const loopBorder = useColorModeValue("gray.200", "gray.600")
   return (
     <>
-      <Box mt={16} mb={12} textAlign={{ base: "center", md: "left" }}>
+      <Box mt={16} mb={10} textAlign={{ base: "center", md: "left" }}>
         <Heading size="2xl" mb={4} lineHeight="1.2">
           Take control of your research project
         </Heading>
+        {/* TODO: rewrite; one long sentence, and references live in Zotero,
+            not Zenodo */}
         <Text fontSize="lg" color="ui.dim" maxW="700px" mb={6}>
           Connect all the pieces of your research project with Calkit. Add the
           scripts you run on a cluster, notebooks sitting on your laptop, data
@@ -252,14 +253,20 @@ function LandingPage() {
           seamlessly move between tasks with minimal context switching and a
           robust history recorded along the way.
         </Text>
-        <HStack spacing={4} justify={{ base: "center", md: "flex-start" }}>
-          <Button as={RouterLink} to="/new" variant="primary" size="lg">
-            Start a project
-          </Button>
-          <Button as={RouterLink} to="/login" size="lg" variant="outline">
-            Sign in
-          </Button>
-        </HStack>
+        <Button as={RouterLink} to="/new" variant="primary" size="lg">
+          Start a project
+        </Button>
+      </Box>
+      {/* The start paths are the conversion element, so they sit above the
+          fold rather than under the pitch */}
+      <Box mb={14}>
+        <Heading size="md" mb={1}>
+          Where are you starting?
+        </Heading>
+        <Text color="ui.dim" fontSize="sm" mb={4}>
+          Pick the one that best describes your goal:
+        </Text>
+        <StartPaths source="landing" />
       </Box>
       {/* The loop a project actually moves through, and the tool each
           phase usually lives in. One place for all four is the pitch. */}
@@ -315,15 +322,6 @@ function LandingPage() {
           </Box>
         ))}
       </SimpleGrid>
-      <Box mb={12}>
-        <Heading size="md" mb={1}>
-          Where are you starting?
-        </Heading>
-        <Text color="ui.dim" fontSize="sm" mb={4}>
-          Pick the one that best describes your goal:
-        </Text>
-        <StartPaths source="landing" />
-      </Box>
       <FeaturedProjects />
     </>
   )

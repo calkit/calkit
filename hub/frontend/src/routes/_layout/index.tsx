@@ -372,9 +372,13 @@ function Home() {
           <ProjectsTable />
         </>
       )}
-      <Box mt={8}>
-        <AccountSetupCard projectCount={projectCount} />
-      </Box>
+      {/* Installing and connecting things is asked once there's a project
+          to use them on, not on the first signed-in page */}
+      {projectCount > 0 ? (
+        <Box mt={8}>
+          <AccountSetupCard projectCount={projectCount} />
+        </Box>
+      ) : null}
     </Container>
   )
 }

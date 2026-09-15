@@ -74,10 +74,10 @@ function AnalyticsConsentBanner() {
         <Text fontSize="sm" flex={1}>
           With your permission, Calkit records which pages you visit and which
           features you use, so we can improve the features people rely on and
-          remove the ones nobody does. It's never sold or used for advertising.
-          It relies on storage in your browser, so it stays off unless you
-          accept. You can change your choice at any time under Settings →
-          Privacy.{" "}
+          remove ones that are unused. Nothing is ever sold or used for
+          advertising. It relies on storage in your browser, so it stays off
+          unless you accept. You can change your choice at any time under
+          Settings → Privacy.{" "}
           <Link href={privacyPolicyUrl} isExternal textDecoration="underline">
             Privacy policy
           </Link>

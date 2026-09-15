@@ -25,10 +25,10 @@ import { MiscService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import NewOrg from "../Orgs/NewOrg"
 import NewProject from "../Projects/NewProject"
-import UserMenu from "./UserMenu"
 import GlobalSearch from "./GlobalSearch"
 import HelpFeedback from "./HelpFeedback"
 import NotificationBell from "./NotificationBell"
+import UserMenu from "./UserMenu"
 
 // "Docs" leaves the app entirely rather than going to a page that only
 // links onward to the documentation site, which is where that content is
@@ -170,26 +170,29 @@ export default function Topbar() {
           </HStack>
           <Flex alignItems={"center"} gap={2}>
             <GlobalSearch />
-            <Button
-              aria-label="new-org"
-              size="sm"
-              onClick={user ? newOrgModal.onOpen : goToLoginWithRedirect}
-            >
-              <Icon as={FaPlus} mr={1} />
-              New org
-            </Button>
-            <NewOrg onClose={newOrgModal.onClose} isOpen={newOrgModal.isOpen} />
-            <Button
-              aria-label="new-project"
-              size="sm"
-              as={RouterLink}
-              to="/new"
-            >
-              <Icon as={FaPlus} mr={1} />
-              New project
-            </Button>
             {user ? (
               <>
+                <Button
+                  aria-label="new-org"
+                  size="sm"
+                  onClick={newOrgModal.onOpen}
+                >
+                  <Icon as={FaPlus} mr={1} />
+                  New org
+                </Button>
+                <NewOrg
+                  onClose={newOrgModal.onClose}
+                  isOpen={newOrgModal.isOpen}
+                />
+                <Button
+                  aria-label="new-project"
+                  size="sm"
+                  as={RouterLink}
+                  to="/new"
+                >
+                  <Icon as={FaPlus} mr={1} />
+                  New project
+                </Button>
                 <Button
                   aria-label="help"
                   size="sm"
@@ -230,16 +233,31 @@ export default function Topbar() {
             {user ? (
               <UserMenu />
             ) : (
-              <Link
-                as={RouterLink}
-                to={"/login"}
-                onClick={(event) => {
-                  event.preventDefault()
-                  goToLoginWithRedirect()
-                }}
-              >
-                <Button variant="primary">Sign in</Button>
-              </Link>
+              <>
+                <Button
+                  as={RouterLink}
+                  to="/signup"
+                  variant="primary"
+                  size="sm"
+                  onClick={() =>
+                    mixpanel.track("Clicked sign up", { source: "topbar" })
+                  }
+                >
+                  Sign up
+                </Button>
+                <Button
+                  as={RouterLink}
+                  to="/login"
+                  variant="outline"
+                  size="sm"
+                  onClick={(event: React.MouseEvent) => {
+                    event.preventDefault()
+                    goToLoginWithRedirect()
+                  }}
+                >
+                  Sign in
+                </Button>
+              </>
             )}
           </Flex>
         </Flex>

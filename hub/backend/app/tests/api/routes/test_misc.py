@@ -1,11 +1,108 @@
 """Tests for app.api.routes.misc endpoints."""
 
+import shutil
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import git
+import pytest
 from fastapi.testclient import TestClient
 
+from app.api.routes import misc
 from app.config import settings
+
+
+def _make_repo(tmp_path) -> str:
+    """A committed repo with a pipeline and calkit.yaml but no README."""
+    path = tmp_path / "src"
+    repo = git.Repo.init(path)
+    (path / "calkit.yaml").write_text("datasets: []\n")
+    (path / "dvc.yaml").write_text(
+        "stages:\n  plot:\n    cmd: python plot.py\n    outs:\n      - fig.png\n"
+    )
+    (path / "plot.py").write_text("print('hi')\n")
+    (path / "loose.py").write_text("print('nobody runs me')\n")
+    repo.index.add(["calkit.yaml", "dvc.yaml", "plot.py", "loose.py"])
+    repo.index.commit("Initial")
+    return str(path)
+
+
+@pytest.mark.parametrize(
+    "url", ["https://gitlab.com/a/b", "github.com/onlyowner", "not a url"]
+)
+def test_check_public_repo_rejects_bad_urls(client: TestClient, url) -> None:
+    with patch.object(misc, "_public_repo_head") as head:
+        resp = client.get("/repo-check", params={"url": url})
+    assert resp.status_code == 422
+    head.assert_not_called()
+
+
+def test_check_public_repo_reports_on_a_shallow_clone(
+    client: TestClient, tmp_path
+) -> None:
+    src = _make_repo(tmp_path)
+    with (
+        patch.object(misc, "_public_repo_head", return_value="abc123"),
+        patch.object(
+            misc,
+            "_clone_public_repo",
+            side_effect=lambda url, dest: shutil.copytree(src, dest),
+        ) as clone,
+    ):
+        resp = client.get(
+            "/repo-check", params={"url": "github.com/someone/repo.git"}
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["owner"] == "someone"
+    assert body["name"] == "repo"
+    assert body["commit"] == "abc123"
+    assert clone.call_args.args[0] == "https://github.com/someone/repo.git"
+    check = body["check"]
+    assert check["has_pipeline"] is True
+    assert check["has_calkit_info"] is True
+    assert check["has_readme"] is False
+    assert check["n_stages"] == 1
+    assert check["scripts_not_in_pipeline"] == ["loose.py"]
+
+
+def test_check_public_repo_not_found(client: TestClient) -> None:
+    with patch.object(misc, "_public_repo_head", return_value=None):
+        resp = client.get("/repo-check", params={"url": "github.com/a/b"})
+    assert resp.status_code == 404
+    with (
+        patch.object(misc, "_public_repo_head", return_value="abc123"),
+        patch.object(
+            misc,
+            "_clone_public_repo",
+            side_effect=subprocess.CalledProcessError(128, "git"),
+        ),
+    ):
+        resp = client.get("/repo-check", params={"url": "github.com/a/b"})
+    assert resp.status_code == 404
+
+
+def test_check_public_repo_rate_limits(client: TestClient) -> None:
+    misc._repo_check_hits.clear()
+    with (
+        patch.object(misc, "REPO_CHECK_LIMIT_PER_CLIENT", (2, 600)),
+        patch.object(misc, "_public_repo_head", return_value=None) as head,
+    ):
+        for _ in range(2):
+            resp = client.get("/repo-check", params={"url": "github.com/a/b"})
+            assert resp.status_code == 404
+        resp = client.get("/repo-check", params={"url": "github.com/a/b"})
+        assert resp.status_code == 429
+        # Another client is counted separately
+        resp = client.get(
+            "/repo-check",
+            params={"url": "github.com/a/b"},
+            headers={"x-forwarded-for": "203.0.113.9, 10.0.0.1"},
+        )
+        assert resp.status_code == 404
+    assert head.call_count == 3
+    misc._repo_check_hits.clear()
 
 
 def test_get_arxiv_pdf_requires_auth(client: TestClient) -> None:

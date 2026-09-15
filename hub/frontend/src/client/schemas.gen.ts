@@ -8668,6 +8668,29 @@ export const ReleaseViewSchema = {
     "Release as rendered on its page, for a member or a share-token holder.\n\nDeliberately omits internal identifiers; exposes only what the viewer page\nneeds to render the artifact, the provenance note, and comments. The\nviewer's effective ``permission`` says whether they may comment or manage\nthe release, so the UI can adapt without leaking the share tokens.",
 } as const
 
+export const PublicRepoCheckSchema = {
+  properties: {
+    owner: {
+      type: "string",
+      title: "Owner",
+    },
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    commit: {
+      type: "string",
+      title: "Commit",
+    },
+    check: {
+      $ref: "#/components/schemas/ReproCheck",
+    },
+  },
+  type: "object",
+  required: ["owner", "name", "commit", "check"],
+  title: "PublicRepoCheck",
+} as const
+
 export const ReproCheckSchema = {
   properties: {
     has_pipeline: {

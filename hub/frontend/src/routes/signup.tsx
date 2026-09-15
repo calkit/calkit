@@ -155,7 +155,7 @@ function SignUp() {
       </form>
       <Text fontSize="sm">
         Already have an account?{" "}
-        <Link as={RouterLink} to="/login" variant="default">
+        <Link as={RouterLink} to="/login" variant="blue">
           Sign in
         </Link>
       </Text>

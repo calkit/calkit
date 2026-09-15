@@ -185,7 +185,7 @@ function Login() {
         </form>
         <Text fontSize="sm">
           New to Calkit?{" "}
-          <Link as={RouterLink} to="/signup" variant="default">
+          <Link as={RouterLink} to="/signup" variant="blue">
             Create an account.
           </Link>
         </Text>

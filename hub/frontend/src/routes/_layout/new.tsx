@@ -154,6 +154,7 @@ const STEPS_BY_PATH: Record<StartPath, StepKey[]> = {
   overleaf: ["path", "name", "paper", "question", "data", "machine"],
 }
 
+// TODO: rewrite these step titles
 const STEP_TITLES: Record<StepKey, string> = {
   path: "Starting point",
   name: "A name",

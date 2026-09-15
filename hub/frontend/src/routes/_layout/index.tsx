@@ -198,6 +198,7 @@ function ProjectsTable() {
 function EmptyState() {
   return (
     <>
+      {/* TODO: rewrite this heading and paragraph */}
       <Heading size="lg" mt={12} mb={2}>
         Connect all the pieces of your research project
       </Heading>
@@ -209,6 +210,7 @@ function EmptyState() {
       <Box mb={10}>
         <StartPaths source="empty-state" />
       </Box>
+      {/* TODO: rewrite this heading */}
       <FeaturedProjects heading="Or look at one that's already there" />
     </>
   )
@@ -308,6 +310,7 @@ function LandingPage() {
             body: "The CLI runs pipelines, builds environments, and manages data on your machine just as easily as the web app does.",
           },
           {
+            // TODO: rewrite this title and body
             title: "Best practices, without the DIY part",
             body: "Environment management, a workflow system, versioned data, and connections to external apps: components typically chosen and integrated manually, ready to go from day one.",
           },

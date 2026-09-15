@@ -27,6 +27,7 @@ interface PathOption {
  * a wish not to end up there again. Naming those situations lets someone
  * recognize themselves rather than guess which button is for them.
  */
+// TODO: rewrite these three descriptions
 export const START_PATHS: PathOption[] = [
   {
     path: "existing",

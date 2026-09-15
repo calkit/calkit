@@ -199,6 +199,7 @@ export interface AccountOnboardingInput {
 }
 
 /** One-time account setup, shared by every project the user creates. */
+// TODO: rewrite the browser extension, Overleaf, and Zotero details
 export function buildAccountSteps({
   githubConnected,
   zoteroConnected,

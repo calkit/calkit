@@ -139,6 +139,7 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
   return (
     <ChecklistCard
       title="Set up your workspace"
+      // TODO: rewrite the intro and the done message
       intro={
         "Connect the tools you already use. Nothing moves into Calkit that " +
         "you can't take back out -- your repo, your .bib, your Overleaf " +

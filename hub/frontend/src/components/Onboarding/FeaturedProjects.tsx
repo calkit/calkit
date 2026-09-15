@@ -41,6 +41,7 @@ const FeaturedProjects = ({ heading }: { heading?: string }) => {
   return (
     <Box>
       <Flex align="baseline" gap={3} mb={1}>
+        {/* TODO: rewrite the default heading and the line under it */}
         <Heading size="md">{heading ?? "See it put together"}</Heading>
         <Link as={RouterLink} to="/projects" fontSize="sm" variant="blue">
           Browse all projects →

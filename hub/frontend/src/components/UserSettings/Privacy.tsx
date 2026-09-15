@@ -32,6 +32,7 @@ const Privacy = () => {
       </Heading>
       {analyticsEnabled ? (
         <>
+          {/* TODO: rewrite this paragraph */}
           <Text fontSize="sm" mb={4}>
             Calkit can record which pages you visit and which features you use,
             so we can improve the features people rely on and remove the ones

@@ -169,12 +169,18 @@ export default function Topbar() {
             </HStack>
           </HStack>
           <Flex alignItems={"center"} gap={2}>
-            <GlobalSearch />
+            {/* Phones only get what can't wait: creating, signing in, and
+                the user menu. Everything else lives in the drawer or the
+                repo link. */}
+            <Box display={{ base: "none", md: "block" }}>
+              <GlobalSearch />
+            </Box>
             {user ? (
               <>
                 <Button
                   aria-label="new-org"
                   size="sm"
+                  display={{ base: "none", md: "inline-flex" }}
                   onClick={newOrgModal.onOpen}
                 >
                   <Icon as={FaPlus} mr={1} />
@@ -196,6 +202,7 @@ export default function Topbar() {
                 <Button
                   aria-label="help"
                   size="sm"
+                  display={{ base: "none", md: "inline-flex" }}
                   onClick={() => {
                     mixpanel.track("Opened help and feedback", {
                       source: "topbar",
@@ -216,19 +223,21 @@ export default function Topbar() {
               onClose={newProjectModal.onClose}
               isOpen={newProjectModal.isOpen}
             />
-            <Link
-              isExternal
-              href="https://github.com/calkit/calkit"
-              aria-label="View GitHub repo."
-            >
-              <Flex alignItems={"center"} pt={0.5} pb={0.5} mr={-0.5}>
-                <Icon fontSize="2xl" mr={1}>
-                  <FaGithub />
-                </Icon>
-                <Text fontSize="xs">calkit/calkit</Text>
-              </Flex>
-            </Link>
-            <HubVersion />
+            <HStack spacing={2} display={{ base: "none", md: "flex" }}>
+              <Link
+                isExternal
+                href="https://github.com/calkit/calkit"
+                aria-label="View GitHub repo."
+              >
+                <Flex alignItems={"center"} pt={0.5} pb={0.5} mr={-0.5}>
+                  <Icon fontSize="2xl" mr={1}>
+                    <FaGithub />
+                  </Icon>
+                  <Text fontSize="xs">calkit/calkit</Text>
+                </Flex>
+              </Link>
+              <HubVersion />
+            </HStack>
             {user && <NotificationBell />}
             {user ? (
               <UserMenu />

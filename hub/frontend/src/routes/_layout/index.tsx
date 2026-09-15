@@ -256,7 +256,7 @@ function LandingPage() {
           robust history recorded along the way.
         </Text>
         <Button as={RouterLink} to="/new" variant="primary" size="lg">
-          Start a project
+          Get started
         </Button>
       </Box>
       {/* The start paths are the conversion element, so they sit above the

@@ -32,7 +32,11 @@ DIFF_TMP_DIR = os.path.join(LOCAL_DIR, "latex-diff-build")
 # that would produce the same document again can skip the build. Machine
 # private, so a fresh clone simply builds once.
 DIFF_STATE_DIR = os.path.join(DIFF_TMP_DIR, "state")
-DIFF_AUX_DIR = os.path.join(DIFF_TMP_DIR, "aux")
+# Where the marked-up document's auxiliary files and PDF are written,
+# inside the directory it's built in. TeX refuses to write outside the
+# working directory or to dotfiles, and packages like glossaries run
+# makeindex from inside TeX, so anywhere else leaves their lists empty.
+DIFF_AUX_DIRNAME = "calkit-latex-diff-aux"
 DIFF_DIR = os.path.join(".calkit", "latex-diffs")
 # Revisions that mean something different tomorrow. A comparison with one
 # of these at either end can't be settled by looking at files alone.

@@ -470,6 +470,9 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert rc.endswith("latex-diff-build/head/paper/.latexmkrc")
     auxdir = next(a for a in latexmk_args if a.startswith("-auxdir="))
     assert latexmk_args.index("-r") < latexmk_args.index(auxdir)
+    # Inside the directory the document is built in, since TeX refuses to
+    # write anywhere else and makeindex runs from inside it for glossaries
+    assert auxdir == "-auxdir=calkit-latex-diff-aux"
     with open(stubs / "latexdiff-args.txt") as f:
         assert "--graphics-markup=both" in f.read()
     # An output DVC doesn't store is copied from the working tree, since no
@@ -516,6 +519,8 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         assert result.returncode == 0, result.stderr
         with open(working_output) as f:
             assert f.read() == "old\n" + content
+    # Building beside the working tree's document leaves nothing behind
+    assert not os.path.exists("paper/calkit-latex-diff-aux")
     os.remove(stubs / "latexmk-args.txt")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
     assert "is up to date" in result.stdout

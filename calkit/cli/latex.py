@@ -301,7 +301,6 @@ def build(
 
 
 DIFF_TMP_DIR = calkit.latex.DIFF_TMP_DIR
-DIFF_AUX_DIR = calkit.latex.DIFF_AUX_DIR
 # A verbatim input named by a macro parameter, e.g., \verbatiminput{#1.wcsum}
 # in a \newcommand, which latexdiff dies trying to open. Breaking the line
 # after the command reads the same to TeX, but not to latexdiff's pattern.
@@ -813,6 +812,7 @@ def _build_diff(
     # Where --keep-tex leaves it: beside the document, since a checkout is
     # removed afterwards
     kept_tex = os.path.normpath(os.path.join(tex_dir, f"{stem}-diff.tex"))
+    aux_dir = os.path.join(build_dir, calkit.latex.DIFF_AUX_DIRNAME)
     try:
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
@@ -902,9 +902,8 @@ def _build_diff(
             return
         with open(diff_tex, "wb") as f:
             f.write(marked_up)
-        aux_dir = DIFF_AUX_DIR
         os.makedirs(aux_dir, exist_ok=True)
-        rel_aux = Path(os.path.relpath(aux_dir, build_dir)).as_posix()
+        rel_aux = calkit.latex.DIFF_AUX_DIRNAME
         latexmk_cmd = ["latexmk"]
         # First, since latexmk reads an rc file where it appears, so the
         # directories below override any the rc file sets
@@ -959,6 +958,10 @@ def _build_diff(
             raise_error("latexmk did not produce a PDF")
         os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
         shutil.move(built, output)
+        # A checkout is removed afterwards, but the working tree's document
+        # directory is the user's, so nothing is left behind in it
+        if os.path.abspath(head_root) == os.path.abspath("."):
+            shutil.rmtree(aux_dir, ignore_errors=True)
         os.makedirs(os.path.dirname(state_path), exist_ok=True)
         with open(state_path, "w") as f:
             f.write(digest)

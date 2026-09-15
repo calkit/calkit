@@ -400,17 +400,19 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     _commit("second")
     # Neither side can come from the working tree
     shutil.rmtree("paper/figs")
-    cmd = [
+    diff = [
         "calkit",
         "latex",
         "diff",
         "paper/main.tex",
         "--from",
         "v1",
-        "--to",
-        "HEAD",
         "-r",
         "paper/.latexmkrc",
+    ]
+    cmd = diff + [
+        "--to",
+        "HEAD",
         "--latexdiff-arg",
         "--graphics-markup=both",
         "--input",
@@ -444,6 +446,52 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert DIFF_TMP_DIR not in subprocess.check_output(
         ["git", "worktree", "list"], text=True
     )
+    # Fetched without --input too, since a directory DVC tracks as a whole
+    # beside the document is included
+    result = subprocess.run(
+        diff + ["--to", "HEAD", "--force"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    with open(output) as f:
+        assert f.read() == "old\nnew\n"
+    # Changing how a comparison between fixed revisions is built rebuilds
+    # it, since the pipeline only runs it when something has changed
+    head_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True
+    ).strip()
+    for markup in ["CFONT", "UNDERLINE"]:
+        result = subprocess.run(
+            diff + ["--to", head_sha, "--latexdiff-arg", f"--type={markup}"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        with open(stubs / "latexdiff-args.txt") as f:
+            assert f"--type={markup}" in f.read()
+    # Against the working tree, a changed figure or rc file rebuilds the
+    # diff even though the marked-up source is the same
+    working_output = get_diff_path("paper/main.tex", "v1")
+    os.makedirs("paper/figs")
+    for content in ["newer\n", "newest\n"]:
+        with open("paper/figs/plot.png", "w") as f:
+            f.write(content)
+        result = subprocess.run(diff, capture_output=True, text=True, env=env)
+        assert result.returncode == 0, result.stderr
+        with open(working_output) as f:
+            assert f.read() == "old\n" + content
+    os.remove(stubs / "latexmk-args.txt")
+    result = subprocess.run(diff, capture_output=True, text=True, env=env)
+    assert "is up to date" in result.stdout
+    assert not os.path.exists(stubs / "latexmk-args.txt")
+    with open("paper/.latexmkrc", "a") as f:
+        f.write("$max_repeat = 5;\n")
+    result = subprocess.run(diff, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert os.path.exists(stubs / "latexmk-args.txt")
     # -silent hides why latexmk failed, so the errors LaTeX logged are shown
     result = subprocess.run(
         cmd + ["--force"],

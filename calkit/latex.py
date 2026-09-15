@@ -301,28 +301,6 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     return sorted(found)
 
 
-def _is_immutable_ref(repo: git.Repo, ref: str | None) -> bool:
-    """Whether a ref names something that can't change under us.
-
-    A tag or a commit hash pins content; a branch or the working tree
-    doesn't. Only a diff between two of the former can be built once and
-    left alone.
-    """
-    if ref is None:
-        return False
-    if ref in [tag.name for tag in repo.tags]:
-        return True
-    if ref in [head.name for head in repo.heads]:
-        return False
-    if not re.fullmatch(r"[0-9a-f]{7,40}", ref):
-        return False
-    try:
-        repo.commit(ref)
-    except Exception:
-        return False
-    return True
-
-
 DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")
 DOCX_MERGES_DIR = os.path.join(".calkit", "latex", "docx-merges")
 # Word bookmark names: 40 chars max, letters/digits/underscores

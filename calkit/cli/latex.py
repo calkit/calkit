@@ -303,7 +303,6 @@ def build(
 DIFF_TMP_DIR = calkit.latex.DIFF_TMP_DIR
 DIFF_AUX_DIR = calkit.latex.DIFF_AUX_DIR
 get_diff_path = calkit.latex.get_diff_path
-_is_immutable_ref = calkit.latex._is_immutable_ref
 _default_base_ref = calkit.latex.default_base_ref
 
 
@@ -403,14 +402,25 @@ def diff(
             ),
         ),
     ] = [],
+    revision_key: Annotated[
+        str | None,
+        typer.Option(
+            "--revision-key",
+            hidden=True,
+            help=(
+                "Set by the pipeline so a diff's stage reruns when either "
+                "revision's inputs change. Not used by the command."
+            ),
+        ),
+    ] = None,
     force: Annotated[
         bool,
         typer.Option(
             "--force",
             "-f",
             help=(
-                "Rebuild even if this comparison can't have changed and "
-                "has already been built."
+                "Rebuild even if nothing the diff depends on has changed "
+                "since it was last built."
             ),
         ),
     ] = False,
@@ -462,8 +472,12 @@ def diff(
         from dvc.exceptions import NotDvcRepoError
         from dvc.fs import DVCFileSystem
 
+        import calkit.dvc
+
         fetched: list[str] = []
         try:
+            # A project using Calkit's own remote needs its scheme known
+            calkit.dvc.register_ck_scheme()
             fs = DVCFileSystem(url=".", rev=rev)
             found: list[str] = []
             for path in paths:
@@ -490,6 +504,22 @@ def diff(
         except NotDvcRepoError:
             pass
         return fetched
+
+    def default_inputs(root: str) -> list[str]:
+        """What to fetch or note for a side when no inputs were given.
+
+        Detection finds a file by its own name or pointer, but a file in a
+        directory DVC tracks as a whole has only the directory's pointer,
+        which can't say what's inside, so those directories beside the
+        document are included whole.
+        """
+        doc_dir = Path(root, os.path.dirname(tex_file))
+        pointed = [
+            Path(os.path.relpath(p, root)).as_posix().removesuffix(".dvc")
+            for p in sorted(doc_dir.rglob("*.dvc"))
+            if p.is_file()
+        ]
+        return calkit.latex.detect_inputs(tex_file, wdir=root) + pointed
 
     def point_changed_figures_at_base(base_root: str, head_root: str) -> None:
         """Make the older side's changed figures refer to its own copies.
@@ -557,15 +587,6 @@ def diff(
             to_ref=to_ref,
             output_dir=output_dir,
         )
-    # A comparison between two revisions that can't move is the same
-    # comparison forever, and LaTeX writes a timestamp into every PDF, so
-    # rebuilding one would change the file without changing what it says
-    fixed = _is_immutable_ref(repo, from_ref) and _is_immutable_ref(
-        repo, to_ref
-    )
-    if fixed and os.path.isfile(output) and not force:
-        typer.echo(f"{output} is already built; use --force to rebuild it")
-        return
     checkouts: dict[str, str] = {}
     shas: dict[str, str] = {}
     try:
@@ -602,10 +623,26 @@ def diff(
             sides[name] = side
         # The working tree already has its DVC-tracked files, if pulled
         head_root = checkouts.get("head", ".")
-        fetched: list[str] = []
+        context: list[str] = []
         for name, root in checkouts.items():
-            paths = inputs or calkit.latex.detect_inputs(tex_file, wdir=root)
-            fetched += fetch_dvc_inputs(root, rev=shas[name], paths=paths)
+            paths = inputs or default_inputs(root)
+            context += fetch_dvc_inputs(root, rev=shas[name], paths=paths)
+        if "head" not in checkouts:
+            # The working tree has no revision to name its files by, so
+            # note what's there instead
+            for path in inputs or default_inputs("."):
+                if os.path.isfile(path):
+                    files = [Path(path)]
+                else:
+                    files = sorted(
+                        p for p in Path(path).rglob("*") if p.is_file()
+                    )
+                for file_path in files:
+                    stat = file_path.stat()
+                    context.append(
+                        f"{file_path.as_posix()} {stat.st_size} "
+                        f"{stat.st_mtime_ns}"
+                    )
         point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
             base_tex=sides["base"],
@@ -617,7 +654,7 @@ def diff(
             latexmk_rc_path=latexmk_rc_path,
             latexmk_args=latexmk_args,
             latexdiff_args=latexdiff_args,
-            context=fetched,
+            context=context,
             no_check=no_check,
             keep_tex=keep_tex,
             force=force,
@@ -755,11 +792,16 @@ def _build_diff(
         # The newer side's copy, which is what the document was built with
         # at that revision
         rc_path = None
+        rc_hash = None
         if latexmk_rc_path is not None:
             rc_path = os.path.join(head_root, latexmk_rc_path)
             if not os.path.isfile(rc_path):
                 rc_path = latexmk_rc_path
             rc_path = Path(os.path.normpath(rc_path)).as_posix()
+            if os.path.isfile(rc_path):
+                rc_hash = hashlib.sha256(
+                    Path(rc_path).read_bytes()
+                ).hexdigest()
         # The PDF is a function of this marked-up source and how it's built,
         # so if neither has changed there's nothing to build. Worth checking
         # because the common case produces nothing at all: on the default
@@ -767,7 +809,9 @@ def _build_diff(
         # and latexmk is the expensive half of this.
         digest = _marked_up_digest(
             marked_up,
-            context=context + [f"latexmkrc {rc_path}"] + latexmk_args,
+            context=context
+            + [f"latexmkrc {rc_path} {rc_hash}"]
+            + latexmk_args,
         )
         state_path = calkit.latex.diff_state_path(output)
         if (

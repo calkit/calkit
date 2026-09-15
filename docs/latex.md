@@ -183,6 +183,36 @@ document's own path inside it:
 `diff_pdf_storage` on the stage chooses between DVC and Git for them, like
 `pdf_storage` does for the document itself.
 
+### Figures, tables, and build settings
+
+Each side of a comparison is built from its own revision, including
+figures and tables tracked with DVC.
+Anything the stage lists in `inputs` that DVC tracks is fetched from the
+cache, or a remote, as it was at that commit.
+A figure that changed is marked as changed, and `latexdiff`'s
+`--graphics-markup=both` shows the old one beside the new.
+
+The diff is built the same way as the document, with the stage's
+`latexmkrc_path` and `latexmk_args`.
+Options for `latexdiff` itself go in `latexdiff_args`:
+
+```yaml
+pipeline:
+  stages:
+    paper-1:
+      kind: latex
+      environment: tex
+      target_path: pubs/paper-1/main.tex
+      latexmkrc_path: pubs/paper-1/.latexmkrc
+      inputs:
+        - pubs/paper-1/figs/
+      diffs:
+        - paper-1-submitted
+      latexdiff_args:
+        - --graphics-markup=both
+        - --type=CFONT
+```
+
 ### Comparing against uncommitted work
 
 `calkit latex diff` runs a comparison on demand, and with no `--to` the
@@ -196,6 +226,9 @@ calkit latex diff pubs/paper-1/main.tex --from main --env tex
 That one can't be reproduced from two revisions, so it isn't tracked: it
 goes under `.calkit/local`, which is private to the machine.
 With no `--from` it compares against the merge base with the default branch.
+DVC-tracked files the document names directly are fetched for the older
+side, but a pipeline output without a `.dvc` file isn't found that way, so
+name any of those with `--input`, e.g., `--input pubs/paper-1/figs/`.
 
 ## Interoperability with Microsoft Word
 

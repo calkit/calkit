@@ -1004,23 +1004,16 @@ class LatexStage(Stage):
         description="Extra arguments passed straight through to latexmk, for "
         "control Calkit does not model.",
     )
+    latexdiff_args: list[str] = Field(
+        default=[],
+        description="Extra arguments passed straight through to latexdiff "
+        "when building diffs, e.g., '--graphics-markup=both'.",
+    )
 
     @property
     def diff_pairs(self) -> list[tuple[str, str]]:
-        """The revisions to compare, oldest side first.
-
-        A bare revision compares it against ``HEAD``. Every comparison
-        here is between two commits: one against the working tree can't be
-        reproduced, so it belongs to whoever is doing the work rather than
-        to the project.
-        """
-        pairs: list[tuple[str, str]] = []
-        for entry in self.diffs:
-            if isinstance(entry, str):
-                pairs.append((entry, "HEAD"))
-            else:
-                pairs.append((entry[0], entry[1]))
-        return pairs
+        """The revisions to compare, oldest side first."""
+        return calkit.latex.get_diff_pairs(self.diffs)
 
     @property
     def diff_paths(self) -> list[str]:
@@ -1046,9 +1039,8 @@ class LatexStage(Stage):
         """
         stages = {}
         for (from_ref, to_ref), path in zip(self.diff_pairs, self.diff_paths):
-            name = (
-                f"{self.name}-diff-"
-                f"{calkit.latex.diff_stage_suffix(from_ref, to_ref)}"
+            name = calkit.latex.get_diff_stage_name(
+                str(self.name), from_ref, to_ref
             )
             out: str | dict = path
             if self.diff_pdf_storage != "dvc":
@@ -1065,6 +1057,22 @@ class LatexStage(Stage):
                 f" --no-check --from {shlex.quote(from_arg)}"
                 f" --to {shlex.quote(to_arg)}"
             )
+            # Built the way the document itself is, so a latexmkrc that sets
+            # search paths or shell escape applies to the diff too
+            if self.latexmkrc_path is not None:
+                cmd += f" -r {shlex.quote(self.latexmkrc_path)}"
+            for arg in self.latexmk_args:
+                cmd += f" --latexmk-arg {shlex.quote(arg)}"
+            for arg in self.latexdiff_args:
+                cmd += f" --latexdiff-arg {shlex.quote(arg)}"
+            # Each revision gets its own copies of any of these that are
+            # tracked with DVC, since a checkout only has their pointers
+            for path in self.dvc_deps:
+                if path in (self.target_path, self.latexmkrc_path):
+                    continue
+                if path.startswith(".calkit/"):
+                    continue
+                cmd += f" --input {shlex.quote(path)}"
             # Named from the pair as written, so the output path is the
             # same on every branch even when the command holds commits
             cmd += (

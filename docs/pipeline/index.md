@@ -432,6 +432,7 @@ Model class: `LatexStage`
 | `force`                 | bool                          | no       | False   | Keep compiling despite errors (latexmk -f).                                                                                                       |
 | `synctex`               | bool                          | no       | True    | Generate SyncTeX data for editor/PDF navigation.                                                                                                  |
 | `latexmk_args`          | list[str]                     | no       |         | Extra arguments passed straight through to latexmk, for control Calkit does not model.                                                            |
+| `latexdiff_args`        | list[str]                     | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--graphics-markup=both'.                                         |
 
 ### `map-paths`
 

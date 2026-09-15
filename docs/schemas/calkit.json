@@ -2358,6 +2358,15 @@
           "title": "Kind",
           "type": "string"
         },
+        "latexdiff_args": {
+          "default": [],
+          "description": "Extra arguments passed straight through to latexdiff when building diffs, e.g., '--graphics-markup=both'.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Latexdiff Args",
+          "type": "array"
+        },
         "latexmk_args": {
           "default": [],
           "description": "Extra arguments passed straight through to latexmk, for control Calkit does not model.",

@@ -336,6 +336,127 @@ def test_latex_diff_setup(tmp_dir):
     assert "does not exist" in result.stderr
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Stands in for TeX with shell scripts"
+)
+def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
+    # Stand-ins for latexdiff and latexmk record what they were given and
+    # build a "PDF" from the figures the marked-up document names, so this
+    # runs without TeX Live
+    import shutil
+
+    from calkit.cli.latex import DIFF_TMP_DIR
+    from calkit.latex import get_diff_path
+
+    stubs = tmp_path_factory.mktemp("stubs")
+    with open(stubs / "latexdiff", "w") as f:
+        f.write(
+            "#!/usr/bin/env bash\n"
+            '[ "$1" = --version ] && exit 0\n'
+            'echo "$@" > "$RECORD_DIR/latexdiff-args.txt"\n'
+            'for a in "$@"; do case "$a" in -*) ;; *) cat "$a";; esac; done\n'
+        )
+    with open(stubs / "latexmk", "w") as f:
+        f.write(
+            "#!/usr/bin/env bash\n"
+            '[ "$1" = --version ] && exit 0\n'
+            'echo "$@" > "$RECORD_DIR/latexmk-args.txt"\n'
+            'for a in "$@"; do tex="$a"; case "$a" in '
+            '-outdir=*) out="${a#-outdir=}";; esac; done\n'
+            'cd "$(dirname "$tex")"\n'
+            'stem=$(basename "$tex" .tex)\n'
+            'if [ -n "$FAIL" ]; then\n'
+            '  printf "junk\\n! Undefined control sequence.\\nl.3 \\\\oops\\n"'
+            ' > "$out/$stem.log"\n'
+            "  exit 12\n"
+            "fi\n"
+            ': > "$out/$stem.pdf"\n'
+            "for fig in $(sed -n 's/.*includegraphics{\\([^}]*\\)}.*/\\1/p'"
+            ' "$stem.tex"); do cat "$fig"* >> "$out/$stem.pdf"; done\n'
+        )
+    for name in ["latexdiff", "latexmk"]:
+        os.chmod(stubs / name, 0o755)
+    env = os.environ | {
+        "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+        "RECORD_DIR": str(stubs),
+    }
+    # A figure tracked with DVC that changes between two revisions
+    subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
+    subprocess.check_call(["calkit", "dvc", "init", "-q"])
+    os.makedirs("paper/figs")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n\\begin{document}\n")
+        f.write("\\includegraphics{figs/plot}\n\\end{document}\n")
+    with open("paper/.latexmkrc", "w") as f:
+        f.write("$aux_dir = 'aux';\n")
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("old\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    _commit("first")
+    subprocess.check_call(["git", "tag", "v1"])
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("new\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    _commit("second")
+    # Neither side can come from the working tree
+    shutil.rmtree("paper/figs")
+    cmd = [
+        "calkit",
+        "latex",
+        "diff",
+        "paper/main.tex",
+        "--from",
+        "v1",
+        "--to",
+        "HEAD",
+        "-r",
+        "paper/.latexmkrc",
+        "--latexdiff-arg",
+        "--graphics-markup=both",
+        "--input",
+        "paper/figs/",
+        "--keep-tex",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    # Each side shows its own revision's figure: the older side's is
+    # repointed at its checkout, since it changed, and the newer side's is
+    # fetched into the checkout the document is built in. Relative, so it
+    # resolves inside a container too.
+    output = get_diff_path("paper/main.tex", "v1", "HEAD")
+    with open(output) as f:
+        assert f.read() == "old\nnew\n"
+    with open("paper/main-diff.tex") as f:
+        marked_up = f.read()
+    assert "\\includegraphics{../../base/paper/figs/plot.png}" in marked_up
+    assert "\\includegraphics{figs/plot}" in marked_up
+    assert not os.path.exists("paper/figs")
+    # The diff is built with the document's rc file, read before the
+    # directories Calkit sets so those win, and latexdiff gets its options
+    with open(stubs / "latexmk-args.txt") as f:
+        latexmk_args = f.read().split()
+    rc = latexmk_args[latexmk_args.index("-r") + 1]
+    assert rc.endswith("latex-diff-build/head/paper/.latexmkrc")
+    auxdir = next(a for a in latexmk_args if a.startswith("-auxdir="))
+    assert latexmk_args.index("-r") < latexmk_args.index(auxdir)
+    with open(stubs / "latexdiff-args.txt") as f:
+        assert "--graphics-markup=both" in f.read()
+    assert DIFF_TMP_DIR not in subprocess.check_output(
+        ["git", "worktree", "list"], text=True
+    )
+    # -silent hides why latexmk failed, so the errors LaTeX logged are shown
+    result = subprocess.run(
+        cmd + ["--force"],
+        capture_output=True,
+        text=True,
+        env=env | {"FAIL": "1"},
+    )
+    assert result.returncode != 0
+    assert "! Undefined control sequence." in result.stderr
+    assert "l.3 \\oops" in result.stderr
+    assert "exit status 12" in result.stderr
+
+
 def test_marked_up_digest_ignores_the_header():
     # latexdiff writes both inputs' paths and modification times into a
     # header comment, and the older side is a fresh checkout every time,

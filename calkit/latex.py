@@ -112,6 +112,43 @@ def diff_stage_suffix(from_ref: str, to_ref: str | None = None) -> str:
     return suffix
 
 
+def get_diff_pairs(diffs: list) -> list[tuple[str, str]]:
+    """The revisions a latex stage's ``diffs`` compare, oldest side first.
+
+    A bare revision compares it against ``HEAD``. Every comparison in a
+    pipeline is between two commits: one against the working tree can't be
+    reproduced, so it belongs to whoever is doing the work rather than to
+    the project.
+    """
+    pairs: list[tuple[str, str]] = []
+    for entry in diffs:
+        if isinstance(entry, str):
+            pairs.append((entry, "HEAD"))
+        else:
+            pairs.append((entry[0], entry[1]))
+    return pairs
+
+
+def get_diff_stage_name(stage_name: str, from_ref: str, to_ref: str) -> str:
+    """The DVC stage a latex stage generates to build one of its diffs."""
+    return f"{stage_name}-diff-{diff_stage_suffix(from_ref, to_ref)}"
+
+
+# Appended to a latex stage's name to address all of its diffs at once,
+# e.g., 'calkit run paper.diffs'
+DIFFS_TARGET_SUFFIX = ".diffs"
+
+
+def get_diff_stage_names(stage_name: str, stage: dict) -> list[str]:
+    """Every diff stage a latex stage in calkit.yaml generates."""
+    if stage.get("kind") != "latex":
+        return []
+    return [
+        get_diff_stage_name(stage_name, from_ref, to_ref)
+        for from_ref, to_ref in get_diff_pairs(stage.get("diffs") or [])
+    ]
+
+
 def diff_state_path(output: str) -> str:
     """Where the hash of a diff's marked-up source is remembered."""
     flat = Path(output).as_posix().replace("/", "-")

@@ -17,7 +17,7 @@ from typing_extensions import Annotated
 
 import calkit
 import calkit.latex
-from calkit.cli import raise_error
+from calkit.cli import raise_error, warn
 
 latex_app = typer.Typer(no_args_is_help=True)
 
@@ -362,6 +362,47 @@ def diff(
             ),
         ),
     ] = None,
+    latexmk_rc_path: Annotated[
+        str | None,
+        typer.Option(
+            "--latexmk-rc",
+            "-r",
+            help="Path to a latexmkrc file to build the marked-up document with.",
+        ),
+    ] = None,
+    latexmk_args: Annotated[
+        list[str],
+        typer.Option(
+            "--latexmk-arg",
+            help=(
+                "Extra argument to pass through to latexmk. Repeat the option "
+                "to pass more than one."
+            ),
+        ),
+    ] = [],
+    latexdiff_args: Annotated[
+        list[str],
+        typer.Option(
+            "--latexdiff-arg",
+            help=(
+                "Extra argument to pass through to latexdiff, e.g., "
+                "'--graphics-markup=both'. Repeat the option to pass more "
+                "than one."
+            ),
+        ),
+    ] = [],
+    inputs: Annotated[
+        list[str],
+        typer.Option(
+            "--input",
+            help=(
+                "File or directory the document reads. Anything in it "
+                "tracked with DVC is fetched as it was at each revision. "
+                "Defaults to the inputs detected in the document. Repeat "
+                "the option to pass more than one."
+            ),
+        ),
+    ] = [],
     force: Annotated[
         bool,
         typer.Option(
@@ -406,7 +447,98 @@ def diff(
     With the default `--to`, the newer side is the working tree, so the
     marked-up document is built with the current figures and bibliography
     and what's marked is what changed in the text.
+
+    A revision's DVC-tracked inputs, e.g., figures and tables a pipeline
+    generates, are fetched as they were at that revision, so each side of
+    the comparison shows its own.
     """
+
+    def fetch_dvc_inputs(root: str, rev: str, paths: list[str]) -> list[str]:
+        """Fetch the DVC-tracked content of ``paths`` at ``rev`` into ``root``.
+
+        Returns each fetched path with its hash, since that content changes
+        the PDF without changing the marked-up source.
+        """
+        from dvc.exceptions import NotDvcRepoError
+        from dvc.fs import DVCFileSystem
+
+        fetched: list[str] = []
+        try:
+            fs = DVCFileSystem(url=".", rev=rev)
+            found: list[str] = []
+            for path in paths:
+                try:
+                    found += list(fs.find(path.rstrip("/")))
+                except FileNotFoundError:
+                    continue
+            for rpath in dict.fromkeys(found):
+                dvc_info = fs.info(rpath).get("dvc_info")
+                if not dvc_info:
+                    continue
+                fetched.append(f"{rpath} {dvc_info.get('md5')}")
+                dest = os.path.join(root, rpath)
+                if os.path.exists(dest):
+                    continue
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                try:
+                    fs.get_file(rpath, dest)
+                except FileNotFoundError:
+                    warn(
+                        f"{rpath} at {rev[:7]} is in neither the DVC cache "
+                        "nor a remote, so the diff will be missing it"
+                    )
+        except NotDvcRepoError:
+            pass
+        return fetched
+
+    def point_changed_figures_at_base(base_root: str, head_root: str) -> None:
+        """Make the older side's changed figures refer to its own copies.
+
+        The marked-up document is built beside the newer side, where the
+        older side's figure names find the newer figures. Left alone, a
+        figure that changed would show as it is now on both sides, and
+        latexdiff wouldn't mark it, since its name didn't change.
+        """
+        import filecmp
+
+        tex_dir = os.path.dirname(tex_file)
+        build_dir = os.path.join(head_root, tex_dir)
+        graphic_re = re.compile(
+            r"(\\includegraphics\*?\s*(?:\[[^\]]*\])*\s*\{)([^}#\\]+)(\})"
+        )
+
+        def repoint(match: re.Match[str]) -> str:
+            name = match.group(2).strip()
+            exts = calkit.latex._GRAPHICS_EXTS
+            for candidate in [name] + [name + ext for ext in exts]:
+                rel = os.path.normpath(os.path.join(tex_dir, candidate))
+                base_path = os.path.join(base_root, rel)
+                if not os.path.isfile(base_path):
+                    continue
+                head_path = os.path.join(head_root, rel)
+                if os.path.isfile(head_path) and filecmp.cmp(
+                    base_path, head_path, shallow=False
+                ):
+                    return match.group(0)
+                new_name = Path(os.path.relpath(base_path, build_dir))
+                return match.group(1) + new_name.as_posix() + match.group(3)
+            return match.group(0)
+
+        sources = [tex_file] + [
+            path
+            for path in calkit.latex.detect_inputs(tex_file, wdir=base_root)
+            if Path(path).suffix in calkit.latex._SOURCE_EXTS
+        ]
+        for source in sources:
+            source_path = Path(base_root, source)
+            try:
+                text = source_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            new_text = graphic_re.sub(repoint, text)
+            if new_text != text:
+                source_path.write_text(new_text, encoding="utf-8")
+
     repo = calkit.git.get_repo()
     if repo.bare:
         raise_error("This is not a working Git repo")
@@ -435,6 +567,7 @@ def diff(
         typer.echo(f"{output} is already built; use --force to rebuild it")
         return
     checkouts: dict[str, str] = {}
+    shas: dict[str, str] = {}
     try:
         for name, ref in [("base", from_ref), ("head", to_ref)]:
             if ref is None:
@@ -442,6 +575,7 @@ def diff(
             sha = calkit.git.resolve_ref(repo, ref)
             if sha is None:
                 raise_error(f"Git ref '{ref}' was not found")
+            shas[name] = sha
             # A worktree, not a temp directory: a document is rarely one
             # file, and \input needs the rest of them as they were then
             path = os.path.join(DIFF_TMP_DIR, name)
@@ -466,12 +600,24 @@ def diff(
             if not os.path.isfile(side):
                 raise_error(f"{tex_file} does not exist at {ref}")
             sides[name] = side
+        # The working tree already has its DVC-tracked files, if pulled
+        head_root = checkouts.get("head", ".")
+        fetched: list[str] = []
+        for name, root in checkouts.items():
+            paths = inputs or calkit.latex.detect_inputs(tex_file, wdir=root)
+            fetched += fetch_dvc_inputs(root, rev=shas[name], paths=paths)
+        point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
             base_tex=sides["base"],
             head_tex=sides["head"],
             tex_file=tex_file,
+            head_root=head_root,
             output=output,
             environment=environment,
+            latexmk_rc_path=latexmk_rc_path,
+            latexmk_args=latexmk_args,
+            latexdiff_args=latexdiff_args,
+            context=fetched,
             no_check=no_check,
             keep_tex=keep_tex,
             force=force,
@@ -482,19 +628,23 @@ def diff(
             _remove_worktree(path)
 
 
-def _marked_up_digest(marked_up: bytes) -> str:
+def _marked_up_digest(marked_up: bytes, context: list[str] = []) -> str:
     """Hash a marked-up document by what actually determines the PDF.
 
     latexdiff writes the two inputs' paths and modification times into a
     header comment, and the older side is a fresh checkout every time, so
     hashing the file as-is would say "changed" on every run when nothing
     had. Those lines are comments; the PDF doesn't depend on them.
+
+    ``context`` is anything else the PDF depends on, e.g., the hashes of
+    DVC-tracked figures and the options it's built with.
     """
     kept = [
         line
         for line in marked_up.splitlines(keepends=True)
         if not line.startswith((b"%DIF DEL ", b"%DIF ADD "))
     ]
+    kept += [f"{item}\n".encode() for item in context]
     return hashlib.sha256(b"".join(kept)).hexdigest()
 
 
@@ -520,23 +670,29 @@ def _build_diff(
     base_tex: str,
     head_tex: str,
     tex_file: str,
+    head_root: str,
     output: str,
     environment: str | None,
+    latexmk_rc_path: str | None,
+    latexmk_args: list[str],
+    latexdiff_args: list[str],
+    context: list[str],
     no_check: bool,
     keep_tex: bool,
     force: bool,
     verbose: bool,
 ) -> None:
     """Mark up one document against another and build the result."""
-    # Built beside the working copy of the document, so \graphicspath,
-    # \bibliography, and relative \includegraphics resolve the way they do
-    # for the real thing. A checked-out revision would be the tidier place
-    # for it, but a DVC-tracked figure isn't in Git: a checkout has the
-    # pointer file and not the image, and the marked-up document would
-    # come out with its figures missing.
+    # Built beside the newer side, so \graphicspath, \bibliography, and
+    # relative \includegraphics resolve the way they do for the real thing,
+    # against that revision's own files
     tex_dir = os.path.dirname(tex_file) or "."
+    build_dir = os.path.normpath(os.path.join(head_root, tex_dir))
     stem = Path(tex_file).stem
-    diff_tex = os.path.join(tex_dir, f"{stem}-diff.tex")
+    diff_tex = os.path.join(build_dir, f"{stem}-diff.tex")
+    # Where --keep-tex leaves it: beside the document, since a checkout is
+    # removed afterwards
+    kept_tex = os.path.normpath(os.path.join(tex_dir, f"{stem}-diff.tex"))
     try:
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
@@ -576,6 +732,9 @@ def _build_diff(
             latexdiff_cmd.append(
                 f"--filter-script=perl {filter_path.as_posix()}"
             )
+        # User pass-through args come last so they can override Calkit's
+        # defaults
+        latexdiff_cmd += latexdiff_args
         cmd = _tex_cmd(
             latexdiff_cmd + [base_tex, head_tex],
             environment=environment,
@@ -591,14 +750,25 @@ def _build_diff(
                 "latexdiff was not found; it ships with TeX Live, so a "
                 "minimal install may not have it"
             )
-        except subprocess.CalledProcessError:
-            raise_error("latexdiff failed")
-        # The PDF is a function of this marked-up source, so if it hasn't
-        # changed there's nothing to build. Worth checking because the
-        # common case produces nothing at all: on the default branch the
-        # merge base is usually HEAD, so the comparison is empty, and
-        # latexmk is the expensive half of this.
-        digest = _marked_up_digest(marked_up)
+        except subprocess.CalledProcessError as e:
+            raise_error(f"latexdiff failed with exit status {e.returncode}")
+        # The newer side's copy, which is what the document was built with
+        # at that revision
+        rc_path = None
+        if latexmk_rc_path is not None:
+            rc_path = os.path.join(head_root, latexmk_rc_path)
+            if not os.path.isfile(rc_path):
+                rc_path = latexmk_rc_path
+            rc_path = Path(os.path.normpath(rc_path)).as_posix()
+        # The PDF is a function of this marked-up source and how it's built,
+        # so if neither has changed there's nothing to build. Worth checking
+        # because the common case produces nothing at all: on the default
+        # branch the merge base is usually HEAD, so the comparison is empty,
+        # and latexmk is the expensive half of this.
+        digest = _marked_up_digest(
+            marked_up,
+            context=context + [f"latexmkrc {rc_path}"] + latexmk_args,
+        )
         state_path = calkit.latex.diff_state_path(output)
         if (
             not force
@@ -611,9 +781,13 @@ def _build_diff(
             f.write(marked_up)
         aux_dir = DIFF_AUX_DIR
         os.makedirs(aux_dir, exist_ok=True)
-        rel_aux = Path(os.path.relpath(aux_dir, tex_dir)).as_posix()
-        latexmk_cmd = [
-            "latexmk",
+        rel_aux = Path(os.path.relpath(aux_dir, build_dir)).as_posix()
+        latexmk_cmd = ["latexmk"]
+        # First, since latexmk reads an rc file where it appears, so the
+        # directories below override any the rc file sets
+        if rc_path is not None:
+            latexmk_cmd += ["-r", rc_path]
+        latexmk_cmd += [
             "-pdf",
             "-cd",
             "-interaction=nonstopmode",
@@ -622,6 +796,9 @@ def _build_diff(
         ]
         if not verbose:
             latexmk_cmd.append("-silent")
+        # User pass-through args come last so they can override Calkit's
+        # defaults
+        latexmk_cmd += latexmk_args
         latexmk_cmd.append(diff_tex)
         cmd = _tex_cmd(
             latexmk_cmd,
@@ -633,10 +810,26 @@ def _build_diff(
         typer.echo("Building the marked-up document")
         try:
             subprocess.check_call(cmd)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            # -silent hides why, so show the errors LaTeX logged
+            log_path = Path(aux_dir, f"{stem}-diff.log")
+            try:
+                log_lines = log_path.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+            except OSError:
+                log_lines = []
+            shown: list[str] = []
+            for i, line in enumerate(log_lines):
+                if line.startswith("!"):
+                    shown += log_lines[i : i + 3]
+            excerpt = shown[:60] or log_lines[-20:]
+            if excerpt:
+                typer.echo(f"From {log_path.as_posix()}:", err=True)
+                typer.echo("\n".join(excerpt), err=True)
             raise_error(
-                "latexmk failed on the marked-up document; rerun with "
-                "--keep-tex to inspect it"
+                "latexmk failed on the marked-up document with exit status "
+                f"{e.returncode}; rerun with --keep-tex to inspect it"
             )
         built = os.path.join(aux_dir, f"{stem}-diff.pdf")
         if not os.path.isfile(built):
@@ -648,8 +841,12 @@ def _build_diff(
             f.write(digest)
         typer.echo(f"Wrote {output}")
     finally:
-        if not keep_tex and os.path.isfile(diff_tex):
-            os.remove(diff_tex)
+        if os.path.isfile(diff_tex):
+            in_place = os.path.abspath(diff_tex) == os.path.abspath(kept_tex)
+            if keep_tex and not in_place:
+                shutil.copy(diff_tex, kept_tex)
+            if not keep_tex or not in_place:
+                os.remove(diff_tex)
 
 
 @latex_app.command(name="to-docx")

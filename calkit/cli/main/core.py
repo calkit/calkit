@@ -3478,8 +3478,11 @@ def run_in_env(
             typer.echo(f"Running command: {docker_cmd}")
         try:
             subprocess.check_call(docker_cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
-            raise_error("Failed to run in Docker environment")
+        except subprocess.CalledProcessError as e:
+            raise_error(
+                "Failed to run in Docker environment: command exited with "
+                f"status {e.returncode}"
+            )
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)

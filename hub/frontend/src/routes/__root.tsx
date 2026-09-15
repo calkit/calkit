@@ -1,8 +1,10 @@
+import { CloseIcon } from "@chakra-ui/icons"
 import {
   Box,
   Button,
   Flex,
   HStack,
+  IconButton,
   Link,
   Text,
   useColorModeValue,
@@ -61,34 +63,40 @@ function AnalyticsConsentBanner() {
       bg={bg}
       borderTopWidth={1}
       borderColor={borderColor}
-      px={6}
-      py={4}
+      px={4}
+      py={3}
     >
       <Flex
         maxW="6xl"
         mx="auto"
-        gap={4}
+        gap={{ base: 2, md: 3 }}
         direction={{ base: "column", md: "row" }}
-        align={{ base: "stretch", md: "center" }}
+        align={{ base: "flex-end", md: "center" }}
       >
-        <Text fontSize="sm" flex={1}>
-          With your permission, Calkit records which pages you visit and which
-          features you use, so we can improve the features people rely on and
-          remove ones that are unused. Nothing is ever sold or used for
-          advertising. It relies on storage in your browser, so it stays off
-          unless you accept. You can change your choice at any time under
-          Settings → Privacy.{" "}
+        {/* TODO: rewrite this banner text; it has to stay short enough not
+            to cover the signup form on a phone */}
+        <Text fontSize={{ base: "xs", md: "sm" }} flex={1} alignSelf="stretch">
+          Calkit can record which pages and features you use so we can improve
+          them. Nothing is sold or shared.{" "}
           <Link href={privacyPolicyUrl} isExternal textDecoration="underline">
             Privacy policy
           </Link>
         </Text>
-        <HStack spacing={2} justify="flex-end">
+        <HStack spacing={2} flexShrink={0}>
           <Button size="sm" onClick={() => setAnalyticsConsent("denied")}>
             Reject
           </Button>
           <Button size="sm" onClick={() => setAnalyticsConsent("granted")}>
             Accept
           </Button>
+          {/* Closing without answering is a no */}
+          <IconButton
+            aria-label="Close"
+            icon={<CloseIcon boxSize={2.5} />}
+            size="sm"
+            variant="ghost"
+            onClick={() => setAnalyticsConsent("denied")}
+          />
         </HStack>
       </Flex>
     </Box>

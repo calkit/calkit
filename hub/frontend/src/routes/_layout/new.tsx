@@ -9,8 +9,8 @@ import {
   FormErrorMessage,
   FormHelperText,
   FormLabel,
-  Heading,
   HStack,
+  Heading,
   Icon,
   Image,
   Input,
@@ -25,9 +25,9 @@ import {
   Radio,
   RadioGroup,
   Select,
-  Stack,
   SimpleGrid,
   Spacer,
+  Stack,
   Text,
   Textarea,
   useColorModeValue,
@@ -43,10 +43,10 @@ import {
 import type { AxiosError } from "axios"
 import mixpanel from "mixpanel-browser"
 import { useState } from "react"
-import { useDebounce } from "use-debounce"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { FiCircle } from "react-icons/fi"
 import { SiOverleaf, SiZotero } from "react-icons/si"
+import { useDebounce } from "use-debounce"
 import { z } from "zod"
 
 import {
@@ -57,9 +57,9 @@ import {
   UsersService,
 } from "../../client"
 import ConnectGitHubPrompt from "../../components/Common/ConnectGitHubPrompt"
+import FilterableSelect from "../../components/Common/FilterableSelect"
 import BrowseDatasets from "../../components/Datasets/BrowseDatasets"
 import NewDataset from "../../components/Datasets/NewDataset"
-import FilterableSelect from "../../components/Common/FilterableSelect"
 import FigureEditor from "../../components/Figures/FigureEditor"
 import CommandBlock from "../../components/Onboarding/CommandBlock"
 import ReproAudit from "../../components/Onboarding/ReproAudit"
@@ -1481,7 +1481,9 @@ function NewProjectWizard() {
       <ModalContent>
         <ModalCloseButton />
         <ModalBody px={{ base: 6, md: 10 }} py={8}>
-          <StepHeader step={step} steps={steps} />
+          {/* The steps after creation only show once there's a project,
+              so a new user isn't shown seven steps before naming one */}
+          <StepHeader step={step} steps={project ? steps : steps.slice(0, 2)} />
           {body}
         </ModalBody>
         <ModalFooter>

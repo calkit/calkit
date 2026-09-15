@@ -358,6 +358,7 @@ def test_marked_up_digest_ignores_the_header():
     assert _marked_up_digest(changed) != _marked_up_digest(first)
 
 
+@skipif_windows_docker
 def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     # Two revisions that resolve to the same commit is what a pull request
     # diff looks like from the default branch. The pipeline resolves both
@@ -387,3 +388,17 @@ def test_latex_diff_of_one_revision_against_itself(tmp_dir):
         text=True,
     )
     assert "Nothing to compare" not in result.stderr
+    # A verbatim input that's a macro parameter used to make latexdiff try
+    # to open, e.g., '#1.wcsum' and fail
+    with open("paper/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n\\usepackage{verbatim}\n")
+        f.write("\\newcommand{\\wc}[1]{\\verbatiminput{#1.wcsum}}\n")
+        f.write("\\begin{document}\nHi\n\\end{document}\n")
+    _commit("macro")
+    result = subprocess.run(
+        ["calkit", "latex", "diff", "paper/main.tex", "--from", sha],
+        capture_output=True,
+        text=True,
+    )
+    assert "Couldn't open" not in result.stderr
+    assert result.returncode == 0, result.stderr

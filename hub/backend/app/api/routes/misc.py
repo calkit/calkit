@@ -111,6 +111,7 @@ def _parse_public_github_url(url: str) -> tuple[str, str]:
     if "://" not in url:
         url = "https://" + url
     host, _, path = url.split("://", 1)[1].partition("/")
+    # TODO: rewrite the error messages in this function; the page shows them
     if host.lower().removeprefix("www.") != "github.com":
         raise HTTPException(422, "Only public GitHub repos can be checked")
     parts = [p for p in path.split("/") if p]
@@ -193,6 +194,7 @@ def check_public_repo(url: str, request: Request) -> PublicRepoCheck:
     time-boxed, requests are rate limited, and results are cached by commit.
     """
     owner, name = _parse_public_github_url(url)
+    # TODO: rewrite the error messages in this function; the page shows them
     if _over_repo_check_limit(_client_ip(request)):
         raise HTTPException(429, "Too many checks; try again in a few minutes")
     clone_url = f"https://github.com/{owner}/{name}.git"

@@ -283,6 +283,7 @@ function PublicRepoCheck() {
   }
   return (
     <Box mb={12}>
+      {/* TODO: rewrite this heading */}
       <Heading size="md" mb={3}>
         Check a public GitHub repo
       </Heading>
@@ -294,6 +295,7 @@ function PublicRepoCheck() {
         }}
       >
         <HStack maxW="640px">
+          {/* TODO: rewrite the placeholder and button label */}
           <Input
             value={url}
             onChange={(event) => setUrl(event.target.value)}
@@ -311,6 +313,7 @@ function PublicRepoCheck() {
         </HStack>
       </form>
       {checkQuery.isError ? (
+        // TODO: rewrite the fallback error message
         <Text color="ui.danger" fontSize="sm" mt={3}>
           {typeof errorDetail === "string"
             ? errorDetail
@@ -329,6 +332,7 @@ function PublicRepoCheck() {
             {result.owner}/{result.name} at {result.commit.slice(0, 7)}
           </Text>
           <ReproAuditReport check={result.check} />
+          {/* TODO: rewrite both sign-up labels */}
           <Button mt={4} variant="primary" onClick={startFromThis}>
             {gaps > 0 ? "Sign up to fix these" : "Sign up and bring it in"}
           </Button>

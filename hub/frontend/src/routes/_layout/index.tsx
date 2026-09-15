@@ -302,7 +302,7 @@ function LandingPage() {
           },
           {
             title: "Best practices, without the DIY part",
-            body: "Environment management, a workflow system, versioned data, and a paper that rebuilds itself: components typically integrated manually, ready to go from day one.",
+            body: "Environment management, a workflow system, versioned data, and connections to external apps: components typically chosen and integrated manually, ready to go from day one.",
           },
         ].map((item) => (
           <Box key={item.title}>

@@ -364,6 +364,7 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
             'for a in "$@"; do tex="$a"; case "$a" in '
             '-outdir=*) out="${a#-outdir=}";; esac; done\n'
             'cd "$(dirname "$tex")"\n'
+            '[ -f setup.tex ] && echo present > "$RECORD_DIR/setup.txt"\n'
             'stem=$(basename "$tex" .tex)\n'
             'if [ -n "$FAIL" ]; then\n'
             '  printf "junk\\n! Undefined control sequence.\\nl.3 \\\\oops\\n"'
@@ -392,6 +393,23 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     with open("paper/figs/plot.png", "w") as f:
         f.write("old\n")
     subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    # A copy another stage makes, which DVC records but doesn't store
+    os.makedirs("shared")
+    with open("shared/setup.tex", "w") as f:
+        f.write("% setup\n")
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  copy-setup:\n"
+            "    cmd: cp shared/setup.tex paper/setup.tex\n"
+            "    deps: [shared/setup.tex]\n"
+            "    outs:\n"
+            "      - paper/setup.tex:\n"
+            "          cache: false\n"
+        )
+    with open(".gitignore", "a") as f:
+        f.write("/paper/setup.tex\n")
+    subprocess.check_call(["calkit", "dvc", "repro", "-q"])
     _commit("first")
     subprocess.check_call(["git", "tag", "v1"])
     with open("paper/figs/plot.png", "w") as f:
@@ -417,6 +435,8 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         "--graphics-markup=both",
         "--input",
         "paper/figs/",
+        "--input",
+        "paper/setup.tex",
         "--keep-tex",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
@@ -443,6 +463,10 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert latexmk_args.index("-r") < latexmk_args.index(auxdir)
     with open(stubs / "latexdiff-args.txt") as f:
         assert "--graphics-markup=both" in f.read()
+    # An output DVC doesn't store is copied from the working tree, since no
+    # checkout can have it
+    with open(stubs / "setup.txt") as f:
+        assert f.read() == "present\n"
     assert DIFF_TMP_DIR not in subprocess.check_output(
         ["git", "worktree", "list"], text=True
     )

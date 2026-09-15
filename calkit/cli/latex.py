@@ -474,36 +474,86 @@ def diff(
 
         import calkit.dvc
 
+        def reason(e: BaseException) -> str:
+            # DVC wraps a remote's own error, e.g., needing to log in, in
+            # several layers that each say less
+            while e.__cause__ is not None:
+                e = e.__cause__
+            return str(e)
+
         fetched: list[str] = []
         try:
             # A project using Calkit's own remote needs its scheme known
             calkit.dvc.register_ck_scheme()
             fs = DVCFileSystem(url=".", rev=rev)
-            found: list[str] = []
-            for path in paths:
-                try:
-                    found += list(fs.find(path.rstrip("/")))
-                except FileNotFoundError:
+        except NotDvcRepoError:
+            return fetched
+        found: list[str] = []
+        for path in paths:
+            try:
+                found += list(fs.find(path.rstrip("/")))
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                # A directory whose listing is in neither the cache nor a
+                # reachable remote can't be expanded, but the rest of the
+                # comparison can still be built
+                warn(
+                    f"Can't list {path} at {rev[:7]}, so the diff will be "
+                    f"missing it: {reason(e)}"
+                )
+        for rpath in dict.fromkeys(found):
+            dvc_info = fs.info(rpath).get("dvc_info")
+            if not dvc_info:
+                continue
+            fetched.append(f"{rpath} {dvc_info.get('md5')}")
+            dest = os.path.join(root, rpath)
+            if os.path.exists(dest):
+                continue
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            try:
+                fs.get_file(rpath, dest)
+            except Exception as e:
+                warn(
+                    f"Can't fetch {rpath} at {rev[:7]}, so the diff will be "
+                    f"missing it: {reason(e)}"
+                )
+        return fetched
+
+    def copy_uncached_outputs(
+        root: str, rev: str, paths: list[str]
+    ) -> list[str]:
+        """Copy outputs DVC records but doesn't store from the working tree.
+
+        An output with caching off, e.g., a copy another stage makes, has
+        only its hash in ``dvc.lock``, so no revision's checkout can have
+        it. The working tree's copy stands in when it's the same content.
+        Returns each copied path with its hash.
+        """
+        try:
+            lock = calkit.ryaml.load(repo.git.show(f"{rev}:dvc.lock")) or {}
+        except Exception:
+            return []
+        prefixes = [p.rstrip("/") for p in paths]
+        copied: list[str] = []
+        for stage in (lock.get("stages") or {}).values():
+            for out in stage.get("outs") or []:
+                path, md5 = out.get("path"), out.get("md5")
+                if not path or not md5 or str(md5).endswith(".dir"):
                     continue
-            for rpath in dict.fromkeys(found):
-                dvc_info = fs.info(rpath).get("dvc_info")
-                if not dvc_info:
+                if not any(
+                    path == p or path.startswith(p + "/") for p in prefixes
+                ):
                     continue
-                fetched.append(f"{rpath} {dvc_info.get('md5')}")
-                dest = os.path.join(root, rpath)
-                if os.path.exists(dest):
+                dest = os.path.join(root, path)
+                if os.path.exists(dest) or not os.path.isfile(path):
+                    continue
+                if hashlib.md5(Path(path).read_bytes()).hexdigest() != md5:
                     continue
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
-                try:
-                    fs.get_file(rpath, dest)
-                except FileNotFoundError:
-                    warn(
-                        f"{rpath} at {rev[:7]} is in neither the DVC cache "
-                        "nor a remote, so the diff will be missing it"
-                    )
-        except NotDvcRepoError:
-            pass
-        return fetched
+                shutil.copy2(path, dest)
+                copied.append(f"{path} {md5}")
+        return copied
 
     def default_inputs(root: str) -> list[str]:
         """What to fetch or note for a side when no inputs were given.
@@ -627,6 +677,7 @@ def diff(
         for name, root in checkouts.items():
             paths = inputs or default_inputs(root)
             context += fetch_dvc_inputs(root, rev=shas[name], paths=paths)
+            context += copy_uncached_outputs(root, rev=shas[name], paths=paths)
         if "head" not in checkouts:
             # The working tree has no revision to name its files by, so
             # note what's there instead

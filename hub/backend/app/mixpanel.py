@@ -14,6 +14,10 @@ def track(
     add_event_info: dict | None = None,
     meta: dict | None = None,
 ):
+    # Users who haven't answered the consent question are treated as having
+    # said no, the same as in the browser
+    if user.analytics_consent is not True:
+        return
     return mp.track(
         str(user.id),
         event_name=event_name,

@@ -9988,6 +9988,17 @@ export const UserPublicSchema = {
         },
       ],
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   required: [
@@ -10313,6 +10324,17 @@ export const UserUpdateMeSchema = {
         },
       ],
       title: "Github Username",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",

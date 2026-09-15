@@ -190,6 +190,26 @@ def test_update_user_me(
     assert user_db.full_name == full_name
 
 
+def test_update_user_me_analytics_consent(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    r = client.get("/user", headers=normal_user_token_headers)
+    assert r.status_code == 200
+    user_id = r.json()["id"]
+    for consent in (True, False):
+        r = client.patch(
+            "/user",
+            headers=normal_user_token_headers,
+            json={"analytics_consent": consent},
+        )
+        assert r.status_code == 200
+        assert r.json()["analytics_consent"] is consent
+        user_db = db.get(User, uuid.UUID(user_id))
+        assert user_db
+        db.refresh(user_db)
+        assert user_db.analytics_consent is consent
+
+
 def test_update_password_me(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:

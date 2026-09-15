@@ -140,6 +140,17 @@ describe("analytics consent", () => {
     expect(mixpanel.track_pageview).toHaveBeenCalledTimes(2)
   })
 
+  it("notifies subscribers when the answer changes", async () => {
+    const { subscribeAnalyticsConsent, setAnalyticsConsent } = await load()
+    const listener = vi.fn()
+    const unsubscribe = subscribeAnalyticsConsent(listener)
+    setAnalyticsConsent("denied")
+    expect(listener).toHaveBeenCalledTimes(1)
+    unsubscribe()
+    setAnalyticsConsent("granted")
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
   it("opts out without deleting the Mixpanel profile", async () => {
     const { mixpanel, setAnalyticsConsent, getAnalyticsConsent } = await load()
     setAnalyticsConsent("denied")
@@ -147,5 +158,43 @@ describe("analytics consent", () => {
     expect(mixpanel.opt_out_tracking).toHaveBeenCalledWith({
       delete_user: false,
     })
+  })
+})
+
+describe("reconcileAnalyticsConsent", () => {
+  it("applies the account's answer when a user is first seen", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(true, null, true)).toEqual({
+      apply: "granted",
+    })
+    expect(reconcileAnalyticsConsent(false, "granted", true)).toEqual({
+      apply: "denied",
+    })
+  })
+
+  it("does nothing when the account and browser already agree", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(true, "granted", true)).toBeNull()
+    expect(reconcileAnalyticsConsent(false, "denied", false)).toBeNull()
+  })
+
+  it("saves an answer given before signing in to an account without one", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(null, "denied", true)).toEqual({
+      save: false,
+    })
+  })
+
+  it("saves a changed answer to the account after the first look", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(false, "granted", false)).toEqual({
+      save: true,
+    })
+  })
+
+  it("does nothing when neither has an answer", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(null, null, true)).toBeNull()
+    expect(reconcileAnalyticsConsent(undefined, null, false)).toBeNull()
   })
 })

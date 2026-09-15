@@ -5727,6 +5727,10 @@ export type UserPublic = {
    */
   email_verified: boolean
   subscription: UserSubscription | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -5893,6 +5897,10 @@ export type UserUpdateMe = {
    * Github Username
    */
   github_username?: string | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**

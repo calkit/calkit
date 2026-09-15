@@ -1899,19 +1899,10 @@ def post_release_comment(
         "via_share_link": share_token is not None,
         "opened_github_issue": comment.external_url is not None,
     }
+    # Anonymous commenters have no account to hold a consent answer, so only
+    # signed-in commenters are tracked
     if current_user is not None:
         mixpanel.track(current_user, "Posted release comment", event_props)
-    else:
-        distinct_id = (
-            f"share-token:{share_token.id}"
-            if share_token is not None
-            else "anonymous-release-commenter"
-        )
-        mixpanel.mp.track(
-            distinct_id,
-            event_name="Posted release comment",
-            properties=event_props,
-        )
     return ReleaseCommentPublic(
         id=comment.id,
         author_name=comment.author_name,

@@ -7,7 +7,7 @@ import {
   Stack,
   Text,
 } from "@chakra-ui/react"
-import { useState } from "react"
+import { useSyncExternalStore } from "react"
 
 import {
   type AnalyticsConsent,
@@ -15,10 +15,15 @@ import {
   getAnalyticsConsent,
   privacyPolicyUrl,
   setAnalyticsConsent,
+  subscribeAnalyticsConsent,
 } from "../../lib/analytics"
 
 const Privacy = () => {
-  const [consent, setConsent] = useState(getAnalyticsConsent)
+  // Saving to the account happens in the layout, which watches this too
+  const consent = useSyncExternalStore(
+    subscribeAnalyticsConsent,
+    getAnalyticsConsent,
+  )
 
   return (
     <Container maxW="full">
@@ -31,7 +36,8 @@ const Privacy = () => {
             Calkit can record which pages you visit and which features you use,
             so we can improve the features people rely on and remove the ones
             nobody does. It's never sold or used for advertising. This setting
-            applies to this browser. See the{" "}
+            is saved to your account, so it applies wherever you sign in. See
+            the{" "}
             <Link href={privacyPolicyUrl} isExternal textDecoration="underline">
               privacy policy
             </Link>{" "}
@@ -39,10 +45,7 @@ const Privacy = () => {
           </Text>
           <RadioGroup
             value={consent ?? ""}
-            onChange={(value) => {
-              setAnalyticsConsent(value as AnalyticsConsent)
-              setConsent(value as AnalyticsConsent)
-            }}
+            onChange={(value) => setAnalyticsConsent(value as AnalyticsConsent)}
           >
             <Stack>
               <Radio value="granted" colorScheme="teal">

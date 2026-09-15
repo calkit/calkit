@@ -8,16 +8,16 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { Outlet, createRootRoute } from "@tanstack/react-router"
-import React, { Suspense, useState } from "react"
+import React, { Suspense, useSyncExternalStore } from "react"
 
 import NotFound from "../components/Common/NotFound"
 import useSubmitOnCmdEnter from "../hooks/useSubmitOnCmdEnter"
 import {
-  type AnalyticsConsent,
   analyticsEnabled,
   getAnalyticsConsent,
   privacyPolicyUrl,
   setAnalyticsConsent,
+  subscribeAnalyticsConsent,
 } from "../lib/analytics"
 
 const loadDevtools = () =>
@@ -42,14 +42,13 @@ const TanStackDevtools =
 // It doesn't block the page, and rejecting is as prominent as accepting, since
 // consent only counts if saying no is just as easy.
 function AnalyticsConsentBanner() {
-  const [answered, setAnswered] = useState(() => getAnalyticsConsent() !== null)
+  const consent = useSyncExternalStore(
+    subscribeAnalyticsConsent,
+    getAnalyticsConsent,
+  )
   const bg = useColorModeValue("gray.100", "gray.800")
   const borderColor = useColorModeValue("gray.300", "gray.600")
-  if (!analyticsEnabled || answered) return null
-  const answer = (consent: AnalyticsConsent) => {
-    setAnalyticsConsent(consent)
-    setAnswered(true)
-  }
+  if (!analyticsEnabled || consent !== null) return null
   return (
     <Box
       role="region"
@@ -84,10 +83,10 @@ function AnalyticsConsentBanner() {
           </Link>
         </Text>
         <HStack spacing={2} justify="flex-end">
-          <Button size="sm" onClick={() => answer("denied")}>
+          <Button size="sm" onClick={() => setAnalyticsConsent("denied")}>
             Reject
           </Button>
-          <Button size="sm" onClick={() => answer("granted")}>
+          <Button size="sm" onClick={() => setAnalyticsConsent("granted")}>
             Accept
           </Button>
         </HStack>

@@ -98,6 +98,7 @@ class UserUpdateMe(SQLModel):
     full_name: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     github_username: str | None = Field(default=None, max_length=255)
+    analytics_consent: bool | None = None
 
 
 class UpdatePassword(SQLModel):
@@ -197,6 +198,9 @@ class User(UserBase, table=True):
     # code or following its link; null until then. A Google or GitHub
     # sign-in that vouched for the address sets it too.
     email_verified_at: datetime | None = Field(default=None)
+    # Whether the user allows usage analytics; null until they answer. Saved
+    # on the account so server-side events can respect it too.
+    analytics_consent: bool | None = Field(default=None)
     # Relationships
     account: Account = Relationship(back_populates="user", cascade_delete=True)
     github_token: UserGitHubToken | None = Relationship(cascade_delete=True)
@@ -307,6 +311,7 @@ class UserPublic(UserBase):
     github_username: str | None
     email_verified: bool
     subscription: Union["UserSubscription", None]
+    analytics_consent: bool | None = None
 
 
 class UserEmailVerification(SQLModel, table=True):

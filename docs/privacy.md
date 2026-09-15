@@ -7,6 +7,10 @@ command line tool and Python package, and the Calkit browser extension.
 Self-hosted hubs are run by whoever hosts them, and their own policies
 apply.
 
+Calkit is run by Pete Bachant as a sole proprietor, who is responsible for
+the information described here. Questions and requests go to
+[help@calkit.io](mailto:help@calkit.io).
+
 The short version: we keep what's needed to run your account, and, only if
 you allow it, a record of which features you use so we can make Calkit
 better. Your data is never sold, never used for advertising, and never
@@ -44,18 +48,19 @@ watch what any one person is doing.
 ### Usage information
 
 When you first visit the hub, it asks whether you allow usage information
-to be recorded in your browser. If you accept, the hub records the pages you
-visit and the features you use, along with basic browser and device
-information and an approximate location derived from your IP address. If
-you're signed in, this is associated with your account. If you reject, none
-of it is recorded from your browser, and nothing for this purpose is stored
-on your device.
+to be recorded. If you accept, the hub records the pages you visit and the
+features you use, along with basic browser and device information and an
+approximate location derived from your IP address. While you're signed in,
+this is associated with your account, and includes actions recorded by the
+hub's server, such as creating a project or publishing a release.
 
-Some actions are also recorded by the hub's server when you take them while
-signed in, such as signing in, creating a project, or publishing a release,
-for the same purpose described [above](#how-usage-information-is-used).
+If you reject, none of it is recorded, and nothing for this purpose is
+stored on your device. Once you're signed in, your choice is saved to your
+account, so it applies on every device you use.
 
-You can change your choice at any time under Settings → Privacy.
+You can change your choice at any time under Settings → Privacy. Stopping
+it stops future recording. To have usage information that was already
+recorded deleted, email [help@calkit.io](mailto:help@calkit.io).
 
 ### Server logs
 
@@ -79,6 +84,22 @@ email delivery, and usage analytics. They process data only to provide that
 service to Calkit, not for their own purposes. When you connect an outside
 account, like GitHub or Zenodo, data you send there through the hub is
 governed by that service's policy.
+
+### Why we're allowed to use it
+
+- **Account information and your work**: needed to provide the service you
+  signed up for.
+- **Usage information**: only with your consent, which you can withdraw at
+  any time.
+- **Server logs**: our legitimate interest in keeping the service running
+  and secure.
+
+### Where it's stored
+
+calkit.io runs on a server in the United States, and the service providers
+it relies on store data in the United States as well. If you use the hub
+from outside the United States, including from the EU or UK, your
+information is transferred to and processed in the United States.
 
 ## The command line tool and Python package
 
@@ -172,7 +193,7 @@ from the extension's own service worker.
 ## Your choices and rights
 
 - **Usage information**: allow or stop it at any time under Settings →
-  Privacy on the hub.
+  Privacy on the hub, and ask for what was already recorded to be deleted.
 - **Correcting your information**: edit your profile under Settings → My
   profile.
 - **Deleting your account**: Settings → Danger zone deletes your account

@@ -28,8 +28,36 @@ export function getAnalyticsConsent(): AnalyticsConsent | null {
   return value === "granted" || value === "denied" ? value : null
 }
 
+const consentListeners = new Set<() => void>()
+
+// For useSyncExternalStore, so the banner, the settings tab, and the account
+// sync all see an answer given in any one of them
+export function subscribeAnalyticsConsent(listener: () => void): () => void {
+  consentListeners.add(listener)
+  return () => consentListeners.delete(listener)
+}
+
+// Once signed in, the account's saved answer wins the first time it's seen,
+// so a choice follows the user between browsers. After that, answers given in
+// this browser (including one given before signing in) are saved to the
+// account, which is what server-side events check.
+export function reconcileAnalyticsConsent(
+  account: boolean | null | undefined,
+  local: AnalyticsConsent | null,
+  firstSeen: boolean,
+): { apply: AnalyticsConsent } | { save: boolean } | null {
+  if (firstSeen && account != null) {
+    const fromAccount = account ? "granted" : "denied"
+    return fromAccount === local ? null : { apply: fromAccount }
+  }
+  if (local === null) return null
+  const granted = local === "granted"
+  return account === granted ? null : { save: granted }
+}
+
 export function setAnalyticsConsent(consent: AnalyticsConsent): void {
   localStorage.setItem(CONSENT_KEY, consent)
+  for (const listener of consentListeners) listener()
   if (consent === "granted") {
     mixpanel.opt_in_tracking()
     // The page the visitor accepted on was dropped while opted out

@@ -385,8 +385,10 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
     subprocess.check_call(["calkit", "dvc", "init", "-q"])
     os.makedirs("paper/figs")
-    with open("paper/main.tex", "w") as f:
-        f.write("\\documentclass{article}\n\\begin{document}\n")
+    with open("paper/main.tex", "w", encoding="utf-8") as f:
+        f.write("\\documentclass{article}\n")
+        f.write("\\newcommand{\\wc}[1]{\\verbatiminput{#1.wcsum}}\n")
+        f.write("\\begin{document}\nGreen\u2019s function\n")
         f.write("\\includegraphics{figs/plot}\n\\end{document}\n")
     with open("paper/.latexmkrc", "w") as f:
         f.write("$aux_dir = 'aux';\n")
@@ -448,8 +450,15 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     output = get_diff_path("paper/main.tex", "v1", "HEAD")
     with open(output) as f:
         assert f.read() == "old\nnew\n"
-    with open("paper/main-diff.tex") as f:
+    with open("paper/main-diff.tex", encoding="utf-8") as f:
         marked_up = f.read()
+    # A verbatim input named by a macro parameter is broken onto its own
+    # line in each checkout rather than by latexdiff's --filter-script,
+    # which mangles non-ASCII text
+    assert "\\verbatiminput%\n{#1.wcsum}" in marked_up
+    assert "Green\u2019s function" in marked_up
+    with open(stubs / "latexdiff-args.txt") as f:
+        assert "--filter-script" not in f.read()
     assert "\\includegraphics{../../base/paper/figs/plot.png}" in marked_up
     assert "\\includegraphics{figs/plot}" in marked_up
     assert not os.path.exists("paper/figs")

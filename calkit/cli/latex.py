@@ -302,6 +302,13 @@ def build(
 
 DIFF_TMP_DIR = calkit.latex.DIFF_TMP_DIR
 DIFF_AUX_DIR = calkit.latex.DIFF_AUX_DIR
+# A verbatim input named by a macro parameter, e.g., \verbatiminput{#1.wcsum}
+# in a \newcommand, which latexdiff dies trying to open. Breaking the line
+# after the command reads the same to TeX, but not to latexdiff's pattern.
+_VERBATIM_PARAM_RE = re.compile(
+    r"(\\(?:verbatiminput\*?|lstinputlisting))"
+    r"(?=\s*(?:\[[^\]\n]*\])?\s*\{[^}\n]*#[0-9])"
+)
 get_diff_path = calkit.latex.get_diff_path
 _default_base_ref = calkit.latex.default_base_ref
 
@@ -555,6 +562,29 @@ def diff(
                 copied.append(f"{path} {md5}")
         return copied
 
+    def break_verbatim_params(root: str) -> None:
+        """Break verbatim inputs named by macro parameters in a checkout.
+
+        Done to the checked-out files directly rather than with latexdiff's
+        --filter-script, which hands text to the script and reads it back
+        with no encoding, mangling anything outside Latin-1, e.g., a curly
+        apostrophe.
+        """
+        sources = [tex_file] + [
+            path
+            for path in calkit.latex.detect_inputs(tex_file, wdir=root)
+            if Path(path).suffix in calkit.latex._SOURCE_EXTS
+        ]
+        for source in sources:
+            source_path = Path(root, source)
+            try:
+                text = source_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            new_text = _VERBATIM_PARAM_RE.sub("\\1%\n", text)
+            if new_text != text:
+                source_path.write_text(new_text, encoding="utf-8")
+
     def default_inputs(root: str) -> list[str]:
         """What to fetch or note for a side when no inputs were given.
 
@@ -694,6 +724,8 @@ def diff(
                         f"{file_path.as_posix()} {stat.st_size} "
                         f"{stat.st_mtime_ns}"
                     )
+        for root in checkouts.values():
+            break_verbatim_params(root)
         point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
             base_tex=sides["base"],
@@ -785,14 +817,10 @@ def _build_diff(
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
         latexdiff_cmd = ["latexdiff", "--flatten", "--encoding=utf8"]
-        # latexdiff dies trying to open a verbatim input that's a macro
-        # parameter, e.g., \verbatiminput{#1.wcsum} in a \newcommand, so a
-        # filter breaks the line after the command, which TeX reads the same
-        # but latexdiff's pattern doesn't match
-        verbatim_param = re.compile(
-            r"\\(?:verbatiminput\*?|lstinputlisting)"
-            r"\s*(?:\[[^\]\n]*\])?\s*\{[^}\n]*#[0-9]"
-        )
+        # A checkout's verbatim inputs named by macro parameters are already
+        # broken, so this only finds the working tree's, which can't be
+        # edited. A filter breaks those instead, though latexdiff's
+        # --filter-script mangles anything outside Latin-1.
         sources = [base_tex, head_tex] + [
             path
             for side in (base_tex, head_tex)
@@ -801,7 +829,7 @@ def _build_diff(
         ]
         if any(
             os.path.isfile(path)
-            and verbatim_param.search(
+            and _VERBATIM_PARAM_RE.search(
                 Path(path).read_text(encoding="utf-8", errors="replace")
             )
             for path in sources

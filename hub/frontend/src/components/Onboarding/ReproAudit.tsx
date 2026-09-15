@@ -185,52 +185,12 @@ export function auditFindings(check: ReproCheck): AuditFinding[] {
   return findings
 }
 
-interface ReproAuditProps {
-  accountName: string
-  projectName: string
-}
-
-/**
- * What we found in an imported project, and what's between it and
- * reproducible.
- *
- * This is the moment the "clean up a project in progress" path promised:
- * someone finally looked at the whole thing and said what's there. The
- * gaps become the project checklist, so nothing here is a dead end.
- */
-const ReproAudit = ({ accountName, projectName }: ReproAuditProps) => {
+/** The findings of one check, wherever it came from. */
+export const ReproAuditReport = ({ check }: { check: ReproCheck }) => {
   const okColor = "ui.success"
   const gapColor = useColorModeValue("orange.500", "orange.300")
   const cardBg = useColorModeValue("white", "ui.darkSlate")
   const borderColor = useColorModeValue("gray.200", "gray.600")
-  const checkQuery = useQuery({
-    queryKey: ["projects", accountName, projectName, "repro-check"],
-    queryFn: () =>
-      ProjectsService.getProjectReproCheck({
-        owner_name: accountName,
-        project_name: projectName,
-      }).then((response) => response.data),
-    retry: false,
-    refetchOnWindowFocus: false,
-  })
-  if (checkQuery.isPending) {
-    return (
-      <Box>
-        <Skeleton height="20px" mb={3} />
-        <Skeleton height="20px" mb={3} />
-        <Skeleton height="20px" />
-      </Box>
-    )
-  }
-  if (checkQuery.isError || !checkQuery.data) {
-    return (
-      <Text color="ui.dim">
-        Couldn't read the project yet. It may still be importing; the project
-        page will show the same summary once it's in.
-      </Text>
-    )
-  }
-  const check = checkQuery.data
   const findings = auditFindings(check)
   const gaps = findings.filter((f) => !f.ok)
   const stats = [
@@ -302,6 +262,50 @@ const ReproAudit = ({ accountName, projectName }: ReproAuditProps) => {
       </Box>
     </Box>
   )
+}
+
+interface ReproAuditProps {
+  accountName: string
+  projectName: string
+}
+
+/**
+ * What we found in an imported project, and what's between it and
+ * reproducible.
+ *
+ * This is the moment the "clean up a project in progress" path promised:
+ * someone finally looked at the whole thing and said what's there. The
+ * gaps become the project checklist, so nothing here is a dead end.
+ */
+const ReproAudit = ({ accountName, projectName }: ReproAuditProps) => {
+  const checkQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "repro-check"],
+    queryFn: () =>
+      ProjectsService.getProjectReproCheck({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+  if (checkQuery.isPending) {
+    return (
+      <Box>
+        <Skeleton height="20px" mb={3} />
+        <Skeleton height="20px" mb={3} />
+        <Skeleton height="20px" />
+      </Box>
+    )
+  }
+  if (checkQuery.isError || !checkQuery.data) {
+    return (
+      <Text color="ui.dim">
+        Couldn't read the project yet. It may still be importing; the project
+        page will show the same summary once it's in.
+      </Text>
+    )
+  }
+  return <ReproAuditReport check={checkQuery.data} />
 }
 
 export default ReproAudit

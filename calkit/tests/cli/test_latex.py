@@ -434,7 +434,7 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         "--to",
         "HEAD",
         "--latexdiff-arg",
-        "--graphics-markup=both",
+        "--graphics-markup=new-only",
         "--input",
         "paper/figs/",
         "--input",
@@ -473,8 +473,11 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     # Inside the directory the document is built in, since TeX refuses to
     # write anywhere else and makeindex runs from inside it for glossaries
     assert auxdir == "-auxdir=calkit-latex-diff-aux"
+    # An explicit --graphics-markup replaces Calkit's default
     with open(stubs / "latexdiff-args.txt") as f:
-        assert "--graphics-markup=both" in f.read()
+        latexdiff_args = f.read().split()
+    assert "--graphics-markup=new-only" in latexdiff_args
+    assert "--graphics-markup=both" not in latexdiff_args
     # An output DVC doesn't store is copied from the working tree, since no
     # checkout can have it
     with open(stubs / "setup.txt") as f:
@@ -493,6 +496,10 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert result.returncode == 0, result.stderr
     with open(output) as f:
         assert f.read() == "old\nnew\n"
+    # Changed figures are shown old and new by default, since each side has
+    # its own revision's figures
+    with open(stubs / "latexdiff-args.txt") as f:
+        assert "--graphics-markup=both" in f.read().split()
     # Changing how a comparison between fixed revisions is built rebuilds
     # it, since the pipeline only runs it when something has changed
     head_sha = subprocess.check_output(

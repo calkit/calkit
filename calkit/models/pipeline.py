@@ -1012,7 +1012,8 @@ class LatexStage(Stage):
     latexdiff_args: list[str] = Field(
         default=[],
         description="Extra arguments passed straight through to latexdiff "
-        "when building diffs, e.g., '--graphics-markup=both'.",
+        "when building diffs, e.g., '--type=CFONT'. Changed figures are "
+        "shown old and new unless '--graphics-markup' is set here.",
     )
 
     @property

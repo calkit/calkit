@@ -391,7 +391,9 @@ def diff(
             "--latexdiff-arg",
             help=(
                 "Extra argument to pass through to latexdiff, e.g., "
-                "'--graphics-markup=both'. Repeat the option to pass more "
+                "'--type=CFONT'. Changed figures are shown old and new by "
+                "default; pass '--graphics-markup=new-only' to show only the "
+                "new. Repeat the option to pass more "
                 "than one."
             ),
         ),
@@ -848,6 +850,11 @@ def _build_diff(
             latexdiff_cmd.append(
                 f"--filter-script=perl {filter_path.as_posix()}"
             )
+        # Each side has its own revision's figures, so a changed one is
+        # shown both ways rather than only as it is now, unless the user
+        # chose otherwise
+        if not any(a.startswith("--graphics-markup") for a in latexdiff_args):
+            latexdiff_cmd.append("--graphics-markup=both")
         # User pass-through args come last so they can override Calkit's
         # defaults
         latexdiff_cmd += latexdiff_args

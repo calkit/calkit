@@ -190,8 +190,10 @@ Each side of a comparison is built from its own revision, including
 figures and tables tracked with DVC.
 Anything the stage lists in `inputs` that DVC tracks is fetched from the
 cache, or a remote, as it was at that commit.
-A figure that changed is marked as changed, and `latexdiff`'s
-`--graphics-markup=both` shows the old one beside the new.
+A figure that changed is shown both as it was and as it is now, using
+`latexdiff`'s `--graphics-markup=both`.
+To show only the new version, set `--graphics-markup=new-only` in
+`latexdiff_args`.
 
 The diff is built the same way as the document, with the stage's
 `latexmkrc_path` and `latexmk_args`.
@@ -210,7 +212,6 @@ pipeline:
       diffs:
         - paper-1-submitted
       latexdiff_args:
-        - --graphics-markup=both
         - --type=CFONT
 ```
 

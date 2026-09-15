@@ -419,20 +419,20 @@ automatically.
 
 Model class: `LatexStage`
 
-| Kind-specific parameter | Type                          | Required | Default | Description                                                                                                                                       |
-| ----------------------- | ----------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target_path`           | str                           | yes      |         | Path to the .tex file to compile.                                                                                                                 |
-| `output_dir`            | str \| None                   | no       | null    | Directory for latexmk output. Defaults to compiling in place, alongside the target.                                                               |
-| `aux_dir`               | str \| None                   | no       | null    | Directory for latexmk auxiliary files.                                                                                                            |
-| `latexmkrc_path`        | str \| None                   | no       | null    | Path to a latexmkrc file to use.                                                                                                                  |
-| `pdf_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the resulting PDF.                                                                                                                 |
-| `diffs`                 | list[str \| list[str]]        | no       |         | Comparisons to keep for this document, each a pair of revisions. A bare string is shorthand for comparing that revision against the working tree. |
-| `diff_pdf_storage`      | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the resulting diff PDFs.                                                                                                           |
-| `verbose`               | bool                          | no       | False   | Show full latexmk output.                                                                                                                         |
-| `force`                 | bool                          | no       | False   | Keep compiling despite errors (latexmk -f).                                                                                                       |
-| `synctex`               | bool                          | no       | True    | Generate SyncTeX data for editor/PDF navigation.                                                                                                  |
-| `latexmk_args`          | list[str]                     | no       |         | Extra arguments passed straight through to latexmk, for control Calkit does not model.                                                            |
-| `latexdiff_args`        | list[str]                     | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--graphics-markup=both'.                                         |
+| Kind-specific parameter | Type                          | Required | Default | Description                                                                                                                                                                   |
+| ----------------------- | ----------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target_path`           | str                           | yes      |         | Path to the .tex file to compile.                                                                                                                                             |
+| `output_dir`            | str \| None                   | no       | null    | Directory for latexmk output. Defaults to compiling in place, alongside the target.                                                                                           |
+| `aux_dir`               | str \| None                   | no       | null    | Directory for latexmk auxiliary files.                                                                                                                                        |
+| `latexmkrc_path`        | str \| None                   | no       | null    | Path to a latexmkrc file to use.                                                                                                                                              |
+| `pdf_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the resulting PDF.                                                                                                                                             |
+| `diffs`                 | list[str \| list[str]]        | no       |         | Comparisons to keep for this document, each a pair of revisions. A bare string is shorthand for comparing that revision against the working tree.                             |
+| `diff_pdf_storage`      | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the resulting diff PDFs.                                                                                                                                       |
+| `verbose`               | bool                          | no       | False   | Show full latexmk output.                                                                                                                                                     |
+| `force`                 | bool                          | no       | False   | Keep compiling despite errors (latexmk -f).                                                                                                                                   |
+| `synctex`               | bool                          | no       | True    | Generate SyncTeX data for editor/PDF navigation.                                                                                                                              |
+| `latexmk_args`          | list[str]                     | no       |         | Extra arguments passed straight through to latexmk, for control Calkit does not model.                                                                                        |
+| `latexdiff_args`        | list[str]                     | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here. |
 
 ### `map-paths`
 

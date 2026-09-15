@@ -17,7 +17,7 @@ def get_token() -> str:
     if token is None:
         token = os.getenv("GITHUB_TOKEN")
     if token is None:
-        token = calkit.cloud.get("/user/github-token")["access_token"]
+        token = calkit.hub.get("/user/github-token")["access_token"]
     return token
 
 

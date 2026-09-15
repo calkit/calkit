@@ -1,0 +1,67 @@
+busytex WASM engine — license, attribution & source (the "license wall")
+========================================================================
+
+This directory holds the in-browser LaTeX engine. It is deliberately kept
+separate from the rest of calkit-cloud (which is MIT — see the repository root
+LICENSE). The app uses this engine only at arm's length — it boots a Web Worker
+(busytex_worker.js) and communicates by message-passing (postMessage), and the
+.wasm is a runtime-fetched static asset, never imported into the app's JS bundle
+graph. So the MIT frontend/backend are a mere *user* of this engine, not a
+derivative work of it, and the licenses below do NOT extend to the rest of the
+repository.
+
+Committed here:
+    busytex.js, busytex.wasm      the compiled busytex engine (+ Calkit patches)
+    busytex_worker.js             MIT glue (Web Worker entry)
+    busytex_pipeline.js           MIT glue (compile pipeline)
+    LICENSE-busytex               this file
+
+Downloaded at build time, NOT committed (git-ignored): the TeX Live filesystem
+bundles `*.data` and their `.js` loaders, which carry the various per-package
+TeX Live licenses of their contents (mostly LPPL). See download-tex-engine.sh.
+
+Licenses of what's inside busytex.{js,wasm}
+-------------------------------------------
+- busytex glue + build recipe .................. MIT (https://github.com/busytex/busytex)
+- Calkit remote-fetch / font-generation patches  MIT (see spikes/busytex-remote-fetch/)
+- pdfTeX ....................................... GPL-2.0-or-later
+- LuaTeX ....................................... GPL-2.0-or-later
+- XeTeX ........................................ permissive (X11/MIT-style)
+- kpathsea ..................................... LGPL-2.1-or-later
+- TeX (Knuth) .................................. permissive
+
+Because the compiled `busytex.wasm` links pdfTeX and LuaTeX, the binary as a
+whole is distributed under the terms of the **GNU GPL v2 (or later)**. This is
+normal for any TeX distribution binary; it is NOT AGPL, and it carries no
+network-use / source-link obligation. (SwiftLaTeX's AGPL engine was
+intentionally NOT used — see LATEX_EDITOR_PLAN.md §0.)
+
+Corresponding source (GPL/LGPL requirement)
+-------------------------------------------
+The complete corresponding source for this binary is publicly available:
+- busytex build system: https://github.com/busytex/busytex
+- TeX Live 2023 sources (pdfTeX, LuaTeX, XeTeX, kpathsea): https://tug.org/texlive/
+- Calkit's patches + exact build steps: spikes/busytex-remote-fetch/ in this repo
+
+MIT License (busytex glue + Calkit patches)
+-------------------------------------------
+Copyright (c) busytex contributors
+Copyright (c) Calkit (remote-fetch / font-generation patches)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

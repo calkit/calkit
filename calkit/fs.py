@@ -1,5 +1,5 @@
 """A filesystem-like object that follows ``fsspec`` and interacts with Calkit
-cloud storage to unify operations between private and public storage.
+object storage to unify operations between private and public storage.
 
 The basic operation is as follows:
 1. Make a request to the Calkit API over HTTP to get file operation info.
@@ -13,17 +13,17 @@ Path format:
     - project: Project name
     - path/to/file: File path within the project (optional)
 
-Supported storage backends (via Calkit Cloud API):
+Supported storage backends (via the Calkit hub API):
     - Google Cloud Storage (GCS) - presigned URLs
     - Amazon S3 - presigned URLs
     - Google Drive - OAuth + API
     - Box - OAuth + API
-    - Other storage providers as configured in Calkit Cloud
+    - Other storage providers as configured in the hub
 
-Multi-cloud support:
-    By default, the filesystem routes to the Calkit Cloud API endpoint
-    configured by CALKIT_ENV (production, staging, etc.). To use a different
-    Calkit Cloud instance:
+Multi-backend support:
+    By default, the filesystem routes to the Calkit hub API endpoint
+    of the active hub (CALKIT_HUB, the project's declared hub, or
+    default_hub). To use a different Calkit hub:
 
     - DVC config: dvc remote modify myremote endpointurl https://api.other.com
     - URI query: ck://owner/project/file?endpoint_url=https://api.other.com
@@ -130,13 +130,13 @@ def _parse_path(path: str) -> tuple[str, str, str]:
 
 
 class CalkitFileSystem(AbstractFileSystem):
-    """An fsspec-compatible filesystem for Calkit cloud storage.
+    """An fsspec-compatible filesystem for Calkit hub storage.
 
     This filesystem makes requests to the Calkit API to get file operation
     information, then uses the appropriate method to interact with the
     underlying storage backend.
 
-    The Calkit Cloud API acts as a compatibility layer that:
+    The Calkit hub API acts as a compatibility layer that:
 
     - Determines which storage backend is configured for each project
     - Returns appropriate access credentials (presigned URLs, OAuth tokens,
@@ -151,19 +151,19 @@ class CalkitFileSystem(AbstractFileSystem):
     - Users can create subdirectories for organization (data/, models/, etc.)
     - Files can be stored at the project root
 
-    Cloud endpoints are configured via:
+    Endpoints are configured via:
 
     - endpointurl parameter (for DVC remotes): Route to different Calkit
       instances
     - endpoint_url query parameter (for URIs): Ad-hoc endpoint specification
-    - CALKIT_ENV environment variable: Select production, staging, local, or
-      test
-    - Defaults to production when unspecified
+    - the active hub: CALKIT_HUB, the working directory project's declared
+      ``hub``, or the ``default_hub`` config value
+    - Defaults to calkit.io when unspecified
 
     This design allows for:
 
     - Multiple storage backend support without client-side changes
-    - Multi-cloud support with configurable endpoints
+    - Multiple storage backends with configurable endpoints
     - Future protocol upgrades (e.g., SFTP) without breaking API compatibility
     - Unified interface regardless of underlying storage provider
 
@@ -172,8 +172,8 @@ class CalkitFileSystem(AbstractFileSystem):
     protocol : str
         The protocol scheme for this filesystem ("ck")
     base_url : str
-        The Calkit Cloud API endpoint URL, configured via endpointurl in DVC
-        config, endpoint_url in URI query, or CALKIT_ENV environment variable.
+        The Calkit hub API endpoint URL, configured via endpointurl in DVC
+        config, endpoint_url in URI query, or the active hub.
         Defaults to production (https://api.calkit.io) when unspecified.
     """
 
@@ -187,8 +187,8 @@ class CalkitFileSystem(AbstractFileSystem):
 
     @property
     def base_url(self) -> str:
-        """Get the base URL for the Calkit Cloud API."""
-        return self._base_url or calkit.cloud.get_base_url()
+        """Get the base URL for the Calkit hub API."""
+        return self._base_url or calkit.hub.get_base_url()
 
     @staticmethod
     def _normalize_info(
@@ -222,7 +222,7 @@ class CalkitFileSystem(AbstractFileSystem):
             request_body["content_length"] = content_length
         if content_type is not None:
             request_body["content_type"] = content_type
-        resp = calkit.cloud.post(
+        resp = calkit.hub.post(
             endpoint, json=request_body, base_url=self.base_url
         )
         # Validate response has required fields
@@ -250,7 +250,7 @@ class CalkitFileSystem(AbstractFileSystem):
         }
         if include:
             request_body["include"] = include
-        resp = calkit.cloud.post(
+        resp = calkit.hub.post(
             endpoint, json=request_body, base_url=self.base_url
         )
         if "backend" not in resp:
@@ -989,7 +989,7 @@ class CalkitFileSystem(AbstractFileSystem):
         mode="overwrite",
         **kwargs,
     ):
-        """Upload a local file to Calkit cloud storage.
+        """Upload a local file to Calkit hub storage.
 
         Overrides the default fsspec implementation to report progress based
         on actual bytes uploaded rather than bytes written to the local buffer.
@@ -1024,7 +1024,7 @@ class CalkitFileSystem(AbstractFileSystem):
 
 
 class CalkitFile(AbstractBufferedFile):
-    """A file-like object for reading/writing from Calkit cloud storage.
+    """A file-like object for reading/writing from Calkit hub storage.
 
     This class handles buffering and delegates actual I/O to the underlying
     storage backend (GCS, S3, Google Drive, Box, etc.) via the Calkit API.
@@ -1092,7 +1092,7 @@ class CalkitFile(AbstractBufferedFile):
                 self.owner, self.project, self.file_path, "get"
             )
         # Add Range header for partial content
-        # For backends where range is unsupported, the Calkit Cloud API can
+        # For backends where range is unsupported, the Calkit hub API can
         # choose to ignore this header or return a backend-specific request
         # configuration
         headers = {"Range": f"bytes={start}-{end - 1}"}
@@ -1104,7 +1104,7 @@ class CalkitFile(AbstractBufferedFile):
         return resp.content
 
     def _upload_chunk(self, final: bool = False) -> int | bool:
-        """Upload buffered data to cloud storage."""
+        """Upload buffered data to object storage."""
         if not final:
             # For non-final chunks, we don't upload yet (buffer accumulates)
             return False

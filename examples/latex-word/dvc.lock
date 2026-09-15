@@ -1,0 +1,63 @@
+schema: '2.0'
+stages:
+  build-paper:
+    cmd: calkit latex build -e tex --no-check paper/main.tex
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: 92243501d7c8e4386853adc821e64e9d.dir
+      size: 2136
+      nfiles: 2
+    - path: paper/figures
+      hash: md5
+      md5: a47f1c47051ce6c45a28060ec6f6f3f7.dir
+      size: 10834
+      nfiles: 2
+    - path: paper/main.tex
+      hash: md5
+      md5: 1d0fe2c1186498c3960dfd71d0fe5fc3
+      size: 1587
+    - path: paper/methods.tex
+      hash: md5
+      md5: b56a59736c54be896d9194ac318c84fd
+      size: 692
+    - path: paper/refs.bib
+      hash: md5
+      md5: 5ab1183dc30c5f6e36c11ea050165e93
+      size: 404
+    outs:
+    - path: paper/main.pdf
+      hash: md5
+      md5: 52b546095ffc2c467be10710f256f89d
+      size: 125002
+  plot-wake:
+    cmd: calkit xenv -n py --no-check -- python scripts/plot-wake.py
+    deps:
+    - path: .calkit/env-locks/py
+      hash: md5
+      md5: 399b8b8c9af3162242d15f5feee3462b.dir
+      size: 378
+      nfiles: 2
+    - path: scripts/plot-wake.py
+      hash: md5
+      md5: 0f3b586290046a1651601938699a780c
+      size: 518
+    outs:
+    - path: figures/wake-deficit.pdf
+      hash: md5
+      md5: e10454178199440ef9821ccf9810ad4b
+      size: 10815
+  figs-to-paper:
+    cmd: calkit map-paths --dir-to-dir-replace "figures->paper/figures"
+    deps:
+    - path: figures
+      hash: md5
+      md5: a47f1c47051ce6c45a28060ec6f6f3f7.dir
+      size: 10834
+      nfiles: 2
+    outs:
+    - path: paper/figures
+      hash: md5
+      md5: a47f1c47051ce6c45a28060ec6f6f3f7.dir
+      size: 10834
+      nfiles: 2

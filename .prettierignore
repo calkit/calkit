@@ -7,3 +7,4 @@ calkit
 .pytest_cache
 .ruff_cache
 .venv
+browser-ext/dist

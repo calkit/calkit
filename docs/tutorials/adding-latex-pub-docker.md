@@ -26,11 +26,8 @@ What happens when we do this:
 
 1. A new publication is added to `calkit.yaml`.
 1. A new Docker environment called `latex` is added to `calkit.yaml`.
-   This environment uses an `_include` key so the details can be written to
-   a different file, `.calkit/environments/latex.yaml`.
-   This will allow us to use that environment specification as an input
-   dependency for a DVC pipeline stage,
-   such that if our environment changes, that stage will be rerun.
+   The pipeline stage depends on that environment's specification,
+   so if our environment changes, that stage will be rerun.
 1. Files from a LaTeX template called "article" are copied into the `./paper`
    directory.
 1. A new stage called `build-paper` is added to the DVC pipeline in `dvc.yaml`.

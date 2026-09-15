@@ -1,0 +1,14 @@
+# Our patched busytex engine (MIT, ~30 MB) IS committed — see LICENSE-busytex.
+# The stock TeX Live filesystem bundles (~190 MB, mixed per-package licenses)
+# are NOT committed; they're downloaded from the upstream busytex release at
+# build time by scripts/download-tex-engine.sh. The small MIT glue
+# (busytex_worker.js, busytex_pipeline.js) is committed too.
+#
+# So busytex.js + busytex.wasm are intentionally NOT ignored here.
+*.data
+texlive-basic.js
+ubuntu-texlive-*.js
+# Build-output copies + stock backups — not committed.
+*.stock
+busytex.patched.js
+busytex.patched.wasm

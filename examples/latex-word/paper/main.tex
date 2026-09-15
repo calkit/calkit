@@ -1,0 +1,57 @@
+\documentclass[twocolumn]{article}
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\title{Wake recovery behind a model turbine}
+\author{P. Bachant \and A. Reviewer}
+\begin{document}
+\maketitle
+\begin{abstract}
+We study the wake of a model turbine. The flow is turbulent~\citep{smith2020}.
+This is the abstract's second sentence, which is fairly long so that it
+wraps across a couple of lines in the two-column layout.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Wakes matter for wind farm layout, as discussed by \citet{smith2020}
+and \citet{lee2018}.
+The flow is turbulent~\citep{smith2020}.
+% A comment that should not appear
+This paragraph contains an inline equation $Re = U D/\nu \approx 10^5$
+and a hyphenated compound like ``high-Reynolds-number'' plus a
+non-breaking~space and an em dash---like this one.
+
+\input{methods}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\linewidth]{figures/wake-deficit.pdf}
+  \caption{Modeled wake velocity deficit.}
+  \label{fig:one}
+\end{figure}
+
+\begin{table}[t]
+  \centering
+  \caption{Parameters used in the wake model.}
+  \label{tab:params}
+  \begin{tabular}{lcc}
+    \toprule
+    Parameter & Symbol & Value \\
+    \midrule
+    Thrust coefficient & $C_T$ & 0.8 \\
+    Growth rate & $k$ & 0.05 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Conclusions}
+
+The model in Eq.~\eqref{eq:wake} fits the data in Sec.~\ref{sec:methods}
+reasonably well.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+\end{document}

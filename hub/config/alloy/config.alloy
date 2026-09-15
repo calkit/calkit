@@ -1,0 +1,73 @@
+// Discover all running Docker containers.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Relabel container metadata into Loki labels.
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "project"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"
+  }
+}
+
+// Read logs from Docker via the Docker daemon API.
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.docker_logs.output
+  forward_to = [loki.process.parse_json.receiver]
+}
+
+// Extract structured fields from JSON log lines emitted by the FastAPI backend.
+loki.process "parse_json" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.json {
+    expressions = {
+      level       = "levelname",
+      logger      = "name",
+      method      = "method",
+      path        = "path",
+      status_code = "status_code",
+      duration_ms = "duration_ms",
+    }
+  }
+
+  // Only promote low-cardinality fields to Loki stream labels. `path` and
+  // `status_code` are left as parsed JSON fields (still queryable via
+  // `| json`): `path` in particular is effectively unbounded (every DVC
+  // object is a unique md5 path), and promoting it spawns a new stream per
+  // request, blowing past Loki's per-tenant stream limit and silently
+  // dropping ingestion for the backend services.
+  stage.labels {
+    values = {
+      level  = "",
+      method = "",
+    }
+  }
+}
+
+// Push logs to the local Loki instance.
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

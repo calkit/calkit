@@ -28,6 +28,12 @@ export function getAnalyticsConsent(): AnalyticsConsent | null {
   return value === "granted" || value === "denied" ? value : null
 }
 
+// Sent with signup and login requests; unanswered is left out, not sent as no
+export function getAnalyticsConsentToSave(): boolean | undefined {
+  const consent = getAnalyticsConsent()
+  return consent === null ? undefined : consent === "granted"
+}
+
 const consentListeners = new Set<() => void>()
 
 // For useSyncExternalStore, so the banner, the settings tab, and the account

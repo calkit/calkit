@@ -11,6 +11,7 @@ import {
   type UserRegister,
   UsersService,
 } from "../client"
+import { getAnalyticsConsentToSave } from "../lib/analytics"
 import {
   clearTokens,
   forceRefreshAccessToken,
@@ -89,7 +90,10 @@ const useAuth = () => {
 
   const login = async (data: AccessToken) => {
     const response = await LoginService.loginAccessToken({
-      bodyLoginLoginAccessToken: data,
+      bodyLoginLoginAccessToken: {
+        ...data,
+        analytics_consent: getAnalyticsConsentToSave(),
+      },
     }).then((response) => response.data)
     storeTokens(response.access_token, response.refresh_token)
   }
@@ -114,6 +118,7 @@ const useAuth = () => {
       oAuthCodeExchange: {
         code: data.code,
         redirect_uri: data.redirectUri,
+        analytics_consent: getAnalyticsConsentToSave(),
       },
     }).then((response) => response.data)
     storeTokens(response.access_token, response.refresh_token)
@@ -140,6 +145,7 @@ const useAuth = () => {
       oAuthCodeExchange: {
         code: data.code,
         redirect_uri: data.redirectUri,
+        analytics_consent: getAnalyticsConsentToSave(),
       },
     }).then((response) => response.data)
     storeTokens(response.access_token, response.refresh_token)

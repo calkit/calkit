@@ -86,6 +86,7 @@ class UserRegister(SQLModel):
     password: str = Field(min_length=8, max_length=40)
     account_name: str | None = Field(default=None, max_length=64)
     full_name: str | None = Field(default=None, max_length=255)
+    analytics_consent: bool | None = None
 
 
 # Properties to receive via API on update, all are optional

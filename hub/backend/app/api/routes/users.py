@@ -308,6 +308,10 @@ def register_user(session: SessionDep, user_in: UserRegister) -> UserPublic:
         )
     user_create = UserCreate.model_validate(user_in)
     user = users.create_user(session=session, user_create=user_create)
+    users.apply_analytics_consent(
+        session=session, user=user, consent=user_in.analytics_consent
+    )
+    mixpanel.user_signed_up(user, provider="email")
     return user
 
 

@@ -119,6 +119,15 @@ describe("analytics consent", () => {
     expect(getAnalyticsConsent()).toBeNull()
   })
 
+  it("is sent with signups and logins only once answered", async () => {
+    const { getAnalyticsConsentToSave, setAnalyticsConsent } = await load()
+    expect(getAnalyticsConsentToSave()).toBeUndefined()
+    setAnalyticsConsent("denied")
+    expect(getAnalyticsConsentToSave()).toBe(false)
+    setAnalyticsConsent("granted")
+    expect(getAnalyticsConsentToSave()).toBe(true)
+  })
+
   it("ignores unrecognized stored values", async () => {
     localStorage.setItem("analytics_consent", "maybe")
     const { getAnalyticsConsent } = await load()

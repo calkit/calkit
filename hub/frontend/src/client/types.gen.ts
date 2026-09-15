@@ -58,6 +58,10 @@ export type BodyLoginLoginAccessToken = {
    * Client Secret
    */
   client_secret?: string | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -2421,6 +2425,10 @@ export type OAuthCodeExchange = {
    * Redirect Uri
    */
   redirect_uri: string
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -5753,6 +5761,10 @@ export type UserRegister = {
    * Full Name
    */
   full_name?: string | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**

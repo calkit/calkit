@@ -24,6 +24,7 @@ import { LoginService, UsersService } from "../client"
 import OAuthButtons from "../components/Common/OAuthButtons"
 import { isLoggedIn } from "../hooks/useAuth"
 import useCustomToast from "../hooks/useCustomToast"
+import { getAnalyticsConsentToSave } from "../lib/analytics"
 import { popPostLoginRedirect, storeTokens } from "../lib/auth"
 import { handleError } from "../lib/errors"
 
@@ -54,17 +55,20 @@ function SignUp() {
 
   const mutation = useMutation({
     mutationFn: async (data: SignUpForm) => {
+      const analytics_consent = getAnalyticsConsentToSave()
       await UsersService.registerUser({
         userRegister: {
           email: data.email,
           password: data.password,
           full_name: data.full_name,
+          analytics_consent,
         },
       }).then((response) => response.data)
       const resp = await LoginService.loginAccessToken({
         bodyLoginLoginAccessToken: {
           username: data.email,
           password: data.password,
+          analytics_consent,
         },
       }).then((response) => response.data)
       storeTokens(resp.access_token, resp.refresh_token)

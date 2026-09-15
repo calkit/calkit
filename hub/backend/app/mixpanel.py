@@ -34,12 +34,14 @@ def user_created_new_token(user: User, scope: str | None, expires_days: int):
     )
 
 
-def user_logged_in(user: User):
-    track(user, "Logged in")
+def user_logged_in(user: User, provider: str, first: bool):
+    track(
+        user, "Logged in", add_event_info=dict(provider=provider, first=first)
+    )
 
 
-def user_signed_up(user: User):
-    track(user, "Signed up")
+def user_signed_up(user: User, provider: str):
+    track(user, "Signed up", add_event_info=dict(provider=provider))
 
 
 def user_dvc_pushed(user: User, owner_name: str, project_name: str):

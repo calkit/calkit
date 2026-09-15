@@ -95,6 +95,17 @@ export const Body_login_login_access_tokenSchema = {
       format: "password",
       title: "Client Secret",
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   required: ["username", "password"],
@@ -4153,6 +4164,17 @@ export const OAuthCodeExchangeSchema = {
     redirect_uri: {
       type: "string",
       title: "Redirect Uri",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",
@@ -10049,6 +10071,17 @@ export const UserRegisterSchema = {
         },
       ],
       title: "Full Name",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",

@@ -299,6 +299,20 @@ def create_email_verification(
     return code, token
 
 
+def apply_analytics_consent(
+    *, session: Session, user: User, consent: bool | None
+) -> User:
+    """Save a consent answer sent with a signup or login, if the account
+    has none yet.
+    """
+    if consent is not None and user.analytics_consent is None:
+        user.analytics_consent = consent
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return user
+
+
 def mark_email_verified(*, session: Session, user: User) -> User:
     """Record that the user's current email is theirs, once."""
     if user.email_verified_at is None:

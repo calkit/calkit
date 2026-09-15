@@ -74,11 +74,6 @@ function SignUp() {
       storeTokens(resp.access_token, resp.refresh_token)
     },
     onSuccess: () => {
-      showToast(
-        "Welcome to Calkit!",
-        "Your account has been created.",
-        "success",
-      )
       // Same destination as the GitHub and Google buttons
       const redirectTo = popPostLoginRedirect()
       navigate({ to: redirectTo || "/new" })

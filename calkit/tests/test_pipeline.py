@@ -2775,6 +2775,25 @@ def test_to_dvc_latex_diff_stages():
     assert stages["paper-diff-v1-v2"]["outs"] == [
         ".calkit/latex-diffs/v1..v2/pubs/paper-1/main.pdf"
     ]
+    # A latex stage's diffs can be run together by naming them after it
+    targets, _ = calkit.pipeline.translate_run_targets(
+        ["paper.diffs", "other"], ck_info=ck_info
+    )
+    assert targets == ["paper-diff-v1-v2", "paper-diff-main", "other"]
+    targets, _ = calkit.pipeline.translate_run_targets(
+        ["paper-diff-main"], ck_info=ck_info
+    )
+    assert targets == ["paper-diff-main"]
+    ck_info["pipeline"]["stages"]["no-diffs"] = {
+        "kind": "latex",
+        "environment": "tex",
+        "target_path": "other/main.tex",
+    }
+    with pytest.raises(ValueError, match="has no diffs"):
+        calkit.pipeline.translate_run_targets(
+            ["no-diffs.diffs"], ck_info=ck_info
+        )
+    del ck_info["pipeline"]["stages"]["no-diffs"]
     # A generated name that collides with one the user wrote is an error,
     # not something to work around: the name is addressable and is the
     # stage's identity in dvc.lock, so it can't be allowed to shift

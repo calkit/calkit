@@ -213,6 +213,17 @@ pipeline:
         - --type=CFONT
 ```
 
+### Running diffs
+
+Each comparison is its own pipeline stage, named after the document's
+stage and what it compares, e.g., `paper-1-diff-paper-1-submitted`, so it
+can be run by itself.
+To run all of a document's comparisons:
+
+```sh
+calkit run paper-1.diffs
+```
+
 ### Comparing against uncommitted work
 
 `calkit latex diff` runs a comparison on demand, and with no `--to` the

@@ -2777,9 +2777,13 @@ def run(
         dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
-    args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
-        deepcopy(targets), ck_info=ck_info
-    )
+    try:
+        args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
+            deepcopy(targets), ck_info=ck_info
+        )
+    except ValueError as e:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(str(e))
     # Extract any boolean args
     for name in [
         "quiet",

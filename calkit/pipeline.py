@@ -2266,6 +2266,7 @@ def translate_run_targets(
     - ``subproject:stage`` → ``subproject/dvc.yaml:stage`` (inline) or
       ``(sp_path, stage)`` in the second return value (isolated; must be run
       directly inside the subproject directory)
+    - ``stage.diffs`` → every diff stage a latex stage generates
 
     Any target that does not match a known subproject is passed through
     unchanged into the first return value.
@@ -2277,6 +2278,7 @@ def translate_run_targets(
         ``isolated_sp_targets`` is a list of ``(sp_path, stage_or_None)``
         pairs that must be reproduced by chdiring into the subproject.
     """
+    import calkit.latex
     import calkit.markdown
 
     if ck_info is None:
@@ -2303,6 +2305,22 @@ def translate_run_targets(
                 continue
             expanded += calkit.markdown.get_stage_names(md_path, target)
         targets = expanded
+    # A latex stage's diffs are separate DVC stages, so a target addressing
+    # them all has to become their names
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    expanded = []
+    for target in targets:
+        stage_name = target.removesuffix(calkit.latex.DIFFS_TARGET_SUFFIX)
+        if stage_name == target or stage_name not in stages:
+            expanded.append(target)
+            continue
+        names = calkit.latex.get_diff_stage_names(
+            stage_name, stages[stage_name]
+        )
+        if not names:
+            raise ValueError(f"Stage '{stage_name}' has no diffs to run")
+        expanded += names
+    targets = expanded
     parent_targets: list[str] = []
     isolated_sp_targets: list[tuple[str, str | None]] = []
     for target in targets:

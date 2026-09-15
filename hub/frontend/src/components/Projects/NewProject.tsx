@@ -64,6 +64,8 @@ const NewProject = ({ isOpen, onClose, defaultTemplate }: NewProjectProps) => {
     queryKey: ["user", "connected-accounts"],
     queryFn: () =>
       UsersService.getUserConnectedAccounts().then((response) => response.data),
+    // Mounted in the topbar for everyone, including visitors, who would 401
+    enabled: isOpen,
   })
   const needsGitHub =
     connectedAccountsQuery.isSuccess && !connectedAccountsQuery.data?.github

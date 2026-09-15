@@ -107,8 +107,9 @@ document can usually diff it too.
 
 A bare revision compares it against `HEAD`, so `- main` means "what this
 branch has committed, against the branch it will merge into".
-That's the diff a PR reviewer wants, and it's rebuilt whenever either end
-moves.
+That's the diff a PR reviewer wants.
+It's rebuilt when the document's inputs change at either end, but not for
+commits that leave them alone, e.g., a merge that brings in unrelated work.
 
 On the default branch, `main` and `HEAD` are the same commit, so the
 comparison comes out empty and the marked-up document is simply the

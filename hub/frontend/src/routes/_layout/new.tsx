@@ -1311,7 +1311,9 @@ function MachineStep({
         <Text fontWeight="semibold" mb={2}>
           3. Run it
         </Text>
-        <CommandBlock command='calkit run -m "Run pipeline"' />
+        <CommandBlock
+          command={`cd ${projectName} && calkit run -m "Run pipeline"`}
+        />
         <Text fontSize="sm" color="ui.dim" mt={2}>
           The <Code>-m</Code> flag saves results with a message and pushes them
           back up here.

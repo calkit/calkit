@@ -10,9 +10,9 @@ import { useProjectQuestions } from "../../hooks/useProject"
 import { DISMISSED, buildProjectSteps } from "../../lib/onboarding"
 import NewDataset from "../Datasets/NewDataset"
 import FigureEditor from "../Figures/FigureEditor"
+import CreateQuestion from "../Projects/CreateQuestion"
 import ImportOverleaf from "../Publications/ImportOverleaf"
 import NewPublication from "../Publications/NewPublication"
-import CreateQuestion from "../Projects/CreateQuestion"
 import ChecklistCard from "./ChecklistCard"
 import CommandBlock from "./CommandBlock"
 
@@ -187,7 +187,7 @@ const ProjectChecklist = ({
         />
         <CommandBlock
           label="Run it and push the results"
-          command='calkit run -m "Run pipeline"'
+          command={`cd ${projectName} && calkit run -m "Run pipeline"`}
         />
       </>
     ),

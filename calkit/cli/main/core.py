@@ -2936,7 +2936,7 @@ def run(
         in_main_thread = threading.current_thread() is threading.main_thread()
         old_handler = None
         handler_set = False
-        with open(log_fpath, "a", encoding="utf-8") as log_f:
+        with open(log_fpath, "a", encoding="utf-8", errors="replace") as log_f:
             log_f.write(STAGE_OUTPUT_START + "\n")
             log_f.flush()
             try:

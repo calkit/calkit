@@ -125,7 +125,12 @@ and a rerun shows whether that's true.
 With AI agents doing more of the work, this matters:
 an agent can make a plausible figure as easily as a real one.
 
-Underneath, it's still Git, DVC, Docker, Conda, uv, and LaTeX.
+Underneath, it's still Git, DVC, Docker, Conda, uv, and LaTeX,
+and Calkit is a transparent layer over them rather than a replacement.
+`git` and `uv` work on the project exactly as they would without it,
+so you can go as deep into the tools as you like
+while a collaborator who'd rather not works on the same project through
+the easier path.
 Nothing is hidden and nothing is locked in.
 
 ## Features

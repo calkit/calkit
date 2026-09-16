@@ -7,6 +7,9 @@ in their editor of choice.
 from __future__ import annotations
 
 __version__ = "0.0.5"
+# The oldest Calkit this assistant knows how to drive. Bump it when the
+# assistant starts relying on newer CLI output.
+MIN_CALKIT_VERSION = "0.47.4"
 
 import glob
 import itertools
@@ -130,6 +133,19 @@ def detect_project_name(wdir: str | None = None) -> str:
     if owner is None:
         owner = owner_name
     return f"{owner}/{name}"
+
+
+def _parse_version(text: str) -> tuple[int, ...]:
+    return tuple(int(n) for n in re.findall(r"\d+", text)[:3])
+
+
+def get_calkit_version() -> tuple[int, ...] | None:
+    """The installed Calkit's version, or None if it isn't installed."""
+    try:
+        out = subprocess.check_output(["calkit", "--version"], text=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    return _parse_version(out)
 
 
 def get_calkit_token() -> str:
@@ -989,11 +1005,26 @@ class CalkitInstall(DependencyInstall):
 
     @property
     def installed(self) -> bool:
-        return check_dep_exists("calkit")
+        """Installed and new enough for this assistant to drive it."""
+        version = get_calkit_version()
+        return version is not None and version >= _parse_version(
+            MIN_CALKIT_VERSION
+        )
+
+    def refresh(self) -> bool:
+        # An old install is a different ask than a missing one
+        if get_calkit_version() is None:
+            self.txt_not_installed = "Install Calkit: ❌"
+        else:
+            self.txt_not_installed = (
+                f"Update Calkit to v{MIN_CALKIT_VERSION} or newer: ❌"
+            )
+        return super().refresh()
 
     @property
     def install_command(self) -> list[str]:
-        return ["uv", "tool", "install", "calkit-python"]
+        # Installs when missing and upgrades when present
+        return ["uv", "tool", "install", "--upgrade", "calkit-python"]
 
 
 class UvInstall(DependencyInstall):

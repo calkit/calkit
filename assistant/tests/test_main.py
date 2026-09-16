@@ -36,6 +36,7 @@ def _stubs(installed: bool) -> dict:
             list(main.VSCodeExtensionsInstall.recommended) if installed else []
         ),
         "find_conda_prefix": lambda: "/opt/conda" if installed else "",
+        "get_calkit_version": lambda: (99, 0, 0) if installed else None,
         "get_calkit_token": lambda: "token" if installed else "",
         "get_projects": list,
         "run_in_git_bash": missing,
@@ -63,6 +64,15 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         assert all(s.install_button is None for s in install_steps)
         assert steps["calkit"].isEnabled()
         assert steps["vscode-extensions"].isEnabled()
+    # An installed but outdated Calkit asks for an update, not an install
+    with mock.patch.multiple(
+        "main",
+        **{**_stubs(installed=True), "get_calkit_version": lambda: (0, 0, 1)},
+    ):
+        window.refresh_setup_status()
+        assert steps["calkit"].install_button is not None
+        assert "Update Calkit" in steps["calkit"].label.text()
+        assert "--upgrade" in steps["calkit"].install_command
     # Platform-specific steps only appear where they apply
     with mock.patch.multiple("main", **_stubs(installed=False)):
         with mock.patch("main.get_platform", return_value="mac"):

@@ -4,6 +4,8 @@ This app helps install and track system-wide dependencies and open projects
 in their editor of choice.
 """
 
+from __future__ import annotations
+
 __version__ = "0.0.5"
 
 import glob
@@ -17,7 +19,7 @@ import sys
 import webbrowser
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 from urllib.request import urlopen
 
 # Set env var for gitpython so it doesn't fail if not installed
@@ -111,7 +113,7 @@ def load_calkit_info(
     return info
 
 
-def detect_project_name(wdir: str = None) -> str:
+def detect_project_name(wdir: str | None = None) -> str:
     """Detect a Calkit project owner and name."""
     ck_info = load_calkit_info(wdir=wdir)
     name = ck_info.get("name")
@@ -186,7 +188,10 @@ def get_installed_vs_code_extensions() -> list[str]:
         return []
     return (
         subprocess.run(
-            [code_path, "--list-extensions"], capture_output=True, text=True
+            [code_path, "--list-extensions"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         .stdout.strip()
         .split("\n")
@@ -370,7 +375,9 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
 
     just_installed = Signal()
 
-    def __init__(self, child_steps: list[QWidget] = []):
+    def __init__(self, child_steps: list[QWidget] | None = None):
+        if child_steps is None:
+            child_steps = []
         super().__init__()
         self.child_steps = child_steps
         self.layout = make_setup_step_layout(self)
@@ -597,7 +604,7 @@ class WSLInstall(DependencyInstall):
         msg_box.addButton("Restart later", QMessageBox.NoRole)
         msg_box.exec()
         if msg_box.clickedButton() == restart_button:
-            subprocess.run("shutdown /r /t 0", shell=True)
+            subprocess.run("shutdown /r /t 0", shell=True, check=False)
 
 
 class CondaInstall(DependencyInstall):
@@ -703,7 +710,7 @@ class VSCodeInstall(DependencyInstall):
 
 
 class VSCodeExtensionsInstall(DependencyInstall):
-    recommended = [
+    recommended: ClassVar[list[str]] = [
         "james-yu.latex-workshop",
         "iterative.dvc",
         "mechatroner.rainbow-csv",
@@ -788,7 +795,9 @@ class WSLGitInstall(DependencyInstall):
 
     def install(self) -> bool:
         cmd = "apt update && apt install git"
-        process = subprocess.run(["wsl", "pkexec", "sh", "-c", cmd])
+        process = subprocess.run(
+            ["wsl", "pkexec", "sh", "-c", cmd], check=False
+        )
         return process.returncode == 0
 
 
@@ -866,7 +875,7 @@ class GitConfigStep(QWidget):
             cmd = self.cmd + [self.key, text]
             try:
                 subprocess.run(cmd, shell=False, check=True)
-            except Exception as e:
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
                 print(f"Failed to set Git {self.key}: {e}")
             self.refresh()
 
@@ -928,13 +937,13 @@ class CondaInit(QWidget):
             print("Checking that Git Bash can run Conda")
             try:
                 run_in_git_bash("conda --version", check=True)
-            except Exception as e:
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
                 print(f"Failed to run Conda in Git Bash: {e}")
                 return False
             print("Checking that Powershell can run Conda")
             try:
                 run_in_powershell("conda --version", check=True)
-            except Exception as e:
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
                 print(f"Failed to run Conda in Powershell: {e}")
                 return False
             return True
@@ -963,7 +972,7 @@ class CondaInit(QWidget):
         else:
             conda_exe = os.path.join(find_conda_prefix(), "bin", "conda")
             cmd = [conda_exe, "init"]
-            subprocess.run(cmd)
+            subprocess.run(cmd, check=False)
         is_done = self.refresh()
         if not is_done:
             QMessageBox.critical(
@@ -983,7 +992,7 @@ class CalkitInstall(DependencyInstall):
         try:
             subprocess.check_output(["calkit", "--version"])
             return True
-        except Exception:
+        except (subprocess.CalledProcessError, FileNotFoundError):
             return False
 
     @property
@@ -1082,7 +1091,7 @@ def get_projects() -> list[Project]:
             headers={"Authorization": f"Bearer {token}"},
         )
         cloud_projects = resp.json()["data"]
-    except Exception as e:
+    except (requests.RequestException, ValueError, KeyError) as e:
         cloud_projects = []
         print(f"Error fetching projects from cloud: {e}")
     # Reorient cloud projects as a dict keyed by the Git repo URL
@@ -1252,7 +1261,9 @@ class CloneThread(QThread):
         if platform == "windows":
             self.process = run_in_powershell(cmd, wdir=wdir)
         else:
-            self.process = subprocess.run(cmd, cwd=wdir, shell=True)
+            self.process = subprocess.run(
+                cmd, cwd=wdir, shell=True, check=False
+            )
         if self.process.returncode != 0:
             QMessageBox.critical(
                 self.parent, "Failed to clone", self.process.stdout.decode()
@@ -1335,24 +1346,23 @@ class InstallThread(QThread):
         read_bytes = 0
         chunk_size = 1024
         # Open the URL address
-        with urlopen(url) as r:
-            # Tell the window the amount of bytes to be downloaded
-            with open(filename, "ab") as f:
-                while True:
-                    # Read a piece of the file we are downloading
-                    chunk = r.read(chunk_size)
-                    # If the result is `None`, that means data is not
-                    # downloaded yet
-                    # Just keep waiting
-                    if chunk is None:
-                        continue
-                    # If the result is an empty `bytes` instance, then
-                    # the file is complete
-                    elif chunk == b"":
-                        break
-                    # Write into the local file the downloaded chunk
-                    f.write(chunk)
-                    read_bytes += chunk_size
+        # Tell the window the amount of bytes to be downloaded
+        with urlopen(url) as r, open(filename, "ab") as f:
+            while True:
+                # Read a piece of the file we are downloading
+                chunk = r.read(chunk_size)
+                # If the result is `None`, that means data is not
+                # downloaded yet
+                # Just keep waiting
+                if chunk is None:
+                    continue
+                # If the result is an empty `bytes` instance, then
+                # the file is complete
+                elif chunk == b"":
+                    break
+                # Write into the local file the downloaded chunk
+                f.write(chunk)
+                read_bytes += chunk_size
 
     def run(self):
         if self.url is not None:
@@ -1368,7 +1378,7 @@ class InstallThread(QThread):
         ]
         for subcommand in subcommands:
             print("Running", subcommand)
-            subprocess.run(subcommand)
+            subprocess.run(subcommand, check=False)
 
 
 class NewProjectThread(QThread):
@@ -1405,7 +1415,9 @@ class NewProjectThread(QThread):
         if platform == "windows":
             self.process = run_in_powershell(cmd, wdir=wdir)
         else:
-            self.process = subprocess.run(cmd, cwd=wdir, shell=True)
+            self.process = subprocess.run(
+                cmd, cwd=wdir, shell=True, check=False
+            )
         if self.process.returncode != 0:
             self.success = False
             QMessageBox.critical(
@@ -1572,7 +1584,7 @@ class ProjectListWidget(QWidget):
             return
         project = self.projects_by_name[item.data(Qt.UserRole)]
         cmd = f"code {project.wdir}"
-        subprocess.run(cmd, shell=True)
+        subprocess.run(cmd, shell=True, check=False)
 
     def clone_project(self, item: QListWidgetItem) -> None:
         project_name = item.data(Qt.UserRole)
@@ -1600,7 +1612,7 @@ class ProjectListWidget(QWidget):
             cmd = ["open", project.wdir]
         elif platform == "linux":
             cmd = ["xdg-open", project.wdir]
-        subprocess.run(cmd)
+        subprocess.run(cmd, check=False)
 
     def create_new_project(self) -> None:
         dialog = NewProjectDialog()
@@ -1671,7 +1683,7 @@ class MainWindow(QWidget):
         # Add setup steps to the left section
         print("Creating setup steps")
         self.setup_step_widgets = make_setup_step_widgets()
-        for _, setup_step_widget in self.setup_step_widgets.items():
+        for setup_step_widget in self.setup_step_widgets.values():
             setup_step_widget.setMinimumHeight(20)
             self.setup_layout.addWidget(setup_step_widget, stretch=0)
         self.layout.addWidget(self.setup_widget)
@@ -1689,7 +1701,7 @@ class MainWindow(QWidget):
 
     def refresh_setup_status(self) -> None:
         """Refresh the status of all setup steps."""
-        for _, step in self.setup_step_widgets.items():
+        for step in self.setup_step_widgets.values():
             step.refresh()
 
 

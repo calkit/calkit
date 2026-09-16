@@ -19,21 +19,17 @@
 
 <!-- INCLUDE: docs/index.md -->
 
-Typical research workflows are horizontally-siloed, i.e.,
-various stages--data collection, analysis, writing--are performed in
-disconnected systems,
-turning research into a slow, error-prone, and tedious
-[waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process.
-
-Calkit helps you integrate code, data, figures, results, publications,
-and more into a cohesive, traceable, and portable _knowledge creation system_,
-so every output can be traced back to its source (provenance)
-and reproduced with a single command.
-
-With industry standard tools combined into a unified and simplified experience
-tailored for research,
-you can reap the rewards of reproducibility and automation
-without the cognitive overhead.
+Calkit makes it easy to create
+["single button"](https://doi.org/10.1190/1.1822162)
+reproducible research projects.
+Instead of a loosely related collection of files and manual instructions,
+your project becomes a version-controlled, self-contained "calculation kit"
+tying together data collection, analysis, visualization, and writing,
+so you, your collaborators, and your readers can go from raw data to
+research article with a single command.
+That means faster iteration, fewer mistakes,
+and no more wondering how a figure was made six months after submitting
+the paper.
 
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 

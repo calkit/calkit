@@ -1023,8 +1023,11 @@ class CalkitInstall(DependencyInstall):
 
     @property
     def install_command(self) -> list[str]:
-        # Installs when missing and upgrades when present
-        return ["uv", "tool", "install", "--upgrade", "calkit-python"]
+        # Calkit knows how it was installed (uv tool, pipx, pip), so an
+        # existing install upgrades itself
+        if get_calkit_version() is None:
+            return ["uv", "tool", "install", "calkit-python"]
+        return ["calkit", "upgrade"]
 
 
 class UvInstall(DependencyInstall):

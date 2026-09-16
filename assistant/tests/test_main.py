@@ -72,7 +72,9 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         window.refresh_setup_status()
         assert steps["calkit"].install_button is not None
         assert "Update Calkit" in steps["calkit"].label.text()
-        assert "--upgrade" in steps["calkit"].install_command
+        assert steps["calkit"].install_command == ["calkit", "upgrade"]
+    with mock.patch.multiple("main", **_stubs(installed=False)):
+        assert steps["calkit"].install_command[:3] == ["uv", "tool", "install"]
     # Platform-specific steps only appear where they apply
     with mock.patch.multiple("main", **_stubs(installed=False)):
         with mock.patch("main.get_platform", return_value="mac"):

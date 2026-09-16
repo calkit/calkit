@@ -3,7 +3,9 @@
 Calkit makes it easy to create
 ["single button"](https://doi.org/10.1190/1.1822162)
 reproducible research projects.
-Instead of a loosely related collection of files and manual instructions,
+Instead of a loosely related collection of files
+split across multiple systems or apps,
+"integrated" via manual steps,
 your project becomes a version-controlled, self-contained "calculation kit"
 tying together data collection, analysis, visualization, and writing,
 so you, your collaborators, and your readers can go from raw data to

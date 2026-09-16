@@ -1449,5 +1449,13 @@ def set_env_vars(ck_info: dict, cli: bool = True) -> None:
             raise_error(msg)
         else:
             raise ValueError(msg)
+    # A project that points the home directory elsewhere, e.g., at /tmp for
+    # a tool a stage runs, would otherwise hide the user's Calkit config,
+    # and with it their credentials, from every Calkit command it runs
+    import calkit.config
+
+    home = os.path.expanduser("~")
     for k, v in env_vars.items():
         os.environ[str(k)] = str(v)
+    if os.path.expanduser("~") != home:
+        os.environ.setdefault(calkit.config.USER_HOME_ENV_VAR, home)

@@ -18,39 +18,59 @@ time, e.g., during an experiment, figuring out what step you're on.
 ## Defining
 
 The `Procedure` model in `calkit.models` shows the structure of a procedure.
+Procedures are defined in the `procedures` section of `calkit.yaml`,
+keyed by name.
 For example, we might define a procedure with 3 steps like:
 
 ```yaml
+procedures:
+  my-important-procedure:
+    title: My important procedure
+    description: This is a manual procedure for setting up the experiment.
+    steps:
+      - summary: Turn on the machine
+        wait_after_s: 5
+      - summary: Record the temperature
+        details: >
+          In the upper right hand corner of the screen you will see a
+          temperature value. Record this.
+        inputs:
+          temperature:
+            units: Degrees C
+            dtype: float
+      - summary: Turn off the machine
+        details: Press the power button.
+```
+
+### Keeping a procedure in its own file
+
+A long procedure can crowd out the rest of `calkit.yaml`, so instead of
+writing it inline, an entry can point at a YAML or JSON file that holds
+it:
+
+```yaml
+procedures:
+  my-important-procedure:
+    path: procedures/my-important-procedure.yaml
+```
+
+The file contains exactly what would have gone inline, i.e., the `title`,
+`description`, and `steps`:
+
+```yaml
+# procedures/my-important-procedure.yaml
 title: My important procedure
 description: This is a manual procedure for setting up the experiment.
 steps:
   - summary: Turn on the machine
     wait_after_s: 5
-  - summary: Record the temperature
-    details: >
-      In the upper right hand corner of the screen you will see a temperature
-      value. Record this.
-    inputs:
-      temperature:
-        units: Degrees C
-        dtype: float
   - summary: Turn off the machine
-    details: Press the power button.
 ```
 
-We can save this anywhere, but to follow convention we will save to
-`.calkit/procedures/my-important-procedure.yaml`.
-
-In `calkit.yaml`, we can add to the `procedures` like:
-
-```yaml
-procedures:
-  my-important-procedure:
-    _include: .calkit/procedures/my-important-procedure.yaml
-```
-
-Here we use an `_include` key to reference the other file to help keep
-`calkit.yaml` easier to read.
+An entry is one or the other: `path` can't be combined with `title`,
+`description`, or `steps`, so a procedure is defined in one place rather
+than split between the two. Everything that reads procedures, e.g.,
+`calkit xproc`, resolves the file, so the two forms behave the same.
 
 ## Executing
 
@@ -87,24 +107,35 @@ These logs can be read later for further analysis and/or visualization.
 
 Let's imagine we want to execute a procedure to collect some data
 and then generate a plot of that data.
-We can define this in our DVC pipeline so we know if/when the procedure
-has been run, and if the plot need to be remade.
+A `procedure` stage puts the manual step in the pipeline where the
+automated ones are:
 
 ```yaml
-stages:
-  run-proc:
-    cmd: calkit xproc my-important-procedure
-    outs:
-      - .calkit/procedure-runs/my-important-procedure:
-          cache: false # Track this in Git, not DVC
-          persist: true # Don't delete existing outputs
-  plot-data:
-    cmd: python scripts/plot-data.py
-    deps:
-      - .calkit/procedure-runs/my-important-procedure
-    outs:
-      - figures/my-plot.png
+pipeline:
+  stages:
+    collect-data:
+      kind: procedure
+      procedure_name: my-important-procedure
+    plot-data:
+      kind: python-script
+      environment: py
+      script_path: scripts/plot-data.py
+      inputs:
+        - from_stage_outputs: collect-data
+      outputs:
+        - figures/my-plot.png
 ```
+
+The stage's output is the run log directory,
+`.calkit/procedure-runs/my-important-procedure`,
+declared for you: kept in Git rather than DVC, and never cleared before a
+run, since earlier runs are data rather than stale output.
+A procedure that also writes something else, e.g., a file the instrument
+saves, declares that in `outputs` as usual.
+
+The stage depends on `calkit.yaml`, and on the procedure's own file when
+it is kept in one, so editing the steps means the procedure needs
+carrying out again --- the old run was of a different procedure.
 
 With this pipeline, when we execute `calkit run`,
 if our procedure has never been executed, it will begin right then.
@@ -112,9 +143,19 @@ After completion, our `plot-data` stage will run.
 
 If the procedure has been run once,
 but we want to run it again, we can use the `-f` flag to force
-it to be called, even though we already data present in
+it to be called, even though we already have data present in
 `.calkit/procedure-runs/my-important-procedure`.
 After that, our `plot-data` stage will run since the procedure log folder
-was defined as its input.
+is its input.
 So again, with one command we can ensure all of our inputs and outputs are
 consistent.
+
+### The definition has to be committed
+
+`calkit xproc` refuses to run a procedure whose definition has
+uncommitted changes, so a run is a record of carrying out an agreed
+procedure rather than one somebody was editing at the time. That means
+`calkit.yaml`, and the procedure's own file when it has one; other work in
+progress is nobody's business, which is what lets a procedure run as a
+pipeline stage at all --- by the time one runs, earlier stages have
+already written their outputs.

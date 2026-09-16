@@ -1,0 +1,10 @@
+[project]
+name = "wavetools"
+version = "0.1.0"
+description = "A tiny example package whose README is its pipeline."
+requires-python = ">=3.13"
+dependencies = ["matplotlib", "numpy"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

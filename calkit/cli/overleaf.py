@@ -31,6 +31,10 @@ PULL_FAILED_MESSAGE = (
     "Credential Manager, macOS Keychain, or your Linux keyring) and try again."
 )
 
+# How many times the guided commands retry a failed pull before giving up
+# when running unattended, where there's nobody to stop an endless retry
+_MAX_PULL_ATTEMPTS = 3
+
 
 def _extract_title_from_tex(tex_file_path: str) -> str | None:
     """Extract the title from a LaTeX file."""
@@ -48,7 +52,7 @@ def _extract_title_from_tex(tex_file_path: str) -> str | None:
 def _get_overleaf_token() -> str:
     """Get the user's Overleaf token from config.
 
-    If not set, we'll try to get from the cloud. If that fails, we'll prompt
+    If not set, we'll try to get from the hub. If that fails, we'll prompt
     the user to enter it.
 
     TODO: Handle expiration?
@@ -56,16 +60,16 @@ def _get_overleaf_token() -> str:
     calkit_config = calkit.config.read()
     overleaf_token = calkit_config.overleaf_token
     if not overleaf_token:
-        # See if we can get it from the cloud
+        # See if we can get it from the hub
         if calkit_config.token is not None:
             try:
-                typer.echo("Getting Overleaf token from cloud")
-                resp = calkit.cloud.get("/user/overleaf-token")
+                typer.echo("Getting Overleaf token from the hub")
+                resp = calkit.hub.get("/user/overleaf-token")
                 overleaf_token = resp["access_token"]
                 calkit_config.overleaf_token = overleaf_token
                 calkit_config.write()
             except Exception:
-                typer.echo("Failed to get Overleaf token from cloud")
+                typer.echo("Failed to get Overleaf token from the hub")
     if not overleaf_token:
         warn("Overleaf token not set in config", prefix="")
         typer.echo(
@@ -135,17 +139,6 @@ def import_publication(
             help="What of the publication this is, e.g., 'journal-article'.",
         ),
     ] = None,
-    sync_paths: Annotated[
-        list[str],
-        typer.Option(
-            "--sync-path",
-            "-s",
-            help=(
-                "Paths to sync from the Overleaf project, e.g., 'main.tex'. "
-                "Note that multiple can be specified."
-            ),
-        ),
-    ] = [],
     push_paths: Annotated[
         list[str],
         typer.Option(
@@ -206,7 +199,7 @@ def import_publication(
     if os.path.isfile(dest_dir):
         raise_error("Destination must be a directory, not a file")
     os.makedirs(dest_dir, exist_ok=True)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
     repo = calkit.git.get_repo()
@@ -318,9 +311,7 @@ def import_publication(
             name=stage_name,
             environment=tex_env_name,
             target_path=target_tex_path,
-            inputs=[
-                os.path.join(dest_dir, p) for p in sync_paths + push_paths
-            ],
+            inputs=[os.path.join(dest_dir, p) for p in push_paths],
             no_check=True,
             no_commit=True,
         )
@@ -341,8 +332,6 @@ def import_publication(
     if dest_dir in ol_sync:
         raise_error(f"'{dest_dir}' is already synced with Overleaf")
     ol_sync[dest_dir] = dict(url=src_url)
-    if sync_paths:
-        ol_sync[dest_dir]["sync_paths"] = sync_paths
     if push_paths:
         ol_sync[dest_dir]["push_paths"] = push_paths
     ck_info["overleaf_sync"] = ol_sync
@@ -359,8 +348,68 @@ def import_publication(
                 f"Import Overleaf project ID {overleaf_project_id}",
             ]
         )
-    # Sync the project
-    sync(paths=[dest_dir], no_commit=no_commit, push_only=push_only)
+    # Sync the project. The build stage was just created and so has never
+    # run, and linking a document isn't the moment to insist on a current
+    # pipeline or branch.
+    sync(
+        paths=[dest_dir],
+        no_commit=no_commit,
+        push_only=push_only,
+        allow_stale=True,
+        any_branch=True,
+    )
+
+
+def check_sync_readiness(
+    check_branch: bool = True, check_pipeline: bool = True
+) -> dict:
+    """Look for reasons this is a risky moment to sync with Overleaf.
+
+    Overleaf has no branches, so whatever is synced there is what
+    collaborators see and write against. Two things make that misleading:
+    a branch that doesn't contain everything already on the default branch,
+    which can send someone else's work backwards, and an out-of-date
+    pipeline, which can send figures or results that don't match the code
+    that supposedly made them.
+
+    Returns a dict with a ``branch`` message, a ``pipeline`` message, and
+    the ``stale_stages`` behind the latter. Each message is None when that
+    check passes or can't be run.
+    """
+    res: dict = {"branch": None, "pipeline": None, "stale_stages": []}
+    if check_branch:
+        try:
+            res["branch"] = calkit.git.check_branch_is_current(
+                calkit.git.get_repo()
+            )
+        except Exception as e:
+            warn(f"Could not check branch is current: {e}")
+    if check_pipeline:
+        # Environments are left alone here: what matters is whether the
+        # outputs match the code that made them, and checking would build or
+        # pull environments as a side effect of a sync, which is a surprising
+        # thing for a sync to do. Running the pipeline checks them anyway.
+        status = calkit.pipeline.get_status(
+            check_environments=False,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+        )
+        if status.errors:
+            res["pipeline"] = "Pipeline checks failed: " + "; ".join(
+                status.errors
+            )
+        elif status.failed_environment_checks:
+            res["pipeline"] = (
+                "Pipeline environment checks failed for: "
+                + ", ".join(status.failed_environment_checks)
+            )
+        elif status.is_stale:
+            res["stale_stages"] = status.stale_stage_names
+            res["pipeline"] = (
+                "Pipeline is not up-to-date; out-of-date stages: "
+                + ", ".join(status.stale_stage_names)
+            )
+    return res
 
 
 @sync_app.command(name="overleaf")
@@ -437,11 +486,43 @@ def sync(
             ),
         ),
     ] = False,
+    allow_stale: Annotated[
+        bool,
+        typer.Option(
+            "--allow-stale",
+            help=(
+                "Sync even if the pipeline is out-of-date, which can send "
+                "stale figures or results to Overleaf."
+            ),
+        ),
+    ] = False,
+    any_branch: Annotated[
+        bool,
+        typer.Option(
+            "--any-branch",
+            help=(
+                "Sync even if the current branch is missing commits from the "
+                "default branch."
+            ),
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Overwrite changes made on Overleaf to push-only paths, "
+                "which the project is meant to be the source of truth for."
+            ),
+        ),
+    ] = False,
 ):
     """Sync folders with Overleaf."""
-    # TODO: We should probably ensure the pipeline isn't stale
     # Read all synced folders, fixing legacy schema if applicable
-    overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=True)
+    overleaf_info = calkit.overleaf.get_sync_info(
+        fix_legacy=True, print_info=typer.echo
+    )
     if not overleaf_info:
         raise_error("No Overleaf sync info found")
     overleaf_sync_dirs = list(overleaf_info.keys())
@@ -455,6 +536,28 @@ def sync(
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")
+    # Check this is a sane state to sync from before touching either side.
+    # Resolving a conflict is the middle of a sync that already passed these,
+    # and the pipeline can't be current until it finishes.
+    readiness = check_sync_readiness(
+        check_branch=not any_branch and not resolve,
+        check_pipeline=not allow_stale and not resolve,
+    )
+    if readiness["branch"]:
+        raise_error(
+            readiness["branch"]
+            + ".\nOverleaf has no branches, so syncing from here can send "
+            "collaborators a version that's missing work already on the "
+            "default branch.\nMerge or rebase first, or use --any-branch to "
+            "sync anyway."
+        )
+    if readiness["pipeline"]:
+        raise_error(
+            readiness["pipeline"]
+            + ".\nSyncing now could send stale figures or results to "
+            "Overleaf.\nRun 'calkit run' first, or use --allow-stale to sync "
+            "anyway."
+        )
     # First check our config for an Overleaf token
     overleaf_token = _get_overleaf_token()
     repo = calkit.git.get_repo()
@@ -472,6 +575,9 @@ def sync(
         # Figure out which wdir has the conflict in it
         with open(conflict_fpath) as f:
             resolving_info = json.load(f)
+    # Keyed by synced folder, so a sync of multiple folders can be summarized
+    # after the loop even if some are skipped
+    results: dict[str, dict] = {}
     for synced_folder, sync_data in overleaf_info.items():
         if not sync_data:
             continue
@@ -536,7 +642,7 @@ def sync(
                 "Overleaf since last sync"
             )
         try:
-            res = calkit.overleaf.sync(
+            results[synced_folder] = calkit.overleaf.sync(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,
                 path_in_project=synced_folder,
@@ -547,17 +653,22 @@ def sync(
                 resolving_conflict=resolve,
                 print_info=typer.echo,
                 push_only=push_only,
+                force=force,
             )
         except Exception as e:
             raise_error(str(e))
-    if not no_push and not no_commit:
+    if results and not no_push and not no_commit:
         if not repo.remotes:
             raise_error("Project has no Git remotes defined")
-        if res.get("committed_project", True):
+        if any(res.get("committed_project", True) for res in results.values()):
             # Push to the project remote
             typer.echo("Pushing changes to project Git remote")
             repo.git.push()
-    # TODO: Add option to run the pipeline after?
+    if any(res.get("map_paths_propagated") for res in results.values()):
+        typer.echo(
+            "Run 'calkit run' to rebuild from the updated source file(s)"
+        )
+    return results
 
 
 def compare_folders_recursively(
@@ -683,3 +794,312 @@ def get_status(
             typer.echo("Changed files:")
             for p in status["diff_files"]:
                 print_path(p, "red")
+
+
+def _prepare_to_sync(
+    branch: str | None,
+    yes: bool,
+    no_pull: bool,
+    allow_stale: bool,
+    any_branch: bool,
+) -> None:
+    """Get the project into a state worth syncing to Overleaf from.
+
+    Switches branches if asked, brings down the latest Git and DVC data,
+    then checks the two things that make a sync misleading -- a branch
+    behind the trunk and an out-of-date pipeline -- offering to run the
+    pipeline when that's what's missing.
+    """
+    from calkit.cli.main.core import pull as calkit_pull
+    from calkit.cli.main.core import run as calkit_run
+    from calkit.cli.main.core import switch_branch
+
+    def confirm(message: str) -> bool:
+        if yes:
+            return True
+        return typer.confirm(message, default=True)
+
+    if branch is not None:
+        typer.echo(f"Switching to branch '{branch}'")
+        switch_branch(branch)
+    if not no_pull:
+        # A failed pull is usually a transient storage error, and syncing on
+        # top of half-fetched data is worse than trying again
+        attempts = 0
+        while True:
+            try:
+                # Arg lists are passed explicitly since their defaults are
+                # shared mutable lists that force=True appends to
+                calkit_pull(force=True, git_args=[], dvc_args=[])
+                break
+            except Exception as e:
+                warn(f"Failed to pull: {e}")
+                attempts += 1
+                # Retrying is the one prompt --yes can't simply answer yes
+                # to, since a pull that keeps failing would loop forever
+                # unattended. Bound it instead.
+                if yes:
+                    if attempts >= _MAX_PULL_ATTEMPTS:
+                        raise_error(
+                            f"Failed to pull after {attempts} attempts; "
+                            "stopping since the project isn't up-to-date"
+                        )
+                    continue
+                if not typer.confirm("Try pulling again?", default=True):
+                    if typer.confirm(
+                        "Continue without pulling?", default=False
+                    ):
+                        break
+                    raise_error("Stopping since the project isn't up-to-date")
+    typer.echo("Checking the project is ready to sync")
+    readiness = check_sync_readiness(
+        check_branch=not any_branch, check_pipeline=not allow_stale
+    )
+    if readiness["branch"]:
+        raise_error(
+            readiness["branch"]
+            + ".\nOverleaf has no branches, so syncing from here can send "
+            "collaborators a version that's missing work already on the "
+            "default branch.\nMerge or rebase first, or use --any-branch to "
+            "sync anyway."
+        )
+    if readiness["pipeline"] and readiness["stale_stages"]:
+        warn(readiness["pipeline"])
+        if confirm("Run the pipeline now?"):
+            calkit_run()
+            readiness = check_sync_readiness(check_branch=False)
+    if readiness["pipeline"]:
+        raise_error(
+            readiness["pipeline"]
+            + ".\nSyncing now could send stale figures or results to "
+            "Overleaf.\nUse --allow-stale to sync anyway."
+        )
+
+
+@overleaf_app.command(name="push")
+def push_to_overleaf(
+    paths: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Paths to push to Overleaf, e.g., 'paper'. "
+                "If not provided, all Overleaf publications will be pushed."
+            ),
+        ),
+    ] = None,
+    branch: Annotated[
+        str | None,
+        typer.Option(
+            "--branch",
+            "-b",
+            help="Switch to (or create) this branch before pushing.",
+        ),
+    ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Answer yes to all prompts, e.g., to run non-interactively.",
+        ),
+    ] = False,
+    no_pull: Annotated[
+        bool,
+        typer.Option(
+            "--no-pull", help="Do not pull from Git and DVC beforehand."
+        ),
+    ] = False,
+    allow_stale: Annotated[
+        bool,
+        typer.Option(
+            "--allow-stale",
+            help="Push even if the pipeline is out-of-date.",
+        ),
+    ] = False,
+    any_branch: Annotated[
+        bool,
+        typer.Option(
+            "--any-branch",
+            help=(
+                "Push even if the current branch is missing commits from the "
+                "default branch."
+            ),
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Overwrite changes made on Overleaf to push-only paths, "
+                "which the project is meant to be the source of truth for."
+            ),
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Enable verbose output.")
+    ] = False,
+) -> None:
+    """Get the project's latest figures and text onto Overleaf.
+
+    Pulls the latest data, ensures the pipeline is up-to-date, then pushes
+    to Overleaf without pulling anything back, so collaborators see current
+    results before they write against them.
+    """
+    _prepare_to_sync(
+        branch=branch,
+        yes=yes,
+        no_pull=no_pull,
+        allow_stale=allow_stale,
+        any_branch=any_branch,
+    )
+    sync(
+        paths=paths,
+        push_only=True,
+        verbose=verbose,
+        allow_stale=True,
+        any_branch=True,
+        force=force,
+    )
+    calkit.echo("Overleaf is up-to-date with this project ✅")
+
+
+@overleaf_app.command(name="pull")
+def pull_from_overleaf(
+    paths: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Paths to pull from Overleaf, e.g., 'paper'. "
+                "If not provided, all Overleaf publications will be pulled."
+            ),
+        ),
+    ] = None,
+    branch: Annotated[
+        str | None,
+        typer.Option(
+            "--branch",
+            "-b",
+            help=(
+                "Switch to (or create) this branch before pulling. Useful "
+                "when the default branch is protected, since pulling from "
+                "Overleaf creates commits."
+            ),
+        ),
+    ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Answer yes to all prompts, e.g., to run non-interactively.",
+        ),
+    ] = False,
+    no_pull: Annotated[
+        bool,
+        typer.Option(
+            "--no-pull", help="Do not pull from Git and DVC beforehand."
+        ),
+    ] = False,
+    no_run: Annotated[
+        bool,
+        typer.Option(
+            "--no-run", help="Do not run the pipeline after pulling."
+        ),
+    ] = False,
+    allow_stale: Annotated[
+        bool,
+        typer.Option(
+            "--allow-stale",
+            help="Pull even if the pipeline is out-of-date.",
+        ),
+    ] = False,
+    any_branch: Annotated[
+        bool,
+        typer.Option(
+            "--any-branch",
+            help=(
+                "Pull even if the current branch is missing commits from the "
+                "default branch."
+            ),
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Overwrite changes made on Overleaf to push-only paths, "
+                "which the project is meant to be the source of truth for."
+            ),
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Enable verbose output.")
+    ] = False,
+) -> None:
+    """Bring collaborators' Overleaf writing back into the project.
+
+    Syncs in both directions, since Overleaf needs current figures to be
+    worth writing against, then rebuilds the document from whatever came
+    back and saves it.
+    """
+    from calkit.cli.main.core import run as calkit_run
+    from calkit.cli.main.core import save
+
+    def confirm(message: str) -> bool:
+        if yes:
+            return True
+        return typer.confirm(message, default=True)
+
+    _prepare_to_sync(
+        branch=branch,
+        yes=yes,
+        no_pull=no_pull,
+        allow_stale=allow_stale,
+        any_branch=any_branch,
+    )
+    typer.echo("Checking what has changed on Overleaf")
+    get_status(paths=paths)
+    if not confirm("Continue with the sync?"):
+        raise_error("Stopped so the changes above can be reviewed")
+    results = sync(
+        paths=paths,
+        verbose=verbose,
+        allow_stale=True,
+        any_branch=True,
+        force=force,
+    )
+    # An Overleaf edit to a map-paths copy lands in the file it's copied
+    # from, so the document is only rebuilt from it after a run
+    propagated = {
+        dest: src
+        for res in (results or {}).values()
+        for dest, src in (res.get("map_paths_propagated") or {}).items()
+    }
+    if no_run:
+        if propagated:
+            warn(
+                "Run the pipeline to rebuild from: "
+                + ", ".join(sorted(set(propagated.values())))
+            )
+        return
+    status = check_sync_readiness(check_branch=False)
+    if not status["pipeline"]:
+        typer.echo("Pipeline is up-to-date; nothing to rebuild")
+        return
+    if not status["stale_stages"]:
+        # Something stopped the check from reaching an answer, so there's
+        # nothing to offer to run
+        warn(status["pipeline"])
+        return
+    typer.echo(
+        "The document needs rebuilding from what came back: "
+        + ", ".join(status["stale_stages"])
+    )
+    if confirm("Run the pipeline now?"):
+        calkit_run()
+        if confirm("Save and push the rebuilt outputs?"):
+            save(save_all=True, message="Run pipeline after Overleaf sync")

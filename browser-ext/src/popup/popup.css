@@ -1,0 +1,217 @@
+:root {
+  --ck-main: #009688;
+  --ck-main-hover: #00766c;
+  --ck-danger: #e53e3e;
+  --ck-success: #48bb78;
+  --ck-dim: #718096;
+  --ck-border: #e2e8f0;
+  --ck-bg: #ffffff;
+  --ck-fg: #1a202c;
+  --ck-subtle-bg: #f7fafc;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ck-border: #2d3748;
+    --ck-bg: #1a202c;
+    --ck-fg: #f7fafc;
+    --ck-dim: #a0aec0;
+    --ck-subtle-bg: #252d3d;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+}
+
+/* Width belongs to the page, not to this shared sheet. Setting it on a
+   class rather than on body keeps it independent of stylesheet order: the
+   bundler injects this sheet after a page's own inline style, so a bare
+   body rule here would override the page. */
+body.popup {
+  width: 340px;
+}
+
+body.options {
+  width: auto;
+  max-width: 720px;
+  margin: 0 auto;
+  padding-bottom: 32px;
+}
+
+body.viewer {
+  width: auto;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding-bottom: 32px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--ck-main);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+header .spacer {
+  flex: 1;
+}
+
+main {
+  padding: 12px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--ck-border);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.dim {
+  color: var(--ck-dim);
+}
+
+.small {
+  font-size: 12px;
+}
+
+.error {
+  color: var(--ck-danger);
+}
+
+.muted-box {
+  background: var(--ck-subtle-bg);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+button.action {
+  background: var(--ck-main);
+  color: #ffffff;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.action:hover:not(:disabled) {
+  background: var(--ck-main-hover);
+}
+
+button.action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--ck-main);
+  border: 1px solid var(--ck-main);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: rgba(0, 150, 136, 0.12);
+}
+
+a {
+  color: var(--ck-main);
+}
+
+input,
+select {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--ck-border);
+  border-radius: 6px;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin: 6px 0 2px;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge.ok {
+  background: rgba(72, 187, 120, 0.18);
+  color: var(--ck-success);
+}
+
+.badge.info {
+  background: rgba(0, 150, 136, 0.18);
+  color: var(--ck-main);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ck-border);
+  border-top-color: var(--ck-main);
+  border-radius: 50%;
+  display: inline-block;
+  animation: ck-spin 0.7s linear infinite;
+}
+
+@keyframes ck-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

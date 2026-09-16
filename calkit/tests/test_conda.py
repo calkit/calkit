@@ -14,6 +14,7 @@ from calkit.conda import (
     _enrich_pip_deps_from_freeze,
     _get_pip_dependency_list,
     _split_env_dependencies,
+    _unparseable_version_satisfies,
     check_env,
     find_conda_exe,
 )
@@ -77,6 +78,64 @@ def test_check_single():
         env_spec_dir=".",
         conda=False,
     )
+    # Unparseable actual version (e.g. conda's "9e"): equality and inequality
+    # are still decidable by comparing version strings, a bare name accepts any
+    # version, and an ordering constraint can't be confirmed so it counts as
+    # unsatisfied.
+    assert _check_single("jpeg", "jpeg=9e", env_spec_dir=".", conda=True)
+    assert _check_single("jpeg=9e", "jpeg=9e", env_spec_dir=".", conda=True)
+    assert _check_single("jpeg!=1", "jpeg=9e", env_spec_dir=".", conda=True)
+    assert not _check_single(
+        "jpeg!=9e", "jpeg=9e", env_spec_dir=".", conda=True
+    )
+    assert not _check_single("jpeg=1", "jpeg=9e", env_spec_dir=".", conda=True)
+    # conda's "=1.2" expands to "==1.2.*", and a wildcard needs a parsed
+    # version, so it stays unverifiable.
+    assert not _check_single(
+        "jpeg=1.2", "jpeg=9e", env_spec_dir=".", conda=True
+    )
+    assert not _check_single(
+        "jpeg>=1", "jpeg=9e", env_spec_dir=".", conda=True
+    )
+    # Pip-style specifiers behave the same way
+    assert _check_single("jpeg==9e", "jpeg==9e", env_spec_dir=".", conda=False)
+    # "!=" and "~=" must parse the package name correctly, which they didn't
+    # when the name was split on "=<>" alone
+    assert _check_single(
+        "jpeg!=1.0", "jpeg==9.0", env_spec_dir=".", conda=False
+    )
+    assert not _check_single(
+        "jpeg!=9.0", "jpeg==9.0", env_spec_dir=".", conda=False
+    )
+    assert _check_single(
+        "jpeg~=1.0", "jpeg==1.9", env_spec_dir=".", conda=False
+    )
+    assert not _check_single(
+        "jpeg~=1.0", "jpeg==2.0", env_spec_dir=".", conda=False
+    )
+
+
+def test_unparseable_version_satisfies():
+    check = _unparseable_version_satisfies
+    # No constraint accepts anything
+    assert check("", "9e") is True
+    # Plain equality and inequality compare as strings
+    assert check("==9e", "9e") is True
+    assert check("==9e", "9f") is False
+    assert check("!=9e", "9e") is False
+    assert check("!=9f", "9e") is True
+    # PEP 440 arbitrary equality is also a string comparison
+    assert check("===9e", "9e") is True
+    # Conjunctions hold only if every clause holds
+    assert check("==9e,!=9f", "9e") is True
+    assert check("==9e,==9f", "9e") is False
+    # Wildcards and ordering operators need a parsed version
+    assert check("==1.*", "9e") is None
+    assert check("!=1.*", "9e") is None
+    assert check(">=1", "9e") is None
+    assert check("~=1.2", "9e") is None
+    # Matching is exact, with no zero-padding
+    assert check("==1.0", "1.0.0") is False
 
 
 def test_enrich_pip_deps_from_freeze():

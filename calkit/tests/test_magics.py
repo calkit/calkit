@@ -3,10 +3,24 @@
 import os
 import shutil
 import subprocess
+import sys
+
+import pytest
 
 import calkit
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Slowest test in the suite and the Windows critical path: it runs "
+        "four notebook stages, each spawning 'dvc stage add', 'dvc repro', "
+        "and a 'calkit xenv' subprocess, which Windows is worst at. The "
+        "magic itself is platform-independent enough that passing on Linux "
+        "is taken as passing. Note this leaves _posix_path, the one piece "
+        "of it that exists for Windows, covered only by Linux runs."
+    ),
+)
 def test_stage(tmp_dir):
     # Test the stage magic
     # Run git and dvc init in the temp dir

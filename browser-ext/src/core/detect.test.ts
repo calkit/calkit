@@ -1,0 +1,268 @@
+import { beforeEach, describe, expect, test } from "vitest";
+
+import {
+  detectReference,
+  getGithubPath,
+  getGithubPullNumber,
+  getGithubRepo,
+  getOverleafProjectId,
+  normalizeArxivId,
+  normalizeDoi,
+  suggestCitationKey,
+} from "./detect";
+
+describe("getGithubRepo", () => {
+  test("reads the repo from repository URLs and ignores everything else", () => {
+    expect(getGithubRepo("https://github.com/calkit/calkit")).toBe(
+      "calkit/calkit",
+    );
+    expect(
+      getGithubRepo("https://github.com/calkit/calkit/blob/main/README.md"),
+    ).toBe("calkit/calkit");
+    expect(getGithubRepo("https://github.com/calkit/calkit.git")).toBe(
+      "calkit/calkit",
+    );
+    expect(getGithubRepo("https://github.com/calkit/calkit/pull/1087")).toBe(
+      "calkit/calkit",
+    );
+    // Pages that look like a repo but aren't one
+    expect(getGithubRepo("https://github.com/calkit")).toBeNull();
+    expect(
+      getGithubRepo("https://github.com/orgs/calkit/projects/1"),
+    ).toBeNull();
+    expect(getGithubRepo("https://github.com/settings/profile")).toBeNull();
+    expect(getGithubRepo("https://gitlab.com/calkit/calkit")).toBeNull();
+  });
+});
+
+describe("getGithubPath", () => {
+  test("reads the browsed path out of blob and tree URLs", () => {
+    expect(
+      getGithubPath("https://github.com/calkit/calkit/blob/main/figures/a.png"),
+    ).toBe("figures/a.png");
+    expect(
+      getGithubPath("https://github.com/calkit/calkit/tree/main/figures"),
+    ).toBe("figures");
+    expect(getGithubPath("https://github.com/calkit/calkit")).toBeNull();
+    expect(
+      getGithubPath("https://github.com/calkit/calkit/issues/12"),
+    ).toBeNull();
+  });
+});
+
+describe("getOverleafProjectId", () => {
+  test("reads the project ID from Overleaf project URLs", () => {
+    expect(
+      getOverleafProjectId("https://www.overleaf.com/project/abc123"),
+    ).toBe("abc123");
+    expect(
+      getOverleafProjectId("https://www.overleaf.com/project/abc123/detacher"),
+    ).toBe("abc123");
+    expect(getOverleafProjectId("https://www.overleaf.com/project")).toBeNull();
+    expect(getOverleafProjectId("https://www.overleaf.com/")).toBeNull();
+    expect(
+      getOverleafProjectId("https://notoverleaf.com/project/abc123"),
+    ).toBeNull();
+  });
+});
+
+describe("normalizeDoi", () => {
+  test("strips prefixes and case, and rejects things that aren't DOIs", () => {
+    expect(normalizeDoi("10.1234/ABCD")).toBe("10.1234/abcd");
+    expect(normalizeDoi("https://doi.org/10.1234/abcd")).toBe("10.1234/abcd");
+    expect(normalizeDoi("doi:10.1234/abcd ")).toBe("10.1234/abcd");
+    expect(normalizeDoi("not-a-doi")).toBeNull();
+    expect(normalizeDoi(null)).toBeNull();
+  });
+});
+
+describe("normalizeArxivId", () => {
+  test("strips prefixes and version suffixes", () => {
+    expect(normalizeArxivId("arXiv:2301.01234v2")).toBe("2301.01234");
+    expect(normalizeArxivId("https://arxiv.org/abs/2301.01234")).toBe(
+      "2301.01234",
+    );
+    expect(normalizeArxivId("math.GT/0309136")).toBe("math.gt/0309136");
+    // arXiv serves the same paper three ways, and the rendered HTML page
+    // is increasingly where people read it
+    expect(normalizeArxivId("https://arxiv.org/html/2608.06314v1")).toBe(
+      "2608.06314",
+    );
+    expect(normalizeArxivId("https://arxiv.org/pdf/2608.06314v1.pdf")).toBe(
+      "2608.06314",
+    );
+    expect(normalizeArxivId("https://arxiv.org/pdf/2608.06314")).toBe(
+      "2608.06314",
+    );
+    expect(normalizeArxivId("10.1234/abcd")).toBeNull();
+    expect(normalizeArxivId(null)).toBeNull();
+  });
+});
+
+describe("detectReference", () => {
+  beforeEach(() => {
+    document.head.replaceChildren();
+    document.body.replaceChildren();
+  });
+
+  const addMeta = (name: string, content: string) => {
+    const meta = document.createElement("meta");
+    meta.name = name;
+    meta.content = content;
+    document.head.append(meta);
+  };
+
+  test("reads Highwire Press citation tags", () => {
+    addMeta("citation_title", "A Study of Things");
+    addMeta("citation_author", "Smith, Jane");
+    addMeta("citation_author", "Jones, Alex");
+    addMeta("citation_doi", "10.1234/ABCD");
+    addMeta("citation_publication_date", "2024/03/15");
+    addMeta("citation_journal_title", "Journal of Things");
+    const reference = detectReference("https://example.org/paper");
+    expect(reference).not.toBeNull();
+    expect(reference?.title).toBe("A Study of Things");
+    expect(reference?.doi).toBe("10.1234/abcd");
+    expect(reference?.authors).toBe("Smith, Jane and Jones, Alex");
+    expect(reference?.year).toBe("2024");
+    expect(reference?.journal).toBe("Journal of Things");
+  });
+
+  test("doesn't repeat authors listed under two schemes", () => {
+    // Springer and others emit the same people as both citation_author and
+    // dc.creator, which used to yield "Thomas, Chris D. and Thomas, Chris D."
+    addMeta("citation_title", "A Paper");
+    addMeta("citation_author", "Thomas, Chris D.");
+    addMeta("dc.creator", "Thomas, Chris D.");
+    expect(detectReference("https://example.org/paper")?.authors).toBe(
+      "Thomas, Chris D.",
+    );
+  });
+
+  test("keeps every distinct author within one scheme", () => {
+    addMeta("citation_title", "A Paper");
+    addMeta("citation_author", "Smith, Jane");
+    addMeta("citation_author", "Jones, Alex");
+    // Repeated once per affiliation is common and still one author
+    addMeta("citation_author", "Smith, Jane");
+    expect(detectReference("https://example.org/paper")?.authors).toBe(
+      "Smith, Jane and Jones, Alex",
+    );
+  });
+
+  test("falls back to Dublin Core tags", () => {
+    addMeta("dc.title", "Another Paper");
+    addMeta("dc.identifier", "10.5555/xyz");
+    addMeta("dc.creator", "Doe, John");
+    const reference = detectReference("https://example.org/paper");
+    expect(reference?.title).toBe("Another Paper");
+    expect(reference?.doi).toBe("10.5555/xyz");
+  });
+
+  test("reads an arXiv ID from the URL when the page has no DOI", () => {
+    addMeta("citation_title", "A Preprint");
+    const reference = detectReference("https://arxiv.org/abs/2301.01234v2");
+    expect(reference?.arxivId).toBe("2301.01234");
+    expect(reference?.doi).toBeNull();
+  });
+
+  test("reads arXiv's rendered HTML, which has no citation tags", () => {
+    // The /html/ version of a paper is LaTeXML output: the title block in
+    // the document is the only place its metadata appears
+    document.body.innerHTML = `
+      <div id="watermark-tr">arXiv:2608.06314v1 [physics.flu-dyn] 06 Aug 2026</div>
+      <article class="ltx_document">
+        <h1 class="ltx_title ltx_title_document">Three-layer water flows</h1>
+        <div class="ltx_authors">
+          <span class="ltx_creator ltx_role_author">
+            <span class="ltx_personname">Rossen Ivanov\n</span>
+            <span class="ltx_author_notes">
+              <span class="ltx_contact ltx_role_email">rossen@example.ie</span>
+            </span>
+          </span>
+          <span class="ltx_creator ltx_role_author">
+            <span class="ltx_personname">Calin-Iulian Martin</span>
+          </span>
+        </div>
+      </article>`;
+    const reference = detectReference("https://arxiv.org/html/2608.06314v1");
+    expect(reference?.title).toBe("Three-layer water flows");
+    // Contact details sit next to the name, so only the name is taken
+    expect(reference?.authors).toBe("Rossen Ivanov and Calin-Iulian Martin");
+    expect(reference?.year).toBe("2026");
+    expect(reference?.arxivId).toBe("2608.06314");
+  });
+
+  test("prefers citation tags over the document on an arXiv abs page", () => {
+    addMeta("citation_title", "The Published Title");
+    addMeta("citation_author", "Smith, Jane");
+    document.body.innerHTML =
+      '<h1 class="ltx_title ltx_title_document">A Draft Title</h1>';
+    const reference = detectReference("https://arxiv.org/abs/2608.06314");
+    expect(reference?.title).toBe("The Published Title");
+    expect(reference?.authors).toBe("Smith, Jane");
+  });
+
+  test("doesn't read the document on a page that isn't arXiv's", () => {
+    document.body.innerHTML =
+      '<h1 class="ltx_title ltx_title_document">Someone Else\'s Heading</h1>';
+    expect(detectReference("https://example.org/paper")).toBeNull();
+  });
+
+  test("returns nothing on a page that describes no reference", () => {
+    expect(detectReference("https://example.org/paper")).toBeNull();
+  });
+});
+
+describe("suggestCitationKey", () => {
+  const base = {
+    doi: null,
+    arxivId: null,
+    title: null,
+    authors: null,
+    year: null,
+    journal: null,
+    url: "https://example.org",
+  };
+
+  test("builds a lastname-year-word key from what the page provided", () => {
+    expect(
+      suggestCitationKey({
+        ...base,
+        authors: "Smith, Jane and Jones, Alex",
+        year: "2024",
+        title: "A Study of Things",
+      }),
+    ).toBe("smith2024study");
+    // "First Last" ordering is just as common in citation meta tags
+    expect(
+      suggestCitationKey({
+        ...base,
+        authors: "Jane Smith",
+        year: "2024",
+        title: "On the Origin",
+      }),
+    ).toBe("smith2024origin");
+    // Nothing usable still yields a key the user can edit
+    expect(suggestCitationKey(base)).toBe("reference");
+  });
+});
+
+describe("getGithubPullNumber", () => {
+  test("reads the number from pull request URLs only", () => {
+    expect(
+      getGithubPullNumber("https://github.com/calkit/calkit/pull/1087"),
+    ).toBe(1087);
+    expect(
+      getGithubPullNumber("https://github.com/calkit/calkit/pull/1087/files"),
+    ).toBe(1087);
+    expect(getGithubPullNumber("https://github.com/calkit/calkit")).toBeNull();
+    // The pulls list isn't a pull request, and neither is an issue
+    expect(
+      getGithubPullNumber("https://github.com/calkit/calkit/pulls"),
+    ).toBeNull();
+    expect(
+      getGithubPullNumber("https://github.com/calkit/calkit/issues/12"),
+    ).toBeNull();
+  });
+});

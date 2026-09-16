@@ -56,4 +56,5 @@ jobs:
           uv run pyinstaller --onefile --icon resources/icon.ico
           --name calkit-assistant main.py
       - name: Check the executable starts
-        run: Test-Path dist/calkit-assistant.exe
+        run: |
+          if (-not (Test-Path dist/calkit-assistant.exe)) { exit 1 }

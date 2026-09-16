@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -221,3 +222,116 @@ def test_install_cli_command(monkeypatch):
         assert result.exit_code != 0
         m_prompt.assert_called_once()
         assert m_prompt.call_args.args[0] == "pixi"
+
+
+@skipif_windows_fake_binary
+def test_platform_entries_prerequisites_and_record(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # macOS gets its own entries, falls back to the shared unix ones, and
+    # names Homebrew as a prerequisite for what's installed through it
+    with mock.patch("calkit.install.sys.platform", "darwin"):
+        brew = install.get_installer("brew")
+        assert brew is not None and "Homebrew" in brew["script"]
+        assert install.get_installer("pixi") is not None
+        git = install.get_installer("git")
+        assert git is not None and git.get("requires") == ["brew"]
+        assert install.get_installer("choco") is None
+        assert "Windows-only" in str(install.get_unsupported_message("choco"))
+    # Linux has no single package manager, so Git says what to run
+    with mock.patch("calkit.install.sys.platform", "linux"):
+        assert install.get_installer("git") is None
+        assert "package manager" in str(install.get_unsupported_message("git"))
+        assert install.get_installer("docker") is not None
+        assert install.get_installer("brew") is None
+    with mock.patch("calkit.install.sys.platform", "win32"):
+        choco = install.get_installer("choco")
+        assert choco is not None and "chocolatey" in choco["script"]
+        assert install.get_installer("brew") is None
+        r = install.get_installer("R")
+        assert r is not None and "*" in str(r["path_add"])
+    # Aliases share entries by reference
+    assert install.INSTALLERS["mamba"] is install.INSTALLERS["conda"]
+    assert install.INSTALLERS["Rscript"] is install.INSTALLERS["R"]
+    # A fake registry with a prerequisite: installing the tool installs the
+    # prerequisite first, both land on PATH, and both are recorded
+    fake_bin = tmp_dir / "bin"
+    fake_bin.mkdir()
+    for name in ("prereq", "tool"):
+        exe = fake_bin / name
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
+    registry: dict[str, install.Installer] = {
+        "prereq": {"script": "install-prereq", "path_add": str(fake_bin)},
+        "tool": {
+            "script": "install-tool",
+            "path_add": str(fake_bin),
+            "requires": ["prereq"],
+        },
+    }
+    monkeypatch.setattr("calkit.install.get_installer", registry.get)
+    log_path = tmp_dir / "installed.json"
+    monkeypatch.setattr(
+        "calkit.install.get_install_log_path", lambda: str(log_path)
+    )
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    ran: list[str] = []
+
+    def fake_run(script: str, shell: bool) -> subprocess.CompletedProcess:
+        ran.append(script)
+        return subprocess.CompletedProcess(args=[], returncode=0)
+
+    with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
+        assert install.install("tool") is True
+    assert ran == ["install-prereq", "install-tool"]
+    log = install.read_install_log()
+    assert [rec["app"] for rec in log] == ["prereq", "tool"]
+    assert log[1]["script"] == "install-tool"
+    assert log[1]["installed_at"]
+    # A prerequisite that's already present isn't reinstalled
+    ran.clear()
+    with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
+        assert install.install("tool") is True
+    assert ran == ["install-tool"]
+    # Prompting asks about the prerequisite before the tool, each on its
+    # own prompt
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    prompts: list[str] = []
+
+    def fake_input(prompt: str) -> str:
+        prompts.append(prompt)
+        return "y"
+
+    with (
+        mock.patch("builtins.input", side_effect=fake_input),
+        mock.patch("calkit.install.install", return_value=True) as m_install,
+    ):
+        assert install.prompt_and_install("tool", interactive=True) is True
+    assert [p.split("'")[1] for p in prompts] == ["prereq", "tool"]
+    assert [c.args[0] for c in m_install.call_args_list] == ["prereq", "tool"]
+    # A versioned install directory is found through a glob, newest last
+    for version in ("R-4.2.0", "R-4.3.1"):
+        vbin = tmp_dir / version / "bin"
+        vbin.mkdir(parents=True)
+        (vbin / "R").write_text("#!/bin/sh\nexit 0\n")
+        (vbin / "R").chmod(0o755)
+    registry["R"] = {
+        "script": "install-r",
+        "path_add": str(tmp_dir / "R-*" / "bin"),
+    }
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
+        assert install.install("R") is True
+    assert os.environ["PATH"].startswith(str(tmp_dir / "R-4.3.1" / "bin"))
+    # The listing marks what Calkit installed
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app as calkit_app
+
+    monkeypatch.setattr(
+        "calkit.install.read_install_log",
+        lambda: [{"app": "pixi", "installed_at": "2026-09-16T00:00:00+00:00"}],
+    )
+    result = CliRunner().invoke(calkit_app, ["list", "installers"])
+    assert result.exit_code == 0
+    assert "pixi  [installed by Calkit 2026-09-16" in result.output

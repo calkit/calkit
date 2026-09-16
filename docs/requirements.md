@@ -198,13 +198,14 @@ parsed by the parent (e.g. `calkit --use-version 0.3 -- --version`).
 
 ## Auto-installing apps
 
-For a small set of well-known apps, Calkit ships with a registry of
-upstream one-liner installers and can offer to run them when the app
-is missing.
+For a set of well-known apps, Calkit ships with a registry of
+upstream installers and can offer to run them when the app is missing.
 On an interactive terminal `calkit run` (and `calkit check reqs`)
 will prompt before installing;
 in CI the same path prints the install command as a fix-it and exits
 non-zero.
+Installing is always opt-in: nothing runs without a yes at the prompt
+or `--yes` on the command line.
 
 Apps currently in the registry:
 
@@ -215,8 +216,22 @@ Apps currently in the registry:
 | `rustup`, `cargo`  | upstream `rustup` script on Unix, `winget` on Windows                                              |
 | `juliaup`, `julia` | upstream `juliaup` script on Unix, `winget` on Windows                                             |
 | `nix`              | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows |
+| `conda`, `mamba`   | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                 |
+| `git`              | Homebrew on macOS, `winget` on Windows                                                             |
+| `docker`           | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows                             |
+| `code`             | Homebrew cask on macOS, `winget` on Windows                                                        |
+| `R`, `Rscript`     | Homebrew cask on macOS, `winget` on Windows                                                        |
+| `brew`             | the upstream Homebrew script, macOS only                                                           |
+| `choco`            | the upstream Chocolatey script in an elevated shell, Windows only                                  |
 
 Run `calkit list installers` for the live list.
+On Linux, Git, VS Code, and R come from the system package manager,
+so those entries print what to run rather than guessing which one.
+
+Some entries depend on another, e.g., Git on macOS is installed with
+Homebrew.
+Those prerequisites are prompted for first, one at a time,
+so saying yes to one thing never silently installs another.
 
 You can also trigger an install directly:
 
@@ -229,6 +244,11 @@ After a successful install, Calkit prepends the installer's known
 output directory (e.g. `~/.pixi/bin`) to `PATH` for the current
 process, so the very next requirement check sees the new binary
 without requiring a shell restart.
+
+Every app Calkit installs is recorded in `~/.calkit/installed.json`,
+with the date and the command that was run,
+and `calkit list installers` marks those entries.
+That way there's always a record of what Calkit changed on the machine.
 
 ## Setup requirements
 

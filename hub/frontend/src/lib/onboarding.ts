@@ -39,6 +39,45 @@ export interface OnboardingStep {
 /** The flag that means "I'm finished with this checklist, hide it." */
 export const DISMISSED = "dismissed"
 
+export type StartPath = "existing" | "fresh" | "overleaf"
+
+export interface ProjectStart {
+  path: StartPath
+  /** A GitHub repo the visitor already pointed at, for the existing path. */
+  repoUrl?: string
+}
+
+const PROJECT_START_KEY = "new_project_start"
+
+// Which start the visitor chose, kept until a project exists or the wizard
+// is closed on purpose. Signing up, connecting GitHub, and installing the
+// GitHub App all leave the site and come back somewhere else, so the wizard
+// can't rely on its URL surviving.
+export function rememberProjectStart(start: ProjectStart): void {
+  localStorage.setItem(PROJECT_START_KEY, JSON.stringify(start))
+}
+
+export function forgetProjectStart(): void {
+  localStorage.removeItem(PROJECT_START_KEY)
+}
+
+export function recallProjectStart(): ProjectStart | null {
+  const raw = localStorage.getItem(PROJECT_START_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (["existing", "fresh", "overleaf"].includes(parsed?.path)) {
+      return {
+        path: parsed.path,
+        repoUrl:
+          typeof parsed.repoUrl === "string" ? parsed.repoUrl : undefined,
+      }
+    }
+  } catch {}
+  forgetProjectStart()
+  return null
+}
+
 export interface ProjectOnboardingInput {
   /** Research questions declared in calkit.yaml. */
   questionCount: number

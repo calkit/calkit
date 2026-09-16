@@ -73,6 +73,11 @@ import useCustomToast from "../../hooks/useCustomToast"
 import { useLocalServer } from "../../hooks/useOnboarding"
 import { appName } from "../../lib/core"
 import { handleError } from "../../lib/errors"
+import {
+  forgetProjectStart,
+  recallProjectStart,
+  rememberProjectStart,
+} from "../../lib/onboarding"
 
 // Each step's state lives in the URL so a refresh, a back button, or a trip
 // out to GitHub or Zotero to connect an account all come back to the same
@@ -101,33 +106,27 @@ const searchSchema = z.object({
     .catch(undefined),
 })
 
-// Which start path the visitor picked before they had an account. The
-// post-login redirect is a bare pathname (the router's `to` doesn't parse a
-// query string), so the choice travels separately rather than being lost to
-// signing up.
-const PATH_STASH_KEY = "new_project_path"
-
 export const Route = createFileRoute("/_layout/new")({
   component: NewProjectWizard,
   validateSearch: (search) => searchSchema.parse(search),
   beforeLoad: ({ search }) => {
+    // The choice outlives this URL: signup, connecting GitHub, and the
+    // GitHub App install all come back somewhere else
+    if (search.path && !search.project) {
+      rememberProjectStart({ path: search.path })
+    }
     // Every path here ends in a GitHub repo, which needs an account.
     if (!isLoggedIn()) {
       localStorage.setItem("post_login_redirect", "/new")
-      if (search.path) {
-        sessionStorage.setItem(PATH_STASH_KEY, search.path)
-      }
       throw redirect({ to: "/signup" })
     }
     if (!search.path) {
-      const stashed = sessionStorage.getItem(PATH_STASH_KEY)
-      sessionStorage.removeItem(PATH_STASH_KEY)
-      if (
-        stashed === "existing" ||
-        stashed === "fresh" ||
-        stashed === "overleaf"
-      ) {
-        throw redirect({ to: "/new", search: { path: stashed, step: 1 } })
+      const remembered = recallProjectStart()
+      if (remembered) {
+        throw redirect({
+          to: "/new",
+          search: { path: remembered.path, step: 1 },
+        })
       }
     }
   },
@@ -1393,16 +1392,20 @@ function NewProjectWizard() {
       path,
       has_project: Boolean(project),
     })
+    // Closing on purpose is the one way to stop being brought back here
+    forgetProjectStart()
     return navigate({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       to: (project ? `/${accountName}/${projectName}` : "/") as any,
     })
   }
-  const onCreated = (created: ProjectPublic) =>
+  const onCreated = (created: ProjectPublic) => {
+    forgetProjectStart()
     goTo({
       step: 2,
       project: `${created.owner_account_name}/${created.name}`,
     })
+  }
   let body
   if (current === "path" || !path) {
     body = (

@@ -106,7 +106,13 @@ function Login() {
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
+      // Back to what was interrupted, where the connect prompt is still up
+      const returnTo = consumeGitHubReturnTo()
       setTimeout(() => {
+        if (returnTo) {
+          window.location.replace(returnTo)
+          return
+        }
         navigate({ to: "/settings", search: { tab: "connected-accounts" } })
       }, 3000)
     },

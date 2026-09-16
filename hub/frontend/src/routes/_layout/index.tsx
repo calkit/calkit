@@ -37,6 +37,7 @@ import FeaturedProjects from "../../components/Onboarding/FeaturedProjects"
 import StartPaths from "../../components/Onboarding/StartPaths"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
+import { recallProjectStart } from "../../lib/onboarding"
 
 const projectsSearchSchema = z.object({
   page: z.number().catch(1),
@@ -332,6 +333,7 @@ function LandingPage() {
 
 function Home() {
   const { user, isLoading } = useAuth()
+  const navigate = useNavigate()
   // Only the count is needed to choose between the empty state and the
   // table, so this asks for one row rather than sharing the table's query,
   // whose key varies with the search box.
@@ -344,6 +346,17 @@ function Home() {
     enabled: Boolean(user),
   })
   const projectCount = countQuery.data?.count ?? 0
+  // A wizard that was interrupted (connecting GitHub, installing the GitHub
+  // App) lands here with no project; pick it back up where it left off
+  const resume =
+    Boolean(user) && countQuery.isSuccess && projectCount === 0
+      ? recallProjectStart()
+      : null
+  useEffect(() => {
+    if (resume) {
+      navigate({ to: "/new", search: { path: resume.path, step: 1 } })
+    }
+  }, [resume, navigate])
   // A stored token means a user is on the way, and useAuth reports not-loading
   // for the tick before the request starts. Treating that gap as "signed out"
   // flashes the landing page at someone who is signed in.

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
 
 import type { ReproCheck } from "../client"
@@ -6,10 +7,31 @@ import {
   applyFlagLocally,
   buildAccountSteps,
   buildProjectSteps,
+  forgetProjectStart,
   isComplete,
   pipelineHasRun,
   progressPercent,
+  recallProjectStart,
+  rememberProjectStart,
 } from "./onboarding"
+
+describe("project start memory", () => {
+  it("keeps the choice until it is forgotten", () => {
+    rememberProjectStart({ path: "existing" })
+    expect(recallProjectStart()).toEqual({ path: "existing" })
+    expect(recallProjectStart()).toEqual({ path: "existing" })
+    forgetProjectStart()
+    expect(recallProjectStart()).toBeNull()
+  })
+
+  it("drops anything that isn't a start path", () => {
+    localStorage.setItem("new_project_start", '{"path":"nope"}')
+    expect(recallProjectStart()).toBeNull()
+    localStorage.setItem("new_project_start", "not json")
+    expect(recallProjectStart()).toBeNull()
+    expect(localStorage.getItem("new_project_start")).toBeNull()
+  })
+})
 
 const emptyReproCheck = {
   has_pipeline: false,

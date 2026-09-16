@@ -18,65 +18,55 @@ the paper.
 
 ## Why Calkit?
 
-The parts of a research project are tightly coupled.
-The data feeds the analysis, the analysis makes the figures,
-the figures go in the paper,
-and all of it exists to answer one question.
-No piece is worth much on its own.
-The whole kit is, and the paper is just the entrypoint to it.
+The parts of a research project are tightly coupled:
+data feeds analysis, analysis makes figures, figures go in the paper,
+and all of it exists to answer a question.
+No piece is valuable on its own.
+The whole kit is, and the paper is just the entrypoint.
 
-When tightly coupled things are kept in separate places,
-iteration gets slow and mistakes creep in.
-Software teams learned this and responded by pulling development, testing,
-and infrastructure into the same repo.
-Research projects tend to drift the other way,
-and it usually starts with one of these:
+Keeping coupled things in separate places makes iteration slow.
+Software teams figured this out and pulled development, testing, and
+infrastructure into the same repo.
+Research projects tend to drift the other way:
 
-- **Large datasets.** They don't fit in Git, so they end up on a shared drive
-  or a laptop, and the repo is no longer a complete record of the project.
-- **Expensive computations.** A simulation that took a week on a cluster is not
-  something a clean build should rerun, so it's left out of the pipeline and
-  its outputs are copied around by hand.
-- **Multiple environments.** A Python analysis, an R script, a Docker
-  container for a solver, and the paper build all need different environments,
-  and "works on my machine" creeps in.
-- **Writing.** Figures are uploaded to Overleaf manually, so the paper is
-  reproducible only up to the last time someone remembered to update it.
-- **Collaboration.** Each collaborator has their own copy of the data, their
-  own environment, and their own idea of which version of a figure is current.
+- Datasets don't fit in Git, so they live on a shared drive.
+- Expensive computations get run once and their outputs copied around by
+  hand.
+- Each script needs a different environment, and "works on my machine"
+  creeps in.
+- Figures are uploaded to Overleaf manually.
+- Collaborators each have their own copy of the data and their own idea of
+  which figure is current.
 
-Each of these has a known fix: DVC for data and caching, Make or Snakemake
-for the rebuild logic, Docker or Conda for environments, CI for running on a
-clean machine, a script to sync figures to Overleaf.
-For a small project, a Makefile and uv may be all you need.
-But past that, it means shopping around for each tool, learning it,
-and wiring it to the others,
-i.e., building your own kit before you can put anything in it.
-Most researchers, reasonably, don't.
-The project ends up as a mix of automated and manual steps,
-and reproducing it means reproducing the manual steps too.
-The single button becomes many buttons, with people in between.
+None of this is inevitable.
+Git, uv, Make, and LaTeX will get a project to single-button
+reproducible, and some people enjoy assembling that kind of setup.
+The trouble usually comes later, when a collaborator who doesn't want to
+learn it needs to add a figure or edit the paper.
+Without an easier way in, the project drifts back to emailed files and
+shared drives, and the single button becomes many buttons with manual
+steps in between.
 
-Calkit is the kit, already assembled.
-It has a slot for each concern: environments, datasets, notebooks and
-scripts, figures, publications, and a pipeline connecting them,
-all described in one `calkit.yaml`.
-You put your pieces in the slots.
-`calkit run` builds environments as needed and runs only what changed,
-`calkit clone` pulls cached outputs so expensive stages never need to be rerun,
+Calkit is a kit with the slots already there:
+environments, datasets, notebooks, figures, publications,
+and a pipeline connecting them, all described in `calkit.yaml`.
+You put your pieces in.
+If you've built this kind of setup yourself, it should feel familiar,
+and your collaborators get the same project through a browser,
+VS Code, or JupyterLab without needing to.
+`calkit run` builds environments and runs only what changed,
+`calkit clone` pulls cached outputs so expensive stages don't rerun,
 `calkit save` handles Git and DVC together,
-and the paper is a pipeline stage like any other, so the button covers it.
+and the paper is a pipeline stage like any other.
 
-Having the whole project described in one place also makes it checkable.
-Every figure, dataset, and number in the paper can be traced to the stage
-that produced it or the source it was imported from,
-and a rerun shows whether that record is true.
-With AI agents doing more of the work, this matters more than it used to.
-An agent can produce a plausible figure as easily as a real one,
-and a cheap rerun is what makes checking its work affordable.
+One description of the whole project also makes it checkable.
+Every figure and number can be traced to the stage that produced it,
+and a rerun shows whether that's true.
+With AI agents doing more of the work, this matters:
+an agent can make a plausible figure as easily as a real one.
 
-Underneath, it's still Git, DVC, Docker, Conda, uv, and LaTeX,
-so nothing is hidden and nothing is locked in.
+Underneath, it's still Git, DVC, Docker, Conda, uv, and LaTeX.
+Nothing is hidden and nothing is locked in.
 
 ## Features
 

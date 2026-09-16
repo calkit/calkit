@@ -40,14 +40,19 @@ Research projects tend to drift the other way:
 - Collaborators each have their own copy of the data and their own idea of
   which figure is current.
 
-None of this is inevitable.
+The tools to solve all of these already exist.
 Git, uv, Make, and LaTeX will get a project to single-button
 reproducible, and some people enjoy assembling that kind of setup.
-The trouble usually comes later, when a collaborator who doesn't want to
-learn it needs to add a figure or edit the paper.
-Without an easier way in, the project drifts back to emailed files and
-shared drives, and the single button becomes many buttons with manual
-steps in between.
+But the tools don't come integrated with each other,
+and they don't have easy entrypoints for someone who only wants to
+contribute to one part, e.g., writing or review.
+So when a collaborator needs to add a figure or edit the paper,
+the project drifts back to emailed files and shared drives,
+and the single button becomes many buttons with manual steps in between.
+That turns research into a
+[waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process:
+returning to an early stage like data collection or preprocessing is
+expensive, so it rarely happens, even when it should.
 
 Calkit is a kit with the slots already there:
 environments, datasets, notebooks, figures, publications,

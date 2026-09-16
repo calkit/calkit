@@ -2877,6 +2877,30 @@ def _tree_figure_paths(repo: git.Repo, ref: str | None) -> list[str]:
     return paths
 
 
+def _map_paths_outputs(ck_info: dict[str, Any]) -> list[str]:
+    """The files and directories the project's map-paths stages write."""
+    outs: list[str] = []
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage_map in stages.items():
+        try:
+            stage = _validate_ck_stage(stage_map, name)
+        except HTTPException:
+            continue
+        if stage.kind == "map-paths":
+            outs.extend(
+                normalize_artifact_path(p) for p in stage.dvc_out_paths
+            )
+    return outs
+
+
+def _under_any(path: str, roots: list[str]) -> bool:
+    path = normalize_artifact_path(path)
+    return any(
+        path == root or path.startswith(root.rstrip("/") + "/")
+        for root in roots
+    )
+
+
 def _discover_figures(
     project: Project,
     repo: git.Repo,
@@ -2901,17 +2925,6 @@ def _discover_figures(
         if not fig.get("title"):
             fig["title"] = title_from_path(fig["path"])
     declared_paths = {fig["path"] for fig in figures}
-
-    def _maybe_add_figure(path: str) -> None:
-        """Add `path` to figures if it looks like a figure and is not yet
-        known.
-        """
-        if _looks_like_figure(path) and path not in declared_paths:
-            figures.append({"path": path, "title": title_from_path(path)})
-            declared_paths.add(path)
-
-    for path in _tree_figure_paths(repo, ref):
-        _maybe_add_figure(path)
     # Pre-compute calkit.yaml / dvc.lock metadata once for the tree so we
     # don't re-read and re-expand on every iteration.
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
@@ -2921,6 +2934,24 @@ def _discover_figures(
         zip_path_map,
         dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
+    # A map-paths stage's outputs are copies of figures found elsewhere,
+    # e.g., into the paper's folder, so they aren't figures of their own
+    copies = _map_paths_outputs(ck_info_full)
+
+    def _maybe_add_figure(path: str) -> None:
+        """Add `path` to figures if it looks like a figure and is not yet
+        known.
+        """
+        if (
+            _looks_like_figure(path)
+            and path not in declared_paths
+            and not _under_any(path, copies)
+        ):
+            figures.append({"path": path, "title": title_from_path(path)})
+            declared_paths.add(path)
+
+    for path in _tree_figure_paths(repo, ref):
+        _maybe_add_figure(path)
     # Also auto-detect figures from DVC lock outs (files stored with DVC)
     for dvc_path, dvc_out in dvc_lock_outs.items():
         if dvc_out.get("type") == "dir":
@@ -3381,9 +3412,11 @@ def _build_tables(
                 tables.append({"path": path, "title": title_from_path(path)})
                 known_paths.add(path)
     auto: list[dict[str, Any]] = []
+    # Copies a map-paths stage makes, e.g., into the paper's folder
+    copies = _map_paths_outputs(ck_info)
 
     def _maybe_add_table(path: str, tex_text: str | None = None) -> None:
-        if path in known_paths:
+        if path in known_paths or _under_any(path, copies):
             return
         if PurePosixPath(path).suffix.lower() == ".tex":
             # Only Git-tracked TeX is checked; reading a DVC-tracked one

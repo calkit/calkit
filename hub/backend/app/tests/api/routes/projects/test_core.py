@@ -3974,6 +3974,112 @@ def test_get_featured_projects(client: TestClient, db: Session) -> None:
     assert response.json() == {"data": [], "count": 0}
 
 
+# A pipeline that copies a figure and a table into the paper's folder, the
+# way a map-paths stage stands in for a symlink
+MAP_PATHS_CK_INFO = {
+    "pipeline": {
+        "stages": {
+            "copy-to-paper": {
+                "kind": "map-paths",
+                "paths": [
+                    {
+                        "kind": "file-to-file",
+                        "src": "figures/plot.png",
+                        "dest": "paper/figures/plot.png",
+                    },
+                    {
+                        "kind": "file-to-dir",
+                        "src": "tables/t.csv",
+                        "dest": "paper/tables",
+                    },
+                ],
+            }
+        }
+    }
+}
+
+
+def _committed_repo(tmp_path, files: dict[str, str]):
+    import git
+
+    repo = git.Repo.init(tmp_path / "repo")
+    for path, content in files.items():
+        full = tmp_path / "repo" / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Initial")
+    return repo
+
+
+def test_figures_listing_skips_map_paths_copies(tmp_path) -> None:
+    from app.api.routes.projects.core import _discover_figures
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "figures/plot.png": "png",
+            "paper/figures/plot.png": "png",
+            "paper/figures/hand-drawn.png": "png",
+        },
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(MAP_PATHS_CK_INFO, {}, {}, {}),
+        ),
+    ):
+        ctx = _discover_figures(
+            project=SimpleNamespace(owner_account_name="o", name="p"),
+            repo=repo,
+            ref=None,
+        )
+    # The copy is the same figure; a file only in the paper's folder isn't
+    assert sorted(f["path"] for f in ctx.figures) == [
+        "figures/plot.png",
+        "paper/figures/hand-drawn.png",
+    ]
+
+
+def test_tables_listing_skips_map_paths_copies(tmp_path) -> None:
+    from app.api.routes.projects.core import _build_tables
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "tables/t.csv": "a,b\n1,2\n",
+            "paper/tables/t.csv": "a,b\n1,2\n",
+        },
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=MAP_PATHS_CK_INFO,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(MAP_PATHS_CK_INFO, {}, {}, {}),
+        ),
+    ):
+        tables = _build_tables(
+            project=SimpleNamespace(
+                owner_account_name="o", name="p", file_locks=[]
+            ),
+            repo=repo,
+            ref=None,
+            resolve_content=False,
+        )
+    assert [t.path for t in tables] == ["tables/t.csv"]
+
+
 def test_post_project_when_account_name_differs_from_github(
     client: TestClient, db: Session
 ) -> None:

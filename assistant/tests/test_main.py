@@ -53,6 +53,10 @@ def test_main_window_builds_and_refreshes_offscreen(app):
             s for s in steps.values() if isinstance(s, main.DependencyInstall)
         ]
         assert {"git", "docker", "uv", "calkit", "vscode"} <= set(steps)
+        # Logging in defers to the CLI's device flow rather than a pasted
+        # token
+        assert steps["hub-login"].login_command == ["calkit", "hub", "login"]
+        assert "❌" in steps["hub-login"].label.text()
         assert install_steps
         assert all(s.install_button is not None for s in install_steps)
         # Steps that depend on another are disabled until it's installed

@@ -249,14 +249,6 @@ def find_conda_prefix() -> str:
     return ""
 
 
-def get_conda_scripts_dir() -> str:
-    prefix = find_conda_prefix()
-    platform = get_platform()
-    if platform == "windows":
-        return os.path.join(prefix, "Scripts")
-    return os.path.join(prefix, "bin")
-
-
 def run_in_git_bash(
     command: str, capture_output: bool = False, check: bool = False
 ) -> subprocess.CompletedProcess:
@@ -321,30 +313,34 @@ def make_setup_step_layout(widget: QWidget) -> QHBoxLayout:
     return layout
 
 
-class CalkitToken(QWidget):
-    """A widget to set the Calkit token."""
+class HubLogin(QWidget):
+    """A widget to log in to the Calkit hub.
+
+    Logging in runs ``calkit hub login``, which opens the browser for the
+    device flow and stores the token itself, so nothing is typed in here.
+    """
 
     just_set = Signal()
 
     def __init__(self):
         super().__init__()
-        print("Checking Calkit token status")
+        print("Checking Calkit hub login status")
         is_set = self.is_set
-        self.txt_not_set = "Set Calkit Cloud API token: ❌"
-        self.txt_set = "Set Calkit Cloud API token: ✅"
+        self.txt_not_set = "Log in to the Calkit hub: ❌"
+        self.txt_set = "Log in to the Calkit hub: ✅"
         self.label = QLabel(self.txt_set if is_set else self.txt_not_set)
-        self.update_button = QPushButton(self)
-        self.update_button.setText("✏️")
-        self.update_button.setCursor(Qt.PointingHandCursor)
-        self.update_button.setStyleSheet(
+        self.login_button = QPushButton(self)
+        self.login_button.setText("🔑")
+        self.login_button.setCursor(Qt.PointingHandCursor)
+        self.login_button.setStyleSheet(
             "font-size: 12px; padding: 0px; margin: 0px; border: none;"
         )
-        self.update_button.setFixedSize(18, 18)
-        self.update_button.setToolTip("Update")
+        self.login_button.setFixedSize(18, 18)
+        self.login_button.setToolTip("Log in")
         self.layout = make_setup_step_layout(self)
-        self.update_button.clicked.connect(self.open_dialog)
+        self.login_button.clicked.connect(self.log_in)
         self.layout.addWidget(self.label)
-        self.layout.addWidget(self.update_button)
+        self.layout.addWidget(self.login_button)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
 
@@ -356,7 +352,7 @@ class CalkitToken(QWidget):
         menu.exec(self.mapToGlobal(position))
 
     def refresh(self) -> None:
-        print("Refreshing Calkit token status")
+        print("Refreshing Calkit hub login status")
         if self.is_set:
             self.label.setText(self.txt_set)
         else:
@@ -366,20 +362,34 @@ class CalkitToken(QWidget):
     def is_set(self) -> bool:
         return bool(get_calkit_token())
 
-    def open_dialog(self):
-        webbrowser.open("https://calkit.io/settings?tab=tokens")
-        text, ok = QInputDialog.getText(
-            self,
-            "Set Calkit Cloud API token",
-            "Enter API token created at calkit.io/settings:",
-            echo=QLineEdit.Password,
+    @property
+    def login_command(self) -> list[str]:
+        return ["calkit", "hub", "login"]
+
+    def log_in(self):
+        # The device flow waits for the browser, so it runs off the GUI
+        # thread with a busy dialog until it finishes or times out
+        self.login_button.setEnabled(False)
+        login_thread = InstallThread(
+            url=None, cmd=self.login_command, parent=self
         )
-        if ok and text:
-            exe = os.path.join(get_conda_scripts_dir(), "calkit")
-            cmd = [exe, "config", "set", "token", text]
-            subprocess.check_call(cmd)
-            self.refresh()
-            self.just_set.emit()
+        progress = QProgressDialog(
+            "Waiting for you to authorize this device in the browser...",
+            None,
+            0,
+            0,
+            self,
+        )
+        progress.setWindowTitle("Calkit Assistant")
+        progress.show()
+        login_thread.finished.connect(progress.close)
+        login_thread.finished.connect(self.finish_login)
+        login_thread.start()
+
+    def finish_login(self):
+        self.login_button.setEnabled(True)
+        self.refresh()
+        self.just_set.emit()
 
 
 class QWidgetABCMeta(ABCMeta, type(QWidget)):
@@ -1100,14 +1110,14 @@ def make_setup_step_widgets() -> dict[str, QWidget]:
     # However, this is not necessary on Linux
     # TODO: Ensure Docker permissions are set on Linux
     # TODO: Ensure we have GitHub credentials?
-    calkit_token = CalkitToken()
-    calkit_install = CalkitInstall(child_steps=[calkit_token])
+    hub_login = HubLogin()
+    calkit_install = CalkitInstall(child_steps=[hub_login])
     # Install uv
     steps["uv"] = UvInstall(child_steps=[calkit_install])
     # Install Calkit as a uv tool
     steps["calkit"] = calkit_install
-    # Ensure Calkit token is set
-    steps["calkit-token"] = calkit_token
+    # Log in to the hub, which stores the token
+    steps["hub-login"] = hub_login
     # Install VS Code and recommended extensions
     vs_code_extensions = VSCodeExtensionsInstall()
     steps["vscode"] = VSCodeInstall(child_steps=[vs_code_extensions])
@@ -1736,7 +1746,7 @@ class MainWindow(QWidget):
         self.setup_step_widgets["calkit"].just_installed.connect(
             self.projects_widget.refresh
         )
-        self.setup_step_widgets["calkit-token"].just_set.connect(
+        self.setup_step_widgets["hub-login"].just_set.connect(
             self.projects_widget.refresh
         )
         # Add the projects widget to the layout

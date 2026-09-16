@@ -68,7 +68,8 @@ No piece is valuable on its own.
 The whole kit is, and the paper is
 [just the entrypoint](https://doi.org/10.1007/978-1-4612-2544-7_5).
 
-Keeping coupled things in separate places makes iteration slow.
+Iteration requires integration:
+keeping coupled things in separate places makes iteration slow.
 Software teams figured this out and pulled development, testing, and
 infrastructure into the same repo,
 and teams that adopt continuous integration

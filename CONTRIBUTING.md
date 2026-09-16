@@ -134,6 +134,8 @@ As with the extensions, uncheck "set as the latest release" for these.
 Pull requests that touch `assistant/` run its offscreen smoke test on all
 three platforms and a Windows build, so a broken build is caught before a
 release is cut.
+`make assistant` runs the app locally and `make test-assistant` runs the
+same smoke test.
 
 ## 💡 Other ways to contribute
 

@@ -24,14 +24,15 @@ Research is iterative.
 The first version of an analysis is rarely the last:
 a reviewer asks for another case, a bug turns up in preprocessing,
 new data arrives, an advisor wants a different figure.
-Each of those means rerunning everything downstream.
+Each of those means going back to an earlier stage and rerunning
+everything downstream.
 If that takes a manual pass through scripts, exports, and uploads,
 iterations get rationed, and the work stops improving when the effort
 runs out rather than when it's right.
 If it takes one command, and only what changed actually reruns,
 iterating is nearly free.
 That matters because iteration is what produces good work:
-in controlled studies, people who iterate more get
+in controlled studies of design tasks, people who iterate more get
 [better results](https://doi.org/10.1145/1640233.1640260),
 and iterating even makes up for a lack of experience.
 Automating a step takes about as long as doing it once by hand,
@@ -49,8 +50,9 @@ The whole kit is, and the paper is
 Keeping coupled things in separate places makes iteration slow.
 Software teams figured this out and pulled development, testing, and
 infrastructure into the same repo,
-and projects that integrate continuously
-[release twice as often](https://doi.org/10.1145/2970276.2970358).
+and teams that adopt continuous integration
+[merge more contributions](https://doi.org/10.1145/2786805.2786850)
+without a drop in quality.
 Research projects tend to drift the other way:
 
 - Datasets don't fit in Git, so they live on a shared drive.

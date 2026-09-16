@@ -39,6 +39,50 @@ without the cognitive overhead.
 
 ![pipeline](https://docs.calkit.org/img/pipeline.png)
 
+## Why Calkit?
+
+For a small project, you don't need Calkit to be single-button reproducible.
+A Makefile, a uv-managed environment, Git, and a LaTeX build will get you
+there, and if that's your situation, it's a fine setup.
+
+Projects rarely stay small, though.
+Reproducibility gets hard when a project gets fragmented,
+i.e., when the context needed to regenerate a result stops living in one
+place.
+That usually starts with one of these:
+
+- **Large datasets.** They don't fit in Git, so they end up on a shared drive
+  or a laptop, and the repo is no longer a complete record of the project.
+- **Expensive computations.** A simulation that took a week on a cluster is not
+  something a clean build should rerun, so it's left out of the pipeline and
+  its outputs are copied around by hand.
+- **Multiple environments.** A Python analysis, an R script, a Docker
+  container for a solver, and the paper build all need different environments,
+  and "works on my machine" creeps in.
+- **Writing.** Figures are uploaded to Overleaf manually, so the paper is
+  reproducible only up to the last time someone remembered to update it.
+- **Collaboration.** Each collaborator has their own copy of the data, their
+  own environment, and their own idea of which version of a figure is current.
+
+Each of these has a known fix: DVC for data and caching, Docker or Conda for
+environments, CI for running on a clean machine, a script to sync figures to
+Overleaf.
+But each fix is another tool to learn, configure, and keep in step with the
+others, and most researchers, reasonably, don't.
+The project ends up as a mix of automated and manual steps,
+and reproducing it means reproducing the manual steps too.
+The single button becomes many buttons, with people in between.
+
+Calkit exists to make the integrated version the easy version.
+One `calkit.yaml` describes the environments, the pipeline, and the artifacts,
+so all of the context is in one place.
+`calkit run` builds environments as needed and runs only what changed,
+`calkit clone` pulls cached outputs so expensive stages never need to be rerun,
+`calkit save` handles Git and DVC together,
+and the paper is a pipeline stage like any other, so the button covers it.
+Underneath, it's still Git, DVC, Docker, Conda, uv, and LaTeX,
+so nothing is hidden and nothing is locked in.
+
 ## Features
 
 - A simplified [version control](https://docs.calkit.org/version-control)

@@ -84,3 +84,13 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         with mock.patch("main.get_platform", return_value="linux"):
             linux_steps = main.make_setup_step_widgets()
             assert "homebrew" not in linux_steps and "wsl" not in linux_steps
+            # Git has no installer on Linux, so clicking explains rather
+            # than crashing
+            with mock.patch("main.QMessageBox.information") as m_info:
+                assert linux_steps["git"].install() is False
+            assert "package manager" in m_info.call_args.args[2]
+    # A machine without WSL at all reports it as missing
+    with mock.patch(
+        "main.subprocess.check_output", side_effect=FileNotFoundError
+    ):
+        assert main.wsl_installed() is False

@@ -183,7 +183,7 @@ def wsl_installed() -> bool:
             and "Default Distribution: Ubuntu" in output
             and "not supported" not in output
         )
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
 
@@ -467,10 +467,22 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
 
     def install(self) -> bool:
         """Install the app, returning a bool indicating success."""
+        # Some apps have no installer here, e.g., Git on Linux comes from
+        # the system package manager
+        try:
+            cmd = self.install_command
+        except NotImplementedError:
+            QMessageBox.information(
+                self,
+                "Calkit Assistant",
+                f"Install {self.dependency_name} with your system package "
+                "manager, then refresh.",
+            )
+            return False
         self.install_button.setEnabled(False)
         install_thread = InstallThread(
             url=self.installer_download_url,
-            cmd=self.install_command,
+            cmd=cmd,
             parent=self,
         )
         install_progress = QProgressDialog(
@@ -525,8 +537,9 @@ class HomebrewInstall(DependencyInstall):
             "/bin/bash",
             "-c",
             (
-                "$(curl -fsSL https://raw.githubusercontent.com/"
-                "Homebrew/install/HEAD/install.sh)"
+                'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL '
+                "https://raw.githubusercontent.com/Homebrew/install/HEAD/"
+                'install.sh)"'
             ),
         ]
 
@@ -1773,7 +1786,8 @@ def check_windows_path():
 
 def run():
     print(f"Starting Calkit Assistant v{__version__}")
-    check_windows_path()
+    if get_platform() == "windows":
+        check_windows_path()
     app = QApplication(sys.argv)
     icon = QIcon("resources/icon.ico")
     app.setWindowIcon(icon)

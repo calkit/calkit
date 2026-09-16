@@ -1,0 +1,34 @@
+name: Build
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-windows:
+    name: Build for Windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Make
+        run: choco install make
+
+      - name: Build with PyInstaller
+        run: make build
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./dist/calkit-assistant.exe
+          asset_name: calkit-assistant-${{ github.ref_name }}-windows.exe
+          asset_content_type: application/octet-stream

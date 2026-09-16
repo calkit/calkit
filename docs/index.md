@@ -20,22 +20,46 @@ the paper.
 
 ## Why Calkit?
 
+Research is iterative.
+The first version of an analysis is rarely the last:
+a reviewer asks for another case, a bug turns up in preprocessing,
+new data arrives, an advisor wants a different figure.
+Each of those means rerunning everything downstream.
+If that takes a manual pass through scripts, exports, and uploads,
+iterations get rationed, and the work stops improving when the effort
+runs out rather than when it's right.
+If it takes one command, and only what changed actually reruns,
+iterating is nearly free.
+That matters because iteration is what produces good work:
+in controlled studies, people who iterate more get
+[better results](https://doi.org/10.1145/1640233.1640260),
+and iterating even makes up for a lack of experience.
+Automating a step takes about as long as doing it once by hand,
+so it pays for itself the second time.
+That's the case for single-button reproducibility:
+not just that others can check the work, but that you can change it.
+
 The parts of a research project are tightly coupled:
 data feeds analysis, analysis makes figures, figures go in the paper,
 and all of it exists to answer a question.
 No piece is valuable on its own.
-The whole kit is, and the paper is just the entrypoint.
+The whole kit is, and the paper is
+[just the entrypoint](https://doi.org/10.1007/978-1-4612-2544-7_5).
 
 Keeping coupled things in separate places makes iteration slow.
 Software teams figured this out and pulled development, testing, and
-infrastructure into the same repo.
+infrastructure into the same repo,
+and projects that integrate continuously
+[release twice as often](https://doi.org/10.1145/2970276.2970358).
 Research projects tend to drift the other way:
 
 - Datasets don't fit in Git, so they live on a shared drive.
 - Expensive computations get run once and their outputs copied around by
   hand.
 - Each script needs a different environment, and "works on my machine"
-  creeps in.
+  creeps in
+  ([74% of R files](https://doi.org/10.1038/s41597-022-01143-6) in a
+  large sample of published replication packages fail to run).
 - Figures are uploaded to Overleaf manually.
 - Collaborators each have their own copy of the data and their own idea of
   which figure is current.
@@ -48,11 +72,13 @@ and they don't have easy entrypoints for someone who only wants to
 contribute to one part, e.g., writing or review.
 So when a collaborator needs to add a figure or edit the paper,
 the project drifts back to emailed files and shared drives,
-and the single button becomes many buttons with manual steps in between.
+and the single button becomes many buttons with
+[manual steps in between](https://doi.org/10.1371/journal.pcbi.1003285).
 That turns research into a
 [waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process:
 returning to an early stage like data collection or preprocessing is
-expensive, so it rarely happens, even when it should.
+[expensive](https://doi.org/10.1109/2.962984),
+so it rarely happens, even when it should.
 
 Calkit is a kit with the slots already there:
 environments, datasets, notebooks, figures, publications,

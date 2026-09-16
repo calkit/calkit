@@ -92,7 +92,7 @@ const DatasetSource = ({
   if (stage) {
     return (
       <Text fontSize="sm">
-        <strong>Source:</strong> produced by stage{" "}
+        <strong>Origin:</strong> produced by stage{" "}
         {pipelineTo ? (
           <Link as={RouterLink} to={pipelineTo} search={{ stage } as any}>
             <Code fontSize="xs">{stage}</Code>
@@ -114,7 +114,7 @@ const DatasetSource = ({
         .replace(/^doi:\s*/i, "")
       return (
         <Text fontSize="sm">
-          <strong>Source:</strong> imported from DOI{" "}
+          <strong>Origin:</strong> imported from DOI{" "}
           <Tooltip label={`https://doi.org/${doi}`}>
             <Link href={`https://doi.org/${doi}`} isExternal>
               {doi} <ExternalLinkIcon mb={0.5} />
@@ -138,7 +138,7 @@ const DatasetSource = ({
       }
       return (
         <Text fontSize="sm" isTruncated>
-          <strong>Source:</strong> downloaded from{" "}
+          <strong>Origin:</strong> downloaded from{" "}
           <Tooltip label={importedFrom.url}>
             <Link href={importedFrom.url} isExternal>
               {shown} <ExternalLinkIcon mb={0.5} />
@@ -164,7 +164,7 @@ const DatasetSource = ({
       }`
       return (
         <Text fontSize="sm" isTruncated>
-          <strong>Source:</strong> from Git repo{" "}
+          <strong>Origin:</strong> from Git repo{" "}
           <Tooltip label={at ? `${label} at ${at}` : label}>
             <Link href={treeUrl} isExternal>
               {label} <ExternalLinkIcon mb={0.5} />
@@ -185,7 +185,7 @@ const DatasetSource = ({
       const label = `${importedFrom.project}${srcPath ? `/${srcPath}` : ""}`
       return (
         <Text fontSize="sm" isTruncated>
-          <strong>Source:</strong> imported from{" "}
+          <strong>Origin:</strong> imported from{" "}
           <Tooltip label={label}>
             {/* Straight to that dataset's viewer in its own project */}
             <Link
@@ -205,13 +205,20 @@ const DatasetSource = ({
         </Text>
       )
     }
+    if (importedFrom.description) {
+      return (
+        <Text fontSize="sm" isTruncated>
+          <strong>Origin:</strong> {importedFrom.description}
+        </Text>
+      )
+    }
   }
   if (createdBy?.length) {
     const names = createdBy.map(personLabel).join(", ")
     const withAi = createdBy.some((p) => p.with_ai)
     return (
       <Text fontSize="sm">
-        <strong>Source:</strong> created or collected by {names}
+        <strong>Origin:</strong> created or collected by {names}
         {withAi ? (
           <Text as="span" color="orange.400">
             {" "}
@@ -223,7 +230,7 @@ const DatasetSource = ({
   }
   return (
     <Text fontSize="sm" color="orange.400">
-      <strong>Source:</strong> not recorded
+      <strong>Origin:</strong> not recorded
     </Text>
   )
 }

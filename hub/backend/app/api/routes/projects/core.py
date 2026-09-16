@@ -60,6 +60,7 @@ import calkit.detect
 import calkit.environments
 import calkit.latex
 import calkit.pipeline
+import calkit.provenance
 import calkit.resources
 import calkit.templates
 from app import (
@@ -4570,14 +4571,26 @@ def get_project_datasets(
             DatasetPublic.model_validate(
                 row,
                 update=dict(
-                    imported_from_info=(
-                        imported if isinstance(imported, dict) else None
-                    ),
+                    imported_from_info=_imported_from_info(imported),
                     created_by=created if created else None,
                 ),
             )
         )
     return out
+
+
+def _imported_from_info(value: Any) -> dict[str, Any] | None:
+    """The structured origin, reading a bare string the way the calkit.yaml
+    schema does, so ``imported_from: https://doi.org/...`` is a DOI here too.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return calkit.provenance.source_from_location(value)
+        except ValueError:
+            return {"description": value}
+    return None
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")

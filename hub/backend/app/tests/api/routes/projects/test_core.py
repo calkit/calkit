@@ -4047,6 +4047,22 @@ def test_figures_listing_skips_map_paths_copies(tmp_path) -> None:
     ]
 
 
+def test_imported_from_info_reads_bare_strings() -> None:
+    from app.api.routes.projects.core import _imported_from_info
+
+    assert _imported_from_info(None) is None
+    assert _imported_from_info({"doi": "10.1/x"}) == {"doi": "10.1/x"}
+    assert _imported_from_info("https://doi.org/10.5281/zenodo.3960218") == {
+        "doi": "10.5281/zenodo.3960218"
+    }
+    assert _imported_from_info("https://example.com/data.csv") == {
+        "url": "https://example.com/data.csv"
+    }
+    assert _imported_from_info("a colleague's USB stick") == {
+        "description": "a colleague's USB stick"
+    }
+
+
 def test_tables_listing_skips_map_paths_copies(tmp_path) -> None:
     from app.api.routes.projects.core import _build_tables
 

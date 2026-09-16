@@ -8,11 +8,6 @@ install: ## Create the project's virtual environment.
 	@echo "🚀 Creating virtual environment"
 	@uv sync
 
-.PHONY: format
-format: ## Automatically format files.
-	@echo "🚀 Linting code with pre-commit"
-	@uv run pre-commit run -a
-
 .PHONY: test
 test: ## Test the code with pytest.
 	@echo "🚀 Testing code with pytest"

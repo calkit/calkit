@@ -30,7 +30,9 @@ If that takes a manual pass through scripts, exports, and uploads,
 iterations get rationed, and the work stops improving when the effort
 runs out rather than when it's right.
 If it takes one command, and only what changed actually reruns,
-iterating is nearly free.
+iterating is nearly free,
+and even modest cuts to a feedback loop
+[measurably raise productivity](https://doi.org/10.1109/MS.2023.3275268).
 That matters because iteration is what produces good work:
 in controlled studies of design tasks, people who iterate more get
 [better results](https://doi.org/10.1145/1640233.1640260),
@@ -86,6 +88,9 @@ Calkit is a kit with the slots already there:
 environments, datasets, notebooks, figures, publications,
 and a pipeline connecting them, all described in `calkit.yaml`.
 You put your pieces in.
+It's also one thing to install:
+when a project needs uv, pixi, Julia, Rust, or Nix and you don't have it,
+`calkit run` offers to install it.
 If you've built this kind of setup yourself, it should feel familiar,
 and your collaborators get the same project through a browser,
 VS Code, or JupyterLab without needing to.

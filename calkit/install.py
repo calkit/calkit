@@ -29,6 +29,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -372,8 +373,12 @@ def _expand_path(path: str) -> str:
     """Resolve ``~``, environment variables, and a glob to one directory."""
     expanded = os.path.expandvars(os.path.expanduser(path))
     if any(c in expanded for c in "*?["):
-        # Newest version last, which is the one we want on PATH
-        matches = sorted(glob.glob(expanded))
+        # Newest version last, which is the one we want on PATH; compared
+        # numerically so 4.10 sorts after 4.9
+        matches = sorted(
+            glob.glob(expanded),
+            key=lambda p: [int(n) for n in re.findall(r"\d+", p)],
+        )
         if matches:
             return matches[-1]
     return expanded

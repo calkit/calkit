@@ -310,7 +310,7 @@ def test_platform_entries_prerequisites_and_record(
     assert [p.split("'")[1] for p in prompts] == ["prereq", "tool"]
     assert [c.args[0] for c in m_install.call_args_list] == ["prereq", "tool"]
     # A versioned install directory is found through a glob, newest last
-    for version in ("R-4.2.0", "R-4.3.1"):
+    for version in ("R-4.9.0", "R-4.10.0"):
         vbin = tmp_dir / version / "bin"
         vbin.mkdir(parents=True)
         (vbin / "R").write_text("#!/bin/sh\nexit 0\n")
@@ -322,7 +322,17 @@ def test_platform_entries_prerequisites_and_record(
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
         assert install.install("R") is True
-    assert os.environ["PATH"].startswith(str(tmp_dir / "R-4.3.1" / "bin"))
+    assert os.environ["PATH"].startswith(str(tmp_dir / "R-4.10.0" / "bin"))
+    # An app with no installer on this platform still says what to run
+    monkeypatch.setattr("calkit.install.get_installer", lambda app: None)
+    with (
+        mock.patch("calkit.install.sys.platform", "linux"),
+        mock.patch("calkit.core.check_dep_exists", return_value=False),
+        pytest.raises(ValueError, match="package manager"),
+    ):
+        calkit.check_system_deps(
+            ck_info={"dependencies": ["R"]}, interactive=False
+        )
     # The listing marks what Calkit installed
     from typer.testing import CliRunner
 

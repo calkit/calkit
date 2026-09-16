@@ -6,6 +6,7 @@
 - The JupyterLab extension lives in `src`
 - The VS Code extension lives in `vscode-ext`
 - The Chrome extension lives in `browser-ext`
+- The desktop assistant app lives in `assistant`
 - GitHub Actions live in `actions`, e.g., `calkit/calkit/actions/run`
 - Config Calkit installs into projects, e.g., the dev container, VS Code, and
   GitHub Actions configs, lives in `calkit/resources`; see the README there

@@ -2940,6 +2940,7 @@ def run(
             log_f.write(STAGE_OUTPUT_START + "\n")
             log_f.flush()
             try:
+                kwargs.setdefault("errors", "replace")
                 p = subprocess.Popen(exec_cmd, **kwargs)
                 if in_main_thread:
                     old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)

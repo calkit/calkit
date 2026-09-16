@@ -2777,9 +2777,13 @@ def run(
         dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
-    args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
-        deepcopy(targets), ck_info=ck_info
-    )
+    try:
+        args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
+            deepcopy(targets), ck_info=ck_info
+        )
+    except ValueError as e:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(str(e))
     # Extract any boolean args
     for name in [
         "quiet",
@@ -3478,8 +3482,11 @@ def run_in_env(
             typer.echo(f"Running command: {docker_cmd}")
         try:
             subprocess.check_call(docker_cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
-            raise_error("Failed to run in Docker environment")
+        except subprocess.CalledProcessError as e:
+            raise_error(
+                "Failed to run in Docker environment: command exited with "
+                f"status {e.returncode}"
+            )
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)

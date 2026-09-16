@@ -577,12 +577,13 @@ def test_latex_stage_diffs():
         "main": "ccc3333",
         "HEAD": "ddd4",
     }
-    extra = stage.extra_dvc_stages(resolve_ref=fake.get)
+    extra = stage.extra_dvc_stages(revision_key=fake.get)
     assert list(extra) == ["paper-1-diff-v1-v2", "paper-1-diff-main"]
-    # Revisions are resolved into the command, so DVC sees a moving end
-    # move, while the output location keeps the pair as written
+    # Each revision's key goes into the command, so DVC sees when what
+    # either end contains changes, while the revisions stay as written
     assert extra["paper-1-diff-v1-v2"]["cmd"] == (
-        "calkit latex diff -e tex --no-check --from aaa1111 --to bbb2222 "
+        "calkit latex diff -e tex --no-check --from v1 --to v2 "
+        "--revision-key aaa1111..bbb2222 --input figures/fig1.png "
         "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
     )
     # HEAD is what a comparison runs up to unless it says otherwise, so
@@ -600,8 +601,8 @@ def test_latex_stage_diffs():
         "pubs/paper-1/main.tex",
         "figures/fig1.png",
     ]
-    # Without a resolver the command holds a name rather than a commit, so
-    # a moving end has nothing DVC could notice
+    # Without keys the command holds only names, so a moving end has nothing
+    # DVC could notice
     unresolved = stage.extra_dvc_stages()
     assert unresolved["paper-1-diff-main"]["always_changed"] is True
     assert "always_changed" not in unresolved["paper-1-diff-v1-v2"]
@@ -617,6 +618,33 @@ def test_latex_stage_diffs():
     assert git_stored.extra_dvc_stages()["paper-1-diff-v1-v2"]["outs"] == [
         {".calkit/latex-diffs/v1..v2/pubs/paper-1/main.pdf": {"cache": False}}
     ]
+    # A diff is built the way the document is, with its own latexdiff
+    # options, and fetches each revision's copy of the stage's inputs
+    configured = LatexStage(
+        name="paper-1",
+        kind="latex",
+        environment="tex",
+        target_path="pubs/paper-1/main.tex",
+        latexmkrc_path="pubs/paper-1/.latexmkrc",
+        latexmk_args=["-shell-escape"],
+        latexdiff_args=["--graphics-markup=both"],
+        inputs=["pubs/paper-1/figs/"],
+        diffs=[["v1", "v2"]],
+    )
+    assert configured.extra_dvc_stages()["paper-1-diff-v1-v2"]["cmd"] == (
+        "calkit latex diff -e tex --no-check --from v1 --to v2 "
+        "-r pubs/paper-1/.latexmkrc --latexmk-arg -shell-escape "
+        "--latexdiff-arg --graphics-markup=both "
+        "--input pubs/paper-1/figs/ "
+        "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
+    )
+    # Paths only known once the pipeline is compiled, e.g., another stage's
+    # outputs, are fetched and depended on like any other input
+    with_outputs = stage.extra_dvc_stages(extra_inputs=["figures/fig2.png"])
+    main_diff = with_outputs["paper-1-diff-main"]
+    assert "--input figures/fig2.png" in main_diff["cmd"]
+    assert "figures/fig2.png" in main_diff["deps"]
+    assert with_outputs["paper-1-diff-v1-v2"]["deps"] == []
     for bad in [[["v1"]], [["v1", "v2", "v3"]], [["v1", ""]], [["v1", "v1"]]]:
         with pytest.raises(ValidationError):
             LatexStage(

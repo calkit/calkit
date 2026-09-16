@@ -732,7 +732,9 @@ class Stage(BaseModel):
         return stage
 
     def extra_dvc_stages(
-        self, resolve_ref: Callable[[str], str] | None = None
+        self,
+        revision_key: Callable[[str], str] | None = None,
+        extra_inputs: list[str] | None = None,
     ) -> dict[str, dict]:
         """Additional DVC stages this one compiles into, keyed by name.
 
@@ -740,8 +742,11 @@ class Stage(BaseModel):
         the work has genuinely different inputs, so that a change to one
         part doesn't force the rest to run again.
 
-        ``resolve_ref`` turns a Git revision into a commit, for stages
-        whose inputs are revisions rather than files.
+        ``revision_key`` names a Git revision by the content of what the
+        stage reads, for stages whose inputs are revisions rather than
+        files. ``extra_inputs`` are paths the stage reads that are only
+        known once the whole pipeline is compiled, e.g., other stages'
+        outputs.
         """
         return {}
 
@@ -1004,23 +1009,17 @@ class LatexStage(Stage):
         description="Extra arguments passed straight through to latexmk, for "
         "control Calkit does not model.",
     )
+    latexdiff_args: list[str] = Field(
+        default=[],
+        description="Extra arguments passed straight through to latexdiff "
+        "when building diffs, e.g., '--type=CFONT'. Changed figures are "
+        "shown old and new unless '--graphics-markup' is set here.",
+    )
 
     @property
     def diff_pairs(self) -> list[tuple[str, str]]:
-        """The revisions to compare, oldest side first.
-
-        A bare revision compares it against ``HEAD``. Every comparison
-        here is between two commits: one against the working tree can't be
-        reproduced, so it belongs to whoever is doing the work rather than
-        to the project.
-        """
-        pairs: list[tuple[str, str]] = []
-        for entry in self.diffs:
-            if isinstance(entry, str):
-                pairs.append((entry, "HEAD"))
-            else:
-                pairs.append((entry[0], entry[1]))
-        return pairs
+        """The revisions to compare, oldest side first."""
+        return calkit.latex.get_diff_pairs(self.diffs)
 
     @property
     def diff_paths(self) -> list[str]:
@@ -1030,7 +1029,9 @@ class LatexStage(Stage):
         ]
 
     def extra_dvc_stages(
-        self, resolve_ref: Callable[[str], str] | None = None
+        self,
+        revision_key: Callable[[str], str] | None = None,
+        extra_inputs: list[str] | None = None,
     ) -> dict[str, dict]:
         """One stage per diff, separate from building the document.
 
@@ -1039,47 +1040,66 @@ class LatexStage(Stage):
         would rebuild the paper whenever a comparison was added and would
         chain commands with ``&&``, which not every shell understands.
 
-        A revision that can move is resolved into the command, so the
-        command changes when it moves and DVC re-runs the stage. Without
-        that the only honest option is to run every time, which is what
-        happens when no resolver is given.
+        Each revision's key goes into the command, so the command changes
+        when what either revision contains does and DVC re-runs the stage.
+        Without keys the only honest option for a revision that can move
+        is to run every time.
         """
+        deps = self.dvc_deps + (extra_inputs or [])
+        inputs = [
+            path
+            for path in deps
+            if path not in (self.target_path, self.latexmkrc_path)
+            and not path.startswith(".calkit/")
+        ]
         stages = {}
         for (from_ref, to_ref), path in zip(self.diff_pairs, self.diff_paths):
-            name = (
-                f"{self.name}-diff-"
-                f"{calkit.latex.diff_stage_suffix(from_ref, to_ref)}"
+            name = calkit.latex.get_diff_stage_name(
+                str(self.name), from_ref, to_ref
             )
             out: str | dict = path
             if self.diff_pdf_storage != "dvc":
                 out = {path: {"cache": False}}
-            # Revisions are resolved to the commit that last changed this
-            # document, not to the tip. The two describe the same document
-            # -- nothing since has touched it -- but the tip moves with
-            # every commit to anything, which would rewrite this command
-            # constantly, and saving that rewrite is itself a commit.
-            from_arg = resolve_ref(from_ref) if resolve_ref else from_ref
-            to_arg = resolve_ref(to_ref) if resolve_ref else to_ref
             cmd = (
                 f"calkit latex diff -e {shlex.quote(self.environment)}"
-                f" --no-check --from {shlex.quote(from_arg)}"
-                f" --to {shlex.quote(to_arg)}"
+                f" --no-check --from {shlex.quote(from_ref)}"
+                f" --to {shlex.quote(to_ref)}"
             )
+            # Named by content rather than by commit: a merge, a rebase, or
+            # a commit to anything else makes a new commit without changing
+            # the document, and would otherwise rewrite this command and
+            # make the stage stale
+            if revision_key is not None:
+                key = f"{revision_key(from_ref)}..{revision_key(to_ref)}"
+                cmd += f" --revision-key {shlex.quote(key)}"
+            # Built the way the document itself is, so a latexmkrc that sets
+            # search paths or shell escape applies to the diff too
+            if self.latexmkrc_path is not None:
+                cmd += f" -r {shlex.quote(self.latexmkrc_path)}"
+            for arg in self.latexmk_args:
+                cmd += f" --latexmk-arg {shlex.quote(arg)}"
+            for arg in self.latexdiff_args:
+                cmd += f" --latexdiff-arg {shlex.quote(arg)}"
+            # Each revision gets its own copies of any of these that are
+            # tracked with DVC, since a checkout only has their pointers
+            for input_path in inputs:
+                cmd += f" --input {shlex.quote(input_path)}"
             # Named from the pair as written, so the output path is the
-            # same on every branch even when the command holds commits
+            # same on every branch
             cmd += (
                 " --output-dir "
                 f"{shlex.quote(calkit.latex.get_diff_dir(from_ref, to_ref))}"
             )
             cmd += f" {shlex.quote(self.target_path)}"
-            # The command already names the exact commits being compared,
-            # so nothing in the working tree is an input. A DVC-tracked
-            # figure is the exception: its content isn't in Git, so only
-            # the dependency catches a change to it.
+            # The keys cover what Git holds at each revision, so for two
+            # fixed revisions nothing in the working tree is an input. One
+            # that can move also reads the working tree's files, since a
+            # DVC-tracked figure's content isn't in Git and only the
+            # dependency catches a change to it.
             moving = calkit.latex.MOVING_REFS.intersection({from_ref, to_ref})
             stage: dict = {
                 "cmd": cmd,
-                "deps": self.dvc_deps if moving else [],
+                "deps": deps if moving else [],
                 "outs": [out],
                 "desc": (
                     f"Automatically generated from the '{self.name}' stage "
@@ -1088,9 +1108,9 @@ class LatexStage(Stage):
             }
             if self.wdir is not None:
                 stage["wdir"] = self.wdir
-            # Without a resolver the command holds a name rather than a
-            # commit, so there's nothing for DVC to notice moving
-            if moving and resolve_ref is None:
+            # Without keys the command holds only names, so there's nothing
+            # for DVC to notice moving
+            if moving and revision_key is None:
                 stage["always_changed"] = True
             stages[name] = stage
         return stages

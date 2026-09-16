@@ -212,6 +212,10 @@ const FileEditorModal = ({
         onClose={handleClose}
         size={{ base: "full", md: "4xl" }}
         isCentered
+        // No fade: the editor's first render lands in the frame between the
+        // overlay's animation ending and its final value being committed,
+        // which paints one undimmed frame (see EditQuestion)
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent maxH="90vh">
@@ -268,6 +272,9 @@ const FileEditorModal = ({
         size={{ base: "sm", md: "md" }}
         isCentered
         initialFocusRef={commitInputRef}
+        // Opens over the editor, which already holds the page still
+        preserveScrollBarGap
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent

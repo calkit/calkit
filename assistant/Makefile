@@ -13,15 +13,6 @@ format: ## Automatically format files.
 	@echo "🚀 Linting code with pre-commit"
 	@uv run pre-commit run -a
 
-.PHONY: check
-check: format ## Run code quality tools.
-	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
-	@uv lock --locked
-	@echo "🚀 Static type checking with mypy"
-	@uv run mypy .
-	@echo "🚀 Checking for obsolete dependencies with deptry"
-	@uv run deptry .
-
 .PHONY: test
 test: ## Test the code with pytest.
 	@echo "🚀 Testing code with pytest"
@@ -31,14 +22,6 @@ test: ## Test the code with pytest.
 test-cov: ## Test the code coverage with pytest.
 	@echo "🚀 Testing code coverage with pytest"
 	@uv run pytest --cov --cov-config=pyproject.toml
-
-.PHONY: docs-test
-docs-test: ## Test if documentation can be built without warnings or errors.
-	@uv run mkdocs build -s
-
-.PHONY: docs
-docs: ## Build and serve the documentation.
-	@uv run mkdocs serve
 
 .PHONY: gui
 gui: ## Run the GUI in dev mode.

@@ -49,5 +49,5 @@ build: ## Build the GUI with PyInstaller.
 	@uv run pyinstaller --onefile --icon resources/icon.ico --name calkit-assistant main.py
 
 .PHONY: icon
-icon: resources/c-to-the-k.svg ## Create the app icon.
-	@convert -density 256x256 -background transparent resources/c-to-the-k.svg -define icon:auto-resize -colors 256 resources/icon.ico
+icon: ../hub/frontend/public/assets/images/c-to-the-k.svg ## Create the app icon.
+	@convert -density 256x256 -background transparent $< -define icon:auto-resize -colors 256 resources/icon.ico

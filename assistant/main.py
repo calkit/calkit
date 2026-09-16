@@ -989,11 +989,7 @@ class CalkitInstall(DependencyInstall):
 
     @property
     def installed(self) -> bool:
-        try:
-            subprocess.check_output(["calkit", "--version"])
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
+        return check_dep_exists("calkit")
 
     @property
     def install_command(self) -> list[str]:

@@ -21,6 +21,11 @@ dev = [
   "pytest-test-utils", # For tmp_dir fixture
 ]
 
+# Rootdir would otherwise resolve to the monorepo's pyproject, whose
+# options need plugins this environment doesn't have
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.mypy]
 files = ["calkit"]
 disallow_untyped_defs = true

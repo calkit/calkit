@@ -199,20 +199,18 @@ function ProjectsTable() {
 function EmptyState() {
   return (
     <>
-      {/* TODO: rewrite this heading and paragraph */}
       <Heading size="lg" mt={12} mb={2}>
-        Connect all the pieces of your research project
+        Make your project single-button reproducible
       </Heading>
       <Text color="ui.dim" mb={6} maxW="640px">
-        Reading, collecting data, analyzing it, and writing it up, in one
-        project instead of multiple. Stored as a plain Git/DVC repo, anyone can
-        clone and re-run it, and it all works offline.
+        Bring the data, code, environment, and writing into one
+        version-controlled project, so you, your collaborators, and your readers
+        can go from raw data to research article with a single command.
       </Text>
       <Box mb={10}>
         <StartPaths source="empty-state" />
       </Box>
-      {/* TODO: rewrite this heading */}
-      <FeaturedProjects heading="Or look at one that's already there" />
+      <FeaturedProjects heading="Or start from an example" />
     </>
   )
 }
@@ -222,19 +220,19 @@ function EmptyState() {
 const LOOP = [
   {
     title: "Read",
-    body: "Start with a fresh BibTeX file or import your Zotero collection as the project's bibliography and sync it bidirectionally.",
+    body: "Import a Zotero collection as the project's bibliography, or start a fresh BibTeX file, and keep the two in sync.",
   },
   {
     title: "Collect",
-    body: "Type data in, upload, import by DOI, URL, or Git repo, or create it as part of the pipeline. Every dataset keeps track of where it came from.",
+    body: "Type data in, upload it, or import it by DOI, URL, or Git repo. Every dataset records where it came from.",
   },
   {
     title: "Analyze",
-    body: "Plot offline with Python, R, or Julia, or in the browser, then save as a pipeline stage with a reproducible environment. Figures trace back to code and data.",
+    body: "Plot with Python, R, or Julia, offline or in the browser, then save it as a pipeline stage. Figures trace back to the code and data behind them.",
   },
   {
     title: "Write",
-    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have, linked to figures and results, which when updated, also trigger a rebuild of the paper.",
+    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have, so a changed figure reaches the PDF on the next run.",
   },
 ]
 
@@ -245,16 +243,19 @@ function LandingPage() {
     <>
       <Box mt={16} mb={10} textAlign={{ base: "center", md: "left" }}>
         <Heading size="2xl" mb={4} lineHeight="1.2">
-          Take control of your research project
+          Single-button reproducible research projects
         </Heading>
-        {/* TODO: rewrite; one long sentence, and references live in Zotero,
-            not Zenodo */}
+        <Text fontSize="lg" color="ui.dim" maxW="700px" mb={4}>
+          Instead of a loosely related collection of files split across multiple
+          systems, “integrated” via manual steps, your project becomes a
+          version-controlled, self-contained calculation kit tying together
+          literature review, data collection, analysis, and writing, so you,
+          your collaborators, and your readers can go from raw data to research
+          article with a single command.
+        </Text>
         <Text fontSize="lg" color="ui.dim" maxW="700px" mb={6}>
-          Connect all the pieces of your research project with Calkit. Add the
-          scripts you run on a cluster, notebooks sitting on your laptop, data
-          on a shared drive, a paper in Overleaf, references in Zenodo, and
-          seamlessly move between tasks with minimal context switching and a
-          robust history recorded along the way.
+          That means faster iteration, fewer mistakes, and no more wondering how
+          a figure was made six months after submitting the paper.
         </Text>
         <Button as={RouterLink} to="/new" variant="primary" size="lg">
           Get started
@@ -273,6 +274,16 @@ function LandingPage() {
       </Box>
       {/* The loop a project actually moves through, and the tool each
           phase usually lives in. One place for all four is the pitch. */}
+      <Box mb={4}>
+        <Heading size="md" mb={1}>
+          Success comes from iteration, and iteration comes from integration
+        </Heading>
+        <Text color="ui.dim" fontSize="sm">
+          A change in a dataset requires reanalyzing, which changes a figure,
+          which changes the article. Coupled components belong close together
+          and connected, in the same repo.
+        </Text>
+      </Box>
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={10}>
         {LOOP.map((phase, index) => (
           <Box
@@ -297,23 +308,22 @@ function LandingPage() {
       <SimpleGrid columns={{ base: 1, md: 3 }} spacing={6} mb={14}>
         {[
           {
-            title: "No lock-in",
+            title: "No subsystems to integrate",
+            body: "Git, uv, DVC, and LaTeX already exist, but wiring them together means setting up half a dozen subsystems and training everyone on them. Calkit ships them connected, so nobody has to become a de facto software engineer to contribute.",
+          },
+          {
+            title: "Transparent, without lock-in",
             body: (
               <>
                 Your project is a Git/DVC repo with a <Code>calkit.yaml</Code>{" "}
-                file in it. The pipeline, environments, and figures are all
-                declared in files you own.
+                file in it. Anyone comfortable with the underlying tools can use
+                them directly, and everyone else can work at a higher level.
               </>
             ),
           },
           {
-            title: "It all works offline",
-            body: "The CLI runs pipelines, builds environments, and manages data on your machine just as easily as the web app does.",
-          },
-          {
-            // TODO: rewrite this title and body
-            title: "Best practices, without the DIY part",
-            body: "Environment management, a workflow system, versioned data, and connections to external apps: components typically chosen and integrated manually, ready to go from day one.",
+            title: "Nothing goes stale quietly",
+            body: "The project records its research questions and the artifacts produced as evidence to answer them, so there's no mystery about where a figure came from or whether it's stale with respect to its data.",
           },
         ].map((item) => (
           <Box key={item.title}>

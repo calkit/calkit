@@ -27,32 +27,33 @@ interface PathOption {
  * a wish not to end up there again. Naming those situations lets someone
  * recognize themselves rather than guess which button is for them.
  */
-// TODO: rewrite these three descriptions
 export const START_PATHS: PathOption[] = [
   {
     path: "existing",
     icon: FaBroom,
-    title: "Simplify a project in progress",
+    title: "Make a project in progress reproducible",
     description:
-      "Notebooks on your laptop, data on a shared drive, figures pasted into " +
-      "Overleaf. Integrate them all into one project and iterate effortlessly.",
+      "Notebooks on your laptop, data on a shared drive, figures pasted " +
+      "into Overleaf. Bring them into one repo and connect them, so the " +
+      "whole thing runs with a single command.",
   },
   {
     path: "fresh",
     icon: FaSeedling,
-    title: "Start clean and stay that way",
+    title: "Start a new project",
     description:
-      "Data, code, and writing connected from day one " +
-      "so you can focus on the research questions instead of " +
-      "logistics.",
+      "Data, code, environment, and paper connected from the first commit, " +
+      "so the project stays reproducible as it grows instead of needing to " +
+      "be cleaned up later.",
   },
   {
     path: "overleaf",
     icon: FaLeaf,
-    title: "Start from the paper you're writing",
+    title: "Start from a paper you're writing",
     description:
       "Link the Overleaf project you already have, then build the analysis " +
-      "behind it so its figures and results automatically stay up to date.",
+      "behind it, so its figures and results come from the pipeline rather " +
+      "than from manual uploads.",
   },
 ]
 

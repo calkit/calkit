@@ -153,15 +153,14 @@ const STEPS_BY_PATH: Record<StartPath, StepKey[]> = {
   overleaf: ["path", "name", "paper", "question", "data", "machine"],
 }
 
-// TODO: rewrite these step titles
 const STEP_TITLES: Record<StepKey, string> = {
   path: "Starting point",
-  name: "A name",
-  audit: "Current status",
-  question: "The question",
-  data: "Your data",
-  figure: "A figure",
-  paper: "Paper and references",
+  name: "Name",
+  audit: "Status",
+  question: "Question",
+  data: "Data",
+  figure: "Figure",
+  paper: "Paper",
   machine: "Your machine",
 }
 
@@ -463,14 +462,14 @@ function NameItStep({
       <Text color="ui.dim" mb={6}>
         {isExisting
           ? "Point Calkit at the repo. Nothing in it is moved or rewritten: " +
-            "we read what's there and show you what it would take to " +
-            "reproduce."
+            "we read what's there and show you what stands between it and " +
+            "running with a single command."
           : path === "overleaf"
             ? "The repo is where the analysis behind the paper will live. " +
               "You'll link the Overleaf project to it in a moment, and its " +
               "figures will come from the pipeline instead of your manual uploads."
             : "You get a repo with an environment, a pipeline, and a paper " +
-              "skeleton connected together, so the first thing you do " +
+              "connected together out of the box, so the first thing you do " +
               "is research rather than setup."}
       </Text>
       {isExisting ? (
@@ -813,9 +812,8 @@ function AuditStep({
       </Heading>
       <Text color="ui.dim" mb={6}>
         Nothing was moved or rewritten. This is the project as it stands, read
-        the way a stranger trying to reproduce it would read it. Each gap
-        becomes an item on the project's setup list, with a button that closes
-        it.
+        the way someone trying to reproduce it would read it. Each gap becomes
+        an item on the project's setup list, with a button that closes it.
       </Text>
       <Box mb={6}>
         <ReproAudit accountName={accountName} projectName={projectName} />
@@ -1277,12 +1275,12 @@ function MachineStep({
   return (
     <>
       <Heading size="lg" mb={2}>
-        Get it onto your machine
+        Run it with a single command
       </Heading>
       <Text color="ui.dim" mb={6}>
-        The command line interface (CLI) runs the pipeline, manages
-        environments, and moves results between your machine and here, and every
-        bit of it works offline using free and open-source tools.
+        This is the single button. The command line interface (CLI) builds the
+        environments, runs the pipeline, and moves results between your machine
+        and here. All of it works offline, using free and open source tools.
       </Text>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>

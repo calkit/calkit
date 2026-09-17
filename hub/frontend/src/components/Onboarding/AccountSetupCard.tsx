@@ -139,11 +139,10 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
   return (
     <ChecklistCard
       title="Set up your workspace"
-      // TODO: rewrite the intro and the done message
       intro={
-        "Connect the tools you already use. Nothing moves into Calkit that " +
-        "you can't take back out -- your repo, your .bib, your Overleaf " +
-        "project stay yours."
+        "Connect the tools you already use. The integration is transparent, " +
+        "so nothing moves into Calkit that you can't take back out: your " +
+        "repo, your .bib file, and your Overleaf project stay yours."
       }
       steps={steps}
       actions={actions}
@@ -153,7 +152,7 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
       onMarkDone={setFlag}
       dismissed={accountFlags.includes(DISMISSED)}
       onDismissedChange={(dismissed) => setFlag(DISMISSED, dismissed)}
-      doneMessage="You're all set up. Everything's connected."
+      doneMessage="You're set up. Everything's connected."
     />
   )
 }

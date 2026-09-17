@@ -14,6 +14,18 @@ That means faster iteration, fewer mistakes,
 and no more wondering how a figure was made six months after submitting
 the paper.
 
+[Success comes from iteration](https://doi.org/10.1145/1640233.1640260),
+and iteration is made possible through _integration_.
+Calkit allows all stages of a research project to live in the
+same repository, making feedback loops both inside and across stages
+fast and painless, providing full context to both humans and AI agents.
+
+Software teams learned the value of these principles long ago,
+integrating development, testing, deployment, and infrastructure
+into the same repo, and many times within the same team,
+with automation across the entire lifecycle.
+Now it's time for research to see similar productivity and quality gains.
+
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 
 ![pipeline](img/pipeline.png)

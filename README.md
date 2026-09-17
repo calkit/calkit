@@ -20,18 +20,35 @@
 <!-- INCLUDE: docs/index.md -->
 
 Calkit makes it easy to create
-["single button"](https://doi.org/10.1190/1.1822162)
+[single-button](https://doi.org/10.1190/1.1822162)
 reproducible research projects.
 Instead of a loosely related collection of files
 split across multiple systems or apps,
 "integrated" via manual steps,
 your project becomes a version-controlled, self-contained "calculation kit"
-tying together data collection, analysis, visualization, and writing,
+tying together planning, data collection, analysis, and writing,
 so you, your collaborators, and your readers can go from raw data to
 research article with a single command.
 That means faster iteration, fewer mistakes,
 and no more wondering how a figure was made six months after submitting
 the paper.
+
+[Success comes from iteration](https://doi.org/10.1145/1640233.1640260),
+and iteration is made possible through _integration_.
+Calkit allows all stages of a research project to live in the
+same repository, making feedback loops both inside and across stages
+fast and painless, providing full context to both humans and AI agents.
+This is important because the stages are coupled.
+A change in a dataset requires reanalyzing,
+which creates a change in a figure,
+which creates a change in a research article.
+Coupled components belong close together and connected.
+
+Software teams learned the value of these principles long ago,
+integrating development, testing, deployment, and infrastructure
+into the same repo, and many times within the same team,
+with automation across the entire lifecycle.
+Now it's time for research to see similar productivity and quality gains.
 
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 
@@ -39,99 +56,73 @@ the paper.
 
 ## Why Calkit?
 
-Research is iterative.
-The first version of an analysis is rarely the last:
-a reviewer asks for another case, a bug turns up in preprocessing,
-new data arrives, an advisor wants a different figure.
-Each of those means going back to an earlier stage and rerunning
-everything downstream.
-If that takes a manual pass through scripts, exports, and uploads,
-iterations get rationed, and the work stops improving when the effort
-runs out rather than when it's right.
-If it takes one command, and only what changed actually reruns,
-iterating is nearly free,
-and even modest cuts to a feedback loop
-[measurably raise productivity](https://doi.org/10.1109/MS.2023.3275268).
-That matters because iteration is what produces good work:
-in controlled studies of design tasks, people who iterate more get
-[better results](https://doi.org/10.1145/1640233.1640260),
-and iterating even makes up for a lack of experience.
-Automating a step takes about as long as doing it once by hand,
-so it pays for itself the second time.
-That's the case for single-button reproducibility:
-not just that others can check the work, but that you can change it.
+The tools to create single-button reproducible
+research projects already exist, e.g.,
+version control with Git,
+environment management with uv,
+Make for a build system or pipeline,
+and LaTeX for document compilation.
+If you and your team can work effectively with a system like that,
+there's no need for any additional complexity.
 
-The parts of a research project are tightly coupled:
-data feeds analysis, analysis makes figures, figures go in the paper,
-and all of it exists to answer a question.
-No piece is valuable on its own.
-The whole kit is, and the paper is
-[just the entrypoint](https://doi.org/10.1007/978-1-4612-2544-7_5).
+And yet these practices are still not common,
+resulting in most "compendiums" failing to reproduce.
+Many still silo the code away from the data,
+and the analysis from the writing.
+Many are "multi-button",
+and not reproducible, because their stages are not connected,
+and important setup or execution information is omitted.
 
-Iteration requires integration:
-keeping coupled things in separate places makes iteration slow.
-Software teams figured this out and pulled development, testing, and
-infrastructure into the same repo,
-and teams that adopt continuous integration
-[merge more contributions](https://doi.org/10.1145/2786805.2786850)
-without a drop in quality.
-Research projects tend to drift the other way:
+Furthermore,
+there are additional challenges:
 
-- Datasets don't fit in Git, so they live on a shared drive.
-- Expensive computations get run once and their outputs copied around by
-  hand.
-- Each script needs a different environment, and "works on my machine"
-  creeps in
-  ([74% of R files](https://doi.org/10.1038/s41597-022-01143-6) in a
-  large sample of published replication packages fail to run).
-- Figures are uploaded to Overleaf manually.
-- Collaborators each have their own copy of the data and their own idea of
-  which figure is current.
+1. Computationally expensive steps may need to be run on a high-performance
+   computing (HPC) cluster.
+   Automating the transfer of data to and from there requires additional
+   work,
+   and it becomes important to use a
+   content-aware pipeline system, else steps are inefficiently repeated
+   or mistakenly skipped.
+2. Keeping large data files in version control along with the rest.
+   A typical solution may involve siloing data files away on a shared cloud
+   or physical hard drive,
+   requiring custom syncing scripts to avoid manual uploads and downloads.
 
-The tools to solve all of these already exist.
-Git, uv, Make, and LaTeX will get a project to single-button
-reproducible, and some people enjoy assembling that kind of setup.
-But the tools don't come integrated with each other,
-and they don't have easy entrypoints for someone who only wants to
-contribute to one part, e.g., writing or review.
-So when a collaborator needs to add a figure or edit the paper,
-the project drifts back to emailed files and shared drives,
-and the single button becomes many buttons with
-[manual steps in between](https://doi.org/10.1371/journal.pcbi.1003285).
-That turns research into a
-[waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process:
-returning to an early stage like data collection or preprocessing is
-[expensive](https://doi.org/10.1109/2.962984),
-so it rarely happens, even when it should.
+Again,
+the tools to solve these problems do exist:
+Snakemake, NextFlow, or DVC for pipelines,
+Git LFS, git-annex, or DVC for data version control,
+but they all require significant setup and training.
+At this point, you're looking at half a dozen subsystems to integrate,
+setup, and train everyone on the team to use.
+Essentially this requires everyone to become a de facto software engineer
+to contribute.
+What happens in reality is that
+workflows remain manual and fragmented,
+and many team members are not able to contribute to all stages to
+their full potential.
 
-Calkit is a kit with the slots already there:
-environments, datasets, notebooks, figures, publications,
-and a pipeline connecting them, all described in `calkit.yaml`.
-You put your pieces in.
-It's also one thing to install:
-when a project needs uv, pixi, Julia, Rust, or Nix and you don't have it,
-`calkit run` offers to install it.
-If you've built this kind of setup yourself, it should feel familiar,
-and your collaborators get the same project through a browser,
-VS Code, or JupyterLab without needing to.
-`calkit run` builds environments and runs only what changed,
-`calkit clone` pulls cached outputs so expensive stages don't rerun,
-`calkit save` handles Git and DVC together,
-and the paper is a pipeline stage like any other.
+Calkit solves these by providing a fully integrated experience
+built from the open source components that would typically
+comprise such a workflow.
+Everything is connected right out of the box,
+with a command line interface (CLI), web app, and more,
+to reduce friction for every task and team member involved.
+The integration is transparent without lock-in,
+so the underlying SWE-oriented tools can be used directly by more
+tolerant team members,
+and others can contribute at a higher level,
+while maintaining single-button reproducibility and frictionless,
+seamless iteration.
 
-One description of the whole project also makes it checkable.
-Every figure and number can be traced to the stage that produced it,
-and a rerun shows whether that's true.
-With AI agents doing more of the work, this matters:
-an agent can make a plausible figure as easily as a real one.
-
-Underneath, it's still Git, DVC, Docker, Conda, uv, and LaTeX,
-and Calkit is a transparent layer over them rather than a replacement.
-`git` and `uv` work on the project exactly as they would without it,
-so you can go as deep into the tools as you like
-while a collaborator who'd rather not works on the same project through
-the easier path.
-Nothing is hidden and nothing is locked in.
+Additionally, the Calkit project information format,
+saved in `calkit.yaml`,
+gives a full picture of the research questions, artifacts
+generated as evidence to answer them,
+and a way to fully verify everything back to its origin.
+So there's no mystery about where a certain figure or table came from,
+and whether or not its stale w.r.t. its input data,
+which is a critical feature to have when using generative AI.
 
 ## Features
 

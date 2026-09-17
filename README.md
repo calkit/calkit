@@ -26,7 +26,8 @@ Instead of a loosely related collection of files
 split across multiple systems or apps,
 "integrated" via manual steps,
 your project becomes a version-controlled, self-contained "calculation kit"
-tying together planning, data collection, analysis, and writing,
+tying together literature review, planning, data collection,
+analysis, and writing,
 so you, your collaborators, and your readers can go from raw data to
 research article with a single command.
 That means faster iteration, fewer mistakes,
@@ -44,11 +45,11 @@ which creates a change in a figure,
 which creates a change in a research article.
 Coupled components belong close together and connected.
 
-Software teams learned the value of these principles long ago,
+Software teams learned the importance of these principles long ago,
 integrating development, testing, deployment, and infrastructure
 into the same repo, and many times within the same team,
 with automation across the entire lifecycle.
-Now it's time for research to see similar productivity and quality gains.
+Similar productivity and quality gains can be had in research.
 
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 
@@ -93,34 +94,36 @@ the tools to solve these problems do exist:
 Snakemake, NextFlow, or DVC for pipelines,
 Git LFS, git-annex, or DVC for data version control,
 but they all require significant setup and training.
-At this point, you're looking at half a dozen subsystems to integrate,
-setup, and train everyone on the team to use.
-Essentially this requires everyone to become a de facto software engineer
+At this point, you're looking at half a dozen subsystems to integrate
+and get everyone on the team up to speed to use,
+essentially requiring many on the team to become de facto software engineers
 to contribute.
-What happens in reality is that
+What happens in reality is that the costs are deemed too high
+and the benefit too low, so
 workflows remain manual and fragmented,
-and many team members are not able to contribute to all stages to
+and many team members are not able to contribute to
 their full potential.
 
 Calkit solves these by providing a fully integrated experience
 built from the open source components that would typically
 comprise such a workflow.
 Everything is connected right out of the box,
-with a command line interface (CLI), web app, and more,
+with a command line interface (CLI), web app, and more
 to reduce friction for every task and team member involved.
 The integration is transparent without lock-in,
 so the underlying SWE-oriented tools can be used directly by more
 tolerant team members,
-and others can contribute at a higher level,
+and others can contribute at a higher level
 while maintaining single-button reproducibility and frictionless,
 seamless iteration.
 
 Additionally, the Calkit project information format,
 saved in `calkit.yaml`,
-gives a full picture of the research questions, artifacts
+gives a full picture of the project,
+its research questions, artifacts
 generated as evidence to answer them,
 and a way to fully verify everything back to its origin.
-So there's no mystery about where a certain figure or table came from,
+There's no mystery about where a certain figure or table came from,
 and whether or not its stale w.r.t. its input data,
 which is a critical feature to have when using generative AI.
 
@@ -146,7 +149,7 @@ which is a critical feature to have when using generative AI.
   including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
 - A complementary self-hostable and GitHub-integrated
   [hub](https://github.com/calkit/calkit/tree/main/hub)
-  to facilitate backup, collaboration,
+  web app to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so
   analysis, visualization, and writing can all stay in sync

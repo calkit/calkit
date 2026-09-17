@@ -52,11 +52,11 @@ resulting in most compendiums
 [failing to reproduce](https://doi.org/10.1038/s41597-022-01143-6).
 Many still silo the code away from the data,
 and the analysis from the writing.
-Many are "multi-button,"
-and not reproducible, because their stages are not connected,
+Many are "multi-button"
+and irreproducible because their stages are not connected
 and important setup or execution information is omitted.
 
-Furthermore, there are additional challenges:
+There are additional challenges:
 
 1. Computationally expensive steps may need to be run on a high-performance
    computing (HPC) cluster.
@@ -72,12 +72,12 @@ Furthermore, there are additional challenges:
 
 Again,
 the tools to solve these problems do exist:
-Snakemake, Nextflow, or DVC for pipelines,
+Snakemake, Nextflow, or DVC for pipelines;
 Git LFS, git-annex, or DVC for data version control,
 but they all require significant setup and training.
 At this point, you're looking at half a dozen subsystems to integrate
-and get everyone on the team up to speed to use,
-essentially requiring many on the team to become de facto software engineers
+and upskill the team to use,
+essentially requiring many to become de facto software engineers
 to contribute.
 What happens in reality is that the costs are deemed too high
 and the benefit too low, so
@@ -92,15 +92,16 @@ Everything is connected right out of the box,
 with a command line interface (CLI), web app, and more
 to reduce friction for every task and team member involved.
 The integration is transparent without lock-in,
-so the underlying SWE-oriented tools can be used directly by more
-tolerant team members,
+so the underlying software engineering-oriented
+tools can be used directly by
+team members more comfortable with them,
 and others can contribute at a higher level
 while maintaining single-button reproducibility and frictionless,
 seamless iteration.
 
 Additionally, the Calkit project information format,
 saved in `calkit.yaml`,
-gives a full picture of the project,
+gives a full picture of the project:
 its research questions, artifacts
 generated as evidence to answer them,
 and a way to fully verify everything back to its origin.

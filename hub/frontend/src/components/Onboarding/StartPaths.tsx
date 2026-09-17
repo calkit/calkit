@@ -33,27 +33,25 @@ export const START_PATHS: PathOption[] = [
     icon: FaBroom,
     title: "Make a project in progress reproducible",
     description:
-      "Notebooks on your laptop, data on a shared drive, figures pasted " +
-      "into Overleaf. Bring them into one repo and connect them, so the " +
-      "whole thing runs with a single command.",
+      "Notebooks on a laptop, data on a shared drive, figures pasted into " +
+      "Overleaf. Calkit brings them into one repo and connects them.",
   },
   {
     path: "fresh",
     icon: FaSeedling,
     title: "Start a new project",
     description:
-      "Data, code, environment, and paper connected from the first commit, " +
-      "so the project stays reproducible as it grows instead of needing to " +
-      "be cleaned up later.",
+      "Data, code, environment, and paper connected from the first commit. " +
+      "Nothing to clean up later.",
   },
   {
     path: "overleaf",
     icon: FaLeaf,
     title: "Start from a paper you're writing",
     description:
-      "Link the Overleaf project you already have, then build the analysis " +
-      "behind it, so its figures and results come from the pipeline rather " +
-      "than from manual uploads.",
+      "Link the Overleaf project you already have. The analysis behind it " +
+      "goes in the same repo, and its figures come from the pipeline " +
+      "instead of manual uploads.",
   },
 ]
 

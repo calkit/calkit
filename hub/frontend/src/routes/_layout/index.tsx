@@ -203,9 +203,8 @@ function EmptyState() {
         Make your project single-button reproducible
       </Heading>
       <Text color="ui.dim" mb={6} maxW="640px">
-        Bring the data, code, environment, and writing into one
-        version-controlled project, so you, your collaborators, and your readers
-        can go from raw data to research article with a single command.
+        Data, code, environment, and writing in one version-controlled project.
+        Go from raw data to research article with a single command.
       </Text>
       <Box mb={10}>
         <StartPaths source="empty-state" />
@@ -228,11 +227,11 @@ const LOOP = [
   },
   {
     title: "Analyze",
-    body: "Plot with Python, R, or Julia, offline or in the browser, then save it as a pipeline stage. Figures trace back to the code and data behind them.",
+    body: "Plot with Python, R, or Julia, offline or in the browser, then save it as a pipeline stage. Figures trace back to the code and data that made them.",
   },
   {
     title: "Write",
-    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have, so a changed figure reaches the PDF on the next run.",
+    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have. A changed figure reaches the PDF on the next run.",
   },
 ]
 
@@ -276,12 +275,13 @@ function LandingPage() {
           phase usually lives in. One place for all four is the pitch. */}
       <Box mb={4}>
         <Heading size="md" mb={1}>
-          Success comes from iteration, and iteration comes from integration
+          Success comes from iteration, and iteration is made possible through
+          integration
         </Heading>
         <Text color="ui.dim" fontSize="sm">
-          A change in a dataset requires reanalyzing, which changes a figure,
-          which changes the article. Coupled components belong close together
-          and connected, in the same repo.
+          A change in a dataset requires reanalyzing, which creates a change in
+          a figure, which creates a change in a research article. Coupled
+          components belong close together and connected.
         </Text>
       </Box>
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={10}>
@@ -308,22 +308,23 @@ function LandingPage() {
       <SimpleGrid columns={{ base: 1, md: 3 }} spacing={6} mb={14}>
         {[
           {
-            title: "No subsystems to integrate",
-            body: "Git, uv, DVC, and LaTeX already exist, but wiring them together means setting up half a dozen subsystems and training everyone on them. Calkit ships them connected, so nobody has to become a de facto software engineer to contribute.",
+            title: "Everything connected out of the box",
+            body: "Git, uv, DVC, and LaTeX are all things you could integrate yourself. That's half a dozen subsystems to set up and train a team on. Calkit is those same open source components, already integrated.",
           },
           {
-            title: "Transparent, without lock-in",
+            title: "No lock-in",
             body: (
               <>
                 Your project is a Git/DVC repo with a <Code>calkit.yaml</Code>{" "}
-                file in it. Anyone comfortable with the underlying tools can use
-                them directly, and everyone else can work at a higher level.
+                file in it. The integration is transparent. Team members who
+                prefer the underlying tools can use them directly, and others
+                contribute at a higher level.
               </>
             ),
           },
           {
-            title: "Nothing goes stale quietly",
-            body: "The project records its research questions and the artifacts produced as evidence to answer them, so there's no mystery about where a figure came from or whether it's stale with respect to its data.",
+            title: "A full picture of the project",
+            body: "calkit.yaml records the research questions and the artifacts generated as evidence to answer them. There's no mystery about where a figure came from, or whether it's stale with respect to its input data.",
           },
         ].map((item) => (
           <Box key={item.title}>

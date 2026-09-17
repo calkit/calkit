@@ -267,8 +267,8 @@ export function buildAccountSteps({
       key: "cli",
       title: "Install the Calkit CLI",
       detail:
-        "The CLI is what builds environments, runs the pipeline, and moves " +
-        "results between your machine and the hub.",
+        "Builds environments, runs the pipeline, and moves results between " +
+        "your machine and the hub.",
       done: cliRunning,
       // The local server is usually not running even when the CLI is
       // installed, so an unanswered check is not evidence of absence.

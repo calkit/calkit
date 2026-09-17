@@ -461,9 +461,8 @@ function NameItStep({
       </Heading>
       <Text color="ui.dim" mb={6}>
         {isExisting
-          ? "Point Calkit at the repo. Nothing in it is moved or rewritten: " +
-            "we read what's there and show you what stands between it and " +
-            "running with a single command."
+          ? "Point Calkit at the repo. Nothing in it is moved or rewritten. " +
+            "We read what's there and show you what's missing."
           : path === "overleaf"
             ? "The repo is where the analysis behind the paper will live. " +
               "You'll link the Overleaf project to it in a moment, and its " +
@@ -1278,9 +1277,9 @@ function MachineStep({
         Run it with a single command
       </Heading>
       <Text color="ui.dim" mb={6}>
-        This is the single button. The command line interface (CLI) builds the
-        environments, runs the pipeline, and moves results between your machine
-        and here. All of it works offline, using free and open source tools.
+        The command line interface (CLI) builds the environments, runs the
+        pipeline, and moves results between your machine and here. All of it
+        works offline, using free and open source tools.
       </Text>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>

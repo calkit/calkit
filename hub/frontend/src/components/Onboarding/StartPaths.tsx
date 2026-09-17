@@ -31,27 +31,26 @@ export const START_PATHS: PathOption[] = [
   {
     path: "existing",
     icon: FaBroom,
-    title: "Make a project in progress reproducible",
+    title: "Clean up a project in progress",
     description:
-      "Notebooks on a laptop, data on a shared drive, figures pasted into " +
-      "Overleaf. Calkit brings them into one repo and connects them.",
+      "Scripts on your laptop, data on the lab drive, figures dragged into " +
+      "Overleaf. One repo, wired together.",
   },
   {
     path: "fresh",
     icon: FaSeedling,
-    title: "Start a new project",
+    title: "Start a new one",
     description:
-      "Data, code, environment, and paper connected from the first commit. " +
-      "Nothing to clean up later.",
+      "Environment, pipeline, and paper connected from the first commit. " +
+      "Nothing to untangle later.",
   },
   {
     path: "overleaf",
     icon: FaLeaf,
-    title: "Start from a paper you're writing",
+    title: "Start from your paper",
     description:
-      "Link the Overleaf project you already have. The analysis behind it " +
-      "goes in the same repo, and its figures come from the pipeline " +
-      "instead of manual uploads.",
+      "Link the Overleaf project you're already writing in. The analysis " +
+      "moves in behind it, and the figures stop going stale.",
   },
 ]
 

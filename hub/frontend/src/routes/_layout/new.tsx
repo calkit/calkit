@@ -1277,9 +1277,8 @@ function MachineStep({
         Run it with a single command
       </Heading>
       <Text color="ui.dim" mb={6}>
-        The command line interface (CLI) builds the environments, runs the
-        pipeline, and moves results between your machine and here. All of it
-        works offline, using free and open source tools.
+        The command line interface (CLI) builds the environment, runs the
+        pipeline, and pushes the results back here. All of it works offline.
       </Text>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>

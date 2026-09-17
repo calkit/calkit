@@ -203,8 +203,7 @@ function EmptyState() {
         Make your project single-button reproducible
       </Heading>
       <Text color="ui.dim" mb={6} maxW="640px">
-        Data, code, environment, and writing in one version-controlled project.
-        Go from raw data to research article with a single command.
+        Data, code, environment, and writing in one repo. One command runs it.
       </Text>
       <Box mb={10}>
         <StartPaths source="empty-state" />
@@ -219,19 +218,19 @@ function EmptyState() {
 const LOOP = [
   {
     title: "Read",
-    body: "Import a Zotero collection as the project's bibliography, or start a fresh BibTeX file, and keep the two in sync.",
+    body: "Your Zotero collection becomes the project's .bib file, synced both ways.",
   },
   {
     title: "Collect",
-    body: "Type data in, upload it, or import it by DOI, URL, or Git repo. Every dataset records where it came from.",
+    body: "Type it, upload it, or import it by DOI. Every dataset remembers where it came from.",
   },
   {
     title: "Analyze",
-    body: "Plot with Python, R, or Julia, offline or in the browser, then save it as a pipeline stage. Figures trace back to the code and data that made them.",
+    body: "Plot in Python, R, or Julia. Save it as a stage and the figure is reproducible.",
   },
   {
     title: "Write",
-    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have. A changed figure reaches the PDF on the next run.",
+    body: "LaTeX here or Overleaf there. Change a figure and the PDF catches up.",
   },
 ]
 
@@ -244,17 +243,10 @@ function LandingPage() {
         <Heading size="2xl" mb={4} lineHeight="1.2">
           Single-button reproducible research projects
         </Heading>
-        <Text fontSize="lg" color="ui.dim" maxW="700px" mb={4}>
-          Instead of a loosely related collection of files split across multiple
-          systems, “integrated” via manual steps, your project becomes a
-          version-controlled, self-contained calculation kit tying together
-          literature review, data collection, analysis, and writing, so you,
-          your collaborators, and your readers can go from raw data to research
-          article with a single command.
-        </Text>
-        <Text fontSize="lg" color="ui.dim" maxW="700px" mb={6}>
-          That means faster iteration, fewer mistakes, and no more wondering how
-          a figure was made six months after submitting the paper.
+        <Text fontSize="lg" color="ui.dim" maxW="620px" mb={6}>
+          Your data, code, environment, and paper in one repo. One command runs
+          all of it: for a collaborator, for a reviewer, and for you six months
+          from now.
         </Text>
         <Button as={RouterLink} to="/new" variant="primary" size="lg">
           Get started
@@ -263,25 +255,20 @@ function LandingPage() {
       {/* The start paths are the conversion element, so they sit above the
           fold rather than under the pitch */}
       <Box mb={14}>
-        <Heading size="md" mb={1}>
+        <Heading size="md" mb={4}>
           Where are you starting?
         </Heading>
-        <Text color="ui.dim" fontSize="sm" mb={4}>
-          Pick the one that best describes your goal:
-        </Text>
         <StartPaths source="landing" />
       </Box>
       {/* The loop a project actually moves through, and the tool each
           phase usually lives in. One place for all four is the pitch. */}
       <Box mb={4}>
         <Heading size="md" mb={1}>
-          Success comes from iteration, and iteration is made possible through
-          integration
+          Iteration needs integration
         </Heading>
         <Text color="ui.dim" fontSize="sm">
-          A change in a dataset requires reanalyzing, which creates a change in
-          a figure, which creates a change in a research article. Coupled
-          components belong close together and connected.
+          Change the data, and the analysis, the figure, and the paper all
+          follow. Coupled things belong close together and connected.
         </Text>
       </Box>
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={10}>
@@ -308,23 +295,21 @@ function LandingPage() {
       <SimpleGrid columns={{ base: 1, md: 3 }} spacing={6} mb={14}>
         {[
           {
-            title: "Everything connected out of the box",
-            body: "Git, uv, DVC, and LaTeX are all things you could integrate yourself. That's half a dozen subsystems to set up and train a team on. Calkit is those same open source components, already integrated.",
+            title: "Connected out of the box",
+            body: "Git, uv, DVC, LaTeX. You could integrate them yourself. That's the part Calkit already did.",
           },
           {
             title: "No lock-in",
             body: (
               <>
-                Your project is a Git/DVC repo with a <Code>calkit.yaml</Code>{" "}
-                file in it. The integration is transparent. Team members who
-                prefer the underlying tools can use them directly, and others
-                contribute at a higher level.
+                A Git repo with a <Code>calkit.yaml</Code> file in it. Drop down
+                to the underlying tools whenever you want.
               </>
             ),
           },
           {
-            title: "A full picture of the project",
-            body: "calkit.yaml records the research questions and the artifacts generated as evidence to answer them. There's no mystery about where a figure came from, or whether it's stale with respect to its input data.",
+            title: "Nothing unaccounted for",
+            body: "Every figure and table says which stage made it, from which data. Including when it's out of date.",
           },
         ].map((item) => (
           <Box key={item.title}>

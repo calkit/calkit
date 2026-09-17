@@ -1,8 +1,8 @@
 # Home
 
 Calkit makes it easy to create
-[single-button](https://doi.org/10.1190/1.1822162)
-reproducible research projects.
+[single-button reproducible](https://doi.org/10.1190/1.1822162)
+research projects.
 Instead of a loosely related collection of files
 split across multiple systems or apps,
 "integrated" via manual steps,
@@ -48,15 +48,15 @@ If you and your team can work effectively with a system like that,
 there's no need for any additional complexity.
 
 And yet these practices are still not common,
-resulting in most "compendiums" failing to reproduce.
+resulting in most "compendiums"
+[failing to reproduce](https://doi.org/10.1038/s41597-022-01143-6).
 Many still silo the code away from the data,
 and the analysis from the writing.
 Many are "multi-button",
 and not reproducible, because their stages are not connected,
 and important setup or execution information is omitted.
 
-Furthermore,
-there are additional challenges:
+Furthermore, there are additional challenges:
 
 1. Computationally expensive steps may need to be run on a high-performance
    computing (HPC) cluster.

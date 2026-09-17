@@ -1,9 +1,7 @@
 [build-system]
 requires = [
   "hatchling>=1.5.0",
-  # 4.6 builds with jupyter-builder, which needs @jupyter/builder or else
-  # fetches core-meta from GitHub's rate-limited API
-  "jupyterlab>=4.0.0,<4.6",
+  "jupyter-builder>=1.2.3",
   "hatch-nodejs-version>=0.3.2",
   "hatch-vcs>=0.3.0",
 ]
@@ -77,6 +75,8 @@ xet = ["xet>=0.0.1"]  # For fast large file transfers with XeT protocol
 dev = [
   "deptry>=0.22.0",
   "ipykernel",
+  # Builds the JupyterLab extension outside of an isolated build
+  "jupyter-builder>=1.2.3",
   "jsonschema",
   "types-jsonschema",
   "kaleido==0.2.1",
@@ -157,7 +157,7 @@ version_cmd = "hatch version"
 
 [tool.jupyter-releaser.hooks]
 before-build-npm = [
-  "python -m pip install 'jupyterlab>=4.0.0,<5'",
+  "python -m pip install 'jupyter-builder>=1.2.3'",
   "cd jupyterlab-ext && jlpm",
   "cd jupyterlab-ext && jlpm build:prod",
 ]

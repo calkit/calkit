@@ -32,7 +32,11 @@ DIFF_TMP_DIR = os.path.join(LOCAL_DIR, "latex-diff-build")
 # that would produce the same document again can skip the build. Machine
 # private, so a fresh clone simply builds once.
 DIFF_STATE_DIR = os.path.join(DIFF_TMP_DIR, "state")
-DIFF_AUX_DIR = os.path.join(DIFF_TMP_DIR, "aux")
+# Where the marked-up document's auxiliary files and PDF are written,
+# inside the directory it's built in. TeX refuses to write outside the
+# working directory or to dotfiles, and packages like glossaries run
+# makeindex from inside TeX, so anywhere else leaves their lists empty.
+DIFF_AUX_DIRNAME = "calkit-latex-diff-aux"
 DIFF_DIR = os.path.join(".calkit", "latex-diffs")
 # Revisions that mean something different tomorrow. A comparison with one
 # of these at either end can't be settled by looking at files alone.
@@ -110,6 +114,43 @@ def diff_stage_suffix(from_ref: str, to_ref: str | None = None) -> str:
     if to_ref is not None and to_ref != "HEAD":
         suffix += f"-{_ref_dirname(to_ref)}"
     return suffix
+
+
+def get_diff_pairs(diffs: list) -> list[tuple[str, str]]:
+    """The revisions a latex stage's ``diffs`` compare, oldest side first.
+
+    A bare revision compares it against ``HEAD``. Every comparison in a
+    pipeline is between two commits: one against the working tree can't be
+    reproduced, so it belongs to whoever is doing the work rather than to
+    the project.
+    """
+    pairs: list[tuple[str, str]] = []
+    for entry in diffs:
+        if isinstance(entry, str):
+            pairs.append((entry, "HEAD"))
+        else:
+            pairs.append((entry[0], entry[1]))
+    return pairs
+
+
+def get_diff_stage_name(stage_name: str, from_ref: str, to_ref: str) -> str:
+    """The DVC stage a latex stage generates to build one of its diffs."""
+    return f"{stage_name}-diff-{diff_stage_suffix(from_ref, to_ref)}"
+
+
+# Appended to a latex stage's name to address all of its diffs at once,
+# e.g., 'calkit run paper.diffs'
+DIFFS_TARGET_SUFFIX = ".diffs"
+
+
+def get_diff_stage_names(stage_name: str, stage: dict) -> list[str]:
+    """Every diff stage a latex stage in calkit.yaml generates."""
+    if stage.get("kind") != "latex":
+        return []
+    return [
+        get_diff_stage_name(stage_name, from_ref, to_ref)
+        for from_ref, to_ref in get_diff_pairs(stage.get("diffs") or [])
+    ]
 
 
 def diff_state_path(output: str) -> str:
@@ -262,28 +303,6 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
                         queue.append(Path(rel))
                     break
     return sorted(found)
-
-
-def _is_immutable_ref(repo: git.Repo, ref: str | None) -> bool:
-    """Whether a ref names something that can't change under us.
-
-    A tag or a commit hash pins content; a branch or the working tree
-    doesn't. Only a diff between two of the former can be built once and
-    left alone.
-    """
-    if ref is None:
-        return False
-    if ref in [tag.name for tag in repo.tags]:
-        return True
-    if ref in [head.name for head in repo.heads]:
-        return False
-    if not re.fullmatch(r"[0-9a-f]{7,40}", ref):
-        return False
-    try:
-        repo.commit(ref)
-    except Exception:
-        return False
-    return True
 
 
 DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")

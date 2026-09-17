@@ -47,7 +47,7 @@ This guide will help you get started.
 1. Install the JupyterLab extension in development mode
    (if working on the JupyterLab extension):
    ```sh
-   uv run jupyter labextension develop . --overwrite
+   uv run jupyter-builder develop . --overwrite
    ```
 1. Start the JupyterLab extension TypeScript compiler in watch mode
    (if working on the JupyterLab extension):

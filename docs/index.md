@@ -32,7 +32,7 @@ into the same repo, and many times within the same team,
 with automation across the entire lifecycle.
 Similar productivity and quality gains can be had in research.
 
-<!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
+<!-- https://docs.google.com/drawings/d/1h-OvPG0-PMIaayMNnQvERMjXTebFBhKQeDnIC9z_jp8/edit -->
 
 ![pipeline](img/pipeline.png)
 

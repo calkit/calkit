@@ -67,11 +67,11 @@ If you and your team can work effectively with a system like that,
 there's no need for any additional complexity.
 
 And yet these practices are still not common,
-resulting in most "compendiums"
+resulting in most compendiums
 [failing to reproduce](https://doi.org/10.1038/s41597-022-01143-6).
 Many still silo the code away from the data,
 and the analysis from the writing.
-Many are "multi-button",
+Many are "multi-button,"
 and not reproducible, because their stages are not connected,
 and important setup or execution information is omitted.
 
@@ -84,14 +84,14 @@ Furthermore, there are additional challenges:
    and it becomes important to use a
    content-aware pipeline system, else steps are inefficiently repeated
    or mistakenly skipped.
-2. Keeping large data files in version control along with the rest.
+2. Large data files need to be kept in version control along with the rest.
    A typical solution may involve siloing data files away on a shared cloud
    or physical hard drive,
    requiring custom syncing scripts to avoid manual uploads and downloads.
 
 Again,
 the tools to solve these problems do exist:
-Snakemake, NextFlow, or DVC for pipelines,
+Snakemake, Nextflow, or DVC for pipelines,
 Git LFS, git-annex, or DVC for data version control,
 but they all require significant setup and training.
 At this point, you're looking at half a dozen subsystems to integrate
@@ -124,7 +124,7 @@ its research questions, artifacts
 generated as evidence to answer them,
 and a way to fully verify everything back to its origin.
 There's no mystery about where a certain figure or table came from,
-and whether or not its stale w.r.t. its input data,
+and whether or not it's stale with respect to its input data,
 which is a critical feature to have when using generative AI.
 
 ## Features
@@ -153,7 +153,7 @@ which is a critical feature to have when using generative AI.
   and sharing throughout the entire research lifecycle.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so
   analysis, visualization, and writing can all stay in sync
-  (no more manual uploads!)
+  (no more manual uploads!).
 - Support for running on [high performance computing (HPC)](https://docs.calkit.org/hpc) systems
   that use PBS or SLURM schedulers.
 - Support for automated running with

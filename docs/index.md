@@ -7,7 +7,7 @@ Instead of a loosely related collection of files
 split across multiple systems or apps,
 "integrated" via manual steps,
 your project becomes a version-controlled, self-contained "calculation kit"
-tying together data collection, analysis, visualization, and writing,
+tying together planning, data collection, analysis, and writing,
 so you, your collaborators, and your readers can go from raw data to
 research article with a single command.
 That means faster iteration, fewer mistakes,

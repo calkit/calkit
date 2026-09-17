@@ -19,25 +19,114 @@
 
 <!-- INCLUDE: docs/index.md -->
 
-Typical research workflows are horizontally-siloed, i.e.,
-various stages--data collection, analysis, writing--are performed in
-disconnected systems,
-turning research into a slow, error-prone, and tedious
-[waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process.
+Calkit makes it easy to create
+[single-button reproducible](https://doi.org/10.1190/1.1822162)
+research projects.
+Instead of a loosely related collection of files
+split across multiple systems or apps,
+"integrated" via manual steps,
+your project becomes a version-controlled, self-contained "calculation kit"
+tying together literature review, planning, data collection,
+analysis, and writing,
+so you, your collaborators, and your readers can go from raw data to
+research article with a single command.
+That means faster iteration, fewer mistakes,
+and no more wondering how a figure was made six months after submitting
+the paper.
 
-Calkit helps you integrate code, data, figures, results, publications,
-and more into a cohesive, traceable, and portable _knowledge creation system_,
-so every output can be traced back to its source (provenance)
-and reproduced with a single command.
+[Success comes from iteration](https://doi.org/10.1145/1640233.1640260),
+and iteration is made possible through _integration_.
+Calkit allows all stages of a research project to live in the
+same repository, making feedback loops both inside and across stages
+fast and painless, providing full context to both humans and AI agents.
+This is important because the stages are coupled.
+A change in a dataset requires reanalyzing,
+which creates a change in a figure,
+which creates a change in a research article.
+Coupled components belong close together and connected.
 
-With industry standard tools combined into a unified and simplified experience
-tailored for research,
-you can reap the rewards of reproducibility and automation
-without the cognitive overhead.
+Software teams learned the importance of these principles long ago,
+integrating development, testing, deployment, and infrastructure
+into the same repo, and many times within the same team,
+with automation across the entire lifecycle.
+Similar productivity and quality gains can be had in research.
 
-<!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
+<!-- https://docs.google.com/drawings/d/1h-OvPG0-PMIaayMNnQvERMjXTebFBhKQeDnIC9z_jp8/edit -->
 
 ![pipeline](https://docs.calkit.org/img/pipeline.png)
+
+## Why Calkit?
+
+The tools to create single-button reproducible
+research projects already exist, e.g.,
+version control with Git,
+environment management with uv,
+Make for a build system or pipeline,
+and LaTeX for document compilation.
+If you and your team can work effectively with a system like that,
+there's no need for any additional complexity.
+
+And yet these practices are still not common,
+resulting in most compendiums
+[failing to reproduce](https://doi.org/10.1038/s41597-022-01143-6).
+Many still silo the code away from the data,
+and the analysis from the writing.
+Many are "multi-button"
+and irreproducible because their stages are not connected
+and important setup or execution information is omitted.
+
+There are additional challenges:
+
+1. Computationally expensive steps may need to be run on a high-performance
+   computing (HPC) cluster.
+   Automating the transfer of data to and from there requires additional
+   work,
+   and it becomes important to use a
+   content-aware pipeline system, else steps are inefficiently repeated
+   or mistakenly skipped.
+2. Large data files need to be kept in version control along with the rest.
+   A typical solution may involve siloing data files away on a shared cloud
+   or physical hard drive,
+   requiring custom syncing scripts to avoid manual uploads and downloads.
+
+Again,
+the tools to solve these problems do exist:
+Snakemake, Nextflow, or DVC for pipelines;
+Git LFS, git-annex, or DVC for data version control,
+but they all require significant setup and training.
+At this point, you're looking at half a dozen subsystems to integrate
+and upskill the team to use,
+essentially requiring many to become de facto software engineers
+to contribute.
+What happens in reality is that the costs are deemed too high
+and the benefit too low, so
+workflows remain manual and fragmented,
+and many team members are not able to contribute to
+their full potential.
+
+Calkit solves these by providing a fully integrated experience
+built from the open source components that would typically
+comprise such a workflow.
+Everything is connected right out of the box,
+with a command line interface (CLI), web app, and more
+to reduce friction for every task and team member involved.
+The integration is transparent without lock-in,
+so the underlying software engineering-oriented
+tools can be used directly by
+team members more comfortable with them,
+and others can contribute at a higher level
+while maintaining single-button reproducibility and frictionless,
+seamless iteration.
+
+Additionally, the Calkit project information format,
+saved in `calkit.yaml`,
+gives a full picture of the project:
+its research questions, artifacts
+generated as evidence to answer them,
+and a way to fully verify everything back to its origin.
+There's no mystery about where a certain figure or table came from,
+and whether or not it's stale with respect to its input data,
+which is a critical feature to have when using generative AI.
 
 ## Features
 
@@ -61,11 +150,11 @@ without the cognitive overhead.
   including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
 - A complementary self-hostable and GitHub-integrated
   [hub](https://github.com/calkit/calkit/tree/main/hub)
-  to facilitate backup, collaboration,
+  web app to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so
   analysis, visualization, and writing can all stay in sync
-  (no more manual uploads!)
+  (no more manual uploads!).
 - Support for running on [high performance computing (HPC)](https://docs.calkit.org/hpc) systems
   that use PBS or SLURM schedulers.
 - Support for automated running with

@@ -111,55 +111,65 @@ function SignUp() {
         verb="Sign up"
         page="signup"
         githubOnly={headedForNewProject}
+        showDivider={!headedForNewProject}
       />
-      <form onSubmit={handleSubmit(onSubmit)} style={{ width: "100%" }}>
-        <FormControl isInvalid={!!errors.full_name} mb={3}>
-          <FormLabel htmlFor="full_name">Name</FormLabel>
-          <Input
-            id="full_name"
-            {...register("full_name", { required: "Name is required" })}
-            placeholder="Your name"
-          />
-          {errors.full_name && (
-            <FormErrorMessage>{errors.full_name.message}</FormErrorMessage>
-          )}
-        </FormControl>
-        <FormControl isInvalid={!!errors.email} mb={3}>
-          <FormLabel htmlFor="email">Email</FormLabel>
-          <Input
-            id="email"
-            type="email"
-            {...register("email", { required: "Email is required" })}
-            placeholder="you@example.com"
-          />
-          {errors.email && (
-            <FormErrorMessage>{errors.email.message}</FormErrorMessage>
-          )}
-        </FormControl>
-        <FormControl isInvalid={!!errors.password} mb={4}>
-          <FormLabel htmlFor="password">Password</FormLabel>
-          <Input
-            id="password"
-            type="password"
-            {...register("password", {
-              required: "Password is required",
-              minLength: { value: 8, message: "At least 8 characters" },
-            })}
-            placeholder="Choose a password"
-          />
-          {errors.password && (
-            <FormErrorMessage>{errors.password.message}</FormErrorMessage>
-          )}
-        </FormControl>
-        <Button
-          variant="primary"
-          type="submit"
-          width="full"
-          isLoading={isSubmitting || mutation.isPending}
-        >
-          Sign up
-        </Button>
-      </form>
+      {/* TODO: rewrite this line */}
+      {headedForNewProject ? (
+        <Text fontSize="xs" color="ui.dim" textAlign="center">
+          A project lives in a GitHub repo, so GitHub is how you sign up for
+          one.
+        </Text>
+      ) : null}
+      {headedForNewProject ? null : (
+        <form onSubmit={handleSubmit(onSubmit)} style={{ width: "100%" }}>
+          <FormControl isInvalid={!!errors.full_name} mb={3}>
+            <FormLabel htmlFor="full_name">Name</FormLabel>
+            <Input
+              id="full_name"
+              {...register("full_name", { required: "Name is required" })}
+              placeholder="Your name"
+            />
+            {errors.full_name && (
+              <FormErrorMessage>{errors.full_name.message}</FormErrorMessage>
+            )}
+          </FormControl>
+          <FormControl isInvalid={!!errors.email} mb={3}>
+            <FormLabel htmlFor="email">Email</FormLabel>
+            <Input
+              id="email"
+              type="email"
+              {...register("email", { required: "Email is required" })}
+              placeholder="you@example.com"
+            />
+            {errors.email && (
+              <FormErrorMessage>{errors.email.message}</FormErrorMessage>
+            )}
+          </FormControl>
+          <FormControl isInvalid={!!errors.password} mb={4}>
+            <FormLabel htmlFor="password">Password</FormLabel>
+            <Input
+              id="password"
+              type="password"
+              {...register("password", {
+                required: "Password is required",
+                minLength: { value: 8, message: "At least 8 characters" },
+              })}
+              placeholder="Choose a password"
+            />
+            {errors.password && (
+              <FormErrorMessage>{errors.password.message}</FormErrorMessage>
+            )}
+          </FormControl>
+          <Button
+            variant="primary"
+            type="submit"
+            width="full"
+            isLoading={isSubmitting || mutation.isPending}
+          >
+            Sign up
+          </Button>
+        </form>
+      )}
       <Text fontSize="sm">
         Already have an account?{" "}
         <Link as={RouterLink} to="/login" variant="blue">

@@ -19,6 +19,8 @@ interface OAuthButtonsProps {
    * at the connect-GitHub step. Drop this once the hub can host the repo.
    */
   githubOnly?: boolean
+  /** The "or" rule only makes sense when an email form follows. */
+  showDivider?: boolean
 }
 
 /**
@@ -33,6 +35,7 @@ const OAuthButtons = ({
   githubLoading,
   googleLoading,
   githubOnly = false,
+  showDivider = true,
 }: OAuthButtonsProps) => (
   <>
     <Button
@@ -62,13 +65,15 @@ const OAuthButtons = ({
         {verb} with Google
       </Button>
     )}
-    <HStack width="full">
-      <Divider />
-      <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
-        or
-      </Text>
-      <Divider />
-    </HStack>
+    {showDivider ? (
+      <HStack width="full">
+        <Divider />
+        <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
+          or
+        </Text>
+        <Divider />
+      </HStack>
+    ) : null}
   </>
 )
 

@@ -349,9 +349,12 @@ You'll see that the pipeline has a stage that is out-of-date:
 
 ```sh
 ---------------------------- Pipeline ----------------------------
-analyze:
-        changed deps:
-                modified:           scripts/analyze.py
+Stale stages:
+        analyze:
+          stale outputs:
+            data/results.csv
+          modified inputs:
+            scripts/analyze.py
 ```
 
 This can be fixed with another call to `calkit run`.
@@ -396,9 +399,12 @@ For example:
 
 ```sh
 ---------------------------- Pipeline ----------------------------
-build-paper:
-        changed deps:
-                modified:           paper/paper.tex
+Stale stages:
+        build-paper:
+          stale outputs:
+            paper/paper.pdf
+          modified inputs:
+            paper/paper.tex
 ```
 
 Execute `calkit run` again to bring everything up-to-date.

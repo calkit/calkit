@@ -246,25 +246,15 @@ function LandingPage() {
   const loopBorder = useColorModeValue("gray.200", "gray.600")
   return (
     <>
-      <Box mt={16} mb={10} textAlign={{ base: "center", md: "left" }}>
+      <Box mt={16} mb={4} textAlign={{ base: "center", md: "left" }}>
         <Heading size="2xl" mb={4} lineHeight="1.2">
           Single-button reproducible research
         </Heading>
-        <Text fontSize="lg" color="ui.dim" maxW="620px" mb={6}>
+        <Text fontSize="lg" color="ui.dim">
           All stages in one project repository, connected by an
           environment-aware pipeline that can be verified with a single command.
+          Work locally or on the web. Totally open-source with zero lock-in.
         </Text>
-        <Button as={RouterLink} to="/new" variant="primary" size="lg">
-          Get started
-        </Button>
-      </Box>
-      {/* The start paths are the conversion element, so they sit above the
-          fold rather than under the pitch */}
-      <Box mb={14}>
-        <Heading size="md" mb={4}>
-          Where are you starting?
-        </Heading>
-        <StartPaths source="landing" />
       </Box>
       {/* The loop a project actually moves through, and the tool each
           phase usually lives in. One place for all four is the pitch. */}
@@ -279,7 +269,7 @@ function LandingPage() {
           iteration is quicker and easier, and iteration is the key to quality.
         </Text>
       </Box>
-      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={10}>
+      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={8}>
         {LOOP.map((phase, index) => (
           <Box
             key={phase.title}
@@ -300,36 +290,11 @@ function LandingPage() {
           </Box>
         ))}
       </SimpleGrid>
-      <SimpleGrid columns={{ base: 1, md: 3 }} spacing={6} mb={14}>
-        {[
-          {
-            title: "Connected out of the box",
-            body: "Git, uv, DVC, LaTeX. You could integrate them yourself. That's the part Calkit already did.",
-          },
-          {
-            title: "No lock-in",
-            body: (
-              <>
-                A Git repo with a <Code>calkit.yaml</Code> file in it. Drop down
-                to the underlying tools whenever you want.
-              </>
-            ),
-          },
-          {
-            title: "Nothing unaccounted for",
-            body: "Every figure and table says which stage made it, from which data. Including when it's out of date.",
-          },
-        ].map((item) => (
-          <Box key={item.title}>
-            <Heading size="sm" mb={2}>
-              {item.title}
-            </Heading>
-            <Text fontSize="sm" color="ui.dim">
-              {item.body}
-            </Text>
-          </Box>
-        ))}
-      </SimpleGrid>
+      <Box mb={8}>
+        <Button as={RouterLink} to="/new" variant="primary" size="lg">
+          Get started
+        </Button>
+      </Box>
       <FeaturedProjects />
     </>
   )

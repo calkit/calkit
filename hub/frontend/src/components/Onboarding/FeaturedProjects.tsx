@@ -33,7 +33,7 @@ const FeaturedProjects = ({ heading }: { heading?: string }) => {
   return (
     <Box>
       <Flex align="baseline" gap={3} mb={3}>
-        <Heading size="md">{heading ?? "See it in action"}</Heading>
+        <Heading size="md">{heading ?? "Check out some examples"}</Heading>
         <Link as={RouterLink} to="/projects" fontSize="sm" variant="blue">
           Browse all projects →
         </Link>

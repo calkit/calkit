@@ -314,9 +314,9 @@ all scientific or analytical computing projects.
 <!-- INCLUDE: docs/quickstart.md +1 -->
 
 <!-- prettier-ignore -->
-!!! note
-    `ck` is an abbreviated alias for the `calkit` executable.
-    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
+> [!NOTE]
+> `ck` is an abbreviated alias for the `calkit` executable.
+> All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
 
 ### From an existing project
 

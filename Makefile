@@ -15,6 +15,10 @@ install: ## Create the project's virtual environment.
 dev: ## Start up the hub containers for development.
 	@$(MAKE) -C hub dev
 
+.PHONY: dev-reset-user
+dev-reset-user: ## Reset the hub development user's data.
+	@$(MAKE) -C hub dev-reset-user
+
 .PHONY: frontend-client
 frontend-client: ## Regenerate the hub frontend's API client.
 	@$(MAKE) -C hub/frontend client

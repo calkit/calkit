@@ -271,11 +271,12 @@ function LandingPage() {
           phase usually lives in. One place for all four is the pitch. */}
       <Box mb={4}>
         <Heading size="md" mb={1}>
-          Iteration needs integration
+          Faster iteration from tighter integration
         </Heading>
         <Text color="ui.dim" fontSize="sm">
-          Change the data, and the analysis, the figure, and the paper all
-          follow. Coupled things belong close together and connected.
+          Change the data and the analysis, figures, and paper all follow. When
+          coupled components stay close together and connected, iteration is
+          quicker and easier, and iteration is the key to quality.
         </Text>
       </Box>
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={10}>

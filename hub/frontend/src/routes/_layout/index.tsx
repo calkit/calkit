@@ -248,12 +248,11 @@ function LandingPage() {
     <>
       <Box mt={16} mb={10} textAlign={{ base: "center", md: "left" }}>
         <Heading size="2xl" mb={4} lineHeight="1.2">
-          Single-button reproducible research projects
+          Single-button reproducible research
         </Heading>
         <Text fontSize="lg" color="ui.dim" maxW="620px" mb={6}>
-          Your data, code, environment, and paper in one repo. One command runs
-          all of it: for a collaborator, for a reviewer, and for you six months
-          from now.
+          All stages of a project in one repository, connected by an
+          environment-aware pipeline that can be verified with a single command.
         </Text>
         <Button as={RouterLink} to="/new" variant="primary" size="lg">
           Get started

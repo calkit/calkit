@@ -72,13 +72,14 @@ interface ProjectFormValues extends ProjectPost {
 }
 
 /** Where the project comes from. One flat choice rather than a wizard. */
-type Source = "github" | "upload" | "template" | "overleaf"
+type Source = "github" | "upload" | "template" | "overleaf" | "empty"
 
 const SOURCE_LABELS: { value: Source; label: string }[] = [
-  { value: "github", label: "A GitHub repo I already have" },
-  { value: "upload", label: "A folder on my machine, as a zip" },
+  { value: "github", label: "An existing GitHub repo" },
+  { value: "overleaf", label: "An existing Overleaf project" },
+  { value: "upload", label: "A zipped folder upload" },
   { value: "template", label: "A new project from a template" },
-  { value: "overleaf", label: "An Overleaf project I'm writing in" },
+  { value: "empty", label: "A fresh empty project" },
 ]
 
 const SOURCE_FOR_PATH: Record<StartPath, Source> = {
@@ -109,6 +110,9 @@ function NewProjectForm({
   // request is unchanged by collapsing the wizard into one screen.
   const isExisting = source === "github" || source === "upload"
   const fromUpload = source === "upload"
+  // Narrower than "a new repo": an empty project and an Overleaf one are
+  // new repos too, but neither is generated from a template.
+  const fromTemplate = source === "template"
   const path: StartPath =
     source === "overleaf" ? "overleaf" : isExisting ? "existing" : "fresh"
   const [uploadFile, setUploadFile] = useState<File | null>(null)
@@ -199,9 +203,9 @@ function NewProjectForm({
         git_repo_exists: isExisting,
         // An existing repo is imported as it stands; generating it from a
         // template would overwrite the work the user came here to clean up.
-        template: isExisting ? null : data.template || null,
+        template: fromTemplate ? data.template || null : null,
         keep_template_history:
-          !isExisting && Boolean(data.keep_template_history),
+          fromTemplate && Boolean(data.keep_template_history),
       }
       const gitName = String(post.git_repo_url).split("/").at(-1)
       if (gitName) {
@@ -313,7 +317,7 @@ function NewProjectForm({
         New project
       </Heading>
       <FormControl mb={5}>
-        <FormLabel>Start from</FormLabel>
+        <FormLabel>Start from:</FormLabel>
         <RadioGroup
           value={source}
           onChange={(value) => setSource(value as Source)}
@@ -348,8 +352,7 @@ function NewProjectForm({
             }}
           />
           <FormHelperText>
-            Yours and your organizations', most recently updated first. Not
-            listed? Paste the URL below instead.
+            Not listed? Paste the URL below instead.
           </FormHelperText>
         </FormControl>
       ) : null}
@@ -364,9 +367,9 @@ function NewProjectForm({
             onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
           />
           <FormHelperText>
-            Up to 50 MB. A new GitHub repo is created for it, and the contents
-            become the first commit. Leave large data files out and add them
-            with DVC once the project is set up.
+            Up to 50 MB. A new GitHub repo will be created with the contents as
+            the first commit. Exclude large data files for now and add them with
+            DVC afterwards.
           </FormHelperText>
         </FormControl>
       ) : null}
@@ -392,24 +395,23 @@ function NewProjectForm({
         <Input
           id="description"
           {...register("description")}
-          placeholder="One line on what this project is about"
+          placeholder="One sentence describing what the project investigates."
           autoComplete="off"
         />
       </FormControl>
-      {!isExisting ? (
+      {fromTemplate ? (
         <FormControl mb={4}>
-          <FormLabel htmlFor="template">Start from</FormLabel>
+          <FormLabel htmlFor="template">Template</FormLabel>
           <Select id="template" {...register("template")}>
             {TEMPLATES.map((template) => (
               <option key={template.value} value={template.value}>
                 {template.label}
               </option>
             ))}
-            <option value="">Empty repo: I'll set it up myself</option>
           </Select>
         </FormControl>
       ) : null}
-      {!isExisting ? (
+      {fromTemplate ? (
         <FormControl mb={4}>
           <Checkbox {...register("keep_template_history")} colorScheme="teal">
             Keep the template's commit history

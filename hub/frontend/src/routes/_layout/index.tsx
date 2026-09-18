@@ -2,7 +2,6 @@ import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
   Box,
   Button,
-  Code,
   Container,
   Flex,
   Heading,
@@ -17,6 +16,7 @@ import {
   Th,
   Thead,
   Tr,
+  chakra,
   useColorModeValue,
   useDisclosure,
 } from "@chakra-ui/react"
@@ -241,6 +241,89 @@ const LOOP = [
   },
 ]
 
+/**
+ * The loops over the four stages, as in the diagram on the docs home page.
+ *
+ * Two kinds of iteration, which is the whole point of keeping the stages in
+ * one repo. The arc returning into a card is iteration within that stage;
+ * the arcs reaching back over earlier cards are iteration between stages,
+ * e.g. writing sending you back to the analysis or to collect more data.
+ *
+ * Drawn in a viewBox 800 wide so the four x positions are the centers of
+ * four equal columns, then stretched to whatever the grid is actually
+ * wide. Hidden below `md`, where the grid drops to two columns and the
+ * arcs would point at the wrong cards.
+ */
+function LoopArcs() {
+  const color = useColorModeValue("gray.400", "gray.500")
+  const centers = [100, 300, 500, 700]
+  // A cubic whose control points share a y only reaches three quarters of
+  // the way to it, so these are the control values that put each arc where
+  // the comment says. Longer reaches ride higher and start and land further
+  // out, so no two arcs touch and the arrowheads don't stack up.
+  const BASE = 80
+  const spans = [
+    { from: 1, to: 0, peak: 35, out: 40 }, // tops out around y=46
+    { from: 2, to: 1, peak: 35, out: 40 },
+    { from: 3, to: 2, peak: 35, out: 40 },
+    { from: 2, to: 0, peak: 11, out: 56 }, // around y=28
+    { from: 3, to: 1, peak: 11, out: 56 },
+    { from: 3, to: 0, peak: -13, out: 72 }, // around y=10
+  ]
+  return (
+    <Box
+      display={{ base: "none", md: "block" }}
+      color={color}
+      aria-hidden="true"
+    >
+      <chakra.svg
+        viewBox={`0 0 800 ${BASE}`}
+        width="100%"
+        height={`${BASE}px`}
+        preserveAspectRatio="none"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        sx={{ "& path": { vectorEffect: "non-scaling-stroke" } }}
+      >
+        <title>Iteration within each stage and back to earlier stages</title>
+        <defs>
+          <marker
+            id="loop-arrowhead"
+            viewBox="0 0 8 8"
+            refX={7}
+            refY={4}
+            markerWidth={5}
+            markerHeight={5}
+            orient="auto"
+          >
+            <path d="M0 0 L8 4 L0 8 z" fill="currentColor" stroke="none" />
+          </marker>
+        </defs>
+        {spans.map(({ from, to, peak, out }) => {
+          const sx = centers[from] - out
+          const ex = centers[to] + out
+          return (
+            <path
+              key={`${from}-${to}`}
+              d={`M ${sx} ${BASE} C ${sx} ${peak}, ${ex} ${peak}, ${ex} ${BASE}`}
+              markerEnd="url(#loop-arrowhead)"
+            />
+          )
+        })}
+        {/* Iteration within a stage: a short loop back into the same card */}
+        {centers.map((cx) => (
+          <path
+            key={cx}
+            d={`M ${cx + 12} ${BASE} C ${cx + 18} 56, ${cx - 18} 56, ${cx - 12} ${BASE}`}
+            markerEnd="url(#loop-arrowhead)"
+          />
+        ))}
+      </chakra.svg>
+    </Box>
+  )
+}
+
 /** The signed-out landing page. */
 function LandingPage() {
   const loopBorder = useColorModeValue("gray.200", "gray.600")
@@ -251,7 +334,7 @@ function LandingPage() {
           Single-button reproducible research
         </Heading>
         <Text fontSize="lg" color="ui.dim">
-          All stages in one project repository, connected by an
+          All stages and context in one project repository, connected by an
           environment-aware pipeline that can be verified with a single command.
           Work locally or on the web. Totally open-source with zero lock-in.
         </Text>
@@ -269,6 +352,7 @@ function LandingPage() {
           iteration is quicker and easier, and iteration is the key to quality.
         </Text>
       </Box>
+      <LoopArcs />
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={8}>
         {LOOP.map((phase, index) => (
           <Box

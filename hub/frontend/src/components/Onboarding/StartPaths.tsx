@@ -12,7 +12,7 @@ import mixpanel from "mixpanel-browser"
 import type { IconType } from "react-icons"
 import { FaBroom, FaLeaf, FaSeedling } from "react-icons/fa"
 
-export type StartPath = "existing" | "fresh" | "overleaf"
+import type { StartPath } from "../../lib/onboarding"
 
 interface PathOption {
   path: StartPath
@@ -27,7 +27,7 @@ interface PathOption {
  * a wish not to end up there again. Naming those situations lets someone
  * recognize themselves rather than guess which button is for them.
  */
-export const START_PATHS: PathOption[] = [
+const START_PATHS: PathOption[] = [
   {
     path: "existing",
     icon: FaBroom,

@@ -43,9 +43,9 @@ import {
 import useCustomToast from "../../hooks/useCustomToast"
 import { appName } from "../../lib/core"
 import { handleError } from "../../lib/errors"
+import type { StartPath } from "../../lib/onboarding"
 import ConnectGitHubPrompt from "../Common/ConnectGitHubPrompt"
 import FilterableSelect from "../Common/FilterableSelect"
-import type { StartPath } from "../Onboarding/StartPaths"
 
 // Each step's state lives in the URL so a refresh, a back button, or a trip
 // out to GitHub or Zotero to connect an account all come back to the same

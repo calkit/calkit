@@ -251,7 +251,7 @@ function LandingPage() {
           Single-button reproducible research
         </Heading>
         <Text fontSize="lg" color="ui.dim" maxW="620px" mb={6}>
-          All stages of a project in one repository, connected by an
+          All stages in one project repository, connected by an
           environment-aware pipeline that can be verified with a single command.
         </Text>
         <Button as={RouterLink} to="/new" variant="primary" size="lg">
@@ -273,9 +273,10 @@ function LandingPage() {
           Faster iteration from tighter integration
         </Heading>
         <Text color="ui.dim" fontSize="sm">
-          Change the data and the analysis, figures, and paper all follow. When
-          coupled components stay close together and connected, iteration is
-          quicker and easier, and iteration is the key to quality.
+          Change the data and the analysis, figures, and paper all follow
+          without manually transferring data between different apps or
+          platforms. When coupled components stay close together and connected,
+          iteration is quicker and easier, and iteration is the key to quality.
         </Text>
       </Box>
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={10}>

@@ -89,9 +89,9 @@ For example:
 Stale stages:
         build-paper:
           stale outputs:
-            paper/paper.pdf
+            paper/main.pdf
           modified inputs:
-            paper/paper.tex
+            paper/main.tex
 ```
 
 Execute `calkit run` again to bring everything up-to-date.

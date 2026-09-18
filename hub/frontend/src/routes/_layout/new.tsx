@@ -342,10 +342,6 @@ function NewProjectForm({
       <Heading size="lg" mb={2}>
         New project
       </Heading>
-      <Text color="ui.dim" mb={6}>
-        Nothing is moved or rewritten. What to do next is waiting on the project
-        page.
-      </Text>
       <FormControl mb={5}>
         <FormLabel>Start from</FormLabel>
         <RadioGroup

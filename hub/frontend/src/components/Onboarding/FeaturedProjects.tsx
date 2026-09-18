@@ -32,15 +32,12 @@ const FeaturedProjects = ({ heading }: { heading?: string }) => {
   }
   return (
     <Box>
-      <Flex align="baseline" gap={3} mb={1}>
+      <Flex align="baseline" gap={3} mb={3}>
         <Heading size="md">{heading ?? "See it in action"}</Heading>
         <Link as={RouterLink} to="/projects" fontSize="sm" variant="blue">
           Browse all projects →
         </Link>
       </Flex>
-      <Text color="ui.dim" fontSize="sm" mb={4}>
-        Some example projects for inspiration:
-      </Text>
       {featuredQuery.isPending ? (
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
           {new Array(3).fill(null).map((_, index) => (

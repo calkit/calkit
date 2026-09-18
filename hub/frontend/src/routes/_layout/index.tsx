@@ -203,12 +203,12 @@ function EmptyState() {
         Make your project single-button reproducible
       </Heading>
       <Text color="ui.dim" mb={6} maxW="640px">
-        Data, code, environment, and writing in one repo. One command runs it.
+        Lit review, data collection, analysis, and writing all in one place.
       </Text>
       <Box mb={10}>
         <StartPaths source="empty-state" />
       </Box>
-      <FeaturedProjects heading="Or check out some examples" />
+      <FeaturedProjects heading="Or take a look at some examples" />
     </>
   )
 }

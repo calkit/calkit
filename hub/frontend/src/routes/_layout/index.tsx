@@ -5,6 +5,7 @@ import {
   Container,
   Flex,
   Heading,
+  Icon,
   Link,
   SimpleGrid,
   SkeletonText,
@@ -27,6 +28,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
+import { FiArrowRight } from "react-icons/fi"
 import { useDebounce } from "use-debounce"
 import { z } from "zod"
 
@@ -329,7 +331,7 @@ function LandingPage() {
   const loopBorder = useColorModeValue("gray.200", "gray.600")
   return (
     <>
-      <Box mt={16} mb={4} textAlign={{ base: "center", md: "left" }}>
+      <Box mt={16} mb={12} textAlign={{ base: "center", md: "left" }}>
         <Heading size="2xl" mb={4} lineHeight="1.2">
           Single-button reproducible research
         </Heading>
@@ -338,6 +340,22 @@ function LandingPage() {
           environment-aware pipeline that can be verified with a single command.
           Work locally or on the web. Totally open-source with zero lock-in.
         </Text>
+        <Button
+          as={RouterLink}
+          to="/new"
+          variant="primary"
+          size="lg"
+          mt={7}
+          px={8}
+          height={14}
+          fontSize="lg"
+          rightIcon={<Icon as={FiArrowRight} />}
+          boxShadow="lg"
+          transition="transform 0.15s, box-shadow 0.15s"
+          _hover={{ transform: "translateY(-2px)", boxShadow: "xl" }}
+        >
+          Get started
+        </Button>
       </Box>
       {/* The loop a project actually moves through, and the tool each
           phase usually lives in. One place for all four is the pitch. */}
@@ -374,8 +392,15 @@ function LandingPage() {
           </Box>
         ))}
       </SimpleGrid>
-      <Box mb={8}>
-        <Button as={RouterLink} to="/new" variant="primary" size="lg">
+      <Box mb={10}>
+        <Button
+          as={RouterLink}
+          to="/new"
+          variant="primary"
+          size="lg"
+          px={8}
+          rightIcon={<Icon as={FiArrowRight} />}
+        >
           Get started
         </Button>
       </Box>

@@ -977,7 +977,8 @@ def post_user_github_auth(
             409,
             (
                 f"The GitHub account '{github_username}' is already "
-                "connected to a different Calkit account"
+                "connected to a different Calkit account. Sign in to that "
+                "account instead, or switch GitHub accounts and try again."
             ),
         )
     current_github_username = current_user.github_username

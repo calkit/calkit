@@ -165,7 +165,9 @@ function ConnectedAccounts() {
               <Button
                 size="xs"
                 variant="primary"
-                onClick={() => startGitHubOAuth()}
+                onClick={() =>
+                  startGitHubOAuth(undefined, { chooseAccount: true })
+                }
               >
                 Connect
               </Button>

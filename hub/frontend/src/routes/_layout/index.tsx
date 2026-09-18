@@ -208,7 +208,7 @@ function EmptyState() {
       <Box mb={10}>
         <StartPaths source="empty-state" />
       </Box>
-      <FeaturedProjects heading="Or start from an example" />
+      <FeaturedProjects heading="Or check out some examples" />
     </>
   )
 }

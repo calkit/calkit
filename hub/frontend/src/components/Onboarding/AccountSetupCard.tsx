@@ -72,7 +72,7 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
         size="xs"
         variant="primary"
         leftIcon={<FaGithub />}
-        onClick={() => startGitHubOAuth("/")}
+        onClick={() => startGitHubOAuth("/", { chooseAccount: true })}
       >
         Connect GitHub
       </Button>

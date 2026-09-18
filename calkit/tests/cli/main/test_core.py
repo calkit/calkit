@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 import dvc.repo
 import git
 import pytest
+import typer
 import yaml
 from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
@@ -1297,6 +1298,69 @@ def test_run_isolated_subproject_stage_exit_code(tmp_dir):
             {"stages": {"stage-b": {"cmd": "python -c \"print('ok')\""}}}, f
         )
     subprocess.check_call(["calkit", "run", "isolated-sp:stage-b"])
+
+
+def test_pull_dvc_subprojects(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import pull
+
+    # Two isolated subprojects (their own .dvc dir), one non-isolated
+    # subproject, and a malformed entry that must be skipped
+    for name in ["sp1", "sp2", "not-isolated"]:
+        os.makedirs(name)
+    for name in ["sp1", "sp2"]:
+        os.makedirs(os.path.join(name, ".dvc"))
+    ck_info = {
+        "subprojects": [
+            {"path": "sp1"},
+            "bogus",
+            {"path": "not-isolated"},
+            {"path": "sp2"},
+        ]
+    }
+    monkeypatch.setattr(calkit, "load_calkit_info", lambda: ck_info)
+    monkeypatch.setattr(calkit.dvc, "get_remotes", lambda: {})
+    exit_codes: dict = {}
+    calls: list = []
+
+    def fake_run_dvc_command(args, cwd=None, lock_timeout=None):
+        calls.append((args, cwd))
+        return exit_codes.get(cwd, 0)
+
+    monkeypatch.setattr(calkit.dvc, "run_dvc_command", fake_run_dvc_command)
+    monkeypatch.setattr(
+        calkit.dvc.zip, "sync_all", lambda direction, wdir=None: None
+    )
+    # When everything succeeds, the root pulls first, then each isolated
+    # subproject in order, and nothing else
+    pull(no_git=True, dvc_args=[])
+    assert calls == [
+        (["pull", "--recursive"], None),
+        (["pull", "--recursive"], "sp1"),
+        (["pull", "--recursive"], "sp2"),
+    ]
+    # A failing root pull must not stop the subprojects from being pulled
+    # (issue #1042), but it still exits nonzero
+    calls.clear()
+    exit_codes = {None: 1}
+    with pytest.raises(typer.Exit):
+        pull(no_git=True, dvc_args=[])
+    assert [cwd for _, cwd in calls] == [None, "sp1", "sp2"]
+    assert "Error: DVC pull failed" in capsys.readouterr().err
+    # Likewise a failing first subproject must not stop later ones, and the
+    # error names only the subprojects that failed
+    calls.clear()
+    exit_codes = {"sp1": 1}
+    with pytest.raises(typer.Exit):
+        pull(no_git=True, dvc_args=[])
+    assert [cwd for _, cwd in calls] == [None, "sp1", "sp2"]
+    err = capsys.readouterr().err
+    assert "DVC pull failed in subproject(s): sp1" in err
+    assert "sp2" not in err
+    # --no-recursive pulls only the root, without the recursive flag
+    calls.clear()
+    exit_codes = {}
+    pull(no_git=True, no_recursive=True, dvc_args=[])
+    assert calls == [(["pull"], None)]
 
 
 def test_run_ignore_errors(tmp_dir):

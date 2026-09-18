@@ -1504,11 +1504,12 @@ def pull(
             ["pull"] + dvc_args,
             lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
         )
-        if result != 0:
-            raise_error("DVC pull failed")
         calkit.dvc.zip.sync_all(direction="to-workspace")
+        # Pull DVC in isolated subprojects (those with their own .dvc folder),
+        # attempting all of them even if an earlier pull failed so one bad
+        # remote doesn't leave the rest of the project unfetched
+        failed_subprojects = []
         if not no_recursive:
-            # Pull DVC in isolated subprojects (those with their own .dvc folder)
             ck_info = calkit.load_calkit_info()
             for sp in ck_info.get("subprojects", []):
                 if not isinstance(sp, dict) or not sp.get("path"):
@@ -1523,8 +1524,15 @@ def pull(
                     lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
                 )
                 if sp_result != 0:
-                    raise_error(f"DVC pull failed in subproject: {sp_path}")
+                    failed_subprojects.append(sp_path)
                 calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+        if result != 0:
+            raise_error("DVC pull failed")
+        if failed_subprojects:
+            raise_error(
+                "DVC pull failed in subproject(s): "
+                + ", ".join(failed_subprojects)
+            )
 
 
 # What ``calkit push`` can send, in the order it sends them

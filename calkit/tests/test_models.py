@@ -462,7 +462,7 @@ def test_procedure_entries():
     assert schema["$defs"]["Procedure"]["not"] == {"required": ["path"]}
 
 
-def test_latex_environments():
+def test_latex_environments() -> None:
     info = ProjectInfo.model_validate(
         {
             "environments": {
@@ -479,18 +479,23 @@ def test_latex_environments():
             }
         }
     )
-    assert isinstance(info.environments["flexible"], LatexEnvironment)
-    assert isinstance(info.environments["tt"], TinyTexEnvironment)
-    assert isinstance(info.environments["tec"], TectonicEnvironment)
+    flexible = info.environments["flexible"]
+    tinytex = info.environments["tt"]
+    tectonic = info.environments["tec"]
+    pinned = info.environments["pinned"]
+    assert isinstance(flexible, LatexEnvironment)
+    assert isinstance(tinytex, TinyTexEnvironment)
+    assert isinstance(tectonic, TectonicEnvironment)
+    assert isinstance(pinned, LatexEnvironment)
     # A flexible environment pins nothing by default, so stages that use it
     # gain no dependency on whatever it resolved to
-    flexible = info.environments["flexible"]
     assert flexible.lock == []
     assert flexible.backends is None
     assert flexible.packages == []
-    pinned = info.environments["pinned"]
     assert pinned.lock == ["backend", "version"]
     assert pinned.backends == ["tinytex", "docker"]
+    assert tinytex.packages == ["revtex4-1", "epsf"]
+    assert tectonic.version == "0.15.0"
     # Neither the kinds nor what they can pin are open sets
     for bad in [
         {"kind": "latex", "lock": ["image"]},
@@ -503,5 +508,6 @@ def test_latex_environments():
     roundtripped = _roundtrip(
         {"environments": {"tt": {"kind": "tinytex", "packages": ["epsf"]}}}
     )
-    assert isinstance(roundtripped.environments["tt"], TinyTexEnvironment)
-    assert roundtripped.environments["tt"].packages == ["epsf"]
+    tt = roundtripped.environments["tt"]
+    assert isinstance(tt, TinyTexEnvironment)
+    assert tt.packages == ["epsf"]

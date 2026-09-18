@@ -392,18 +392,6 @@ function LandingPage() {
           </Box>
         ))}
       </SimpleGrid>
-      <Box mb={10}>
-        <Button
-          as={RouterLink}
-          to="/new"
-          variant="primary"
-          size="lg"
-          px={8}
-          rightIcon={<Icon as={FiArrowRight} />}
-        >
-          Get started
-        </Button>
-      </Box>
       <FeaturedProjects />
     </>
   )

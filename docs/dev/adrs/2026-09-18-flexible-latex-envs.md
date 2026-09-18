@@ -43,22 +43,50 @@ resolution is a choice among real kinds rather than a hidden mode of one.
 A project that wants to pin a backend names it directly and nothing is
 resolved.
 
-The resolved backend and its version are written to the environment's
-lock file.
-This is the part that matters for reproducibility: the lock, not the
-resolver, is what a collaborator runs.
-Someone who clones a project whose lock says Tectonic 0.15.0 gets
-Tectonic 0.15.0, not whatever their own machine happens to resolve to
-first.
-Resolution runs when there is no lock; after that the lock is
-authoritative, and a machine missing the locked backend is offered an
-install of _that_ backend rather than being silently moved to a
-different one.
+The resolved backend and its version are recorded, and by default that
+recording is provenance rather than a pin.
 
-Rejected: resolving on every run.
-It would make the same project build through TeX Live on one machine and
-Tectonic on another, which is precisely the class of difference that
-reproducibility is supposed to rule out.
+This is the part that took the longest to settle, so the reasoning is
+worth keeping. For a compute stage, the environment determines the
+_result_: a different BLAS moves numbers, so the lock has to gate the
+cache. For a document build it determines _typesetting_, while the
+science arrives through the inputs -- the `.tex` source, the figures,
+`results.tex` -- which are produced by upstream stages that stay
+strictly locked. A backend swap changes kerning and line breaks, not
+what the paper claims.
+
+The strict guarantee is also partly illusory. `pdflatex` embeds
+`/CreationDate` and a `/ID` by default, so two builds of identical
+source on one machine already differ byte-wise unless
+`SOURCE_DATE_EPOCH` and `FORCE_SOURCE_DATE` are set. Pinning the image
+never bought byte-identical PDFs; it bought rebuildability, which is the
+thing actually worth protecting.
+
+So strictness is tiered, using vocabulary Calkit already has.
+`system_env_locks_anything` (`calkit/environments.py:520`) already
+decides whether a system environment writes a lock file at all, and an
+environment that locks nothing gives its stages no dependency to hash.
+A `latex` environment defaults to `lock: []`: nothing is pinned, no
+stage dependency is added, and a collaborator with a different backend
+does not rerun `build-paper` and commit a byte-different PDF into DVC.
+Writing `lock: [backend]` or `lock: [backend, version]` opts into the
+hard pin, exactly as a system env pins `os` or `python-version`, which
+is what a camera-ready submission or an archived artifact should do.
+
+This leaves one piece of new mechanism: with nothing locked there is no
+lock file to carry the backend, so the backend and version have to be
+recorded with the run's provenance instead. That is a feature, not a
+workaround -- it is how a reader learns what produced the PDF without
+the fact gating anyone's cache.
+
+Calkit should also set `SOURCE_DATE_EPOCH` from the commit date when
+building, which costs nothing and gets PDFs close to deterministic
+within a backend.
+
+Rejected: hard-locking the backend by default.
+It buys a guarantee the toolchain does not honor, and charges for it in
+DVC churn -- every collaborator on a different backend reruns the stage
+and stores another PDF whose differences carry no scientific content.
 
 Rejected: explicit kinds only, with no `latex` kind.
 It works, but it puts a research question ("which TeX distribution?") in
@@ -66,11 +94,11 @@ front of someone whose actual question is "does my paper build?".
 
 When nothing is installed, the user is offered the options by name and
 weight rather than having one chosen for them: Tectonic (tens of MB),
-TinyTeX (hundreds), TeX Live (multiple GB, per decision 4), or Docker
+TinyTeX (hundreds), TeX Live (multiple GB, per decision 5), or Docker
 (no local install, but pulls an image). Whatever they pick is what gets
 locked.
 
-### 2. Git and Docker join the installer registry (PR #1684)
+### 2. Invasive installs are prompted for, never automatic (PR #1684)
 
 This is already built in
 [#1684](https://github.com/calkit/calkit/pull/1684), which folds the
@@ -83,21 +111,64 @@ Homebrew first, and a record of every install in
 No separate implementation is needed here; this ADR should not be read
 as proposing one.
 
-**Unresolved, and deliberately flagged:** #1684 installs Git and Docker
-automatically, including `curl -fsSL https://get.docker.com | sudo sh`
-on Linux and Homebrew casks on macOS.
-The policy chosen in the session that produced this ADR was the
-opposite: register Docker, print the platform's own one-liner, and never
-run a privileged or GUI installer off the back of a `[Y/n]`, on the
-principle that Calkit may install into the user's own account without
-ceremony but should not acquire root or launch a GUI installer because
-someone pressed enter at a prompt.
+**The consent rule: an invasive install may be prompted for, never
+performed automatically.**
 
-Both are defensible -- the automatic path serves "install Calkit and
-you're off to the races" most directly, and the assistant's whole job is
-the machine that has nothing on it.
-The two need reconciling before #1684 merges, since retrofitting a
-consent policy after the fact is harder than deciding it now.
+Invasive means the install acquires root, writes outside the user's own
+account, or launches a GUI installer -- `curl -fsSL
+https://get.docker.com | sudo sh`, a Homebrew cask, `xcode-select`, a
+distro package manager. Everything the registry carried before this
+(pixi, uv, rustup, juliaup, nix) is user-local and not invasive.
+
+Calkit may ask, and act on a yes. What it may not do is install one of
+these as a side effect of something else the user asked for.
+
+**And every prompt shows the exact command first, invasive or not.**
+Consent to an unnamed action is not consent. This applies to the
+user-local entries too: someone should be able to read
+`curl -LsSf https://astral.sh/uv/install.sh | sh` and decide, or copy it
+and run it themselves. Today the command is only revealed _after_ a
+decline ("Skipped. To install, run: ..."), which is backwards -- it is
+shown to the people who said no and hidden from the people who said yes.
+
+Against that rule, #1684 is closer than it first appears, and an earlier
+reading of it in this ADR was wrong. It does not install automatically:
+it keeps the existing `prompt_and_install`, which asks `[Y/n]` on a TTY
+and, when there is no TTY, prints the command and declines. Its
+`requires` chain prompts for each prerequisite separately, with the
+comment "saying yes to one thing never silently installs another" --
+which is this rule, already implemented for the prerequisite case.
+
+Three gaps remain, all small:
+
+1. The prompt names neither the command nor the stakes. A `[Y/n]` that
+   is about to run `curl | sudo sh` reads exactly like one that drops
+   `uv` into `~/.local/bin`, and neither shows what will run. The prompt
+   should print the command for every entry, and invasive entries should
+   additionally be marked so the root, system-wide, or GUI part is
+   stated rather than inferred. Roughly:
+
+   ```
+   Docker is not installed. Installing it needs root and affects
+   the whole system:
+
+     curl -fsSL https://get.docker.com | sudo sh
+
+   Run this now? [y/N]
+   ```
+
+   Note the default flips to `N` for an invasive entry: a bare enter
+   should not acquire root.
+
+2. The `requires` loop calls `prompt_and_install(req, interactive=True)`
+   with the flag hardcoded, so a non-interactive caller reaches an
+   `input()` that only declines because `EOFError` is caught. It should
+   pass the caller's own `interactive` through and take the
+   non-interactive path deliberately.
+3. `calkit install docker --yes` would run a privileged installer
+   unattended. That is an explicit request naming the app, so it is
+   consistent with the rule -- the prompt was answered on the command
+   line -- but it is worth being deliberate about rather than incidental.
 
 ### 3. A backend is chosen for what the project does, not just compiling
 
@@ -125,12 +196,147 @@ Note `_tex_cmd` already carries a `dep` argument naming the tool being
 wrapped (`latexmk` or `latexdiff`), which is the natural place for this
 to be enforced.
 
-Windows is the sharp edge: TinyTeX there can install `latexdiff` through
-`tlmgr`, but it still needs a Perl, which TeX Live's Windows bundle
-provides and TinyTeX does not.
-Docker remains the honest fallback for that case.
+Perl turns out to be a much smaller problem than it looked.
+`calkit/tinytex-latexmk-docker` already installs `perl` in its first
+apt line, so making that backend diff-capable is adding `latexdiff` to
+its `tlmgr install` list -- one word.
+macOS and Linux have Perl in practice, and TeX Live on Windows bundles
+its own.
+The only real gap is a local TinyTeX on Windows, which is one registry
+entry (Strawberry Perl) or a fall back to the image.
 
-### 4. TeX Live is installable, but never the silent default
+So the capability rule collapses to: Tectonic cannot diff, everything
+else can.
+
+Rejected: porting `latexdiff` to Python.
+It is roughly ten thousand lines of Perl doing real TeX tokenization,
+and its accumulated edge cases _are_ its value -- a partial port would
+silently mis-mark diffs, which is worse than not having the feature.
+With Perl already present everywhere that matters, there is nothing left
+to buy.
+
+### 4. Calkit ships its own image, and the existing one needs two fixes
+
+`calkit/tinytex-latexmk-docker` is the right basis for a
+"TeX Live full-ish" image: Ubuntu 24.04 plus TinyTeX, 756 MB on disk
+(220 MB content) against roughly 9 GB for `texlive/texlive:latest-full`.
+It should become the default image for LaTeX environments.
+
+It does not currently work, and testing found two independent reasons,
+both reproduced here against a locally built copy.
+
+**The documented invocation destroys the installation.** The README's
+example mounts a host cache over the image's own TeX tree:
+
+```sh
+-v "$HOME/.cache/tinytex":/root/.TinyTeX
+```
+
+TinyTeX lives at `/root/.TinyTeX`, so an empty host directory shadows
+it. Measured directly:
+
+```
+without the mount:  /root/bin/latexmk   /root/bin/pdflatex
+with the mount:     MISSING
+```
+
+A persistent tree for on-the-fly packages has to be a separate one,
+mounted somewhere that isn't the system tree. This was tested and
+works:
+
+```sh
+docker run --rm \
+    -v "$HOME/.cache/calkit-texmf":/root/texmf \
+    -e TEXMFHOME=/root/texmf \
+    ...
+# in the container, once:
+tlmgr init-usertree && tlmgr --usermode install <pkg>
+```
+
+All three properties hold: `latexmk` stays on `PATH` (nothing is
+shadowed), `kpsewhich` resolves the installed package out of
+`/root/texmf`, and the files persist on the host between runs.
+
+**The minimal package set can't build a real journal paper.** Commit
+71043e7 ("Remove packages from image") stripped the collections in
+favor of `texliveonfly`. Building `boom-paper` (AASTeX 6.3.1,
+`threeparttable`, `subfigure`, `rotating`, `todonotes`, `tikz`,
+`epstopdf`, BibTeX via `aasjournal.bst`) from clean fails:
+
+```
+Please update your system to include revtex4-1.cls
+(\end occurred when \ifx on line 3 was incomplete)
+Latexmk: Log file says no output from latex
+```
+
+`aastex631.cls` loads `revtex4-1`, which was in the removed list. The
+failure mode is the important part: the class prints its own message
+and stops, so TeX never reports a missing file and `texliveonfly` has
+nothing to act on. On-the-fly installation cannot rescue a class that
+refuses to load, which is the flaw in the minimal-image strategy rather
+than a bug in this particular image.
+
+This was confirmed rather than reasoned about. A resolver loop written
+for this investigation -- compile, read the missing file out of the
+log, find its package with `tlmgr search --global --file`, install,
+retry -- is a direct proxy for what `texliveonfly` does, and against
+the minimal image it stops immediately with no missing-file error and
+nothing to install. Seeding `revtex4-1` by hand is what gets it moving.
+
+**Restoring the collections wholesale costs most of the advantage, and
+is not necessary.** All three were built and tested against the same
+paper:
+
+| Image                             | On disk    | Builds the paper? |
+| --------------------------------- | ---------- | ----------------- |
+| `texlive/texlive:latest-full`     | ~9 GB      | yes               |
+| seven collections (3,451 pkgs)    | 5.29 GB    | yes               |
+| minimal (current `main`)          | 756 MB     | no                |
+| **curated (12 pkgs + latexdiff)** | **766 MB** | **yes**           |
+
+The collections' `tlmgr` layer alone is 3.17 GB, and 9 GB to 5.29 GB is
+not the win this work is after.
+
+The curated set was found by compiling `boom-paper` against the minimal
+image and installing exactly what it asked for, one package at a time:
+
+```
+revtex4-1  textcase  epsf  ulem  threeparttable  multirow
+units  grfext  subfigure  enumitem  todonotes  lineno
+```
+
+Twelve packages, 10 MB over the image that could not build anything at
+all, and about a twelfth of what it replaces. Both the curated and
+collections images produce the same 18-page document with no errors,
+differing by 8 KB of font subsetting -- a typographic difference of
+exactly the kind decision 1 treats as acceptable.
+
+`revtex4-1` is the one that has to be baked in rather than fetched on
+demand, for the reason above: its absence stops the class without
+reporting a missing file. The other eleven are ordinary missing-file
+cases that a resolver can find, which is what makes a project-declared
+package list a workable escape hatch for whatever the core misses:
+
+```yaml
+environments:
+  tex:
+    kind: tinytex
+    packages:
+      - revtex4-1
+      - epsf
+```
+
+That is what makes a small image viable, and it is why `packages` was
+worth having on the explicit kinds. It also composes with the fix to
+the cache bug above: a project's extra packages install into a
+persistent `TEXMFHOME` tree on first run and stay there, so the cost is
+paid once per machine rather than baked into the image for everyone.
+The package list belongs in the environment spec, which means it is
+version-controlled, and it is exactly the kind of thing that should be
+locked, since a missing TeX package is a hard build failure rather than
+a typographic difference.
+
+### 5. TeX Live is installable, but never the silent default
 
 TeX Live is what most people mean by "LaTeX on this machine", so the
 registry should be able to install it -- a user who wants the
@@ -170,7 +376,7 @@ A machine that already has `latexmk` on `PATH` is almost always a
 machine with TeX Live, which is why the resolver prefers it and why
 that preference costs nothing.
 
-### 5. The Docker daemon check goes on the failure path
+### 6. The Docker daemon check goes on the failure path
 
 `docker --version` succeeds while the daemon is down, so "installed" and
 "usable" are different questions, and the second one is what people
@@ -183,7 +389,7 @@ So the daemon is not probed during requirement checks; instead a Docker
 failure is translated into a clear "Docker is installed but not
 running" message at the point it fails.
 
-### 6. Rolling this out across two repos uses the version pin
+### 7. Rolling this out across two repos uses the version pin
 
 `example-basic` is a submodule at `examples/basic`, but
 `calkit new project --template calkit/example-basic` clones that repo's

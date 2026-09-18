@@ -580,7 +580,14 @@ function NewProjectWizard() {
     return navigate({ to: "/" })
   }
   return (
-    <Modal isOpen onClose={close} size="2xl" scrollBehavior="inside" isCentered>
+    <Modal
+      isOpen
+      onClose={close}
+      size="2xl"
+      scrollBehavior="inside"
+      isCentered
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalCloseButton />

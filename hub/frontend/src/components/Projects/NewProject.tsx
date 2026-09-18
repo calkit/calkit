@@ -186,6 +186,7 @@ const NewProject = ({ isOpen, onClose, defaultTemplate }: NewProjectProps) => {
         onClose={onClose}
         size={{ base: "sm", md: "md" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>
@@ -301,7 +302,12 @@ const NewProject = ({ isOpen, onClose, defaultTemplate }: NewProjectProps) => {
         </ModalContent>
       </Modal>
       {/* Error modal prompting user to install the GitHub App */}
-      <Modal isOpen={errorModal.isOpen} onClose={errorModal.onClose} isCentered>
+      <Modal
+        isOpen={errorModal.isOpen}
+        onClose={errorModal.onClose}
+        isCentered
+        motionPreset="none"
+      >
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>GitHub app not enabled</ModalHeader>

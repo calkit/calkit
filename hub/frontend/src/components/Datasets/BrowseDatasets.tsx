@@ -108,7 +108,13 @@ const BrowseDatasets = ({
     onError: (err: AxiosError) => handleError(err, showToast),
   })
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="2xl" isCentered>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="2xl"
+      isCentered
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>Find a dataset on Calkit</ModalHeader>

@@ -225,6 +225,7 @@ const StageEditorModal = ({
         onClose={handleClose}
         size={{ base: "full", md: "3xl" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent maxH="90vh">
@@ -309,6 +310,7 @@ const StageEditorModal = ({
         size={{ base: "sm", md: "md" }}
         isCentered
         initialFocusRef={commitInputRef}
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent

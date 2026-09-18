@@ -26,9 +26,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
-import { FaPlus, FaTimes } from "react-icons/fa"
 import { merge as diff3Merge } from "node-diff3"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { FaPlus, FaTimes } from "react-icons/fa"
 
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
@@ -41,17 +41,17 @@ import {
   findMissingPackages,
 } from "../../lib/latexCompiler"
 import {
+  type MappedPath,
   TEXT_EXT,
   ext,
   loadLatexProject,
-  type MappedPath,
   mappedPaths,
 } from "../../lib/latexProject"
 import { fetchTree, newBudget } from "../../lib/projectFiles"
-import PathPicker from "../Releases/PathPicker"
 import { trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
+import PathPicker from "../Releases/PathPicker"
 
 interface LatexEditorProps {
   isOpen: boolean
@@ -737,7 +737,12 @@ const LatexEditor = ({
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={handleClose} size="full">
+      <Modal
+        isOpen={isOpen}
+        onClose={handleClose}
+        size="full"
+        motionPreset="none"
+      >
         <ModalOverlay />
         <ModalContent>
           <Flex align="center" gap={3} px={4} py={2} borderBottomWidth="1px">
@@ -1062,6 +1067,7 @@ const LatexEditor = ({
         size={{ base: "sm", md: "md" }}
         isCentered
         initialFocusRef={commitInputRef}
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent

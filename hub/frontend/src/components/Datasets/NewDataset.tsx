@@ -427,6 +427,7 @@ const NewDataset = ({
       size={{ base: "sm", md: source === "enter" ? "2xl" : "lg" }}
       isCentered
       scrollBehavior="inside"
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>

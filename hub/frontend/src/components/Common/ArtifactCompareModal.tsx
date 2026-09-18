@@ -775,6 +775,7 @@ export function ArtifactCompareModal({
       size="6xl"
       scrollBehavior="inside"
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent maxW="95vw" maxH="95vh">

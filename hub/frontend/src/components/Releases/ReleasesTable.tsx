@@ -51,6 +51,7 @@ import {
   releasePagePath,
 } from "../../lib/releases"
 import LoadingSpinner from "../Common/LoadingSpinner"
+import TipBubble from "../Onboarding/TipBubble"
 import NewRelease from "./NewRelease"
 import ShareDialog from "./ShareDialog"
 import {
@@ -58,7 +59,6 @@ import {
   type ReleaseSort,
   type SortKey,
 } from "./releaseSort"
-import TipBubble from "../Onboarding/TipBubble"
 
 // Columns that read most naturally as descending on first click.
 const DESC_FIRST: Set<SortKey> = new Set(["date", "views", "comments"])
@@ -498,6 +498,7 @@ const ReleasesTable = ({
         onClose={confirmDelete.onClose}
         isCentered
         size={{ base: "sm", md: "md" }}
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent>

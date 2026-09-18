@@ -45,10 +45,10 @@ import { useEffect, useState } from "react"
 import { BsThreeDots } from "react-icons/bs"
 import { FaCodeBranch } from "react-icons/fa"
 import { FaGithub, FaQuestion, FaRegClone, FaRegFileAlt } from "react-icons/fa"
-import { SiOverleaf } from "react-icons/si"
 import { FiCheckSquare } from "react-icons/fi"
 import { LuCopyPlus } from "react-icons/lu"
 import { MdEdit, MdOutlineLightbulb } from "react-icons/md"
+import { SiOverleaf } from "react-icons/si"
 import { z } from "zod"
 
 import {
@@ -69,10 +69,10 @@ import ImportOverleaf from "../../../../components/Publications/ImportOverleaf"
 import NewPublication from "../../../../components/Publications/NewPublication"
 import useAuth from "../../../../hooks/useAuth"
 import useOnboardingFlags from "../../../../hooks/useOnboarding"
-import { DISMISSED } from "../../../../lib/onboarding"
 import useProject from "../../../../hooks/useProject"
-import { isAuthenticationError } from "../../../../lib/auth"
 import useTips from "../../../../hooks/useTips"
+import { isAuthenticationError } from "../../../../lib/auth"
+import { DISMISSED } from "../../../../lib/onboarding"
 
 interface CommitHistory {
   hash: string
@@ -152,6 +152,7 @@ function SwitchVersionModal({
         setQuery("")
       }}
       size="md"
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent>

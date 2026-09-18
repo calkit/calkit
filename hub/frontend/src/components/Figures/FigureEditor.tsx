@@ -1,3 +1,4 @@
+import { InfoOutlineIcon } from "@chakra-ui/icons"
 import {
   Alert,
   AlertDescription,
@@ -54,7 +55,6 @@ import {
   useColorModeValue,
   useDisclosure,
 } from "@chakra-ui/react"
-import { InfoOutlineIcon } from "@chakra-ui/icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
@@ -62,18 +62,12 @@ import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react"
 
-import { ProjectsService, type FigureScriptResult } from "../../client"
+import { FaPlus } from "react-icons/fa"
+import { type FigureScriptResult, ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { isSubmitChord } from "../../hooks/useSubmitOnCmdEnter"
 import { numericColumns, previewCsv } from "../../lib/csv"
-import { bytesToText, fetchTree, newBudget } from "../../lib/projectFiles"
 import { handleError } from "../../lib/errors"
-import {
-  type RunResult,
-  packagesFromImports,
-  preloadPackages,
-  runFigureScript,
-} from "../../lib/pyodide"
 import {
   defaultScript,
   envPackages,
@@ -85,9 +79,15 @@ import {
   stem,
   withDatasetLines,
 } from "../../lib/figureScript"
+import { bytesToText, fetchTree, newBudget } from "../../lib/projectFiles"
+import {
+  type RunResult,
+  packagesFromImports,
+  preloadPackages,
+  runFigureScript,
+} from "../../lib/pyodide"
 import CodeEditorPane from "../Common/CodeEditorPane"
 import PdfCanvas from "../Common/PdfCanvas"
-import { FaPlus } from "react-icons/fa"
 import PathPicker from "../Releases/PathPicker"
 
 const AUTO_RUN_KEY = "figure-editor-auto-run"
@@ -651,6 +651,7 @@ const FigureEditor = ({
       size="6xl"
       scrollBehavior="inside"
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent
@@ -1067,6 +1068,7 @@ const FigureEditor = ({
         leastDestructiveRef={keepEditingRef}
         onClose={discardDialog.onClose}
         isCentered
+        motionPreset="none"
       >
         <AlertDialogOverlay>
           <AlertDialogContent>

@@ -113,13 +113,6 @@ function SignUp() {
         githubOnly={headedForNewProject}
         showDivider={!headedForNewProject}
       />
-      {/* TODO: rewrite this line */}
-      {headedForNewProject ? (
-        <Text fontSize="xs" color="ui.dim" textAlign="center">
-          A project lives in a GitHub repo, so GitHub is how you sign up for
-          one.
-        </Text>
-      ) : null}
       {headedForNewProject ? null : (
         <form onSubmit={handleSubmit(onSubmit)} style={{ width: "100%" }}>
           <FormControl isInvalid={!!errors.full_name} mb={3}>

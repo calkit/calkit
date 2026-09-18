@@ -14,7 +14,7 @@ import {
   redirect,
 } from "@tanstack/react-router"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -24,6 +24,7 @@ import { useNavigate } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import Logo from "/assets/images/calkit-no-bg.svg"
 import { UsersService } from "../../client"
+import LoadingSpinner from "../../components/Common/LoadingSpinner"
 import OAuthButtons from "../../components/Common/OAuthButtons"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
@@ -70,6 +71,11 @@ function Login() {
   } = useAuth()
   const { code: ghAuthCode, state: ghAuthStateRecv } = Route.useSearch()
   const isMounted = useRef(false)
+  // Coming back from GitHub, the sign-in form is the wrong thing to show:
+  // the user is already signed in and only connecting an account, and a
+  // sign-in page at that moment reads as having been signed out. Cleared if
+  // the code turns out to be unusable, which puts the form back.
+  const [handlingOAuth, setHandlingOAuth] = useState(Boolean(ghAuthCode))
   const {
     register,
     handleSubmit,
@@ -105,6 +111,7 @@ function Login() {
       navigate({ to: "/settings", search: { tab: "connected-accounts" } })
     },
     onError: (err: AxiosError) => {
+      setHandlingOAuth(false)
       handleError(err, showToast)
       // Back to what was interrupted, where the connect prompt is still up
       const returnTo = consumeGitHubReturnTo()
@@ -138,10 +145,17 @@ function Login() {
           }
         } else {
           console.error("OAuth state mismatch — possible CSRF attempt")
+          setHandlingOAuth(false)
         }
       }
     }
   }, [])
+
+  // The connect mutation clears this itself; a failed sign-in is reported
+  // through useAuth, so watch its error too rather than spinning forever.
+  if (handlingOAuth && !loginGitHubMutation.isError) {
+    return <LoadingSpinner height="100vh" />
+  }
 
   return (
     <>

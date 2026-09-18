@@ -60,6 +60,11 @@ export const startGitHubOAuth = (
   location.href = `https://github.com/login/oauth/authorize?${params.toString()}`
 }
 
+/** Where to return after connecting, for redirects that aren't OAuth. */
+export const setGitHubReturnTo = (returnTo: string): void => {
+  sessionStorage.setItem(GITHUB_RETURN_TO_KEY, returnTo)
+}
+
 // Read and clear where to return after connecting. Only same-origin paths are
 // honored, so a stale or tampered value can't bounce the user off-site.
 export const consumeGitHubReturnTo = (): string | null => {

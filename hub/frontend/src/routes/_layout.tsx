@@ -17,6 +17,7 @@ import {
 } from "../lib/analytics"
 import { isAuthenticationError } from "../lib/auth"
 import { appName } from "../lib/core"
+import { setGitHubReturnTo } from "../lib/github"
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
@@ -108,6 +109,11 @@ function Layout() {
     ghAppInstalledQuery.data &&
     !ghAppInstalledQuery.data.total_count
   if (ghAppNotInstalled) {
+    // Installing the app sends the browser away and brings it back through
+    // the OAuth callback. Without this it lands on the settings page, which
+    // for someone who just created a project is nowhere near what they were
+    // doing.
+    setGitHubReturnTo(`${location.pathname}${location.search}${location.hash}`)
     location.href = `https://github.com/apps/${appName}/installations/new`
   }
 

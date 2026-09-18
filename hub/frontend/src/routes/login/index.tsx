@@ -44,12 +44,18 @@ const githubAuthParamsSchema = z.object({
 export const Route = createFileRoute("/login/")({
   component: Login,
   beforeLoad: async () => {
-    // A logged-in user arriving with an OAuth code is connecting GitHub to
-    // their existing account, not signing in, so let the component handle
-    // it rather than bouncing them away
-    const hasOAuthCode = new URLSearchParams(window.location.search).has("code")
-    if (isLoggedIn() && !hasOAuthCode) {
-      const stored = popPostLoginRedirect()
+    if (!isLoggedIn()) {
+      return
+    }
+    // A logged-in user is only here to connect GitHub to their account, and
+    // that needs both halves of the handshake. Landing here with a code but
+    // no state (the GitHub App install sends one back, since we never
+    // started an OAuth flow) leaves nothing to exchange, and rendering the
+    // sign-in form at that point looks exactly like having been signed out.
+    const params = new URLSearchParams(window.location.search)
+    const connecting = params.has("code") && params.has("state")
+    if (!connecting) {
+      const stored = popPostLoginRedirect() || consumeGitHubReturnTo()
       throw redirect({ to: stored || "/" })
     }
   },

@@ -25,7 +25,11 @@ import OAuthButtons from "../components/Common/OAuthButtons"
 import { isLoggedIn } from "../hooks/useAuth"
 import useCustomToast from "../hooks/useCustomToast"
 import { getAnalyticsConsentToSave } from "../lib/analytics"
-import { popPostLoginRedirect, storeTokens } from "../lib/auth"
+import {
+  peekPostLoginRedirect,
+  popPostLoginRedirect,
+  storeTokens,
+} from "../lib/auth"
 import { handleError } from "../lib/errors"
 
 export const Route = createFileRoute("/signup")({
@@ -46,6 +50,13 @@ interface SignUpForm {
 
 function SignUp() {
   const navigate = useNavigate()
+  // Creating a project needs a GitHub repo, so when that's where signing up
+  // leads, GitHub is the only way in that doesn't ask for a second identity
+  // a moment later. Somewhere else (an invite, a project someone shared)
+  // has no such requirement, so both providers stay. Signing up with no
+  // destination stored lands on /new, which is the project case.
+  const destination = peekPostLoginRedirect()
+  const headedForNewProject = destination === null || destination === "/new"
   const showToast = useCustomToast()
   const {
     register,
@@ -96,7 +107,11 @@ function SignUp() {
       centerContent
     >
       <Image src={Logo} alt="Logo" height="120px" alignSelf="center" mb={-4} />
-      <OAuthButtons verb="Sign up" page="signup" />
+      <OAuthButtons
+        verb="Sign up"
+        page="signup"
+        githubOnly={headedForNewProject}
+      />
       <form onSubmit={handleSubmit(onSubmit)} style={{ width: "100%" }}>
         <FormControl isInvalid={!!errors.full_name} mb={3}>
           <FormLabel htmlFor="full_name">Name</FormLabel>

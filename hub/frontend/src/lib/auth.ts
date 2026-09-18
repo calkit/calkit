@@ -157,6 +157,18 @@ export const setPostLoginRedirect = (target: string): void => {
 }
 
 /**
+ * Where the next login will land, without consuming it.
+ *
+ * Only for deciding what to show; `popPostLoginRedirect` is what the
+ * navigation itself reads, and it applies the same safety check.
+ */
+export const peekPostLoginRedirect = (): string | null => {
+  if (typeof window === "undefined") return null
+  const target = localStorage.getItem("post_login_redirect")
+  return target?.startsWith("/") && !target.includes("..") ? target : null
+}
+
+/**
  * Retrieves and removes the stored post-login redirect path from localStorage.
  * Only returns paths that start with "/" and don't contain ".." to prevent
  * open redirect and directory traversal attacks.

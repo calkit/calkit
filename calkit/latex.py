@@ -50,6 +50,130 @@ LOCAL_DIFF_DIR = os.path.join(LOCAL_DIR, "latex-diffs")
 # ends
 WORKING_NAME = "working"
 
+# The image a flexible LaTeX environment reaches for when it falls back to
+# Docker. TinyTeX plus a curated package set and latexdiff, which is a
+# fraction of the size of a full TeX Live image.
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/tinytex-latexmk-docker:latest"
+
+# Backends a flexible LaTeX environment can resolve to, most preferred
+# first. System latexmk wins when it's there: a machine that already has a
+# TeX distribution should not download a second one. Docker is last since
+# it's the only one that needs a daemon.
+LATEX_BACKEND_ORDER = ["system", "tectonic", "tinytex", "docker"]
+
+# Backends that can run latexdiff, which is a Perl script that ships with
+# TeX Live and installs into TinyTeX with tlmgr. Tectonic has neither it
+# nor a Perl to run it, so a project that keeps diffs cannot use Tectonic
+# -- this is a capability, not a preference, and a document that diffs
+# fails outright rather than typesetting differently.
+LATEX_DIFF_CAPABLE = frozenset({"system", "tinytex", "docker"})
+
+
+def backend_can_diff(backend: str) -> bool:
+    """Whether ``latexdiff`` can be run in this backend."""
+    return backend in LATEX_DIFF_CAPABLE
+
+
+def project_keeps_diffs(ck_info: dict) -> bool:
+    """Whether any LaTeX stage in this project builds diffs.
+
+    A project that does decides its backend on a smaller set, since a
+    backend that can't run latexdiff can't build them at all.
+    """
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if not isinstance(stages, dict):
+        return False
+    return any(
+        stage.get("kind") == "latex" and stage.get("diffs")
+        for stage in stages.values()
+        if isinstance(stage, dict)
+    )
+
+
+def get_backend_version(backend: str) -> str | None:
+    """Read the version of a backend that's present, or None if it isn't.
+
+    What this returns is what gets recorded as the document's provenance,
+    so it names the thing that actually typeset the PDF rather than the
+    kind of environment it was reached through.
+    """
+    import shutil
+    import subprocess
+
+    commands = {
+        "system": ["latexmk", "--version"],
+        "tectonic": ["tectonic", "--version"],
+        # TinyTeX is a TeX Live, so its version is TeX Live's.
+        "tinytex": ["tlmgr", "--version"],
+        "docker": ["docker", "--version"],
+    }
+    cmd = commands.get(backend)
+    if cmd is None or shutil.which(cmd[0]) is None:
+        return None
+    try:
+        out = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # Every one of these prints its version somewhere in a line of prose,
+    # so take the first thing shaped like one rather than parsing each
+    # tool's wording.
+    match = re.search(r"\d+(?:\.\d+)+", out)
+    if match is not None:
+        return match.group(0)
+    return out.strip().splitlines()[0] if out.strip() else None
+
+
+def backend_is_available(backend: str) -> bool:
+    """Whether this backend could run here.
+
+    Docker is the awkward one: the binary existing says nothing about
+    whether the daemon is up, and that's the failure people actually hit.
+    It's checked properly here rather than on every pipeline run, since
+    this only happens when an environment is being resolved.
+    """
+    import subprocess
+
+    if backend == "docker":
+        if get_backend_version("docker") is None:
+            return False
+        try:
+            return (
+                subprocess.run(
+                    ["docker", "info"],
+                    capture_output=True,
+                    timeout=60,
+                ).returncode
+                == 0
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+    if backend == "tinytex":
+        # TinyTeX is only useful here if it can both compile and install,
+        # and tlmgr without latexmk is a TeX Live that can't build.
+        return (
+            get_backend_version("tinytex") is not None
+            and get_backend_version("system") is not None
+        )
+    return get_backend_version(backend) is not None
+
+
+def get_backend_order(env: dict, ck_info: dict | None = None) -> list[str]:
+    """Backends to try for a flexible LaTeX environment, best first.
+
+    The environment's own ``backends`` wins if it sets one, since naming
+    them is how a project says it has an opinion. Otherwise the default
+    order, with Tectonic dropped when the project keeps diffs.
+    """
+    backends = env.get("backends")
+    if backends:
+        return list(backends)
+    order = list(LATEX_BACKEND_ORDER)
+    if ck_info is not None and project_keeps_diffs(ck_info):
+        order = [b for b in order if backend_can_diff(b)]
+    return order
+
 
 def _ref_dirname(ref: str) -> str:
     """Turn a ref into something that can be one path component."""

@@ -96,14 +96,6 @@ function SignUp() {
       centerContent
     >
       <Image src={Logo} alt="Logo" height="120px" alignSelf="center" mb={-4} />
-      <Text fontSize="lg" fontWeight="bold">
-        Create your account
-      </Text>
-      {/* TODO: rewrite; projects need GitHub, so signing up with it skips
-          the connect step in the wizard */}
-      <Text fontSize="xs" color="ui.dim" textAlign="center" mt={-2}>
-        Projects live in GitHub repos, so signing up with GitHub saves a step.
-      </Text>
       <OAuthButtons verb="Sign up" page="signup" />
       <form onSubmit={handleSubmit(onSubmit)} style={{ width: "100%" }}>
         <FormControl isInvalid={!!errors.full_name} mb={3}>

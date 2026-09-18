@@ -63,7 +63,7 @@ import CloneProject from "../../../../components/Projects/CloneProject"
 import EditProject from "../../../../components/Projects/EditProject"
 import HelpContent from "../../../../components/Projects/HelpContent"
 import MakeProjectPublic from "../../../../components/Projects/MakeProjectPublic"
-import NewProject from "../../../../components/Projects/NewProject"
+import NewProjectModal from "../../../../components/Projects/NewProjectModal"
 import ProjectStatus from "../../../../components/Projects/ProjectStatus"
 import ImportOverleaf from "../../../../components/Publications/ImportOverleaf"
 import NewPublication from "../../../../components/Publications/NewPublication"
@@ -414,7 +414,7 @@ function ProjectMenu({
         isOpen={editProjectModal.isOpen}
         onClose={editProjectModal.onClose}
       />
-      <NewProject
+      <NewProjectModal
         isOpen={newProjectModal.isOpen}
         onClose={newProjectModal.onClose}
         defaultTemplate={`${project.owner_account_name}/${project.name}`}

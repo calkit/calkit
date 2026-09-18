@@ -24,7 +24,7 @@ import { useQuery } from "@tanstack/react-query"
 import { MiscService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import NewOrg from "../Orgs/NewOrg"
-import NewProject from "../Projects/NewProject"
+import NewProjectModal from "../Projects/NewProjectModal"
 import GlobalSearch from "./GlobalSearch"
 import HelpFeedback from "./HelpFeedback"
 import NotificationBell from "./NotificationBell"
@@ -93,9 +93,8 @@ export default function Topbar() {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   const { user } = useAuth()
-  // The new-project button goes to the wizard now; this modal is still here
-  // for the "use as template" form, which sends the user off to connect
-  // GitHub and comes back with ?newProject=1 to be reopened.
+  // Opened in place rather than by navigating, so the page behind it stays.
+  // Also reopened with ?newProject=1 after a trip out to connect GitHub.
   const newProjectModal = useDisclosure()
   const newOrgModal = useDisclosure()
   const helpModal = useDisclosure()
@@ -193,8 +192,7 @@ export default function Topbar() {
                 <Button
                   aria-label="new-project"
                   size="sm"
-                  as={RouterLink}
-                  to="/new"
+                  onClick={newProjectModal.onOpen}
                 >
                   <Icon as={FaPlus} mr={1} />
                   New project
@@ -219,7 +217,7 @@ export default function Topbar() {
                 />
               </>
             ) : null}
-            <NewProject
+            <NewProjectModal
               onClose={newProjectModal.onClose}
               isOpen={newProjectModal.isOpen}
             />

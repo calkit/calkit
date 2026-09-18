@@ -18,6 +18,7 @@ import {
   Thead,
   Tr,
   useColorModeValue,
+  useDisclosure,
 } from "@chakra-ui/react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -35,6 +36,7 @@ import ClearableInput from "../../components/Common/ClearableInput"
 import AccountSetupCard from "../../components/Onboarding/AccountSetupCard"
 import FeaturedProjects from "../../components/Onboarding/FeaturedProjects"
 import StartPaths from "../../components/Onboarding/StartPaths"
+import NewProjectModal from "../../components/Projects/NewProjectModal"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
 import { recallProjectStart } from "../../lib/onboarding"
@@ -70,6 +72,7 @@ function getOwnedProjectsQueryOptions({
 }
 
 function ProjectsTable() {
+  const newProjectModal = useDisclosure()
   const queryClient = useQueryClient()
   const { page } = projectsSearchSchema.parse(Route.useSearch())
   const navigate = useNavigate({ from: Route.fullPath })
@@ -101,9 +104,13 @@ function ProjectsTable() {
   return (
     <>
       <Flex alignItems="center" py={4} gap={4}>
-        <Button variant="primary" as={RouterLink} to="/new">
+        <Button variant="primary" onClick={newProjectModal.onOpen}>
           + New project
         </Button>
+        <NewProjectModal
+          isOpen={newProjectModal.isOpen}
+          onClose={newProjectModal.onClose}
+        />
         <ClearableInput
           placeholder="Search..."
           width="33%"

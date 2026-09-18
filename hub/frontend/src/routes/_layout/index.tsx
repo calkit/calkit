@@ -41,14 +41,17 @@ import StartPaths from "../../components/Onboarding/StartPaths"
 import NewProjectModal from "../../components/Projects/NewProjectModal"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
-import { recallProjectStart } from "../../lib/onboarding"
 
 const projectsSearchSchema = z.object({
-  page: z.number().catch(1),
+  page: z.number().optional().catch(1),
+  // Set once, by signing in. Home is the only place that knows whether the
+  // account has a project yet, so it decides what a new arrival sees.
+  welcome: z.boolean().optional(),
 })
 
 export const Route = createFileRoute("/_layout/")({
   component: Home,
+  validateSearch: (search) => projectsSearchSchema.parse(search),
 })
 
 // A calendar date, as 2026-08-21, is what "last updated" means in a list;
@@ -76,7 +79,7 @@ function getOwnedProjectsQueryOptions({
 function ProjectsTable() {
   const newProjectModal = useDisclosure()
   const queryClient = useQueryClient()
-  const { page } = projectsSearchSchema.parse(Route.useSearch())
+  const { page = 1 } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const setPage = (page: number) =>
     navigate({ search: (prev) => ({ ...prev, page }) })
@@ -342,7 +345,7 @@ function LandingPage() {
         </Text>
         <Button
           as={RouterLink}
-          to="/new"
+          to="/login"
           variant="primary"
           size="lg"
           mt={7}
@@ -412,17 +415,19 @@ function Home() {
     enabled: Boolean(user),
   })
   const projectCount = countQuery.data?.count ?? 0
-  // A wizard that was interrupted (connecting GitHub, installing the GitHub
-  // App) lands here with no project; pick it back up where it left off
-  const resume =
-    Boolean(user) && countQuery.isSuccess && projectCount === 0
-      ? recallProjectStart()
-      : null
+  // Signing in sends everyone here; an account with nothing in it gets the
+  // new-project form over the top, and everyone else just gets their
+  // projects. The flag is dropped either way, so a refresh or a later visit
+  // doesn't reopen it.
+  const { welcome } = Route.useSearch()
+  const newProjectModal = useDisclosure()
   useEffect(() => {
-    if (resume) {
-      navigate({ to: "/new", search: { path: resume.path } })
+    if (!welcome || !countQuery.isSuccess) return
+    if (projectCount === 0) {
+      newProjectModal.onOpen()
     }
-  }, [resume, navigate])
+    navigate({ to: "/", search: { welcome: undefined }, replace: true })
+  }, [welcome, countQuery.isSuccess, projectCount, navigate, newProjectModal])
   // A stored token means a user is on the way, and useAuth reports not-loading
   // for the tick before the request starts. Treating that gap as "signed out"
   // flashes the landing page at someone who is signed in.
@@ -461,6 +466,10 @@ function Home() {
           <AccountSetupCard projectCount={projectCount} />
         </Box>
       ) : null}
+      <NewProjectModal
+        isOpen={newProjectModal.isOpen}
+        onClose={newProjectModal.onClose}
+      />
     </Container>
   )
 }

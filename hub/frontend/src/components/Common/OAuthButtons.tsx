@@ -2,7 +2,6 @@ import { Button, Divider, HStack, Text } from "@chakra-ui/react"
 import mixpanel from "mixpanel-browser"
 import { FaGithub, FaGoogle } from "react-icons/fa"
 
-import { setPostLoginRedirect } from "../../lib/auth"
 import { startGitHubOAuth } from "../../lib/github"
 import { startGoogleOAuth } from "../../lib/google"
 
@@ -44,7 +43,6 @@ const OAuthButtons = ({
       isLoading={githubLoading}
       onClick={() => {
         mixpanel.track("Clicked login", { provider: "github", page })
-        if (page === "signup") setPostLoginRedirect("/new")
         startGitHubOAuth()
       }}
       rightIcon={<FaGithub />}
@@ -57,7 +55,6 @@ const OAuthButtons = ({
         isLoading={googleLoading}
         onClick={() => {
           mixpanel.track("Clicked Google login", { page })
-          if (page === "signup") setPostLoginRedirect("/new")
           startGoogleOAuth()
         }}
         rightIcon={<FaGoogle />}

@@ -102,7 +102,13 @@ const useAuth = () => {
     mutationFn: login,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
-      navigate({ to: redirectTo || "/" })
+      // Home is the only place that knows whether this account has a
+      // project, so it decides between the new-project form and the
+      // project list rather than this hook guessing.
+      navigate({
+        to: redirectTo || "/",
+        search: { welcome: redirectTo ? undefined : true },
+      })
     },
     onError: (err: AxiosError) => {
       let errDetail = (err.response?.data as any)?.detail ?? err.message
@@ -128,7 +134,13 @@ const useAuth = () => {
     mutationFn: loginGithub,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
-      navigate({ to: redirectTo || "/" })
+      // Home is the only place that knows whether this account has a
+      // project, so it decides between the new-project form and the
+      // project list rather than this hook guessing.
+      navigate({
+        to: redirectTo || "/",
+        search: { welcome: redirectTo ? undefined : true },
+      })
     },
     onError: (err: AxiosError) => {
       let errDetail = (err.response?.data as any)?.detail ?? err.message
@@ -155,7 +167,13 @@ const useAuth = () => {
     mutationFn: loginGoogle,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
-      navigate({ to: redirectTo || "/" })
+      // Home is the only place that knows whether this account has a
+      // project, so it decides between the new-project form and the
+      // project list rather than this hook guessing.
+      navigate({
+        to: redirectTo || "/",
+        search: { welcome: redirectTo ? undefined : true },
+      })
     },
     onError: (err: AxiosError) => {
       let errDetail = (err.response?.data as any)?.detail ?? err.message

@@ -870,11 +870,14 @@ class Environment(BaseModel):
         "conda",
         "docker",
         "julia",
+        "latex",
         "matlab",
         "nix",
         "pbs",
         "slurm",
         "system",
+        "tectonic",
+        "tinytex",
         "uv",
         "pixi",
         "venv",
@@ -1101,6 +1104,98 @@ class REnvironment(Environment):
     )
     prefix: str | None = Field(
         default=None, description="Path at which to create the environment."
+    )
+
+
+LatexBackend = Literal["system", "tectonic", "tinytex", "docker"]
+
+# What a flexible LaTeX environment can pin. The backend is what built the
+# document; the version is that backend's own. Both are recorded either
+# way---locking decides whether stages rerun when they change.
+LatexLockProperty = Literal["backend", "version"]
+
+
+class TectonicEnvironment(Environment):
+    """Tectonic, which fetches the packages a document needs as it runs.
+
+    The smallest way to build a document, and the only backend that cannot
+    run ``latexdiff``, since it ships neither the script nor a Perl to run
+    it. A project that keeps diffs needs one of the others.
+    """
+
+    kind: Literal["tectonic"] = "tectonic"
+    version: str | None = Field(
+        default=None,
+        description="Tectonic version to use. Resolved from what's "
+        "installed when not given.",
+    )
+
+
+class TinyTexEnvironment(Environment):
+    """TinyTeX, a small TeX Live that grows by installing what's asked for.
+
+    ``packages`` is that list. It is a hard dependency rather than a
+    preference: a document whose class or package is missing doesn't
+    typeset differently, it fails to build, so the list is locked and
+    changing it reruns the stages that use it.
+    """
+
+    kind: Literal["tinytex"] = "tinytex"
+    packages: list[str] = Field(
+        default=[],
+        description="TeX packages to install with tlmgr, beyond what "
+        "TinyTeX ships. Names are tlmgr package names, e.g. 'revtex4-1'.",
+    )
+    version: str | None = Field(
+        default=None,
+        description="TeX Live version to use. Resolved from what's "
+        "installed when not given.",
+    )
+
+
+class LatexEnvironment(Environment):
+    """A LaTeX toolchain, without saying which one.
+
+    Resolves to one of the explicit kinds---system ``latexmk``, Tectonic,
+    TinyTeX, or Docker---the first time it's used, and records what it
+    resolved to. The point is that a document builds on a machine that has
+    no TeX at all, without the project having to decide which distribution
+    everyone installs.
+
+    Unlike other environments, what this resolves to is not pinned by
+    default. A backend determines typesetting, while the results a paper
+    reports come from its inputs, which upstream stages lock; PDFs are not
+    byte-reproducible across runs anyway. So ``lock`` is empty by default
+    and the backend is recorded as provenance, leaving collaborators on
+    different machines free to build without rerunning each other's
+    stages. Lock 'backend' when the toolchain has to be the same
+    everywhere, e.g., for a camera-ready submission.
+    """
+
+    kind: Literal["latex"] = "latex"
+    backends: list[LatexBackend] | None = Field(
+        default=None,
+        description="Backends to consider, most preferred first. Defaults "
+        "to system latexmk, then Tectonic, then TinyTeX, then Docker, "
+        "with Tectonic skipped when the project keeps LaTeX diffs, since "
+        "it can't run latexdiff.",
+    )
+    packages: list[str] = Field(
+        default=[],
+        description="TeX packages the document needs beyond what the "
+        "backend ships, installed with tlmgr where the backend supports "
+        "it. Ignored by Tectonic, which fetches what it needs itself.",
+    )
+    image: str | None = Field(
+        default=None,
+        description="Image for the Docker backend. Defaults to Calkit's "
+        "own TinyTeX image.",
+    )
+    lock: list[LatexLockProperty] = Field(
+        default=[],
+        description="What to pin about the resolved backend. Empty means "
+        "the backend is recorded but stages don't depend on it, so a "
+        "collaborator building with a different one doesn't rerun them.",
     )
 
 
@@ -1984,6 +2079,9 @@ class ProjectInfo(BaseModel):
             CondaEnvironment
             | DockerEnvironment
             | JuliaEnvironment
+            | LatexEnvironment
+            | TectonicEnvironment
+            | TinyTexEnvironment
             | MatlabEnvironment
             | PixiEnvironment
             | REnvironment

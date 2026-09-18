@@ -10,11 +10,14 @@ from calkit.models.core import (
     Dataset,
     Figure,
     ImportedDataset,
+    LatexEnvironment,
     MiscArtifact,
     Procedure,
     ProcedureFile,
     ProjectInfo,
     Publication,
+    TectonicEnvironment,
+    TinyTexEnvironment,
     _ImportedFromDoi,
 )
 
@@ -457,3 +460,48 @@ def test_procedure_entries():
     ]
     assert schema["$defs"]["ProcedureFile"]["additionalProperties"] is False
     assert schema["$defs"]["Procedure"]["not"] == {"required": ["path"]}
+
+
+def test_latex_environments():
+    info = ProjectInfo.model_validate(
+        {
+            "environments": {
+                "flexible": {"kind": "latex"},
+                "pinned": {
+                    "kind": "latex",
+                    "lock": ["backend", "version"],
+                    "backends": ["tinytex", "docker"],
+                    "packages": ["revtex4-1"],
+                    "image": "ghcr.io/calkit/tinytex-latexmk-docker:latest",
+                },
+                "tt": {"kind": "tinytex", "packages": ["revtex4-1", "epsf"]},
+                "tec": {"kind": "tectonic", "version": "0.15.0"},
+            }
+        }
+    )
+    assert isinstance(info.environments["flexible"], LatexEnvironment)
+    assert isinstance(info.environments["tt"], TinyTexEnvironment)
+    assert isinstance(info.environments["tec"], TectonicEnvironment)
+    # A flexible environment pins nothing by default, so stages that use it
+    # gain no dependency on whatever it resolved to
+    flexible = info.environments["flexible"]
+    assert flexible.lock == []
+    assert flexible.backends is None
+    assert flexible.packages == []
+    pinned = info.environments["pinned"]
+    assert pinned.lock == ["backend", "version"]
+    assert pinned.backends == ["tinytex", "docker"]
+    # Neither the kinds nor what they can pin are open sets
+    for bad in [
+        {"kind": "latex", "lock": ["image"]},
+        {"kind": "latex", "backends": ["mactex"]},
+        {"kind": "tex"},
+    ]:
+        with pytest.raises(ValidationError):
+            ProjectInfo.model_validate({"environments": {"x": bad}})
+    # Round-tripping through YAML keeps the kind-specific class
+    roundtripped = _roundtrip(
+        {"environments": {"tt": {"kind": "tinytex", "packages": ["epsf"]}}}
+    )
+    assert isinstance(roundtripped.environments["tt"], TinyTexEnvironment)
+    assert roundtripped.environments["tt"].packages == ["epsf"]

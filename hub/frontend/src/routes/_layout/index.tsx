@@ -350,7 +350,7 @@ function Home() {
       : null
   useEffect(() => {
     if (resume) {
-      navigate({ to: "/new", search: { path: resume.path, step: 1 } })
+      navigate({ to: "/new", search: { path: resume.path } })
     }
   }, [resume, navigate])
   // A stored token means a user is on the way, and useAuth reports not-loading

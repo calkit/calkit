@@ -110,6 +110,7 @@ from app.git import (
     get_repo,
     get_repo_tree_for_ref,
     get_zip_path_map_from_repo,
+    push_and_expire,
     record_project_update,
     resolve_commit_sha,
     search_refs,
@@ -681,7 +682,7 @@ def post_project_upload(
     repo.git.add(["-A"])
     if repo.git.diff("--staged"):
         repo.git.commit(["-m", "Import existing project files"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.user_uploaded_project(
         user=current_user,
         owner_name=project.owner_account_name,
@@ -1096,7 +1097,7 @@ def post_project(
             else:
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
-            repo.git.push(["origin", repo.active_branch.name])
+            push_and_expire(project, repo)
             if project_in.template is not None:
                 _copy_template_dvc_objects(
                     repo_dir=str(repo.working_dir),
@@ -2067,7 +2068,7 @@ def put_project_contents(
     if repo.git.diff(["--staged", path]):
         commit_message = message or f"Upload {path} from web"
         repo.git.commit(["-m", commit_message])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     else:
         raise HTTPException(
             400,
@@ -2176,7 +2177,7 @@ def patch_project_contents(
         message = f"Add {path} to {target_category}"
     repo.git.commit(["-m", message])
     logger.info("Pushing Git repo")
-    repo.git.push(["origin", repo.branches[0].name])
+    push_and_expire(project, repo, repo.branches[0].name)
     return current_object
 
 
@@ -2693,7 +2694,7 @@ def post_project_question(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     # The question was pushed from this clone; readers share another one,
     # and without this they'd keep serving the project as it was before.
     expire_shared_read_clone(project, repo.active_branch.name)
@@ -2785,7 +2786,7 @@ def put_project_question(
     repo.git.add("calkit.yaml")
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
         expire_shared_read_clone(project, repo.active_branch.name)
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
@@ -3789,7 +3790,7 @@ def post_project_figure(
     # Make a commit
     repo.git.commit(["-m", f"Add figure {path}"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.branches[0].name])
+    push_and_expire(project, repo, repo.branches[0].name)
     url = None
     if file is not None:
         if file_data is None or full_fig_path is None:
@@ -5163,7 +5164,7 @@ def post_project_dataset(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Add dataset {ds['path']}"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if storage == "dvc":
         # The pointer is pushed with Git; the bytes go to this project's
         # object storage so a clone can pull them
@@ -5306,7 +5307,7 @@ def post_project_dataset_upload(
     # Make a commit
     repo.git.commit(["-m", f"Add dataset {path}"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if storage == "dvc":
         # If using the DVC remote, we can just put it in the expected
         # location since we'll have the md5 hash in the dvc file
@@ -5878,7 +5879,7 @@ def post_project_misc(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     record_project_update(project, repo, session)
     return MiscArtifact.model_validate(entry)
 
@@ -6229,7 +6230,7 @@ def post_project_publication(
     # Make a commit
     repo.git.commit(["-m", f"Add publication {path} ({kind})"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     url = None
     if file is not None:
         # If using the DVC remote, we can just put it in the expected location
@@ -6704,7 +6705,7 @@ async def post_project_overleaf_publication(
         else f"Import Overleaf ZIP to '{path}'"
     )
     repo.git.commit(["-m", commit_msg])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if not import_zip_mode:
         app.projects.record_overleaf_links(
             session=session, project=project, repo=repo
@@ -6786,7 +6787,7 @@ def post_project_overleaf_sync(
             400, "Overleaf sync failed; try locally with Calkit CLI"
         )
     # Push the main repo (Overleaf has already been pushed in sync)
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     # Get data from the result of the sync
     commits_since = res.get("commits_since_last_sync", [])
     last_overleaf_commit = res.get("overleaf_commit_after", "")
@@ -7611,7 +7612,7 @@ def put_project_pipeline_stage(
         repo.git.commit(
             ["-m", req.message or f"Update pipeline stage {stage_name}"]
         )
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
         record_project_update(project, repo, session)
     return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage_map))
 
@@ -8592,7 +8593,7 @@ def post_project_references(
     repo.git.add("calkit.yaml")
     verb = "Label" if req.label_existing else "Add"
     repo.git.commit(["-m", f"{verb} references collection '{req.path}'"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Created references collection",
@@ -8668,7 +8669,7 @@ def delete_project_references(
         repo.git.add(["-f", zotero.SYNC_INFO_REL_PATH])
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Delete references collection '{path}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Deleted references collection",
@@ -8775,7 +8776,7 @@ def post_project_reference_item(
             else f"Add reference '{req.key}' in new collection '{req.path}'"
         )
         repo.git.commit(["-m", message])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Added reference item",
@@ -8852,7 +8853,7 @@ def put_project_reference_item(
     # commit rather than letting git error on an empty commit.
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Edit reference '{req.key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Edited reference item",
@@ -8902,7 +8903,7 @@ def delete_project_reference_item(
     repo.git.add(path)
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Delete reference '{bib_key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Deleted reference item",
@@ -9141,7 +9142,7 @@ def post_project_zotero_import(
     repo.git.add(req.bib_path)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Import Zotero collection into '{req.bib_path}'"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Imported Zotero collection",
@@ -9550,7 +9551,7 @@ def post_project_zotero_sync(
     committed = bool(repo.git.diff("--cached", "--name-only").strip())
     if committed:
         repo.git.commit(["-m", f"Sync Zotero collection into '{req.path}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Synced Zotero collection",
@@ -9832,7 +9833,7 @@ def put_project_reference_notes(
     if changed:
         repo.git.add(req.path)
         repo.git.commit(["-m", f"Edit notes on '{bib_key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Edited reference note",
@@ -10036,7 +10037,7 @@ def post_project_environment(
             f.write(req.file_content)
         repo.git.add(fpath)
     repo.git.commit(["-m", f"Add environment {req.name}"])
-    repo.git.push(["origin", repo.active_branch])
+    push_and_expire(project, repo)
     mixpanel.user_created_environment(
         user=current_user,
         owner_name=owner_name,
@@ -10359,7 +10360,7 @@ def put_project_dev_container(
     repo.git.add(".devcontainer")
     if repo.git.diff("--staged"):
         repo.git.commit(["-m", "Add dev container spec"])
-        repo.git.push(["origin", repo.active_branch])
+        push_and_expire(project, repo)
     return Message(message="Success")
 
 
@@ -11023,7 +11024,7 @@ def post_project_status(
     try:
         subprocess.check_call(cmd, cwd=repo.working_dir)
         logger.info("Git pushing")
-        repo.git.push(["origin", repo.active_branch])
+        push_and_expire(project, repo)
     except Exception as e:
         logger.error(f"Failed to set project status: {e}")
         raise HTTPException(400, f"Failed to set project status: {e}")

@@ -728,6 +728,22 @@ def get_repo(
     return repo
 
 
+def push_and_expire(
+    project: Project, repo: git.Repo, branch: str | None = None
+) -> None:
+    """Push to origin, and make the next read see what was pushed.
+
+    Readers share a checkout, behind a cached answer for what the remote's
+    head is, and neither knows about a push made from a writer's own clone.
+    Pushing without this leaves reads serving the project as it was for up
+    to ``REMOTE_HEAD_TTL``, so a stage saved through the app reads back as
+    though it was never saved.
+    """
+    name = branch or repo.active_branch.name
+    repo.git.push(["origin", name])
+    expire_shared_read_clone(project, name)
+
+
 def record_project_update(
     project: Project, repo: git.Repo, session: Session
 ) -> None:

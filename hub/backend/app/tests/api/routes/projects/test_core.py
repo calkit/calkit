@@ -1010,7 +1010,12 @@ def _get_declared_at_ref(
     client: TestClient, endpoint: str, ck_key: str, declared: list
 ):
     """GET an artifact listing at a ref with ``declared`` in calkit.yaml."""
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     fake_repo = SimpleNamespace(
         working_dir="/tmp/nonexistent",
         commit=lambda _ref: SimpleNamespace(tree=_EmptyTree()),
@@ -4036,7 +4041,12 @@ def test_figures_listing_skips_map_paths_copies(tmp_path) -> None:
         ),
     ):
         ctx = _discover_figures(
-            project=SimpleNamespace(owner_account_name="o", name="p"),
+            project=SimpleNamespace(
+                owner_account_name="o",
+                name="p",
+                owner_github_name="o",
+                git_repo_url="https://github.com/o/p",
+            ),
             repo=repo,
             ref=None,
         )

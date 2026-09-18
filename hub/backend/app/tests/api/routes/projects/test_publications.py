@@ -113,7 +113,11 @@ def test_post_project_overleaf_publication_replace_existing(
     repo, origin = _make_repo(tmp_path, files, ck_info)
     wdir = str(repo.working_dir)
     fake_project = SimpleNamespace(
-        owner_account_name="o", name="p", id=uuid.uuid4()
+        owner_account_name="o",
+        name="p",
+        id=uuid.uuid4(),
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
     )
     zip_data = _zip_bytes(
         {
@@ -301,7 +305,11 @@ def test_get_project_publication_components(
     }
     repo, _ = _make_repo(tmp_path, files, ck_info)
     fake_project = SimpleNamespace(
-        owner_account_name="o", name="p", id=uuid.uuid4()
+        owner_account_name="o",
+        name="p",
+        id=uuid.uuid4(),
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
     )
     with (
         patch(

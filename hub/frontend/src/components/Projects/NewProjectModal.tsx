@@ -500,10 +500,6 @@ function NewProjectForm({
           <Checkbox {...register("is_public")} colorScheme="teal">
             Make it public
           </Checkbox>
-          <FormHelperText>
-            A private project can be made public later. Going the other way is
-            more complicated, so leave it private if you're not sure.
-          </FormHelperText>
         </FormControl>
       ) : null}
       <Button

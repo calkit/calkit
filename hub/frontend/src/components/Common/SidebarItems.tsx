@@ -139,11 +139,15 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
         {title === "Pipeline" && pipelineIsStale ? (
           <Tooltip label="The pipeline has changed since it was last run">
             <Box
-              ml={2}
+              // Pushed to the far edge rather than trailing the label, so
+              // it reads as a status on the row instead of punctuation.
+              ml="auto"
+              mr={1}
               boxSize={2}
               borderRadius="full"
               bg="orange.400"
               alignSelf="center"
+              flexShrink={0}
               aria-label="Pipeline is out of date"
             />
           </Tooltip>

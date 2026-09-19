@@ -86,6 +86,7 @@ import {
   preloadPackages,
   runFigureScript,
 } from "../../lib/pyodide"
+import { capitalizeFirstLetter } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
 import PdfCanvas from "../Common/PdfCanvas"
 import PathPicker from "../Releases/PathPicker"
@@ -458,7 +459,11 @@ const FigureEditor = ({
     const [x, y] = numeric.length >= 2 ? numeric : [undefined, undefined]
     const nextFigure = `figures/${slug(stem(primaryPath))}.png`
     setTitle(
-      (current) => current || (x && y ? `${y} vs. ${x}` : stem(primaryPath)),
+      (current) =>
+        current ||
+        // A column name or a filename stem is usually lowercase, and a
+        // title that opens in lowercase reads like a mistake.
+        capitalizeFirstLetter(x && y ? `${y} vs. ${x}` : stem(primaryPath)),
     )
     if (!codeTouched) {
       setCode(defaultScript({ datasetPaths, figurePath: nextFigure, x, y }))

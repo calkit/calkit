@@ -52,8 +52,11 @@ WORKING_NAME = "working"
 
 # The image a flexible LaTeX environment reaches for when it falls back to
 # Docker. TinyTeX plus a curated package set and latexdiff, which is a
-# fraction of the size of a full TeX Live image.
-DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/tinytex-latexmk-docker:latest"
+# fraction of the size of a full TeX Live image; built from images/latex.
+# Pinned to an exact tag rather than :latest, since an environment that
+# resolved to Docker should keep building against the same TeX until the
+# default is deliberately moved.
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:1.0.0"
 
 # Backends a flexible LaTeX environment can resolve to, most preferred
 # first. System latexmk wins when it's there: a machine that already has a

@@ -101,22 +101,26 @@ def get_templates(kind: str | None = None) -> list[TemplatePublic]:
     """List the templates in the calkit registry, optionally of one kind.
 
     Read from the package rather than repeated in the frontend, so adding
-    one there is enough.
+    one there is enough. In registry order, which is the order they should
+    be offered in.
     """
-    from calkit.templates.core import TEMPLATES
+    import calkit.templates
 
-    if kind is not None and kind not in TEMPLATES:
+    try:
+        templates = calkit.templates.get_templates(kind=kind)
+    except ValueError:
         raise HTTPException(404, f"Unknown template kind '{kind}'")
-    kinds = [kind] if kind is not None else sorted(TEMPLATES)
     return [
         TemplatePublic(
-            name=f"{k}/{template.name}",
-            kind=k,
+            # How the template is asked for, which differs by kind: a LaTeX
+            # template is named within this package, a project template is
+            # a project on a hub.
+            name=template.ref,
+            kind=template.kind,
             title=template.title or template.name,
             description=template.description,
         )
-        for k in kinds
-        for template in TEMPLATES[k].values()
+        for template in templates
     ]
 
 

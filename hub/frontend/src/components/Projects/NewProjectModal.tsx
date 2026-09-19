@@ -34,6 +34,7 @@ import { type SubmitHandler, useForm } from "react-hook-form"
 import { useDebounce } from "use-debounce"
 
 import {
+  MiscService,
   type ProjectPost,
   type ProjectPublic,
   ProjectsService,
@@ -52,29 +53,6 @@ import FilterableSelect from "../Common/FilterableSelect"
 // place rather than to the start.
 // Each field falls back to unset rather than throwing, so a hand-edited or
 // stale URL lands on the first step instead of the error boundary.
-const TEMPLATES = [
-  {
-    value: "calkit/example-basic",
-    label: "Basic: uv environment, Python analysis, LaTeX paper",
-  },
-  {
-    value: "calkit/example-matlab",
-    label: "MATLAB: scripts run in batch mode",
-  },
-  {
-    value: "calkit/example-analytics",
-    label: "Analytics: notebook analysis, figures and tables",
-  },
-  {
-    value: "calkit/example-r",
-    label: "R: renv environment, R analysis, figures",
-  },
-  {
-    value: "calkit/example-julia",
-    label: "Julia: Julia environment, script and notebook, LaTeX paper",
-  },
-]
-
 interface ProjectFormValues extends ProjectPost {
   existing_repo: string
 }
@@ -291,6 +269,19 @@ function NewProjectForm({
   // the org in Calkit (created on the way, which takes an admin of it on
   // GitHub) and the Calkit GitHub App installed for that org. Both are
   // checked here so the person finds out before the submit fails.
+  // The template registry lives in the calkit package, so the list comes
+  // from the API rather than being repeated here.
+  const templatesQuery = useQuery({
+    queryKey: ["templates", "project"],
+    queryFn: () =>
+      MiscService.getTemplates({ kind: "project" }).then(
+        (response) => response.data,
+      ),
+    enabled: fromTemplate,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const templates = templatesQuery.data ?? []
+  const selectedTemplate = templates.find((t) => t.name === watch("template"))
   const repoUrl = watch("git_repo_url") ?? ""
   const repoOwner = repoUrl.match(/github\.com\/([^/]+)\/./)?.[1] ?? ""
   const isOrgRepo =
@@ -452,12 +443,15 @@ function NewProjectForm({
         <FormControl mb={4}>
           <FormLabel htmlFor="template">Template</FormLabel>
           <Select id="template" {...register("template")}>
-            {TEMPLATES.map((template) => (
-              <option key={template.value} value={template.value}>
-                {template.label}
+            {templates.map((template) => (
+              <option key={template.name} value={template.name}>
+                {template.title}
               </option>
             ))}
           </Select>
+          {selectedTemplate?.description ? (
+            <FormHelperText>{selectedTemplate.description}</FormHelperText>
+          ) : null}
         </FormControl>
       ) : null}
       {fromTemplate ? (

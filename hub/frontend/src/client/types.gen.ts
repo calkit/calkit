@@ -35,6 +35,10 @@ export type AccountPublic = {
  */
 export type BodyLoginLoginAccessToken = {
   /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+  /**
    * Grant Type
    */
   grant_type?: string | null
@@ -58,10 +62,6 @@ export type BodyLoginLoginAccessToken = {
    * Client Secret
    */
   client_secret?: string | null
-  /**
-   * Analytics Consent
-   */
-  analytics_consent?: boolean | null
 }
 
 /**
@@ -2414,24 +2414,6 @@ export type Notification = {
 }
 
 /**
- * OAuthCodeExchange
- */
-export type OAuthCodeExchange = {
-  /**
-   * Code
-   */
-  code: string
-  /**
-   * Redirect Uri
-   */
-  redirect_uri: string
-  /**
-   * Analytics Consent
-   */
-  analytics_consent?: boolean | null
-}
-
-/**
  * OnboardingFlagPost
  */
 export type OnboardingFlagPost = {
@@ -2866,6 +2848,20 @@ export type Pipeline = {
 }
 
 /**
+ * PipelinePut
+ */
+export type PipelinePut = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
  * PipelineStage
  *
  * One stage of the Calkit pipeline, as editable YAML.
@@ -2920,9 +2916,9 @@ export type PipelineStageEdited = {
 }
 
 /**
- * PipelinePut
+ * PipelineStagePut
  */
-export type PipelinePut = {
+export type PipelineStagePut = {
   /**
    * Yaml
    */
@@ -2935,9 +2931,10 @@ export type PipelinePut = {
 
 /**
  * PipelineYaml
+ *
  * The project's whole pipeline, as editable YAML.
  *
- * The YAML is the `pipeline:` block of calkit.yaml, exactly as the
+ * The YAML is the ``pipeline:`` block of calkit.yaml, exactly as the
  * pipeline page shows it -- same key order, same comments.
  */
 export type PipelineYaml = {
@@ -2945,20 +2942,6 @@ export type PipelineYaml = {
    * Yaml
    */
   yaml: string
-}
-
-/**
- * PipelineStagePut
- */
-export type PipelineStagePut = {
-  /**
-   * Yaml
-   */
-  yaml: string
-  /**
-   * Message
-   */
-  message?: string | null
 }
 
 /**
@@ -6181,6 +6164,38 @@ export type ContentsItemBase = {
 }
 
 /**
+ * OAuthCodeExchange
+ */
+export type AppApiRoutesLoginOAuthCodeExchange = {
+  /**
+   * Code
+   */
+  code: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+}
+
+/**
+ * OAuthCodeExchange
+ */
+export type AppApiRoutesUsersOAuthCodeExchange = {
+  /**
+   * Code
+   */
+  code: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
+}
+
+/**
  * FileLock
  */
 export type FileLockWritable = {
@@ -6515,6 +6530,10 @@ export type UserPublicWritable = {
    */
   email_verified: boolean
   subscription: UserSubscriptionWritable | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -6790,7 +6809,7 @@ export type RecoverPasswordHtmlContentResponse =
   RecoverPasswordHtmlContentResponses[keyof RecoverPasswordHtmlContentResponses]
 
 export type LoginWithGithubData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesLoginOAuthCodeExchange
   path?: never
   query?: never
   url: "/login/github"
@@ -6817,7 +6836,7 @@ export type LoginWithGithubResponse =
   LoginWithGithubResponses[keyof LoginWithGithubResponses]
 
 export type LoginWithGoogleData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesLoginOAuthCodeExchange
   path?: never
   query?: never
   url: "/login/google"
@@ -7583,7 +7602,7 @@ export type GetUserConnectedAccountsResponse =
   GetUserConnectedAccountsResponses[keyof GetUserConnectedAccountsResponses]
 
 export type PostUserZenodoAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/zenodo-auth"
@@ -7688,7 +7707,7 @@ export type PutUserOverleafTokenResponse =
   PutUserOverleafTokenResponses[keyof PutUserOverleafTokenResponses]
 
 export type PostUserGoogleAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/google-auth"
@@ -7715,7 +7734,7 @@ export type PostUserGoogleAuthResponse =
   PostUserGoogleAuthResponses[keyof PostUserGoogleAuthResponses]
 
 export type PostUserGithubAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/github-auth"

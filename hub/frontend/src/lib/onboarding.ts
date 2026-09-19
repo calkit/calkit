@@ -123,7 +123,7 @@ export function buildProjectSteps({
       key: "run",
       title: "Run the pipeline",
       detail:
-        "Install the CLI, clone the project, run it end to end. " +
+        "Install the CLI, clone the project, run it end to end, " +
         "and push the results back here.",
       // Having run at all is the milestone; a run that has since gone
       // stale is ordinary work in progress, not an unfinished setup step,

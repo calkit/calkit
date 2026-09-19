@@ -46,6 +46,17 @@ export const AccountPublicSchema = {
 
 export const Body_login_login_access_tokenSchema = {
   properties: {
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
     grant_type: {
       anyOf: [
         {
@@ -94,17 +105,6 @@ export const Body_login_login_access_tokenSchema = {
       ],
       format: "password",
       title: "Client Secret",
-    },
-    analytics_consent: {
-      anyOf: [
-        {
-          type: "boolean",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Analytics Consent",
     },
   },
   type: "object",
@@ -4155,33 +4155,6 @@ export const NotificationSchema = {
     "In-app notification delivered to a user when a comment is posted on\ntheir project (or a project they collaborate on).\n\nDesigned to be lightweight: no fan-out to external services here.\n``link`` stores a frontend URL (e.g., ``/owner/project/publications?path=…``)\nso the notification can deep-link directly to the relevant item.",
 } as const
 
-export const OAuthCodeExchangeSchema = {
-  properties: {
-    code: {
-      type: "string",
-      title: "Code",
-    },
-    redirect_uri: {
-      type: "string",
-      title: "Redirect Uri",
-    },
-    analytics_consent: {
-      anyOf: [
-        {
-          type: "boolean",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Analytics Consent",
-    },
-  },
-  type: "object",
-  required: ["code", "redirect_uri"],
-  title: "OAuthCodeExchange",
-} as const
-
 export const OnboardingFlagPostSchema = {
   properties: {
     step: {
@@ -4863,6 +4836,29 @@ export const PipelineSchema = {
   title: "Pipeline",
 } as const
 
+export const PipelinePutSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelinePut",
+} as const
+
 export const PipelineStageSchema = {
   properties: {
     name: {
@@ -4916,43 +4912,6 @@ export const PipelineStageEditedSchema = {
     "The stage after an edit, plus what the edit touched.\n\n``changed`` is what the user should see happened: the inputs added, or\nthe default-valued keys removed.",
 } as const
 
-export const PipelinePutSchema = {
-  properties: {
-    yaml: {
-      type: "string",
-      title: "Yaml",
-    },
-    message: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Message",
-    },
-  },
-  type: "object",
-  required: ["yaml"],
-  title: "PipelinePut",
-} as const
-
-export const PipelineYamlSchema = {
-  properties: {
-    yaml: {
-      type: "string",
-      title: "Yaml",
-    },
-  },
-  type: "object",
-  required: ["yaml"],
-  title: "PipelineYaml",
-  description:
-    "The project's whole pipeline, as editable YAML.\n\nThe YAML is the ``pipeline:`` block of calkit.yaml, exactly as the\npipeline page shows it -- same key order, same comments.",
-} as const
-
 export const PipelineStagePutSchema = {
   properties: {
     yaml: {
@@ -4974,6 +4933,20 @@ export const PipelineStagePutSchema = {
   type: "object",
   required: ["yaml"],
   title: "PipelineStagePut",
+} as const
+
+export const PipelineYamlSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineYaml",
+  description:
+    "The project's whole pipeline, as editable YAML.\n\nThe YAML is the ``pipeline:`` block of calkit.yaml, exactly as the\npipeline page shows it -- same key order, same comments.",
 } as const
 
 export const PresentationSchema = {
@@ -6173,9 +6146,16 @@ export const ProjectPostSchema = {
       title: "Name",
     },
     title: {
-      type: "string",
-      maxLength: 255,
-      minLength: 4,
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+          minLength: 4,
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Title",
     },
     description: {
@@ -6308,9 +6288,21 @@ export const ProjectPostSchema = {
       title: "Keep Template History",
       default: false,
     },
+    overleaf_project_url: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 2048,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Overleaf Project Url",
+    },
   },
   type: "object",
-  required: ["name", "title"],
+  required: ["name"],
   title: "ProjectPost",
 } as const
 
@@ -10807,6 +10799,49 @@ export const _ContentsItemBaseSchema = {
   title: "_ContentsItemBase",
 } as const
 
+export const app__api__routes__login__OAuthCodeExchangeSchema = {
+  properties: {
+    code: {
+      type: "string",
+      title: "Code",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
+  },
+  type: "object",
+  required: ["code", "redirect_uri"],
+  title: "OAuthCodeExchange",
+} as const
+
+export const app__api__routes__users__OAuthCodeExchangeSchema = {
+  properties: {
+    code: {
+      type: "string",
+      title: "Code",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+  },
+  type: "object",
+  required: ["code", "redirect_uri"],
+  title: "OAuthCodeExchange",
+} as const
+
 export const FileLockWritableSchema = {
   properties: {
     project_id: {
@@ -11345,6 +11380,17 @@ export const UserPublicWritableSchema = {
           type: "null",
         },
       ],
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",

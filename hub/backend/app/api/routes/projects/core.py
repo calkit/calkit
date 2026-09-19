@@ -2713,9 +2713,6 @@ def post_project_question(
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
     push_and_expire(project, repo)
-    # The question was pushed from this clone; readers share another one,
-    # and without this they'd keep serving the project as it was before.
-    expire_shared_read_clone(project, repo.active_branch.name)
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
     )
@@ -2805,7 +2802,6 @@ def put_project_question(
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
         push_and_expire(project, repo)
-        expire_shared_read_clone(project, repo.active_branch.name)
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
     )

@@ -210,7 +210,7 @@ def shared_reader_root() -> str:
 
 
 def expire_shared_read_clone(
-    project: Project, branch: str | None = None
+    project: Project, branch: str | None = None, head: str | None = None
 ) -> None:
     """Make the next read of *project* fetch, after a push through the API.
 
@@ -224,7 +224,18 @@ def expire_shared_read_clone(
         git_plain_url = project.git_repo_url or ""
         if git_plain_url and not git_plain_url.endswith(".git"):
             git_plain_url += ".git"
-        cache.delete(cache.make_key("remote-head", git_plain_url, branch))
+        key = cache.make_key("remote-head", git_plain_url, branch)
+        if head:
+            # We just put that commit there, so there is nothing to ask the
+            # remote. Recording it saves the next read an ls-remote, which
+            # measures around 700 ms and is the single most expensive thing
+            # a read does. It still fetches, since this won't match what the
+            # shared checkout has.
+            cache.set_json(key, head, ttl=REMOTE_HEAD_TTL)
+        else:
+            # Someone else moved the remote and we don't know where to, so
+            # the next read has to ask.
+            cache.delete(key)
     # Dated to the epoch rather than removed: its absence means "no complete
     # clone here", which 503s every read until one finishes.
     marker = os.path.join(
@@ -742,7 +753,11 @@ def push_and_expire(
     """
     name = branch or repo.active_branch.name
     repo.git.push(["origin", name])
-    expire_shared_read_clone(project, name)
+    try:
+        head: str | None = repo.head.commit.hexsha
+    except (ValueError, GitCommandError):
+        head = None
+    expire_shared_read_clone(project, name, head=head)
 
 
 def record_project_update(

@@ -769,3 +769,41 @@ def test_read_overleaf_title_collapses_whitespace() -> None:
         }
     )
     assert title == "A title split over lines"
+
+
+def test_expire_shared_read_clone_records_a_known_head(tmp_path) -> None:
+    """A push knows where the remote is, so the next read needn't ask."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from app import cache
+    from app.git import expire_shared_read_clone
+
+    project = SimpleNamespace(
+        owner_github_name="o",
+        name="p",
+        git_repo_url="https://github.com/o/p",
+    )
+    marker_dir = tmp_path / "o" / "p"
+    marker_dir.mkdir(parents=True)
+    (marker_dir / "updated.txt").touch()
+    key = cache.make_key("remote-head", "https://github.com/o/p.git", "main")
+    with (
+        patch("app.git.shared_reader_root", return_value=str(tmp_path)),
+        patch("app.git.cache.set_json") as set_json,
+        patch("app.git.cache.delete") as delete,
+    ):
+        expire_shared_read_clone(project, "main", head="a" * 40)
+        set_json.assert_called_once_with(key, "a" * 40, ttl=300)
+        delete.assert_not_called()
+    # Without one, the next read still has to go and ask.
+    with (
+        patch("app.git.shared_reader_root", return_value=str(tmp_path)),
+        patch("app.git.cache.set_json") as set_json,
+        patch("app.git.cache.delete") as delete,
+    ):
+        expire_shared_read_clone(project, "main")
+        delete.assert_called_once_with(key)
+        set_json.assert_not_called()
+    # Either way the checkout is marked stale, so the next read refreshes it.
+    assert (marker_dir / "updated.txt").stat().st_mtime == 0

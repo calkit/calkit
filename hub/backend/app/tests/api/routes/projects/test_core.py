@@ -1637,6 +1637,7 @@ def _make_fake_repo(working_dir: str) -> SimpleNamespace:
     return SimpleNamespace(
         working_dir=working_dir,
         active_branch=SimpleNamespace(name="main"),
+        head=SimpleNamespace(commit=SimpleNamespace(hexsha="0" * 40)),
         ignored=lambda *a, **k: [],
         git=SimpleNamespace(
             add=lambda *a, **k: None,
@@ -4186,6 +4187,7 @@ def test_post_project_dataset_provenance(
             push=lambda *a, **k: None,
         )
         active_branch = SimpleNamespace(name="main")
+        head = SimpleNamespace(commit=SimpleNamespace(hexsha="0" * 40))
 
     def post(body: dict, existing_path: bool = False):
         ck_info: dict = {"datasets": list(written)}

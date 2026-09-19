@@ -21,36 +21,27 @@ interface PathOption {
   description: string
 }
 
-/**
- * Nobody arrives wanting "a project." They arrive with scripts scattered
- * across a laptop, a shared drive, and an Overleaf tab, or with an idea and
- * a wish not to end up there again. Naming those situations lets someone
- * recognize themselves rather than guess which button is for them.
- */
 const START_PATHS: PathOption[] = [
   {
     path: "existing",
     icon: FaBroom,
-    title: "Clean up a project in progress",
+    title: "Clean up an existing project",
     description:
-      "Scripts on your laptop, data on the lab drive, figures dragged into " +
-      "Overleaf. One repo, wired together.",
+      "Link a GitHub repo or upload a ZIP of the files on your laptop.",
   },
   {
     path: "fresh",
     icon: FaSeedling,
-    title: "Start a new one",
+    title: "Start fresh",
     description:
-      "Environment, pipeline, and paper connected from the first commit. " +
-      "Nothing to untangle later.",
+      "Build on a blank slate or a project template and follow best practices from day one.",
   },
   {
     path: "overleaf",
     icon: FaLeaf,
-    title: "Start from your paper",
+    title: "Start from an Overleaf project",
     description:
-      "Link the Overleaf project you're already writing in. The analysis " +
-      "moves in behind it, and the figures stop going stale.",
+      "Connect the analysis to something you're already writing in Overleaf.",
   },
 ]
 

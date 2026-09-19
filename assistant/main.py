@@ -1339,6 +1339,7 @@ class CloneThread(QThread):
     def __init__(self, project_name: str, **kwargs):
         super().__init__(**kwargs)
         self.project_name = project_name
+        self.success = None
 
     def run(self) -> None:
         """Run Calkit in a subprocess to clone the project.
@@ -1357,10 +1358,9 @@ class CloneThread(QThread):
             self.process = subprocess.run(
                 cmd, cwd=wdir, shell=True, check=False
             )
-        if self.process.returncode != 0:
-            QMessageBox.critical(
-                self.parent, "Failed to clone", self.process.stdout.decode()
-            )
+        # Widgets can only be touched on the GUI thread, so the outcome is
+        # recorded here and reported by the finished handler
+        self.success = self.process.returncode == 0
 
 
 class FileDownloadThread(QThread):
@@ -1511,15 +1511,7 @@ class NewProjectThread(QThread):
             self.process = subprocess.run(
                 cmd, cwd=wdir, shell=True, check=False
             )
-        if self.process.returncode != 0:
-            self.success = False
-            QMessageBox.critical(
-                self.parent,
-                "Failed",
-                "Failed to create project.",
-            )
-        else:
-            self.success = True
+        self.success = self.process.returncode == 0
 
 
 class ProjectListWidget(QWidget):
@@ -1690,10 +1682,24 @@ class ProjectListWidget(QWidget):
         progress.setMinimumDuration(0)  # Show immediately
         progress.setRange(0, 0)  # Indeterminate progress
         progress.show()
-        thread = CloneThread(project_name=project_name, parent=self)
-        thread.finished.connect(progress.close)
-        thread.finished.connect(self.refresh)
-        thread.start()
+        # Kept on self so the thread isn't garbage collected while running
+        self.clone_thread = CloneThread(project_name=project_name, parent=self)
+        self.clone_thread.finished.connect(
+            lambda: self.finish_clone(progress, project_name)
+        )
+        self.clone_thread.start()
+
+    def finish_clone(self, progress: QProgressDialog, project_name: str):
+        """Finish cloning, back on the GUI thread."""
+        progress.close()
+        self.refresh()
+        if not self.clone_thread.success:
+            QMessageBox.critical(
+                self,
+                "Failed to clone",
+                f"Failed to clone {project_name}. "
+                "See the console output for details.",
+            )
 
     def open_project_folder(self, item: QListWidgetItem) -> None:
         """Open the project folder in the file explorer."""
@@ -1736,6 +1742,13 @@ class ProjectListWidget(QWidget):
             self.refresh()
             QMessageBox.information(
                 self, "Success", "Project created successfully!"
+            )
+        else:
+            QMessageBox.critical(
+                self,
+                "Failed",
+                "Failed to create project. "
+                "See the console output for details.",
             )
 
 

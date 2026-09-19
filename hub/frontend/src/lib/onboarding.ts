@@ -93,7 +93,7 @@ export function buildProjectSteps({
     },
     {
       key: "dataset",
-      title: "Bring in your data",
+      title: "Collect some data",
       detail:
         "Type it in, upload it, or import it by DOI, URL, or repo. " +
         "Recording the source now is what lets anyone trace a figure back " +
@@ -102,7 +102,7 @@ export function buildProjectSteps({
     },
     {
       key: "figure",
-      title: "Make a figure from it",
+      title: "Analyze and visualize",
       detail:
         "Plot the data in the browser, then save it as a pipeline stage. " +
         "That creates the environment it runs in, so the figure traces back " +
@@ -124,7 +124,7 @@ export function buildProjectSteps({
     },
     {
       key: "publication",
-      title: "Write it up",
+      title: "Write about the work",
       detail:
         "Start a paper from a template or connect the Overleaf project " +
         "you're already writing in, so its figures stop drifting out of " +

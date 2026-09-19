@@ -219,10 +219,8 @@ function Auth() {
         showDivider={!githubOnly}
       />
       {githubOnly ? (
-        // TODO: rewrite this line
         <Text fontSize="xs" color="ui.dim" textAlign="center">
-          A project lives in a GitHub repo, so GitHub is how you sign up for
-          one.
+          Your code will live on GitHub, so an account there is required.
         </Text>
       ) : (
         <form onSubmit={handleSubmit(onSubmit)} style={{ width: "100%" }}>

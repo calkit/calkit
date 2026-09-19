@@ -5,8 +5,9 @@ import {
   Code,
   Container,
   Flex,
-  Heading,
   HStack,
+  Heading,
+  Input,
   Link,
   SimpleGrid,
   SkeletonText,
@@ -26,18 +27,25 @@ import {
   createFileRoute,
   useNavigate,
 } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
 import { useEffect, useState } from "react"
 import { useDebounce } from "use-debounce"
 import { z } from "zod"
 
-import { ProjectsService } from "../../client"
+import { MiscService, ProjectsService } from "../../client"
 import ActionsMenu from "../../components/Common/ActionsMenu"
 import ClearableInput from "../../components/Common/ClearableInput"
 import AccountSetupCard from "../../components/Onboarding/AccountSetupCard"
 import FeaturedProjects from "../../components/Onboarding/FeaturedProjects"
+import {
+  ReproAuditReport,
+  auditFindings,
+} from "../../components/Onboarding/ReproAudit"
 import StartPaths from "../../components/Onboarding/StartPaths"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
+import { setPostLoginRedirect } from "../../lib/auth"
 import { pageWidthNoSidebar } from "../../lib/layout"
+import { stashProjectStart } from "../../lib/onboarding"
 
 const projectsSearchSchema = z.object({
   page: z.number().catch(1),
@@ -236,6 +244,104 @@ const LOOP = [
   },
 ]
 
+/**
+ * Check any public GitHub repo before signing up.
+ *
+ * The result is the same audit the wizard shows for an imported project,
+ * and the sign-up button carries the repo into the wizard.
+ */
+function PublicRepoCheck() {
+  const navigate = useNavigate()
+  const borderColor = useColorModeValue("gray.200", "gray.600")
+  const [url, setUrl] = useState("")
+  const [submitted, setSubmitted] = useState("")
+  const checkQuery = useQuery({
+    queryKey: ["public-repo-check", submitted],
+    queryFn: () =>
+      MiscService.checkPublicRepo({ url: submitted }).then(
+        (response) => response.data,
+      ),
+    enabled: Boolean(submitted),
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60_000,
+  })
+  const result = checkQuery.data
+  const gaps = result
+    ? auditFindings(result.check).filter((f) => !f.ok).length
+    : 0
+  const errorDetail = (checkQuery.error as any)?.response?.data?.detail
+  const startFromThis = () => {
+    if (!result) return
+    mixpanel.track("Started project from public repo check", { gaps })
+    stashProjectStart({
+      path: "existing",
+      repoUrl: `https://github.com/${result.owner}/${result.name}`,
+    })
+    setPostLoginRedirect("/new")
+    navigate({ to: "/signup" })
+  }
+  return (
+    <Box mb={12}>
+      {/* TODO: rewrite this heading */}
+      <Heading size="md" mb={3}>
+        Check a public GitHub repo
+      </Heading>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          mixpanel.track("Checked public repo", { url: url.trim() })
+          setSubmitted(url.trim())
+        }}
+      >
+        <HStack maxW="640px">
+          {/* TODO: rewrite the placeholder and button label */}
+          <Input
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://github.com/owner/repo"
+            autoComplete="off"
+          />
+          <Button
+            type="submit"
+            variant="primary"
+            isLoading={checkQuery.isFetching}
+            isDisabled={!url.trim()}
+          >
+            Check
+          </Button>
+        </HStack>
+      </form>
+      {checkQuery.isError ? (
+        // TODO: rewrite the fallback error message
+        <Text color="ui.danger" fontSize="sm" mt={3}>
+          {typeof errorDetail === "string"
+            ? errorDetail
+            : "Couldn't check that repo."}
+        </Text>
+      ) : null}
+      {result ? (
+        <Box
+          mt={5}
+          p={5}
+          borderWidth={1}
+          borderColor={borderColor}
+          borderRadius="lg"
+        >
+          <Text fontSize="sm" color="ui.dim" mb={4}>
+            {result.owner}/{result.name} at {result.commit.slice(0, 7)}
+          </Text>
+          <ReproAuditReport check={result.check} />
+          {/* TODO: rewrite both sign-up labels */}
+          <Button mt={4} variant="primary" onClick={startFromThis}>
+            {gaps > 0 ? "Sign up to fix these" : "Sign up and bring it in"}
+          </Button>
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
 /** The signed-out landing page. */
 function LandingPage() {
   const loopBorder = useColorModeValue("gray.200", "gray.600")
@@ -261,6 +367,7 @@ function LandingPage() {
           </Button>
         </HStack>
       </Box>
+      <PublicRepoCheck />
       {/* The loop a project actually moves through, and the tool each
           phase usually lives in. One place for all four is the pitch. */}
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={10}>

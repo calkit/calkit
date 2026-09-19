@@ -4894,6 +4894,25 @@ export type ReleaseView = {
 }
 
 /**
+ * PublicRepoCheck
+ */
+export type PublicRepoCheck = {
+  /**
+   * Owner
+   */
+  owner: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Commit
+   */
+  commit: string
+  check: ReproCheck
+}
+
+/**
  * ReproCheck
  */
 export type ReproCheck = {
@@ -7861,6 +7880,38 @@ export type PutUserOnboardingFlagResponses = {
 
 export type PutUserOnboardingFlagResponse =
   PutUserOnboardingFlagResponses[keyof PutUserOnboardingFlagResponses]
+
+export type CheckPublicRepoData = {
+  body?: never
+  path?: never
+  query: {
+    /**
+     * Url
+     */
+    url: string
+  }
+  url: "/repo-check"
+}
+
+export type CheckPublicRepoErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type CheckPublicRepoError =
+  CheckPublicRepoErrors[keyof CheckPublicRepoErrors]
+
+export type CheckPublicRepoResponses = {
+  /**
+   * Successful Response
+   */
+  200: PublicRepoCheck
+}
+
+export type CheckPublicRepoResponse =
+  CheckPublicRepoResponses[keyof CheckPublicRepoResponses]
 
 export type GetHubVersionData = {
   body?: never

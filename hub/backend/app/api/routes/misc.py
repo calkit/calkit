@@ -5,13 +5,19 @@ import hmac
 import json
 import logging
 import os
+import re
+import subprocess
+import tempfile
+import threading
+import time
 import uuid
+from collections import deque
 from typing import Literal
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from pydantic.networks import EmailStr
 from sqlalchemy import func
 from sqlalchemy.exc import DataError
@@ -19,7 +25,7 @@ from sqlmodel import Session, and_, or_, select
 from starlette.requests import Request
 
 import app.tasks
-from app import arxiv, version
+from app import arxiv, cache, version
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -46,6 +52,7 @@ from app.models import (
 )
 from app.stripe import stripe
 from app.subscriptions import SubscriptionPlan, get_plans
+from calkit.reproducibility import ReproCheck, check_reproducibility
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -80,6 +87,141 @@ def test_email(email_to: EmailStr) -> Message:
         html_content=email_data.html_content,
     )
     return Message(message="Test email sent")
+
+
+class PublicRepoCheck(BaseModel):
+    owner: str
+    name: str
+    commit: str
+    check: ReproCheck
+
+
+REPO_CHECK_LS_REMOTE_TIMEOUT = 20
+REPO_CHECK_CLONE_TIMEOUT = 60
+# (requests, seconds) for one client, then for the whole hub
+REPO_CHECK_LIMIT_PER_CLIENT = (10, 600)
+REPO_CHECK_LIMIT_GLOBAL = (60, 600)
+_repo_check_hits: dict[str, deque[float]] = {}
+_repo_check_lock = threading.Lock()
+_GITHUB_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _parse_public_github_url(url: str) -> tuple[str, str]:
+    url = url.strip()
+    if "://" not in url:
+        url = "https://" + url
+    host, _, path = url.split("://", 1)[1].partition("/")
+    # TODO: rewrite the error messages in this function; the page shows them
+    if host.lower().removeprefix("www.") != "github.com":
+        raise HTTPException(422, "Only public GitHub repos can be checked")
+    parts = [p for p in path.split("/") if p]
+    if len(parts) < 2:
+        raise HTTPException(422, "Enter a repo URL like github.com/owner/repo")
+    owner, name = parts[0], parts[1].removesuffix(".git")
+    if not (_GITHUB_NAME.match(owner) and _GITHUB_NAME.match(name)):
+        raise HTTPException(422, "Enter a repo URL like github.com/owner/repo")
+    return owner, name
+
+
+def _client_ip(request: Request) -> str:
+    # Set by the proxy in front of the API
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _over_repo_check_limit(client_ip: str) -> bool:
+    now = time.monotonic()
+    limits = (
+        (client_ip, REPO_CHECK_LIMIT_PER_CLIENT),
+        ("*", REPO_CHECK_LIMIT_GLOBAL),
+    )
+    with _repo_check_lock:
+        for key, (limit, window) in limits:
+            hits = _repo_check_hits.setdefault(key, deque())
+            while hits and hits[0] < now - window:
+                hits.popleft()
+            if len(hits) >= limit:
+                return True
+        for key, _ in limits:
+            _repo_check_hits[key].append(now)
+        for key in [k for k, v in _repo_check_hits.items() if not v]:
+            del _repo_check_hits[key]
+    return False
+
+
+def _public_repo_head(clone_url: str) -> str | None:
+    try:
+        out = subprocess.run(
+            ["git", "ls-remote", clone_url, "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=REPO_CHECK_LS_REMOTE_TIMEOUT,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    return out.stdout.split()[0]
+
+
+def _clone_public_repo(clone_url: str, dest: str) -> None:
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "--depth=1",
+            "--single-branch",
+            "--no-tags",
+            "--quiet",
+            clone_url,
+            dest,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=REPO_CHECK_CLONE_TIMEOUT,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    )
+
+
+@router.get("/repo-check")
+def check_public_repo(url: str, request: Request) -> PublicRepoCheck:
+    """Check the reproducibility of a public GitHub repo, no account needed.
+
+    Anonymous, so the host is restricted to GitHub, the clone is shallow and
+    time-boxed, requests are rate limited, and results are cached by commit.
+    """
+    owner, name = _parse_public_github_url(url)
+    # TODO: rewrite the error messages in this function; the page shows them
+    if _over_repo_check_limit(_client_ip(request)):
+        raise HTTPException(429, "Too many checks; try again in a few minutes")
+    clone_url = f"https://github.com/{owner}/{name}.git"
+    commit = _public_repo_head(clone_url)
+    if commit is None:
+        raise HTTPException(404, "No public GitHub repo at that URL")
+    key = cache.make_key(
+        "public-repo-check", f"{owner}/{name}".lower(), commit
+    )
+    cached = cache.get_json(key)
+    if cached is not None:
+        try:
+            return PublicRepoCheck.model_validate(cached)
+        except ValidationError:
+            cache.delete(key)
+    with tempfile.TemporaryDirectory(prefix="repo-check-") as tmp:
+        dest = os.path.join(tmp, "repo")
+        try:
+            _clone_public_repo(clone_url, dest)
+        except subprocess.CalledProcessError:
+            raise HTTPException(404, "No public GitHub repo at that URL")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, "That repo is too large to check here")
+        check = check_reproducibility(wdir=dest, log_func=logger.debug)
+    res = PublicRepoCheck(owner=owner, name=name, commit=commit, check=check)
+    cache.set_json(key, res.model_dump())
+    return res
 
 
 class TemplatePublic(BaseModel):

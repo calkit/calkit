@@ -39,6 +39,39 @@ export interface OnboardingStep {
 /** The flag that means "I'm finished with this checklist, hide it." */
 export const DISMISSED = "dismissed"
 
+export type StartPath = "existing" | "fresh" | "overleaf"
+
+export interface ProjectStart {
+  path: StartPath
+  /** A GitHub repo the visitor already pointed at, for the existing path. */
+  repoUrl?: string
+}
+
+const PROJECT_START_KEY = "new_project_start"
+
+// The post-login redirect is a bare pathname, so what the visitor chose
+// before signing up travels separately
+export function stashProjectStart(start: ProjectStart): void {
+  sessionStorage.setItem(PROJECT_START_KEY, JSON.stringify(start))
+}
+
+export function popProjectStart(): ProjectStart | null {
+  const raw = sessionStorage.getItem(PROJECT_START_KEY)
+  sessionStorage.removeItem(PROJECT_START_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (["existing", "fresh", "overleaf"].includes(parsed?.path)) {
+      return {
+        path: parsed.path,
+        repoUrl:
+          typeof parsed.repoUrl === "string" ? parsed.repoUrl : undefined,
+      }
+    }
+  } catch {}
+  return null
+}
+
 export interface ProjectOnboardingInput {
   /** Research questions declared in calkit.yaml. */
   questionCount: number

@@ -47,7 +47,6 @@ import InputsRow, {
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
-import TipBubble from "../../../../../components/Onboarding/TipBubble"
 import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewPublication from "../../../../../components/Publications/NewPublication"
@@ -445,18 +444,16 @@ function Publications() {
           </Tooltip>
         )}
         {canEditLatex && (
-          <TipBubble tip="edit-latex" where="page" placement="bottom">
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() =>
-                navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
-              }
-            >
-              <Icon as={MdEdit} mr={1} />
-              Edit LaTeX
-            </Button>
-          </TipBubble>
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() =>
+              navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
+            }
+          >
+            <Icon as={MdEdit} mr={1} />
+            Edit LaTeX
+          </Button>
         )}
       </HStack>
     ) : undefined
@@ -551,18 +548,16 @@ function Publications() {
               {userHasWriteAccess && (
                 <>
                   <Menu>
-                    <TipBubble tip="publication" where="page">
-                      <MenuButton
-                        as={Button}
-                        variant="primary"
-                        height="25px"
-                        width="9px"
-                        px={1}
-                        ml={2}
-                      >
-                        <Icon as={FaPlus} fontSize="xs" />
-                      </MenuButton>
-                    </TipBubble>
+                    <MenuButton
+                      as={Button}
+                      variant="primary"
+                      height="25px"
+                      width="9px"
+                      px={1}
+                      ml={2}
+                    >
+                      <Icon as={FaPlus} fontSize="xs" />
+                    </MenuButton>
                     <Portal>
                       <MenuList zIndex="popover">
                         <MenuItem onClick={newPubTemplateModal.onOpen}>

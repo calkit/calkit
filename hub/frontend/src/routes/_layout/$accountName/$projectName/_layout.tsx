@@ -47,7 +47,7 @@ import { FaCodeBranch } from "react-icons/fa"
 import { FaGithub, FaQuestion, FaRegClone, FaRegFileAlt } from "react-icons/fa"
 import { FiCheckSquare } from "react-icons/fi"
 import { LuCopyPlus } from "react-icons/lu"
-import { MdEdit, MdOutlineLightbulb } from "react-icons/md"
+import { MdEdit } from "react-icons/md"
 import { SiOverleaf } from "react-icons/si"
 import { z } from "zod"
 
@@ -70,7 +70,6 @@ import NewPublication from "../../../../components/Publications/NewPublication"
 import useAuth from "../../../../hooks/useAuth"
 import useOnboardingFlags from "../../../../hooks/useOnboarding"
 import useProject from "../../../../hooks/useProject"
-import useTips from "../../../../hooks/useTips"
 import { isAuthenticationError } from "../../../../lib/auth"
 import { DISMISSED } from "../../../../lib/onboarding"
 
@@ -290,7 +289,6 @@ function ProjectMenu({
   const navigate = useNavigate()
   // Clearing the flag is what brings the checklist back on the home page.
   const { setFlag } = useOnboardingFlags(project.id)
-  const tips = useTips(project.id, userHasWriteAccess)
   const editProjectModal = useDisclosure()
   const newProjectModal = useDisclosure()
   const cloneProjectModal = useDisclosure()
@@ -376,14 +374,6 @@ function ProjectMenu({
                 }}
               >
                 Show setup checklist
-              </MenuItem>
-            ) : null}
-            {userHasWriteAccess ? (
-              <MenuItem
-                icon={<MdOutlineLightbulb fontSize={18} />}
-                onClick={tips.showing ? tips.dismissAll : tips.resetAll}
-              >
-                {tips.showing ? "Hide tips" : "Show tips again"}
               </MenuItem>
             ) : null}
             <MenuDivider />

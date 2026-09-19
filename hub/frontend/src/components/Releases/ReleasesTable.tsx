@@ -51,7 +51,6 @@ import {
   releasePagePath,
 } from "../../lib/releases"
 import LoadingSpinner from "../Common/LoadingSpinner"
-import TipBubble from "../Onboarding/TipBubble"
 import NewRelease from "./NewRelease"
 import ShareDialog from "./ShareDialog"
 import {
@@ -276,17 +275,15 @@ const ReleasesTable = ({
         <Heading size="md">Releases</Heading>
         {userHasWriteAccess && (
           <>
-            <TipBubble tip="release" where="page">
-              <Button
-                variant="primary"
-                size="sm"
-                ml={4}
-                leftIcon={<Icon as={FaPlus} />}
-                onClick={openNewRelease}
-              >
-                New release
-              </Button>
-            </TipBubble>
+            <Button
+              variant="primary"
+              size="sm"
+              ml={4}
+              leftIcon={<Icon as={FaPlus} />}
+              onClick={openNewRelease}
+            >
+              New release
+            </Button>
             <Button
               size="sm"
               ml={2}

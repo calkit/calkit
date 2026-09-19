@@ -39,7 +39,6 @@ import FigureEditor from "../../../../../components/Figures/FigureEditor"
 import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
 
 import { ProjectsService } from "../../../../../client"
-import TipBubble from "../../../../../components/Onboarding/TipBubble"
 
 // Which "add a dataset" form is open lives in the URL, the same way the
 // references page carries its own. Filling one in is several fields of
@@ -434,24 +433,18 @@ function ProjectDataView() {
             />
           ) : null}
           <SimpleGrid columns={[3, null, 4]} gap={6}>
-            {datasets?.map((dataset, datasetIndex) => (
+            {datasets?.map((dataset) => (
               <Card key={dataset.path} p={6} variant="elevated">
                 <Heading size="sm" mb={2}>
                   <Code p={1} maxW="100%">
                     {/* The card's heading opens the viewer; the viewer's
                         own header links to the file on the files page */}
-                    <TipBubble
-                      tip="view-dataset"
-                      where="page"
-                      when={datasetIndex === 0}
+                    <Link
+                      cursor="pointer"
+                      onClick={() => setViewPath(dataset.path)}
                     >
-                      <Link
-                        cursor="pointer"
-                        onClick={() => setViewPath(dataset.path)}
-                      >
-                        {dataset.path}
-                      </Link>
-                    </TipBubble>
+                      {dataset.path}
+                    </Link>
                     {dataset.imported_from ? (
                       <Badge ml={1} bgColor="green.500">
                         imported

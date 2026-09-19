@@ -794,6 +794,56 @@ def get_owned_projects(
     return ProjectsPublic(data=projects, count=count)  # type: ignore
 
 
+def _resolve_project_template(
+    session: Session, current_user: User, template: str
+) -> tuple[Project | None, str]:
+    """Work out which repo a new project should be started from.
+
+    A template hosted here is preferred: being a project on this hub is
+    what lets its outputs be copied into the new project's storage, so the
+    figures and paper are there before the first run.
+
+    Failing that, a template this package knows lives on its own hub, and
+    its Git repo is readable from anywhere, so it can still be used --
+    which is what makes the built-in templates work on a hub that doesn't
+    host them, a local dev instance included.
+
+    Returns the project if this hub has one, and the Git repo URL to pull
+    from either way.
+    """
+    if template.count("/") != 1:
+        raise HTTPException(
+            422, "A template is named owner/project, e.g. calkit/example"
+        )
+    owner_name, project_name = template.split("/")
+    try:
+        template_project = app.projects.get_project(
+            session=session,
+            owner_name=owner_name,
+            project_name=project_name,
+            current_user=current_user,
+            min_access_level="read",
+        )
+        return template_project, template_project.git_repo_url
+    except HTTPException as e:
+        if e.status_code not in (403, 404):
+            raise
+    known = calkit.templates.find_template(template, kind="project")
+    if known is None:
+        # The template came off a list this hub offered, so "Project not
+        # found" reads as though the project being created is the one
+        # missing. Say which template, and that it is the problem.
+        raise HTTPException(
+            404,
+            f"Template {template} isn't available on this hub; "
+            "pick another one",
+        )
+    logger.info(
+        f"Template {template} isn't hosted here; using {known.git_repo_url}"
+    )
+    return None, known.git_repo_url  # type: ignore[union-attr]
+
+
 @router.post("/projects")
 def post_project(
     *,
@@ -836,33 +886,14 @@ def post_project(
             f"https://github.com/{current_user.account.name}/{project_in.name}"
         )
     # First check if template even exists, if specified
+    template_project: Project | None = None
+    template_git_repo_url: str | None = None
     if project_in.template is not None:
-        if project_in.template.count("/") != 1:
-            raise HTTPException(
-                422, "A template is named owner/project, e.g. calkit/example"
-            )
-        template_owner_name, template_project_name = project_in.template.split(
-            "/"
+        template_project, template_git_repo_url = _resolve_project_template(
+            session=session,
+            current_user=current_user,
+            template=project_in.template,
         )
-        try:
-            template_project = app.projects.get_project(
-                session=session,
-                owner_name=template_owner_name,
-                project_name=template_project_name,
-                current_user=current_user,
-                min_access_level="read",
-            )
-        except HTTPException as e:
-            if e.status_code not in (403, 404):
-                raise
-            # The template came off a list this hub offered, so "Project not
-            # found" reads as though the project being created is the one
-            # missing. Say which template, and that it is the problem.
-            raise HTTPException(
-                404,
-                f"Template {project_in.template} isn't available on this "
-                "hub; pick another one",
-            )
     # Validate the git repo URL is on github.com to prevent SSRF
     parsed_git_url = urlparse(project_in.git_repo_url)
     if parsed_git_url.hostname not in ("github.com", "www.github.com"):
@@ -1022,7 +1053,9 @@ def post_project(
         else:
             owner_account_id = current_user.account.id
         add_info = {"owner_account_id": owner_account_id}
-        if project_in.template is not None:
+        if template_project is not None:
+            # Only a template hosted here can be a parent: the column is a
+            # foreign key into this hub's projects.
             add_info["parent_project_id"] = template_project.id
         project = Project.model_validate(project_in, update=add_info)
         logger.info("Adding project to database")
@@ -1039,9 +1072,15 @@ def post_project(
             )
             # If we have a template, set as upstream and pull from it
             if project_in.template is not None:
-                template_git_repo_url = template_project.git_repo_url
                 repo.git.remote(["add", "upstream", template_git_repo_url])
                 repo.git.pull(["upstream", repo.active_branch.name])
+                # Read off the remote-tracking ref while it is still here.
+                # This is the revision the project was taken from, and it
+                # costs nothing; cloning the template again to ask it was a
+                # second full clone of a repo we just pulled.
+                template_git_rev = repo.git.rev_parse(
+                    f"upstream/{repo.active_branch.name}"
+                )
                 # Remove upstream remote so we don't have any confusion later
                 repo.git.remote(["remove", "upstream"])
                 if not project_in.keep_template_history:
@@ -1057,12 +1096,6 @@ def post_project(
                     )
                     repo.git.branch("-D", branch)
                     repo.git.branch("-m", branch)
-                template_repo = get_repo(
-                    project=template_project,
-                    session=session,
-                    user=current_user,
-                    fresh=True,
-                )
                 # dvc.lock stays: its hashes name the template's outputs,
                 # which are copied into this project's storage below, so
                 # the figures and paper are there before the first run.
@@ -1084,7 +1117,7 @@ def post_project(
                 ck_info["derived_from"] = dict(
                     project=project_in.template,
                     git_repo_url=template_git_repo_url,
-                    git_rev=template_repo.git.rev_parse("HEAD"),
+                    git_rev=template_git_rev,
                 )
             with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
                 ryaml.dump(ck_info, f)
@@ -1134,11 +1167,20 @@ def post_project(
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
             push_and_expire(project, repo)
-            if project_in.template is not None:
+            if template_project is not None:
                 _copy_template_dvc_objects(
                     repo_dir=str(repo.working_dir),
                     template_project=template_project,
                     project=project,
+                )
+            elif project_in.template is not None:
+                # The template's outputs live in its own hub's storage,
+                # which this one has no access to. The repo, dvc.lock and
+                # all, still arrives; the outputs come back on the first
+                # `calkit run`, which is what they are for.
+                logger.info(
+                    f"Not copying outputs from {project_in.template}, "
+                    "which is hosted elsewhere"
                 )
         except Exception as e:
             # The project row is already committed, and it would block a retry

@@ -18,7 +18,7 @@ from app.api.routes.projects.core import (
 from app.config import settings
 from app.core import ryaml
 from app.models import Project, UserCreate
-from app.models.core import ContentsItem, UserProjectAccess
+from app.models.core import Account, ContentsItem, UserProjectAccess
 from app.projects import CkInfoAndOuts
 from app.tests import authentication_token_from_email, create_random_user
 
@@ -3302,6 +3302,54 @@ def test_project_pipeline_edit_creates_one_where_there_was_none(
         assert r.status_code == 200, r.text
         written = ryaml.load((tmp_path / "calkit.yaml").read_text())
         assert list(written["pipeline"]["stages"]) == ["plot"]
+
+
+def test_resolve_project_template(client: TestClient, db: Session) -> None:
+    """A template doesn't have to be hosted by the hub using it."""
+    from app.api.routes.projects.core import _resolve_project_template
+
+    project, _ = _make_owner_with_project(db, client)
+    owner = project.owner_account.user
+    # A template this hub hosts is preferred: being a project here is what
+    # lets its outputs be copied into the new project's storage
+    found, url = _resolve_project_template(
+        session=db,
+        current_user=owner,
+        template=f"{project.owner_account.name}/{project.name}",
+    )
+    assert found is not None and found.id == project.id
+    assert url == project.git_repo_url
+    # One this hub has never heard of still works if the package knows it:
+    # it lives on its own hub and its repo is readable from anywhere, which
+    # is what makes the built-in templates usable from a dev instance
+    assert (
+        db.exec(
+            select(Project)
+            .join(Account, Account.id == Project.owner_account_id)  # type: ignore
+            .where(Account.name == "calkit")
+            .where(Project.name == "example-r")
+        ).first()
+        is None
+    ), "this test means nothing if the hub happens to host the template"
+    found, url = _resolve_project_template(
+        session=db, current_user=owner, template="calkit/example-r"
+    )
+    assert found is None
+    assert url == "https://github.com/calkit/example-r"
+    # Neither hosted nor known is a 404 that names the template, since it
+    # came off a list this hub offered
+    with pytest.raises(HTTPException) as exc:
+        _resolve_project_template(
+            session=db, current_user=owner, template="nobody/nothing"
+        )
+    assert exc.value.status_code == 404
+    assert "nobody/nothing" in str(exc.value.detail)
+    # A name that isn't owner/project can't be either
+    with pytest.raises(HTTPException) as exc:
+        _resolve_project_template(
+            session=db, current_user=owner, template="just-a-name"
+        )
+    assert exc.value.status_code == 422
 
 
 def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:

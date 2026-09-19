@@ -736,7 +736,9 @@ class ProjectsPublic(SQLModel):
 
 class ProjectPost(ProjectBase):
     name: str = Field(min_length=4, max_length=255)
-    title: str = Field(min_length=4, max_length=255)
+    # Optional only when an Overleaf project is named below, since the title
+    # is then read from its main document
+    title: str | None = Field(default=None, min_length=4, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )
@@ -747,6 +749,8 @@ class ProjectPost(ProjectBase):
     # Whether a project made from a template keeps the template's commits.
     # Off by default: the new project's history starts with itself.
     keep_template_history: bool = False
+    # An Overleaf project to take the title from, when none is given
+    overleaf_project_url: str | None = Field(default=None, max_length=2048)
 
 
 class UserProjectAccess(SQLModel, table=True):

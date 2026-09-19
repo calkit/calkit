@@ -695,3 +695,77 @@ def test_remote_head_cache_is_bypassed_when_the_caller_wants_the_truth(
         == new
     )
     assert app.git.get_remote_head_sha(repo, str(origin), "main") == new
+
+
+def _fake_overleaf_clone(files: dict[str, str]):
+    """Stand in for the clone, writing *files* into the destination."""
+
+    def clone(cmd, **kwargs):
+        dest = cmd[-1]
+        for rel, text in files.items():
+            full = os.path.join(dest, rel)
+            os.makedirs(os.path.dirname(full) or dest, exist_ok=True)
+            with open(full, "w") as f:
+                f.write(text)
+
+    return clone
+
+
+def _read_title(files: dict[str, str]):
+    from unittest.mock import patch
+
+    from app.git import read_overleaf_title
+
+    with (
+        patch("app.git.users.get_overleaf_token", return_value="tok"),
+        patch(
+            "app.git.subprocess.check_call",
+            side_effect=_fake_overleaf_clone(files),
+        ),
+    ):
+        return read_overleaf_title(
+            user=object(), session=object(), overleaf_project_id="abc"
+        )
+
+
+def test_read_overleaf_title_finds_the_document_that_builds() -> None:
+    # The file with a document class wins over an included fragment that
+    # happens to sort first.
+    title = _read_title(
+        {
+            "aaa-intro.tex": "\\section{Intro}\nNo class here.\n",
+            "main.tex": (
+                "\\documentclass{article}\n"
+                "\\title{Coherent structures in boundary layers}\n"
+                "\\begin{document}\\maketitle\\end{document}\n"
+            ),
+        }
+    )
+    assert title == "Coherent structures in boundary layers"
+
+
+def test_read_overleaf_title_prefers_a_conventional_name() -> None:
+    doc = "\\documentclass{article}\n\\title{%s}\n"
+    title = _read_title(
+        {"appendix.tex": doc % "Appendix", "paper.tex": doc % "The paper"}
+    )
+    assert title == "The paper"
+
+
+def test_read_overleaf_title_returns_none_when_there_is_none() -> None:
+    assert _read_title({"main.tex": "\\documentclass{article}\n"}) is None
+    # Nothing that builds at all
+    assert _read_title({"notes.tex": "\\section{Notes}\n"}) is None
+    assert _read_title({}) is None
+
+
+def test_read_overleaf_title_collapses_whitespace() -> None:
+    title = _read_title(
+        {
+            "main.tex": (
+                "\\documentclass{article}\n"
+                "\\title{A title\n  split over lines}\n"
+            )
+        }
+    )
+    assert title == "A title split over lines"

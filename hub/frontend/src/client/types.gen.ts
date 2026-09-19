@@ -3560,7 +3560,7 @@ export type ProjectPost = {
   /**
    * Title
    */
-  title: string
+  title?: string | null
   /**
    * Description
    */
@@ -3609,6 +3609,10 @@ export type ProjectPost = {
    * Keep Template History
    */
   keep_template_history?: boolean
+  /**
+   * Overleaf Project Url
+   */
+  overleaf_project_url?: string | null
 }
 
 /**

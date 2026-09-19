@@ -65,6 +65,14 @@ const TEMPLATES = [
     value: "calkit/example-analytics",
     label: "Analytics: data processing and interactive figures",
   },
+  {
+    value: "calkit/example-r",
+    label: "R: Renv environment, R analysis, LaTeX paper",
+  },
+  {
+    value: "calkit/example-julia",
+    label: "Julia: Julia environment, Julia analysis, LaTeX paper",
+  },
 ]
 
 interface ProjectFormValues extends ProjectPost {
@@ -113,6 +121,9 @@ function NewProjectForm({
   // Narrower than "a new repo": an empty project and an Overleaf one are
   // new repos too, but neither is generated from a template.
   const fromTemplate = source === "template"
+  // The paper already carries a title, so asking for one here is asking the
+  // user to copy it across. The server reads it from the main document.
+  const fromOverleaf = source === "overleaf"
   const path: StartPath =
     source === "overleaf" ? "overleaf" : isExisting ? "existing" : "fresh"
   const [uploadFile, setUploadFile] = useState<File | null>(null)
@@ -179,12 +190,13 @@ function NewProjectForm({
         if (!uploadFile) {
           return Promise.reject(new Error("Choose a zip file to upload."))
         }
+        const title = data.title ?? ""
         return ProjectsService.postProjectUpload({
           bodyProjectsPostProjectUpload: {
-            title: data.title,
+            title,
             name:
               data.name ||
-              data.title
+              title
                 .toLowerCase()
                 .replace(/\s+/g, "-")
                 .replace(/[^\w-]+/g, ""),
@@ -206,6 +218,10 @@ function NewProjectForm({
         template: fromTemplate ? data.template || null : null,
         keep_template_history:
           fromTemplate && Boolean(data.keep_template_history),
+        // Only sent for the one source that can supply a title of its own
+        overleaf_project_url: fromOverleaf
+          ? data.overleaf_project_url || null
+          : null,
       }
       const gitName = String(post.git_repo_url).split("/").at(-1)
       if (gitName) {
@@ -373,18 +389,51 @@ function NewProjectForm({
           </FormHelperText>
         </FormControl>
       ) : null}
-      <FormControl isRequired isInvalid={!!errors.title} mb={4}>
-        <FormLabel htmlFor="title">Title</FormLabel>
+      {fromOverleaf ? (
+        <FormControl
+          isRequired
+          isInvalid={!!errors.overleaf_project_url}
+          mb={4}
+        >
+          <FormLabel htmlFor="overleaf_project_url">
+            Overleaf project URL
+          </FormLabel>
+          <Input
+            id="overleaf_project_url"
+            {...register("overleaf_project_url", {
+              required: "An Overleaf project URL is required.",
+            })}
+            placeholder="Ex: https://www.overleaf.com/project/abc123"
+            autoComplete="off"
+          />
+          {errors.overleaf_project_url ? (
+            <FormErrorMessage>
+              {errors.overleaf_project_url.message}
+            </FormErrorMessage>
+          ) : null}
+        </FormControl>
+      ) : null}
+      <FormControl isRequired={!fromOverleaf} isInvalid={!!errors.title} mb={4}>
+        <FormLabel htmlFor="title">
+          {fromOverleaf ? "Title (optional)" : "Title"}
+        </FormLabel>
         <Input
           id="title"
           {...register("title", {
-            required: "Title is required.",
+            required: fromOverleaf ? false : "Title is required.",
             // Passed through register so it chains with the form's own
             // handler rather than replacing it.
             onChange: isExisting ? undefined : onTitleChange,
           })}
-          placeholder="Ex: Coherent structures in high Reynolds number boundary layers"
+          placeholder={
+            fromOverleaf
+              ? "Read from the Overleaf paper if left blank"
+              : "Ex: Coherent structures in high Reynolds number boundary layers"
+          }
           autoComplete="off"
+          data-form-type="other"
+          data-lpignore="true"
+          data-1p-ignore="true"
         />
         {errors.title ? (
           <FormErrorMessage>{errors.title.message}</FormErrorMessage>

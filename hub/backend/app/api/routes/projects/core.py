@@ -111,6 +111,7 @@ from app.git import (
     get_repo_tree_for_ref,
     get_zip_path_map_from_repo,
     push_and_expire,
+    read_overleaf_title,
     record_project_update,
     resolve_commit_sha,
     search_refs,
@@ -807,6 +808,23 @@ def post_project(
             "A linked GitHub account is required to create or own projects.",
         )
     project_in.name = project_in.name.lower()
+    # Starting from Overleaf, the title is in the paper already, so asking
+    # for it again is asking the user to copy it across.
+    if not project_in.title and project_in.overleaf_project_url:
+        overleaf_id = project_in.overleaf_project_url.rstrip("/").split("/")[
+            -1
+        ]
+        project_in.title = read_overleaf_title(
+            user=current_user, session=session, overleaf_project_id=overleaf_id
+        )
+        if not project_in.title:
+            raise HTTPException(
+                400,
+                "Could not read a title from that Overleaf project; please "
+                "give one",
+            )
+    if not project_in.title:
+        raise HTTPException(400, "A title is required")
     if project_in.git_repo_exists and project_in.git_repo_url is None:
         raise HTTPException(
             400, "Git repo URL must be specified if Git repo exists"

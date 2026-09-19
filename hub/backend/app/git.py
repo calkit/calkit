@@ -24,6 +24,7 @@ from filelock import FileLock, Timeout
 from git.exc import GitCommandError
 from ruamel.yaml import YAMLError
 from sqlmodel import Session, select
+from TexSoup import TexSoup
 
 import calkit
 from app import cache, github, users
@@ -947,6 +948,77 @@ def get_overleaf_repo(
     # Run git config so we make commits as this user (with safe fallbacks)
     _configure_committer(repo, user, session=session)
     return repo
+
+
+# Names a main document usually goes by, tried before falling back to
+# whichever file actually declares a document class.
+OVERLEAF_MAIN_TEX_NAMES = ("main.tex", "paper.tex", "manuscript.tex")
+
+
+def read_overleaf_title(
+    user: User, session: Session, overleaf_project_id: str
+) -> str | None:
+    """The ``\\title`` of an Overleaf project's main document, if it has one.
+
+    Cloned into a temporary directory rather than the usual per-project
+    checkout: this runs before the project exists, and nothing here needs to
+    outlive the read. Returns None whenever the title can't be worked out,
+    since a project can still be created without one.
+    """
+    overleaf_token = users.get_overleaf_token(session=session, user=user)
+    auth = _make_git_auth_env(overleaf_token, username="git")
+    with tempfile.TemporaryDirectory(prefix="overleaf-title-") as tmp:
+        repo_dir = os.path.join(tmp, "repo")
+        try:
+            subprocess.check_call(
+                [
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    f"https://git.overleaf.com/{overleaf_project_id}",
+                    repo_dir,
+                ],
+                env={**os.environ, **auth},
+                timeout=120,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            logger.info(f"Could not clone Overleaf project for title: {e}")
+            return None
+        tex_paths = sorted(
+            os.path.join(root, f)
+            for root, _, files in os.walk(repo_dir)
+            for f in files
+            if f.endswith(".tex")
+        )
+        # The document class is what marks the file that actually builds;
+        # the conventional names only break ties between several of them.
+        candidates = []
+        for path in tex_paths:
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            if "\\documentclass" in text:
+                candidates.append((path, text))
+        if not candidates:
+            return None
+        candidates.sort(
+            key=lambda pair: (
+                os.path.basename(pair[0]).lower()
+                not in OVERLEAF_MAIN_TEX_NAMES,
+                pair[0],
+            )
+        )
+        text = candidates[0][1]
+        try:
+            soup = TexSoup(text)
+            title = str(soup.title.string) if soup.title else None
+        except Exception as e:
+            logger.info(f"Could not parse Overleaf title: {e}")
+            return None
+        title = " ".join((title or "").split())
+        return title or None
 
 
 def get_default_branch(repo: git.Repo) -> str:

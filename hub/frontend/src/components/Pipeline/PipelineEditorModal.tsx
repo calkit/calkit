@@ -60,6 +60,10 @@ const PipelineEditorModal = ({
   const [commitMessage, setCommitMessage] = useState("")
   // Bumped to remount the editor when the pipeline is replaced under it.
   const [docNonce, setDocNonce] = useState(0)
+  // What `content` was when the editor last loaded it. A background refetch
+  // of the page's pipeline changes the prop while the modal is open, and
+  // reloading on that would throw away whatever is being typed.
+  const loadedRef = useRef<string | null>(null)
   const commitModal = useDisclosure()
   const showToast = useCustomToast()
   const queryClient = useQueryClient()
@@ -68,8 +72,13 @@ const PipelineEditorModal = ({
   // was committed; reopening then starts from that rather than the old text.
   useEffect(() => {
     if (!isOpen) {
+      loadedRef.current = null
       return
     }
+    if (loadedRef.current !== null) {
+      return
+    }
+    loadedRef.current = content
     textRef.current = content
     baseRef.current = content
     setDirty(false)
@@ -82,7 +91,7 @@ const PipelineEditorModal = ({
         owner_name: ownerName,
         project_name: projectName,
         pipelinePut: {
-          yaml: trimForSave(textRef.current, content),
+          yaml: trimForSave(textRef.current, loadedRef.current ?? content),
           message: message || null,
         },
       }).then((response) => response.data)
@@ -173,7 +182,7 @@ const PipelineEditorModal = ({
             <Box height="60vh">
               <CodeEditorPane
                 key={docNonce}
-                initialDoc={content}
+                initialDoc={loadedRef.current ?? content}
                 path="calkit.yaml"
                 viewRef={viewRef}
                 onChange={(text) => {

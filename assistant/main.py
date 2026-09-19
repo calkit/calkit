@@ -149,12 +149,14 @@ def get_calkit_version() -> tuple[int, ...] | None:
 
 
 def get_calkit_token() -> str:
+    # The token is a per-hub credential, so it lives under 'hub config',
+    # not the shared 'config' group
     try:
-        return (
-            subprocess.check_output(["calkit", "config", "get", "token"])
-            .decode()
-            .strip()
-        )
+        return subprocess.check_output(
+            ["calkit", "hub", "config", "get", "token"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
     except (FileNotFoundError, subprocess.CalledProcessError):
         return ""
 
@@ -1170,18 +1172,21 @@ def get_projects() -> list[Project]:
             print(f"Can't detect project name in {project_dir}")
             continue
         owner, name = project_full_name.split("/")
-        # Make sure this path is a Git repo
+        # Make sure this path is a Git repo with an origin remote
         try:
             repo = git.Repo(project_dir)
-            remote_url = repo.remotes.origin.url
-            # Simplify the remote URL to account for SSH and HTTPS
-            if remote_url.startswith("git@github.com:"):
-                remote_url = "https://github.com/" + remote_url.removeprefix(
-                    "git@github.com:"
-                )
-            remote_url = remote_url.removesuffix(".git")
         except git.exc.InvalidGitRepositoryError:
             continue
+        if "origin" not in repo.remotes:
+            print(f"No origin remote in {project_dir}")
+            continue
+        remote_url = repo.remotes.origin.url
+        # Simplify the remote URL to account for SSH and HTTPS
+        if remote_url.startswith("git@github.com:"):
+            remote_url = "https://github.com/" + remote_url.removeprefix(
+                "git@github.com:"
+            )
+        remote_url = remote_url.removesuffix(".git")
         project = Project(
             owner_name=owner,
             project_name=name,

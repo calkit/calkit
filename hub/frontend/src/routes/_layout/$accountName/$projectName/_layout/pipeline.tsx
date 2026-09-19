@@ -410,6 +410,21 @@ function ProjectPipeline() {
   // define their pipeline there, and never while viewing an older revision.
   const canEditStages =
     userHasWriteAccess && !ref && Boolean(pipelineQuery.data?.calkit_yaml)
+  // A project with no pipeline at all is the other case worth editing: there
+  // is nothing to disturb, and writing one here is how it gets its first.
+  // A pipeline written directly in dvc.yaml is not -- editing calkit.yaml
+  // would leave the project with two, and the compiled one would win.
+  const hasNoPipeline =
+    !pipelineQuery.isPending &&
+    !pipelineQuery.data?.calkit_yaml &&
+    !pipelineQuery.data?.dvc_yaml
+  const canEditPipeline =
+    canEditStages || (userHasWriteAccess && !ref && hasNoPipeline)
+  // What the editor opens on. A project with no pipeline gets the empty
+  // shape rather than a blank pane, so it's clear what is being written.
+  const pipelineDoc = String(
+    pipelineQuery.data?.calkit_yaml ?? "pipeline:\n  stages: {}\n",
+  )
   const openStageEditor = useCallback(
     (stageName: string) =>
       navigate({
@@ -507,7 +522,7 @@ function ProjectPipeline() {
                   <>
                     <Flex align="center" my={2}>
                       <Heading size="md">calkit.yaml</Heading>
-                      {canEditStages && (
+                      {canEditPipeline && (
                         <IconButton
                           aria-label="Edit pipeline"
                           title="Edit the pipeline"
@@ -550,28 +565,37 @@ function ProjectPipeline() {
             </>
           ) : (
             <Alert mt={2} status="warning" borderRadius="xl">
-              <AlertIcon />A pipeline has not yet been defined for this project.
-              To create one, see the{" "}
-              <Link
-                ml={1}
-                isExternal
-                variant="blue"
-                href="https://docs.calkit.org/pipeline/"
-              >
-                pipeline documentation
-              </Link>
-              .
+              <AlertIcon />
+              <Box>
+                {/* TODO: rewrite this line */}
+                <Text>
+                  A pipeline has not yet been defined for this project. See the{" "}
+                  <Link
+                    isExternal
+                    variant="blue"
+                    href="https://docs.calkit.org/pipeline/"
+                  >
+                    pipeline documentation
+                  </Link>
+                  .
+                </Text>
+                {canEditPipeline && (
+                  <Button size="sm" mt={3} onClick={openPipelineEditor}>
+                    Define a pipeline
+                  </Button>
+                )}
+              </Box>
             </Alert>
           )}
         </Flex>
       )}
-      {pipeline_editor_open && canEditStages && (
+      {pipeline_editor_open && canEditPipeline && (
         <PipelineEditorModal
           isOpen={Boolean(pipeline_editor_open)}
           onClose={closePipelineEditor}
           ownerName={accountName}
           projectName={projectName}
-          content={String(pipelineQuery.data?.calkit_yaml ?? "")}
+          content={pipelineDoc}
         />
       )}
       {stage_editor_open && stage && canEditStages && (

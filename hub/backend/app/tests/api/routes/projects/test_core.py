@@ -3249,6 +3249,53 @@ def test_project_pipeline_edit(
         ) == ["plot"]
 
 
+def test_project_pipeline_edit_creates_one_where_there_was_none(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    """A project gets its first pipeline from the same editor."""
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    url = f"/projects/{owner_name}/{project.name}/pipeline"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    # No pipeline key, and other things in the file that must survive
+    ck_info = {"questions": ["Does it work?"]}
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=lambda *a, **k: ck_info,
+        ),
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
+    ):
+        # The empty shape the editor opens on saves as-is, so someone can
+        # commit the key and fill it in from there
+        r = client.put(
+            url, headers=headers, json={"yaml": "pipeline:\n  stages: {}\n"}
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert written["pipeline"] == {"stages": {}}
+        assert written["questions"] == ["Does it work?"]
+        r = client.put(
+            url,
+            headers=headers,
+            json={
+                "yaml": (
+                    "pipeline:\n"
+                    "  stages:\n"
+                    "    plot:\n"
+                    "      kind: python-script\n"
+                    "      environment: py\n"
+                    "      script_path: scripts/plot.py\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert list(written["pipeline"]["stages"]) == ["plot"]
+
+
 def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:
     # A declared path is joined onto the repo's working dir and written to,
     # so anything that could resolve outside the project is refused

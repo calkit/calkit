@@ -121,32 +121,31 @@ TEMPLATES: dict[str, dict[str, Template]] = {
             description="A longer document organized into chapters.",
         ),
     },
-    # Ordered as they should be offered: the one most people want first.
-    # TODO: rewrite these titles and descriptions
+    # Project templates
     "project": {
         "example-basic": ProjectTemplate(
             name="example-basic",
-            title="Basic",
+            title="Basic example",
             description="uv environment, Python analysis, LaTeX paper.",
         ),
         "example-analytics": ProjectTemplate(
             name="example-analytics",
-            title="Analytics",
+            title="Analytics example",
             description="Notebook analysis, figures and tables.",
         ),
         "example-r": ProjectTemplate(
             name="example-r",
-            title="R",
+            title="R example",
             description="renv environment, R analysis, figures.",
         ),
         "example-julia": ProjectTemplate(
             name="example-julia",
-            title="Julia",
+            title="Julia example",
             description="Julia environment, script and notebook, LaTeX paper.",
         ),
         "example-matlab": ProjectTemplate(
             name="example-matlab",
-            title="MATLAB",
+            title="MATLAB example",
             description="Scripts run in batch mode.",
         ),
     },

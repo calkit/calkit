@@ -3277,6 +3277,14 @@ def test_project_pipeline_edit_creates_one_where_there_was_none(
         written = ryaml.load((tmp_path / "calkit.yaml").read_text())
         assert written["pipeline"] == {"stages": {}}
         assert written["questions"] == ["Does it work?"]
+        # Emptying the editor means an empty pipeline, not a broken one:
+        # a cleared pane, a bare key, and a bare `stages:` all save
+        for emptied in ["", "   \n", "pipeline:\n", "pipeline:\n  stages:\n"]:
+            r = client.put(url, headers=headers, json={"yaml": emptied})
+            assert r.status_code == 200, f"{emptied!r} -> {r.text}"
+            written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+            assert written["pipeline"] in ({}, {"stages": {}}), emptied
+            assert written["questions"] == ["Does it work?"]
         r = client.put(
             url,
             headers=headers,

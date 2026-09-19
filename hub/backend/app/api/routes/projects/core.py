@@ -7661,17 +7661,29 @@ def _load_ck_pipeline(pipeline_yaml: str) -> Any:
     The page shows the ``pipeline:`` key and its body, so that's what comes
     back; a body on its own is accepted too, since that's what someone who
     deleted the wrapper would send.
+
+    Emptying the editor means an empty pipeline, not a malformed one:
+    clearing the pane, leaving a bare ``pipeline:``, or leaving ``stages:``
+    with nothing under it all save as no stages.
     """
     try:
         loaded = ryaml.load(pipeline_yaml)
     except Exception as e:
         raise HTTPException(422, f"Invalid YAML: {e}")
+    if loaded is None:
+        return {}
     if not isinstance(loaded, dict):
         raise HTTPException(422, "A pipeline must be a YAML mapping")
     if "pipeline" in loaded:
         loaded = loaded["pipeline"]
+    if loaded is None:
+        return {}
     if not isinstance(loaded, dict):
         raise HTTPException(422, "A pipeline must be a YAML mapping")
+    if loaded.get("stages", False) is None:
+        # `stages:` with nothing under it reads as no stages, not as a
+        # stages key that failed to parse.
+        del loaded["stages"]
     try:
         CkPipeline(**dict(loaded))
     except Exception as e:

@@ -144,7 +144,7 @@ const ChecklistCard = ({
   }
   return (
     <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-      <Flex align="center" mb={1}>
+      <Flex align="center" mb={2}>
         <Heading size="md">{title}</Heading>
         <Spacer />
         <Button

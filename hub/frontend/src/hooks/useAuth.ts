@@ -11,6 +11,7 @@ import {
   type UserRegister,
   UsersService,
 } from "../client"
+import { getAnalyticsConsentToSave } from "../lib/analytics"
 import {
   clearTokens,
   forceRefreshAccessToken,
@@ -89,7 +90,10 @@ const useAuth = () => {
 
   const login = async (data: AccessToken) => {
     const response = await LoginService.loginAccessToken({
-      bodyLoginLoginAccessToken: data,
+      bodyLoginLoginAccessToken: {
+        ...data,
+        analytics_consent: getAnalyticsConsentToSave(),
+      },
     }).then((response) => response.data)
     storeTokens(response.access_token, response.refresh_token)
   }
@@ -98,6 +102,8 @@ const useAuth = () => {
     mutationFn: login,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
+      // Home shows the start cards to an account with no projects and the
+      // project list to everyone else, so it needs nothing from here.
       navigate({ to: redirectTo || "/" })
     },
     onError: (err: AxiosError) => {
@@ -114,6 +120,7 @@ const useAuth = () => {
       oAuthCodeExchange: {
         code: data.code,
         redirect_uri: data.redirectUri,
+        analytics_consent: getAnalyticsConsentToSave(),
       },
     }).then((response) => response.data)
     storeTokens(response.access_token, response.refresh_token)
@@ -123,6 +130,8 @@ const useAuth = () => {
     mutationFn: loginGithub,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
+      // Home shows the start cards to an account with no projects and the
+      // project list to everyone else, so it needs nothing from here.
       navigate({ to: redirectTo || "/" })
     },
     onError: (err: AxiosError) => {
@@ -140,6 +149,7 @@ const useAuth = () => {
       oAuthCodeExchange: {
         code: data.code,
         redirect_uri: data.redirectUri,
+        analytics_consent: getAnalyticsConsentToSave(),
       },
     }).then((response) => response.data)
     storeTokens(response.access_token, response.refresh_token)
@@ -149,6 +159,8 @@ const useAuth = () => {
     mutationFn: loginGoogle,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
+      // Home shows the start cards to an account with no projects and the
+      // project list to everyone else, so it needs nothing from here.
       navigate({ to: redirectTo || "/" })
     },
     onError: (err: AxiosError) => {

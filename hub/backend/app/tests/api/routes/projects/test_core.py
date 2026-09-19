@@ -18,7 +18,7 @@ from app.api.routes.projects.core import (
 from app.config import settings
 from app.core import ryaml
 from app.models import Project, UserCreate
-from app.models.core import ContentsItem, UserProjectAccess
+from app.models.core import Account, ContentsItem, UserProjectAccess
 from app.projects import CkInfoAndOuts
 from app.tests import authentication_token_from_email, create_random_user
 
@@ -1010,7 +1010,12 @@ def _get_declared_at_ref(
     client: TestClient, endpoint: str, ck_key: str, declared: list
 ):
     """GET an artifact listing at a ref with ``declared`` in calkit.yaml."""
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     fake_repo = SimpleNamespace(
         working_dir="/tmp/nonexistent",
         commit=lambda _ref: SimpleNamespace(tree=_EmptyTree()),
@@ -1345,7 +1350,17 @@ def test_get_project_results_autodetects_and_reads_ref(
         ) as mock_get_repo,
         patch(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
-            return_value={},
+            return_value={
+                "results": [
+                    # A declared result whose name is the key it is stored
+                    # under, not something written to be read
+                    {"path": "results/stats.json", "name": "r_squared"},
+                    # A declared result with neither, so the path is tidied
+                    {"path": "results/mean-velocity.json"},
+                    # A title someone wrote is left exactly as it is
+                    {"path": "results/rmse.json", "title": "RMSE by run"},
+                ]
+            },
         ) as mock_ck_for_ref,
         patch(
             "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
@@ -1361,11 +1376,19 @@ def test_get_project_results_autodetects_and_reads_ref(
             "/projects/test-owner/test-project/results?ref=some-branch"
         )
     assert response.status_code == 200, response.text
-    paths = {res["path"] for res in response.json()}
+    body = response.json()
+    paths = {res["path"] for res in body}
     for path in detected_paths:
         assert path in paths, f"Expected {path!r} to be detected"
     for path in ignored_paths:
         assert path not in paths, f"Expected {path!r} to be ignored"
+    titles = {res["path"]: res["title"] for res in body}
+    # A derived title reads as a title, whether it came from the name or
+    # the path; one the user wrote is never rewritten
+    assert titles["results/stats.json"] == "R squared"
+    assert titles["results/mean-velocity.json"] == "Mean velocity"
+    assert titles["results/rmse.json"] == "RMSE by run"
+    assert titles["results/data.csv"] == "Data"
     assert mock_get_repo.call_args.kwargs["ref"] == "some-branch"
     assert mock_ck_for_ref.call_args.kwargs["ref"] == "some-branch"
 
@@ -1632,6 +1655,7 @@ def _make_fake_repo(working_dir: str) -> SimpleNamespace:
     return SimpleNamespace(
         working_dir=working_dir,
         active_branch=SimpleNamespace(name="main"),
+        head=SimpleNamespace(commit=SimpleNamespace(hexsha="0" * 40)),
         ignored=lambda *a, **k: [],
         git=SimpleNamespace(
             add=lambda *a, **k: None,
@@ -3119,6 +3143,215 @@ def test_project_pipeline_stage_edit(
         assert "slurm" in ryaml.load(r.json()["yaml"])
 
 
+def test_project_pipeline_edit(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    """The whole pipeline can be replaced without disturbing the rest of
+    calkit.yaml."""
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    url = f"/projects/{owner_name}/{project.name}/pipeline"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "scripts/plot.py",
+                }
+            }
+        },
+        # Everything else in the file, which an edit here must leave alone
+        "datasets": [{"path": "data/raw.csv", "title": "Raw"}],
+        "questions": ["Does it work?"],
+    }
+
+    def fake_ck_info(*args, **kwargs) -> dict:
+        return ck_info
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=fake_ck_info,
+        ),
+        # Saving recompiles dvc.yaml from the whole project, which this
+        # stand-in repo can't support; the compile has its own tests
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
+    ):
+        # The page shows the `pipeline:` key and its body, so that is what
+        # comes back, and a second stage is added by sending it whole
+        edited = (
+            "pipeline:\n"
+            "  stages:\n"
+            "    plot:\n"
+            "      kind: python-script\n"
+            "      environment: py\n"
+            "      script_path: scripts/plot.py\n"
+            "    # keep this comment\n"
+            "    report:\n"
+            "      kind: latex\n"
+            "      environment: tex\n"
+            "      target_path: paper/paper.tex\n"
+        )
+        r = client.put(
+            url,
+            headers=headers,
+            json={"yaml": edited, "message": "Add report"},
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert list(written["pipeline"]["stages"]) == ["plot", "report"]
+        # Nothing outside the pipeline was touched
+        assert written["datasets"] == [
+            {"path": "data/raw.csv", "title": "Raw"}
+        ]
+        assert written["questions"] == ["Does it work?"]
+        # Comments survive the round trip, in the response and on disk
+        assert "# keep this comment" in r.json()["yaml"]
+        assert "# keep this comment" in (tmp_path / "calkit.yaml").read_text()
+        # A body without the wrapper is what someone who deleted the
+        # `pipeline:` line would send, so it means the same thing
+        r = client.put(
+            url,
+            headers=headers,
+            json={
+                "yaml": (
+                    "stages:\n"
+                    "  plot:\n"
+                    "    kind: python-script\n"
+                    "    environment: py\n"
+                    "    script_path: scripts/plot.py\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert list(
+            ryaml.load((tmp_path / "calkit.yaml").read_text())["pipeline"][
+                "stages"
+            ]
+        ) == ["plot"]
+        # Bad YAML, a non-mapping, an unknown kind, and a missing required
+        # field are all rejected before anything is written
+        for bad in [
+            "pipeline:\n  stages:\n   bad indent: true\n",
+            "- not a mapping\n",
+            "stages:\n  plot:\n    kind: not-a-real-kind\n",
+            "stages:\n  plot:\n    kind: latex\n    environment: tex\n",
+        ]:
+            r = client.put(url, headers=headers, json={"yaml": bad})
+            assert r.status_code == 422, f"{bad!r} -> {r.status_code}"
+        assert list(
+            ryaml.load((tmp_path / "calkit.yaml").read_text())["pipeline"][
+                "stages"
+            ]
+        ) == ["plot"]
+
+
+def test_project_pipeline_edit_creates_one_where_there_was_none(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    """A project gets its first pipeline from the same editor."""
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    url = f"/projects/{owner_name}/{project.name}/pipeline"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    # No pipeline key, and other things in the file that must survive
+    ck_info = {"questions": ["Does it work?"]}
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=lambda *a, **k: ck_info,
+        ),
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
+    ):
+        # The empty shape the editor opens on saves as-is, so someone can
+        # commit the key and fill it in from there
+        r = client.put(
+            url, headers=headers, json={"yaml": "pipeline:\n  stages: {}\n"}
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert written["pipeline"] == {"stages": {}}
+        assert written["questions"] == ["Does it work?"]
+        # Emptying the editor means an empty pipeline, not a broken one:
+        # a cleared pane, a bare key, and a bare `stages:` all save
+        for emptied in ["", "   \n", "pipeline:\n", "pipeline:\n  stages:\n"]:
+            r = client.put(url, headers=headers, json={"yaml": emptied})
+            assert r.status_code == 200, f"{emptied!r} -> {r.text}"
+            written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+            assert written["pipeline"] in ({}, {"stages": {}}), emptied
+            assert written["questions"] == ["Does it work?"]
+        r = client.put(
+            url,
+            headers=headers,
+            json={
+                "yaml": (
+                    "pipeline:\n"
+                    "  stages:\n"
+                    "    plot:\n"
+                    "      kind: python-script\n"
+                    "      environment: py\n"
+                    "      script_path: scripts/plot.py\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert list(written["pipeline"]["stages"]) == ["plot"]
+
+
+def test_resolve_project_template(client: TestClient, db: Session) -> None:
+    """A template doesn't have to be hosted by the hub using it."""
+    from app.api.routes.projects.core import _resolve_project_template
+
+    project, _ = _make_owner_with_project(db, client)
+    owner = project.owner_account.user
+    # A template this hub hosts is preferred: being a project here is what
+    # lets its outputs be copied into the new project's storage
+    found, url = _resolve_project_template(
+        session=db,
+        current_user=owner,
+        template=f"{project.owner_account.name}/{project.name}",
+    )
+    assert found is not None and found.id == project.id
+    assert url == project.git_repo_url
+    # One this hub has never heard of still works if the package knows it:
+    # it lives on its own hub and its repo is readable from anywhere, which
+    # is what makes the built-in templates usable from a dev instance
+    assert (
+        db.exec(
+            select(Project)
+            .join(Account, Account.id == Project.owner_account_id)  # type: ignore
+            .where(Account.name == "calkit")
+            .where(Project.name == "example-r")
+        ).first()
+        is None
+    ), "this test means nothing if the hub happens to host the template"
+    found, url = _resolve_project_template(
+        session=db, current_user=owner, template="calkit/example-r"
+    )
+    assert found is None
+    assert url == "https://github.com/calkit/example-r"
+    # Neither hosted nor known is a 404 that names the template, since it
+    # came off a list this hub offered
+    with pytest.raises(HTTPException) as exc:
+        _resolve_project_template(
+            session=db, current_user=owner, template="nobody/nothing"
+        )
+    assert exc.value.status_code == 404
+    assert "nobody/nothing" in str(exc.value.detail)
+    # A name that isn't owner/project can't be either
+    with pytest.raises(HTTPException) as exc:
+        _resolve_project_template(
+            session=db, current_user=owner, template="just-a-name"
+        )
+    assert exc.value.status_code == 422
+
+
 def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:
     # A declared path is joined onto the repo's working dir and written to,
     # so anything that could resolve outside the project is refused
@@ -3974,6 +4207,133 @@ def test_get_featured_projects(client: TestClient, db: Session) -> None:
     assert response.json() == {"data": [], "count": 0}
 
 
+# A pipeline that copies a figure and a table into the paper's folder, the
+# way a map-paths stage stands in for a symlink
+MAP_PATHS_CK_INFO = {
+    "pipeline": {
+        "stages": {
+            "copy-to-paper": {
+                "kind": "map-paths",
+                "paths": [
+                    {
+                        "kind": "file-to-file",
+                        "src": "figures/plot.png",
+                        "dest": "paper/figures/plot.png",
+                    },
+                    {
+                        "kind": "file-to-dir",
+                        "src": "tables/t.csv",
+                        "dest": "paper/tables",
+                    },
+                ],
+            }
+        }
+    }
+}
+
+
+def _committed_repo(tmp_path, files: dict[str, str]):
+    import git
+
+    repo = git.Repo.init(tmp_path / "repo")
+    for path, content in files.items():
+        full = tmp_path / "repo" / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Initial")
+    return repo
+
+
+def test_figures_listing_skips_map_paths_copies(tmp_path) -> None:
+    from app.api.routes.projects.core import _discover_figures
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "figures/plot.png": "png",
+            "paper/figures/plot.png": "png",
+            "paper/figures/hand-drawn.png": "png",
+        },
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(MAP_PATHS_CK_INFO, {}, {}, {}),
+        ),
+    ):
+        ctx = _discover_figures(
+            project=SimpleNamespace(
+                owner_account_name="o",
+                name="p",
+                owner_github_name="o",
+                git_repo_url="https://github.com/o/p",
+            ),
+            repo=repo,
+            ref=None,
+        )
+    # The copy is the same figure; a file only in the paper's folder isn't
+    assert sorted(f["path"] for f in ctx.figures) == [
+        "figures/plot.png",
+        "paper/figures/hand-drawn.png",
+    ]
+
+
+def test_imported_from_info_reads_bare_strings() -> None:
+    from app.api.routes.projects.core import _imported_from_info
+
+    assert _imported_from_info(None) is None
+    assert _imported_from_info({"doi": "10.1/x"}) == {"doi": "10.1/x"}
+    assert _imported_from_info("https://doi.org/10.5281/zenodo.3960218") == {
+        "doi": "10.5281/zenodo.3960218"
+    }
+    assert _imported_from_info("https://example.com/data.csv") == {
+        "url": "https://example.com/data.csv"
+    }
+    assert _imported_from_info("a colleague's USB stick") == {
+        "description": "a colleague's USB stick"
+    }
+
+
+def test_tables_listing_skips_map_paths_copies(tmp_path) -> None:
+    from app.api.routes.projects.core import _build_tables
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "tables/t.csv": "a,b\n1,2\n",
+            "paper/tables/t.csv": "a,b\n1,2\n",
+        },
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=MAP_PATHS_CK_INFO,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(MAP_PATHS_CK_INFO, {}, {}, {}),
+        ),
+    ):
+        tables = _build_tables(
+            project=SimpleNamespace(
+                owner_account_name="o", name="p", file_locks=[]
+            ),
+            repo=repo,
+            ref=None,
+            resolve_content=False,
+        )
+    assert [t.path for t in tables] == ["tables/t.csv"]
+
+
 def test_post_project_when_account_name_differs_from_github(
     client: TestClient, db: Session
 ) -> None:
@@ -4054,6 +4414,7 @@ def test_post_project_dataset_provenance(
             push=lambda *a, **k: None,
         )
         active_branch = SimpleNamespace(name="main")
+        head = SimpleNamespace(commit=SimpleNamespace(hexsha="0" * 40))
 
     def post(body: dict, existing_path: bool = False):
         ck_info: dict = {"datasets": list(written)}

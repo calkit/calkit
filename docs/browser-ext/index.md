@@ -125,4 +125,4 @@ and add it there.
 
 ## Privacy
 
-See the [privacy policy](privacy.md).
+See the [privacy policy](../privacy.md#browser-extension).

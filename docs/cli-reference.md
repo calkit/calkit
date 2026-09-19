@@ -1866,7 +1866,7 @@ List Calkit objects.
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
 | [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.                                                     |
 | [`environments\|envs`](#subcommand-list-ls-environments-envs)   | List environments in the project.                                                              |
-| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates.                                                           |
+| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates, grouped by kind.                                          |
 | [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer.                                                  |
 | [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
@@ -2065,7 +2065,9 @@ Options:
 
 #### `calkit list|ls templates`
 
-List all available Calkit templates.
+List all available Calkit templates, grouped by kind.
+
+A template is named by its kind and name, except a project template, which names a project on a hub and so is `owner/project`.
 
 Usage:
 
@@ -2075,9 +2077,10 @@ calkit list|ls templates [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description            |
-| -------- | ------- | -------- | ------- | ---------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON. |
+| Option         | Type    | Required | Default | Description                      |
+| -------------- | ------- | -------- | ------- | -------------------------------- |
+| `--kind`, `-k` | str     | no       |         | Only show templates of one kind. |
+| `--json`       | boolean | no       | False   | Output result as JSON.           |
 
 <a id="subcommand-list-ls-installers"></a>
 

@@ -95,6 +95,17 @@ export const Body_login_login_access_tokenSchema = {
       format: "password",
       title: "Client Secret",
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   required: ["username", "password"],
@@ -4154,6 +4165,17 @@ export const OAuthCodeExchangeSchema = {
       type: "string",
       title: "Redirect Uri",
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   required: ["code", "redirect_uri"],
@@ -4892,6 +4914,43 @@ export const PipelineStageEditedSchema = {
   title: "PipelineStageEdited",
   description:
     "The stage after an edit, plus what the edit touched.\n\n``changed`` is what the user should see happened: the inputs added, or\nthe default-valued keys removed.",
+} as const
+
+export const PipelinePutSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelinePut",
+} as const
+
+export const PipelineYamlSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineYaml",
+  description:
+    "The project's whole pipeline, as editable YAML.\n\nThe YAML is the ``pipeline:`` block of calkit.yaml, exactly as the\npipeline page shows it -- same key order, same comments.",
 } as const
 
 export const PipelineStagePutSchema = {
@@ -9988,6 +10047,17 @@ export const UserPublicSchema = {
         },
       ],
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   required: [
@@ -10038,6 +10108,17 @@ export const UserRegisterSchema = {
         },
       ],
       title: "Full Name",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",
@@ -10313,6 +10394,17 @@ export const UserUpdateMeSchema = {
         },
       ],
       title: "Github Username",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",

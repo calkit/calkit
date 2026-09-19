@@ -2059,6 +2059,40 @@ def test_parse_template():
         _parse_template("just-a-name")
 
 
+def test_new_project_from_a_known_template_skips_the_hub(tmp_dir, monkeypatch):
+    """A template this package knows needs no hub to resolve.
+
+    The repo URL is in the registry, so `calkit new project --from
+    calkit/example-r` works without being logged in, or online to anything
+    but the repo host.
+    """
+    import calkit.hub
+    from calkit.cli.new import _parse_template
+
+    asked: list[str] = []
+
+    def fake_get(path, *args, **kwargs):
+        asked.append(path)
+        raise AssertionError(f"should not have asked the hub for {path}")
+
+    monkeypatch.setattr(calkit.hub, "get", fake_get)
+    # The resolution the CLI does before cloning: parse, then look the
+    # project up. A known one comes back from the registry.
+    name, url, subdir = _parse_template(
+        "calkit/example-r", calkit.hub.get_hub_url()
+    )
+    assert (name, url, subdir) == ("calkit/example-r", None, None)
+    known = calkit.templates.find_template(name, kind="project")
+    assert known is not None
+    assert known.git_repo_url == "https://github.com/calkit/example-r"
+    assert asked == []
+    # Something unregistered still has to be asked about, which is the
+    # path that keeps any other project usable as a template
+    assert calkit.templates.find_template(
+        "someone/theirs", kind="project"
+    ) is (None)
+
+
 def test_release_with_pipeline(tmp_dir):
     ck_info = {
         "title": "Test Project",

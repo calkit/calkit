@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app import users
+from app import mixpanel, users
 from app.config import settings
 from app.core import utcnow
 from app.models import DeviceAuth, RefreshToken, User, UserCreate
@@ -31,6 +31,39 @@ def test_get_access_token(client: TestClient) -> None:
     assert tokens["refresh_token"]
     assert "expires_in" in tokens
     assert tokens["expires_in"] > 0
+
+
+def test_password_login_saves_consent_and_reports_first_login(
+    client: TestClient, db: Session
+) -> None:
+    email = f"pw-{uuid.uuid4().hex[:8]}@example.com"
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password="testpassword123"),
+    )
+    assert user.analytics_consent is None
+    login_data = {
+        "username": email,
+        "password": "testpassword123",
+        "analytics_consent": "true",
+    }
+    with patch.object(mixpanel.mp, "track") as mp_track:
+        r = client.post("/login/access-token", data=login_data)
+        assert r.status_code == 200, r.text
+        # A second login with the opposite answer neither changes the
+        # account's answer nor counts as first
+        login_data["analytics_consent"] = "false"
+        r = client.post("/login/access-token", data=login_data)
+        assert r.status_code == 200, r.text
+    db.refresh(user)
+    assert user.analytics_consent is True
+    assert [c.kwargs["properties"] for c in mp_track.call_args_list] == [
+        {"provider": "email", "first": True},
+        {"provider": "email", "first": False},
+    ]
+    assert all(
+        c.kwargs["event_name"] == "Logged in" for c in mp_track.call_args_list
+    )
 
 
 def test_refresh_access_token_rotates(
@@ -444,7 +477,10 @@ class _FakeGitHubResp:
 
 
 def _github_login(
-    client: TestClient, username: str, emails: list[dict]
+    client: TestClient,
+    username: str,
+    emails: list[dict],
+    analytics_consent: bool | None = None,
 ) -> "object":
     """Drive POST /login/github with GitHub's responses stubbed out."""
 
@@ -471,8 +507,52 @@ def _github_login(
             json={
                 "code": "auth-code",
                 "redirect_uri": "http://localhost:5173/login",
+                "analytics_consent": analytics_consent,
             },
         )
+
+
+def test_login_with_github_reports_signup_when_consent_came_along(
+    client: TestClient, db: Session
+) -> None:
+    email = f"ghc-{uuid.uuid4().hex[:8]}@example.com"
+    username = f"ghc{uuid.uuid4().hex[:6]}"
+    emails = [{"email": email, "primary": True, "verified": True}]
+    with patch.object(mixpanel.mp, "track") as mp_track:
+        r = _github_login(client, username, emails, analytics_consent=True)
+        assert r.status_code == 200, r.text
+        r = _github_login(client, username, emails)
+        assert r.status_code == 200, r.text
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.analytics_consent is True
+    events = [
+        (c.kwargs["event_name"], c.kwargs["properties"])
+        for c in mp_track.call_args_list
+    ]
+    assert events == [
+        ("Signed up", {"provider": "github"}),
+        ("Logged in", {"provider": "github", "first": True}),
+        ("Logged in", {"provider": "github", "first": False}),
+    ]
+
+
+def test_login_with_github_reports_nothing_without_consent(
+    client: TestClient, db: Session
+) -> None:
+    email = f"ghn-{uuid.uuid4().hex[:8]}@example.com"
+    username = f"ghn{uuid.uuid4().hex[:6]}"
+    with patch.object(mixpanel.mp, "track") as mp_track:
+        r = _github_login(
+            client,
+            username,
+            [{"email": email, "primary": True, "verified": True}],
+        )
+    assert r.status_code == 200, r.text
+    mp_track.assert_not_called()
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.analytics_consent is None
 
 
 def test_login_with_github_links_to_existing_account(

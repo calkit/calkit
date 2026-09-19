@@ -41,7 +41,12 @@ def _make_repo(tmp_path, ck_info: dict, files: dict[str, str] | None = None):
 def _post(
     client: TestClient, headers: dict[str, str], repo: git.Repo, body: dict
 ):
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     with (
         patch(
             "app.api.routes.projects.figures.app.projects.get_project",

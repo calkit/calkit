@@ -39,6 +39,8 @@ export interface OnboardingStep {
 /** The flag that means "I'm finished with this checklist, hide it." */
 export const DISMISSED = "dismissed"
 
+export type StartPath = "existing" | "fresh" | "overleaf"
+
 export interface ProjectOnboardingInput {
   /** Research questions declared in calkit.yaml. */
   questionCount: number
@@ -91,7 +93,7 @@ export function buildProjectSteps({
     },
     {
       key: "dataset",
-      title: "Bring in your data",
+      title: "Collect some data",
       detail:
         "Type it in, upload it, or import it by DOI, URL, or repo. " +
         "Recording the source now is what lets anyone trace a figure back " +
@@ -100,7 +102,7 @@ export function buildProjectSteps({
     },
     {
       key: "figure",
-      title: "Make a figure from it",
+      title: "Analyze and visualize",
       detail:
         "Plot the data in the browser, then save it as a pipeline stage. " +
         "That creates the environment it runs in, so the figure traces back " +
@@ -122,7 +124,7 @@ export function buildProjectSteps({
     },
     {
       key: "publication",
-      title: "Write it up",
+      title: "Write about the work",
       detail:
         "Start a paper from a template or connect the Overleaf project " +
         "you're already writing in, so its figures stop drifting out of " +
@@ -228,8 +230,8 @@ export function buildAccountSteps({
       key: "cli",
       title: "Install the Calkit CLI",
       detail:
-        "The CLI is what runs pipelines and moves results between your " +
-        "machine and the hub.",
+        "Builds environments, runs the pipeline, and moves results between " +
+        "your machine and the hub.",
       done: cliRunning,
       // The local server is usually not running even when the CLI is
       // installed, so an unanswered check is not evidence of absence.
@@ -239,9 +241,9 @@ export function buildAccountSteps({
       key: "browser_extension",
       title: "Install the browser extension",
       detail:
-        "Brings Calkit into GitHub, Overleaf, and journal pages: stale " +
-        "figures on Overleaf, DVC-tracked files on GitHub, and references " +
-        "saved straight from the paper you're reading.",
+        "Save references to BibTeX from the paper you're reading, view " +
+        "DVC-tracked files on GitHub, and keep Overleaf figures in sync, " +
+        "without leaving the browser.",
       done: false,
       // Nothing on the server can tell whether an extension is installed.
       manual: true,
@@ -250,7 +252,9 @@ export function buildAccountSteps({
     {
       key: "overleaf",
       title: "Connect Overleaf",
-      detail: "Link papers you're already writing to the projects behind them.",
+      detail:
+        "Keep a paper you're already writing in sync with the analysis " +
+        "behind it.",
       done: overleafConnected,
       optional: true,
       detectedOnly: true,
@@ -258,7 +262,8 @@ export function buildAccountSteps({
     {
       key: "zotero",
       title: "Connect Zotero",
-      detail: "Import a collection and keep the project's .bib file in step.",
+      detail:
+        "Import a collection and keep the project's .bib file in sync with it.",
       done: zoteroConnected,
       optional: true,
       detectedOnly: true,

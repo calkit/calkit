@@ -36,7 +36,7 @@ preceded by a `<!-- prettier-ignore -->` comment. Otherwise Prettier reformats
 the block and strips the 4-space indentation of the admonition body, which
 breaks rendering.
 
-Agents should never make commits to Git.
+Agents should never make commits to Git unless asked to.
 
 Tests belong in the test module named after the module the exercised code
 lives in, e.g., tests for `calkit/cli/new.py` go in
@@ -71,4 +71,9 @@ respectively.
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
 
-Don't be verbose in comments. One sentence is usually fine.
+Don't be verbose in comments. One sentence is usually fine, if anything at all.
+
+Agents should typically not be writing prose for human consumption.
+If some is needed, notify
+the human developer and ask them to write in a given file at a specified
+line and make a commit.

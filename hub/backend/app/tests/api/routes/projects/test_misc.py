@@ -37,7 +37,11 @@ def test_post_project_misc(
     repo.create_remote("origin", str(origin.working_dir))
     repo.git.push("origin", repo.active_branch.name)
     fake_project = SimpleNamespace(
-        owner_account_name="o", name="p", id=uuid.uuid4()
+        owner_account_name="o",
+        name="p",
+        id=uuid.uuid4(),
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
     )
     with (
         patch(

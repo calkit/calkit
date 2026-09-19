@@ -22,8 +22,6 @@ import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
 import useAuth from "../../hooks/useAuth"
 import { useLocalServer } from "../../hooks/useOnboarding"
-import { TIPS, type TipId } from "../../lib/tips"
-import TipBubble from "../Onboarding/TipBubble"
 
 export interface ProjectNavItem {
   icon: IconType
@@ -69,11 +67,6 @@ interface SidebarItemsProps {
   basePath: string
 }
 
-// Sidebar items that a first-project tip points at from other pages
-const TIP_FOR_NAV: Partial<Record<string, TipId>> = Object.fromEntries(
-  TIPS.map((t) => [t.nav, t.id]),
-)
-
 const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
   const textColor = useColorModeValue("ui.main", "ui.light")
   const bgActive = useColorModeValue("#E2E8F0", "#4A5568")
@@ -97,7 +90,7 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
       return null
     }
 
-    const item = (
+    return (
       <Flex
         key={title}
         as={Link}
@@ -123,20 +116,6 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
         />
         <Text ml={2}>{title}</Text>
       </Flex>
-    )
-    const tipId = TIP_FOR_NAV[title]
-    return tipId ? (
-      <TipBubble
-        key={title}
-        tip={tipId}
-        where="nav"
-        placement="right"
-        display="block"
-      >
-        {item}
-      </TipBubble>
-    ) : (
-      item
     )
   })
 

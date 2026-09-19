@@ -29,6 +29,7 @@ from app.api.deps import (
 from app.config import settings
 from app.core import utcnow
 from app.db import engine
+from app.git import expire_shared_read_clone
 from app.messaging import generate_test_email, send_email
 from app.models import (
     PLAN_IDS,
@@ -100,22 +101,26 @@ def get_templates(kind: str | None = None) -> list[TemplatePublic]:
     """List the templates in the calkit registry, optionally of one kind.
 
     Read from the package rather than repeated in the frontend, so adding
-    one there is enough.
+    one there is enough. In registry order, which is the order they should
+    be offered in.
     """
-    from calkit.templates.core import TEMPLATES
+    import calkit.templates
 
-    if kind is not None and kind not in TEMPLATES:
+    try:
+        templates = calkit.templates.get_templates(kind=kind)
+    except ValueError:
         raise HTTPException(404, f"Unknown template kind '{kind}'")
-    kinds = [kind] if kind is not None else sorted(TEMPLATES)
     return [
         TemplatePublic(
-            name=f"{k}/{template.name}",
-            kind=k,
+            # How the template is asked for, which differs by kind: a LaTeX
+            # template is named within this package, a project template is
+            # a project on a hub.
+            name=template.ref,
+            kind=template.kind,
             title=template.title or template.name,
             description=template.description,
         )
-        for k in kinds
-        for template in TEMPLATES[k].values()
+        for template in templates
     ]
 
 
@@ -261,6 +266,11 @@ async def post_github_event(request: Request) -> Message:
         # Read the names while the session is still open: the owner's name
         # comes off a relationship, and the objects are detached after this.
         slugs = [(p.owner_account_name, p.name) for p in projects]
+        # Warming is queued; this makes the push visible to the next read
+        # without waiting for it. "refs/heads/main" -> "main".
+        branch = str(payload.get("ref") or "").removeprefix("refs/heads/")
+        for project in projects:
+            expire_shared_read_clone(project, branch or None)
     if not slugs:
         logger.info(f"No project tracks {repo}")
         return Message(message="Ignored")

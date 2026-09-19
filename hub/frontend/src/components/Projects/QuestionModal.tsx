@@ -637,6 +637,7 @@ function QuestionModal({
       // See EditQuestion: it opens over this one, and both have to agree on
       // the scrollbar or the page jumps as the second lock goes on and off.
       preserveScrollBarGap
+      motionPreset="none"
     >
       <ModalOverlay />
       {/* Fixed height so stepping between evidence items doesn't resize the

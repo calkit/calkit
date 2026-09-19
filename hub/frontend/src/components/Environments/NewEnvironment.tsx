@@ -191,6 +191,7 @@ const NewEnvironment = ({
       size={{ base: "sm", md: "2xl" }}
       isCentered
       scrollBehavior="inside"
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent as="form" onSubmit={submit}>

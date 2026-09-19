@@ -85,6 +85,7 @@ const EditUser = ({ user, isOpen, onClose }: EditUserProps) => {
         onClose={onClose}
         size={{ base: "sm", md: "md" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>

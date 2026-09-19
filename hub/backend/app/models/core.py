@@ -86,6 +86,7 @@ class UserRegister(SQLModel):
     password: str = Field(min_length=8, max_length=40)
     account_name: str | None = Field(default=None, max_length=64)
     full_name: str | None = Field(default=None, max_length=255)
+    analytics_consent: bool | None = None
 
 
 # Properties to receive via API on update, all are optional
@@ -98,6 +99,7 @@ class UserUpdateMe(SQLModel):
     full_name: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     github_username: str | None = Field(default=None, max_length=255)
+    analytics_consent: bool | None = None
 
 
 class UpdatePassword(SQLModel):
@@ -197,6 +199,9 @@ class User(UserBase, table=True):
     # code or following its link; null until then. A Google or GitHub
     # sign-in that vouched for the address sets it too.
     email_verified_at: datetime | None = Field(default=None)
+    # Whether the user allows usage analytics; null until they answer. Saved
+    # on the account so server-side events can respect it too.
+    analytics_consent: bool | None = Field(default=None)
     # Relationships
     account: Account = Relationship(back_populates="user", cascade_delete=True)
     github_token: UserGitHubToken | None = Relationship(cascade_delete=True)
@@ -307,6 +312,7 @@ class UserPublic(UserBase):
     github_username: str | None
     email_verified: bool
     subscription: Union["UserSubscription", None]
+    analytics_consent: bool | None = None
 
 
 class UserEmailVerification(SQLModel, table=True):
@@ -730,7 +736,9 @@ class ProjectsPublic(SQLModel):
 
 class ProjectPost(ProjectBase):
     name: str = Field(min_length=4, max_length=255)
-    title: str = Field(min_length=4, max_length=255)
+    # Optional only when an Overleaf project is named below, since the title
+    # is then read from its main document
+    title: str | None = Field(default=None, min_length=4, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )
@@ -741,6 +749,8 @@ class ProjectPost(ProjectBase):
     # Whether a project made from a template keeps the template's commits.
     # Off by default: the new project's history starts with itself.
     keep_template_history: bool = False
+    # An Overleaf project to take the title from, when none is given
+    overleaf_project_url: str | None = Field(default=None, max_length=2048)
 
 
 class UserProjectAccess(SQLModel, table=True):
@@ -1021,6 +1031,21 @@ class Pipeline(SQLModel):
     ck_stages: list[str] = Field(default_factory=list)
     stage_statuses: dict[str, StageStatus] = Field(default_factory=dict)
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
+
+
+class PipelineYaml(SQLModel):
+    """The project's whole pipeline, as editable YAML.
+
+    The YAML is the ``pipeline:`` block of calkit.yaml, exactly as the
+    pipeline page shows it -- same key order, same comments.
+    """
+
+    yaml: str
+
+
+class PipelinePut(SQLModel):
+    yaml: str
+    message: str | None = None
 
 
 class PipelineStage(SQLModel):

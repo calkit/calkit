@@ -10,9 +10,9 @@ import { useProjectQuestions } from "../../hooks/useProject"
 import { DISMISSED, buildProjectSteps } from "../../lib/onboarding"
 import NewDataset from "../Datasets/NewDataset"
 import FigureEditor from "../Figures/FigureEditor"
+import CreateQuestion from "../Projects/CreateQuestion"
 import ImportOverleaf from "../Publications/ImportOverleaf"
 import NewPublication from "../Publications/NewPublication"
-import CreateQuestion from "../Projects/CreateQuestion"
 import ChecklistCard from "./ChecklistCard"
 import CommandBlock from "./CommandBlock"
 
@@ -101,6 +101,13 @@ const ProjectChecklist = ({
   if (reproCheckQuery.isPending || reproCheckQuery.isError) {
     return null
   }
+  // Every signal, not just the repo read: these three land at different
+  // times, and each one arriving ticks off its own step under the reader,
+  // collapsing a row and swapping its mark as it goes. Rendering once they
+  // have all settled shows the list in the state it is actually in.
+  if (questionsRequest.isPending || pipelineQuery.isPending) {
+    return null
+  }
   const actions: Record<string, React.ReactNode> = {
     question: (
       <>
@@ -187,7 +194,7 @@ const ProjectChecklist = ({
         />
         <CommandBlock
           label="Run it and push the results"
-          command='calkit run -m "Run pipeline"'
+          command={`cd ${projectName} && calkit run -m "Run pipeline"`}
         />
       </>
     ),
@@ -233,19 +240,12 @@ const ProjectChecklist = ({
   return (
     <ChecklistCard
       title="Project setup"
-      intro={
-        "Each step here is checked against the project itself, so anything " +
-        "you do from the CLI ticks off on its own."
-      }
       steps={steps}
       actions={actions}
       onMarkDone={setFlag}
       dismissed={projectFlags.includes(DISMISSED)}
       onDismissedChange={(dismissed) => setFlag(DISMISSED, dismissed)}
-      doneMessage={
-        "This project is reproducible end to end. Anyone can clone it and " +
-        "get your results back."
-      }
+      doneMessage={"Looks good!"}
     />
   )
 }

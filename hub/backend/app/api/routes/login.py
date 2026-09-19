@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 import jwt
 import requests
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from jwt.algorithms import RSAAlgorithm
@@ -79,10 +79,21 @@ def _make_tokens(
     return access_token, raw_refresh, refresh_db
 
 
+def _is_first_login(session: Session, user: User) -> bool:
+    """Refresh tokens are never deleted, so none means no login yet."""
+    return (
+        session.exec(
+            select(RefreshToken).where(RefreshToken.user_id == user.id)
+        ).first()
+        is None
+    )
+
+
 @router.post("/login/access-token")
 def login_access_token(
     session: SessionDep,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    analytics_consent: Annotated[bool | None, Form()] = None,
 ) -> Token:
     """Get an access token for future requests."""
     user = users.authenticate(
@@ -95,6 +106,12 @@ def login_access_token(
     elif not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     users.check_email_allowed(user.email)
+    users.apply_analytics_consent(
+        session=session, user=user, consent=analytics_consent
+    )
+    mixpanel.user_logged_in(
+        user, provider="email", first=_is_first_login(session, user)
+    )
     access_token, raw_refresh, refresh_db = _make_tokens(
         user.id, description="password login"
     )
@@ -235,6 +252,7 @@ def recover_password_html_content(email: str, session: SessionDep) -> Any:
 class OAuthCodeExchange(BaseModel):
     code: str
     redirect_uri: str
+    analytics_consent: bool | None = None
 
 
 def _create_github_user(
@@ -326,6 +344,7 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
     user = users.get_user_by_github_username(
         session=session, github_username=github_username
     )
+    is_new = False
     if user is None:
         # An account may already exist under this email from a Google or
         # email signup, which leaves github_name null. Without this, signing
@@ -403,7 +422,7 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
             )
             if email_verified:
                 users.mark_email_verified(session=session, user=user)
-            mixpanel.user_signed_up(user)
+            is_new = True
     else:
         logger.info(f"Found existing user with email: {user.email}")
     if user.github_username != github_username:
@@ -413,10 +432,16 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
     if not user.is_active:
         logger.info("User is not active")
         raise HTTPException(401, "User is not active")
+    users.apply_analytics_consent(
+        session=session, user=user, consent=req.analytics_consent
+    )
+    if is_new:
+        mixpanel.user_signed_up(user, provider="github")
+    first_login = _is_first_login(session, user)
     # Save the user's GitHub token for later
     users.save_github_token(session=session, user=user, github_resp=out)
     # Lastly, generate an access token for this user
-    mixpanel.user_logged_in(user)
+    mixpanel.user_logged_in(user, provider="github", first=first_login)
     access_token, raw_refresh, refresh_db = _make_tokens(
         user.id, description="GitHub login"
     )
@@ -471,6 +496,7 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
     full_name = profile.get("name")
     users.check_email_allowed(email)
     user = users.get_user_by_email(session=session, email=email)
+    is_new = user is None
     if user is None:
         logger.info("Creating new GitHub-less user via Google")
         try:
@@ -496,11 +522,16 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
                     account_name=f"{email.split('@')[0]}-{secrets.token_hex(3)}",
                 ),
             )
-        mixpanel.user_signed_up(user)
     else:
         logger.info(f"Found existing user with email: {user.email}")
     if not user.is_active:
         raise HTTPException(401, "User is not active")
+    users.apply_analytics_consent(
+        session=session, user=user, consent=req.analytics_consent
+    )
+    if is_new:
+        mixpanel.user_signed_up(user, provider="google")
+    first_login = _is_first_login(session, user)
     # Persist the Google credential so the account shows as connected, and
     # with it the address Google vouched for, which is what lets a GitHub
     # login under the same email claim this account later.
@@ -511,7 +542,7 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
         verified_email=email,
     )
     users.mark_email_verified(session=session, user=user)
-    mixpanel.user_logged_in(user)
+    mixpanel.user_logged_in(user, provider="google", first=first_login)
     access_token, raw_refresh, refresh_db = _make_tokens(
         user.id, description="Google login"
     )

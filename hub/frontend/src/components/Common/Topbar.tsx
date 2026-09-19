@@ -24,11 +24,11 @@ import { useQuery } from "@tanstack/react-query"
 import { MiscService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import NewOrg from "../Orgs/NewOrg"
-import NewProject from "../Projects/NewProject"
-import UserMenu from "./UserMenu"
+import NewProjectModal from "../Projects/NewProjectModal"
 import GlobalSearch from "./GlobalSearch"
 import HelpFeedback from "./HelpFeedback"
 import NotificationBell from "./NotificationBell"
+import UserMenu from "./UserMenu"
 
 // "Docs" leaves the app entirely rather than going to a page that only
 // links onward to the documentation site, which is where that content is
@@ -93,9 +93,8 @@ export default function Topbar() {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   const { user } = useAuth()
-  // The new-project button goes to the wizard now; this modal is still here
-  // for the "use as template" form, which sends the user off to connect
-  // GitHub and comes back with ?newProject=1 to be reopened.
+  // Opened in place rather than by navigating, so the page behind it stays.
+  // Also reopened with ?newProject=1 after a trip out to connect GitHub.
   const newProjectModal = useDisclosure()
   const newOrgModal = useDisclosure()
   const helpModal = useDisclosure()
@@ -169,30 +168,39 @@ export default function Topbar() {
             </HStack>
           </HStack>
           <Flex alignItems={"center"} gap={2}>
-            <GlobalSearch />
-            <Button
-              aria-label="new-org"
-              size="sm"
-              onClick={user ? newOrgModal.onOpen : goToLoginWithRedirect}
-            >
-              <Icon as={FaPlus} mr={1} />
-              New org
-            </Button>
-            <NewOrg onClose={newOrgModal.onClose} isOpen={newOrgModal.isOpen} />
-            <Button
-              aria-label="new-project"
-              size="sm"
-              as={RouterLink}
-              to="/new"
-            >
-              <Icon as={FaPlus} mr={1} />
-              New project
-            </Button>
+            {/* Phones only get what can't wait: creating, signing in, and
+                the user menu. Everything else lives in the drawer or the
+                repo link. */}
+            <Box display={{ base: "none", md: "block" }}>
+              <GlobalSearch />
+            </Box>
             {user ? (
               <>
                 <Button
+                  aria-label="new-org"
+                  size="sm"
+                  display={{ base: "none", md: "inline-flex" }}
+                  onClick={newOrgModal.onOpen}
+                >
+                  <Icon as={FaPlus} mr={1} />
+                  New org
+                </Button>
+                <NewOrg
+                  onClose={newOrgModal.onClose}
+                  isOpen={newOrgModal.isOpen}
+                />
+                <Button
+                  aria-label="new-project"
+                  size="sm"
+                  onClick={newProjectModal.onOpen}
+                >
+                  <Icon as={FaPlus} mr={1} />
+                  New project
+                </Button>
+                <Button
                   aria-label="help"
                   size="sm"
+                  display={{ base: "none", md: "inline-flex" }}
                   onClick={() => {
                     mixpanel.track("Opened help and feedback", {
                       source: "topbar",
@@ -209,37 +217,54 @@ export default function Topbar() {
                 />
               </>
             ) : null}
-            <NewProject
+            <NewProjectModal
               onClose={newProjectModal.onClose}
               isOpen={newProjectModal.isOpen}
             />
-            <Link
-              isExternal
-              href="https://github.com/calkit/calkit"
-              aria-label="View GitHub repo."
-            >
-              <Flex alignItems={"center"} pt={0.5} pb={0.5} mr={-0.5}>
-                <Icon fontSize="2xl" mr={1}>
-                  <FaGithub />
-                </Icon>
-                <Text fontSize="xs">calkit/calkit</Text>
-              </Flex>
-            </Link>
-            <HubVersion />
+            <HStack spacing={2} display={{ base: "none", md: "flex" }}>
+              <Link
+                isExternal
+                href="https://github.com/calkit/calkit"
+                aria-label="View GitHub repo."
+              >
+                <Flex alignItems={"center"} pt={0.5} pb={0.5} mr={-0.5}>
+                  <Icon fontSize="2xl" mr={1}>
+                    <FaGithub />
+                  </Icon>
+                  <Text fontSize="xs">calkit/calkit</Text>
+                </Flex>
+              </Link>
+              <HubVersion />
+            </HStack>
             {user && <NotificationBell />}
             {user ? (
               <UserMenu />
             ) : (
-              <Link
-                as={RouterLink}
-                to={"/login"}
-                onClick={(event) => {
-                  event.preventDefault()
-                  goToLoginWithRedirect()
-                }}
-              >
-                <Button variant="primary">Sign in</Button>
-              </Link>
+              <>
+                <Button
+                  as={RouterLink}
+                  to="/signup"
+                  variant="primary"
+                  size="sm"
+                  onClick={() =>
+                    mixpanel.track("Clicked sign up", { source: "topbar" })
+                  }
+                >
+                  Sign up
+                </Button>
+                <Button
+                  as={RouterLink}
+                  to="/login"
+                  variant="outline"
+                  size="sm"
+                  onClick={(event: React.MouseEvent) => {
+                    event.preventDefault()
+                    goToLoginWithRedirect()
+                  }}
+                >
+                  Sign in
+                </Button>
+              </>
             )}
           </Flex>
         </Flex>

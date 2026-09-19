@@ -60,6 +60,7 @@ import calkit.detect
 import calkit.environments
 import calkit.latex
 import calkit.pipeline
+import calkit.provenance
 import calkit.resources
 import calkit.templates
 from app import (
@@ -109,6 +110,8 @@ from app.git import (
     get_repo,
     get_repo_tree_for_ref,
     get_zip_path_map_from_repo,
+    push_and_expire,
+    read_overleaf_title,
     record_project_update,
     resolve_commit_sha,
     search_refs,
@@ -130,10 +133,12 @@ from app.models import (
     OrgSubscription,
     OverleafLink,
     Pipeline,
+    PipelinePut,
     PipelineStage,
     PipelineStageEdit,
     PipelineStageEdited,
     PipelineStagePut,
+    PipelineYaml,
     Presentation,
     Project,
     ProjectComment,
@@ -680,7 +685,7 @@ def post_project_upload(
     repo.git.add(["-A"])
     if repo.git.diff("--staged"):
         repo.git.commit(["-m", "Import existing project files"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.user_uploaded_project(
         user=current_user,
         owner_name=project.owner_account_name,
@@ -789,6 +794,56 @@ def get_owned_projects(
     return ProjectsPublic(data=projects, count=count)  # type: ignore
 
 
+def _resolve_project_template(
+    session: Session, current_user: User, template: str
+) -> tuple[Project | None, str]:
+    """Work out which repo a new project should be started from.
+
+    A template hosted here is preferred: being a project on this hub is
+    what lets its outputs be copied into the new project's storage, so the
+    figures and paper are there before the first run.
+
+    Failing that, a template this package knows lives on its own hub, and
+    its Git repo is readable from anywhere, so it can still be used --
+    which is what makes the built-in templates work on a hub that doesn't
+    host them, a local dev instance included.
+
+    Returns the project if this hub has one, and the Git repo URL to pull
+    from either way.
+    """
+    if template.count("/") != 1:
+        raise HTTPException(
+            422, "A template is named owner/project, e.g. calkit/example"
+        )
+    owner_name, project_name = template.split("/")
+    try:
+        template_project = app.projects.get_project(
+            session=session,
+            owner_name=owner_name,
+            project_name=project_name,
+            current_user=current_user,
+            min_access_level="read",
+        )
+        return template_project, template_project.git_repo_url
+    except HTTPException as e:
+        if e.status_code not in (403, 404):
+            raise
+    known = calkit.templates.find_template(template, kind="project")
+    if known is None:
+        # The template came off a list this hub offered, so "Project not
+        # found" reads as though the project being created is the one
+        # missing. Say which template, and that it is the problem.
+        raise HTTPException(
+            404,
+            f"Template {template} isn't available on this hub; "
+            "pick another one",
+        )
+    logger.info(
+        f"Template {template} isn't hosted here; using {known.git_repo_url}"
+    )
+    return None, known.git_repo_url  # type: ignore[union-attr]
+
+
 @router.post("/projects")
 def post_project(
     *,
@@ -805,6 +860,23 @@ def post_project(
             "A linked GitHub account is required to create or own projects.",
         )
     project_in.name = project_in.name.lower()
+    # Starting from Overleaf, the title is in the paper already, so asking
+    # for it again is asking the user to copy it across.
+    if not project_in.title and project_in.overleaf_project_url:
+        overleaf_id = project_in.overleaf_project_url.rstrip("/").split("/")[
+            -1
+        ]
+        project_in.title = read_overleaf_title(
+            user=current_user, session=session, overleaf_project_id=overleaf_id
+        )
+        if not project_in.title:
+            raise HTTPException(
+                400,
+                "Could not read a title from that Overleaf project; please "
+                "give one",
+            )
+    if not project_in.title:
+        raise HTTPException(400, "A title is required")
     if project_in.git_repo_exists and project_in.git_repo_url is None:
         raise HTTPException(
             400, "Git repo URL must be specified if Git repo exists"
@@ -814,16 +886,13 @@ def post_project(
             f"https://github.com/{current_user.account.name}/{project_in.name}"
         )
     # First check if template even exists, if specified
+    template_project: Project | None = None
+    template_git_repo_url: str | None = None
     if project_in.template is not None:
-        template_owner_name, template_project_name = project_in.template.split(
-            "/"
-        )
-        template_project = app.projects.get_project(
+        template_project, template_git_repo_url = _resolve_project_template(
             session=session,
-            owner_name=template_owner_name,
-            project_name=template_project_name,
             current_user=current_user,
-            min_access_level="read",
+            template=project_in.template,
         )
     # Validate the git repo URL is on github.com to prevent SSRF
     parsed_git_url = urlparse(project_in.git_repo_url)
@@ -984,7 +1053,9 @@ def post_project(
         else:
             owner_account_id = current_user.account.id
         add_info = {"owner_account_id": owner_account_id}
-        if project_in.template is not None:
+        if template_project is not None:
+            # Only a template hosted here can be a parent: the column is a
+            # foreign key into this hub's projects.
             add_info["parent_project_id"] = template_project.id
         project = Project.model_validate(project_in, update=add_info)
         logger.info("Adding project to database")
@@ -1001,9 +1072,15 @@ def post_project(
             )
             # If we have a template, set as upstream and pull from it
             if project_in.template is not None:
-                template_git_repo_url = template_project.git_repo_url
                 repo.git.remote(["add", "upstream", template_git_repo_url])
                 repo.git.pull(["upstream", repo.active_branch.name])
+                # Read off the remote-tracking ref while it is still here.
+                # This is the revision the project was taken from, and it
+                # costs nothing; cloning the template again to ask it was a
+                # second full clone of a repo we just pulled.
+                template_git_rev = repo.git.rev_parse(
+                    f"upstream/{repo.active_branch.name}"
+                )
                 # Remove upstream remote so we don't have any confusion later
                 repo.git.remote(["remove", "upstream"])
                 if not project_in.keep_template_history:
@@ -1019,12 +1096,6 @@ def post_project(
                     )
                     repo.git.branch("-D", branch)
                     repo.git.branch("-m", branch)
-                template_repo = get_repo(
-                    project=template_project,
-                    session=session,
-                    user=current_user,
-                    fresh=True,
-                )
                 # dvc.lock stays: its hashes name the template's outputs,
                 # which are copied into this project's storage below, so
                 # the figures and paper are there before the first run.
@@ -1046,7 +1117,7 @@ def post_project(
                 ck_info["derived_from"] = dict(
                     project=project_in.template,
                     git_repo_url=template_git_repo_url,
-                    git_rev=template_repo.git.rev_parse("HEAD"),
+                    git_rev=template_git_rev,
                 )
             with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
                 ryaml.dump(ck_info, f)
@@ -1095,12 +1166,21 @@ def post_project(
             else:
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
-            repo.git.push(["origin", repo.active_branch.name])
-            if project_in.template is not None:
+            push_and_expire(project, repo)
+            if template_project is not None:
                 _copy_template_dvc_objects(
                     repo_dir=str(repo.working_dir),
                     template_project=template_project,
                     project=project,
+                )
+            elif project_in.template is not None:
+                # The template's outputs live in its own hub's storage,
+                # which this one has no access to. The repo, dvc.lock and
+                # all, still arrives; the outputs come back on the first
+                # `calkit run`, which is what they are for.
+                logger.info(
+                    f"Not copying outputs from {project_in.template}, "
+                    "which is hosted elsewhere"
                 )
         except Exception as e:
             # The project row is already committed, and it would block a retry
@@ -2066,7 +2146,7 @@ def put_project_contents(
     if repo.git.diff(["--staged", path]):
         commit_message = message or f"Upload {path} from web"
         repo.git.commit(["-m", commit_message])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     else:
         raise HTTPException(
             400,
@@ -2175,7 +2255,7 @@ def patch_project_contents(
         message = f"Add {path} to {target_category}"
     repo.git.commit(["-m", message])
     logger.info("Pushing Git repo")
-    repo.git.push(["origin", repo.branches[0].name])
+    push_and_expire(project, repo, repo.branches[0].name)
     return current_object
 
 
@@ -2692,10 +2772,7 @@ def post_project_question(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
-    repo.git.push(["origin", repo.active_branch.name])
-    # The question was pushed from this clone; readers share another one,
-    # and without this they'd keep serving the project as it was before.
-    expire_shared_read_clone(project, repo.active_branch.name)
+    push_and_expire(project, repo)
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
     )
@@ -2784,8 +2861,7 @@ def put_project_question(
     repo.git.add("calkit.yaml")
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
-        repo.git.push(["origin", repo.active_branch.name])
-        expire_shared_read_clone(project, repo.active_branch.name)
+        push_and_expire(project, repo)
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
     )
@@ -2877,6 +2953,30 @@ def _tree_figure_paths(repo: git.Repo, ref: str | None) -> list[str]:
     return paths
 
 
+def _map_paths_outputs(ck_info: dict[str, Any]) -> list[str]:
+    """The files and directories the project's map-paths stages write."""
+    outs: list[str] = []
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage_map in stages.items():
+        try:
+            stage = _validate_ck_stage(stage_map, name)
+        except HTTPException:
+            continue
+        if stage.kind == "map-paths":
+            outs.extend(
+                normalize_artifact_path(p) for p in stage.dvc_out_paths
+            )
+    return outs
+
+
+def _under_any(path: str, roots: list[str]) -> bool:
+    path = normalize_artifact_path(path)
+    return any(
+        path == root or path.startswith(root.rstrip("/") + "/")
+        for root in roots
+    )
+
+
 def _discover_figures(
     project: Project,
     repo: git.Repo,
@@ -2901,17 +3001,6 @@ def _discover_figures(
         if not fig.get("title"):
             fig["title"] = title_from_path(fig["path"])
     declared_paths = {fig["path"] for fig in figures}
-
-    def _maybe_add_figure(path: str) -> None:
-        """Add `path` to figures if it looks like a figure and is not yet
-        known.
-        """
-        if _looks_like_figure(path) and path not in declared_paths:
-            figures.append({"path": path, "title": title_from_path(path)})
-            declared_paths.add(path)
-
-    for path in _tree_figure_paths(repo, ref):
-        _maybe_add_figure(path)
     # Pre-compute calkit.yaml / dvc.lock metadata once for the tree so we
     # don't re-read and re-expand on every iteration.
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
@@ -2921,6 +3010,24 @@ def _discover_figures(
         zip_path_map,
         dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
+    # A map-paths stage's outputs are copies of figures found elsewhere,
+    # e.g., into the paper's folder, so they aren't figures of their own
+    copies = _map_paths_outputs(ck_info_full)
+
+    def _maybe_add_figure(path: str) -> None:
+        """Add `path` to figures if it looks like a figure and is not yet
+        known.
+        """
+        if (
+            _looks_like_figure(path)
+            and path not in declared_paths
+            and not _under_any(path, copies)
+        ):
+            figures.append({"path": path, "title": title_from_path(path)})
+            declared_paths.add(path)
+
+    for path in _tree_figure_paths(repo, ref):
+        _maybe_add_figure(path)
     # Also auto-detect figures from DVC lock outs (files stored with DVC)
     for dvc_path, dvc_out in dvc_lock_outs.items():
         if dvc_out.get("type") == "dir":
@@ -3222,8 +3329,10 @@ def _build_results(
         res = dict(res)
         if not res.get("title"):
             # A result's name is a better title than its path, since several
-            # results can share one file and only the name tells them apart
-            res["title"] = res.get("name") or title_from_path(res["path"])
+            # results can share one file and only the name tells them apart.
+            # Both go through the same tidying, since a name is a key like
+            # ``r_squared_quadratic`` rather than something written to read.
+            res["title"] = title_from_path(res.get("name") or res["path"])
         results.append(res)
     declared_paths = {res["path"] for res in results}
 
@@ -3381,9 +3490,11 @@ def _build_tables(
                 tables.append({"path": path, "title": title_from_path(path)})
                 known_paths.add(path)
     auto: list[dict[str, Any]] = []
+    # Copies a map-paths stage makes, e.g., into the paper's folder
+    copies = _map_paths_outputs(ck_info)
 
     def _maybe_add_table(path: str, tex_text: str | None = None) -> None:
-        if path in known_paths:
+        if path in known_paths or _under_any(path, copies):
             return
         if PurePosixPath(path).suffix.lower() == ".tex":
             # Only Git-tracked TeX is checked; reading a DVC-tracked one
@@ -3755,7 +3866,7 @@ def post_project_figure(
     # Make a commit
     repo.git.commit(["-m", f"Add figure {path}"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.branches[0].name])
+    push_and_expire(project, repo, repo.branches[0].name)
     url = None
     if file is not None:
         if file_data is None or full_fig_path is None:
@@ -4537,14 +4648,26 @@ def get_project_datasets(
             DatasetPublic.model_validate(
                 row,
                 update=dict(
-                    imported_from_info=(
-                        imported if isinstance(imported, dict) else None
-                    ),
+                    imported_from_info=_imported_from_info(imported),
                     created_by=created if created else None,
                 ),
             )
         )
     return out
+
+
+def _imported_from_info(value: Any) -> dict[str, Any] | None:
+    """The structured origin, reading a bare string the way the calkit.yaml
+    schema does, so ``imported_from: https://doi.org/...`` is a DOI here too.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return calkit.provenance.source_from_location(value)
+        except ValueError:
+            return {"description": value}
+    return None
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")
@@ -5117,7 +5240,7 @@ def post_project_dataset(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Add dataset {ds['path']}"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if storage == "dvc":
         # The pointer is pushed with Git; the bytes go to this project's
         # object storage so a clone can pull them
@@ -5260,7 +5383,7 @@ def post_project_dataset_upload(
     # Make a commit
     repo.git.commit(["-m", f"Add dataset {path}"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if storage == "dvc":
         # If using the DVC remote, we can just put it in the expected
         # location since we'll have the md5 hash in the dvc file
@@ -5832,7 +5955,7 @@ def post_project_misc(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     record_project_update(project, repo, session)
     return MiscArtifact.model_validate(entry)
 
@@ -6183,7 +6306,7 @@ def post_project_publication(
     # Make a commit
     repo.git.commit(["-m", f"Add publication {path} ({kind})"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     url = None
     if file is not None:
         # If using the DVC remote, we can just put it in the expected location
@@ -6658,7 +6781,7 @@ async def post_project_overleaf_publication(
         else f"Import Overleaf ZIP to '{path}'"
     )
     repo.git.commit(["-m", commit_msg])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if not import_zip_mode:
         app.projects.record_overleaf_links(
             session=session, project=project, repo=repo
@@ -6740,7 +6863,7 @@ def post_project_overleaf_sync(
             400, "Overleaf sync failed; try locally with Calkit CLI"
         )
     # Push the main repo (Overleaf has already been pushed in sync)
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     # Get data from the result of the sync
     commits_since = res.get("commits_since_last_sync", [])
     last_overleaf_commit = res.get("overleaf_commit_after", "")
@@ -7151,6 +7274,10 @@ def post_project_push_event(
     # Warming is normally skipped when the commit is already warm. That is
     # the wrong answer for a push that moved data rather than code: the
     # commit is the same and what it resolves to is not.
+    # Warming is a queued job, so reads arriving before it finishes would
+    # keep serving the project as it was. Expiring here costs one ls-remote
+    # on the next read and makes the push visible immediately.
+    expire_shared_read_clone(project, req.branch)
     moved_data = bool(set(req.targets or []) - {"git"})
     queued = app.tasks.enqueue_warm(
         project.owner_account_name, project.name, force=moved_data
@@ -7565,9 +7692,100 @@ def put_project_pipeline_stage(
         repo.git.commit(
             ["-m", req.message or f"Update pipeline stage {stage_name}"]
         )
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
         record_project_update(project, repo, session)
     return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage_map))
+
+
+def _load_ck_pipeline(pipeline_yaml: str) -> Any:
+    """Parse the pipeline block the editor holds.
+
+    The page shows the ``pipeline:`` key and its body, so that's what comes
+    back; a body on its own is accepted too, since that's what someone who
+    deleted the wrapper would send.
+
+    Emptying the editor means an empty pipeline, not a malformed one:
+    clearing the pane, leaving a bare ``pipeline:``, or leaving ``stages:``
+    with nothing under it all save as no stages.
+    """
+    try:
+        loaded = ryaml.load(pipeline_yaml)
+    except Exception as e:
+        raise HTTPException(422, f"Invalid YAML: {e}")
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise HTTPException(422, "A pipeline must be a YAML mapping")
+    if "pipeline" in loaded:
+        loaded = loaded["pipeline"]
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise HTTPException(422, "A pipeline must be a YAML mapping")
+    if loaded.get("stages", False) is None:
+        # `stages:` with nothing under it reads as no stages, not as a
+        # stages key that failed to parse.
+        del loaded["stages"]
+    try:
+        CkPipeline(**dict(loaded))
+    except Exception as e:
+        raise HTTPException(422, f"Invalid pipeline: {e}")
+    return loaded
+
+
+def _dump_ck_pipeline(pipeline: Any) -> str:
+    stream = io.StringIO()
+    ryaml.dump({"pipeline": pipeline}, stream)
+    return stream.getvalue()
+
+
+@router.put("/projects/{owner_name}/{project_name}/pipeline")
+def put_project_pipeline(
+    owner_name: str,
+    project_name: str,
+    req: PipelinePut,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineYaml:
+    """Replace the project's pipeline with the YAML the editor holds.
+
+    Only the ``pipeline`` key of calkit.yaml is touched, so editing the
+    pipeline can't disturb the datasets, figures, or publications sitting
+    beside it in the same file.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    ck_info = get_ck_info_from_repo(repo=repo)
+    pipeline = _load_ck_pipeline(req.yaml)
+    # Written as the user wrote it: same key order, same comments.
+    ck_info["pipeline"] = pipeline
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
+    # read; otherwise the edit sits in calkit.yaml until the next run.
+    try:
+        calkit.pipeline.to_dvc(
+            ck_info=ck_info, wdir=str(repo.working_dir), write=True
+        )
+        repo.git.add("-A")
+    except Exception as e:
+        repo.git.checkout("--", ".")
+        repo.git.clean("-fd")
+        raise HTTPException(422, f"Could not compile the pipeline: {e}")
+    if repo.is_dirty():
+        repo.git.commit(["-m", req.message or "Update pipeline"])
+        push_and_expire(project, repo)
+        record_project_update(project, repo, session)
+    return PipelineYaml(yaml=_dump_ck_pipeline(pipeline))
 
 
 class Collaborator(BaseModel):
@@ -8546,7 +8764,7 @@ def post_project_references(
     repo.git.add("calkit.yaml")
     verb = "Label" if req.label_existing else "Add"
     repo.git.commit(["-m", f"{verb} references collection '{req.path}'"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Created references collection",
@@ -8622,7 +8840,7 @@ def delete_project_references(
         repo.git.add(["-f", zotero.SYNC_INFO_REL_PATH])
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Delete references collection '{path}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Deleted references collection",
@@ -8729,7 +8947,7 @@ def post_project_reference_item(
             else f"Add reference '{req.key}' in new collection '{req.path}'"
         )
         repo.git.commit(["-m", message])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Added reference item",
@@ -8806,7 +9024,7 @@ def put_project_reference_item(
     # commit rather than letting git error on an empty commit.
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Edit reference '{req.key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Edited reference item",
@@ -8856,7 +9074,7 @@ def delete_project_reference_item(
     repo.git.add(path)
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Delete reference '{bib_key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Deleted reference item",
@@ -9095,7 +9313,7 @@ def post_project_zotero_import(
     repo.git.add(req.bib_path)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Import Zotero collection into '{req.bib_path}'"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Imported Zotero collection",
@@ -9504,7 +9722,7 @@ def post_project_zotero_sync(
     committed = bool(repo.git.diff("--cached", "--name-only").strip())
     if committed:
         repo.git.commit(["-m", f"Sync Zotero collection into '{req.path}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Synced Zotero collection",
@@ -9786,7 +10004,7 @@ def put_project_reference_notes(
     if changed:
         repo.git.add(req.path)
         repo.git.commit(["-m", f"Edit notes on '{bib_key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Edited reference note",
@@ -9990,7 +10208,7 @@ def post_project_environment(
             f.write(req.file_content)
         repo.git.add(fpath)
     repo.git.commit(["-m", f"Add environment {req.name}"])
-    repo.git.push(["origin", repo.active_branch])
+    push_and_expire(project, repo)
     mixpanel.user_created_environment(
         user=current_user,
         owner_name=owner_name,
@@ -10313,7 +10531,7 @@ def put_project_dev_container(
     repo.git.add(".devcontainer")
     if repo.git.diff("--staged"):
         repo.git.commit(["-m", "Add dev container spec"])
-        repo.git.push(["origin", repo.active_branch])
+        push_and_expire(project, repo)
     return Message(message="Success")
 
 
@@ -10977,7 +11195,7 @@ def post_project_status(
     try:
         subprocess.check_call(cmd, cwd=repo.working_dir)
         logger.info("Git pushing")
-        repo.git.push(["origin", repo.active_branch])
+        push_and_expire(project, repo)
     except Exception as e:
         logger.error(f"Failed to set project status: {e}")
         raise HTTPException(400, f"Failed to set project status: {e}")

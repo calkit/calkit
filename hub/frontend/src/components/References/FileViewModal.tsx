@@ -24,6 +24,7 @@ const FileViewModal = ({ isOpen, onClose, entry }: FileViewProps) => {
         onClose={onClose}
         size={{ base: "xl", md: "xxl" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent>

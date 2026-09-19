@@ -2060,12 +2060,9 @@ def test_parse_template():
 
 
 def test_new_project_from_a_known_template_skips_the_hub(tmp_dir, monkeypatch):
-    """A template this package knows needs no hub to resolve.
-
-    The repo URL is in the registry, so `calkit new project --from
-    calkit/example-r` works without being logged in, or online to anything
-    but the repo host.
-    """
+    # A template this package knows needs no hub to resolve. The repo URL is in
+    # the registry, so `calkit new project --from calkit/example-r` works
+    # without being logged in, or online to anything but the repo host.
     import calkit.hub
     from calkit.cli.new import _parse_template
 

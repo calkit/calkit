@@ -60,10 +60,11 @@ def clear_cache() -> Generator[None, None, None]:
 
     client = cache.get_client()
     if client is not None:
-        try:
-            client.flushdb()
-        except Exception:
-            pass
+        # Deliberately not caught: a flush that fails leaves the next test
+        # reading another one's cached answers, which is the ordering
+        # dependence this fixture exists to remove. Better to fail setup
+        # than to keep running without the isolation it promises.
+        client.flushdb()
     yield
 
 

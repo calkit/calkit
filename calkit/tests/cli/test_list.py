@@ -43,7 +43,7 @@ def test_list_releases(tmp_dir):
 
 
 def test_list_templates():
-    """Templates are grouped by kind, since they aren't interchangeable."""
+    # Templates are grouped by kind, since they aren't interchangeable.
     out = subprocess.check_output(["calkit", "list", "templates"], text=True)
     assert "latex:" in out and "project:" in out
     # A LaTeX template is named within the package; a project template

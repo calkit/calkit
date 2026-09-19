@@ -3146,8 +3146,8 @@ def test_project_pipeline_stage_edit(
 def test_project_pipeline_edit(
     client: TestClient, db: Session, tmp_path
 ) -> None:
-    """The whole pipeline can be replaced without disturbing the rest of
-    calkit.yaml."""
+    # The whole pipeline can be replaced without disturbing the rest of
+    # calkit.yaml.
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
     url = f"/projects/{owner_name}/{project.name}/pipeline"
@@ -3252,7 +3252,7 @@ def test_project_pipeline_edit(
 def test_project_pipeline_edit_creates_one_where_there_was_none(
     client: TestClient, db: Session, tmp_path
 ) -> None:
-    """A project gets its first pipeline from the same editor."""
+    # A project gets its first pipeline from the same editor.
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
     url = f"/projects/{owner_name}/{project.name}/pipeline"
@@ -3305,7 +3305,7 @@ def test_project_pipeline_edit_creates_one_where_there_was_none(
 
 
 def test_resolve_project_template(client: TestClient, db: Session) -> None:
-    """A template doesn't have to be hosted by the hub using it."""
+    # A template doesn't have to be hosted by the hub using it.
     from app.api.routes.projects.core import _resolve_project_template
 
     project, _ = _make_owner_with_project(db, client)

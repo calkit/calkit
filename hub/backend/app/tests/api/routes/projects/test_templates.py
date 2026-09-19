@@ -2,7 +2,7 @@
 
 
 def test_clear_template_pipeline_outputs(tmp_path) -> None:
-    """A project started from a template hasn't run the pipeline yet."""
+    # A project started from a template hasn't run the pipeline yet.
     from app.api.routes.projects.core import _clear_template_pipeline_outputs
 
     repo_dir = tmp_path / "repo"

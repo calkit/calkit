@@ -15,7 +15,7 @@ def test_use_template(tmp_dir):
 
 
 def test_get_templates():
-    """The registry lists what's known, by kind, in the order to offer it."""
+    # The registry lists what's known, by kind, in the order to offer it.
     import pytest
 
     projects = calkit.templates.get_templates(kind="project")
@@ -34,12 +34,9 @@ def test_get_templates():
 
 
 def test_project_templates_know_where_they_live():
-    """A project template carries its locations, so nothing has to ask.
-
-    ``calkit new project --from calkit/example-r`` resolves the repo from
-    here rather than querying a hub, which is what makes it work without
-    being logged in.
-    """
+    # A project template carries its locations, so nothing has to ask. ``calkit
+    # new project --from calkit/example-r`` resolves the repo from here rather
+    # than querying a hub, which is what makes it work without being logged in.
     template = calkit.templates.find_template(
         "calkit/example-r", kind="project"
     )
@@ -60,7 +57,7 @@ def test_project_templates_know_where_they_live():
 
 
 def test_use_template_refuses_a_project_template(tmp_dir):
-    """There are no files here to copy; starting one is the hub's job."""
+    # There are no files here to copy; starting one is the hub's job.
     import pytest
 
     with pytest.raises(NotImplementedError, match="calkit.io"):

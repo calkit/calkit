@@ -786,7 +786,7 @@ def _identify(repo: git.Repo) -> None:
 
 
 def test_push_and_expire_updates_the_shared_checkout(tmp_path) -> None:
-    """A write lands in the shared checkout without going via the remote."""
+    # A write lands in the shared checkout without going via the remote.
     from unittest.mock import patch
 
     project = _StubProject("ck-shared-push")
@@ -842,12 +842,10 @@ def test_push_and_expire_updates_the_shared_checkout(tmp_path) -> None:
 def test_a_read_after_a_write_touches_the_network_not_at_all(
     tmp_path, monkeypatch
 ) -> None:
-    """The point of pushing into the shared checkout, stated as a test.
-
-    Counts what a read does rather than how long it takes: the saving is
-    one ``ls-remote`` and one ``fetch``, both round trips to GitHub, and
-    both are gone only if the read makes neither.
-    """
+    # The point of pushing into the shared checkout, stated as a test. Counts
+    # what a read does rather than how long it takes: the saving is one
+    # ``ls-remote`` and one ``fetch``, both round trips to GitHub, and both are
+    # gone only if the read makes neither.
     from unittest.mock import patch
 
     project = _StubProject("ck-shared-no-network")
@@ -914,7 +912,7 @@ def test_a_read_after_a_write_touches_the_network_not_at_all(
 def test_push_and_expire_falls_back_when_the_shared_checkout_wont_take_it(
     tmp_path,
 ) -> None:
-    """Anything that stops the local push leaves the old slow path."""
+    # Anything that stops the local push leaves the old slow path.
     from unittest.mock import patch
 
     project = _StubProject("ck-shared-push-fallback")
@@ -954,7 +952,7 @@ def test_push_and_expire_falls_back_when_the_shared_checkout_wont_take_it(
 def test_push_and_expire_leaves_a_dirty_shared_checkout_alone(
     tmp_path,
 ) -> None:
-    """A tree that doesn't match its head is not ours to overwrite."""
+    # A tree that doesn't match its head is not ours to overwrite.
     from unittest.mock import patch
 
     project = _StubProject("ck-shared-push-dirty")
@@ -995,7 +993,7 @@ def test_push_and_expire_leaves_a_dirty_shared_checkout_alone(
 def test_push_and_expire_without_a_shared_checkout_leaves_nothing_stale(
     tmp_path,
 ) -> None:
-    """Nobody has read the project yet, so there is nothing to catch up."""
+    # Nobody has read the project yet, so there is nothing to catch up.
     from unittest.mock import patch
 
     project = _StubProject("ck-shared-push-absent")
@@ -1020,7 +1018,7 @@ def test_push_and_expire_without_a_shared_checkout_leaves_nothing_stale(
 
 
 def test_expire_shared_read_clone_records_a_known_head(tmp_path) -> None:
-    """A push knows where the remote is, so the next read needn't ask."""
+    # A push knows where the remote is, so the next read needn't ask.
     from types import SimpleNamespace
     from unittest.mock import patch
 

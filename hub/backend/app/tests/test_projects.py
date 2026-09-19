@@ -168,14 +168,12 @@ def test_get_project_logged_in_without_min_access_level(db: Session) -> None:
 
 
 def test_get_project_survives_a_concurrent_access_insert(db: Session) -> None:
-    """Two requests resolving the same user's access don't 500 one of them.
-
-    Regression: the unique violation was caught, but the handler logged
-    ``current_user.id`` before rolling back. A failed flush expires every
-    attribute and refuses to load one back until the rollback, so reading
-    it raised PendingRollbackError out of the handler -- which is what a
-    burst of requests for one project (a page load) actually hit.
-    """
+    # Two requests resolving the same user's access don't 500 one of them.
+    # Regression: the unique violation was caught, but the handler logged
+    # ``current_user.id`` before rolling back. A failed flush expires every
+    # attribute and refuses to load one back until the rollback, so reading it
+    # raised PendingRollbackError out of the handler -- which is what a burst
+    # of requests for one project (a page load) actually hit.
     from types import SimpleNamespace
     from unittest.mock import patch
 

@@ -2,7 +2,6 @@ import { CheckCircleIcon } from "@chakra-ui/icons"
 import {
   Box,
   Button,
-  Collapse,
   Flex,
   Heading,
   Icon,
@@ -218,14 +217,20 @@ const ChecklistCard = ({
                     </Text>
                   ) : null}
                 </Flex>
-                <Collapse in={!step.done} animateOpacity>
+                {/* Hidden rather than collapsed. Animating a step's body
+                    shut means measuring it first, and the tallest one here
+                    (the three commands under "run the pipeline") paints at
+                    full height for a frame before the animation takes over,
+                    which is the flash. Kept mounted, since a step's action
+                    can own an open modal that ticks the step off itself. */}
+                <Box display={step.done ? "none" : "block"}>
                   <Text fontSize="sm" color="ui.dim" mt={0.5}>
                     {step.detail}
                   </Text>
                   {actions?.[step.key] ? (
                     <Box mt={2}>{actions[step.key]}</Box>
                   ) : null}
-                </Collapse>
+                </Box>
               </Box>
             </Flex>
           </Box>

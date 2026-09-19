@@ -837,16 +837,32 @@ def post_project(
         )
     # First check if template even exists, if specified
     if project_in.template is not None:
+        if project_in.template.count("/") != 1:
+            raise HTTPException(
+                422, "A template is named owner/project, e.g. calkit/example"
+            )
         template_owner_name, template_project_name = project_in.template.split(
             "/"
         )
-        template_project = app.projects.get_project(
-            session=session,
-            owner_name=template_owner_name,
-            project_name=template_project_name,
-            current_user=current_user,
-            min_access_level="read",
-        )
+        try:
+            template_project = app.projects.get_project(
+                session=session,
+                owner_name=template_owner_name,
+                project_name=template_project_name,
+                current_user=current_user,
+                min_access_level="read",
+            )
+        except HTTPException as e:
+            if e.status_code not in (403, 404):
+                raise
+            # The template came off a list this hub offered, so "Project not
+            # found" reads as though the project being created is the one
+            # missing. Say which template, and that it is the problem.
+            raise HTTPException(
+                404,
+                f"Template {project_in.template} isn't available on this "
+                "hub; pick another one",
+            )
     # Validate the git repo URL is on github.com to prevent SSRF
     parsed_git_url = urlparse(project_in.git_repo_url)
     if parsed_git_url.hostname not in ("github.com", "www.github.com"):

@@ -69,6 +69,22 @@ def check_dep_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def add_to_path(directory: str) -> None:
+    """Prepend a directory to this process's `PATH`.
+
+    Installers that edit shell startup files don't affect this already
+    running process, so anything we want to find right after installing
+    needs to be added here.
+    """
+    directory = os.path.expanduser(directory)
+    if not os.path.isdir(directory):
+        return
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    if directory in entries:
+        return
+    os.environ["PATH"] = os.pathsep.join([directory] + entries)
+
+
 def load_calkit_info(
     wdir=None,
     process_includes: bool | str | list[str] = False,
@@ -477,6 +493,15 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
     def installer_download_url(self) -> str | None:
         return None
 
+    @property
+    def path_add(self) -> str | None:
+        """A directory the installer puts its executables in.
+
+        Returned when the installer only wires it up through shell startup
+        files, so this process needs it added before the re-check.
+        """
+        return None
+
     def install(self) -> bool:
         """Install the app, returning a bool indicating success."""
         # Some apps have no installer here, e.g., Git on Linux comes from
@@ -520,6 +545,8 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
             msg_box.setStandardButtons(QMessageBox.Ok)
             if msg_box.exec() == QMessageBox.Ok:
                 restart()
+        if self.path_add is not None:
+            add_to_path(self.path_add)
         installed = self.refresh()
         for step in self.child_steps:
             step.refresh()
@@ -1054,6 +1081,10 @@ class CalkitInstall(DependencyInstall):
             return ["uv", "tool", "install", "calkit-python"]
         return ["calkit", "upgrade"]
 
+    @property
+    def path_add(self) -> str | None:
+        return "~/.local/bin"
+
 
 class UvInstall(DependencyInstall):
     @property
@@ -1080,6 +1111,10 @@ class UvInstall(DependencyInstall):
             "-c",
             "curl -LsSf https://astral.sh/uv/install.sh | sh",
         ]
+
+    @property
+    def path_add(self) -> str | None:
+        return "~/.local/bin"
 
 
 def make_setup_step_widgets() -> dict[str, QWidget]:

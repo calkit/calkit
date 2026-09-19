@@ -15,14 +15,18 @@ import type {
   AddOrgMemberErrors,
   AddOrgMemberResponses,
   BodyLoginLoginAccessToken,
+  BodyProjectsPostContribRequestResponse,
   BodyProjectsPostProjectDatasetUpload,
   BodyProjectsPostProjectFigure,
+  BodyProjectsPostProjectLatexReview,
   BodyProjectsPostProjectOverleafPublication,
   BodyProjectsPostProjectPublication,
   BodyProjectsPostProjectUpload,
   BodyProjectsPutProjectContents,
   CommentReply,
   ContentPatch,
+  ContribRequestPatch,
+  ContribRequestPost,
   CreateReleaseGithubReleaseErrors,
   CreateReleaseGithubReleaseResponses,
   CreateReleaseShareErrors,
@@ -85,6 +89,10 @@ import type {
   GetAccountResponses,
   GetArxivPdfErrors,
   GetArxivPdfResponses,
+  GetContribRequestByTokenErrors,
+  GetContribRequestByTokenResponses,
+  GetContribRequestDocumentErrors,
+  GetContribRequestDocumentResponses,
   GetCurrentUserResponses,
   GetDatasetsErrors,
   GetDatasetsResponses,
@@ -125,6 +133,8 @@ import type {
   GetProjectContents2Responses,
   GetProjectContentsErrors,
   GetProjectContentsResponses,
+  GetProjectContribRequestsErrors,
+  GetProjectContribRequestsResponses,
   GetProjectDatasetCsvErrors,
   GetProjectDatasetCsvResponses,
   GetProjectDatasetErrors,
@@ -168,6 +178,10 @@ import type {
   GetProjectInvitationsResponses,
   GetProjectIssuesErrors,
   GetProjectIssuesResponses,
+  GetProjectLatexReviewErrors,
+  GetProjectLatexReviewResponses,
+  GetProjectLatexReviewsErrors,
+  GetProjectLatexReviewsResponses,
   GetProjectNotebooksErrors,
   GetProjectNotebooksResponses,
   GetProjectOverleafSyncStatusErrors,
@@ -247,6 +261,7 @@ import type {
   ImportGithubReleasesResponses,
   IssuePatch,
   IssuePost,
+  LatexReviewMergePost,
   ListReleaseSharesErrors,
   ListReleaseSharesResponses,
   LoginAccessTokenErrors,
@@ -281,6 +296,8 @@ import type {
   PatchProjectCommentResponses,
   PatchProjectContentsErrors,
   PatchProjectContentsResponses,
+  PatchProjectContribRequestErrors,
+  PatchProjectContribRequestResponses,
   PatchProjectErrors,
   PatchProjectIssueErrors,
   PatchProjectIssueResponses,
@@ -289,6 +306,8 @@ import type {
   PatchUserTokenResponses,
   PipelineStageEdit,
   PipelineStagePut,
+  PostContribRequestResponseErrors,
+  PostContribRequestResponseResponses,
   PostDiscountCodeErrors,
   PostDiscountCodeResponses,
   PostExternalReleaseErrors,
@@ -311,6 +330,8 @@ import type {
   PostProjectCommentReplyErrors,
   PostProjectCommentReplyResponses,
   PostProjectCommentResponses,
+  PostProjectContribRequestErrors,
+  PostProjectContribRequestResponses,
   PostProjectDatasetErrors,
   PostProjectDatasetResponses,
   PostProjectDatasetUploadErrors,
@@ -338,6 +359,10 @@ import type {
   PostProjectInvitationResponses,
   PostProjectIssueErrors,
   PostProjectIssueResponses,
+  PostProjectLatexReviewErrors,
+  PostProjectLatexReviewMergeErrors,
+  PostProjectLatexReviewMergeResponses,
+  PostProjectLatexReviewResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
   PostProjectMiscErrors,
@@ -7507,6 +7532,455 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/activity",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get Project Latex Reviews
+   *
+   * Reviewed documents in the project, optionally for one .tex source.
+   *
+   * Documents that can't be read as Calkit exports, or whose source is
+   * gone, are left out rather than failing the whole list.
+   */
+  public static getProjectLatexReviews<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      source?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectLatexReviewsResponses,
+    GetProjectLatexReviewsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "source" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectLatexReviewsResponses,
+      GetProjectLatexReviewsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-reviews",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Latex Review
+   *
+   * Add a reviewed document to the project.
+   *
+   * It lands under ``reviews/`` tracked by DVC, so the repo records that
+   * the review happened without carrying the binary, and comes back with
+   * what merging it would do.
+   */
+  public static postProjectLatexReview<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      bodyProjectsPostProjectLatexReview: BodyProjectsPostProjectLatexReview
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexReviewResponses,
+    PostProjectLatexReviewErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "bodyProjectsPostProjectLatexReview", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexReviewResponses,
+      PostProjectLatexReviewErrors,
+      ThrowOnError
+    >({
+      ...formDataBodySerializer,
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-reviews",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": null,
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Latex Review
+   *
+   * What merging a reviewed document would do to the source now.
+   */
+  public static getProjectLatexReview<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectLatexReviewResponses,
+    GetProjectLatexReviewErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectLatexReviewResponses,
+      GetProjectLatexReviewErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-reviews/{path}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Latex Review Merge
+   *
+   * Write the lead's decisions into the source and commit them.
+   *
+   * Only what's named is decided; anything else stays open for a later
+   * pass, here or with the CLI. Rejected and dismissed items are recorded
+   * in the merge record so they aren't offered again.
+   */
+  public static postProjectLatexReviewMerge<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      latexReviewMergePost: LatexReviewMergePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexReviewMergeResponses,
+    PostProjectLatexReviewMergeErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "path" },
+            { key: "latexReviewMergePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexReviewMergeResponses,
+      PostProjectLatexReviewMergeErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-reviews/{path}/merge",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Contrib Requests
+   */
+  public static getProjectContribRequests<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      target_path?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectContribRequestsResponses,
+    GetProjectContribRequestsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "target_path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectContribRequestsResponses,
+      GetProjectContribRequestsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/contrib-requests",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Contrib Request
+   *
+   * Send a request for a review of a publication.
+   *
+   * Records it in the repo, mints the link, and emails it if there's a
+   * recipient and email is configured. The raw token comes back once.
+   */
+  public static postProjectContribRequest<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      contribRequestPost: ContribRequestPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectContribRequestResponses,
+    PostProjectContribRequestErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "contribRequestPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectContribRequestResponses,
+      PostProjectContribRequestErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/contrib-requests",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Patch Project Contrib Request
+   *
+   * Close or revoke a request, or change its message or dates.
+   *
+   * The change is committed to the request's record in the repo too.
+   */
+  public static patchProjectContribRequest<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      request_id: string
+      contribRequestPatch: ContribRequestPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PatchProjectContribRequestResponses,
+    PatchProjectContribRequestErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "request_id" },
+            { key: "contribRequestPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      PatchProjectContribRequestResponses,
+      PatchProjectContribRequestErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/contrib-requests/{request_id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Contrib Request By Token
+   *
+   * What the recipient of a link sees: the ask, and whether they can
+   * still answer it.
+   */
+  public static getContribRequestByToken<ThrowOnError extends boolean = true>(
+    parameters: {
+      token: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetContribRequestByTokenResponses,
+    GetContribRequestByTokenErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "token" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetContribRequestByTokenResponses,
+      GetContribRequestByTokenErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/contrib-requests/{token}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Contrib Request Document
+   *
+   * The document that went out with the request, e.g., the Word copy.
+   */
+  public static getContribRequestDocument<ThrowOnError extends boolean = true>(
+    parameters: {
+      token: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetContribRequestDocumentResponses,
+    GetContribRequestDocumentErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "token" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetContribRequestDocumentResponses,
+      GetContribRequestDocumentErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      url: "/contrib-requests/{token}/document",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Contrib Request Response
+   *
+   * Hand a reviewed document back.
+   *
+   * It's saved to the project under ``reviews/`` and committed on behalf
+   * of whoever sent the request, authored by the reviewer, and recorded
+   * against the request in the repo and here.
+   */
+  public static postContribRequestResponse<ThrowOnError extends boolean = true>(
+    parameters: {
+      token: string
+      bodyProjectsPostContribRequestResponse: BodyProjectsPostContribRequestResponse
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostContribRequestResponseResponses,
+    PostContribRequestResponseErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "token" },
+            { key: "bodyProjectsPostContribRequestResponse", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostContribRequestResponseResponses,
+      PostContribRequestResponseErrors,
+      ThrowOnError
+    >({
+      ...formDataBodySerializer,
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/contrib-requests/{token}/responses",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": null,
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

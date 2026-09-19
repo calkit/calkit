@@ -48,6 +48,7 @@ import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import TipBubble from "../../../../../components/Onboarding/TipBubble"
+import DocxReviews from "../../../../../components/Publications/DocxReviews"
 import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewPublication from "../../../../../components/Publications/NewPublication"
@@ -708,6 +709,17 @@ function Publications() {
                       path={selectedPub.path}
                       userHasWriteAccess={userHasWriteAccess}
                       kind="publication"
+                    />
+                  </Box>
+                )}
+                {texPath && (
+                  <Box bg={secBgColor} borderRadius="lg" p={3}>
+                    <DocxReviews
+                      ownerName={accountName}
+                      projectName={projectName}
+                      publicationPath={selectedPub.path}
+                      source={texPath}
+                      userHasWriteAccess={userHasWriteAccess}
                     />
                   </Box>
                 )}

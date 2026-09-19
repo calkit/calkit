@@ -139,6 +139,39 @@ def generate_release_share_email(
     return EmailData(html_content=html_content, subject=subject)
 
 
+def generate_contrib_request_email(
+    email_to: str,
+    project_name: str,
+    title: str,
+    link: str,
+    inviter: str,
+    permission: str,
+    note: str | None = None,
+    due: str | None = None,
+) -> EmailData:
+    subject = f"{inviter} asked for your review: {title}"
+    action = {
+        "view": "look at",
+        "comment": "comment on",
+        "suggest": "review and suggest changes to",
+        "edit": "edit",
+    }.get(permission, "review")
+    html_content = render_email_template(
+        template_name="contrib_request.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "shared_project": project_name,
+            "title": title,
+            "inviter": inviter,
+            "action": action,
+            "note": note,
+            "due": due,
+            "link": link,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
 def generate_project_invitation_email(
     email_to: str,
     project_name: str,

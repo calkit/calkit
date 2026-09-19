@@ -351,6 +351,158 @@ their way to turn it off, and one who does loses only the author on
 those edits.
 `--comment-only` still locks, since that one is a deliberate choice.
 
+## The hub side, as built
+
+The first hub version is the stateless design above with a browser on
+the lead's end, and nothing of it lives only in the hub:
+
+- A reviewer with write access uploads the returned `.docx` from the
+  publication page.
+  It's validated as a Calkit export whose source is in the repo, then
+  saved under `reviews/`, `dvc add`ed, pushed to the project's storage,
+  and committed, which is exactly what `calkit save reviews/x.docx`
+  does from a laptop.
+  `reviews/` is a convention rather than a schema; the document
+  identifies its own export, so listing is a scan for `.docx` under
+  that directory.
+- The merge is split into a plan and an apply step in `calkit.review`,
+  shared by `merge-docx` and the hub.
+  The plan is a list of per-paragraph edits and per-thread comments,
+  each with a stable key: the paragraph's bookmark name for an edit,
+  Word's `paraId` for a thread root.
+  Both survive the document's whole life, so a decision can be
+  remembered by key.
+- The hub shows the plan and the lead decides item by item.
+  The CLI's reading of a document, "apply what Word already settled,
+  warn about the rest," is the special case where nothing is passed.
+  A tracked change the reviewer left pending is a decision the hub can
+  take without Word: accepting writes the paragraph's accept-all text,
+  which the parser already produces.
+  Granularity is the paragraph, since that's what the bookmark anchors;
+  two tracked changes in one paragraph are accepted or rejected
+  together, and a lead who wants to split them opens Word.
+- Rejections and dismissals go in the merge record under
+  `.calkit/latex/docx-merges/`, committed with the source edits they
+  accompany, and the next plan reads them back.
+  That's the memory the stateless section said sessions would add,
+  and it turned out to fit in the record that already existed.
+  A pass that decides nothing writes no record, so the history is of
+  decisions rather than page loads.
+
+The request link is the thin layer on top of that.
+A lead creates a review request against a publication, naming a
+recipient and optionally the Word copy to send, and the hub mints a
+token whose hash it keeps.
+The request's own record, everything the lead decided about it and
+every response it received, is a YAML file under `.calkit/requests/`
+committed to the repo, so the hub row is an index over repo data
+rather than the only copy.
+The recipient's page needs no account: it shows the ask, serves the
+document, and takes the marked-up copy back, which goes through the
+same upload path as a collaborator's and is committed on behalf of the
+lead with the reviewer as author.
+Only outbound requests to a named recipient, targeting a publication,
+are built; the model already carries the rest (public calls, inbound
+asks, other artifact kinds) for the branch-based path below.
+
+## Direct editing in the browser: the branch is the `.docx`
+
+The other half of the ask is a collaborator who edits the LaTeX on the
+hub rather than in Word, from a request link, with what they did coming
+back as a set of changes the lead can pick through.
+Everything above transfers, because the `.docx` was only ever a carrier
+for three things: a pinned original, a set of paragraph edits, and a
+set of comment threads.
+A branch carries the same three:
+
+- **The pinned original** is the commit the request was cut at.
+  No custom XML part needed; the branch's merge base is the original.
+- **Edits** are the diff of the reviewed `.tex` files between the merge
+  base and the branch tip, split at the same paragraph blocks
+  `calkit.latex.blocks` produces for the `.docx` path.
+  A block that differs is one `LatexDocxEdit` with the same fields:
+  the block as sent, the block as proposed, the lines it maps to at
+  HEAD, and a key.
+  The key can't be a bookmark, since there's no document to bookmark,
+  but the same function that names bookmarks (a hash of the path plus
+  the line at the pinned revision) names the block.
+  Placement against a HEAD that has moved on is the existing
+  `find_block` search, so a lead who kept writing while the review was
+  out gets the same "unplaced, apply by hand" floor rather than a
+  conflict.
+- **Comments** are `% COMMENT` blocks the editor writes into the branch,
+  in the format the tutorial documents.
+  That format was designed to be the repo's own representation of a
+  thread, and it's already what a Word comment becomes on merge, so a
+  comment typed in the browser and a comment typed in Word are the same
+  thing at rest.
+  The plan reads them out of the diff the way it reads them out of
+  `comments.xml`.
+
+So the reviewer's side is an editor on a branch, and the lead's side is
+the triage page that already exists, fed by `calkit.review.plan` with a
+branch instead of a `.docx`.
+Accepting writes the block to the default branch, which is a
+cherry-pick at paragraph granularity, and the record of what was
+accepted and rejected goes in the same merge record.
+Rejecting everything and deleting the branch leaves the record and
+nothing else, which is the "a response is data, not a branch" argument
+from #1580 with the branch demoted to a transport.
+
+The editor itself should be the existing LaTeX editor scoped to the
+request: the files the target resolves to, or a section of one,
+committing to the response branch rather than the default branch.
+Compilation preview runs the project's own `latex` stage on the branch,
+which is what the pipeline already knows how to do.
+
+### What the request adds, and where it lives
+
+The request is the only piece that needs a server: someone has to mint
+a link, receive a visit, and check a token.
+Per the split above, the hub keeps the token hash, the reply key, sent
+and viewed state, and any response not yet pulled.
+Everything the lead decided is a file in the repo.
+The `ContribRequest` fields that are decisions (target, permission,
+identity requirement, due date, round, status) belong in a tracked
+file, `.calkit/requests/<id>.yaml` or a list in one file, and the hub
+row points at it.
+That's the part of #1580 that hasn't been built, and the docx path
+above was deliberately built without it so it could ship first.
+
+Targets aren't only publications.
+The request model already names figures, the figure collection,
+presentations, datasets, notebooks, stages, and the whole project, and
+the branch-as-response design doesn't care what's on the branch.
+What differs per kind is the reviewer's surface (a figure gets its
+script and a re-run, a dataset gets a viewer and a comment box, the
+whole project gets the project shell in a read-only-plus-suggest mode)
+and how the plan splits the diff into items.
+Text splits at paragraph blocks; a script splits at hunks; a figure is
+one item with a before-and-after render.
+A public call for contributions is a request with no recipient and
+`public` set, listed on the project page, that mints a response branch
+per responder.
+
+### Comments have to leave the hub's database
+
+The publication page's comments and highlights are hub rows today,
+which is the one place this design is still siloed.
+The `.docx` path doesn't touch them, since its comments go to the
+source as `% COMMENT` blocks, and the branch path above does the same,
+so the two review flows are already distributed.
+The remaining question is the comments people type on the hub without
+a request, and the tasks a review turns into.
+
+The direction is the one #1580 sketched: comments on prose live in the
+source, comments on anything else and the task board live in
+[git-bug](https://github.com/git-bug/git-bug)-style objects in the
+repo, and the hub is a view that syncs on push.
+The `% COMMENT` format is the first of those to exist; a comment on a
+figure needs an anchor that isn't a source line, which is what the
+git-bug entity gives it.
+Migrating the existing rows is a one-time export once the target
+exists.
+
 ## Repo-first reviews with the hub as a view (later)
 
 Everything in this section is the layer that can be added on top of the

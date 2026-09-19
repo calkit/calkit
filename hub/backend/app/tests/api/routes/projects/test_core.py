@@ -3125,6 +3125,112 @@ def test_project_pipeline_stage_edit(
         assert "slurm" in ryaml.load(r.json()["yaml"])
 
 
+def test_project_pipeline_edit(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    """The whole pipeline can be replaced without disturbing the rest of
+    calkit.yaml."""
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    url = f"/projects/{owner_name}/{project.name}/pipeline"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "scripts/plot.py",
+                }
+            }
+        },
+        # Everything else in the file, which an edit here must leave alone
+        "datasets": [{"path": "data/raw.csv", "title": "Raw"}],
+        "questions": ["Does it work?"],
+    }
+
+    def fake_ck_info(*args, **kwargs) -> dict:
+        return ck_info
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=fake_ck_info,
+        ),
+        # Saving recompiles dvc.yaml from the whole project, which this
+        # stand-in repo can't support; the compile has its own tests
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
+    ):
+        # The page shows the `pipeline:` key and its body, so that is what
+        # comes back, and a second stage is added by sending it whole
+        edited = (
+            "pipeline:\n"
+            "  stages:\n"
+            "    plot:\n"
+            "      kind: python-script\n"
+            "      environment: py\n"
+            "      script_path: scripts/plot.py\n"
+            "    # keep this comment\n"
+            "    report:\n"
+            "      kind: latex\n"
+            "      environment: tex\n"
+            "      target_path: paper/paper.tex\n"
+        )
+        r = client.put(
+            url,
+            headers=headers,
+            json={"yaml": edited, "message": "Add report"},
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert list(written["pipeline"]["stages"]) == ["plot", "report"]
+        # Nothing outside the pipeline was touched
+        assert written["datasets"] == [
+            {"path": "data/raw.csv", "title": "Raw"}
+        ]
+        assert written["questions"] == ["Does it work?"]
+        # Comments survive the round trip, in the response and on disk
+        assert "# keep this comment" in r.json()["yaml"]
+        assert "# keep this comment" in (tmp_path / "calkit.yaml").read_text()
+        # A body without the wrapper is what someone who deleted the
+        # `pipeline:` line would send, so it means the same thing
+        r = client.put(
+            url,
+            headers=headers,
+            json={
+                "yaml": (
+                    "stages:\n"
+                    "  plot:\n"
+                    "    kind: python-script\n"
+                    "    environment: py\n"
+                    "    script_path: scripts/plot.py\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert list(
+            ryaml.load((tmp_path / "calkit.yaml").read_text())["pipeline"][
+                "stages"
+            ]
+        ) == ["plot"]
+        # Bad YAML, a non-mapping, an unknown kind, and a missing required
+        # field are all rejected before anything is written
+        for bad in [
+            "pipeline:\n  stages:\n   bad indent: true\n",
+            "- not a mapping\n",
+            "stages:\n  plot:\n    kind: not-a-real-kind\n",
+            "stages:\n  plot:\n    kind: latex\n    environment: tex\n",
+        ]:
+            r = client.put(url, headers=headers, json={"yaml": bad})
+            assert r.status_code == 422, f"{bad!r} -> {r.status_code}"
+        assert list(
+            ryaml.load((tmp_path / "calkit.yaml").read_text())["pipeline"][
+                "stages"
+            ]
+        ) == ["plot"]
+
+
 def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:
     # A declared path is joined onto the repo's working dir and written to,
     # so anything that could resolve outside the project is refused

@@ -18,6 +18,7 @@ in ``index_project``; the warm job picks it up without further wiring.
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 from sqlmodel import Session
 
@@ -26,7 +27,7 @@ from app.models import Project, Question
 
 
 def index_project(
-    session: Session, project: Project, ck_info: dict
+    session: Session, project: Project, ck_info: dict[str, Any]
 ) -> dict[str, int]:
     """Bring every indexed artifact of *project* in line with calkit.yaml.
 
@@ -35,7 +36,9 @@ def index_project(
     return {"questions": index_questions(session, project, ck_info)}
 
 
-def index_questions(session: Session, project: Project, ck_info: dict) -> int:
+def index_questions(
+    session: Session, project: Project, ck_info: dict[str, Any]
+) -> int:
     """Index the project's research questions, by position.
 
     A question has no identifier of its own in ``calkit.yaml`` -- it is the
@@ -68,7 +71,7 @@ def index_questions(session: Session, project: Project, ck_info: dict) -> int:
     return len(questions_ck)
 
 
-def extract_question_text(question: str | dict) -> str:
+def extract_question_text(question: str | dict[str, Any]) -> str:
     """Extract the question text from a calkit.yaml question entry.
 
     A question may be a plain string or an object with a ``question`` field.

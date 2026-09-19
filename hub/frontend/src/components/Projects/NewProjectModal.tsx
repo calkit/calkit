@@ -58,14 +58,14 @@ interface ProjectFormValues extends ProjectPost {
 }
 
 /** Where the project comes from. One flat choice rather than a wizard. */
-type Source = "github" | "upload" | "template" | "overleaf" | "empty"
+type Source = "template" | "empty" | "github" | "upload" | "overleaf"
 
 const SOURCE_LABELS: { value: Source; label: string }[] = [
+  { value: "template", label: "A new project from a template" },
+  { value: "empty", label: "An empty project" },
   { value: "github", label: "An existing GitHub repo" },
   { value: "overleaf", label: "An existing Overleaf project" },
   { value: "upload", label: "A zipped folder upload" },
-  { value: "template", label: "A new project from a template" },
-  { value: "empty", label: "An empty project" },
 ]
 
 const SOURCE_FOR_PATH: Record<StartPath, Source> = {
@@ -90,7 +90,7 @@ function NewProjectForm({
       ? "template"
       : initialPath
         ? SOURCE_FOR_PATH[initialPath]
-        : "github",
+        : "template",
   )
   // The mutation below still branches on these two, so the shape of the
   // request is unchanged by collapsing the wizard into one screen.
@@ -319,7 +319,6 @@ function NewProjectForm({
   }
   return (
     <Box as="form" onSubmit={handleSubmit(onSubmit)}>
-      {/* TODO: rewrite this heading */}
       <Heading size="lg" mb={2}>
         New project
       </Heading>

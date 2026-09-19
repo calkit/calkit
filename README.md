@@ -28,28 +28,32 @@ split across multiple systems or apps,
 your project becomes a version-controlled, self-contained "calculation kit"
 tying together literature review, planning, data collection,
 analysis, and writing,
-so you, your collaborators, and your readers can go from raw data to
+so you, your collaborators, and your readers can verify the full
+chain from raw data to
 research article with a single command.
-That means faster iteration, fewer mistakes,
-and no more wondering how a figure was made six months after submitting
-the paper.
+This enables faster, more confident, and more frequent iteration,
+which in turn produces
+[higher quality results](https://doi.org/10.1145/1640233.1640260).
+It also makes it easy to check the work of an AI agent,
+i.e., that the outputs it produced as evidence to answer research questions
+came from a transparent,
+deterministic pipeline, not hallucinations.
 
-[Success comes from iteration](https://doi.org/10.1145/1640233.1640260),
-and iteration is made possible through _integration_.
-Calkit allows all stages of a research project to live in the
-same repository, making feedback loops both inside and across stages
-fast and painless, providing full context to both humans and AI agents.
-This is important because the stages are coupled.
+Calkit also makes it natural to keep all stages of a research project
+together in the
+same repository, providing full context to both humans and AI agents.
+This is important because the stages are tightly coupled.
 A change in a dataset requires reanalyzing,
 which creates a change in a figure,
 which creates a change in a research article.
-Coupled components belong close together and connected.
+Coupled components belong close together and connected,
+and cross-stage iteration is enabled by _integration_.
 
-Software teams learned the importance of these principles long ago,
-integrating development, testing, deployment, and infrastructure
-into the same repo, and many times within the same team,
+Software teams learned the importance of integration long ago,
+unifying design, development, testing, deployment, and infrastructure
+in the same repo, often within the same team,
 with automation across the entire lifecycle.
-Similar productivity and quality gains can be had in research.
+Research can benefit in similar ways.
 
 <!-- https://docs.google.com/drawings/d/1h-OvPG0-PMIaayMNnQvERMjXTebFBhKQeDnIC9z_jp8/edit -->
 
@@ -66,12 +70,12 @@ and LaTeX for document compilation.
 If you and your team can work effectively with a system like that,
 there's no need for any additional complexity.
 
-And yet these practices are still not common,
+However, these practices are still not common,
 resulting in most compendiums
 [failing to reproduce](https://doi.org/10.1038/s41597-022-01143-6).
 Many still silo the code away from the data,
 and the analysis from the writing.
-Many are "multi-button"
+Many are instead "multi-button"
 and irreproducible because their stages are not connected
 and important setup or execution information is omitted.
 
@@ -82,7 +86,7 @@ There are additional challenges:
    Automating the transfer of data to and from there requires additional
    work,
    and it becomes important to use a
-   content-aware pipeline system, else steps are inefficiently repeated
+   content-aware pipeline system, otherwise steps are inefficiently repeated
    or mistakenly skipped.
 2. Large data files need to be kept in version control along with the rest.
    A typical solution may involve siloing data files away on a shared cloud
@@ -296,12 +300,14 @@ see
 ### Calkit Assistant
 
 For Windows users, the
-[Calkit Assistant](https://github.com/calkit/calkit-assistant)
+[Calkit Assistant](https://github.com/calkit/calkit/tree/main/assistant)
 app is the easiest way to get everything set up and ready to work in
 VS Code, which can then be used as the primary app for working on
 all scientific or analytical computing projects.
+Download the executable from the latest
+[assistant release](https://github.com/calkit/calkit/releases?q=assistant%2Fv&expanded=true).
 
-![Calkit Assistant](https://github.com/calkit/calkit-assistant/blob/main/resources/screenshot.png?raw=true)
+![Calkit Assistant](https://github.com/calkit/calkit/blob/main/assistant/resources/screenshot.png?raw=true)
 
 <!-- END INCLUDE -->
 
@@ -310,9 +316,9 @@ all scientific or analytical computing projects.
 <!-- INCLUDE: docs/quickstart.md +1 -->
 
 <!-- prettier-ignore -->
-!!! note
-    `ck` is an abbreviated alias for the `calkit` executable.
-    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
+> [!NOTE]
+> `ck` is an abbreviated alias for the `calkit` executable.
+> All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
 
 ### From an existing project
 
@@ -345,9 +351,12 @@ You'll see that the pipeline has a stage that is out-of-date:
 
 ```sh
 ---------------------------- Pipeline ----------------------------
-analyze:
-        changed deps:
-                modified:           scripts/analyze.py
+Stale stages:
+        analyze:
+          stale outputs:
+            data/results.csv
+          modified inputs:
+            scripts/analyze.py
 ```
 
 This can be fixed with another call to `calkit run`.
@@ -392,9 +401,12 @@ For example:
 
 ```sh
 ---------------------------- Pipeline ----------------------------
-build-paper:
-        changed deps:
-                modified:           paper/paper.tex
+Stale stages:
+        build-paper:
+          stale outputs:
+            paper/paper.pdf
+          modified inputs:
+            paper/paper.tex
 ```
 
 Execute `calkit run` again to bring everything up-to-date.

@@ -148,6 +148,10 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
               bg="orange.400"
               alignSelf="center"
               flexShrink={0}
+              // A bare div with a label is invisible to a screen reader;
+              // the role is what makes it an announceable status rather
+              // than decoration.
+              role="img"
               aria-label="Pipeline is out of date"
             />
           </Tooltip>

@@ -1350,7 +1350,17 @@ def test_get_project_results_autodetects_and_reads_ref(
         ) as mock_get_repo,
         patch(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
-            return_value={},
+            return_value={
+                "results": [
+                    # A declared result whose name is the key it is stored
+                    # under, not something written to be read
+                    {"path": "results/stats.json", "name": "r_squared"},
+                    # A declared result with neither, so the path is tidied
+                    {"path": "results/mean-velocity.json"},
+                    # A title someone wrote is left exactly as it is
+                    {"path": "results/rmse.json", "title": "RMSE by run"},
+                ]
+            },
         ) as mock_ck_for_ref,
         patch(
             "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
@@ -1366,11 +1376,19 @@ def test_get_project_results_autodetects_and_reads_ref(
             "/projects/test-owner/test-project/results?ref=some-branch"
         )
     assert response.status_code == 200, response.text
-    paths = {res["path"] for res in response.json()}
+    body = response.json()
+    paths = {res["path"] for res in body}
     for path in detected_paths:
         assert path in paths, f"Expected {path!r} to be detected"
     for path in ignored_paths:
         assert path not in paths, f"Expected {path!r} to be ignored"
+    titles = {res["path"]: res["title"] for res in body}
+    # A derived title reads as a title, whether it came from the name or
+    # the path; one the user wrote is never rewritten
+    assert titles["results/stats.json"] == "R squared"
+    assert titles["results/mean-velocity.json"] == "Mean velocity"
+    assert titles["results/rmse.json"] == "RMSE by run"
+    assert titles["results/data.csv"] == "Data"
     assert mock_get_repo.call_args.kwargs["ref"] == "some-branch"
     assert mock_ck_for_ref.call_args.kwargs["ref"] == "some-branch"
 

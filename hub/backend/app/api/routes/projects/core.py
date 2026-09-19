@@ -3271,8 +3271,10 @@ def _build_results(
         res = dict(res)
         if not res.get("title"):
             # A result's name is a better title than its path, since several
-            # results can share one file and only the name tells them apart
-            res["title"] = res.get("name") or title_from_path(res["path"])
+            # results can share one file and only the name tells them apart.
+            # Both go through the same tidying, since a name is a key like
+            # ``r_squared_quadratic`` rather than something written to read.
+            res["title"] = title_from_path(res.get("name") or res["path"])
         results.append(res)
     declared_paths = {res["path"] for res in results}
 

@@ -35,6 +35,7 @@ import { z } from "zod"
 import { ProjectsService } from "../../client"
 import ActionsMenu from "../../components/Common/ActionsMenu"
 import ClearableInput from "../../components/Common/ClearableInput"
+import LoadingSpinner from "../../components/Common/LoadingSpinner"
 import AccountSetupCard from "../../components/Onboarding/AccountSetupCard"
 import FeaturedProjects from "../../components/Onboarding/FeaturedProjects"
 import StartPaths from "../../components/Onboarding/StartPaths"
@@ -421,7 +422,7 @@ function Home() {
   // for the tick before the request starts. Treating that gap as "signed out"
   // flashes the landing page at someone who is signed in.
   if (isLoading || (!user && isLoggedIn())) {
-    return null
+    return <LoadingSpinner height="60vh" />
   }
   if (!user) {
     return (
@@ -431,7 +432,7 @@ function Home() {
     )
   }
   if (countQuery.isPending) {
-    return null
+    return <LoadingSpinner height="60vh" />
   }
   // A failed count says nothing about whether there are projects, so it
   // falls through to the table, which shows its own error, rather than

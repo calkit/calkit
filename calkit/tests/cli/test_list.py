@@ -43,11 +43,37 @@ def test_list_releases(tmp_dir):
 
 
 def test_list_templates():
-    subprocess.check_call("calkit list templates", shell=True)
+    """Templates are grouped by kind, since they aren't interchangeable."""
+    out = subprocess.check_output(["calkit", "list", "templates"], text=True)
+    assert "latex:" in out and "project:" in out
+    # A LaTeX template is named within the package; a project template
+    # names a project on a hub, so it isn't `project/example-r`
+    assert "  latex/article" in out
+    assert "  calkit/example-r" in out
+    assert "project/example-r" not in out
+    # Each one says what it is, which is the point of a listing
+    assert "Article (generic)" in out
     out = subprocess.check_output(
         ["calkit", "list", "templates", "--json"], text=True
     )
-    assert "latex/article" in json.loads(out)
+    groups = json.loads(out)
+    assert set(groups) == {"latex", "project"}
+    assert "latex/article" in [t["name"] for t in groups["latex"]]
+    assert all(t["title"] for t in groups["project"])
+    # One kind at a time, for a picker that only wants one
+    out = subprocess.check_output(
+        ["calkit", "list", "templates", "--kind", "project", "--json"],
+        text=True,
+    )
+    assert set(json.loads(out)) == {"project"}
+    assert (
+        subprocess.call(
+            ["calkit", "list", "templates", "--kind", "nope"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        != 0
+    )
 
 
 def test_list_stages(tmp_dir):

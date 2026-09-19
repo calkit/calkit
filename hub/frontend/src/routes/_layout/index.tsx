@@ -363,7 +363,7 @@ function LandingPage() {
           phase usually lives in. One place for all four is the pitch. */}
       <Box mb={4}>
         <Heading size="md" mb={1}>
-          Faster iteration from tighter integration
+          Faster iteration from better integration
         </Heading>
         <Text color="ui.dim" fontSize="sm">
           Change the data and the analysis, figures, and paper all follow

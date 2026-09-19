@@ -27,7 +27,7 @@ import {
   createFileRoute,
   useNavigate,
 } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FiArrowRight } from "react-icons/fi"
 import { useDebounce } from "use-debounce"
 import { z } from "zod"
@@ -421,8 +421,13 @@ function Home() {
   // doesn't reopen it.
   const { welcome } = Route.useSearch()
   const newProjectModal = useDisclosure()
+  // Acted on once and only once. Creating a project refetches the count,
+  // which runs this again, and a second navigate would land on home over
+  // the project that was just opened.
+  const welcomeHandled = useRef(false)
   useEffect(() => {
-    if (!welcome || !countQuery.isSuccess) return
+    if (welcomeHandled.current || !welcome || !countQuery.isSuccess) return
+    welcomeHandled.current = true
     if (projectCount === 0) {
       newProjectModal.onOpen()
     }

@@ -70,7 +70,7 @@ after 30 days.
 
 ### What's stored in your browser
 
-- Sign-in tokens, so you stay signed in.
+- Login tokens, so you stay signed in.
 - Small preferences, such as light or dark mode and where to return to
   after signing in.
 - Your answer to the usage information question.
@@ -120,7 +120,7 @@ particular, [DVC](https://dvc.org/doc/user-guide/analytics) sends anonymous
 usage statistics to its developers by default. To turn that off:
 
 ```sh
-dvc config --global core.analytics false
+calkit dvc config --global core.analytics false
 ```
 
 ## Browser extension

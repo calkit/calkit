@@ -121,11 +121,10 @@ export function buildProjectSteps({
     },
     {
       key: "run",
-      title: "Run the pipeline on your machine",
+      title: "Run the pipeline",
       detail:
-        "Install the CLI, clone the project, and run it end to end. " +
-        "What it produces gets pushed back here, where the project page " +
-        "picks it up.",
+        "Install the CLI, clone the project, run it end to end. " +
+        "and push the results back here.",
       // Having run at all is the milestone; a run that has since gone
       // stale is ordinary work in progress, not an unfinished setup step,
       // and the sidebar says so without reopening the checklist.
@@ -133,7 +132,7 @@ export function buildProjectSteps({
     },
     {
       key: "publication",
-      title: "Write about the work",
+      title: "Do some writing",
       detail:
         "Start a paper from a template or connect the Overleaf project " +
         "you're already writing in, so its figures stop drifting out of " +

@@ -98,7 +98,9 @@ interface ChecklistCardProps {
   dismissed: boolean
   onDismissedChange: (dismissed: boolean) => void
   /** Shown in place of the list once nothing required is left. */
-  doneMessage: string
+  /** Shown in place of the progress bar once every step is done. A list
+   * whose finish needs no announcing leaves it out and shows nothing. */
+  doneMessage?: string
   /**
    * Columns to lay the steps out in on a wide screen. Two suits a card that
    * spans the page and a list whose steps can be done in any order; one
@@ -161,10 +163,12 @@ const ChecklistCard = ({
         </Button>
       </Flex>
       {complete ? (
-        <Flex align="center" gap={2} mt={2} mb={4}>
-          <Icon as={CheckCircleIcon} color="ui.success" />
-          <Text fontSize="sm">{doneMessage}</Text>
-        </Flex>
+        doneMessage ? (
+          <Flex align="center" gap={2} mt={2} mb={4}>
+            <Icon as={CheckCircleIcon} color="ui.success" />
+            <Text fontSize="sm">{doneMessage}</Text>
+          </Flex>
+        ) : null
       ) : (
         <>
           {intro ? (

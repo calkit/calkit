@@ -216,10 +216,9 @@ describe("buildProjectSteps", () => {
         stageStatuses,
         flags: [],
       })
-    // Never run: still to do, and the title says where to do it.
+    // Never run: still to do.
     const neverRun = build({ plot: { status: "not-run" } })
     expect(stepByKey(neverRun, "run")?.done).toBe(false)
-    expect(stepByKey(neverRun, "run")?.title).toMatch(/on your machine/)
     // Run and since gone stale: the setup step is done. Drifting out of
     // date is ordinary work in progress, and the sidebar shows it.
     expect(stepByKey(build({ plot: { status: "stale" } }), "run")?.done).toBe(

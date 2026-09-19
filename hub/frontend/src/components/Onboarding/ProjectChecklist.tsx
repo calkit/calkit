@@ -275,7 +275,6 @@ const ProjectChecklist = ({
       onMarkDone={setFlag}
       dismissed={projectFlags.includes(DISMISSED)}
       onDismissedChange={(dismissed) => setFlag(DISMISSED, dismissed)}
-      doneMessage={"Looks good!"}
     />
   )
 }

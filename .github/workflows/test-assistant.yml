@@ -1,0 +1,60 @@
+name: Test assistant
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "assistant/**"
+      - ".github/workflows/test-assistant.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Smoke test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: assistant
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      # Qt's offscreen platform still loads the GL and input libraries
+      - name: Install Qt system libraries
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update -qq && sudo apt-get install -y -qq
+          libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest
+  build:
+    # The release workflow builds the same way; this catches a broken build
+    # before a release does
+    name: Build for Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: assistant
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      - name: Build with PyInstaller
+        run: >-
+          uv run pyinstaller --onefile --icon resources/icon.ico
+          --name calkit-assistant main.py
+      - name: Check the executable starts
+        run: |
+          if (-not (Test-Path dist/calkit-assistant.exe)) { exit 1 }

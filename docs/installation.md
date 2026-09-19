@@ -122,9 +122,11 @@ see
 ## Calkit Assistant
 
 For Windows users, the
-[Calkit Assistant](https://github.com/calkit/calkit-assistant)
+[Calkit Assistant](https://github.com/calkit/calkit/tree/main/assistant)
 app is the easiest way to get everything set up and ready to work in
 VS Code, which can then be used as the primary app for working on
 all scientific or analytical computing projects.
+Download the executable from the latest
+[assistant release](https://github.com/calkit/calkit/releases?q=assistant%2Fv&expanded=true).
 
-![Calkit Assistant](https://github.com/calkit/calkit-assistant/blob/main/resources/screenshot.png?raw=true)
+![Calkit Assistant](https://github.com/calkit/calkit/blob/main/assistant/resources/screenshot.png?raw=true)

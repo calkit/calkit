@@ -141,3 +141,11 @@ browser-ext-dev: ## Rebuild the browser extension on every change.
 .PHONY: browser-ext-clean-zips
 browser-ext-clean-zips: ## Delete all built browser extension ZIPs.
 	@rm -rf browser-ext/zip
+
+.PHONY: assistant
+assistant: ## Run the desktop assistant locally for development.
+	@cd assistant && uv run main.py
+
+.PHONY: test-assistant
+test-assistant: ## Run the desktop assistant's offscreen smoke tests.
+	@cd assistant && QT_QPA_PLATFORM=offscreen uv run pytest

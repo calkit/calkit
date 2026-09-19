@@ -132,7 +132,7 @@ export function buildProjectSteps({
     },
     {
       key: "publication",
-      title: "Do some writing",
+      title: "Write about the findings",
       detail:
         "Start a paper from a template or connect the Overleaf project " +
         "you're already writing in, so its figures stop drifting out of " +

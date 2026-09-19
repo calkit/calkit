@@ -146,10 +146,6 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
   return (
     <ChecklistCard
       title="Set up your workspace"
-      intro={
-        "Connect the tools you already use. Nothing moves in that you " +
-        "can't take back out."
-      }
       steps={steps}
       actions={actions}
       // These can be done in any order and the card spans the page, so two

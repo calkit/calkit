@@ -328,7 +328,7 @@ function NewProjectForm({
   }
   return (
     <Box as="form" onSubmit={handleSubmit(onSubmit)}>
-      {/* TODO: rewrite this heading and the line under it */}
+      {/* TODO: rewrite this heading */}
       <Heading size="lg" mb={2}>
         New project
       </Heading>

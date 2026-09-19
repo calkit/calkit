@@ -112,6 +112,95 @@ def convert_relative_links(content: str) -> str:
     return re.sub(html_image_pattern, replace_html_image_src, content)
 
 
+ADMONITION_TYPES = {
+    "note": "NOTE",
+    "info": "NOTE",
+    "tip": "TIP",
+    "important": "IMPORTANT",
+    "warning": "WARNING",
+    "danger": "CAUTION",
+    "caution": "CAUTION",
+}
+
+
+def convert_admonitions(content: str) -> str:
+    """Convert MkDocs admonitions into GitHub alerts.
+
+    MkDocs (Python-Markdown) admonitions like::
+
+        !!! note "Optional title"
+            Body text.
+
+    render as literal text on GitHub, so they are rewritten as GitHub
+    alerts, e.g., ``> [!NOTE]``. Unrecognized admonition types are left
+    alone. Each alert is emitted with a ``<!-- prettier-ignore -->``
+    comment, since prettier otherwise reflows the ``> [!NOTE]`` marker onto
+    the following line and breaks the alert.
+
+    Parameters
+    ----------
+    content : str
+        Markdown content
+
+    Returns
+    -------
+    str
+        Content with admonitions converted
+    """
+    lines = content.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        match = re.match(r'^!!!\s+(\w+)\s*(?:"([^"]*)")?\s*$', lines[i])
+        if match is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        kind = ADMONITION_TYPES.get(match.group(1).lower())
+        if kind is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        # Collect the indented body, keeping blank lines that are followed
+        # by more body
+        i += 1
+        body: list[str] = []
+        while i < len(lines):
+            line = lines[i]
+            if line.strip() == "":
+                body.append("")
+                i += 1
+                continue
+            if not line.startswith((" ", "\t")):
+                break
+            body.append(line)
+            i += 1
+        while body and body[-1] == "":
+            body.pop()
+            i -= 1
+        # Strip the common indentation from the body
+        indents = [
+            len(line) - len(line.lstrip()) for line in body if line.strip()
+        ]
+        dedent = min(indents) if indents else 0
+        # Keep the alert adjacent to its own prettier-ignore comment,
+        # dropping any blank line the MkDocs source had in between
+        while out and out[-1].strip() == "":
+            out.pop()
+        if not out or out[-1].strip() != "<!-- prettier-ignore -->":
+            if out:
+                out.append("")
+            out.append("<!-- prettier-ignore -->")
+        out.append(f"> [!{kind}]")
+        title = match.group(2)
+        if title:
+            out.append(f"> **{title}**")
+            out.append(">")
+        for line in body:
+            out.append(">" if line == "" else f"> {line[dedent:]}")
+    return "\n".join(out)
+
+
 def adjust_heading_levels(content: str, shift: int) -> str:
     """Adjust markdown heading levels by the specified amount.
 
@@ -184,6 +273,8 @@ def process_readme(readme_path: Path, docs_dir: Path) -> str:
                 doc_content = adjust_heading_levels(doc_content, shift)
             # Convert relative links to absolute URLs
             doc_content = convert_relative_links(doc_content)
+            # Convert MkDocs admonitions into GitHub alerts
+            doc_content = convert_admonitions(doc_content)
             # Return just the content, preserving the markers
             return (
                 f"<!-- INCLUDE: docs/{doc_file}"

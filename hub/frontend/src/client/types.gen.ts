@@ -2920,6 +2920,34 @@ export type PipelineStageEdited = {
 }
 
 /**
+ * PipelinePut
+ */
+export type PipelinePut = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
+ * PipelineYaml
+ * The project's whole pipeline, as editable YAML.
+ *
+ * The YAML is the `pipeline:` block of calkit.yaml, exactly as the
+ * pipeline page shows it -- same key order, same comments.
+ */
+export type PipelineYaml = {
+  /**
+   * Yaml
+   */
+  yaml: string
+}
+
+/**
  * PipelineStagePut
  */
 export type PipelineStagePut = {
@@ -10450,6 +10478,42 @@ export type GetProjectPipelineResponses = {
 
 export type GetProjectPipelineResponse =
   GetProjectPipelineResponses[keyof GetProjectPipelineResponses]
+
+export type PutProjectPipelineData = {
+  body: PipelinePut
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline"
+}
+
+export type PutProjectPipelineErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutProjectPipelineError =
+  PutProjectPipelineErrors[keyof PutProjectPipelineErrors]
+
+export type PutProjectPipelineResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineYaml
+}
+
+export type PutProjectPipelineResponse =
+  PutProjectPipelineResponses[keyof PutProjectPipelineResponses]
 
 export type GetProjectPipelineStageData = {
   body?: never

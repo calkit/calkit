@@ -133,10 +133,12 @@ from app.models import (
     OrgSubscription,
     OverleafLink,
     Pipeline,
+    PipelinePut,
     PipelineStage,
     PipelineStageEdit,
     PipelineStageEdited,
     PipelineStagePut,
+    PipelineYaml,
     Presentation,
     Project,
     ProjectComment,
@@ -7633,6 +7635,85 @@ def put_project_pipeline_stage(
         push_and_expire(project, repo)
         record_project_update(project, repo, session)
     return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage_map))
+
+
+def _load_ck_pipeline(pipeline_yaml: str) -> Any:
+    """Parse the pipeline block the editor holds.
+
+    The page shows the ``pipeline:`` key and its body, so that's what comes
+    back; a body on its own is accepted too, since that's what someone who
+    deleted the wrapper would send.
+    """
+    try:
+        loaded = ryaml.load(pipeline_yaml)
+    except Exception as e:
+        raise HTTPException(422, f"Invalid YAML: {e}")
+    if not isinstance(loaded, dict):
+        raise HTTPException(422, "A pipeline must be a YAML mapping")
+    if "pipeline" in loaded:
+        loaded = loaded["pipeline"]
+    if not isinstance(loaded, dict):
+        raise HTTPException(422, "A pipeline must be a YAML mapping")
+    try:
+        CkPipeline(**dict(loaded))
+    except Exception as e:
+        raise HTTPException(422, f"Invalid pipeline: {e}")
+    return loaded
+
+
+def _dump_ck_pipeline(pipeline: Any) -> str:
+    stream = io.StringIO()
+    ryaml.dump({"pipeline": pipeline}, stream)
+    return stream.getvalue()
+
+
+@router.put("/projects/{owner_name}/{project_name}/pipeline")
+def put_project_pipeline(
+    owner_name: str,
+    project_name: str,
+    req: PipelinePut,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineYaml:
+    """Replace the project's pipeline with the YAML the editor holds.
+
+    Only the ``pipeline`` key of calkit.yaml is touched, so editing the
+    pipeline can't disturb the datasets, figures, or publications sitting
+    beside it in the same file.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    ck_info = get_ck_info_from_repo(repo=repo)
+    pipeline = _load_ck_pipeline(req.yaml)
+    # Written as the user wrote it: same key order, same comments.
+    ck_info["pipeline"] = pipeline
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
+    # read; otherwise the edit sits in calkit.yaml until the next run.
+    try:
+        calkit.pipeline.to_dvc(
+            ck_info=ck_info, wdir=str(repo.working_dir), write=True
+        )
+        repo.git.add("-A")
+    except Exception as e:
+        repo.git.checkout("--", ".")
+        repo.git.clean("-fd")
+        raise HTTPException(422, f"Could not compile the pipeline: {e}")
+    if repo.is_dirty():
+        repo.git.commit(["-m", req.message or "Update pipeline"])
+        push_and_expire(project, repo)
+        record_project_update(project, repo, session)
+    return PipelineYaml(yaml=_dump_ck_pipeline(pipeline))
 
 
 class Collaborator(BaseModel):

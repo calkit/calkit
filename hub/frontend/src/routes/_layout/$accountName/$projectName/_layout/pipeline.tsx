@@ -8,6 +8,7 @@ import {
   Flex,
   Heading,
   Icon,
+  IconButton,
   Link,
   Text,
 } from "@chakra-ui/react"
@@ -27,13 +28,15 @@ import yaml from "react-syntax-highlighter/dist/esm/languages/hljs/yaml"
 import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
 import { z } from "zod"
 
+import { FaExclamationTriangle } from "react-icons/fa"
+import { MdEdit } from "react-icons/md"
 import { ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
-import { FaExclamationTriangle } from "react-icons/fa"
 
 import Mermaid, {
   MAX_READABLE_STAGES,
 } from "../../../../../components/Common/Mermaid"
+import PipelineEditorModal from "../../../../../components/Pipeline/PipelineEditorModal"
 import StageEditorModal from "../../../../../components/Pipeline/StageEditorModal"
 import useProject, {
   useProjectEnvironments,
@@ -344,6 +347,7 @@ const pipelineSearchSchema = z.object({
   ref: z.string().optional(),
   stage: z.string().optional(),
   stage_editor_open: z.boolean().optional(),
+  pipeline_editor_open: z.boolean().optional(),
   // Draw the diagram for a pipeline with too many stages to read. A query
   // param so the choice survives a reload and can be linked to.
   show_diagram: z.boolean().optional(),
@@ -360,8 +364,14 @@ export const Route = createFileRoute(
 
 function ProjectPipeline() {
   const { accountName, projectName } = Route.useParams()
-  const { ref, stage, stage_editor_open, show_diagram, show_full_yaml } =
-    Route.useSearch()
+  const {
+    ref,
+    stage,
+    stage_editor_open,
+    pipeline_editor_open,
+    show_diagram,
+    show_full_yaml,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const pipelineQuery = useQuery({
@@ -413,6 +423,12 @@ function ProjectPipeline() {
   )
   const closeStageEditor = () =>
     navigate({ search: (prev) => ({ ...prev, stage_editor_open: undefined }) })
+  const openPipelineEditor = () =>
+    navigate({ search: (prev) => ({ ...prev, pipeline_editor_open: true }) })
+  const closePipelineEditor = () =>
+    navigate({
+      search: (prev) => ({ ...prev, pipeline_editor_open: undefined }),
+    })
   // What the diagram actually draws. The compiled DVC stages are what the
   // graph is built from, so they're what decides whether it's worth drawing;
   // calkit.yaml stages are a subset for projects that define them there.
@@ -489,9 +505,21 @@ function ProjectPipeline() {
               <Box flex={1} minW={0}>
                 {pipelineQuery.data.calkit_yaml ? (
                   <>
-                    <Heading size="md" my={2}>
-                      calkit.yaml
-                    </Heading>
+                    <Flex align="center" my={2}>
+                      <Heading size="md">calkit.yaml</Heading>
+                      {canEditStages && (
+                        <IconButton
+                          aria-label="Edit pipeline"
+                          title="Edit the pipeline"
+                          height="25px"
+                          width="28px"
+                          ml={1.5}
+                          icon={<MdEdit />}
+                          size="xs"
+                          onClick={openPipelineEditor}
+                        />
+                      )}
+                    </Flex>
                     <LinkedYaml
                       content={String(pipelineQuery.data.calkit_yaml)}
                       filesTo={filesTo}
@@ -536,6 +564,15 @@ function ProjectPipeline() {
             </Alert>
           )}
         </Flex>
+      )}
+      {pipeline_editor_open && canEditStages && (
+        <PipelineEditorModal
+          isOpen={Boolean(pipeline_editor_open)}
+          onClose={closePipelineEditor}
+          ownerName={accountName}
+          projectName={projectName}
+          content={String(pipelineQuery.data?.calkit_yaml ?? "")}
+        />
       )}
       {stage_editor_open && stage && canEditStages && (
         <StageEditorModal

@@ -4916,6 +4916,43 @@ export const PipelineStageEditedSchema = {
     "The stage after an edit, plus what the edit touched.\n\n``changed`` is what the user should see happened: the inputs added, or\nthe default-valued keys removed.",
 } as const
 
+export const PipelinePutSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelinePut",
+} as const
+
+export const PipelineYamlSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineYaml",
+  description:
+    "The project's whole pipeline, as editable YAML.\n\nThe YAML is the ``pipeline:`` block of calkit.yaml, exactly as the\npipeline page shows it -- same key order, same comments.",
+} as const
+
 export const PipelineStagePutSchema = {
   properties: {
     yaml: {

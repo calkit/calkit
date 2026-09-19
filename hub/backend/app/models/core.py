@@ -1033,6 +1033,21 @@ class Pipeline(SQLModel):
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
 
 
+class PipelineYaml(SQLModel):
+    """The project's whole pipeline, as editable YAML.
+
+    The YAML is the ``pipeline:`` block of calkit.yaml, exactly as the
+    pipeline page shows it -- same key order, same comments.
+    """
+
+    yaml: str
+
+
+class PipelinePut(SQLModel):
+    yaml: str
+    message: str | None = None
+
+
 class PipelineStage(SQLModel):
     """One stage of the Calkit pipeline, as editable YAML.
 

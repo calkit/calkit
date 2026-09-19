@@ -63,15 +63,15 @@ const TEMPLATES = [
   },
   {
     value: "calkit/example-analytics",
-    label: "Analytics: data processing and interactive figures",
+    label: "Analytics: notebook analysis, figures and tables",
   },
   {
     value: "calkit/example-r",
-    label: "R: Renv environment, R analysis, LaTeX paper",
+    label: "R: renv environment, R analysis, figures",
   },
   {
     value: "calkit/example-julia",
-    label: "Julia: Julia environment, Julia analysis, LaTeX paper",
+    label: "Julia: Julia environment, script and notebook, LaTeX paper",
   },
 ]
 

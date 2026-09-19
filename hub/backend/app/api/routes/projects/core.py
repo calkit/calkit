@@ -1083,6 +1083,12 @@ def post_project(
                 )
                 # Remove upstream remote so we don't have any confusion later
                 repo.git.remote(["remove", "upstream"])
+                # A new project hasn't run anything yet, and dvc.lock is how
+                # that is known -- it records what the pipeline produced and
+                # from what. Inheriting the template's would say this
+                # project's results already exist, which is the one thing
+                # someone starting from a template still has to do.
+                _clear_template_pipeline_outputs(str(repo.working_dir))
                 if not project_in.keep_template_history:
                     # The template's commits are its history, not this
                     # project's. Start from one commit holding its tree;
@@ -1096,9 +1102,6 @@ def post_project(
                     )
                     repo.git.branch("-D", branch)
                     repo.git.branch("-m", branch)
-                # dvc.lock stays: its hashes name the template's outputs,
-                # which are copied into this project's storage below, so
-                # the figures and paper are there before the first run.
             # Add a calkit.yaml file
             # First existing info, which is empty unless we're using a template
             ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
@@ -1167,21 +1170,6 @@ def post_project(
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
             push_and_expire(project, repo)
-            if template_project is not None:
-                _copy_template_dvc_objects(
-                    repo_dir=str(repo.working_dir),
-                    template_project=template_project,
-                    project=project,
-                )
-            elif project_in.template is not None:
-                # The template's outputs live in its own hub's storage,
-                # which this one has no access to. The repo, dvc.lock and
-                # all, still arrives; the outputs come back on the first
-                # `calkit run`, which is what they are for.
-                logger.info(
-                    f"Not copying outputs from {project_in.template}, "
-                    "which is hosted elsewhere"
-                )
         except Exception as e:
             # The project row is already committed, and it would block a retry
             # since a Git repo can only back one project, so remove it and let
@@ -1282,65 +1270,49 @@ def post_project(
     return project  # type: ignore
 
 
-def _copy_template_dvc_objects(
-    repo_dir: str, template_project: Project, project: Project
-) -> int:
-    """Copy the template's pipeline outputs into the new project's storage.
+def _clear_template_pipeline_outputs(repo_dir: str) -> list[str]:
+    """Strip a template's results out of a project just started from it.
 
-    The new repo carries the template's dvc.lock, whose hashes point at
-    objects in the template's storage. Copying them across is what lets the
-    project page show the figures and the paper immediately, and what lets
-    `calkit run` on a fresh clone find everything up to date instead of
-    rebuilding from scratch. Best-effort: a missing object only means that
-    output isn't shown until the pipeline runs. Returns how many were
-    copied.
+    ``dvc.lock`` is the record of what the pipeline produced and from
+    what, so a project carrying the template's says the work has already
+    been done here. Running the pipeline is the one step starting from a
+    template doesn't do for you, and the setup checklist reads this to
+    know whether it has happened.
+
+    The outputs the lock names go with it. Leaving them would show the
+    template's figures and paper as though this project had made them,
+    and the first run would overwrite them anyway. Only files actually
+    in the tree are affected: a DVC-tracked output isn't in the clone to
+    begin with. Returns what was removed.
     """
     lock_path = os.path.join(repo_dir, "dvc.lock")
     if not os.path.isfile(lock_path):
-        return 0
+        return []
+    removed: list[str] = []
     try:
         with open(lock_path) as f:
-            dvc_lock = yaml.safe_load(f) or {}
-        fs = get_object_fs()
-        outs = expand_dvc_lock_outs(
-            dvc_lock,
-            owner_name=template_project.owner_account_name,
-            project_name=template_project.name,
-            fs=fs,
-        )
+            lock = load_yaml_fast(f.read()) or {}
     except Exception as e:
-        logger.warning(f"Could not read template outputs for copying: {e}")
-        return 0
-    count = 0
-    for out in outs.values():
-        md5 = out.get("md5")
-        if not md5:
+        logger.warning(f"Could not read the template's dvc.lock: {e}")
+        lock = {}
+    for stage in (lock.get("stages") or {}).values():
+        if not isinstance(stage, dict):
             continue
-        src = make_data_fpath(
-            owner_name=template_project.owner_account_name,
-            project_name=template_project.name,
-            idx=md5[:2],
-            md5=md5[2:],
-        )
-        dst = make_data_fpath(
-            owner_name=project.owner_account_name,
-            project_name=project.name,
-            idx=md5[:2],
-            md5=md5[2:],
-        )
-        try:
-            if fs.exists(dst) or not fs.exists(src):
+        for out in stage.get("outs") or []:
+            out_path = out.get("path") if isinstance(out, dict) else None
+            if not out_path:
                 continue
-            fs.copy(src, dst)
-            count += 1
-        except Exception as e:
-            logger.warning(f"Could not copy template object {md5}: {e}")
-    logger.info(
-        f"Copied {count} template objects from "
-        f"{template_project.owner_account_name}/{template_project.name} "
-        f"to {project.owner_account_name}/{project.name}"
-    )
-    return count
+            abs_path = _abs_path_within(repo_dir, str(out_path))
+            if os.path.isdir(abs_path):
+                shutil.rmtree(abs_path, ignore_errors=True)
+                removed.append(str(out_path))
+            elif os.path.isfile(abs_path):
+                os.remove(abs_path)
+                removed.append(str(out_path))
+    os.remove(lock_path)
+    removed.append("dvc.lock")
+    logger.info(f"Cleared the template's pipeline outputs: {removed}")
+    return removed
 
 
 class ProjectOptionalExtended(ProjectPublic):

@@ -44,8 +44,9 @@ export type StartPath = "existing" | "fresh" | "overleaf"
 export interface ProjectOnboardingInput {
   /** Research questions declared in calkit.yaml. */
   questionCount: number
+  /** Entries across the project's reference collections. */
+  referenceCount: number
   reproCheck?: ReproCheck | null
-  pipelineStatus?: "up-to-date" | "stale" | "unknown" | null
   /**
    * Per-stage statuses from the pipeline endpoint. A stage that's up to
    * date or stale has been run at least once; "not-run" hasn't.
@@ -76,8 +77,8 @@ export function pipelineHasRun(
  */
 export function buildProjectSteps({
   questionCount,
+  referenceCount,
   reproCheck,
-  pipelineStatus,
   stageStatuses,
   flags,
 }: ProjectOnboardingInput): OnboardingStep[] {
@@ -90,6 +91,15 @@ export function buildProjectSteps({
         "Write down what the project is trying to find out, and what you " +
         "expect the answer to be, before the analysis can talk you into one.",
       done: questionCount > 0,
+    },
+    {
+      key: "references",
+      // TODO: rewrite this title and detail
+      title: "Add references",
+      detail:
+        "Pull in the papers the work builds on, so citations come out of " +
+        "the same project as the figures rather than a separate library.",
+      done: referenceCount > 0,
     },
     {
       key: "dataset",
@@ -111,16 +121,15 @@ export function buildProjectSteps({
     },
     {
       key: "run",
-      title: hasRun
-        ? "Run the pipeline again"
-        : "Run the pipeline on your machine",
-      detail: hasRun
-        ? "Something changed since the last run. Run it again and push, " +
-          "so what's shown here matches the code."
-        : "Install the CLI, clone the project, and run it end to end. " +
-          "What it produces gets pushed back here, where the project page " +
-          "picks it up.",
-      done: pipelineStatus === "up-to-date",
+      title: "Run the pipeline on your machine",
+      detail:
+        "Install the CLI, clone the project, and run it end to end. " +
+        "What it produces gets pushed back here, where the project page " +
+        "picks it up.",
+      // Having run at all is the milestone; a run that has since gone
+      // stale is ordinary work in progress, not an unfinished setup step,
+      // and the sidebar says so without reopening the checklist.
+      done: hasRun,
     },
     {
       key: "publication",
@@ -130,16 +139,6 @@ export function buildProjectSteps({
         "you're already writing in, so its figures stop drifting out of " +
         "date.",
       done: (reproCheck?.n_publications ?? 0) > 0,
-    },
-    {
-      key: "editor",
-      title: "Set up your editor",
-      detail:
-        "The VS Code, JupyterLab, and browser extensions put the pipeline " +
-        "and the hub where you're already working.",
-      done: false,
-      manual: true,
-      optional: true,
     },
   ]
   // A user can mark any step done by hand, not just the manual ones -- a

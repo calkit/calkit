@@ -1,4 +1,5 @@
 import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
+import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import type { IconType } from "react-icons"
 import { FaLaptop } from "react-icons/fa"
@@ -20,8 +21,10 @@ import { IoLibraryOutline } from "react-icons/io5"
 import { MdOutlineDashboard } from "react-icons/md"
 import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
+import { ProjectsService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import { useLocalServer } from "../../hooks/useOnboarding"
+import Tooltip from "./Tooltip"
 
 export interface ProjectNavItem {
   icon: IconType
@@ -84,6 +87,24 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
   // query with the onboarding checklist so the page asks localhost once.
   const { projectConnected } = useLocalServer(accountName, projectName)
   const localMachineColor = projectConnected ? "ui.success" : "gray"
+  // A pipeline that has run but no longer matches the code. The checklist
+  // stops at "has it run at all", so this is where a project says its
+  // results have drifted -- visible from any page, without reopening a
+  // setup list the user has finished. Same key as the pipeline page and
+  // the checklist, so the three share one request.
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "pipeline", currentRef],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: accountName,
+        project_name: projectName,
+        ref: currentRef,
+      }).then((response) => response.data),
+    enabled: Boolean(user),
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+  const pipelineIsStale = pipelineQuery.data?.status === "stale"
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {
@@ -115,6 +136,18 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
           alignSelf="center"
         />
         <Text ml={2}>{title}</Text>
+        {title === "Pipeline" && pipelineIsStale ? (
+          <Tooltip label="The pipeline has changed since it was last run">
+            <Box
+              ml={2}
+              boxSize={2}
+              borderRadius="full"
+              bg="orange.400"
+              alignSelf="center"
+              aria-label="Pipeline is out of date"
+            />
+          </Tooltip>
+        ) : null}
       </Flex>
     )
   })

@@ -46,8 +46,8 @@ describe("buildProjectSteps", () => {
   it("derives each step from project state and honors manual marks", () => {
     const emptyProject = buildProjectSteps({
       questionCount: 0,
+      referenceCount: 0,
       reproCheck: emptyReproCheck,
-      pipelineStatus: null,
       flags: [],
     })
     expect(emptyProject.every((step) => !step.done)).toBe(true)
@@ -57,23 +57,24 @@ describe("buildProjectSteps", () => {
     // or "cloned locally" item to sit unchecked forever.
     expect(emptyProject.map((s) => s.key)).toEqual([
       "question",
+      "references",
       "dataset",
       "figure",
       "run",
       "publication",
-      "editor",
     ])
     // Each signal ticks off exactly its own step.
     const withQuestion = buildProjectSteps({
       questionCount: 2,
+      referenceCount: 0,
       reproCheck: emptyReproCheck,
-      pipelineStatus: null,
       flags: [],
     })
     expect(stepByKey(withQuestion, "question")?.done).toBe(true)
     expect(stepByKey(withQuestion, "dataset")?.done).toBe(false)
     const withFigure = buildProjectSteps({
       questionCount: 0,
+      referenceCount: 0,
       reproCheck: {
         ...emptyReproCheck,
         n_environments: 1,
@@ -81,42 +82,24 @@ describe("buildProjectSteps", () => {
         n_figures_with_import_or_stage: 1,
         n_publications: 1,
       },
-      pipelineStatus: "stale",
       stageStatuses: { plot: { status: "stale" } },
       flags: [],
     })
     expect(stepByKey(withFigure, "figure")?.done).toBe(true)
     expect(stepByKey(withFigure, "publication")?.done).toBe(true)
     expect(stepByKey(withFigure, "dataset")?.done).toBe(false)
-    // A stale pipeline has run but doesn't reflect the current code, so the
-    // "run it" step stays open, worded as "again" since it has run before.
-    expect(stepByKey(withFigure, "run")?.done).toBe(false)
-    expect(stepByKey(withFigure, "run")?.title).toMatch(/again/)
-    const neverRun = buildProjectSteps({
-      questionCount: 0,
-      reproCheck: emptyReproCheck,
-      pipelineStatus: "stale",
-      stageStatuses: { plot: { status: "not-run" } },
-      flags: [],
-    })
-    expect(stepByKey(neverRun, "run")?.title).toMatch(/on your machine/)
-    const upToDate = buildProjectSteps({
-      questionCount: 0,
-      reproCheck: emptyReproCheck,
-      pipelineStatus: "up-to-date",
-      stageStatuses: { plot: { status: "up-to-date" } },
-      flags: [],
-    })
-    expect(stepByKey(upToDate, "run")?.done).toBe(true)
-    // A flag marks any step done, which is how steps we can't detect (the
-    // editor extensions) get completed at all.
+    // A stale pipeline has run, which is what this step asks for; going
+    // stale afterwards is covered on its own below.
+    expect(stepByKey(withFigure, "run")?.done).toBe(true)
+    // A flag marks any step done, which is how a project that satisfies a
+    // step in a way we don't detect gets to say so.
     const flagged = buildProjectSteps({
       questionCount: 0,
+      referenceCount: 0,
       reproCheck: emptyReproCheck,
-      pipelineStatus: null,
-      flags: ["editor", "question"],
+      flags: ["references", "question"],
     })
-    expect(stepByKey(flagged, "editor")?.done).toBe(true)
+    expect(stepByKey(flagged, "references")?.done).toBe(true)
     expect(stepByKey(flagged, "question")?.done).toBe(true)
     expect(stepByKey(flagged, "figure")?.done).toBe(false)
   })
@@ -135,14 +118,15 @@ describe("buildProjectSteps", () => {
   it("distinguishes a mark the user made from something we detected", () => {
     const steps = buildProjectSteps({
       questionCount: 1,
+      referenceCount: 0,
       reproCheck: emptyReproCheck,
-      pipelineStatus: null,
-      flags: ["editor"],
+      flags: ["references"],
     })
     // Detected: nothing to take back, so the mark isn't the user's to undo.
     expect(steps.find((s) => s.key === "question")?.manuallyDone).toBe(false)
-    // Marked by hand: un-marking it would actually change something.
-    expect(steps.find((s) => s.key === "editor")?.manuallyDone).toBe(true)
+    // Marked by hand on a step we can't see done: un-marking it would
+    // actually change something.
+    expect(steps.find((s) => s.key === "references")?.manuallyDone).toBe(true)
     // A step that's neither is undone and unmarked.
     expect(steps.find((s) => s.key === "run")?.manuallyDone).toBe(false)
     const account = buildAccountSteps({
@@ -159,8 +143,8 @@ describe("buildProjectSteps", () => {
     // undo either: un-marking it would leave it done and look broken.
     const markedAndDetected = buildProjectSteps({
       questionCount: 1,
+      referenceCount: 0,
       reproCheck: emptyReproCheck,
-      pipelineStatus: null,
       flags: ["question"],
     })
     const question = markedAndDetected.find((s) => s.key === "question")
@@ -192,6 +176,7 @@ describe("buildProjectSteps", () => {
   it("treats a missing repro check as nothing done rather than crashing", () => {
     const steps = buildProjectSteps({
       questionCount: 1,
+      referenceCount: 0,
       reproCheck: null,
       flags: [],
     })
@@ -200,9 +185,10 @@ describe("buildProjectSteps", () => {
     expect(stepByKey(steps, "figure")?.done).toBe(false)
   })
 
-  it("completes once every required step is done, optional or not", () => {
+  it("completes once every step is done", () => {
     const steps = buildProjectSteps({
       questionCount: 1,
+      referenceCount: 3,
       reproCheck: {
         ...emptyReproCheck,
         n_environments: 1,
@@ -210,14 +196,38 @@ describe("buildProjectSteps", () => {
         n_figures_with_import_or_stage: 1,
         n_publications: 1,
       },
-      pipelineStatus: "up-to-date",
       stageStatuses: { plot: { status: "up-to-date" } },
       flags: [],
     })
-    // "editor" is optional and still undone, and the list is complete anyway.
-    expect(stepByKey(steps, "editor")?.done).toBe(false)
+    // Every step here is about the project, not the machine it's worked on,
+    // so there's nothing left that only the user can answer.
+    expect(steps.every((s) => s.done)).toBe(true)
+    expect(steps.some((s) => s.manual)).toBe(false)
     expect(isComplete(steps)).toBe(true)
-    expect(progressPercent(steps)).toBeLessThan(100)
+    expect(progressPercent(steps)).toBe(100)
+  })
+
+  it("counts the pipeline as run once it has run, stale or not", () => {
+    const build = (stageStatuses: Record<string, { status: string }>) =>
+      buildProjectSteps({
+        questionCount: 0,
+        referenceCount: 0,
+        reproCheck: emptyReproCheck,
+        stageStatuses,
+        flags: [],
+      })
+    // Never run: still to do, and the title says where to do it.
+    const neverRun = build({ plot: { status: "not-run" } })
+    expect(stepByKey(neverRun, "run")?.done).toBe(false)
+    expect(stepByKey(neverRun, "run")?.title).toMatch(/on your machine/)
+    // Run and since gone stale: the setup step is done. Drifting out of
+    // date is ordinary work in progress, and the sidebar shows it.
+    expect(stepByKey(build({ plot: { status: "stale" } }), "run")?.done).toBe(
+      true,
+    )
+    expect(
+      stepByKey(build({ plot: { status: "up-to-date" } }), "run")?.done,
+    ).toBe(true)
   })
 })
 

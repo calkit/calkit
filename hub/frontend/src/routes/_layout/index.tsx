@@ -41,6 +41,7 @@ import StartPaths from "../../components/Onboarding/StartPaths"
 import NewProjectModal from "../../components/Projects/NewProjectModal"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
+import type { StartPath } from "../../lib/onboarding"
 
 const projectsSearchSchema = z.object({
   page: z.number().optional().catch(1),
@@ -208,17 +209,17 @@ function ProjectsTable() {
  * out what to do about it. The three start paths say what Calkit is for by
  * describing the situations people show up in.
  */
-function EmptyState() {
+function EmptyState({ onStart }: { onStart: (path: StartPath) => void }) {
   return (
     <>
       <Heading size="lg" mt={12} mb={2}>
-        Make your project single-button reproducible
+        Make your research single-button reproducible
       </Heading>
       <Text color="ui.dim" mb={6} maxW="640px">
         Lit review, data collection, analysis, and writing all in one place.
       </Text>
       <Box mb={10}>
-        <StartPaths source="empty-state" />
+        <StartPaths source="empty-state" onSelect={onStart} />
       </Box>
       <FeaturedProjects heading="Or take a look at some examples" />
     </>
@@ -421,6 +422,7 @@ function Home() {
   // doesn't reopen it.
   const { welcome } = Route.useSearch()
   const newProjectModal = useDisclosure()
+  const [startPath, setStartPath] = useState<StartPath | undefined>()
   // Acted on once and only once. Creating a project refetches the count,
   // which runs this again, and a second navigate would land on home over
   // the project that was just opened.
@@ -455,7 +457,12 @@ function Home() {
   return (
     <Container maxW={pageWidthNoSidebar} pb={16}>
       {projectCount === 0 && !countQuery.isError ? (
-        <EmptyState />
+        <EmptyState
+          onStart={(path) => {
+            setStartPath(path)
+            newProjectModal.onOpen()
+          }}
+        />
       ) : (
         <>
           <Heading size="lg" textAlign={{ base: "center", md: "left" }} mt={12}>
@@ -474,6 +481,7 @@ function Home() {
       <NewProjectModal
         isOpen={newProjectModal.isOpen}
         onClose={newProjectModal.onClose}
+        initialPath={startPath}
       />
     </Container>
   )

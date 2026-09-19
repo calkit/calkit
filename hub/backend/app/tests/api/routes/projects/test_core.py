@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+import app.index
 from app import users, zotero
 from app.api.routes.projects.core import (
     _normalize_artifact_file_path,
@@ -1393,17 +1394,65 @@ def test_get_project_results_autodetects_and_reads_ref(
     assert mock_ck_for_ref.call_args.kwargs["ref"] == "some-branch"
 
 
-def test_question_text_handles_string_and_object() -> None:
-    from app.api.routes.projects.core import _extract_question_text
-
-    assert _extract_question_text("Plain question?") == "Plain question?"
-    assert (
-        _extract_question_text({"question": "Rich?", "hypothesis": "h"})
-        == "Rich?"
-    )
-    assert _extract_question_text({}) == ""
-    # A non-string/non-dict value (e.g. a list) yields empty text, not a repr.
-    assert _extract_question_text(["a", "b"]) == ""  # type: ignore
+def test_get_project_questions_without_an_index(
+    client: TestClient, db: Session
+) -> None:
+    # Reading questions doesn't write the cross-project index, and doesn't
+    # depend on it either: the warm job rebuilds it after a push, so it can
+    # be empty or behind while the page still shows every question.
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    ck_info = {
+        "questions": [
+            "Does it work?",
+            {"question": "How well?", "hypothesis": "Very"},
+            "And for how long?",
+        ]
+    }
+    fake_repo = _make_fake_repo("/tmp/does-not-matter")
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        r = client.get(f"{base}/questions", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [q["question"] for q in body] == [
+        "Does it work?",
+        "How well?",
+        "And for how long?",
+    ]
+    assert [q["number"] for q in body] == [1, 2, 3]
+    assert body[1]["hypothesis"] == "Very"
+    # Nothing was indexed by the read
+    db.refresh(project)
+    assert list(project.questions) == []
+    # Ids are stable across reads, so a client keying a list on them isn't
+    # re-rendering every question on every poll
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        again = client.get(f"{base}/questions", headers=headers).json()
+    assert [q["id"] for q in again] == [q["id"] for q in body]
+    # Once the index catches up, the real row ids are what come back
+    app.index.index_questions(session=db, project=project, ck_info=ck_info)
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        indexed = client.get(f"{base}/questions", headers=headers).json()
+    by_number = {q.number: str(q.id) for q in project.questions}
+    assert [q["id"] for q in indexed] == [by_number[n] for n in (1, 2, 3)]
 
 
 def test_build_question_evidence_resolves_figures_and_results() -> None:

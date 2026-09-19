@@ -52,6 +52,7 @@ from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
 import app.imports
+import app.index
 import app.projects
 import app.tasks
 import calkit
@@ -2231,56 +2232,6 @@ def patch_project_contents(
     return current_object
 
 
-def _extract_question_text(question: str | dict) -> str:
-    """Extract the question text from a calkit.yaml question entry.
-
-    A question may be a plain string or an object with a ``question`` field.
-    Any other/unexpected type (e.g. a list) yields an empty string rather than
-    a coerced repr, so a non-string never reaches the DB model's ``question``
-    field (and the empty text signals to the user that something is off).
-    """
-    if isinstance(question, dict):
-        value = question.get("question", "")
-    else:
-        value = question
-    return value if isinstance(value, str) else ""
-
-
-def _sync_questions_with_db(
-    ck_info: dict, project: Project, session: Session
-) -> Project:
-    questions_ck = list(ck_info.get("questions", []))
-    questions = deepcopy(questions_ck)
-    logger.info(f"Found {len(questions)} questions in Calkit info")
-    # Put these in the database idempotently
-    existing_questions = project.questions
-    logger.info(f"Found {len(existing_questions)} existing questions in DB")
-    for n, (new, existing) in enumerate(zip(questions_ck, existing_questions)):
-        logger.info(f"Updating existing question number {n + 1}")
-        existing.question = _extract_question_text(questions.pop(0))
-        existing.number = n + 1  # Should already be done, but just in case
-    start_number = len(existing_questions) + 1
-    logger.info(f"Adding {len(questions)} new questions to DB")
-    for n, new in enumerate(questions):
-        number = start_number + n
-        logger.info(f"Appending new question with number: {number}")
-        project.questions.append(
-            Question(
-                project_id=project.id,
-                number=number,
-                question=_extract_question_text(new),
-            )
-        )
-    # Delete extra questions in DB
-    while len(project.questions) > len(questions_ck):
-        q = project.questions.pop(-1)
-        logger.info(f"Deleting question number {q.number}")
-        session.delete(q)
-    session.commit()
-    session.refresh(project)
-    return project
-
-
 def _resolve_result_value(
     project: Project,
     repo: git.Repo,
@@ -2631,10 +2582,14 @@ def _build_questions_public(
                 f"Could not resolve question evidence at ref {ev_ref}: "
                 f"{e.detail}"
             )
-    db_questions = sorted(project.questions, key=lambda q: q.number)
+    # By number rather than by position: the index is rebuilt after a push
+    # rather than on this read, so it can be behind (or ahead of) what this
+    # ref declares. Zipping the two would silently drop the questions past
+    # wherever the shorter list ended.
+    db_by_number = {q.number: q for q in project.questions}
     result_value_cache: dict[tuple[str | None, str], dict | None] = {}
     questions_public = []
-    for q_ck, q_db in zip(questions_ck, db_questions):
+    for number, q_ck in enumerate(questions_ck, start=1):
         hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
         answer = q_ck.get("answer") if isinstance(q_ck, dict) else None
         evidence = _build_question_evidence(
@@ -2645,18 +2600,34 @@ def _build_questions_public(
             lookups_by_ref=lookups_by_ref,
             result_value_cache=result_value_cache,
         )
+        q_db = db_by_number.get(number)
         questions_public.append(
             QuestionPublic(
-                id=q_db.id,
-                project_id=q_db.project_id,
-                number=q_db.number,
-                question=q_db.question,
+                id=(
+                    q_db.id
+                    if q_db is not None
+                    else _unindexed_question_id(project.id, number)
+                ),
+                project_id=project.id,
+                number=number,
+                question=app.index.extract_question_text(q_ck),
                 hypothesis=hypothesis,
                 answer=answer,
                 evidence=evidence,
             )
         )
     return questions_public
+
+
+def _unindexed_question_id(project_id: uuid.UUID, number: int) -> uuid.UUID:
+    """A stable id for a question the index hasn't caught up with yet.
+
+    Derived from what identifies the question -- its project and its
+    position -- so it doesn't change between requests, and so a client
+    using it to key a list doesn't see the row replaced once the warm job
+    indexes it for real.
+    """
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"{project_id}/questions/{number}")
 
 
 @router.get("/projects/{owner_name}/{project_name}/questions")
@@ -2690,9 +2661,10 @@ def get_project_questions(
         repo=repo,
         ref=ref,
     )
-    project = _sync_questions_with_db(
-        ck_info=ck_info, project=project, session=session
-    )
+    # Deliberately not indexed here. The index is for finding questions
+    # across projects; this response is built from calkit.yaml at `ref`,
+    # and writing rows on every read made a page load cost a transaction
+    # per question. The warm job keeps the index up with the pushes.
     # TODO: Maybe questions don't belong in the Calkit file?
     return _build_questions_public(
         project=project,
@@ -2745,8 +2717,8 @@ def post_project_question(
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
     push_and_expire(project, repo)
-    project = _sync_questions_with_db(
-        ck_info=ck_info, project=project, session=session
+    app.index.index_questions(
+        session=session, project=project, ck_info=ck_info
     )
     mixpanel.user_added_question(
         user=current_user,
@@ -2834,8 +2806,8 @@ def put_project_question(
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
         push_and_expire(project, repo)
-    project = _sync_questions_with_db(
-        ck_info=ck_info, project=project, session=session
+    app.index.index_questions(
+        session=session, project=project, ck_info=ck_info
     )
     return _build_questions_public(
         project=project,

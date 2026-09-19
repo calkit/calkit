@@ -2155,6 +2155,14 @@ def _remember_missing_ref(repo: git.Repo, ref: str) -> None:
             _MISSING_REF_CACHE.popitem(last=False)
 
 
+# Where a ref fetched on demand is put. `git fetch origin <ref>` writes
+# only FETCH_HEAD, which the next fetch overwrites and concurrent readers
+# of the shared checkout race over, so the fetch is aimed at a ref of our
+# own instead. A namespace nothing else writes, so it can't collide with a
+# branch or tag the project has.
+_FETCHED_REF_NS = "refs/calkit/fetched"
+
+
 def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
     """Resolve a branch, tag, or commit hash to a Commit object.
 
@@ -2163,9 +2171,12 @@ def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
     -- a new branch, or the head commit of a pull request -- reads as
     missing until that expires, even though it exists on GitHub.
     """
+    fetched_ref = f"{_FETCHED_REF_NS}/{ref}"
 
     def resolve() -> git.Commit | None:
-        for candidate in (ref, f"origin/{ref}"):
+        # The fetched copy is tried last, so a branch that exists locally
+        # still wins over whatever an earlier on-demand fetch left behind.
+        for candidate in (ref, f"origin/{ref}", fetched_ref):
             try:
                 return repo.commit(candidate)
             except Exception:
@@ -2183,10 +2194,12 @@ def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
         try:
             # By SHA as well as by name: GitHub serves a commit that's
             # reachable from any ref, which covers a pull request head
-            # that no local branch points at
+            # that no local branch points at. The refspec is what makes a
+            # tag usable: fetching one by name alone leaves no local ref,
+            # so it stayed unresolvable however many times it was fetched.
             with _timed("fetch-ref", ref=ref):
                 repo.git.fetch(
-                    ["origin", ref],
+                    ["origin", f"+{ref}:{fetched_ref}"],
                     kill_after_timeout=GIT_FETCH_TIMEOUT,
                 )
         except GitCommandError as e:

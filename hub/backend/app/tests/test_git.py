@@ -785,6 +785,44 @@ def _identify(repo: git.Repo) -> None:
     repo.git.config(["user.email", "ci-test@example.com"])
 
 
+def test_resolve_commit_fetches_a_tag_into_something_resolvable(
+    tmp_path,
+) -> None:
+    # Regression: `git fetch origin <tag>` writes FETCH_HEAD and no local
+    # ref, so a tag stayed unresolvable however many times it was fetched.
+    # Evidence citing one never resolved, and every read paid the fetch
+    # again once the missing-ref memo lapsed.
+    import app.git
+
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    seed_dir = tmp_path / "seed"
+    seed = git.Repo.clone_from(str(origin_dir), str(seed_dir))
+    _identify(seed)
+    first = _commit(seed, "notes.txt", "one")
+    branch = seed.active_branch.name
+    seed.git.push(["origin", branch])
+    seed.git.tag(["exp/2026-09-12-a-run"])
+    seed.git.push(["origin", "exp/2026-09-12-a-run"])
+    # A clone that predates the tag, which is what a shared checkout is
+    reader_dir = tmp_path / "reader"
+    reader = git.Repo.clone_from(
+        str(origin_dir), str(reader_dir), no_tags=True
+    )
+    assert not any(r.path.startswith("refs/tags/") for r in reader.references)
+    commit = app.git._resolve_commit(reader, "exp/2026-09-12-a-run")
+    assert commit.hexsha == first
+    # Resolvable from a local ref now, so the next read needs no network
+    fetched = f"{app.git._FETCHED_REF_NS}/exp/2026-09-12-a-run"
+    assert reader.commit(fetched).hexsha == first
+    # A branch still resolves the ordinary way, and one that doesn't exist
+    # anywhere is still a 404 rather than a hang
+    assert app.git._resolve_commit(reader, branch).hexsha == first
+    with pytest.raises(HTTPException) as excinfo:
+        app.git._resolve_commit(reader, "no-such-ref")
+    assert excinfo.value.status_code == 404
+
+
 def test_push_and_expire_updates_the_shared_checkout(tmp_path) -> None:
     # A write lands in the shared checkout without going via the remote.
     from unittest.mock import patch

@@ -30,6 +30,7 @@ import { refreshProjectContents } from "../../lib/api"
 import { handleError } from "../../lib/errors"
 import { decodeBase64Utf8, trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 
 // Extensions and bare filenames the built-in editor will open. Deliberately a
 // list rather than "anything that isn't a known binary": opening a file that
@@ -111,6 +112,7 @@ const FileEditorModal = ({
   const defaultMessage = `Update ${path}`
   const [commitMessage, setCommitMessage] = useState(defaultMessage)
   const commitModal = useDisclosure()
+  const discardDialog = useDisclosure()
   const showToast = useCustomToast()
   const queryClient = useQueryClient()
 
@@ -208,7 +210,8 @@ const FileEditorModal = ({
   }, [isOpen])
 
   const handleClose = () => {
-    if (dirty && !window.confirm("Discard unsaved changes?")) {
+    if (dirty) {
+      discardDialog.onOpen()
       return
     }
     onClose()
@@ -319,6 +322,14 @@ const FileEditorModal = ({
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <DiscardChangesDialog
+        isOpen={discardDialog.isOpen}
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          discardDialog.onClose()
+          onClose()
+        }}
+      />
     </>
   )
 }

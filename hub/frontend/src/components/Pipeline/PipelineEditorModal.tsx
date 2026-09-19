@@ -31,6 +31,7 @@ import { refreshProjectContents } from "../../lib/api"
 import { handleError } from "../../lib/errors"
 import { trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 
 interface PipelineEditorModalProps {
   isOpen: boolean
@@ -68,6 +69,7 @@ const PipelineEditorModal = ({
   // reloading on that would throw away whatever is being typed.
   const loadedRef = useRef<string | null>(null)
   const commitModal = useDisclosure()
+  const discardDialog = useDisclosure()
   const showToast = useCustomToast()
   const queryClient = useQueryClient()
 
@@ -142,7 +144,8 @@ const PipelineEditorModal = ({
   }, [isOpen])
 
   const handleClose = () => {
-    if (dirty && !window.confirm("Discard unsaved changes?")) {
+    if (dirty) {
+      discardDialog.onOpen()
       return
     }
     onClose()
@@ -237,6 +240,14 @@ const PipelineEditorModal = ({
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <DiscardChangesDialog
+        isOpen={discardDialog.isOpen}
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          discardDialog.onClose()
+          onClose()
+        }}
+      />
     </>
   )
 }

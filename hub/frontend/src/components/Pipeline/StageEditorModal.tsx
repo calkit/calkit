@@ -33,6 +33,7 @@ import { handleError } from "../../lib/errors"
 import { stageKindFromYaml } from "../../lib/pipelineYaml"
 import { trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 
 interface StageEditorModalProps {
   isOpen: boolean
@@ -65,6 +66,7 @@ const StageEditorModal = ({
   const [docNonce, setDocNonce] = useState(0)
   const [doc, setDoc] = useState<string | null>(null)
   const commitModal = useDisclosure()
+  const discardDialog = useDisclosure()
   const showToast = useCustomToast()
   const queryClient = useQueryClient()
 
@@ -218,7 +220,8 @@ const StageEditorModal = ({
   }, [isOpen])
 
   const handleClose = () => {
-    if (dirty && !window.confirm("Discard unsaved changes?")) {
+    if (dirty) {
+      discardDialog.onOpen()
       return
     }
     onClose()
@@ -360,6 +363,14 @@ const StageEditorModal = ({
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <DiscardChangesDialog
+        isOpen={discardDialog.isOpen}
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          discardDialog.onClose()
+          onClose()
+        }}
+      />
     </>
   )
 }

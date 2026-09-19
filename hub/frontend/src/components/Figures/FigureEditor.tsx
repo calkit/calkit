@@ -2,12 +2,6 @@ import { InfoOutlineIcon } from "@chakra-ui/icons"
 import {
   Alert,
   AlertDescription,
-  AlertDialog,
-  AlertDialogBody,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogOverlay,
   AlertIcon,
   Box,
   Button,
@@ -88,6 +82,7 @@ import {
 } from "../../lib/pyodide"
 import { capitalizeFirstLetter } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 import PdfCanvas from "../Common/PdfCanvas"
 import PathPicker from "../Releases/PathPicker"
 
@@ -301,7 +296,6 @@ const FigureEditor = ({
   const [codeSettled, setCodeSettled] = useState(false)
   const viewRef = useRef<EditorView | null>(null)
   const discardDialog = useDisclosure()
-  const keepEditingRef = useRef<HTMLButtonElement>(null)
   const datasetsQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "datasets"],
     queryFn: () =>
@@ -1068,45 +1062,24 @@ const FigureEditor = ({
           <Button onClick={requestClose}>Cancel</Button>
         </ModalFooter>
       </ModalContent>
-      <AlertDialog
+      <DiscardChangesDialog
         isOpen={discardDialog.isOpen}
-        leastDestructiveRef={keepEditingRef}
-        onClose={discardDialog.onClose}
-        isCentered
-        motionPreset="none"
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          mixpanel.track("Discarded editor figure", {
+            had_figure: Boolean(result?.image),
+          })
+          discardDialog.onClose()
+          pendingLeave.current()
+        }}
+        title="Discard this figure?"
       >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg">
-              Discard this figure?
-            </AlertDialogHeader>
-            <AlertDialogBody>
-              {result?.image
-                ? "The figure you made hasn't been saved to the pipeline. " +
-                  "Leaving now drops it and the script."
-                : "The script has edits that haven't been saved to the " +
-                  "pipeline. Leaving now drops them."}
-            </AlertDialogBody>
-            <AlertDialogFooter gap={3}>
-              <Button ref={keepEditingRef} onClick={discardDialog.onClose}>
-                Keep editing
-              </Button>
-              <Button
-                colorScheme="red"
-                onClick={() => {
-                  mixpanel.track("Discarded editor figure", {
-                    had_figure: Boolean(result?.image),
-                  })
-                  discardDialog.onClose()
-                  pendingLeave.current()
-                }}
-              >
-                Discard
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
+        {result?.image
+          ? "The figure you made hasn't been saved to the pipeline. " +
+            "Leaving now drops it and the script."
+          : "The script has edits that haven't been saved to the " +
+            "pipeline. Leaving now drops them."}
+      </DiscardChangesDialog>
     </Modal>
   )
 }

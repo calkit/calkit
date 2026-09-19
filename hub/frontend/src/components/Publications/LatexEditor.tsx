@@ -50,6 +50,7 @@ import {
 import { fetchTree, newBudget } from "../../lib/projectFiles"
 import { trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 import PathPicker from "../Releases/PathPicker"
 
@@ -119,6 +120,7 @@ const LatexEditor = ({
   const queryClient = useQueryClient()
   const logPanel = useDisclosure()
   const commitModal = useDisclosure()
+  const discardDialog = useDisclosure()
   const [textPaths, setTextPaths] = useState<string[]>([])
   const [activePath, setActivePath] = useState<string>(texPath)
   const [mainPath, setMainPath] = useState<string>(texPath)
@@ -727,7 +729,8 @@ const LatexEditor = ({
   }, [isOpen])
 
   const handleClose = () => {
-    if (dirty.size > 0 && !window.confirm("Discard unsaved changes?")) {
+    if (dirty.size > 0) {
+      discardDialog.onOpen()
       return
     }
     onClose()
@@ -1103,6 +1106,14 @@ const LatexEditor = ({
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <DiscardChangesDialog
+        isOpen={discardDialog.isOpen}
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          discardDialog.onClose()
+          onClose()
+        }}
+      />
     </>
   )
 }

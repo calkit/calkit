@@ -27,7 +27,7 @@ import {
   createFileRoute,
   useNavigate,
 } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { FiArrowRight } from "react-icons/fi"
 import { useDebounce } from "use-debounce"
 import { z } from "zod"
@@ -45,9 +45,6 @@ import type { StartPath } from "../../lib/onboarding"
 
 const projectsSearchSchema = z.object({
   page: z.number().optional().catch(1),
-  // Set once, by signing in. Home is the only place that knows whether the
-  // account has a project yet, so it decides what a new arrival sees.
-  welcome: z.boolean().optional(),
 })
 
 export const Route = createFileRoute("/_layout/")({
@@ -403,7 +400,6 @@ function LandingPage() {
 
 function Home() {
   const { user, isLoading } = useAuth()
-  const navigate = useNavigate()
   // Only the count is needed to choose between the empty state and the
   // table, so this asks for one row rather than sharing the table's query,
   // whose key varies with the search box.
@@ -416,25 +412,11 @@ function Home() {
     enabled: Boolean(user),
   })
   const projectCount = countQuery.data?.count ?? 0
-  // Signing in sends everyone here; an account with nothing in it gets the
-  // new-project form over the top, and everyone else just gets their
-  // projects. The flag is dropped either way, so a refresh or a later visit
-  // doesn't reopen it.
-  const { welcome } = Route.useSearch()
+  // Signing in lands here with nothing open over the top: an account with no
+  // projects gets the start cards, which say what each way in involves
+  // before committing to a form.
   const newProjectModal = useDisclosure()
   const [startPath, setStartPath] = useState<StartPath | undefined>()
-  // Acted on once and only once. Creating a project refetches the count,
-  // which runs this again, and a second navigate would land on home over
-  // the project that was just opened.
-  const welcomeHandled = useRef(false)
-  useEffect(() => {
-    if (welcomeHandled.current || !welcome || !countQuery.isSuccess) return
-    welcomeHandled.current = true
-    if (projectCount === 0) {
-      newProjectModal.onOpen()
-    }
-    navigate({ to: "/", search: { welcome: undefined }, replace: true })
-  }, [welcome, countQuery.isSuccess, projectCount, navigate, newProjectModal])
   // A stored token means a user is on the way, and useAuth reports not-loading
   // for the tick before the request starts. Treating that gap as "signed out"
   // flashes the landing page at someone who is signed in.

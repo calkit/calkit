@@ -102,13 +102,9 @@ const useAuth = () => {
     mutationFn: login,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
-      // Home is the only place that knows whether this account has a
-      // project, so it decides between the new-project form and the
-      // project list rather than this hook guessing.
-      navigate({
-        to: redirectTo || "/",
-        search: { welcome: redirectTo ? undefined : true },
-      })
+      // Home shows the start cards to an account with no projects and the
+      // project list to everyone else, so it needs nothing from here.
+      navigate({ to: redirectTo || "/" })
     },
     onError: (err: AxiosError) => {
       let errDetail = (err.response?.data as any)?.detail ?? err.message
@@ -134,13 +130,9 @@ const useAuth = () => {
     mutationFn: loginGithub,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
-      // Home is the only place that knows whether this account has a
-      // project, so it decides between the new-project form and the
-      // project list rather than this hook guessing.
-      navigate({
-        to: redirectTo || "/",
-        search: { welcome: redirectTo ? undefined : true },
-      })
+      // Home shows the start cards to an account with no projects and the
+      // project list to everyone else, so it needs nothing from here.
+      navigate({ to: redirectTo || "/" })
     },
     onError: (err: AxiosError) => {
       let errDetail = (err.response?.data as any)?.detail ?? err.message
@@ -167,13 +159,9 @@ const useAuth = () => {
     mutationFn: loginGoogle,
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
-      // Home is the only place that knows whether this account has a
-      // project, so it decides between the new-project form and the
-      // project list rather than this hook guessing.
-      navigate({
-        to: redirectTo || "/",
-        search: { welcome: redirectTo ? undefined : true },
-      })
+      // Home shows the start cards to an account with no projects and the
+      // project list to everyone else, so it needs nothing from here.
+      navigate({ to: redirectTo || "/" })
     },
     onError: (err: AxiosError) => {
       let errDetail = (err.response?.data as any)?.detail ?? err.message

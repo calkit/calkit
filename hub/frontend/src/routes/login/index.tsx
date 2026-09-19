@@ -121,12 +121,9 @@ function Auth() {
     },
     onSuccess: () => {
       const redirectTo = popPostLoginRedirect()
-      // Home works out whether there's a project to go to; this page can't,
-      // since it doesn't know anything about the account yet.
-      navigate({
-        to: redirectTo || "/",
-        search: { welcome: redirectTo ? undefined : true },
-      })
+      // Home shows the start cards to an account with no projects and the
+      // project list to everyone else, so it needs nothing from here.
+      navigate({ to: redirectTo || "/" })
     },
     onError: (err: AxiosError) => handleError(err, showToast),
   })

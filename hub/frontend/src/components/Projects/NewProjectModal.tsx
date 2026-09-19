@@ -87,7 +87,7 @@ const SOURCE_LABELS: { value: Source; label: string }[] = [
   { value: "overleaf", label: "An existing Overleaf project" },
   { value: "upload", label: "A zipped folder upload" },
   { value: "template", label: "A new project from a template" },
-  { value: "empty", label: "A fresh empty project" },
+  { value: "empty", label: "An empty project" },
 ]
 
 const SOURCE_FOR_PATH: Record<StartPath, Source> = {

@@ -4441,13 +4441,11 @@
               }
             ]
           },
+          "description": "Stages to run, keyed by name. A project that has declared a pipeline but not yet written a stage has none, which is empty rather than invalid.",
           "title": "Stages",
           "type": "object"
         }
       },
-      "required": [
-        "stages"
-      ],
       "title": "Pipeline",
       "type": "object"
     },

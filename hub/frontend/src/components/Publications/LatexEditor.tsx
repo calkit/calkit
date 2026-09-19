@@ -131,7 +131,10 @@ const LatexEditor = ({
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [compiling, setCompiling] = useState(false)
   const [autoCompile, setAutoCompile] = useState(true)
-  const [commitMessage, setCommitMessage] = useState("")
+  // Pre-filled so saving is one keystroke away and the history stays
+  // readable for anyone who doesn't stop to write one.
+  const defaultMessage = `Update ${texPath}`
+  const [commitMessage, setCommitMessage] = useState(defaultMessage)
   // Concurrent-editing: origin advanced past what we loaded, and files that
   // came back with conflict markers from the last pull. mergeNonce forces the
   // CodeMirror pane to remount with merged content.
@@ -493,7 +496,7 @@ const LatexEditor = ({
       }
       setUpdatesAvailable(false)
       setDirty(new Set())
-      setCommitMessage("")
+      setCommitMessage(defaultMessage)
       commitModal.onClose()
       // Show the trimmed text if trimming changed anything, so the pane
       // isn't left displaying whitespace that wasn't committed. Remounting
@@ -1085,7 +1088,7 @@ const LatexEditor = ({
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder="Ex: Add paragraph about the boundary conditions"
+              placeholder={defaultMessage}
             />
           </ModalBody>
           <ModalFooter gap={3}>

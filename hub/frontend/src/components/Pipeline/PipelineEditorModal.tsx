@@ -57,7 +57,10 @@ const PipelineEditorModal = ({
   const baseRef = useRef<string>(content)
   const commitInputRef = useRef<HTMLInputElement>(null)
   const [dirty, setDirty] = useState(false)
-  const [commitMessage, setCommitMessage] = useState("")
+  // Pre-filled so saving is one keystroke away and the history stays
+  // readable for anyone who doesn't stop to write one.
+  const defaultMessage = "Update pipeline"
+  const [commitMessage, setCommitMessage] = useState(defaultMessage)
   // Bumped to remount the editor when the pipeline is replaced under it.
   const [docNonce, setDocNonce] = useState(0)
   // What `content` was when the editor last loaded it. A background refetch
@@ -103,7 +106,7 @@ const PipelineEditorModal = ({
     },
     onSuccess: () => {
       setDirty(false)
-      setCommitMessage("")
+      setCommitMessage(defaultMessage)
       commitModal.onClose()
       showToast("Saved", "Your changes were committed.", "success")
       onClose()
@@ -219,7 +222,7 @@ const PipelineEditorModal = ({
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder="Ex: Add a stage to plot the results"
+              placeholder={defaultMessage}
             />
           </ModalBody>
           <ModalFooter gap={3}>

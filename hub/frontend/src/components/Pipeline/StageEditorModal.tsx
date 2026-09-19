@@ -56,7 +56,10 @@ const StageEditorModal = ({
   const baseRef = useRef<string>("")
   const commitInputRef = useRef<HTMLInputElement>(null)
   const [dirty, setDirty] = useState(false)
-  const [commitMessage, setCommitMessage] = useState("")
+  // Pre-filled so saving is one keystroke away and the history stays
+  // readable for anyone who doesn't stop to write one.
+  const defaultMessage = `Update pipeline stage ${stageName}`
+  const [commitMessage, setCommitMessage] = useState(defaultMessage)
   // Bumped to remount the editor with content we replaced wholesale (the
   // stage as loaded, or as returned by input detection).
   const [docNonce, setDocNonce] = useState(0)
@@ -80,6 +83,16 @@ const StageEditorModal = ({
     enabled: isOpen,
     staleTime: 0,
   })
+
+  // Switching stages under an open editor changes what the default
+  // describes, so follow it -- unless the commit box is open, where it
+  // would overwrite something being typed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the stage, not the message
+  useEffect(() => {
+    if (!commitModal.isOpen) {
+      setCommitMessage(defaultMessage)
+    }
+  }, [stageName])
 
   // Load the stage into the editor, and reset when switching stages.
   useEffect(() => {
@@ -169,7 +182,7 @@ const StageEditorModal = ({
       baseRef.current = saved.yaml
       replaceDoc(saved.yaml)
       setDirty(false)
-      setCommitMessage("")
+      setCommitMessage(defaultMessage)
       commitModal.onClose()
       showToast("Saved", `Stage ${stageName} was updated.`, "success")
       onClose()
@@ -332,7 +345,7 @@ const StageEditorModal = ({
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder="Ex: Declare the paper's class file as an input"
+              placeholder={defaultMessage}
             />
           </ModalBody>
           <ModalFooter gap={3}>

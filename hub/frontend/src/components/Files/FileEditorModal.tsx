@@ -106,7 +106,10 @@ const FileEditorModal = ({
   const baseRef = useRef<string>("")
   const commitInputRef = useRef<HTMLInputElement>(null)
   const [dirty, setDirty] = useState(false)
-  const [commitMessage, setCommitMessage] = useState("")
+  // Pre-filled so saving is one keystroke away and the history stays
+  // readable for anyone who doesn't stop to write one.
+  const defaultMessage = `Update ${path}`
+  const [commitMessage, setCommitMessage] = useState(defaultMessage)
   const commitModal = useDisclosure()
   const showToast = useCustomToast()
   const queryClient = useQueryClient()
@@ -132,6 +135,13 @@ const FileEditorModal = ({
     enabled: isOpen,
     staleTime: 0,
   })
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the path, not the message
+  useEffect(() => {
+    if (!commitModal.isOpen) {
+      setCommitMessage(defaultMessage)
+    }
+  }, [path])
 
   useEffect(() => {
     if (initialDoc !== undefined) {
@@ -162,7 +172,7 @@ const FileEditorModal = ({
     onSuccess: () => {
       baseRef.current = trimForSave(textRef.current, initialDoc)
       setDirty(false)
-      setCommitMessage("")
+      setCommitMessage(defaultMessage)
       commitModal.onClose()
       showToast("Saved", "Your changes were committed.", "success")
       onClose()
@@ -294,7 +304,7 @@ const FileEditorModal = ({
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder="Ex: Add the paper's class file as a stage input"
+              placeholder={defaultMessage}
             />
           </ModalBody>
           <ModalFooter gap={3}>

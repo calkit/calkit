@@ -5,6 +5,7 @@ import json
 import os
 import random
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import git
@@ -836,6 +837,78 @@ def test_push_and_expire_updates_the_shared_checkout(tmp_path) -> None:
     assert (shared_base / "repo" / "data" / "raw.csv").exists()
     # And it is marked current, so the next read doesn't refresh it at all
     assert (shared_base / "updated.txt").stat().st_mtime > 0
+
+
+def test_a_read_after_a_write_touches_the_network_not_at_all(
+    tmp_path, monkeypatch
+) -> None:
+    """The point of pushing into the shared checkout, stated as a test.
+
+    Counts what a read does rather than how long it takes: the saving is
+    one ``ls-remote`` and one ``fetch``, both round trips to GitHub, and
+    both are gone only if the read makes neither.
+    """
+    from unittest.mock import patch
+
+    project = _StubProject("ck-shared-no-network")
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    seed_dir = tmp_path / "seed"
+    seed = git.Repo.clone_from(str(origin_dir), str(seed_dir))
+    _identify(seed)
+    _commit(seed, "notes.txt", "one")
+    branch = seed.active_branch.name
+    seed.git.push(["origin", branch])
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    shared_base.mkdir(parents=True)
+    git.Repo.clone_from(str(origin_dir), str(shared_base / "repo"))
+    (shared_base / "updated.txt").touch()
+    writer_dir = tmp_path / "writer"
+    writer = git.Repo.clone_from(str(origin_dir), str(writer_dir))
+    _identify(writer)
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+
+    ops: list[str] = []
+    real_timed = app.git._timed
+
+    @contextmanager
+    def recording_timed(operation: str, **fields):
+        ops.append(operation)
+        with real_timed(operation, **fields):
+            yield
+
+    def read() -> git.Repo:
+        ops.clear()
+        with patch("app.git._timed", recording_timed):
+            return app.git.get_repo(
+                project=project,
+                user=None,
+                session=None,
+                ttl=60,
+                read_only=True,
+            )
+
+    with patch("app.git.shared_reader_root", return_value=str(shared_root)):
+        # A read first, so the read-only hooks are in place before the
+        # write -- a push into a checkout that refuses writes is exactly
+        # the case worth proving
+        read()
+        second = _commit(writer, "notes.txt", "two")
+        app.git.push_and_expire(project, writer, branch)
+        repo = read()
+        assert repo.head.commit.hexsha == second
+        assert (Path(str(repo.working_dir)) / "notes.txt").read_text() == "two"
+        assert ops == [], f"a read after a write did {ops}"
+
+        # For contrast, the path taken when the local push can't be made:
+        # the same read asks where the remote is and goes and gets it
+        third = _commit(writer, "notes.txt", "three")
+        writer.git.push(["origin", branch])
+        app.git.expire_shared_read_clone(project, branch)
+        repo = read()
+        assert repo.head.commit.hexsha == third
+        assert "ls-remote" in ops and "fetch" in ops
 
 
 def test_push_and_expire_falls_back_when_the_shared_checkout_wont_take_it(

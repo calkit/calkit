@@ -39,7 +39,7 @@ const START_PATHS: PathOption[] = [
   {
     path: "overleaf",
     icon: FaLeaf,
-    title: "Start from an Overleaf project",
+    title: "Start from Overleaf",
     description:
       "Connect the analysis to something you're already writing in Overleaf.",
   },

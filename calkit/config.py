@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import platform
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Literal
 from typing import get_args as get_type_args
 
@@ -26,7 +28,8 @@ def _probe_keyring() -> bool:
     """
     try:
         # Attempt to get a password (this will trigger backend initialization)
-        keyring.get_password("test_service", "test_user")
+        with _keyring_home():
+            keyring.get_password("test_service", "test_user")
         return True
     except keyring.errors.NoKeyringError:
         return False
@@ -142,6 +145,40 @@ def _get_project_hub() -> str | None:
     return hub
 
 
+# Where set_env_vars keeps the user's own home directory when a project's
+# env_vars change it, e.g., to /tmp for a tool a stage runs, so Calkit still
+# finds its config, credentials, and caches
+USER_HOME_ENV_VAR = "CALKIT_USER_HOME"
+
+
+def get_user_home() -> str:
+    """The home directory Calkit keeps its own files in."""
+    return os.environ.get(USER_HOME_ENV_VAR) or os.path.expanduser("~")
+
+
+@contextmanager
+def _keyring_home() -> Iterator[None]:
+    """Point HOME at the user's own home for a keyring call.
+
+    The macOS keychain finds the login keychain through HOME when it's
+    called, so a project that points HOME elsewhere would otherwise hide
+    every stored secret, including hub credentials.
+    """
+    user_home = os.environ.get(USER_HOME_ENV_VAR)
+    old_home = os.environ.get("HOME")
+    if user_home is None or user_home == old_home:
+        yield
+        return
+    os.environ["HOME"] = user_home
+    try:
+        yield
+    finally:
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
+
+
 def _get_default_hub() -> str | None:
     """Read ``default_hub`` from the base (unsuffixed) config file.
 
@@ -150,7 +187,7 @@ def _get_default_hub() -> str | None:
     """
     import yaml
 
-    fpath = os.path.join(os.path.expanduser("~"), ".calkit", "config.yaml")
+    fpath = os.path.join(get_user_home(), ".calkit", "config.yaml")
     try:
         with open(fpath) as f:
             data = yaml.safe_load(f) or {}
@@ -275,7 +312,7 @@ def get_local_config_path() -> str:
 
 def get_config_yaml_fpath() -> str:
     return os.path.join(
-        os.path.expanduser("~"),
+        get_user_home(),
         ".calkit",
         f"config{get_env_suffix()}.yaml",
     )
@@ -291,11 +328,12 @@ def set_secret(key: str, value: str) -> None:
     """Sets a secret using keyring, handling byte conversion for Linux."""
     service_name = get_app_name()
     username = _keyring_username(key)
-    if platform.system() == "Linux":
-        value_bytes = value.encode("utf-8")
-        keyring.set_password(service_name, username, value_bytes)  # type: ignore
-    else:
-        keyring.set_password(service_name, username, value)
+    with _keyring_home():
+        if platform.system() == "Linux":
+            value_bytes = value.encode("utf-8")
+            keyring.set_password(service_name, username, value_bytes)  # type: ignore
+        else:
+            keyring.set_password(service_name, username, value)
     _secret_cache[(service_name, username)] = value
 
 
@@ -306,7 +344,8 @@ def get_secret(key: str) -> str | None:
     cache_key = (service_name, username)
     if cache_key in _secret_cache:
         return _secret_cache[cache_key]
-    password = keyring.get_password(service_name, username)
+    with _keyring_home():
+        password = keyring.get_password(service_name, username)
     if platform.system() == "Linux" and isinstance(password, bytes):
         password = password.decode("utf-8")
     _secret_cache[cache_key] = password
@@ -318,7 +357,8 @@ def delete_secret(key: str) -> None:
     service_name = get_app_name()
     username = _keyring_username(key)
     _secret_cache.pop((service_name, username), None)
-    keyring.delete_password(service_name, username)
+    with _keyring_home():
+        keyring.delete_password(service_name, username)
 
 
 class KeyringOptionalSecret(str):

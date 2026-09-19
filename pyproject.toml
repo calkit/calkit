@@ -81,7 +81,7 @@ dev = [
   "jupyter-builder>=1.2.3",
   "jsonschema",
   "types-jsonschema",
-  "kaleido==0.2.1",
+  "kaleido==1.4.0",
   "numpy",
   "pandas>=2.2.3",
   "polars[all]>=1.36.1",

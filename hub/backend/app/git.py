@@ -209,6 +209,38 @@ def shared_reader_root() -> str:
     return os.path.join(settings.CLONE_ROOT, SHARED_READER_DIR)
 
 
+def _remote_head_key(project: Project, branch: str) -> str:
+    """The cache key holding what ``origin`` has for *branch*."""
+    git_plain_url = project.git_repo_url or ""
+    if git_plain_url and not git_plain_url.endswith(".git"):
+        git_plain_url += ".git"
+    return cache.make_key("remote-head", git_plain_url, branch)
+
+
+def _record_remote_head(project: Project, branch: str, head: str) -> None:
+    """Remember the commit we just pushed, so no read has to go and ask.
+
+    An ``ls-remote`` measures around 700 ms and is the single most
+    expensive thing a read does. There is nothing to ask when we are the
+    ones who put the commit there.
+    """
+    cache.set_json(
+        _remote_head_key(project, branch), head, ttl=REMOTE_HEAD_TTL
+    )
+
+
+def shared_read_clone_dir(project: Project) -> str:
+    """Where *project*'s shared read-only checkout lives.
+
+    The directory holding it, not the checkout itself: ``repo`` beside
+    ``updated.txt`` and ``updating.lock``, laid out the way ``get_repo``
+    lays out every clone.
+    """
+    return os.path.join(
+        shared_reader_root(), project.owner_github_name, project.name
+    )
+
+
 def expire_shared_read_clone(
     project: Project, branch: str | None = None, head: str | None = None
 ) -> None:
@@ -221,29 +253,18 @@ def expire_shared_read_clone(
     the app comes back missing, and the DB sync then deletes it.
     """
     if branch:
-        git_plain_url = project.git_repo_url or ""
-        if git_plain_url and not git_plain_url.endswith(".git"):
-            git_plain_url += ".git"
-        key = cache.make_key("remote-head", git_plain_url, branch)
         if head:
-            # We just put that commit there, so there is nothing to ask the
-            # remote. Recording it saves the next read an ls-remote, which
-            # measures around 700 ms and is the single most expensive thing
-            # a read does. It still fetches, since this won't match what the
+            # We put that commit there, so the next read still gets to skip
+            # the ls-remote. It fetches, since this won't match what the
             # shared checkout has.
-            cache.set_json(key, head, ttl=REMOTE_HEAD_TTL)
+            _record_remote_head(project, branch, head)
         else:
             # Someone else moved the remote and we don't know where to, so
             # the next read has to ask.
-            cache.delete(key)
+            cache.delete(_remote_head_key(project, branch))
     # Dated to the epoch rather than removed: its absence means "no complete
     # clone here", which 503s every read until one finishes.
-    marker = os.path.join(
-        shared_reader_root(),
-        project.owner_github_name,
-        project.name,
-        "updated.txt",
-    )
+    marker = os.path.join(shared_read_clone_dir(project), "updated.txt")
     try:
         os.utime(marker, (0, 0))
     except OSError as e:
@@ -740,6 +761,68 @@ def get_repo(
     return repo
 
 
+def push_to_shared_read_clone(
+    project: Project, repo: git.Repo, branch: str, head: str | None
+) -> bool:
+    """Put what was just pushed into the checkout everyone reads from.
+
+    Otherwise that checkout only learns about a write by fetching it back
+    out of GitHub, which the first read after every save pays for: a round
+    trip to ask, another to fetch. This sends the same objects the same
+    way, over the filesystem instead. ``receive.denyCurrentBranch`` set to
+    ``updateInstead`` moves the branch and rewrites the working tree in one
+    step, so the next read finds the checkout already current and touches
+    the network not at all.
+
+    Returns whether the shared checkout is in hand: either it now holds
+    *head*, or there is no checkout there to update. False means it is
+    behind and the caller should expire it, which is what happened before
+    any of this -- nothing here is needed for correctness, so every way it
+    can fail falls back rather than failing the write.
+    """
+    if not head:
+        return False
+    base_dir = shared_read_clone_dir(project)
+    repo_dir = os.path.join(base_dir, "repo")
+    updated_fpath = os.path.join(base_dir, "updated.txt")
+    # No completed checkout to update. Nothing to fall back from either:
+    # the first read clones, and it clones what we just pushed.
+    if not os.path.isfile(updated_fpath) or not os.path.isdir(repo_dir):
+        return True
+    label = f"{project.owner_github_name}/{project.name}"
+    try:
+        with FileLock(os.path.join(base_dir, "updating.lock"), timeout=5):
+            shared = git.Repo(repo_dir)
+            # ``updateInstead`` only applies to the branch that checkout has
+            # out, and only over a working tree that matches it. Reads never
+            # write, so both should hold; when they don't, Git refuses the
+            # push and we expire instead.
+            try:
+                if shared.active_branch.name != branch:
+                    return False
+            except TypeError:
+                # Detached head, left by an interrupted refresh.
+                return False
+            shared.git.config(["receive.denyCurrentBranch", "updateInstead"])
+            with _timed("push-to-shared", repo=label, branch=branch):
+                repo.git.push([repo_dir, f"{branch}:{branch}"])
+            if shared.head.commit.hexsha != head:
+                logger.warning(
+                    f"Shared checkout for {label} is not at {head[:7]} "
+                    "after pushing to it"
+                )
+                return False
+            # The checkout is current as of now, so say so: the next read
+            # is inside its TTL and returns without taking this lock at all.
+            subprocess.call(["touch", updated_fpath])
+            return True
+    except Timeout:
+        logger.info(f"Shared checkout for {label} was locked; expiring it")
+    except (GitCommandError, ValueError, OSError) as e:
+        logger.info(f"Could not push to the shared checkout for {label}: {e}")
+    return False
+
+
 def push_and_expire(
     project: Project, repo: git.Repo, branch: str | None = None
 ) -> None:
@@ -757,7 +840,13 @@ def push_and_expire(
         head: str | None = repo.head.commit.hexsha
     except (ValueError, GitCommandError):
         head = None
-    expire_shared_read_clone(project, name, head=head)
+    if not push_to_shared_read_clone(project, repo, name, head):
+        # It has to fetch after all, but it still knows where from.
+        expire_shared_read_clone(project, name, head=head)
+    elif head:
+        # Every clone's cached answer for where the remote is should say
+        # where we just put it, not only the one we pushed into.
+        _record_remote_head(project, name, head)
 
 
 def record_project_update(

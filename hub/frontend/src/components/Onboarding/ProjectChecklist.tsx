@@ -101,6 +101,13 @@ const ProjectChecklist = ({
   if (reproCheckQuery.isPending || reproCheckQuery.isError) {
     return null
   }
+  // Every signal, not just the repo read: these three land at different
+  // times, and each one arriving ticks off its own step under the reader,
+  // collapsing a row and swapping its mark as it goes. Rendering once they
+  // have all settled shows the list in the state it is actually in.
+  if (questionsRequest.isPending || pipelineQuery.isPending) {
+    return null
+  }
   const actions: Record<string, React.ReactNode> = {
     question: (
       <>
@@ -233,19 +240,12 @@ const ProjectChecklist = ({
   return (
     <ChecklistCard
       title="Project setup"
-      intro={
-        "Each step here is checked against the project itself, so anything " +
-        "you do from the CLI ticks off on its own."
-      }
       steps={steps}
       actions={actions}
       onMarkDone={setFlag}
       dismissed={projectFlags.includes(DISMISSED)}
       onDismissedChange={(dismissed) => setFlag(DISMISSED, dismissed)}
-      doneMessage={
-        "This project is reproducible end to end. Anyone can clone it and " +
-        "get your results back."
-      }
+      doneMessage={"Looks good!"}
     />
   )
 }

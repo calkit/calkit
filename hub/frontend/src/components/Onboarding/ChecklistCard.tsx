@@ -42,39 +42,45 @@ function StepMark({
     Boolean(onMarkDone) &&
     !step.detectedOnly &&
     (!step.done || step.manuallyDone)
-  const icon = (
-    <Icon
-      as={step.done ? CheckCircleIcon : FiCircle}
-      color={step.done ? "ui.success" : "ui.dim"}
-      mt={1}
-      flexShrink={0}
-      aria-hidden
-    />
-  )
-  if (!canToggle) {
-    return icon
-  }
+  // One shape either way. Returning a bare icon when a step can't be
+  // toggled means the moment one becomes untoggleable -- which is what
+  // happens when we detect it as done -- React unmounts the button and the
+  // tooltip you are hovering, and it flashes out from under the cursor.
   return (
-    <Tooltip label={step.done ? "Not done after all?" : "Mark as done"}>
+    <Tooltip
+      label={step.done ? "Not done after all?" : "Mark as done"}
+      isDisabled={!canToggle}
+    >
       <Box
         as="button"
         type="button"
+        disabled={!canToggle}
         aria-label={
           step.done
             ? `Mark "${step.title}" as not done`
             : `Mark "${step.title}" as done`
         }
         lineHeight={0}
+        cursor={canToggle ? "pointer" : "default"}
         onClick={() => {
+          if (!canToggle) {
+            return
+          }
           mixpanel.track("Toggled onboarding step", {
             step: step.key,
             done: !step.done,
           })
           onMarkDone?.(step.key, !step.done)
         }}
-        _hover={{ opacity: 0.6 }}
+        _hover={canToggle ? { opacity: 0.6 } : undefined}
       >
-        {icon}
+        <Icon
+          as={step.done ? CheckCircleIcon : FiCircle}
+          color={step.done ? "ui.success" : "ui.dim"}
+          mt={1}
+          flexShrink={0}
+          aria-hidden
+        />
       </Box>
     </Tooltip>
   )

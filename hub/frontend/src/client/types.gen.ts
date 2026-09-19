@@ -3963,6 +3963,10 @@ export type QuestionEvidence = {
    */
   explanation?: string | null
   /**
+   * Explanation Path
+   */
+  explanation_path?: string | null
+  /**
    * Git Ref
    */
   git_ref?: string | null
@@ -4004,6 +4008,10 @@ export type QuestionEvidencePost = {
    * Explanation
    */
   explanation?: string | null
+  /**
+   * Explanation Path
+   */
+  explanation_path?: string | null
   /**
    * Git Ref
    */

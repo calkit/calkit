@@ -1455,6 +1455,80 @@ def test_get_project_questions_without_an_index(
     assert [q["id"] for q in indexed] == [by_number[n] for n in (1, 2, 3)]
 
 
+def test_render_template() -> None:
+    # A number in an answer is read out of the results file rather than
+    # retyped, so the page can't show a figure the pipeline has moved past.
+    from app.api.routes.projects.core import _render_template
+
+    values = {"speedup": 3.2571, "launches": 1480000, "name": "RRTMGP"}
+    assert (
+        _render_template("{speedup:.1f}x faster on {name}", values)
+        == "3.3x faster on RRTMGP"
+    )
+    # A format spec needs the value's own type, not a stringified copy
+    assert _render_template("{launches:,}", values) == "1,480,000"
+    # Nothing to fill, nothing to do
+    assert _render_template("Plain prose.", values) == "Plain prose."
+    assert _render_template(None, values) is None
+    # For display: a name with no evidence, and a spec the value can't
+    # satisfy, are left as written rather than breaking the page
+    assert _render_template("{missing}", values) == "{missing}"
+    assert _render_template("{name:.2f}", values) == "{name:.2f}"
+
+
+def test_resolve_explanation() -> None:
+    # An explanation is either the reasoning itself or a file holding it.
+    # A paragraph belongs in a file the pipeline can rebuild rather than a
+    # YAML string nobody can diff, so both spellings have to work.
+    import base64
+    from unittest.mock import patch
+
+    from app.api.routes.projects.core import _resolve_explanation
+    from app.models.core import ContentsItem
+
+    project = SimpleNamespace(id="p")
+    repo = SimpleNamespace()
+    cache: dict = {}
+    resolve = lambda e: _resolve_explanation(  # noqa: E731
+        project=project, repo=repo, ref=None, explanation=e, text_cache=cache
+    )
+    # Written inline: the text is the text, and no file is named
+    assert resolve("Because the slope is flat.") == (
+        "Because the slope is flat.",
+        None,
+    )
+    # Nothing at all, and shapes that name no file
+    assert resolve(None) == (None, None)
+    assert resolve({}) == (None, None)
+    assert resolve({"path": ""}) == (None, None)
+    assert resolve(["a"]) == (None, None)
+    body = "# Why\n\nThe launches *disappear*.\n"
+    item = ContentsItem(
+        path="notes/why.md",
+        name="why.md",
+        type="file",
+        size=len(body),
+        in_repo=True,
+        content=base64.b64encode(body.encode()).decode(),
+    )
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        return_value=item,
+    ) as read:
+        assert resolve({"path": "notes/why.md"}) == (body, "notes/why.md")
+        # Cited twice, read once: several questions can lean on one file
+        assert resolve({"path": "notes/why.md"}) == (body, "notes/why.md")
+        assert read.call_count == 1
+    # A file that can't be read still shows as a citation with a path, so
+    # the reader can see what is missing rather than nothing at all
+    cache.clear()
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        side_effect=HTTPException(404, "nope"),
+    ):
+        assert resolve({"path": "notes/gone.md"}) == (None, "notes/gone.md")
+
+
 def test_build_question_evidence_resolves_figures_and_results() -> None:
     import base64
     import json
@@ -1520,6 +1594,7 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
                 )
             },
             result_value_cache={},
+            explanation_cache={},
         )
     assert len(evidence) == 4
     assert evidence[0].kind == "figure"
@@ -1613,6 +1688,7 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
             ),
         },
         result_value_cache={},
+        explanation_cache={},
     )
     assert evidence[0].stage == "plot-declared"
     assert evidence[0].stage_status is not None
@@ -3911,6 +3987,7 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
                 )
             },
             result_value_cache={},
+            explanation_cache={},
         )
     assert evidence[0].result is None
     assert evidence[1].kind == "table"
@@ -3991,6 +4068,7 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
                 )
             },
             result_value_cache={},
+            explanation_cache={},
         )
     assert evidence[0].result is not None
     assert evidence[0].result.title == "Summary statistic"
@@ -4035,6 +4113,7 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
                 )
             },
             result_value_cache={},
+            explanation_cache={},
         )
     assert evidence[0].result is None
 
@@ -4116,6 +4195,7 @@ def test_evidence_resolves_at_its_own_git_ref() -> None:
                 ),
             },
             result_value_cache={},
+            explanation_cache={},
         )
     assert evidence[0].git_ref is None
     assert evidence[0].figure is not None

@@ -62,6 +62,7 @@ import calkit.environments
 import calkit.latex
 import calkit.pipeline
 import calkit.provenance
+import calkit.questions
 import calkit.resources
 import calkit.templates
 from app import (
@@ -2283,6 +2284,65 @@ def _resolve_result_value(
     return str(value)
 
 
+def _evidence_values(
+    project: Project,
+    repo: git.Repo,
+    ref: str | None,
+    evidence_ck: list,
+    cache: dict[tuple[str | None, str], dict | None],
+) -> dict[str, Any]:
+    """What a question's templates can refer to, keyed by evidence name.
+
+    The same values the evidence cards show, in the types the result files
+    hold them in rather than as strings, so a spec like ``{speedup:,.0f}``
+    has a number to format. Named by the entry's ``name``, falling back to
+    its ``key``, which is how calkit.questions names them too.
+    """
+    values: dict[str, Any] = {}
+    for ev in evidence_ck:
+        if not isinstance(ev, dict) or not calkit.questions.is_value_evidence(
+            ev
+        ):
+            continue
+        name = calkit.questions.evidence_name(ev)
+        path, key = ev.get("path"), ev.get("key")
+        if not name or not isinstance(path, str) or not isinstance(key, str):
+            continue
+        cache_key = (_evidence_ref(ev, ref), path)
+        if cache_key not in cache:
+            # _resolve_result_value fills the same cache; calling it here
+            # for its side effect keeps one reader of these files.
+            _resolve_result_value(
+                project=project,
+                repo=repo,
+                ref=cache_key[0],
+                path=path,
+                key=key,
+                cache=cache,
+            )
+        data = cache.get(cache_key)
+        if not isinstance(data, dict):
+            continue
+        try:
+            values[name] = calkit.questions.resolve_key(data, key)
+        except Exception:
+            continue
+    return values
+
+
+def _render_template(text: str | None, values: dict[str, Any]) -> str | None:
+    """Fill a question's placeholders, leaving what can't be filled alone.
+
+    This is for display: a template naming evidence that isn't there shows
+    as written rather than breaking the page. ``calkit check questions`` is
+    where an unfillable template is an error.
+    """
+    try:
+        return calkit.questions.render(text, values)
+    except (KeyError, ValueError, IndexError, TypeError):
+        return text
+
+
 class _EvidenceLookups(NamedTuple):
     """What evidence resolves against, at one Git ref.
 
@@ -2377,6 +2437,45 @@ def _set_evidence_stage(
         item.stale_reason = "frozen"
 
 
+def _resolve_explanation(
+    project: Project,
+    repo: git.Repo,
+    ref: str | None,
+    explanation: Any,
+    text_cache: dict[tuple[str | None, str], str | None],
+) -> tuple[str | None, str | None]:
+    """The text of an evidence explanation, and the file it came from.
+
+    Written inline as a string, or as ``{path: ...}`` naming a file that
+    holds it. The file is read at the evidence's own ref, so an answer
+    keeps the reasoning as it stood when it was written.
+
+    A path that can't be read comes back as a path with no text rather
+    than failing the question: the citation is still worth showing, and
+    the missing file is the kind of thing the reader should see.
+    """
+    if isinstance(explanation, str):
+        return explanation, None
+    if not isinstance(explanation, dict):
+        return None, None
+    path = explanation.get("path")
+    if not isinstance(path, str) or not path:
+        return None, None
+    cache_key = (ref, path)
+    if cache_key not in text_cache:
+        text: str | None = None
+        try:
+            item = app.projects.get_contents_from_repo(
+                project=project, repo=repo, path=path, ref=ref
+            )
+            if item.content is not None:
+                text = base64.b64decode(item.content).decode("utf-8")
+        except Exception as e:
+            logger.warning(f"Could not read explanation {path} at {ref}: {e}")
+        text_cache[cache_key] = text
+    return text_cache[cache_key], path
+
+
 def _build_question_evidence(
     project: Project,
     repo: git.Repo,
@@ -2384,6 +2483,7 @@ def _build_question_evidence(
     evidence_ck: list,
     lookups_by_ref: dict[str | None, _EvidenceLookups],
     result_value_cache: dict[tuple[str | None, str], dict | None],
+    explanation_cache: dict[tuple[str | None, str], str | None],
 ) -> list[QuestionEvidence]:
     """Turn calkit.yaml evidence entries into resolved QuestionEvidence.
 
@@ -2406,11 +2506,19 @@ def _build_question_evidence(
         path = ev.get("path", "")
         ev_ref = _evidence_ref(ev, ref)
         lookups = lookups_by_ref.get(ev_ref, empty)
+        explanation, explanation_path = _resolve_explanation(
+            project=project,
+            repo=repo,
+            ref=ev_ref,
+            explanation=ev.get("explanation"),
+            text_cache=explanation_cache,
+        )
         item = QuestionEvidence(
             kind=ev["kind"],
             path=path,
             key=ev.get("key"),
-            explanation=ev.get("explanation"),
+            explanation=explanation,
+            explanation_path=explanation_path,
             # What the entry declares, not what it resolved at: this is the
             # field an edit writes back, so filling it in from the browsed
             # ref would pin every citation on the next save.
@@ -2588,10 +2696,24 @@ def _build_questions_public(
     # wherever the shorter list ended.
     db_by_number = {q.number: q for q in project.questions}
     result_value_cache: dict[tuple[str | None, str], dict | None] = {}
+    explanation_cache: dict[tuple[str | None, str], str | None] = {}
     questions_public = []
     for number, q_ck in enumerate(questions_ck, start=1):
         hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
         answer = q_ck.get("answer") if isinstance(q_ck, dict) else None
+        # Templates are filled from the question's own value evidence, so a
+        # number in an answer is read out of the results file rather than
+        # retyped into calkit.yaml and left to drift. The CLI already does
+        # this; the page showed the raw `{name}` instead.
+        values = _evidence_values(
+            project=project,
+            repo=repo,
+            ref=ref,
+            evidence_ck=_evidence_of(q_ck),
+            cache=result_value_cache,
+        )
+        hypothesis = _render_template(hypothesis, values)
+        answer = _render_template(answer, values)
         evidence = _build_question_evidence(
             project=project,
             repo=repo,
@@ -2599,7 +2721,10 @@ def _build_questions_public(
             evidence_ck=_evidence_of(q_ck),
             lookups_by_ref=lookups_by_ref,
             result_value_cache=result_value_cache,
+            explanation_cache=explanation_cache,
         )
+        for item in evidence:
+            item.explanation = _render_template(item.explanation, values)
         q_db = db_by_number.get(number)
         questions_public.append(
             QuestionPublic(
@@ -2759,7 +2884,9 @@ def _apply_question_update(
         entry: dict = {"kind": ev.kind, "path": ev.path}
         if ev.kind == "result" and ev.key:
             entry["key"] = ev.key
-        if ev.explanation:
+        if ev.explanation_path:
+            entry["explanation"] = {"path": ev.explanation_path}
+        elif ev.explanation:
             entry["explanation"] = ev.explanation
         if ev.git_ref:
             entry["git_ref"] = ev.git_ref

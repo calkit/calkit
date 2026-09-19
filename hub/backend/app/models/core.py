@@ -1537,7 +1537,15 @@ class QuestionEvidence(SQLModel):
     kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
+    # Why this piece of evidence answers the question. Written inline in
+    # calkit.yaml, or kept in a file and cited by path -- a paragraph of
+    # reasoning belongs in a file the pipeline can rebuild, not in a YAML
+    # string nobody can diff. Either way this is the text to show.
     explanation: str | None = None
+    # The file the explanation was read from, when it came from one. Lets
+    # the page link to it, and say how to render it: a .md explanation is
+    # a document, not a YAML scalar that happens to contain markdown.
+    explanation_path: str | None = None
     # The ref the evidence itself names, if any: evidence can cite a branch,
     # tag, or commit other than the one being browsed, e.g. an answer backed
     # by the figure as it stood when the answer was written. Carried through
@@ -1571,6 +1579,10 @@ class QuestionEvidencePost(SQLModel):
     path: str
     key: str | None = None
     explanation: str | None = None
+    # Set instead of ``explanation`` to point at a file holding it. The two
+    # are alternatives: a path wins, since the file is the record and the
+    # text the reader saw was only a copy of it.
+    explanation_path: str | None = None
     git_ref: str | None = None
 
 

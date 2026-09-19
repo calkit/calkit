@@ -281,7 +281,12 @@ function EvidenceCard({
         // In full: the cards sit in a column of their own now, and an
         // explanation clipped at three lines had nowhere to be read.
         <Box fontSize="xs" color={subtleColor} mt={1}>
-          <Markdown foldedProse>{evidence.explanation}</Markdown>
+          {/* foldedProse only when it came from calkit.yaml: it puts back
+              the paragraph breaks YAML folding ate, and doing that to a
+              real file would split its intentional soft breaks. */}
+          <Markdown foldedProse={!evidence.explanation_path}>
+            {evidence.explanation}
+          </Markdown>
         </Box>
       ) : null}
     </>
@@ -750,7 +755,9 @@ function QuestionModal({
             <Box height="100%">
               {openEvidence.explanation ? (
                 <Box fontSize="sm" color={subtleColor} mb={3}>
-                  <Markdown foldedProse>{openEvidence.explanation}</Markdown>
+                  <Markdown foldedProse={!openEvidence.explanation_path}>
+                    {openEvidence.explanation}
+                  </Markdown>
                 </Box>
               ) : null}
               <EvidenceDetail

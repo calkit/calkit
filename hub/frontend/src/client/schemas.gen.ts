@@ -6952,6 +6952,17 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Explanation",
     },
+    explanation_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Explanation Path",
+    },
     git_ref: {
       anyOf: [
         {
@@ -7075,6 +7086,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Explanation",
+    },
+    explanation_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Explanation Path",
     },
     git_ref: {
       anyOf: [

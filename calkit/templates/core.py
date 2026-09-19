@@ -179,6 +179,17 @@ def find_template(ref: str, kind: str | None = None) -> Template | None:
     return None
 
 
+def find_project_template(ref: str) -> ProjectTemplate | None:
+    """The known project template *ref* names, if there is one.
+
+    Separate from ``find_template`` so callers get back something that
+    actually has ``git_repo_url`` and ``hub_url``, rather than the base
+    type and a cast.
+    """
+    template = find_template(ref, kind="project")
+    return template if isinstance(template, ProjectTemplate) else None
+
+
 def get_templates(kind: str | None = None) -> list[Template]:
     """Every known template, or only those of one kind.
 

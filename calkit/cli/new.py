@@ -437,7 +437,7 @@ def new_project(
             # A template this package knows about carries its own repo URL,
             # so the common case needs no hub: no request, no login, and it
             # still works offline once the repo is reachable.
-            known = calkit.templates.find_template(project, kind="project")
+            known = calkit.templates.find_project_template(project)
             if known is not None:
                 if verbose:
                     typer.echo(f"Using known template {project}")

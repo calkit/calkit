@@ -828,7 +828,7 @@ def _resolve_project_template(
     except HTTPException as e:
         if e.status_code not in (403, 404):
             raise
-    known = calkit.templates.find_template(template, kind="project")
+    known = calkit.templates.find_project_template(template)
     if known is None:
         # The template came off a list this hub offered, so "Project not
         # found" reads as though the project being created is the one
@@ -841,7 +841,7 @@ def _resolve_project_template(
     logger.info(
         f"Template {template} isn't hosted here; using {known.git_repo_url}"
     )
-    return None, known.git_repo_url  # type: ignore[union-attr]
+    return None, known.git_repo_url
 
 
 @router.post("/projects")

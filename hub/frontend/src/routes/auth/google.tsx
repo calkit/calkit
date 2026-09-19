@@ -35,7 +35,7 @@ function GoogleAuth() {
   const googleAuthMutation = useMutation({
     mutationFn: (code: string) =>
       UsersService.postUserGoogleAuth({
-        oAuthCodeExchange: {
+        appApiRoutesUsersOAuthCodeExchange: {
           code,
           redirect_uri: getGoogleRedirectUri(),
         },

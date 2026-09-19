@@ -134,7 +134,10 @@ function Auth() {
   const githubConnectMutation = useMutation({
     mutationFn: (code: string) =>
       UsersService.postUserGithubAuth({
-        oAuthCodeExchange: { code, redirect_uri: getGitHubRedirectUri() },
+        appApiRoutesUsersOAuthCodeExchange: {
+          code,
+          redirect_uri: getGitHubRedirectUri(),
+        },
       }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "GitHub account connected.", "success")

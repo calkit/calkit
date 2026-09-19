@@ -117,7 +117,7 @@ const useAuth = () => {
 
   const loginGithub = async (data: { code: string; redirectUri: string }) => {
     const response = await LoginService.loginWithGithub({
-      oAuthCodeExchange: {
+      appApiRoutesLoginOAuthCodeExchange: {
         code: data.code,
         redirect_uri: data.redirectUri,
         analytics_consent: getAnalyticsConsentToSave(),
@@ -146,7 +146,7 @@ const useAuth = () => {
 
   const loginGoogle = async (data: { code: string; redirectUri: string }) => {
     const response = await LoginService.loginWithGoogle({
-      oAuthCodeExchange: {
+      appApiRoutesLoginOAuthCodeExchange: {
         code: data.code,
         redirect_uri: data.redirectUri,
         analytics_consent: getAnalyticsConsentToSave(),

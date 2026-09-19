@@ -222,6 +222,19 @@ to buy.
 (220 MB content) against roughly 9 GB for `texlive/texlive:latest-full`.
 It should become the default image for LaTeX environments.
 
+It now lives at `images/latex` in this repo and publishes as
+`ghcr.io/calkit/latex`, following the dev container image already here:
+built and smoke tested on pull requests, built multi-platform and pushed
+with a provenance attestation on release. Being in the monorepo means a
+change to the image can be tested against `calkit latex build` in the
+same commit that makes it.
+
+It is versioned on its own `latex-image/vX.Y.Z` tag rather than with the
+CLI, since it changes rarely, and `DEFAULT_LATEX_IMAGE` pins an exact tag
+rather than `:latest`. A floating tag would quietly undo the version
+locking this ADR is built around: an environment that recorded a backend
+version would go on building against whatever was pushed last.
+
 It does not currently work, and testing found two independent reasons,
 both reproduced here against a locally built copy.
 

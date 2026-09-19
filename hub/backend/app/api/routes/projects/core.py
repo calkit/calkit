@@ -7216,6 +7216,10 @@ def post_project_push_event(
     # Warming is normally skipped when the commit is already warm. That is
     # the wrong answer for a push that moved data rather than code: the
     # commit is the same and what it resolves to is not.
+    # Warming is a queued job, so reads arriving before it finishes would
+    # keep serving the project as it was. Expiring here costs one ls-remote
+    # on the next read and makes the push visible immediately.
+    expire_shared_read_clone(project, req.branch)
     moved_data = bool(set(req.targets or []) - {"git"})
     queued = app.tasks.enqueue_warm(
         project.owner_account_name, project.name, force=moved_data

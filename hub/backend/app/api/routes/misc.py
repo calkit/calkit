@@ -29,6 +29,7 @@ from app.api.deps import (
 from app.config import settings
 from app.core import utcnow
 from app.db import engine
+from app.git import expire_shared_read_clone
 from app.messaging import generate_test_email, send_email
 from app.models import (
     PLAN_IDS,
@@ -261,6 +262,11 @@ async def post_github_event(request: Request) -> Message:
         # Read the names while the session is still open: the owner's name
         # comes off a relationship, and the objects are detached after this.
         slugs = [(p.owner_account_name, p.name) for p in projects]
+        # Warming is queued; this makes the push visible to the next read
+        # without waiting for it. "refs/heads/main" -> "main".
+        branch = str(payload.get("ref") or "").removeprefix("refs/heads/")
+        for project in projects:
+            expire_shared_read_clone(project, branch or None)
     if not slugs:
         logger.info(f"No project tracks {repo}")
         return Message(message="Ignored")

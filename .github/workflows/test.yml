@@ -17,7 +17,9 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      cli: ${{ steps.filter.outputs.cli }}
+      cli: >-
+        ${{ steps.filter.outputs.cli == 'true'
+        || steps.docs.outputs.checked == 'true' }}
       jlab: ${{ steps.filter.outputs.jlab }}
       vscode: ${{ steps.filter.outputs.vscode }}
       browser: ${{ steps.filter.outputs.browser }}
@@ -29,11 +31,18 @@ jobs:
           # quantifier, which would make this match every change
           predicate-quantifier: "every"
           filters: |
+            # Prose and docs don't affect the package; the few docs files a
+            # test does read are picked up by the step below
             cli:
               - "**"
               - "!hub/**"
               - "!vscode-ext/**"
               - "!browser-ext/**"
+              - "!docs/**"
+              - "!*.md"
+              - "!mkdocs.yml"
+              - "!CITATION.cff"
+              - "!LICENSE"
             # The JupyterLab extension depends on the core Python package,
             # so run its tests for any change outside the other subprojects
             jlab:
@@ -41,10 +50,26 @@ jobs:
               - "!hub/**"
               - "!vscode-ext/**"
               - "!browser-ext/**"
+              - "!docs/**"
+              - "!*.md"
+              - "!mkdocs.yml"
+              - "!CITATION.cff"
+              - "!LICENSE"
             vscode:
               - "vscode-ext/**"
             browser:
               - "browser-ext/**"
+      # A separate step because these are alternatives, which the 'every'
+      # quantifier above can't express. Tests check these files against
+      # the models, so a hand edit to them has to run the suite.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: docs
+        with:
+          filters: |
+            checked:
+              - "docs/schemas/calkit.json"
+              - "docs/pipeline/index.md"
+              - "docs/environments.md"
 
   main:
     needs: changes

@@ -368,17 +368,30 @@ def list_installers(
     groups: dict[int, list[str]] = {}
     for name, entry in calkit.install.INSTALLERS.items():
         groups.setdefault(id(entry), []).append(name)
+    # What Calkit has already installed here, so the listing doubles as a
+    # record of changes it made to this machine
+    installed = {
+        rec["app"]: rec["installed_at"]
+        for rec in calkit.install.read_install_log()
+    }
     result: list[dict] = []
     for names in groups.values():
         names.sort()
         entry = calkit.install.INSTALLERS[names[0]]
         scripts = {}
-        for platform in ("unix", "windows"):
+        for platform in ("unix", "mac", "linux", "windows"):
             ins = entry.get(platform)  # type: ignore[call-overload]
             if ins is not None:
                 scripts[platform] = ins["script"]
         result.append(
-            {"name": names[0], "aliases": names[1:], "scripts": scripts}
+            {
+                "name": names[0],
+                "aliases": names[1:],
+                "scripts": scripts,
+                "installed_by_calkit": next(
+                    (installed[n] for n in names if n in installed), None
+                ),
+            }
         )
     if json_output:
         echo_json(result)
@@ -388,6 +401,10 @@ def list_installers(
         header = installer["name"] + (
             f"  (aliases: {aliases})" if aliases else ""
         )
+        if installer["installed_by_calkit"]:
+            header += (
+                f"  [installed by Calkit {installer['installed_by_calkit']}]"
+            )
         typer.echo(header)
         for platform, script in installer["scripts"].items():
             typer.echo(f"  {platform}: {script}")

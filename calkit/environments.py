@@ -1142,10 +1142,20 @@ def check_all_in_pipeline(
             for t in targets
             if t in md_stages
         ]
+        # A latex stage's diffs run in its environment, whether they're
+        # named one at a time or all together
+        import calkit.latex
+
         stages = {
             k: v
             for k, v in stages.items()
-            if k in targets or any(k.startswith(p) for p in prefixes)
+            if k in targets
+            or any(k.startswith(p) for p in prefixes)
+            or k + calkit.latex.DIFFS_TARGET_SUFFIX in targets
+            or any(
+                name in targets
+                for name in calkit.latex.get_diff_stage_names(k, v)
+            )
         }
     envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
     envs_in_pipeline = [

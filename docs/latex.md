@@ -18,7 +18,7 @@ Add the document to the [pipeline](pipeline/index.md) as a `latex` stage, and
 and skips it when nothing has:
 
 ```sh
-calkit new latex-stage --name paper --target paper/paper.tex --environment tex
+calkit new latex-stage --name paper --target paper/main.tex --environment tex
 ```
 
 which writes into `calkit.yaml`:
@@ -29,13 +29,15 @@ pipeline:
     paper:
       kind: latex
       environment: tex
-      target_path: paper/paper.tex
+      target_path: paper/main.tex
 ```
 
 The compiled PDF is an output of the stage without being declared, so there's
 nothing to add for it.
 Use `--output` only for the extras a build produces, and see the
-[pipeline docs](pipeline/index.md) for the attributes every stage shares.
+[pipeline docs](pipeline/index.md) for the attributes every stage shares,
+e.g., `inputs`, which can include figures, tables, and results
+converted to [.tex from JSON](pipeline/index.md#json-to-latex).
 
 To start a document from scratch instead, `calkit new publication` writes the
 source files, the environment, and the stage in one go:
@@ -66,21 +68,20 @@ Pass `--no-detect-inputs` to turn this off, and `--input` to add more.
 `calkit xr` detects the same inputs when the command it wraps builds a
 document.
 
-In the web app, clicking a stage in the pipeline diagram opens it for
-editing, with a button to re-run this detection against the current source.
-
 Undeclared inputs mean editing the class file doesn't rebuild the paper, and
 the web app's in-browser editor, which loads exactly what the stage declares,
 can't compile the document at all.
 
 ## Comparing revisions
 
-A rebuilt PDF is a DVC-tracked artifact, so a pull request shows its pointer
+A LaTeX PDF output is stored/tracked with DVC by default
+(controlled with the `pdf_storage` key), so a pull request shows its pointer
 file changing and nothing about the document itself.
 Calkit can mark up one revision of a document against another with
 `latexdiff`, so additions and deletions appear where they happen.
 
-List the comparisons a document should keep in its `latex` stage:
+List the comparisons a document should keep in its `latex` stage
+under the `diffs` list:
 
 ```yaml
 pipeline:
@@ -105,20 +106,13 @@ document can usually diff it too.
 
 ### For pull request reviewers
 
-A bare revision compares it against `HEAD`, so `- main` means "what this
-branch has committed, against the branch it will merge into".
-That's the diff a PR reviewer wants, and it's rebuilt whenever either end
-moves.
+A single revision compares it against `HEAD`, so `- main` means "what this
+branch has committed, against the `main` branch".
+That's the diff you'd want to see for a pull request,
+and it will be rebuilt by the pipeline whenever the PR or `main` changes.
 
 On the default branch, `main` and `HEAD` are the same commit, so the
-comparison comes out empty and the marked-up document is simply the
-document.
-That's a result rather than an error: a stage shouldn't fail depending on
-which branch it runs from.
-
-It does mean the tracked diff keeps showing a merged branch's changes until
-the pipeline runs on the default branch again, which rebuilds it as the
-plain document.
+comparison comes out empty and the diff will show no changes.
 Running the pipeline in CI on pushes to the default branch keeps it current;
 the [run action](https://github.com/calkit/calkit/tree/main/actions/run) does that
 in its example workflow, and saves the result.
@@ -141,7 +135,7 @@ diffs:
   - [paper-1-submitted, paper-1-v2]
 ```
 
-Neither end can move, so it's built once and then left alone.
+Both references are static, so the diff is compiled once.
 That matters for a file you've already sent someone: LaTeX writes a
 timestamp into every PDF, so rebuilding from identical sources would produce
 a different file.
@@ -165,10 +159,10 @@ keeping it costs nothing.
 
 A release covers one path, so archiving the diff means a second release
 naming its directory.
-The tag pins both either way, since the diff is tracked with the project
-like any other output.
 Bundling everything a publication needs into a single release is
-[issue #1026](https://github.com/calkit/calkit/issues/1026).
+possible with the `--pipeline` option,
+which creates a standalone pipeline for the LaTeX stage and everything
+it depends on upstream.
 
 ### Where they go
 
@@ -183,6 +177,48 @@ document's own path inside it:
 `diff_pdf_storage` on the stage chooses between DVC and Git for them, like
 `pdf_storage` does for the document itself.
 
+### Figures, tables, and build settings
+
+Each side of a comparison is built from its own revision, including
+figures and tables tracked with DVC.
+Anything the stage lists in `inputs` that DVC tracks is fetched from the
+cache, or a remote, as it was at that commit.
+A figure that changed is shown both as it was and as it is now, using
+`latexdiff`'s `--graphics-markup=both`.
+To show only the new version, set `--graphics-markup=new-only` in
+`latexdiff_args`.
+
+The diff is built the same way as the document, with the stage's
+`latexmkrc_path` and `latexmk_args`.
+Options for `latexdiff` itself go in `latexdiff_args`:
+
+```yaml
+pipeline:
+  stages:
+    paper-1:
+      kind: latex
+      environment: tex
+      target_path: pubs/paper-1/main.tex
+      latexmkrc_path: pubs/paper-1/.latexmkrc
+      inputs:
+        - pubs/paper-1/figs
+      diffs:
+        - paper-1-submitted
+      latexdiff_args:
+        - --type=CFONT
+```
+
+### Running diffs
+
+Each comparison is its own pipeline substage, named after the document's
+stage and what it compares, e.g., `paper-1-diff-paper-1-submitted`, so it
+can be run by itself.
+To run all of a document's comparisons:
+
+```sh
+calkit run paper-1.diffs
+```
+
 ### Comparing against uncommitted work
 
 `calkit latex diff` runs a comparison on demand, and with no `--to` the
@@ -193,9 +229,12 @@ calkit latex diff pubs/paper-1/main.tex --from main --env tex
 # .calkit/local/latex-diffs/main..working/pubs/paper-1/main.pdf
 ```
 
-That one can't be reproduced from two revisions, so it isn't tracked: it
-goes under `.calkit/local`, which is private to the machine.
+Those diffs can't be reproduced from two revisions, so they're not tracked,
+ending up in the project's `.calkit/local` directory.
 With no `--from` it compares against the merge base with the default branch.
+DVC-tracked files the document names directly are fetched for the older
+side, but a pipeline output without a `.dvc` file isn't found that way, so
+name any of those with `--input`, e.g., `--input pubs/paper-1/figs/`.
 
 ## Interoperability with Microsoft Word
 

@@ -945,7 +945,13 @@ def check_requirements(
                         described_as=described_as,
                     )
                 continue
-        raise ValueError(f"app '{dep_name}' not found on {described_as}")
+        # Some apps have no installer here but a known way in, e.g., a
+        # system package manager on Linux
+        hint = _install.get_unsupported_message(dep_name)
+        raise ValueError(
+            f"app '{dep_name}' not found on {described_as}"
+            + (f"; {hint}" if hint else "")
+        )
     for dep in buckets.get("_other", []):
         dep_name = dep["name"]
         dep_kind = dep["kind"]

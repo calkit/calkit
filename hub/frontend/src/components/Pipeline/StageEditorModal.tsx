@@ -147,8 +147,8 @@ const StageEditorModal = ({
   })
 
   const saveMutation = useMutation({
-    mutationFn: (message: string) =>
-      ProjectsService.putProjectPipelineStage({
+    mutationFn: async (message: string) => {
+      const saved = await ProjectsService.putProjectPipelineStage({
         owner_name: ownerName,
         project_name: projectName,
         stage_name: stageName,
@@ -156,7 +156,13 @@ const StageEditorModal = ({
           yaml: trimForSave(textRef.current, stage?.yaml),
           message: message || null,
         },
-      }).then((response) => response.data),
+      }).then((response) => response.data)
+      // Part of the save rather than a follow-up, so the button keeps
+      // spinning until a read can see the commit. Closing on the write alone
+      // put the pipeline back in view still showing the old stage.
+      await refreshProjectContents(ownerName, projectName, queryClient)
+      return saved
+    },
     onSuccess: (saved) => {
       // The saved stage comes back normalized, so show what actually landed
       // in calkit.yaml rather than what was typed.
@@ -166,8 +172,6 @@ const StageEditorModal = ({
       setCommitMessage("")
       commitModal.onClose()
       showToast("Saved", `Stage ${stageName} was updated.`, "success")
-      // Fire-and-forget: the save already succeeded, and this never rejects.
-      void refreshProjectContents(ownerName, projectName, queryClient)
       onClose()
     },
     onError: (err: AxiosError) => {

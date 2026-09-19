@@ -154,6 +154,10 @@ const FileEditorModal = ({
         "content-length": file.size,
         bodyProjectsPutProjectContents: { file, message: message || null },
       }).then((response) => response.data)
+      // Part of the save rather than a follow-up, so the button keeps
+      // spinning until a read can see the commit. Closing on the write alone
+      // put the page back in view still showing the old content.
+      await refreshProjectContents(ownerName, projectName, queryClient)
     },
     onSuccess: () => {
       baseRef.current = trimForSave(textRef.current, initialDoc)
@@ -161,8 +165,6 @@ const FileEditorModal = ({
       setCommitMessage("")
       commitModal.onClose()
       showToast("Saved", "Your changes were committed.", "success")
-      // Fire-and-forget: the save already succeeded, and this never rejects.
-      void refreshProjectContents(ownerName, projectName, queryClient)
       onClose()
     },
     onError: (err: AxiosError) => {

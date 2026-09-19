@@ -229,20 +229,20 @@ function EmptyState() {
 // gives each one. The pitch is that they happen in one place.
 const LOOP = [
   {
-    title: "Read",
-    body: "Your Zotero collection becomes the project's .bib file, synced both ways.",
+    title: "Lit review/planning",
+    body: "Add your references (optionally linking with Zotero) and come up with a plan.",
   },
   {
-    title: "Collect",
-    body: "Type it, upload it, or import it by DOI. Every dataset remembers where it came from.",
+    title: "Data collection",
+    body: "Enter manually, upload, import from elsewhere, or run simulations in self-contained environments.",
   },
   {
-    title: "Analyze",
-    body: "Plot in Python, R, or Julia. Save it as a stage and the figure is reproducible.",
+    title: "Analysis",
+    body: "Plot in Python, R, Julia, or MATLAB. Changes to data clearly signal and rerun necessary analyses.",
   },
   {
-    title: "Write",
-    body: "LaTeX here or Overleaf there. Change a figure and the PDF catches up.",
+    title: "Writing",
+    body: "Quarto, LaTeX, and more, optionally linked with Overleaf. Like elsewhere, upstream changes propagate automatically.",
   },
 ]
 
@@ -369,8 +369,8 @@ function LandingPage() {
         <Text color="ui.dim" fontSize="sm">
           Change the data and the analysis, figures, and paper all follow
           without manually transferring data between different apps or
-          platforms. When coupled components stay close together and connected,
-          iteration is quicker and easier, and iteration is the key to quality.
+          platforms. Collaborate and iterate within and across stages
+          seamlessly.
         </Text>
       </Box>
       <LoopArcs />

@@ -178,7 +178,13 @@ const ShareDialog = ({
   const shares = sharesQuery.data ?? []
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} size="lg" isCentered>
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      size="lg"
+      isCentered
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>

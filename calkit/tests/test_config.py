@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 from typing import get_args
 
@@ -118,6 +119,33 @@ def test_keyring_probe_is_lazy(monkeypatch):
     # And the result is cached rather than re-probed per secret
     assert config.supports_keyring() is True
     assert len(calls) == 1
+
+
+def test_user_home(monkeypatch, tmp_path):
+    # A project's env_vars can point the home directory elsewhere for a tool
+    # a stage runs, and Calkit's own files have to stay where the user keeps
+    # them
+    project_home = str(tmp_path / "project-home")
+    user_home = str(tmp_path / "user-home")
+    monkeypatch.delenv(config.USER_HOME_ENV_VAR, raising=False)
+    monkeypatch.setenv("HOME", project_home)
+    monkeypatch.setenv("USERPROFILE", project_home)
+    assert config.get_user_home() == project_home
+    monkeypatch.setenv(config.USER_HOME_ENV_VAR, user_home)
+    assert config.get_user_home() == user_home
+    assert config.get_config_yaml_fpath().startswith(user_home)
+    # The macOS keychain finds the login keychain through HOME, so a keyring
+    # call sees the user's home, and HOME is put back afterwards
+    seen: list[str] = []
+    monkeypatch.setattr(config, "_secret_cache", {})
+    monkeypatch.setattr(
+        keyring,
+        "get_password",
+        lambda service, username: seen.append(os.environ["HOME"]),
+    )
+    assert config.get_secret("token") is None
+    assert seen == [user_home]
+    assert os.environ["HOME"] == project_home
 
 
 def test_config_naming(monkeypatch):

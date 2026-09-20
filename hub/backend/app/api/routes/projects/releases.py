@@ -37,7 +37,12 @@ from app import arxiv, messaging, mixpanel, users
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.config import settings
 from app.core import ryaml, utcnow
-from app.git import get_repo, get_repo_tree_for_ref, resolve_commit_sha
+from app.git import (
+    get_repo,
+    get_repo_tree_for_ref,
+    push_and_expire,
+    resolve_commit_sha,
+)
 from app.models import (
     ContentsItem,
     ExternalReleasePost,
@@ -407,6 +412,7 @@ def _store_internal_release_copy(
 
 
 def _commit_calkit_change(
+    project: Project,
     repo: git.Repo,
     message: str,
     *,
@@ -428,7 +434,7 @@ def _commit_calkit_change(
         for path in rm or []:
             repo.git.rm(["-r", "--ignore-unmatch", path])
         repo.git.commit(["-m", message])
-        repo.git.push(["origin", branch])
+        push_and_expire(project, repo, branch)
     except GitCommandError as e:
         repo.git.reset(["--hard", f"origin/{branch}"])
         repo.git.clean(["-fd"])
@@ -481,6 +487,7 @@ def _record_internal_release_in_calkit_yaml(
     with open(ck_path, "w") as f:
         ryaml.dump(ck_info, f)
     _commit_calkit_change(
+        project,
         repo,
         f"Add internal release {release_in.name}",
         error_detail=(
@@ -722,6 +729,7 @@ def post_external_release(
     with open(ck_path, "w") as f:
         ryaml.dump(ck_info, f)
     _commit_calkit_change(
+        project,
         repo,
         f"Declare release {release_in.name}",
         error_detail=(
@@ -1139,6 +1147,7 @@ def import_github_releases(
     # A clear error instead of an opaque 500 when the user has Calkit write
     # access but not GitHub push access to the repo.
     _commit_calkit_change(
+        project,
         repo,
         f"Import {len(imported)} release(s) from GitHub",
         error_detail=(
@@ -1357,6 +1366,7 @@ def delete_project_release(
         with open(ck_path, "w") as f:
             ryaml.dump(ck_info, f)
         _commit_calkit_change(
+            project,
             repo,
             f"Remove internal release {release_name}",
             # Remove the stored copy we saved (no-op if there wasn't one).
@@ -1899,19 +1909,10 @@ def post_release_comment(
         "via_share_link": share_token is not None,
         "opened_github_issue": comment.external_url is not None,
     }
+    # Anonymous commenters have no account to hold a consent answer, so only
+    # signed-in commenters are tracked
     if current_user is not None:
         mixpanel.track(current_user, "Posted release comment", event_props)
-    else:
-        distinct_id = (
-            f"share-token:{share_token.id}"
-            if share_token is not None
-            else "anonymous-release-commenter"
-        )
-        mixpanel.mp.track(
-            distinct_id,
-            event_name="Posted release comment",
-            properties=event_props,
-        )
     return ReleaseCommentPublic(
         id=comment.id,
         author_name=comment.author_name,

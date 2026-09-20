@@ -333,21 +333,44 @@ def list_environments(
 
 @list_app.command(name="templates")
 def list_templates(
+    kind: Annotated[
+        str | None,
+        typer.Option("--kind", "-k", help="Only show templates of one kind."),
+    ] = None,
     json_output: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ):
-    """List all available Calkit templates."""
-    names = [
-        f"{kind}/{name}"
-        for kind, tpl_dict in calkit.templates.TEMPLATES.items()
-        for name in tpl_dict
-    ]
+    """List all available Calkit templates, grouped by kind.
+
+    A template is named by its kind and name, except a project template,
+    which names a project on a hub and so is ``owner/project``.
+    """
+    try:
+        templates = calkit.templates.get_templates(kind=kind)
+    except ValueError as e:
+        raise_error(str(e))
+    groups: dict[str, list[dict]] = {}
+    for template in templates:
+        groups.setdefault(template.kind, []).append(
+            {
+                "name": template.ref,
+                "title": template.title,
+                "description": template.description,
+            }
+        )
     if json_output:
-        echo_json(names)
+        echo_json(groups)
         return
-    for name in names:
-        typer.echo(name)
+    for i, (group, entries) in enumerate(groups.items()):
+        if i:
+            typer.echo()
+        typer.echo(f"{group}:")
+        for entry in entries:
+            typer.echo(f"  {entry['name']}")
+            for key in ("title", "description"):
+                if entry[key]:
+                    typer.echo(f"    {entry[key]}")
 
 
 @list_app.command(name="installers")
@@ -368,17 +391,30 @@ def list_installers(
     groups: dict[int, list[str]] = {}
     for name, entry in calkit.install.INSTALLERS.items():
         groups.setdefault(id(entry), []).append(name)
+    # What Calkit has already installed here, so the listing doubles as a
+    # record of changes it made to this machine
+    installed = {
+        rec["app"]: rec["installed_at"]
+        for rec in calkit.install.read_install_log()
+    }
     result: list[dict] = []
     for names in groups.values():
         names.sort()
         entry = calkit.install.INSTALLERS[names[0]]
         scripts = {}
-        for platform in ("unix", "windows"):
+        for platform in ("unix", "mac", "linux", "windows"):
             ins = entry.get(platform)  # type: ignore[call-overload]
             if ins is not None:
                 scripts[platform] = ins["script"]
         result.append(
-            {"name": names[0], "aliases": names[1:], "scripts": scripts}
+            {
+                "name": names[0],
+                "aliases": names[1:],
+                "scripts": scripts,
+                "installed_by_calkit": next(
+                    (installed[n] for n in names if n in installed), None
+                ),
+            }
         )
     if json_output:
         echo_json(result)
@@ -388,6 +424,10 @@ def list_installers(
         header = installer["name"] + (
             f"  (aliases: {aliases})" if aliases else ""
         )
+        if installer["installed_by_calkit"]:
+            header += (
+                f"  [installed by Calkit {installer['installed_by_calkit']}]"
+            )
         typer.echo(header)
         for platform, script in installer["scripts"].items():
             typer.echo(f"  {platform}: {script}")

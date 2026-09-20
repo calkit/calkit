@@ -60,6 +60,11 @@ services:
   prestart:
     env_file:
       - .env
+    # Migrations come from the mounted source, like the backend's code, so
+    # a branch with a new migration runs without rebuilding the image
+    volumes:
+      - ../:/app
+      - /app/.venv
 
   backend:
     restart: "no"

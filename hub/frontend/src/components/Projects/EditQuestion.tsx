@@ -205,6 +205,12 @@ const EditQuestion = ({
       onClose={onClose}
       size={{ base: "sm", md: "lg" }}
       isCentered
+      // The evidence list grows without limit, so this form outgrows the
+      // viewport. Centered, that leaves it with nothing to scroll: the
+      // content runs off both ends and the page behind is locked. Scrolling
+      // inside keeps the header and the save button where they are and
+      // gives the body the overflow.
+      scrollBehavior="inside"
       // This opens on top of the question's own modal, which already holds
       // the page still. A second scroll lock takes the scrollbar away and
       // puts it back, shifting everything underneath for a frame -- keeping

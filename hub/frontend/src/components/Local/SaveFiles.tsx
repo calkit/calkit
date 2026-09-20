@@ -1,24 +1,24 @@
 import {
+  Box,
   Button,
+  Checkbox,
   FormControl,
+  FormHelperText,
   FormLabel,
+  Input,
   Modal,
   ModalBody,
   ModalCloseButton,
-  Input,
   ModalContent,
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Checkbox,
-  Box,
-  FormHelperText,
 } from "@chakra-ui/react"
-import { useQueryClient, useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi } from "@tanstack/react-router"
-import { type SubmitHandler, useForm } from "react-hook-form"
 import axios from "axios"
 import { useEffect } from "react"
+import { type SubmitHandler, useForm } from "react-hook-form"
 
 import useCustomToast from "../../hooks/useCustomToast"
 
@@ -101,6 +101,7 @@ const SaveFiles = ({
         onClose={onClose}
         size={{ base: "sm", md: "md" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>

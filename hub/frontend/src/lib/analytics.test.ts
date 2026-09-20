@@ -2,7 +2,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("mixpanel-browser", () => ({
-  default: { track_pageview: vi.fn(), register: vi.fn() },
+  default: {
+    track_pageview: vi.fn(),
+    register: vi.fn(),
+    opt_in_tracking: vi.fn(),
+    opt_out_tracking: vi.fn(),
+    has_opted_in_tracking: vi.fn(() => false),
+  },
 }))
 
 function setWebdriver(value: boolean): void {
@@ -32,18 +38,22 @@ function makeRouter() {
 async function load() {
   vi.resetModules()
   const mixpanel = (await import("mixpanel-browser")).default
-  const { initAnalytics } = await import("./analytics")
-  // biome-ignore lint/suspicious/noExplicitAny: test router stub
-  return { mixpanel, initAnalytics: initAnalytics as any }
+  const analytics = await import("./analytics")
+  return {
+    mixpanel,
+    ...analytics,
+    initAnalytics: analytics.initAnalytics as any,
+  }
 }
 
-describe("initAnalytics", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    window.history.pushState({}, "", "/")
-    setWebdriver(false)
-  })
+beforeEach(() => {
+  vi.clearAllMocks()
+  localStorage.clear()
+  window.history.pushState({}, "", "/")
+  setWebdriver(false)
+})
 
+describe("initAnalytics", () => {
   it("tracks the landing page view", async () => {
     const { mixpanel, initAnalytics } = await load()
     initAnalytics(makeRouter())
@@ -79,5 +89,121 @@ describe("initAnalytics", () => {
     const { mixpanel, initAnalytics } = await load()
     initAnalytics(makeRouter())
     expect(mixpanel.register).not.toHaveBeenCalled()
+  })
+
+  it("opts back in when consent was granted but Mixpanel lost its record", async () => {
+    localStorage.setItem("analytics_consent", "granted")
+    const { mixpanel, initAnalytics } = await load()
+    initAnalytics(makeRouter())
+    expect(mixpanel.opt_in_tracking).toHaveBeenCalledTimes(1)
+  })
+
+  it("opts out when Mixpanel is opted in without recorded consent", async () => {
+    const { mixpanel, initAnalytics } = await load()
+    vi.mocked(mixpanel.has_opted_in_tracking).mockReturnValueOnce(true)
+    initAnalytics(makeRouter())
+    expect(mixpanel.opt_out_tracking).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves Mixpanel alone when it already matches the recorded consent", async () => {
+    const { mixpanel, initAnalytics } = await load()
+    initAnalytics(makeRouter())
+    expect(mixpanel.opt_in_tracking).not.toHaveBeenCalled()
+    expect(mixpanel.opt_out_tracking).not.toHaveBeenCalled()
+  })
+})
+
+describe("analytics consent", () => {
+  it("is unanswered until the visitor chooses", async () => {
+    const { getAnalyticsConsent } = await load()
+    expect(getAnalyticsConsent()).toBeNull()
+  })
+
+  it("is sent with signups and logins only once answered", async () => {
+    const { getAnalyticsConsentToSave, setAnalyticsConsent } = await load()
+    expect(getAnalyticsConsentToSave()).toBeUndefined()
+    setAnalyticsConsent("denied")
+    expect(getAnalyticsConsentToSave()).toBe(false)
+    setAnalyticsConsent("granted")
+    expect(getAnalyticsConsentToSave()).toBe(true)
+  })
+
+  it("ignores unrecognized stored values", async () => {
+    localStorage.setItem("analytics_consent", "maybe")
+    const { getAnalyticsConsent } = await load()
+    expect(getAnalyticsConsent()).toBeNull()
+  })
+
+  it("opts in and tracks the page the visitor accepted on", async () => {
+    const {
+      mixpanel,
+      initAnalytics,
+      setAnalyticsConsent,
+      getAnalyticsConsent,
+    } = await load()
+    initAnalytics(makeRouter())
+    setAnalyticsConsent("granted")
+    expect(getAnalyticsConsent()).toBe("granted")
+    expect(mixpanel.opt_in_tracking).toHaveBeenCalledTimes(1)
+    // Once on load (dropped while opted out), then again after accepting
+    expect(mixpanel.track_pageview).toHaveBeenCalledTimes(2)
+  })
+
+  it("notifies subscribers when the answer changes", async () => {
+    const { subscribeAnalyticsConsent, setAnalyticsConsent } = await load()
+    const listener = vi.fn()
+    const unsubscribe = subscribeAnalyticsConsent(listener)
+    setAnalyticsConsent("denied")
+    expect(listener).toHaveBeenCalledTimes(1)
+    unsubscribe()
+    setAnalyticsConsent("granted")
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("opts out without deleting the Mixpanel profile", async () => {
+    const { mixpanel, setAnalyticsConsent, getAnalyticsConsent } = await load()
+    setAnalyticsConsent("denied")
+    expect(getAnalyticsConsent()).toBe("denied")
+    expect(mixpanel.opt_out_tracking).toHaveBeenCalledWith({
+      delete_user: false,
+    })
+  })
+})
+
+describe("reconcileAnalyticsConsent", () => {
+  it("applies the account's answer when a user is first seen", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(true, null, true)).toEqual({
+      apply: "granted",
+    })
+    expect(reconcileAnalyticsConsent(false, "granted", true)).toEqual({
+      apply: "denied",
+    })
+  })
+
+  it("does nothing when the account and browser already agree", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(true, "granted", true)).toBeNull()
+    expect(reconcileAnalyticsConsent(false, "denied", false)).toBeNull()
+  })
+
+  it("saves an answer given before signing in to an account without one", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(null, "denied", true)).toEqual({
+      save: false,
+    })
+  })
+
+  it("saves a changed answer to the account after the first look", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(false, "granted", false)).toEqual({
+      save: true,
+    })
+  })
+
+  it("does nothing when neither has an answer", async () => {
+    const { reconcileAnalyticsConsent } = await load()
+    expect(reconcileAnalyticsConsent(null, null, true)).toBeNull()
+    expect(reconcileAnalyticsConsent(undefined, null, false)).toBeNull()
   })
 })

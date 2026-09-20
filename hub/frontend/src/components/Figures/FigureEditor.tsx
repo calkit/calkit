@@ -1,12 +1,7 @@
+import { InfoOutlineIcon } from "@chakra-ui/icons"
 import {
   Alert,
   AlertDescription,
-  AlertDialog,
-  AlertDialogBody,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogOverlay,
   AlertIcon,
   Box,
   Button,
@@ -54,7 +49,6 @@ import {
   useColorModeValue,
   useDisclosure,
 } from "@chakra-ui/react"
-import { InfoOutlineIcon } from "@chakra-ui/icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
@@ -62,18 +56,12 @@ import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react"
 
-import { ProjectsService, type FigureScriptResult } from "../../client"
+import { FaPlus } from "react-icons/fa"
+import { type FigureScriptResult, ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { isSubmitChord } from "../../hooks/useSubmitOnCmdEnter"
 import { numericColumns, previewCsv } from "../../lib/csv"
-import { bytesToText, fetchTree, newBudget } from "../../lib/projectFiles"
 import { handleError } from "../../lib/errors"
-import {
-  type RunResult,
-  packagesFromImports,
-  preloadPackages,
-  runFigureScript,
-} from "../../lib/pyodide"
 import {
   defaultScript,
   envPackages,
@@ -85,9 +73,17 @@ import {
   stem,
   withDatasetLines,
 } from "../../lib/figureScript"
+import { bytesToText, fetchTree, newBudget } from "../../lib/projectFiles"
+import {
+  type RunResult,
+  packagesFromImports,
+  preloadPackages,
+  runFigureScript,
+} from "../../lib/pyodide"
+import { capitalizeFirstLetter } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 import PdfCanvas from "../Common/PdfCanvas"
-import { FaPlus } from "react-icons/fa"
 import PathPicker from "../Releases/PathPicker"
 
 const AUTO_RUN_KEY = "figure-editor-auto-run"
@@ -300,7 +296,6 @@ const FigureEditor = ({
   const [codeSettled, setCodeSettled] = useState(false)
   const viewRef = useRef<EditorView | null>(null)
   const discardDialog = useDisclosure()
-  const keepEditingRef = useRef<HTMLButtonElement>(null)
   const datasetsQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "datasets"],
     queryFn: () =>
@@ -458,7 +453,11 @@ const FigureEditor = ({
     const [x, y] = numeric.length >= 2 ? numeric : [undefined, undefined]
     const nextFigure = `figures/${slug(stem(primaryPath))}.png`
     setTitle(
-      (current) => current || (x && y ? `${y} vs. ${x}` : stem(primaryPath)),
+      (current) =>
+        current ||
+        // A column name or a filename stem is usually lowercase, and a
+        // title that opens in lowercase reads like a mistake.
+        capitalizeFirstLetter(x && y ? `${y} vs. ${x}` : stem(primaryPath)),
     )
     if (!codeTouched) {
       setCode(defaultScript({ datasetPaths, figurePath: nextFigure, x, y }))
@@ -651,6 +650,7 @@ const FigureEditor = ({
       size="6xl"
       scrollBehavior="inside"
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent
@@ -1062,44 +1062,24 @@ const FigureEditor = ({
           <Button onClick={requestClose}>Cancel</Button>
         </ModalFooter>
       </ModalContent>
-      <AlertDialog
+      <DiscardChangesDialog
         isOpen={discardDialog.isOpen}
-        leastDestructiveRef={keepEditingRef}
-        onClose={discardDialog.onClose}
-        isCentered
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          mixpanel.track("Discarded editor figure", {
+            had_figure: Boolean(result?.image),
+          })
+          discardDialog.onClose()
+          pendingLeave.current()
+        }}
+        title="Discard this figure?"
       >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg">
-              Discard this figure?
-            </AlertDialogHeader>
-            <AlertDialogBody>
-              {result?.image
-                ? "The figure you made hasn't been saved to the pipeline. " +
-                  "Leaving now drops it and the script."
-                : "The script has edits that haven't been saved to the " +
-                  "pipeline. Leaving now drops them."}
-            </AlertDialogBody>
-            <AlertDialogFooter gap={3}>
-              <Button ref={keepEditingRef} onClick={discardDialog.onClose}>
-                Keep editing
-              </Button>
-              <Button
-                colorScheme="red"
-                onClick={() => {
-                  mixpanel.track("Discarded editor figure", {
-                    had_figure: Boolean(result?.image),
-                  })
-                  discardDialog.onClose()
-                  pendingLeave.current()
-                }}
-              >
-                Discard
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
+        {result?.image
+          ? "The figure you made hasn't been saved to the pipeline. " +
+            "Leaving now drops it and the script."
+          : "The script has edits that haven't been saved to the " +
+            "pipeline. Leaving now drops them."}
+      </DiscardChangesDialog>
     </Modal>
   )
 }

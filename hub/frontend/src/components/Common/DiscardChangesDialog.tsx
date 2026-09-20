@@ -28,9 +28,8 @@ const DiscardChangesDialog = ({
   isOpen,
   onKeepEditing,
   onDiscard,
-  // TODO: rewrite this heading and the line under it
   title = "Discard unsaved changes?",
-  children = "These edits haven't been committed. Leaving now drops them.",
+  children = "These edits haven't been committed.",
 }: DiscardChangesDialogProps) => {
   // Focus lands on "Keep editing", so a stray Enter keeps the work.
   const keepEditingRef = useRef<HTMLButtonElement>(null)

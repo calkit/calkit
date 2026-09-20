@@ -567,7 +567,6 @@ function ProjectPipeline() {
             <Alert mt={2} status="warning" borderRadius="xl">
               <AlertIcon />
               <Box>
-                {/* TODO: rewrite this line */}
                 <Text>
                   A pipeline has not yet been defined for this project. See the{" "}
                   <Link

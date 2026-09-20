@@ -964,6 +964,13 @@ def resolve_latex_backend(
         )
     for backend in calkit.latex.get_backend_order(env, ck_info):
         if calkit.latex.backend_is_available(backend):
+            if backend == "docker":
+                # What typeset the document is the image, not the engine
+                # that ran it, so recording Docker's own version would
+                # pin the wrong thing entirely.
+                return backend, (
+                    env.get("image") or calkit.latex.DEFAULT_LATEX_IMAGE
+                )
             return backend, calkit.latex.get_backend_version(backend)
     raise ValueError(
         "No LaTeX backend is available; install one of "

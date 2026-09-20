@@ -3855,6 +3855,52 @@ def run_in_env(
                 subprocess.check_call(shell_cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in system environment")
+    elif env["kind"] in ("latex", "tectonic", "tinytex"):
+        from calkit import latex as _latex
+
+        backend, _ = calkit.environments.resolve_latex_backend(env, ck_info)
+        if not no_check:
+            from calkit.cli.check import check_latex_env
+
+            check_latex_env(
+                env_name=env_name, env=env, ck_info=ck_info, verbose=verbose
+            )
+            save_env_check_cache()
+        if backend == "docker":
+            # The cache is mounted at TEXMFHOME rather than over the
+            # image's own tree, which is what a package installed at run
+            # time writes into and what makes it persist between runs.
+            texmf = _latex.get_texmf_cache_dir()
+            os.makedirs(texmf, exist_ok=True)
+            image = env.get("image") or _latex.DEFAULT_LATEX_IMAGE
+            docker_cmd = [
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{os.getcwd()}:/work",
+                "-v",
+                f"{texmf}:/root/texmf",
+                "-w",
+                posixpath.join("/work", wdir) if wdir else "/work",
+                image,
+            ] + cmd
+            if verbose:
+                typer.echo(f"Running command: {docker_cmd}")
+            try:
+                subprocess.check_call(docker_cmd)
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to run in {image}")
+        else:
+            # The backend's tools are on PATH, so the command runs here.
+            if verbose:
+                typer.echo(f"Running command: {cmd} ({backend})")
+            try:
+                subprocess.check_call(cmd, cwd=wdir)
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to run with {backend}")
+            except FileNotFoundError:
+                raise_error(f"'{cmd[0]}' not found in the {backend} backend")
     else:
         raise_error("Environment kind not supported")
 

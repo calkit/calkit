@@ -72,6 +72,19 @@ LATEX_BACKEND_ORDER = ["system", "tectonic", "tinytex", "docker"]
 LATEX_DIFF_CAPABLE = frozenset({"system", "tinytex", "docker"})
 
 
+def get_texmf_cache_dir() -> str:
+    """Where TeX packages installed at run time are kept.
+
+    Per user rather than per project, since a package a document needs is
+    the same package for every project that needs it, and mounted into the
+    container as ``TEXMFHOME``. Not the distribution's own tree: mounting
+    over that hides TinyTeX and leaves the container with no TeX at all.
+    """
+    from calkit.config import get_user_home
+
+    return os.path.join(get_user_home(), ".calkit", "texmf")
+
+
 def backend_can_diff(backend: str) -> bool:
     """Whether ``latexdiff`` can be run in this backend."""
     return backend in LATEX_DIFF_CAPABLE

@@ -302,6 +302,60 @@ def check_nix_env(env: dict, verbose: bool = False) -> str:
     return lock_fpath
 
 
+def check_latex_env(
+    env_name: str,
+    env: dict,
+    ck_info: dict | None = None,
+    verbose: bool = False,
+) -> str | None:
+    """Resolve a LaTeX environment's backend and install what it needs.
+
+    Returns the lock file path, or None for an environment that pins
+    nothing, in which case there is nothing for stages to depend on.
+    """
+    import calkit.environments
+    import calkit.latex
+
+    backend, version = calkit.environments.resolve_latex_backend(env, ck_info)
+    if verbose:
+        typer.echo(
+            f"Environment '{env_name}' resolved to {backend}"
+            + (f" {version}" if version else "")
+        )
+    # Tectonic fetches what a document needs as it compiles, and the
+    # Docker backend installs into the image's user tree at run time, so
+    # only a local TeX Live has packages to install here.
+    packages = env.get("packages") or []
+    if packages and backend in ("system", "tinytex"):
+        missing = []
+        for package in packages:
+            result = subprocess.run(
+                ["kpsewhich", f"{package}.sty"],
+                capture_output=True,
+                text=True,
+            )
+            if not result.stdout.strip():
+                missing.append(package)
+        if missing:
+            cmd = ["tlmgr", "install"] + missing
+            if verbose:
+                typer.echo(f"Running command: {cmd}")
+            try:
+                subprocess.check_call(cmd)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                raise_error(
+                    f"Failed to install TeX packages: {', '.join(missing)}"
+                )
+            # tlmgr doesn't symlink the scripts a package ships, so one
+            # installed after setup is on disk but not on PATH
+            subprocess.run(
+                ["tlmgr", "path", "add"], capture_output=True, check=False
+            )
+    return calkit.environments.write_latex_env_lock(
+        env_name=env_name, env=env, ck_info=ck_info
+    )
+
+
 @check_app.command(name="repro")
 def check_repro(
     wdir: Annotated[
@@ -738,6 +792,16 @@ def check_environment(
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
+    elif env["kind"] in ("latex", "tectonic", "tinytex"):
+        try:
+            check_latex_env(
+                env_name=env_name,
+                env=env,
+                ck_info=ck_info,
+                verbose=verbose,
+            )
+        except ValueError as e:
+            raise_error(f"Environment '{env_name}': {e}")
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)

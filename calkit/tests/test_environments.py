@@ -1671,9 +1671,11 @@ def test_latex_env_locking(tmp_dir: TmpDir) -> None:
         with mock.patch.object(
             calkit.latex, "get_backend_version", lambda b: "29.7.2"
         ):
+            # The image is what typeset the document, so that is what a
+            # docker backend records rather than the engine's version
             assert calkit.environments.resolve_latex_backend(flexible) == (
                 "docker",
-                "29.7.2",
+                calkit.latex.DEFAULT_LATEX_IMAGE,
             )
             assert (
                 calkit.environments.write_latex_env_lock("tex", flexible)
@@ -1692,7 +1694,7 @@ def test_latex_env_locking(tmp_dir: TmpDir) -> None:
             with open(path) as f:
                 assert json.load(f) == {
                     "backend": "docker",
-                    "version": "29.7.2",
+                    "version": calkit.latex.DEFAULT_LATEX_IMAGE,
                 }
     # An explicit kind is its own backend rather than resolving, and its
     # packages are part of what's pinned

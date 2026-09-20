@@ -97,10 +97,6 @@ interface ChecklistCardProps {
   /** Whether the user has put this list away. */
   dismissed: boolean
   onDismissedChange: (dismissed: boolean) => void
-  /** Shown in place of the list once nothing required is left. */
-  /** Shown in place of the progress bar once every step is done. A list
-   * whose finish needs no announcing leaves it out and shows nothing. */
-  doneMessage?: string
   /**
    * Columns to lay the steps out in on a wide screen. Two suits a card that
    * spans the page and a list whose steps can be done in any order; one
@@ -128,7 +124,6 @@ const ChecklistCard = ({
   onMarkDone,
   dismissed,
   onDismissedChange,
-  doneMessage,
   columns = 1,
 }: ChecklistCardProps) => {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
@@ -162,14 +157,10 @@ const ChecklistCard = ({
           Dismiss
         </Button>
       </Flex>
-      {complete ? (
-        doneMessage ? (
-          <Flex align="center" gap={2} mt={2} mb={4}>
-            <Icon as={CheckCircleIcon} color="ui.success" />
-            <Text fontSize="sm">{doneMessage}</Text>
-          </Flex>
-        ) : null
-      ) : (
+      {/* Nothing in place of the progress bar once every step is done: a
+          list that has been finished has said everything it has to say,
+          and a banner congratulating someone for it is in the way. */}
+      {complete ? null : (
         <>
           {intro ? (
             <Text fontSize="sm" color="ui.dim" mb={3}>

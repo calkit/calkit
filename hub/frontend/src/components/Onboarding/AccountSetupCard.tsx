@@ -154,7 +154,6 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
       onMarkDone={setFlag}
       dismissed={accountFlags.includes(DISMISSED)}
       onDismissedChange={(dismissed) => setFlag(DISMISSED, dismissed)}
-      doneMessage="You're ready to create some knowledge!"
     />
   )
 }

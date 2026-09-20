@@ -32,9 +32,11 @@ updates itself.
 
 from __future__ import annotations
 
+import ast
 import glob
 import io
 import json
+import operator
 import os
 import re
 import string
@@ -245,6 +247,122 @@ def placeholders(text: str) -> list[str]:
     return [m.group(1) for m in _PLACEHOLDER.finditer(text or "")]
 
 
+_IF_CLAUSE = re.compile(r"^\s*(if|elif)\s+(.+?)\s*:\s*(.*)$")
+_ELSE_CLAUSE = re.compile(r"^\s*else\s*:\s*(.*)$")
+_COMPARISONS = {
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+}
+
+
+def is_conditional(text: str | None) -> bool:
+    """Whether a text picks its wording with ``if``/``elif``/``else``."""
+    if not text:
+        return False
+    return bool(_IF_CLAUSE.match(text.strip().splitlines()[0]))
+
+
+def parse_conditional(text: str) -> list[tuple[str | None, str]]:
+    """Split a conditional text into ``(condition, wording)`` clauses.
+
+    The condition is ``None`` for the ``else`` clause. A line that opens no
+    clause continues the one before it, so a long branch can wrap.
+    """
+    clauses: list[list] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        opened = _IF_CLAUSE.match(line)
+        if opened:
+            keyword, condition, wording = opened.groups()
+            if keyword == "if" and clauses:
+                raise ValueError("only the first clause may be 'if'")
+            if keyword == "elif" and not clauses:
+                raise ValueError("'elif' with no 'if' before it")
+            clauses.append([condition, wording.strip()])
+            continue
+        otherwise = _ELSE_CLAUSE.match(line)
+        if otherwise:
+            if not clauses:
+                raise ValueError("'else' with no 'if' before it")
+            clauses.append([None, otherwise.group(1).strip()])
+            continue
+        if not clauses:
+            raise ValueError(f"expected 'if', got {line.strip()[:40]!r}")
+        clauses[-1][1] = f"{clauses[-1][1]} {line.strip()}".strip()
+    return [(condition, wording) for condition, wording in clauses]
+
+
+def _operand(node: ast.AST, values: dict[str, Any]) -> Any:
+    """One side of a comparison, resolved against the evidence values.
+
+    Names and literals are read directly; anything else is arithmetic and
+    goes to the same evaluator the calculations use, so there is one
+    audited path for arithmetic rather than two.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id not in values:
+            raise KeyError(node.id)
+        return values[node.id]
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Name) and inner.id not in values:
+            raise KeyError(inner.id)
+    import arithmetic_eval  # type: ignore[import-untyped]
+
+    return arithmetic_eval.evaluate(ast.unparse(node), values)
+
+
+def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
+    if isinstance(node, ast.BoolOp):
+        outcomes = [_truth(v, values) for v in node.values]
+        if isinstance(node.op, ast.And):
+            return all(outcomes)
+        return any(outcomes)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return not _truth(node.operand, values)
+    if isinstance(node, ast.Compare):
+        left = _operand(node.left, values)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _operand(comparator, values)
+            compare = _COMPARISONS.get(type(op))
+            if compare is None:
+                raise ValueError(
+                    f"{type(op).__name__} is not a supported comparison"
+                )
+            if not compare(left, right):
+                return False
+            left = right
+        return True
+    raise ValueError("a condition must compare values, e.g., 'p < 0.05'")
+
+
+def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
+    """Evaluate one ``if``/``elif`` condition against the evidence values.
+
+    Only comparisons, ``and``/``or``/``not`` and arithmetic are allowed, so
+    a condition read from ``calkit.yaml`` cannot call anything.
+    """
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as e:
+        raise ValueError(f"cannot parse condition {expression!r}: {e}") from e
+    return bool(_truth(tree.body, values))
+
+
+def select_branch(text: str, values: dict[str, Any]) -> str:
+    """The wording whose condition holds, for a conditional text."""
+    for condition, wording in parse_conditional(text):
+        if condition is None or evaluate_condition(condition, values):
+            return wording
+    raise ValueError("no condition held and there is no 'else' clause")
+
+
 def render(text: str | None, values: dict[str, Any]) -> str | None:
     """Fill a question text's placeholders from its evidence values.
 
@@ -252,7 +370,11 @@ def render(text: str | None, values: dict[str, Any]) -> str | None:
     a format spec the value cannot satisfy, so a template that cannot be
     rendered is an error rather than a silently unfilled sentence.
     """
-    if text is None or "{" not in text:
+    if text is None:
+        return text
+    if is_conditional(text):
+        text = select_branch(text, values)
+    if "{" not in text:
         return text
     return _FORMATTER.vformat(text, (), values)
 
@@ -874,7 +996,7 @@ def check_question(
         ev.get("explanation") for ev in evidence
     ]
     for t in texts:
-        if not t or "{" not in t:
+        if not t or ("{" not in t and not is_conditional(t)):
             continue
         try:
             render(t, values)

@@ -14,11 +14,14 @@ from calkit.questions import (
     QuestionsStatus,
     check_question,
     check_questions,
+    evaluate_condition,
     format_status,
+    parse_conditional,
     placeholders,
     render,
     render_question,
     resolve_key,
+    select_branch,
 )
 
 
@@ -530,3 +533,53 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert checked.status == "ok"
     assert checked.evidence[0].current == 2
     assert checked.evidence[0].git_ref == sha
+
+
+def test_conditional_answers():
+    values = {"p": 0.007, "rho": 0.8373, "n": 17, "leader": "turns-max"}
+    # Comparisons, chaining, boolean operators, strings, and arithmetic
+    assert evaluate_condition("p < 0.05", values)
+    assert not evaluate_condition("p >= 0.05", values)
+    assert evaluate_condition("0.0 <= p < 0.05", values)
+    assert evaluate_condition("p < 0.05 and rho > 0.8", values)
+    assert evaluate_condition("p > 0.5 or rho > 0.8", values)
+    assert evaluate_condition("not p > 0.5", values)
+    assert evaluate_condition("leader == 'turns-max'", values)
+    assert evaluate_condition("n / 2 > 8", values)
+    # A name with no evidence is an error, not a false condition, and
+    # nothing may be called or used as a bare value
+    with pytest.raises(KeyError):
+        evaluate_condition("missing < 1", values)
+    with pytest.raises(Exception):
+        evaluate_condition("len(leader) > 1", values)
+    with pytest.raises(ValueError):
+        evaluate_condition("p", values)
+    # Clauses parse in order, with None marking the else
+    text = (
+        "if p < 0.05: strong, rho {rho:.2f}\nelif p < 0.1: weak\nelse: none\n"
+    )
+    assert [c for c, _ in parse_conditional(text)] == [
+        "p < 0.05",
+        "p < 0.1",
+        None,
+    ]
+    assert select_branch(text, {"p": 0.007}) == "strong, rho {rho:.2f}"
+    assert select_branch(text, {"p": 0.08}) == "weak"
+    assert select_branch(text, {"p": 0.9}) == "none"
+    # A branch that wraps continues the one above it
+    wrapped = "if p < 0.05: strong\n  and worth reporting\nelse: none"
+    assert select_branch(wrapped, {"p": 0.01}) == "strong and worth reporting"
+    # Nothing holding with no else is an error rather than a blank answer
+    with pytest.raises(ValueError):
+        select_branch("if p < 0.05: strong", {"p": 0.9})
+    with pytest.raises(ValueError):
+        parse_conditional("elif p < 1: x")
+    # Rendering picks the branch, then fills its placeholders
+    answer = (
+        "if p < 0.05: {leader} predicts it (rho {rho:+.2f})\n"
+        "else: no feature predicts it\n"
+    )
+    assert render(answer, values) == "turns-max predicts it (rho +0.84)"
+    assert render(answer, values | {"p": 0.2}) == "no feature predicts it"
+    # Prose that merely starts with "if" is not a conditional
+    assert render("if and only if", values) == "if and only if"

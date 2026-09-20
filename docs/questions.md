@@ -80,6 +80,37 @@ satisfy, is an error in `calkit check questions`.
 Braces are Python's format syntax, so a brace meant to stay in the text
 has to be doubled: write `\frac{{a}}{{b}}`, not `\frac{a}{b}`.
 
+## Wording that follows the evidence
+
+A number can be read from the results, but so can the claim built on it.
+Where an answer would change if a value crossed a threshold, write the
+branches instead of picking one:
+
+```yaml
+answer: |
+  if p < 0.05: Multimodality predicts where staging pays (rho {rho:+.2f}).
+  elif p < 0.1: There is weak evidence that multimodality predicts it.
+  else: No measured feature predicts where staging pays.
+```
+
+The clauses are `if`, any number of `elif`, and an optional `else`, each
+naming evidence the same way a placeholder does.
+Conditions may compare values, combine comparisons with `and`, `or` and
+`not`, chain them as `0.05 <= p < 0.1`, and do arithmetic with the same
+evaluator the calculations use, so `n / 2 > 8` works.
+Nothing else is allowed: a condition cannot call a function or reach into
+an object, since it is read from `calkit.yaml` rather than written as
+code.
+A branch that wraps onto the next line continues the one above it.
+
+The chosen wording is then rendered like any other text, so placeholders
+inside a branch are filled from the evidence as usual.
+Writing the branches before a run makes the threshold a prediction rather
+than a description: rerun the pipeline, and the answer either holds or
+states the other outcome, instead of quietly going stale.
+A condition that names no evidence, or one that holds for no branch when
+there is no `else`, is an error in `calkit check questions`.
+
 ## Keeping answers honest
 
 An answer is a claim about the evidence as it was when the answer was

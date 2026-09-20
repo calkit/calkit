@@ -281,12 +281,12 @@ function EvidenceCard({
         // In full: the cards sit in a column of their own now, and an
         // explanation clipped at three lines had nowhere to be read.
         <Box fontSize="xs" color={subtleColor} mt={1}>
-          {/* foldedProse only when it came from calkit.yaml: it puts back
-              the paragraph breaks YAML folding ate, and doing that to a
-              real file would split its intentional soft breaks. */}
-          <Markdown foldedProse={!evidence.explanation_path}>
-            {evidence.explanation}
-          </Markdown>
+          <Explanation
+            evidence={evidence}
+            accountName={accountName}
+            projectName={projectName}
+            gitRef={gitRef}
+          />
         </Box>
       ) : null}
     </>
@@ -419,6 +419,46 @@ function EvidenceDetail({
       ) : null}
     </Box>
   )
+}
+
+/** Why this evidence answers the question.
+ *
+ * Written inline in calkit.yaml, it is markdown and is rendered. Cited as
+ * `{path: ...}`, it stays a citation: the file is linked, not pulled in
+ * and shown as though it had been written here. A document has its own
+ * page, and splicing it into a card is how a card becomes a document.
+ */
+function Explanation({
+  evidence,
+  accountName,
+  projectName,
+  gitRef,
+}: {
+  evidence: QuestionEvidence
+  accountName: string
+  projectName: string
+  gitRef?: string
+}) {
+  const path = evidence.explanation_path
+  if (path) {
+    return (
+      <Link
+        as={RouterLink}
+        to={`/${accountName}/${projectName}/files`}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        search={
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          { path, ref: evidenceRefOf(evidence, gitRef) } as any
+        }
+      >
+        {path} <Icon as={FaExternalLinkAlt} boxSize={2.5} />
+      </Link>
+    )
+  }
+  if (!evidence.explanation) {
+    return null
+  }
+  return <Markdown foldedProse>{evidence.explanation}</Markdown>
 }
 
 function NotFound({ evidence }: { evidence: QuestionEvidence }) {
@@ -755,9 +795,12 @@ function QuestionModal({
             <Box height="100%">
               {openEvidence.explanation ? (
                 <Box fontSize="sm" color={subtleColor} mb={3}>
-                  <Markdown foldedProse={!openEvidence.explanation_path}>
-                    {openEvidence.explanation}
-                  </Markdown>
+                  <Explanation
+                    evidence={openEvidence}
+                    accountName={accountName}
+                    projectName={projectName}
+                    gitRef={gitRef}
+                  />
                 </Box>
               ) : null}
               <EvidenceDetail

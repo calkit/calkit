@@ -1477,56 +1477,28 @@ def test_render_template() -> None:
 
 
 def test_resolve_explanation() -> None:
-    # An explanation is either the reasoning itself or a file holding it.
-    # A paragraph belongs in a file the pipeline can rebuild rather than a
-    # YAML string nobody can diff, so both spellings have to work.
-    import base64
-    from unittest.mock import patch
-
+    # An explanation is either the reasoning itself or a citation of the
+    # file holding it. The file is not read: a document stays a document,
+    # linked rather than spliced into the card.
     from app.api.routes.projects.core import _resolve_explanation
-    from app.models.core import ContentsItem
 
-    project = SimpleNamespace(id="p")
-    repo = SimpleNamespace()
-    cache: dict = {}
-    resolve = lambda e: _resolve_explanation(  # noqa: E731
-        project=project, repo=repo, ref=None, explanation=e, text_cache=cache
-    )
-    # Written inline: the text is the text, and no file is named
-    assert resolve("Because the slope is flat.") == (
+    assert _resolve_explanation("Because the slope is flat.") == (
         "Because the slope is flat.",
         None,
     )
-    # Nothing at all, and shapes that name no file
-    assert resolve(None) == (None, None)
-    assert resolve({}) == (None, None)
-    assert resolve({"path": ""}) == (None, None)
-    assert resolve(["a"]) == (None, None)
-    body = "# Why\n\nThe launches *disappear*.\n"
-    item = ContentsItem(
-        path="notes/why.md",
-        name="why.md",
-        type="file",
-        size=len(body),
-        in_repo=True,
-        content=base64.b64encode(body.encode()).decode(),
+    assert _resolve_explanation({"path": "docs/why.md"}) == (
+        None,
+        "docs/why.md",
     )
-    with patch(
-        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
-        return_value=item,
-    ) as read:
-        assert resolve({"path": "notes/why.md"}) == (body, "notes/why.md")
-        # Cited twice, read once: several questions can lean on one file
-        assert resolve({"path": "notes/why.md"}) == (body, "notes/why.md")
-        assert read.call_count == 1
-    # A file that can't be read still shows as a citation with a path, so
-    # the reader can see what is missing rather than nothing at all
-    cache.clear()
-    with patch(
-        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
-        side_effect=HTTPException(404, "nope"),
-    ):
-        assert resolve({"path": "notes/gone.md"}) == (None, "notes/gone.md")
+    # A file explanation is `{path: <string>}` and nothing else. Anything
+    # that only resembles one is ignored rather than guessed at.
+    assert _resolve_explanation(None) == (None, None)
+    assert _resolve_explanation({}) == (None, None)
+    assert _resolve_explanation({"path": ""}) == (None, None)
+    assert _resolve_explanation({"path": 3}) == (None, None)
+    assert _resolve_explanation({"path": "a.md", "title": "x"}) == (None, None)
+    assert _resolve_explanation({"file": "a.md"}) == (None, None)
+    assert _resolve_explanation(["a"]) == (None, None)
 
 
 def test_build_question_evidence_resolves_figures_and_results() -> None:
@@ -1594,7 +1566,6 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
                 )
             },
             result_value_cache={},
-            explanation_cache={},
         )
     assert len(evidence) == 4
     assert evidence[0].kind == "figure"
@@ -1688,7 +1659,6 @@ def test_question_evidence_carries_pipeline_stage_status() -> None:
             ),
         },
         result_value_cache={},
-        explanation_cache={},
     )
     assert evidence[0].stage == "plot-declared"
     assert evidence[0].stage_status is not None
@@ -3987,7 +3957,6 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
                 )
             },
             result_value_cache={},
-            explanation_cache={},
         )
     assert evidence[0].result is None
     assert evidence[1].kind == "table"
@@ -4068,7 +4037,6 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
                 )
             },
             result_value_cache={},
-            explanation_cache={},
         )
     assert evidence[0].result is not None
     assert evidence[0].result.title == "Summary statistic"
@@ -4113,7 +4081,6 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
                 )
             },
             result_value_cache={},
-            explanation_cache={},
         )
     assert evidence[0].result is None
 
@@ -4195,7 +4162,6 @@ def test_evidence_resolves_at_its_own_git_ref() -> None:
                 ),
             },
             result_value_cache={},
-            explanation_cache={},
         )
     assert evidence[0].git_ref is None
     assert evidence[0].figure is not None

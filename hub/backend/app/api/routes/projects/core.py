@@ -2437,43 +2437,33 @@ def _set_evidence_stage(
         item.stale_reason = "frozen"
 
 
-def _resolve_explanation(
-    project: Project,
-    repo: git.Repo,
-    ref: str | None,
-    explanation: Any,
-    text_cache: dict[tuple[str | None, str], str | None],
-) -> tuple[str | None, str | None]:
-    """The text of an evidence explanation, and the file it came from.
+def _resolve_explanation(explanation: Any) -> tuple[str | None, str | None]:
+    """The text of an evidence explanation, or the file it is kept in.
 
     Written inline as a string, or as ``{path: ...}`` naming a file that
-    holds it. The file is read at the evidence's own ref, so an answer
-    keeps the reasoning as it stood when it was written.
-
-    A path that can't be read comes back as a path with no text rather
-    than failing the question: the citation is still worth showing, and
-    the missing file is the kind of thing the reader should see.
+    holds it. The file is deliberately not read: an explanation kept in a
+    document stays a citation of that document, linked rather than spliced
+    into the card as though it had been written there.
     """
     if isinstance(explanation, str):
         return explanation, None
-    if not isinstance(explanation, dict):
+    if explanation is None:
         return None, None
-    path = explanation.get("path")
-    if not isinstance(path, str) or not path:
+    # The only other spelling is ``{path: <string>}``, exactly. A mapping
+    # that is anything else isn't a citation we can follow, and guessing
+    # at it would show the reader something nobody wrote.
+    if (
+        not isinstance(explanation, dict)
+        or set(explanation) != {"path"}
+        or not isinstance(explanation.get("path"), str)
+        or not explanation["path"]
+    ):
+        logger.warning(
+            f"Ignoring an explanation that is neither text nor "
+            f"{{path: <string>}}: {explanation!r}"
+        )
         return None, None
-    cache_key = (ref, path)
-    if cache_key not in text_cache:
-        text: str | None = None
-        try:
-            item = app.projects.get_contents_from_repo(
-                project=project, repo=repo, path=path, ref=ref
-            )
-            if item.content is not None:
-                text = base64.b64decode(item.content).decode("utf-8")
-        except Exception as e:
-            logger.warning(f"Could not read explanation {path} at {ref}: {e}")
-        text_cache[cache_key] = text
-    return text_cache[cache_key], path
+    return None, explanation["path"]
 
 
 def _build_question_evidence(
@@ -2483,7 +2473,6 @@ def _build_question_evidence(
     evidence_ck: list,
     lookups_by_ref: dict[str | None, _EvidenceLookups],
     result_value_cache: dict[tuple[str | None, str], dict | None],
-    explanation_cache: dict[tuple[str | None, str], str | None],
 ) -> list[QuestionEvidence]:
     """Turn calkit.yaml evidence entries into resolved QuestionEvidence.
 
@@ -2507,11 +2496,7 @@ def _build_question_evidence(
         ev_ref = _evidence_ref(ev, ref)
         lookups = lookups_by_ref.get(ev_ref, empty)
         explanation, explanation_path = _resolve_explanation(
-            project=project,
-            repo=repo,
-            ref=ev_ref,
-            explanation=ev.get("explanation"),
-            text_cache=explanation_cache,
+            ev.get("explanation")
         )
         item = QuestionEvidence(
             kind=ev["kind"],
@@ -2696,7 +2681,6 @@ def _build_questions_public(
     # wherever the shorter list ended.
     db_by_number = {q.number: q for q in project.questions}
     result_value_cache: dict[tuple[str | None, str], dict | None] = {}
-    explanation_cache: dict[tuple[str | None, str], str | None] = {}
     questions_public = []
     for number, q_ck in enumerate(questions_ck, start=1):
         hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
@@ -2721,7 +2705,6 @@ def _build_questions_public(
             evidence_ck=_evidence_of(q_ck),
             lookups_by_ref=lookups_by_ref,
             result_value_cache=result_value_cache,
-            explanation_cache=explanation_cache,
         )
         for item in evidence:
             item.explanation = _render_template(item.explanation, values)

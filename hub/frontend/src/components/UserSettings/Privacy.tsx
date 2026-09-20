@@ -32,13 +32,10 @@ const Privacy = () => {
       </Heading>
       {analyticsEnabled ? (
         <>
-          {/* TODO: rewrite this paragraph */}
           <Text fontSize="sm" mb={4}>
             Calkit can record which pages you visit and which features you use,
-            so we can improve the features people rely on and remove the ones
-            nobody does. It's never sold or used for advertising. This setting
-            is saved to your account, so it applies wherever you sign in. See
-            the{" "}
+            so we can improve useful ones and remove the rest. Your data is
+            never sold or used for advertising. See the{" "}
             <Link href={privacyPolicyUrl} isExternal textDecoration="underline">
               privacy policy
             </Link>{" "}

@@ -73,8 +73,6 @@ function AnalyticsConsentBanner() {
         direction={{ base: "column", md: "row" }}
         align={{ base: "flex-end", md: "center" }}
       >
-        {/* TODO: rewrite this banner text; it has to stay short enough not
-            to cover the signup form on a phone */}
         <Text fontSize={{ base: "xs", md: "sm" }} flex={1} alignSelf="stretch">
           Calkit can record which pages and features you use so we can improve
           them. Nothing is sold or shared.{" "}

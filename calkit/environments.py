@@ -655,6 +655,21 @@ def get_env_lock_fpath(
         # itself even when ``for_dvc``: there's exactly one of them, so
         # there's no reason to make a stage depend on the whole directory.
         lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
+    elif env_kind == "latex":
+        # Nothing is pinned unless the project says so. A LaTeX backend
+        # decides how a document is typeset, not what it reports, so what
+        # it resolved to is recorded as provenance rather than hashed into
+        # every stage that builds the document. Locking 'backend' or
+        # 'version' opts into the stricter behavior.
+        if not env.get("lock"):
+            return None
+        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
+    elif env_kind in ("tectonic", "tinytex"):
+        # Named outright rather than resolved, so there is nothing to be
+        # flexible about. The packages a TinyTeX env installs are pinned
+        # for a different reason than the backend: a missing TeX package
+        # fails the build rather than changing how it looks.
+        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
     elif env_kind in ("slurm", "pbs"):
         # Job-scheduler envs have no external dependency manifest, so the
         # "lock" is just a JSON dump of the env config. The file is
@@ -924,6 +939,81 @@ def write_system_env_lock(
             if f.read() == content:
                 return lock_fpath
     # newline="\n" so the file is byte-identical on every platform.
+    with open(lock_fpath, "w", newline="\n") as f:
+        f.write(content)
+    return lock_fpath
+
+
+def resolve_latex_backend(
+    env: dict, ck_info: dict | None = None
+) -> tuple[str, str | None]:
+    """Work out which LaTeX backend to use, and what version it is.
+
+    An explicit kind names its own backend, so only a ``latex`` env
+    resolves. A backend already recorded in the lock file wins over
+    resolving again: that is what makes a collaborator build the document
+    the way the project did rather than the way their machine happens to
+    be set up.
+    """
+    import calkit.latex
+
+    kind = env.get("kind")
+    if kind in ("tectonic", "tinytex"):
+        return kind, env.get("version") or calkit.latex.get_backend_version(
+            kind
+        )
+    for backend in calkit.latex.get_backend_order(env, ck_info):
+        if calkit.latex.backend_is_available(backend):
+            return backend, calkit.latex.get_backend_version(backend)
+    raise ValueError(
+        "No LaTeX backend is available; install one of "
+        + ", ".join(calkit.latex.get_backend_order(env, ck_info))
+        + ", or Docker to use a container"
+    )
+
+
+def write_latex_env_lock(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+    ck_info: dict | None = None,
+) -> str | None:
+    """Write a JSON lock file for a LaTeX environment.
+
+    Returns the path, or None when the environment pins nothing, in which
+    case stages gain no dependency on it and what it resolved to is
+    recorded with the run instead.
+    """
+    lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, wdir=wdir, as_posix=True
+    )
+    if lock_fpath is None:
+        return None
+    backend, version = resolve_latex_backend(env, ck_info)
+    lock_data: dict[str, object] = {}
+    # A flexible env records only what it was told to pin, so adding
+    # 'version' to an existing project's lock doesn't rewrite what the
+    # backend alone already meant. The explicit kinds have no such list
+    # and pin everything that decides what gets installed.
+    locked = env.get("lock") or []
+    if env.get("kind") == "latex":
+        if "backend" in locked:
+            lock_data["backend"] = backend
+        if "version" in locked:
+            lock_data["version"] = version
+    else:
+        lock_data["backend"] = backend
+        lock_data["version"] = version
+    if packages := env.get("packages"):
+        lock_data["packages"] = sorted(packages)
+    content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
+    parent = os.path.dirname(lock_fpath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if os.path.isfile(lock_fpath):
+        with open(lock_fpath, "r") as f:
+            if f.read() == content:
+                return lock_fpath
     with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
     return lock_fpath

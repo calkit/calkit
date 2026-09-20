@@ -168,24 +168,36 @@ def _resolve_github_collaborator_access(
             f"Failed to fetch permissions from GitHub ({resp.status_code})"
         )
     project.current_user_access = permissions
+    # Read off the instances before the commit that may fail. A failed flush
+    # expires every attribute and refuses to load one back until the session
+    # is rolled back, so reading `current_user.id` in the handler below is a
+    # second, uncatchable error on top of the first -- which is what turned
+    # this race into a 500 rather than the no-op it is meant to be.
+    user_id = current_user.id
+    project_id = project.id
     # Concurrent requests for the same user and project can both get here and
     # try to insert. Losing that race is harmless (the winner cached the same
     # permission), but the unique violation would otherwise 500 the request.
     session.add(
         UserProjectAccess(
-            project_id=project.id,
-            user_id=current_user.id,
+            project_id=project_id,
+            user_id=user_id,
             github_access=permissions,
         )
     )
     try:
         session.commit()
     except IntegrityError:
-        logger.info(
-            f"Access record for user {current_user.id} and project "
-            f"{project.id} was written concurrently; ignoring"
-        )
+        # Rolled back first: nothing else can touch this session until it is.
         session.rollback()
+        logger.info(
+            f"Access record for user {user_id} and project "
+            f"{project_id} was written concurrently; ignoring"
+        )
+    # The rollback (and the commit) expire the project's mapped attributes;
+    # `current_user_access` isn't one, but say it again rather than leave the
+    # answer depending on that.
+    project.current_user_access = permissions
 
 
 def get_project(

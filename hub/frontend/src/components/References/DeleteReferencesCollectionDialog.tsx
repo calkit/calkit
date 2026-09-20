@@ -60,6 +60,7 @@ const DeleteReferencesCollectionDialog = ({
       onClose={onClose}
       leastDestructiveRef={cancelRef}
       isCentered
+      motionPreset="none"
     >
       <AlertDialogOverlay>
         <AlertDialogContent>

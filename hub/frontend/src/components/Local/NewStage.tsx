@@ -221,6 +221,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
         onClose={onClose}
         size={{ base: "sm", md: "md" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>

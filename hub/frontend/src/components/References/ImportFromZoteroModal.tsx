@@ -162,7 +162,13 @@ const ImportFromZoteroModal = ({
       (mode === "items" && selectedCount > 0))
 
   return (
-    <Modal isOpen={isOpen} onClose={resetAndClose} size="lg" isCentered>
+    <Modal
+      isOpen={isOpen}
+      onClose={resetAndClose}
+      size="lg"
+      isCentered
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>Import from Zotero</ModalHeader>

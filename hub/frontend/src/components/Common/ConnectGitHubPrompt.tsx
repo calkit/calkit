@@ -31,7 +31,7 @@ const ConnectGitHubPrompt = ({
       size="sm"
       alignSelf="center"
       leftIcon={<FaGithub />}
-      onClick={() => startGitHubOAuth(returnTo)}
+      onClick={() => startGitHubOAuth(returnTo, { chooseAccount: true })}
     >
       Connect GitHub
     </Button>

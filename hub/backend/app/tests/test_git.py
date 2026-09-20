@@ -5,6 +5,7 @@ import json
 import os
 import random
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import git
@@ -695,3 +696,398 @@ def test_remote_head_cache_is_bypassed_when_the_caller_wants_the_truth(
         == new
     )
     assert app.git.get_remote_head_sha(repo, str(origin), "main") == new
+
+
+def _fake_overleaf_clone(files: dict[str, str]):
+    """Stand in for the clone, writing *files* into the destination."""
+
+    def clone(cmd, **kwargs):
+        dest = cmd[-1]
+        for rel, text in files.items():
+            full = os.path.join(dest, rel)
+            os.makedirs(os.path.dirname(full) or dest, exist_ok=True)
+            with open(full, "w") as f:
+                f.write(text)
+
+    return clone
+
+
+def _read_title(files: dict[str, str]):
+    from unittest.mock import patch
+
+    from app.git import read_overleaf_title
+
+    with (
+        patch("app.git.users.get_overleaf_token", return_value="tok"),
+        patch(
+            "app.git.subprocess.check_call",
+            side_effect=_fake_overleaf_clone(files),
+        ),
+    ):
+        return read_overleaf_title(
+            user=object(), session=object(), overleaf_project_id="abc"
+        )
+
+
+def test_read_overleaf_title_finds_the_document_that_builds() -> None:
+    # The file with a document class wins over an included fragment that
+    # happens to sort first.
+    title = _read_title(
+        {
+            "aaa-intro.tex": "\\section{Intro}\nNo class here.\n",
+            "main.tex": (
+                "\\documentclass{article}\n"
+                "\\title{Coherent structures in boundary layers}\n"
+                "\\begin{document}\\maketitle\\end{document}\n"
+            ),
+        }
+    )
+    assert title == "Coherent structures in boundary layers"
+
+
+def test_read_overleaf_title_prefers_a_conventional_name() -> None:
+    doc = "\\documentclass{article}\n\\title{%s}\n"
+    title = _read_title(
+        {"appendix.tex": doc % "Appendix", "paper.tex": doc % "The paper"}
+    )
+    assert title == "The paper"
+
+
+def test_read_overleaf_title_returns_none_when_there_is_none() -> None:
+    assert _read_title({"main.tex": "\\documentclass{article}\n"}) is None
+    # Nothing that builds at all
+    assert _read_title({"notes.tex": "\\section{Notes}\n"}) is None
+    assert _read_title({}) is None
+
+
+def test_read_overleaf_title_collapses_whitespace() -> None:
+    title = _read_title(
+        {
+            "main.tex": (
+                "\\documentclass{article}\n"
+                "\\title{A title\n  split over lines}\n"
+            )
+        }
+    )
+    assert title == "A title split over lines"
+
+
+def _commit(repo: git.Repo, name: str, text: str) -> str:
+    """Write a file and commit it, returning the new SHA."""
+    (Path(str(repo.working_dir)) / name).write_text(text)
+    repo.git.add([name])
+    repo.git.commit(["-m", f"Write {name}"])
+    return repo.head.commit.hexsha
+
+
+def _identify(repo: git.Repo) -> None:
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+
+
+def test_resolve_commit_fetches_a_tag_into_something_resolvable(
+    tmp_path,
+) -> None:
+    # Regression: `git fetch origin <tag>` writes FETCH_HEAD and no local
+    # ref, so a tag stayed unresolvable however many times it was fetched.
+    # Evidence citing one never resolved, and every read paid the fetch
+    # again once the missing-ref memo lapsed.
+    import app.git
+
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    seed_dir = tmp_path / "seed"
+    seed = git.Repo.clone_from(str(origin_dir), str(seed_dir))
+    _identify(seed)
+    first = _commit(seed, "notes.txt", "one")
+    branch = seed.active_branch.name
+    seed.git.push(["origin", branch])
+    seed.git.tag(["exp/2026-09-12-a-run"])
+    seed.git.push(["origin", "exp/2026-09-12-a-run"])
+    # A clone that predates the tag, which is what a shared checkout is
+    reader_dir = tmp_path / "reader"
+    reader = git.Repo.clone_from(
+        str(origin_dir), str(reader_dir), no_tags=True
+    )
+    assert not any(r.path.startswith("refs/tags/") for r in reader.references)
+    commit = app.git._resolve_commit(reader, "exp/2026-09-12-a-run")
+    assert commit.hexsha == first
+    # Resolvable from a local ref now, so the next read needs no network
+    fetched = f"{app.git._FETCHED_REF_NS}/exp/2026-09-12-a-run"
+    assert reader.commit(fetched).hexsha == first
+    # A branch still resolves the ordinary way, and one that doesn't exist
+    # anywhere is still a 404 rather than a hang
+    assert app.git._resolve_commit(reader, branch).hexsha == first
+    with pytest.raises(HTTPException) as excinfo:
+        app.git._resolve_commit(reader, "no-such-ref")
+    assert excinfo.value.status_code == 404
+
+
+def test_push_and_expire_updates_the_shared_checkout(tmp_path) -> None:
+    # A write lands in the shared checkout without going via the remote.
+    from unittest.mock import patch
+
+    project = _StubProject("ck-shared-push")
+    # An origin, the checkout everyone reads, and the writer's own clone,
+    # laid out the way get_repo lays them out
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    seed_dir = tmp_path / "seed"
+    seed = git.Repo.clone_from(str(origin_dir), str(seed_dir))
+    _identify(seed)
+    first = _commit(seed, "notes.txt", "one")
+    seed.git.push(["origin", seed.active_branch.name])
+    branch = seed.active_branch.name
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    shared_base.mkdir(parents=True)
+    shared = git.Repo.clone_from(str(origin_dir), str(shared_base / "repo"))
+    (shared_base / "updated.txt").touch()
+    os.utime(shared_base / "updated.txt", (0, 0))
+    # What a warm left there: data DVC pulled, which is gitignored, and so
+    # isn't the checkout's to lose when the tree is rewritten under it
+    (shared_base / "repo" / "data").mkdir()
+    (shared_base / "repo" / "data" / "raw.csv").write_text("x,y\n1,2\n")
+    writer_dir = tmp_path / "writer"
+    writer = git.Repo.clone_from(str(origin_dir), str(writer_dir))
+    _identify(writer)
+    _commit(writer, ".gitignore", "data/\n")
+    second = _commit(writer, "notes.txt", "two")
+    assert shared.head.commit.hexsha == first
+
+    with (
+        patch("app.git.shared_reader_root", return_value=str(shared_root)),
+        patch("app.git.cache.set_json") as set_json,
+    ):
+        app.git.push_and_expire(project, writer, branch)
+        # The remote is where we put it, and every clone's cached answer
+        # for that says so
+        assert set_json.call_args.args[1] == second
+
+    # Origin has it, and so does the shared checkout -- in its working tree,
+    # not just its refs, since that is what a read actually looks at
+    assert git.Repo(str(origin_dir)).commit(branch).hexsha == second
+    shared = git.Repo(str(shared_base / "repo"))
+    assert shared.head.commit.hexsha == second
+    assert (shared_base / "repo" / "notes.txt").read_text() == "two"
+    # The pulled data is still there: a rewrite of the tracked tree isn't a
+    # reason to make the next read pull a gigabyte of it again
+    assert (shared_base / "repo" / "data" / "raw.csv").exists()
+    # And it is marked current, so the next read doesn't refresh it at all
+    assert (shared_base / "updated.txt").stat().st_mtime > 0
+
+
+def test_a_read_after_a_write_touches_the_network_not_at_all(
+    tmp_path, monkeypatch
+) -> None:
+    # The point of pushing into the shared checkout, stated as a test. Counts
+    # what a read does rather than how long it takes: the saving is one
+    # ``ls-remote`` and one ``fetch``, both round trips to GitHub, and both are
+    # gone only if the read makes neither.
+    from unittest.mock import patch
+
+    project = _StubProject("ck-shared-no-network")
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    seed_dir = tmp_path / "seed"
+    seed = git.Repo.clone_from(str(origin_dir), str(seed_dir))
+    _identify(seed)
+    _commit(seed, "notes.txt", "one")
+    branch = seed.active_branch.name
+    seed.git.push(["origin", branch])
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    shared_base.mkdir(parents=True)
+    git.Repo.clone_from(str(origin_dir), str(shared_base / "repo"))
+    (shared_base / "updated.txt").touch()
+    writer_dir = tmp_path / "writer"
+    writer = git.Repo.clone_from(str(origin_dir), str(writer_dir))
+    _identify(writer)
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+
+    ops: list[str] = []
+    real_timed = app.git._timed
+
+    @contextmanager
+    def recording_timed(operation: str, **fields):
+        ops.append(operation)
+        with real_timed(operation, **fields):
+            yield
+
+    def read() -> git.Repo:
+        ops.clear()
+        with patch("app.git._timed", recording_timed):
+            return app.git.get_repo(
+                project=project,
+                user=None,
+                session=None,
+                ttl=60,
+                read_only=True,
+            )
+
+    with patch("app.git.shared_reader_root", return_value=str(shared_root)):
+        # A read first, so the read-only hooks are in place before the
+        # write -- a push into a checkout that refuses writes is exactly
+        # the case worth proving
+        read()
+        second = _commit(writer, "notes.txt", "two")
+        app.git.push_and_expire(project, writer, branch)
+        repo = read()
+        assert repo.head.commit.hexsha == second
+        assert (Path(str(repo.working_dir)) / "notes.txt").read_text() == "two"
+        assert ops == [], f"a read after a write did {ops}"
+
+        # For contrast, the path taken when the local push can't be made:
+        # the same read asks where the remote is and goes and gets it
+        third = _commit(writer, "notes.txt", "three")
+        writer.git.push(["origin", branch])
+        app.git.expire_shared_read_clone(project, branch)
+        repo = read()
+        assert repo.head.commit.hexsha == third
+        assert "ls-remote" in ops and "fetch" in ops
+
+
+def test_push_and_expire_falls_back_when_the_shared_checkout_wont_take_it(
+    tmp_path,
+) -> None:
+    # Anything that stops the local push leaves the old slow path.
+    from unittest.mock import patch
+
+    project = _StubProject("ck-shared-push-fallback")
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    seed_dir = tmp_path / "seed"
+    seed = git.Repo.clone_from(str(origin_dir), str(seed_dir))
+    _identify(seed)
+    _commit(seed, "notes.txt", "one")
+    branch = seed.active_branch.name
+    seed.git.push(["origin", branch])
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    shared_base.mkdir(parents=True)
+    shared = git.Repo.clone_from(str(origin_dir), str(shared_base / "repo"))
+    (shared_base / "updated.txt").touch()
+    # The shared checkout is off on some other branch, so a push of `branch`
+    # would move the ref without rewriting the tree a read looks at
+    shared.git.checkout(["-b", "somewhere-else"])
+    writer_dir = tmp_path / "writer"
+    writer = git.Repo.clone_from(str(origin_dir), str(writer_dir))
+    _identify(writer)
+    second = _commit(writer, "notes.txt", "two")
+
+    with (
+        patch("app.git.shared_reader_root", return_value=str(shared_root)),
+        patch("app.git.cache.set_json"),
+    ):
+        app.git.push_and_expire(project, writer, branch)
+
+    # The write still went to origin, and the checkout is marked stale so
+    # the next read fetches it -- which is what happened before any of this
+    assert git.Repo(str(origin_dir)).commit(branch).hexsha == second
+    assert (shared_base / "updated.txt").stat().st_mtime == 0
+
+
+def test_push_and_expire_leaves_a_dirty_shared_checkout_alone(
+    tmp_path,
+) -> None:
+    # A tree that doesn't match its head is not ours to overwrite.
+    from unittest.mock import patch
+
+    project = _StubProject("ck-shared-push-dirty")
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    seed_dir = tmp_path / "seed"
+    seed = git.Repo.clone_from(str(origin_dir), str(seed_dir))
+    _identify(seed)
+    _commit(seed, "notes.txt", "one")
+    branch = seed.active_branch.name
+    seed.git.push(["origin", branch])
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    shared_base.mkdir(parents=True)
+    git.Repo.clone_from(str(origin_dir), str(shared_base / "repo"))
+    (shared_base / "updated.txt").touch()
+    # Something left a tracked file edited there. Git refuses to rewrite
+    # the tree over it, which is the answer we want: the edit is evidence
+    # something is wrong, and losing it would hide that.
+    (shared_base / "repo" / "notes.txt").write_text("edited by hand")
+    writer_dir = tmp_path / "writer"
+    writer = git.Repo.clone_from(str(origin_dir), str(writer_dir))
+    _identify(writer)
+    second = _commit(writer, "notes.txt", "two")
+
+    with (
+        patch("app.git.shared_reader_root", return_value=str(shared_root)),
+        patch("app.git.cache.set_json"),
+    ):
+        app.git.push_and_expire(project, writer, branch)
+
+    assert git.Repo(str(origin_dir)).commit(branch).hexsha == second
+    assert (shared_base / "repo" / "notes.txt").read_text() == "edited by hand"
+    # Marked stale, so the next read fetches and resets it the old way
+    assert (shared_base / "updated.txt").stat().st_mtime == 0
+
+
+def test_push_and_expire_without_a_shared_checkout_leaves_nothing_stale(
+    tmp_path,
+) -> None:
+    # Nobody has read the project yet, so there is nothing to catch up.
+    from unittest.mock import patch
+
+    project = _StubProject("ck-shared-push-absent")
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    writer_dir = tmp_path / "writer"
+    writer = git.Repo.clone_from(str(origin_dir), str(writer_dir))
+    _identify(writer)
+    head = _commit(writer, "notes.txt", "one")
+    branch = writer.active_branch.name
+    shared_root = tmp_path / "_shared"
+
+    with (
+        patch("app.git.shared_reader_root", return_value=str(shared_root)),
+        patch("app.git.cache.set_json") as set_json,
+    ):
+        app.git.push_and_expire(project, writer, branch)
+        assert set_json.call_args.args[1] == head
+    assert git.Repo(str(origin_dir)).commit(branch).hexsha == head
+    # The first read clones, and it clones what was just pushed
+    assert not (shared_root / project.owner_github_name).exists()
+
+
+def test_expire_shared_read_clone_records_a_known_head(tmp_path) -> None:
+    # A push knows where the remote is, so the next read needn't ask.
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from app import cache
+    from app.git import expire_shared_read_clone
+
+    project = SimpleNamespace(
+        owner_github_name="o",
+        name="p",
+        git_repo_url="https://github.com/o/p",
+    )
+    marker_dir = tmp_path / "o" / "p"
+    marker_dir.mkdir(parents=True)
+    (marker_dir / "updated.txt").touch()
+    key = cache.make_key("remote-head", "https://github.com/o/p.git", "main")
+    with (
+        patch("app.git.shared_reader_root", return_value=str(tmp_path)),
+        patch("app.git.cache.set_json") as set_json,
+        patch("app.git.cache.delete") as delete,
+    ):
+        expire_shared_read_clone(project, "main", head="a" * 40)
+        set_json.assert_called_once_with(key, "a" * 40, ttl=300)
+        delete.assert_not_called()
+    # Without one, the next read still has to go and ask.
+    with (
+        patch("app.git.shared_reader_root", return_value=str(tmp_path)),
+        patch("app.git.cache.set_json") as set_json,
+        patch("app.git.cache.delete") as delete,
+    ):
+        expire_shared_read_clone(project, "main")
+        delete.assert_called_once_with(key)
+        set_json.assert_not_called()
+    # Either way the checkout is marked stale, so the next read refreshes it.
+    assert (marker_dir / "updated.txt").stat().st_mtime == 0

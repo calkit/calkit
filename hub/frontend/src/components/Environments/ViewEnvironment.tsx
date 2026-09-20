@@ -69,6 +69,7 @@ const ViewEnvironment = ({ environment, isOpen, onClose }: ViewEnvProps) => {
       size="3xl"
       isCentered
       scrollBehavior="inside"
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent>

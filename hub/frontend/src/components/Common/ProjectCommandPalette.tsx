@@ -104,7 +104,7 @@ const ProjectCommandPalette = () => {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} size="lg" motionPreset="none">
       <ModalOverlay />
       <ModalContent>
         <ModalBody p={0}>

@@ -26,9 +26,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
-import { FaPlus, FaTimes } from "react-icons/fa"
 import { merge as diff3Merge } from "node-diff3"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { FaPlus, FaTimes } from "react-icons/fa"
 
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
@@ -41,17 +41,18 @@ import {
   findMissingPackages,
 } from "../../lib/latexCompiler"
 import {
+  type MappedPath,
   TEXT_EXT,
   ext,
   loadLatexProject,
-  type MappedPath,
   mappedPaths,
 } from "../../lib/latexProject"
 import { fetchTree, newBudget } from "../../lib/projectFiles"
-import PathPicker from "../Releases/PathPicker"
 import { trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
+import PathPicker from "../Releases/PathPicker"
 
 interface LatexEditorProps {
   isOpen: boolean
@@ -119,6 +120,7 @@ const LatexEditor = ({
   const queryClient = useQueryClient()
   const logPanel = useDisclosure()
   const commitModal = useDisclosure()
+  const discardDialog = useDisclosure()
   const [textPaths, setTextPaths] = useState<string[]>([])
   const [activePath, setActivePath] = useState<string>(texPath)
   const [mainPath, setMainPath] = useState<string>(texPath)
@@ -131,7 +133,10 @@ const LatexEditor = ({
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [compiling, setCompiling] = useState(false)
   const [autoCompile, setAutoCompile] = useState(true)
-  const [commitMessage, setCommitMessage] = useState("")
+  // Pre-filled so saving is one keystroke away and the history stays
+  // readable for anyone who doesn't stop to write one.
+  const defaultMessage = `Update ${texPath}`
+  const [commitMessage, setCommitMessage] = useState(defaultMessage)
   // Concurrent-editing: origin advanced past what we loaded, and files that
   // came back with conflict markers from the last pull. mergeNonce forces the
   // CodeMirror pane to remount with merged content.
@@ -493,7 +498,7 @@ const LatexEditor = ({
       }
       setUpdatesAvailable(false)
       setDirty(new Set())
-      setCommitMessage("")
+      setCommitMessage(defaultMessage)
       commitModal.onClose()
       // Show the trimmed text if trimming changed anything, so the pane
       // isn't left displaying whitespace that wasn't committed. Remounting
@@ -724,7 +729,8 @@ const LatexEditor = ({
   }, [isOpen])
 
   const handleClose = () => {
-    if (dirty.size > 0 && !window.confirm("Discard unsaved changes?")) {
+    if (dirty.size > 0) {
+      discardDialog.onOpen()
       return
     }
     onClose()
@@ -737,7 +743,12 @@ const LatexEditor = ({
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={handleClose} size="full">
+      <Modal
+        isOpen={isOpen}
+        onClose={handleClose}
+        size="full"
+        motionPreset="none"
+      >
         <ModalOverlay />
         <ModalContent>
           <Flex align="center" gap={3} px={4} py={2} borderBottomWidth="1px">
@@ -1062,6 +1073,7 @@ const LatexEditor = ({
         size={{ base: "sm", md: "md" }}
         isCentered
         initialFocusRef={commitInputRef}
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent
@@ -1079,7 +1091,7 @@ const LatexEditor = ({
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder="Ex: Add paragraph about the boundary conditions"
+              placeholder={defaultMessage}
             />
           </ModalBody>
           <ModalFooter gap={3}>
@@ -1094,6 +1106,14 @@ const LatexEditor = ({
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <DiscardChangesDialog
+        isOpen={discardDialog.isOpen}
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          discardDialog.onClose()
+          onClose()
+        }}
+      />
     </>
   )
 }

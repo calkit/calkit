@@ -2115,7 +2115,14 @@ class Pipeline(BaseModel):
             ),
             Discriminator("kind"),
         ],
-    ]
+    ] = Field(
+        default_factory=dict,
+        description=(
+            "Stages to run, keyed by name. A project that has declared a "
+            "pipeline but not yet written a stage has none, which is empty "
+            "rather than invalid."
+        ),
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
 

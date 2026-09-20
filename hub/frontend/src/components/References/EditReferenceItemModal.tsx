@@ -184,7 +184,13 @@ const EditReferenceItemModal = ({
   })
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="xl" isCentered>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="xl"
+      isCentered
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent
         as="form"

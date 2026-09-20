@@ -8,6 +8,7 @@ import {
   Flex,
   Heading,
   Icon,
+  IconButton,
   Link,
   Text,
 } from "@chakra-ui/react"
@@ -27,13 +28,15 @@ import yaml from "react-syntax-highlighter/dist/esm/languages/hljs/yaml"
 import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
 import { z } from "zod"
 
+import { FaExclamationTriangle } from "react-icons/fa"
+import { MdEdit } from "react-icons/md"
 import { ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
-import { FaExclamationTriangle } from "react-icons/fa"
 
 import Mermaid, {
   MAX_READABLE_STAGES,
 } from "../../../../../components/Common/Mermaid"
+import PipelineEditorModal from "../../../../../components/Pipeline/PipelineEditorModal"
 import StageEditorModal from "../../../../../components/Pipeline/StageEditorModal"
 import useProject, {
   useProjectEnvironments,
@@ -344,6 +347,7 @@ const pipelineSearchSchema = z.object({
   ref: z.string().optional(),
   stage: z.string().optional(),
   stage_editor_open: z.boolean().optional(),
+  pipeline_editor_open: z.boolean().optional(),
   // Draw the diagram for a pipeline with too many stages to read. A query
   // param so the choice survives a reload and can be linked to.
   show_diagram: z.boolean().optional(),
@@ -360,8 +364,14 @@ export const Route = createFileRoute(
 
 function ProjectPipeline() {
   const { accountName, projectName } = Route.useParams()
-  const { ref, stage, stage_editor_open, show_diagram, show_full_yaml } =
-    Route.useSearch()
+  const {
+    ref,
+    stage,
+    stage_editor_open,
+    pipeline_editor_open,
+    show_diagram,
+    show_full_yaml,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const pipelineQuery = useQuery({
@@ -400,6 +410,21 @@ function ProjectPipeline() {
   // define their pipeline there, and never while viewing an older revision.
   const canEditStages =
     userHasWriteAccess && !ref && Boolean(pipelineQuery.data?.calkit_yaml)
+  // A project with no pipeline at all is the other case worth editing: there
+  // is nothing to disturb, and writing one here is how it gets its first.
+  // A pipeline written directly in dvc.yaml is not -- editing calkit.yaml
+  // would leave the project with two, and the compiled one would win.
+  const hasNoPipeline =
+    !pipelineQuery.isPending &&
+    !pipelineQuery.data?.calkit_yaml &&
+    !pipelineQuery.data?.dvc_yaml
+  const canEditPipeline =
+    canEditStages || (userHasWriteAccess && !ref && hasNoPipeline)
+  // What the editor opens on. A project with no pipeline gets the empty
+  // shape rather than a blank pane, so it's clear what is being written.
+  const pipelineDoc = String(
+    pipelineQuery.data?.calkit_yaml ?? "pipeline:\n  stages: {}\n",
+  )
   const openStageEditor = useCallback(
     (stageName: string) =>
       navigate({
@@ -413,6 +438,12 @@ function ProjectPipeline() {
   )
   const closeStageEditor = () =>
     navigate({ search: (prev) => ({ ...prev, stage_editor_open: undefined }) })
+  const openPipelineEditor = () =>
+    navigate({ search: (prev) => ({ ...prev, pipeline_editor_open: true }) })
+  const closePipelineEditor = () =>
+    navigate({
+      search: (prev) => ({ ...prev, pipeline_editor_open: undefined }),
+    })
   // What the diagram actually draws. The compiled DVC stages are what the
   // graph is built from, so they're what decides whether it's worth drawing;
   // calkit.yaml stages are a subset for projects that define them there.
@@ -489,9 +520,21 @@ function ProjectPipeline() {
               <Box flex={1} minW={0}>
                 {pipelineQuery.data.calkit_yaml ? (
                   <>
-                    <Heading size="md" my={2}>
-                      calkit.yaml
-                    </Heading>
+                    <Flex align="center" my={2}>
+                      <Heading size="md">calkit.yaml</Heading>
+                      {canEditPipeline && (
+                        <IconButton
+                          aria-label="Edit pipeline"
+                          title="Edit the pipeline"
+                          height="25px"
+                          width="28px"
+                          ml={1.5}
+                          icon={<MdEdit />}
+                          size="xs"
+                          onClick={openPipelineEditor}
+                        />
+                      )}
+                    </Flex>
                     <LinkedYaml
                       content={String(pipelineQuery.data.calkit_yaml)}
                       filesTo={filesTo}
@@ -522,20 +565,37 @@ function ProjectPipeline() {
             </>
           ) : (
             <Alert mt={2} status="warning" borderRadius="xl">
-              <AlertIcon />A pipeline has not yet been defined for this project.
-              To create one, see the{" "}
-              <Link
-                ml={1}
-                isExternal
-                variant="blue"
-                href="https://docs.calkit.org/pipeline/"
-              >
-                pipeline documentation
-              </Link>
-              .
+              <AlertIcon />
+              <Box>
+                <Text>
+                  A pipeline has not yet been defined for this project. See the{" "}
+                  <Link
+                    isExternal
+                    variant="blue"
+                    href="https://docs.calkit.org/pipeline/"
+                  >
+                    pipeline documentation
+                  </Link>
+                  .
+                </Text>
+                {canEditPipeline && (
+                  <Button size="sm" mt={3} onClick={openPipelineEditor}>
+                    Define a pipeline
+                  </Button>
+                )}
+              </Box>
             </Alert>
           )}
         </Flex>
+      )}
+      {pipeline_editor_open && canEditPipeline && (
+        <PipelineEditorModal
+          isOpen={Boolean(pipeline_editor_open)}
+          onClose={closePipelineEditor}
+          ownerName={accountName}
+          projectName={projectName}
+          content={pipelineDoc}
+        />
       )}
       {stage_editor_open && stage && canEditStages && (
         <StageEditorModal

@@ -1,15 +1,23 @@
 import { Box, Button, Container, Flex, Link } from "@chakra-ui/react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Outlet, createFileRoute } from "@tanstack/react-router"
 import mixpanel from "mixpanel-browser"
+import { useEffect, useRef, useSyncExternalStore } from "react"
 import LoadingSpinner from "../components/Common/LoadingSpinner"
 
-import { UsersService } from "../client"
+import { type UserPublic, UsersService } from "../client"
 import Topbar from "../components/Common/Topbar"
 import PickSubscription from "../components/UserSettings/PickSubscription"
 import useAuth from "../hooks/useAuth"
+import {
+  getAnalyticsConsent,
+  reconcileAnalyticsConsent,
+  setAnalyticsConsent,
+  subscribeAnalyticsConsent,
+} from "../lib/analytics"
 import { isAuthenticationError } from "../lib/auth"
 import { appName } from "../lib/core"
+import { setGitHubReturnTo } from "../lib/github"
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
@@ -27,8 +35,43 @@ function InstallGitHubApp() {
   )
 }
 
+// Keeps this browser's analytics consent and the account's in step, since the
+// server checks the account's before sending its own events
+function useAccountAnalyticsConsent(user: UserPublic | null | undefined) {
+  const queryClient = useQueryClient()
+  const consent = useSyncExternalStore(
+    subscribeAnalyticsConsent,
+    getAnalyticsConsent,
+  )
+  const seenUserId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!user) {
+      seenUserId.current = null
+      return
+    }
+    const firstSeen = seenUserId.current !== user.id
+    seenUserId.current = user.id
+    const action = reconcileAnalyticsConsent(
+      user.analytics_consent,
+      consent,
+      firstSeen,
+    )
+    if (!action) return
+    if ("apply" in action) {
+      setAnalyticsConsent(action.apply)
+    } else {
+      UsersService.updateCurrentUser({
+        userUpdateMe: { analytics_consent: action.save },
+      }).then((response) =>
+        queryClient.setQueryData(["currentUser"], response.data),
+      )
+    }
+  }, [user, consent, queryClient])
+}
+
 function Layout() {
   const { isLoading, user, logout } = useAuth()
+  useAccountAnalyticsConsent(user)
   if (user) {
     mixpanel.identify(user.id)
     mixpanel.people.set({
@@ -66,6 +109,11 @@ function Layout() {
     ghAppInstalledQuery.data &&
     !ghAppInstalledQuery.data.total_count
   if (ghAppNotInstalled) {
+    // Installing the app sends the browser away and brings it back through
+    // the OAuth callback. Without this it lands on the settings page, which
+    // for someone who just created a project is nowhere near what they were
+    // doing.
+    setGitHubReturnTo(`${location.pathname}${location.search}${location.hash}`)
     location.href = `https://github.com/apps/${appName}/installations/new`
   }
 

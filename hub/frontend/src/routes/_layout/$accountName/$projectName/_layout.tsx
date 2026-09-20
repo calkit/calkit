@@ -45,10 +45,10 @@ import { useEffect, useState } from "react"
 import { BsThreeDots } from "react-icons/bs"
 import { FaCodeBranch } from "react-icons/fa"
 import { FaGithub, FaQuestion, FaRegClone, FaRegFileAlt } from "react-icons/fa"
-import { SiOverleaf } from "react-icons/si"
 import { FiCheckSquare } from "react-icons/fi"
 import { LuCopyPlus } from "react-icons/lu"
-import { MdEdit, MdOutlineLightbulb } from "react-icons/md"
+import { MdEdit } from "react-icons/md"
+import { SiOverleaf } from "react-icons/si"
 import { z } from "zod"
 
 import {
@@ -63,16 +63,15 @@ import CloneProject from "../../../../components/Projects/CloneProject"
 import EditProject from "../../../../components/Projects/EditProject"
 import HelpContent from "../../../../components/Projects/HelpContent"
 import MakeProjectPublic from "../../../../components/Projects/MakeProjectPublic"
-import NewProject from "../../../../components/Projects/NewProject"
+import NewProjectModal from "../../../../components/Projects/NewProjectModal"
 import ProjectStatus from "../../../../components/Projects/ProjectStatus"
 import ImportOverleaf from "../../../../components/Publications/ImportOverleaf"
 import NewPublication from "../../../../components/Publications/NewPublication"
 import useAuth from "../../../../hooks/useAuth"
 import useOnboardingFlags from "../../../../hooks/useOnboarding"
-import { DISMISSED } from "../../../../lib/onboarding"
 import useProject from "../../../../hooks/useProject"
 import { isAuthenticationError } from "../../../../lib/auth"
-import useTips from "../../../../hooks/useTips"
+import { DISMISSED } from "../../../../lib/onboarding"
 
 interface CommitHistory {
   hash: string
@@ -152,6 +151,7 @@ function SwitchVersionModal({
         setQuery("")
       }}
       size="md"
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent>
@@ -289,7 +289,6 @@ function ProjectMenu({
   const navigate = useNavigate()
   // Clearing the flag is what brings the checklist back on the home page.
   const { setFlag } = useOnboardingFlags(project.id)
-  const tips = useTips(project.id, userHasWriteAccess)
   const editProjectModal = useDisclosure()
   const newProjectModal = useDisclosure()
   const cloneProjectModal = useDisclosure()
@@ -377,14 +376,6 @@ function ProjectMenu({
                 Show setup checklist
               </MenuItem>
             ) : null}
-            {userHasWriteAccess ? (
-              <MenuItem
-                icon={<MdOutlineLightbulb fontSize={18} />}
-                onClick={tips.showing ? tips.dismissAll : tips.resetAll}
-              >
-                {tips.showing ? "Hide tips" : "Show tips again"}
-              </MenuItem>
-            ) : null}
             <MenuDivider />
             <MenuItem
               icon={<FaCodeBranch fontSize={16} />}
@@ -413,7 +404,7 @@ function ProjectMenu({
         isOpen={editProjectModal.isOpen}
         onClose={editProjectModal.onClose}
       />
-      <NewProject
+      <NewProjectModal
         isOpen={newProjectModal.isOpen}
         onClose={newProjectModal.onClose}
         defaultTemplate={`${project.owner_account_name}/${project.name}`}

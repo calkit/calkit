@@ -72,7 +72,13 @@ const NewReferencesCollection = ({
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md" isCentered>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="md"
+      isCentered
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent
         as="form"

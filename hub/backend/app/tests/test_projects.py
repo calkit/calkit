@@ -6,7 +6,7 @@ from pathlib import Path
 
 import git
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 import app.dvc
 import app.projects
@@ -164,6 +164,100 @@ def test_get_project_logged_in_without_min_access_level(db: Session) -> None:
     finally:
         db.delete(project)
         db.delete(owner)
+        db.commit()
+
+
+def test_get_project_survives_a_concurrent_access_insert(db: Session) -> None:
+    # Two requests resolving the same user's access don't 500 one of them.
+    # Regression: the unique violation was caught, but the handler logged
+    # ``current_user.id`` before rolling back. A failed flush expires every
+    # attribute and refuses to load one back until the rollback, so reading it
+    # raised PendingRollbackError out of the handler -- which is what a burst
+    # of requests for one project (a page load) actually hit.
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from sqlmodel import Session as SQLSession
+
+    from app import users
+    from app.db import engine
+    from app.models import UserCreate, UserProjectAccess
+
+    suffix = uuid.uuid4().hex[:8]
+    owner = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"owner-{suffix}@example.com",
+            password="OwnerPassword123",
+            account_name=f"owner{suffix}",
+            github_username=f"owner{suffix}",
+        ),
+    )
+    viewer = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"viewer-{suffix}@example.com",
+            password="ViewerPassword123",
+            account_name=f"viewer{suffix}",
+            github_username=f"viewer{suffix}",
+        ),
+    )
+    project = Project(
+        name=f"race-{suffix}",
+        title="Race",
+        git_repo_url=f"https://github.com/owner{suffix}/race-{suffix}",
+        owner_account_id=owner.account.id,
+        is_public=True,
+    )
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    project_id = project.id
+    viewer_id = viewer.id
+
+    def insert_the_row_first(*args, **kwargs):
+        """Stand in for the request that wins the race."""
+        with SQLSession(engine) as other:
+            other.add(
+                UserProjectAccess(
+                    project_id=project_id,
+                    user_id=viewer_id,
+                    github_access="write",
+                )
+            )
+            other.commit()
+        return SimpleNamespace(
+            status_code=200, json=lambda: {"permission": "write"}
+        )
+
+    try:
+        with (
+            patch("app.projects.requests.get", insert_the_row_first),
+            patch(
+                "app.projects.app.users.get_github_token",
+                return_value="gh-token",
+            ),
+        ):
+            found = app.projects.get_project(
+                session=db,
+                owner_name=f"owner{suffix}",
+                project_name=f"race-{suffix}",
+                current_user=viewer,
+                min_access_level="read",
+            )
+        # Losing the race is a no-op, not an error, and the answer is still
+        # the access we resolved
+        assert found.current_user_access == "write"
+        # The session is usable afterwards, which it isn't until the rollback
+        assert db.exec(select(Project).where(Project.id == project_id)).first()
+    finally:
+        for row in db.exec(
+            select(UserProjectAccess).where(
+                UserProjectAccess.project_id == project_id
+            )
+        ).all():
+            db.delete(row)
+        db.delete(project)
         db.commit()
 
 

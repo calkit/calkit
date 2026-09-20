@@ -94,29 +94,23 @@ export function buildProjectSteps({
     },
     {
       key: "references",
-      // TODO: rewrite this title and detail
       title: "Add references",
       detail:
-        "Pull in the papers the work builds on, so citations come out of " +
-        "the same project as the figures rather than a separate library.",
+        "Keep track of other relevant work inside the project for quick viewing and added context.",
       done: referenceCount > 0,
     },
     {
       key: "dataset",
       title: "Collect some data",
       detail:
-        "Type it in, upload it, or import it by DOI, URL, or repo. " +
-        "Recording the source now is what lets anyone trace a figure back " +
-        "to it later.",
+        "Collect with a script, type it in manually, or import by DOI, URL, or Git repo.",
       done: (reproCheck?.n_datasets ?? 0) > 0,
     },
     {
       key: "figure",
       title: "Analyze and visualize",
       detail:
-        "Plot the data in the browser, then save it as a pipeline stage. " +
-        "That creates the environment it runs in, so the figure traces back " +
-        "to code, data, and a pinned set of packages.",
+        "Plot the data and calculate statistics to answer your research questions.",
       done: (reproCheck?.n_figures_with_import_or_stage ?? 0) > 0,
     },
     {
@@ -135,8 +129,7 @@ export function buildProjectSteps({
       title: "Write about the findings",
       detail:
         "Start a paper from a template or connect the Overleaf project " +
-        "you're already writing in, so its figures stop drifting out of " +
-        "date.",
+        "you're already writing in, so its figures and results stay up to date without manual uploads.",
       done: (reproCheck?.n_publications ?? 0) > 0,
     },
   ]

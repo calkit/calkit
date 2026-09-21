@@ -85,6 +85,55 @@ def get_texmf_cache_dir() -> str:
     return os.path.join(get_user_home(), ".calkit", "texmf")
 
 
+def get_tectonic_cmd(
+    target_path: str,
+    output_dir: str | None = None,
+    synctex: bool = True,
+    force: bool = False,
+    verbose: bool = False,
+    latexmkrc_path: str | None = None,
+    aux_dir: str | None = None,
+    latexmk_args: list[str] | None = None,
+) -> list[str]:
+    """Build a Tectonic command for what latexmk would have been asked.
+
+    Tectonic replaces latexmk rather than providing it, so a document
+    built this way is a different command, not the same one somewhere
+    else. Options with no equivalent are refused rather than dropped: a
+    build that silently ignored a latexmkrc would produce a document the
+    project didn't ask for.
+
+    Paths stay in the project's frame, unlike latexmk's, which are
+    relative to the document because it is run with ``-cd``.
+    """
+    unsupported = []
+    if latexmkrc_path is not None:
+        unsupported.append("a latexmkrc")
+    if aux_dir is not None:
+        unsupported.append("a separate aux directory")
+    if latexmk_args:
+        unsupported.append("latexmk arguments")
+    if unsupported:
+        raise ValueError(
+            "Tectonic doesn't support " + ", ".join(unsupported) + "; pin "
+            "the environment to a TeX Live backend, e.g., kind: tinytex"
+        )
+    cmd = ["tectonic", "-X", "compile"]
+    if output_dir is not None:
+        cmd += ["--outdir", Path(output_dir).as_posix()]
+    if synctex:
+        cmd.append("--synctex")
+    if force:
+        # Keep going after an error, which is what latexmk's -f asks for
+        cmd.append("--keep-going")
+    if not verbose:
+        cmd += ["--chatter", "minimal"]
+    # latexmk leaves the log next to the document, and Calkit reads it
+    cmd.append("--keep-logs")
+    cmd.append(target_path)
+    return cmd
+
+
 def backend_can_diff(backend: str) -> bool:
     """Whether ``latexdiff`` can be run in this backend."""
     return backend in LATEX_DIFF_CAPABLE

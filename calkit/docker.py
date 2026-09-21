@@ -582,14 +582,31 @@ def get_remote_image_ref(
     return f"{path}:{tag or 'latest'}"
 
 
-def _run_showing_output(cmd: list[str]) -> tuple[bool, str]:
+# How long Docker may say nothing at all before we give up on it. A real
+# transfer reports progress continuously, so silence this long is a stall
+# rather than a slow network: pulling a tag that doesn't exist sits there
+# indefinitely instead of reporting that it doesn't exist.
+PULL_STALL_TIMEOUT = 120.0
+
+
+def _run_showing_output(
+    cmd: list[str], stall_timeout: float | None = None
+) -> tuple[bool, str]:
     """Run a command, showing its output as it happens and keeping it.
 
     Pushing and pulling an image are the slowest things Calkit does, and
     swallowing Docker's progress for minutes on end looks like a hang, so
     the output goes to the terminal as it arrives. It's captured too, since
     what a registry says on refusal decides what happens next.
+
+    ``stall_timeout`` gives up when Docker produces no output at all for
+    that long, which is what a pull of a missing image does here rather
+    than failing. It measures silence, not total time, so a genuinely slow
+    transfer is left alone as long as it's still reporting progress.
     """
+    import queue
+    import threading
+
     lines: list[str] = []
     try:
         proc = subprocess.Popen(
@@ -602,13 +619,37 @@ def _run_showing_output(cmd: list[str]) -> tuple[bool, str]:
     except FileNotFoundError:
         return False, "Docker is not installed"
     assert proc.stdout is not None
+    # Read on a thread so the wait for each line can time out; reading the
+    # pipe directly can only block forever.
+    line_queue: queue.Queue[str | None] = queue.Queue()
+
+    def read_lines() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line_queue.put(line)
+        line_queue.put(None)
+
+    threading.Thread(target=read_lines, daemon=True).start()
     # Docker redraws each layer's status in place on a terminal, but writes
     # every repeat as its own line through a pipe, so a slow push scrolls
     # hundreds of identical 'Waiting' lines past. Only changes are worth
     # showing; a real transfer changes its byte count and still comes
     # through.
     last_status: dict[str, str] = {}
-    for line in proc.stdout:
+    while True:
+        try:
+            line = line_queue.get(timeout=stall_timeout)
+        except queue.Empty:
+            proc.kill()
+            proc.wait()
+            message = (
+                f"Docker produced no output for {stall_timeout:.0f} seconds; "
+                "giving up"
+            )
+            print(message, flush=True)
+            return False, "".join(lines) + "\n" + message
+        if line is None:
+            break
         lines.append(line)
         layer_id, sep, status = line.partition(": ")
         if sep and " " not in layer_id:
@@ -620,13 +661,70 @@ def _run_showing_output(cmd: list[str]) -> tuple[bool, str]:
     return proc.wait() == 0, "".join(lines)
 
 
+def image_exists_locally(ref: str) -> bool:
+    """Whether the image is already on this machine."""
+    try:
+        return (
+            subprocess.run(
+                ["docker", "image", "inspect", ref],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def ensure_image_available(ref: str, platform: str | None = None) -> None:
+    """Make sure an image can be run, or say why it can't.
+
+    ``docker run`` pulls implicitly, and a pull of an image that isn't
+    there doesn't fail: it sits waiting on the registry, which looks
+    exactly like a slow download. Pulling deliberately first means a
+    missing image is reported as one.
+    """
+    if image_exists_locally(ref):
+        return
+    success, output = pull_image(ref, platform=platform)
+    if success:
+        return
+    # Docker announces what it's pulling before it fetches anything, so a
+    # pull that produced nothing at all never reached the registry. That
+    # is local: most often a credential helper that doesn't answer, which
+    # blocks every pull on the machine rather than this one image.
+    if not output.strip().startswith(ref.rsplit(":", 1)[-1]):
+        raise ValueError(
+            f"Could not pull '{ref}', and Docker said nothing before "
+            "giving up, so it never reached the registry. Check that "
+            "Docker is working, e.g., 'docker pull alpine', and that its "
+            "credential helper answers: 'docker-credential-"
+            f"{get_creds_store() or 'desktop'} list'. Restarting Docker "
+            f"usually clears it.\n{output.strip()[-500:]}"
+        )
+    raise ValueError(
+        f"Could not pull '{ref}'. It may not exist, or may not be "
+        "public; check the name and tag, and whether you need to log in "
+        f"to its registry.\n{output.strip()[-500:]}"
+    )
+
+
+def get_creds_store() -> str | None:
+    """Which credential helper Docker is configured to use, if any."""
+    try:
+        with open(os.path.join(Path.home(), ".docker", "config.json")) as f:
+            store = json.load(f).get("credsStore")
+    except (OSError, ValueError):
+        return None
+    return store if isinstance(store, str) else None
+
+
 def pull_image(ref: str, platform: str | None = None) -> tuple[bool, str]:
     """Pull an image, returning success and its output."""
     cmd = ["docker", "pull"]
     if platform is not None:
         cmd += ["--platform", platform]
     cmd.append(ref)
-    return _run_showing_output(cmd)
+    return _run_showing_output(cmd, stall_timeout=PULL_STALL_TIMEOUT)
 
 
 def pull_image_with_login(ref: str, platform: str | None = None) -> bool:

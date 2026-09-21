@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest import mock
 
+import pytest
+
 import calkit.latex
 
 
@@ -85,3 +87,41 @@ def test_backend_availability() -> None:
         "calkit.latex.get_backend_version", side_effect=only_tlmgr
     ):
         assert not calkit.latex.backend_is_available("tinytex")
+
+
+def test_tectonic_cmd() -> None:
+    # Paths stay in the project's frame, unlike latexmk's, which are
+    # relative to the document because it runs with -cd
+    assert calkit.latex.get_tectonic_cmd(
+        target_path="paper/main.tex", output_dir="build"
+    ) == [
+        "tectonic",
+        "-X",
+        "compile",
+        "--outdir",
+        "build",
+        "--synctex",
+        "--chatter",
+        "minimal",
+        "--keep-logs",
+        "paper/main.tex",
+    ]
+    # latexmk's -f means keep going after an error, and verbose output is
+    # the absence of minimal chatter rather than a flag of its own
+    cmd = calkit.latex.get_tectonic_cmd(
+        target_path="main.tex", synctex=False, force=True, verbose=True
+    )
+    assert "--keep-going" in cmd
+    assert "--synctex" not in cmd
+    assert "--chatter" not in cmd
+    # Options Tectonic has no equivalent for are refused rather than
+    # dropped, since a build that ignored them isn't the build that was
+    # asked for
+    unsupported: list[dict] = [
+        {"latexmkrc_path": ".latexmkrc"},
+        {"aux_dir": "aux"},
+        {"latexmk_args": ["-pdflua"]},
+    ]
+    for kwargs in unsupported:
+        with pytest.raises(ValueError, match="Tectonic doesn't support"):
+            calkit.latex.get_tectonic_cmd(target_path="main.tex", **kwargs)

@@ -1,6 +1,7 @@
 """Tests for ``calkit.docker``."""
 
 import sys
+from unittest import mock
 from unittest.mock import Mock
 
 import pytest
@@ -490,3 +491,33 @@ def test_get_image_name(tmp_dir):
     assert (
         get_image_name({"kind": "docker", "path": "Dockerfile"}, "env") is None
     )
+
+
+def test_ensure_image_available() -> None:
+    # An image already here needs no registry at all
+    with mock.patch("calkit.docker.image_exists_locally", return_value=True):
+        with mock.patch("calkit.docker.pull_image") as pull:
+            calkit.docker.ensure_image_available("some/image:1")
+            pull.assert_not_called()
+    # A pull that says nothing never reached the registry, which is local
+    # and affects every pull on the machine, so it's reported that way
+    # rather than as a missing image
+    with mock.patch("calkit.docker.image_exists_locally", return_value=False):
+        with mock.patch(
+            "calkit.docker.pull_image",
+            return_value=(False, "Docker produced no output for 120 seconds"),
+        ):
+            with pytest.raises(ValueError, match="never reached the registry"):
+                calkit.docker.ensure_image_available("some/image:1")
+        # One that got as far as talking to the registry is about the image
+        with mock.patch(
+            "calkit.docker.pull_image",
+            return_value=(False, "1: Pulling from some/image\nnot found"),
+        ):
+            with pytest.raises(ValueError, match="may not exist"):
+                calkit.docker.ensure_image_available("some/image:1")
+        # A successful pull is not an error
+        with mock.patch(
+            "calkit.docker.pull_image", return_value=(True, "1: Pulling")
+        ):
+            calkit.docker.ensure_image_available("some/image:1")

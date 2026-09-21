@@ -3873,6 +3873,12 @@ def run_in_env(
             texmf = _latex.get_texmf_cache_dir()
             os.makedirs(texmf, exist_ok=True)
             image = env.get("image") or _latex.DEFAULT_LATEX_IMAGE
+            # docker run would pull this itself, but a pull of an image
+            # that isn't there waits on the registry rather than failing
+            try:
+                calkit.docker.ensure_image_available(image)
+            except ValueError as e:
+                raise_error(str(e))
             docker_cmd = [
                 "docker",
                 "run",

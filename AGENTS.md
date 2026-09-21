@@ -8,6 +8,8 @@
 - The Chrome extension lives in `browser-ext`
 - The Calkit Assistant desktop app lives in `assistant`
 - GitHub Actions live in `actions`, e.g., `calkit/calkit/actions/run`
+- Docker images we publish live in `images`, e.g., `images/latex`, which
+  is released on its own `latex-image/vX.Y.Z` tag rather than with the CLI
 - Config Calkit installs into projects, e.g., the dev container, VS Code, and
   GitHub Actions configs, lives in `calkit/resources`; see the README there
   before editing, since some of those files are generated

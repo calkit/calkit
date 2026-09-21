@@ -190,8 +190,6 @@ test.describe("Notebook pipeline workflow", () => {
 
     // Prepare network waits to observe the stage save request/response
     const saveStageButton = stageDropdown.locator('button:has-text("Save")').first()
-    // A slow runner has taken well over 15s to get here, and the request
-    // waits start before the click
     const stageRequestPromise = page.waitForRequest(
       (request) => request.url().includes("notebook/stage") && request.method() === "PUT",
       { timeout: 45000 }
@@ -200,7 +198,14 @@ test.describe("Notebook pipeline workflow", () => {
       (response) => response.url().includes("notebook/stage") && response.request().method() === "PUT",
       { timeout: 45000 }
     )
-    await Promise.all([stageRequestPromise, stageResponsePromise, saveStageButton.click()])
+    // Dispatch rather than click: the dropdown is positioned outside the
+    // panel it belongs to, so a real click intermittently waits forever on
+    // an actionability check that never passes, and the save never fires
+    await Promise.all([
+      stageRequestPromise,
+      stageResponsePromise,
+      saveStageButton.dispatchEvent("click"),
+    ])
 
     // Confirm badge updates to show the configured stage
     const stageBadgeUpdated = page

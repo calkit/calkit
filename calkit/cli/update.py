@@ -1538,6 +1538,32 @@ def update_dataset(
     calkit.save_calkit_info(ck_info)
 
 
+def _is_connected_to_hub() -> bool:
+    """Whether this project already has somewhere to push code and data.
+
+    Both halves have to be there: a Git remote without DVC storage leaves
+    data with nowhere to go, and storage without a Git remote leaves the
+    code behind.
+    """
+    import calkit.dvc
+
+    try:
+        repo = calkit.git.get_repo()
+        has_git_remote = "origin" in [r.name for r in repo.remotes]
+    except Exception:
+        return False
+    if not has_git_remote:
+        return False
+    try:
+        remotes = calkit.dvc.get_remotes()
+    except Exception:
+        return False
+    return any(
+        calkit.dvc.detect_calkit_remote_type(name, url) is not None
+        for name, url in remotes.items()
+    )
+
+
 @update_app.command(name="remote", help="Alias for 'hub'.")
 @update_app.command(name="hub")
 def update_hub(
@@ -1591,6 +1617,15 @@ def update_hub(
     from calkit.dvc import configure_remote, set_remote_auth
 
     ck_info = calkit.load_calkit_info()
+    # Connecting a project that is already connected is nothing to do, so
+    # running this a second time costs no requests and changes no files.
+    # Naming a hub is how someone asks to move, which is a real change.
+    if hub is None and _is_connected_to_hub():
+        typer.echo(
+            f"Already connected to {calkit.hub.get_hub_url()}; name a hub "
+            "to connect to a different one"
+        )
+        return
     # The project has to be named before it can be created anywhere, and
     # the directory name is what 'calkit new project' would have used
     name = ck_info.get("name") or os.path.basename(

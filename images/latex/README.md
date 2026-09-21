@@ -48,6 +48,13 @@ the container may not be able to write to. With `cm-super` those fonts
 exist as Type 1 and nothing is generated, which also makes for better
 PDFs. `texmf-var` is writable anyway, for whatever else asks.
 
+`siunitx`, `cleveref`, `algorithms` and `algorithmicx` are here for a
+different reason than the rest: no class asks for them, but documents do.
+Units, cross-references and algorithm listings are what a technical paper
+is made of, so most papers need them whatever they are submitted to.
+Together they come to about 110 kB, which buys more than it costs on an
+image this size.
+
 The image tracks whatever `tlmgr` installs at build time rather than a
 pinned TeX Live snapshot, so two builds of this Dockerfile on different
 days can carry different package versions. That is why a project should
@@ -67,6 +74,12 @@ tlmgr --usermode install <package>
 
 The package lands in whatever is mounted at `TEXMFHOME`, so it is there
 the next time the container runs.
+
+This works when the container is run directly, as below. It does not work
+through `calkit latex build -e <environment>`: that path runs the command
+with `calkit xenv` and never mounts the cache, so a project that declares
+a LaTeX environment cannot install a package at run time at all. Until
+that is fixed, such a project has to derive its own image from this one.
 
 ## Running it directly
 

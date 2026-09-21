@@ -247,6 +247,21 @@ def placeholders(text: str) -> list[str]:
     return [m.group(1) for m in _PLACEHOLDER.finditer(text or "")]
 
 
+def _placeholder_problems(text: str, values: dict[str, Any]) -> list[str]:
+    if "{" not in text:
+        return []
+    try:
+        _FORMATTER.vformat(text, (), values)
+    except KeyError as e:
+        return [
+            f"placeholder {{{e.args[0]}}} names no evidence; write "
+            "'{{' and '}}' for braces meant to stay in the text"
+        ]
+    except (ValueError, IndexError) as e:
+        return [f"cannot render {text[:40]!r}...: {e}"]
+    return []
+
+
 _IF_KEY = re.compile(r"^\s*(if|elif)\s+(.+?)\s*$")
 _ELSE_KEY = re.compile(r"^\s*else\s*$")
 _COMPARISONS = {
@@ -319,6 +334,8 @@ def _operand(node: ast.AST, values: dict[str, Any]) -> Any:
 
 def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
     if isinstance(node, ast.BoolOp):
+        # Not short-circuited, so a misspelled name is an error whatever
+        # the current values are
         outcomes = [_truth(v, values) for v in node.values]
         if isinstance(node.op, ast.And):
             return all(outcomes)
@@ -369,6 +386,47 @@ def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
                 "that is a valid Python identifier"
             ) from None
         raise
+    except ValueError:
+        raise
+    except Exception as e:
+        # E.g., comparing a string to a number, or syntax arithmetic_eval
+        # refuses, so callers only have to handle one kind of bad condition
+        raise ValueError(
+            f"cannot evaluate condition {expression!r}: {e}"
+        ) from e
+
+
+def check_conditional(clauses: dict, values: dict[str, Any]) -> list[str]:
+    """Problems with every clause of a conditional, not just the one chosen.
+
+    The clauses the current values don't select are the ones a rerun will
+    reach, so a typo in them is an error now rather than after the rerun.
+    """
+    try:
+        parsed = parse_conditional(clauses)
+    except ValueError as e:
+        return [f"conditional answer: {e}"]
+    messages: list[str] = []
+    held = False
+    for condition, wording in parsed:
+        if condition is None:
+            held = True
+        else:
+            try:
+                held = evaluate_condition(condition, values) or held
+            except KeyError as e:
+                messages.append(
+                    f"condition {condition!r} names no evidence {e.args[0]!r}"
+                )
+            except ValueError as e:
+                messages.append(str(e))
+        messages += _placeholder_problems(wording, values)
+    if not messages and not held:
+        messages.append(
+            "no condition of the conditional answer holds and there is no "
+            "'else' clause"
+        )
+    return messages
 
 
 def select_branch(clauses: dict, values: dict[str, Any]) -> str:
@@ -1012,17 +1070,10 @@ def check_question(
         ev.get("explanation") for ev in evidence
     ]
     for t in texts:
-        if not t or (not is_conditional(t) and "{" not in t):
-            continue
-        try:
-            render(t, values)
-        except KeyError as e:
-            messages.append(
-                f"placeholder {{{e.args[0]}}} names no evidence; write "
-                "'{{' and '}}' for braces meant to stay in the text"
-            )
-        except (ValueError, IndexError) as e:
-            messages.append(f"cannot render {t[:40]!r}...: {e}")
+        if is_conditional(t):
+            messages += check_conditional(t, values)
+        elif t:
+            messages += _placeholder_problems(t, values)
     # Worst first, matching what the hub shows against each question: an
     # answer resting on nothing anyone can find is worse off than one
     # resting on something merely out of date.

@@ -2330,7 +2330,9 @@ def _evidence_values(
     return values
 
 
-def _render_template(text: str | None, values: dict[str, Any]) -> str | None:
+def _render_template(
+    text: str | dict[str, str] | None, values: dict[str, Any]
+) -> str | None:
     """Fill a question's placeholders, leaving what can't be filled alone.
 
     This is for display: a template naming evidence that isn't there shows
@@ -2340,6 +2342,8 @@ def _render_template(text: str | None, values: dict[str, Any]) -> str | None:
     try:
         return calkit.questions.render(text, values)
     except (KeyError, ValueError, IndexError, TypeError):
+        if isinstance(text, dict):
+            return "; ".join(f"{k}: {v}" for k, v in text.items())
         return text
 
 
@@ -2838,13 +2842,19 @@ def post_project_question(
 
 
 def _apply_question_update(
-    existing: str | dict, req: "QuestionPut"
+    existing: str | dict,
+    req: "QuestionPut",
+    rendered_answer: str | None = None,
 ) -> str | dict:
     """Apply a QuestionPut to a calkit.yaml question entry.
 
     Normalizes the entry to object form, sets provided fields (dropping an
     empty hypothesis/answer/evidence so calkit.yaml stays clean), and collapses
     back to a bare string when only the question text remains.
+
+    ``rendered_answer`` is what the editor was shown for a conditional
+    answer; sending it back unchanged keeps the conditional rather than
+    freezing it to the branch that currently holds.
     """
     if isinstance(existing, str):
         question: dict = {"question": existing}
@@ -2858,10 +2868,13 @@ def _apply_question_update(
         question["hypothesis"] = req.hypothesis
     else:
         question.pop("hypothesis", None)
-    if req.answer:
-        question["answer"] = req.answer
-    else:
+    unchanged = calkit.questions.is_conditional(question.get("answer")) and (
+        req.answer == rendered_answer
+    )
+    if not req.answer:
         question.pop("answer", None)
+    elif not unchanged:
+        question["answer"] = req.answer
     evidence = []
     for ev in req.evidence:
         entry: dict = {"kind": ev.kind, "path": ev.path}
@@ -2908,7 +2921,24 @@ def put_project_question(
     if number < 1 or number > len(ck_questions):
         raise HTTPException(404, "Question not found")
     idx = number - 1
-    ck_questions[idx] = _apply_question_update(ck_questions[idx], req)
+    existing = ck_questions[idx]
+    rendered_answer = None
+    if isinstance(existing, dict) and calkit.questions.is_conditional(
+        existing.get("answer")
+    ):
+        rendered_answer = _render_template(
+            existing["answer"],
+            _evidence_values(
+                project=project,
+                repo=repo,
+                ref=None,
+                evidence_ck=existing.get("evidence") or [],
+                cache={},
+            ),
+        )
+    ck_questions[idx] = _apply_question_update(
+        existing, req, rendered_answer=rendered_answer
+    )
     ck_info["questions"] = ck_questions
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)

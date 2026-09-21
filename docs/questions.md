@@ -90,7 +90,7 @@ by the conditions of a conditional answer:
 
 ```yaml
 answer:
-  if p < 0.05: {leader} predicts it.
+  if p < 0.05: "{leader} predicts it."
   else: Nothing predicts it.
 ```
 

@@ -1710,6 +1710,18 @@ def test_apply_question_update_builds_object() -> None:
             {"kind": "result", "path": "results/summary.json", "key": "mean"},
         ],
     }
+    # A conditional answer sent back as the branch it rendered to is kept,
+    # while an edited answer replaces it
+    conditional = {"if p < 0.05": "yes", "else": "no"}
+    existing = {"question": "q?", "answer": conditional}
+    out = _apply_question_update(
+        existing, QuestionPut(answer="no"), rendered_answer="no"
+    )
+    assert isinstance(out, dict) and out["answer"] == conditional
+    out = _apply_question_update(
+        existing, QuestionPut(answer="maybe"), rendered_answer="no"
+    )
+    assert isinstance(out, dict) and out["answer"] == "maybe"
 
 
 def test_apply_question_update_figure_evidence_drops_key() -> None:

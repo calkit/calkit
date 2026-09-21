@@ -535,7 +535,7 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert checked.evidence[0].git_ref == sha
 
 
-def test_conditional_answers():
+def test_conditional_answers(tmp_dir):
     values = {"p": 0.007, "rho": 0.8373, "n": 17, "leader": "turns-max"}
     # Comparisons, chaining, boolean operators, strings, and arithmetic
     assert evaluate_condition("p < 0.05", values)
@@ -554,6 +554,9 @@ def test_conditional_answers():
         evaluate_condition("len(leader) > 1", values)
     with pytest.raises(ValueError):
         evaluate_condition("p", values)
+    # A comparison the values can't make is a ValueError like the rest
+    with pytest.raises(ValueError, match="cannot evaluate"):
+        evaluate_condition("leader < 0.5", values)
     # A name that is not a valid identifier cannot be read as a variable,
     # and says so rather than reporting a fragment of itself as missing
     with pytest.raises(ValueError, match="valid Python identifier"):
@@ -595,3 +598,41 @@ def test_conditional_answers():
     assert render(answer, values | {"p": 0.2}) == "no feature predicts it"
     # Plain strings are untouched by the conditional path
     assert render("if and only if", values) == "if and only if"
+    # Checking reports every clause's problems, including the clauses the
+    # current values don't select, rather than crashing or passing
+    with open("r.json", "w") as f:
+        json.dump({"p": 0.2, "leader": "x"}, f)
+    evidence = [
+        {"kind": "value", "path": "r.json", "key": "p"},
+        {"kind": "value", "path": "r.json", "key": "leader"},
+    ]
+    cases = [
+        ({"if p < 0.5": "{leader}", "else": "no"}, []),
+        (
+            {"if p < 0.05": "x"},
+            ["no condition of the conditional answer holds"],
+        ),
+        ({"when p < 1": "x"}, ["conditional answer: expected 'if'"]),
+        (
+            {"if leader < 0.05": "x", "else": "y"},
+            ["cannot evaluate condition 'leader < 0.05'"],
+        ),
+        (
+            {"if p > 0.1": "yes", "elif typo < 1": "x", "else": "{rhoo:.2f}"},
+            [
+                "condition 'typo < 1' names no evidence 'typo'",
+                "placeholder {rhoo} names no evidence",
+            ],
+        ),
+    ]
+    for answer, expected in cases:
+        checked = check_question(
+            1,
+            {"question": "q", "answer": answer, "evidence": evidence},
+            {},
+            ".",
+        )
+        messages = checked.message or ""
+        assert (checked.status == "error") == bool(expected), answer
+        for fragment in expected:
+            assert fragment in messages, (answer, messages)

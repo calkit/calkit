@@ -554,32 +554,40 @@ def test_conditional_answers():
         evaluate_condition("len(leader) > 1", values)
     with pytest.raises(ValueError):
         evaluate_condition("p", values)
-    # Clauses parse in order, with None marking the else
-    text = (
-        "if p < 0.05: strong, rho {rho:.2f}\nelif p < 0.1: weak\nelse: none\n"
-    )
-    assert [c for c, _ in parse_conditional(text)] == [
+    # Clauses are tried in the order written, with None marking the else
+    clauses = {
+        "if p < 0.05": "strong, rho {rho:.2f}",
+        "elif p < 0.1": "weak",
+        "else": "none",
+    }
+    assert [c for c, _ in parse_conditional(clauses)] == [
         "p < 0.05",
         "p < 0.1",
         None,
     ]
-    assert select_branch(text, {"p": 0.007}) == "strong, rho {rho:.2f}"
-    assert select_branch(text, {"p": 0.08}) == "weak"
-    assert select_branch(text, {"p": 0.9}) == "none"
-    # A branch that wraps continues the one above it
-    wrapped = "if p < 0.05: strong\n  and worth reporting\nelse: none"
-    assert select_branch(wrapped, {"p": 0.01}) == "strong and worth reporting"
+    assert select_branch(clauses, {"p": 0.007}) == "strong, rho {rho:.2f}"
+    assert select_branch(clauses, {"p": 0.08}) == "weak"
+    assert select_branch(clauses, {"p": 0.9}) == "none"
+    # Malformed clause sets are errors rather than silent misreadings
+    with pytest.raises(ValueError):
+        parse_conditional({"elif p < 1": "x"})
+    with pytest.raises(ValueError):
+        parse_conditional({"else": "x"})
+    with pytest.raises(ValueError):
+        parse_conditional({"when p < 1": "x"})
+    with pytest.raises(ValueError):
+        parse_conditional({"if p < 1": "x", "else": "y", "elif p < 2": "z"})
+    with pytest.raises(ValueError):
+        parse_conditional({"if p < 1": "x", "if p < 2": "y"})
     # Nothing holding with no else is an error rather than a blank answer
     with pytest.raises(ValueError):
-        select_branch("if p < 0.05: strong", {"p": 0.9})
-    with pytest.raises(ValueError):
-        parse_conditional("elif p < 1: x")
+        select_branch({"if p < 0.05": "strong"}, {"p": 0.9})
     # Rendering picks the branch, then fills its placeholders
-    answer = (
-        "if p < 0.05: {leader} predicts it (rho {rho:+.2f})\n"
-        "else: no feature predicts it\n"
-    )
+    answer = {
+        "if p < 0.05": "{leader} predicts it (rho {rho:+.2f})",
+        "else": "no feature predicts it",
+    }
     assert render(answer, values) == "turns-max predicts it (rho +0.84)"
     assert render(answer, values | {"p": 0.2}) == "no feature predicts it"
-    # Prose that merely starts with "if" is not a conditional
+    # Plain strings are untouched by the conditional path
     assert render("if and only if", values) == "if and only if"

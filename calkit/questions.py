@@ -40,7 +40,7 @@ import operator
 import os
 import re
 import string
-from typing import Any, Literal
+from typing import Any, Literal, TypeGuard
 
 from pydantic import BaseModel, Field
 
@@ -247,8 +247,8 @@ def placeholders(text: str) -> list[str]:
     return [m.group(1) for m in _PLACEHOLDER.finditer(text or "")]
 
 
-_IF_CLAUSE = re.compile(r"^\s*(if|elif)\s+(.+?)\s*:\s*(.*)$")
-_ELSE_CLAUSE = re.compile(r"^\s*else\s*:\s*(.*)$")
+_IF_KEY = re.compile(r"^\s*(if|elif)\s+(.+?)\s*$")
+_ELSE_KEY = re.compile(r"^\s*else\s*$")
 _COMPARISONS = {
     ast.Lt: operator.lt,
     ast.LtE: operator.le,
@@ -259,42 +259,41 @@ _COMPARISONS = {
 }
 
 
-def is_conditional(text: str | None) -> bool:
-    """Whether a text picks its wording with ``if``/``elif``/``else``."""
-    if not text:
-        return False
-    return bool(_IF_CLAUSE.match(text.strip().splitlines()[0]))
+def is_conditional(value: Any) -> TypeGuard[dict]:
+    """Whether a value picks its wording with ``if``/``elif``/``else``."""
+    return isinstance(value, dict)
 
 
-def parse_conditional(text: str) -> list[tuple[str | None, str]]:
-    """Split a conditional text into ``(condition, wording)`` clauses.
+def parse_conditional(clauses: dict) -> list[tuple[str | None, str]]:
+    """Read a conditional's keys into ordered ``(condition, wording)``.
 
-    The condition is ``None`` for the ``else`` clause. A line that opens no
-    clause continues the one before it, so a long branch can wrap.
+    The condition is ``None`` for ``else``. Keys are read in the order
+    they appear in the file, so the clauses are tried in the order they
+    were written.
     """
-    clauses: list[list] = []
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        opened = _IF_CLAUSE.match(line)
+    parsed: list[tuple[str | None, str]] = []
+    for position, (key, wording) in enumerate(clauses.items()):
+        opened = _IF_KEY.match(str(key))
         if opened:
-            keyword, condition, wording = opened.groups()
-            if keyword == "if" and clauses:
+            keyword, condition = opened.groups()
+            if keyword == "if" and position:
                 raise ValueError("only the first clause may be 'if'")
-            if keyword == "elif" and not clauses:
+            if keyword == "elif" and not parsed:
                 raise ValueError("'elif' with no 'if' before it")
-            clauses.append([condition, wording.strip()])
+            parsed.append((condition, str(wording)))
             continue
-        otherwise = _ELSE_CLAUSE.match(line)
-        if otherwise:
-            if not clauses:
+        if _ELSE_KEY.match(str(key)):
+            if not parsed:
                 raise ValueError("'else' with no 'if' before it")
-            clauses.append([None, otherwise.group(1).strip()])
+            parsed.append((None, str(wording)))
             continue
-        if not clauses:
-            raise ValueError(f"expected 'if', got {line.strip()[:40]!r}")
-        clauses[-1][1] = f"{clauses[-1][1]} {line.strip()}".strip()
-    return [(condition, wording) for condition, wording in clauses]
+        raise ValueError(f"expected 'if', 'elif' or 'else', got {key!r}")
+    if not parsed:
+        raise ValueError("a conditional needs at least an 'if' clause")
+    for condition, _ in parsed[:-1]:
+        if condition is None:
+            raise ValueError("'else' must be the last clause")
+    return parsed
 
 
 def _operand(node: ast.AST, values: dict[str, Any]) -> Any:
@@ -355,15 +354,15 @@ def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
     return bool(_truth(tree.body, values))
 
 
-def select_branch(text: str, values: dict[str, Any]) -> str:
-    """The wording whose condition holds, for a conditional text."""
-    for condition, wording in parse_conditional(text):
+def select_branch(clauses: dict, values: dict[str, Any]) -> str:
+    """The wording whose condition holds, for a conditional answer."""
+    for condition, wording in parse_conditional(clauses):
         if condition is None or evaluate_condition(condition, values):
             return wording
     raise ValueError("no condition held and there is no 'else' clause")
 
 
-def render(text: str | None, values: dict[str, Any]) -> str | None:
+def render(text: str | dict | None, values: dict[str, Any]) -> str | None:
     """Fill a question text's placeholders from its evidence values.
 
     Raises ``KeyError`` for a name with no evidence and ``ValueError`` for
@@ -372,7 +371,7 @@ def render(text: str | None, values: dict[str, Any]) -> str | None:
     """
     if text is None:
         return text
-    if is_conditional(text):
+    if isinstance(text, dict):
         text = select_branch(text, values)
     if "{" not in text:
         return text
@@ -996,7 +995,7 @@ def check_question(
         ev.get("explanation") for ev in evidence
     ]
     for t in texts:
-        if not t or ("{" not in t and not is_conditional(t)):
+        if not t or (not is_conditional(t) and "{" not in t):
             continue
         try:
             render(t, values)

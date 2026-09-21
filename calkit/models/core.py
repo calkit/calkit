@@ -1841,7 +1841,15 @@ class Question(BaseModel):
 
     question: str
     hypothesis: str | None = None
-    answer: str | None = None
+    answer: str | dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "The claim the evidence supports. A mapping keyed by 'if "
+            "<condition>', 'elif <condition>' and 'else' picks its wording "
+            "from the evidence, so an answer resting on a threshold states "
+            "the other outcome instead of going stale when a value moves."
+        ),
+    )
     notes: str | None = Field(
         default=None,
         description=(

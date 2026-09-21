@@ -87,21 +87,21 @@ Where an answer would change if a value crossed a threshold, write the
 branches instead of picking one:
 
 ```yaml
-answer: |
+answer:
   if p < 0.05: Multimodality predicts where staging pays (rho {rho:+.2f}).
   elif p < 0.1: There is weak evidence that multimodality predicts it.
   else: No measured feature predicts where staging pays.
 ```
 
-The clauses are `if`, any number of `elif`, and an optional `else`, each
-naming evidence the same way a placeholder does.
-Conditions may compare values, combine comparisons with `and`, `or` and
-`not`, chain them as `0.05 <= p < 0.1`, and do arithmetic with the same
+The keys are `if`, any number of `elif`, and an optional `else`, tried in
+the order they appear.
+Conditions name evidence the same way a placeholder does.
+They may compare values, combine comparisons with `and`, `or` and `not`,
+chain them as `0.05 <= p < 0.1`, and do arithmetic with the same
 evaluator the calculations use, so `n / 2 > 8` works.
 Nothing else is allowed: a condition cannot call a function or reach into
 an object, since it is read from `calkit.yaml` rather than written as
 code.
-A branch that wraps onto the next line continues the one above it.
 
 The chosen wording is then rendered like any other text, so placeholders
 inside a branch are filled from the evidence as usual.

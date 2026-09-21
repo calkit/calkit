@@ -79,6 +79,9 @@ jobs:
     env:
       VERSION: ${{ needs.publish.outputs.version }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # devcontainer.json is generated from the VS Code settings, and the
+      # same replacement in both leaves them in sync, which
+      # calkit/tests/test_resources.py checks
       FILES: >-
         calkit/latex.py
         calkit/resources/devcontainer/devcontainer.json

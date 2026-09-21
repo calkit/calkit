@@ -21,6 +21,8 @@ Deterministic, done by `calkit check questions` — never re-derive by hand:
 - every evidence path exists;
 - every `value` key resolves in its file, and every `{name}` placeholder in
   the prose resolves and formats;
+- every clause of a conditional answer parses, names only evidence, and
+  renders, including the clauses the current values don't select;
 - every publication `label` still exists in the LaTeX source;
 - no evidence has changed (Git history for Git-tracked outputs, `dvc.lock`
   for DVC-tracked ones) since the commit that last edited the question;
@@ -35,6 +37,9 @@ sentence:
   this skill exists;
 - does the answer still follow from the evidence, given what changed;
 - are numbers retyped into the prose that should be `{name}` placeholders;
+- does every `value` entry read a file a pipeline stage writes;
+- does a claim resting on a threshold use a conditional answer, with a
+  threshold chosen before the value was known;
 - is the answer concise, and does it point at the publication section that
   carries the argument rather than repeating it.
 
@@ -104,7 +109,9 @@ evidence without showing them both.
    from. If a stage should produce it, that is a pipeline gap worth
    reporting. If it was imported or made by hand, declare it under
    `figures`, `datasets`, or `publications` with `imported_from` or
-   `created_by` so the project says so.
+   `created_by` so the project says so. A `value` entry is the exception:
+   a number no stage computes is a retyped number however it reaches the
+   prose, so give it a stage.
 4. For each **error**, fix the reference: a missing path means the pipeline
    has not been run or pulled; a bad key or placeholder means a results
    file was restructured; a missing label means the publication was
@@ -128,6 +135,38 @@ project, not a tidy-up.
   what it means; leave the reasoning to the publication.
 - Numbers come from `value` evidence via placeholders, formatted to the
   precision the claim needs: `{ratio:.1f}x`, `{error:.0%}`.
+- A `value` entry must read a file a pipeline stage writes. A placeholder
+  over a results file written by hand, including one you write, is a
+  retyped number with extra steps: it renders, passes the check, and goes
+  stale the same way, since no rerun ever recomputes it. If no stage
+  produces the number, add one (`/calkit:add-pipeline-stage`) instead of
+  writing the file, and never edit a results file to change what an
+  answer says.
+- When the claim itself depends on a value, not just the number in it,
+  e.g., significant or not, which method wins, write a conditional answer
+  so the wording follows the evidence on a rerun:
+
+  ```yaml
+  answer:
+    if p < 0.05: "The closure cuts error by {improvement:.1f}x."
+    else: "The closure does not measurably reduce error."
+  evidence:
+    - kind: value
+      path: results/closure.json
+      key: p-value
+      name: p
+    - kind: value
+      path: results/closure.json
+      key: improvement
+  ```
+
+  Conditions name `value` evidence, so those names must be valid Python
+  identifiers; give the entry a `name` otherwise. Every branch must be a
+  claim the evidence would support if it held. The threshold is part of
+  the claim: take it from the field's convention or the user, never pick
+  it to make the current branch hold, and don't use branches to hedge a
+  claim that should simply be weakened.
+
 - Point at the publication with a `publication` evidence entry carrying
   `section` (for the reader) and `label` (for the check), instead of an
   `explanation` that restates the argument.

@@ -390,8 +390,7 @@ calkit list questions
 ```
 1. question: How does the system respond to increasing $x$?
     hypothesis: The value of $y$ increases linearly with $x$.
-    answer: $y$ increases quadratically with $x$, not linearly
-      ($R^2 = 0.985$ for the quadratic fit).
+    answer: $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
     evidence:
       - kind: figure
         path: figures/x-vs-y.png

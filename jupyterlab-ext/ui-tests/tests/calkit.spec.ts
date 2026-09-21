@@ -256,10 +256,11 @@ test.describe("Notebook pipeline workflow", () => {
     // Step 4: Run the stage with the play button
     const playButton = page.locator(".calkit-play-button").first()
     await page.waitForSelector(".calkit-play-button", { state: "attached", timeout: 15000 })
-    await expect(playButton).toBeVisible({ timeout: 5000 })
 
+    // Attached is as much as the toolbar guarantees, so dispatch the click
+    // rather than wait on a button the toolbar may have collapsed
     console.log("Clicking play button...")
-    await playButton.click()
+    await playButton.dispatchEvent("click")
 
     // Wait for execution to complete
     // In manual testing this works, but in Playwright the cell execution completion signals

@@ -137,12 +137,27 @@ def from_json(
             json2latex.dump(cmd_name, formatted, f)
 
 
+def _tex_env(source_date_epoch: str | None) -> dict[str, str] | None:
+    """The environment a TeX command runs in, or None to inherit it.
+
+    ``FORCE_SOURCE_DATE`` is what makes pdfTeX apply the date to
+    ``\pdfcreationdate`` and friends, not only to the trailer ID.
+    """
+    if source_date_epoch is None:
+        return None
+    return os.environ | {
+        "SOURCE_DATE_EPOCH": source_date_epoch,
+        "FORCE_SOURCE_DATE": "1",
+    }
+
+
 def _tex_cmd(
     tex_cmd: list[str],
     environment: str | None,
     no_check: bool,
     verbose: bool,
     dep: str,
+    source_date_epoch: str | None = None,
 ) -> list[str]:
     """Wrap a TeX command so it runs wherever the project's TeX lives.
 
@@ -191,6 +206,15 @@ def _tex_cmd(
         except AttributeError:
             # Windows has no UID to map
             pass
+        # The container gets its own environment, so the date has to be
+        # handed to it rather than inherited like the other two paths
+        if source_date_epoch is not None:
+            cmd += [
+                "-e",
+                f"SOURCE_DATE_EPOCH={source_date_epoch}",
+                "-e",
+                "FORCE_SOURCE_DATE=1",
+            ]
         cmd += [calkit.latex.DEFAULT_LATEX_IMAGE] + tex_cmd
     if verbose:
         typer.echo(f"Running command: {cmd}")
@@ -321,15 +345,17 @@ def build(
     # User pass-through args come last so they can override Calkit's defaults.
     latexmk_cmd += latexmk_args
     latexmk_cmd.append(tex_file)
+    source_date_epoch = calkit.latex.get_source_date_epoch(tex_file)
     cmd = _tex_cmd(
         latexmk_cmd,
         environment=environment,
         no_check=no_check,
         verbose=verbose,
         dep="latexmk",
+        source_date_epoch=source_date_epoch,
     )
     try:
-        subprocess.check_call(cmd)
+        subprocess.check_call(cmd, env=_tex_env(source_date_epoch))
     except subprocess.CalledProcessError:
         raise_error("latexmk failed")
 
@@ -963,16 +989,18 @@ def _build_diff(
         # defaults
         latexmk_cmd += latexmk_args
         latexmk_cmd.append(diff_tex)
+        source_date_epoch = calkit.latex.get_source_date_epoch(tex_file)
         cmd = _tex_cmd(
             latexmk_cmd,
             environment=environment,
             no_check=no_check,
             verbose=verbose,
             dep="latexmk",
+            source_date_epoch=source_date_epoch,
         )
         typer.echo("Building the marked-up document")
         try:
-            subprocess.check_call(cmd)
+            subprocess.check_call(cmd, env=_tex_env(source_date_epoch))
         except subprocess.CalledProcessError as e:
             # -silent hides why, so show the errors LaTeX logged
             log_path = Path(aux_dir, f"{stem}-diff.log")

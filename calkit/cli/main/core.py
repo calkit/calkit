@@ -3516,6 +3516,12 @@ def run_in_env(
                 if isinstance(value, str):
                     value = os.path.expandvars(value)
                 docker_cmd += ["-e", f"{key}={value}"]
+        # Set by whatever is calling xenv, e.g., 'calkit latex build'
+        # stamping a reproducible date into the PDF, and pointless unless
+        # it reaches the container
+        for key in ["SOURCE_DATE_EPOCH", "FORCE_SOURCE_DATE"]:
+            if key in os.environ and key not in env_vars:
+                docker_cmd += ["-e", f"{key}={os.environ[key]}"]
         if (gpus := env.get("gpus")) is not None:
             docker_cmd += ["--gpus", gpus]
         if ports := env.get("ports"):

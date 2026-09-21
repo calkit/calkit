@@ -58,6 +58,48 @@ WORKING_NAME = "working"
 DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.2"
 
 
+def get_source_date_epoch(tex_file: str) -> str | None:
+    """When to say the PDF was built, in seconds since the epoch.
+
+    pdfTeX stamps the current time into the PDF's metadata and trailer
+    ID, so two builds of identical source differ byte for byte, and every
+    rebuild rewrites the output's hash in ``dvc.lock``. Taking the date
+    from the last commit that touched the document keeps it meaningful
+    while the bytes stay put until the document itself changes.
+    """
+    import subprocess
+
+    tex_dir = os.path.dirname(os.path.abspath(tex_file)) or os.getcwd()
+    # A commit's date describes what that commit holds, so it can only
+    # speak for a document that has been saved. With edits still in the
+    # working tree, the honest answer is now, which is what pdfTeX does
+    # left alone.
+    try:
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain", "-uno", "--", tex_dir],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    if dirty:
+        return None
+    # A document with no commits of its own, e.g., one added but not yet
+    # saved, falls back to the repository's last commit
+    for pathspec in [["--", tex_dir], []]:
+        try:
+            out = subprocess.check_output(
+                ["git", "log", "-1", "--format=%ct"] + pathspec,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        if out:
+            return out
+    return None
+
+
 def get_texmf_cache_dir() -> str:
     """Where TeX packages installed at run time are kept.
 

@@ -616,3 +616,36 @@ def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     )
     assert "Couldn't open" not in result.stderr
     assert result.returncode == 0, result.stderr
+
+
+def test_get_source_date_epoch(tmp_dir):
+    from calkit.latex import get_source_date_epoch
+
+    # Outside a repo there's nothing to read a date from
+    os.makedirs("paper")
+    with open(os.path.join("paper", "main.tex"), "w") as f:
+        f.write("\\documentclass{article}\\begin{document}Hi\\end{document}\n")
+    assert get_source_date_epoch("paper/main.tex") is None
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "add", "paper/main.tex"])
+    subprocess.check_call(["git", "commit", "-q", "-m", "Add the paper"])
+    committed = subprocess.check_output(
+        ["git", "log", "-1", "--format=%ct"], text=True
+    ).strip()
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # A commit elsewhere doesn't restamp a document it didn't touch
+    with open("notes.txt", "w") as f:
+        f.write("sup\n")
+    subprocess.check_call(["git", "add", "notes.txt"])
+    subprocess.check_call(
+        ["git", "commit", "-q", "-m", "Add notes", "--date", "2030-01-01"]
+    )
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # Build artifacts are untracked, and say nothing about the source
+    with open(os.path.join("paper", "main.log"), "w") as f:
+        f.write("log\n")
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # An edit in the working tree can only have been made now
+    with open(os.path.join("paper", "main.tex"), "a") as f:
+        f.write("% edit\n")
+    assert get_source_date_epoch("paper/main.tex") is None

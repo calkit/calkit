@@ -72,6 +72,19 @@ Undeclared inputs mean editing the class file doesn't rebuild the paper, and
 the web app's in-browser editor, which loads exactly what the stage declares,
 can't compile the document at all.
 
+## Build dates
+
+pdfTeX stamps the time of the build into the PDF, so building the same
+document twice gives two different files, and every rebuild writes a new
+hash into `dvc.lock` even when nothing about the document changed.
+
+Calkit sets the date from the last commit that touched the document's
+directory, which keeps the date meaningful and the bytes stable until the
+document itself changes.
+With edits still in the working tree there's no commit that describes
+what's being built, so the date is the current time, as it would be
+otherwise.
+
 ## Comparing revisions
 
 A LaTeX PDF output is stored/tracked with DVC by default

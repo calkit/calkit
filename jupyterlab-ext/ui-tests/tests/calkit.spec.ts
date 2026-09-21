@@ -212,7 +212,9 @@ test.describe("Notebook pipeline workflow", () => {
       .locator(".calkit-badge")
       .filter({ hasText: "Stage: analytics" })
       .first()
-    await expect(stageBadgeUpdated).toBeVisible({ timeout: 10000 })
+    // Attached, not visible: the toolbar collapses these badges out of
+    // sight when it runs out of room, exactly as it does the env badge
+    await stageBadgeUpdated.waitFor({ state: "attached", timeout: 10000 })
     // Close the dropdown with Escape
     await page.keyboard.press("Escape")
     await page.waitForTimeout(1000)

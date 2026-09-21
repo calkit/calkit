@@ -60,6 +60,48 @@ Keys are looked up literally at the top level first, then split on dots
 and walked into nested objects, with integers indexing lists,
 so `results.case-a.score` reaches into structured output.
 
+## Values become named variables
+
+A `value` entry reads one value out of a results file and gives it a
+name, and those names are the variables a question can use:
+
+```yaml
+evidence:
+  - kind: value
+    path: results/scan.json
+    key: features.0.p-family-wise-all
+    name: p
+  - kind: value
+    path: results/scan.json
+    key: leading-feature
+    name: leader
+```
+
+The `path` is the results file a stage wrote, `key` finds the value
+inside it, and `name` is what the question calls it.
+`name` defaults to the key, so it can be left out when the key is already
+a good variable name.
+Names have to be unique within a question; `calkit check questions`
+reports duplicates, since a repeated name would silently shadow one of
+the values.
+
+The names form one namespace, used both by placeholders in the prose and
+by the conditions of a conditional answer:
+
+```yaml
+answer:
+  if p < 0.05: {leader} predicts it.
+  else: Nothing predicts it.
+```
+
+Placeholders accept any name, so `{results.case-a.score}` works even
+though that is not a Python name.
+Conditions are Python expressions, so a name used in one has to be a
+valid Python identifier: `paired-gain` would read as a subtraction and
+`case.score` as attribute access.
+Give such evidence an explicit `name`, e.g., `gain`, and use that in the
+condition.
+
 ## Numbers are read, not retyped
 
 The value behind a `value` entry is never copied into `calkit.yaml`.

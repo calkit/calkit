@@ -554,6 +554,10 @@ def test_conditional_answers():
         evaluate_condition("len(leader) > 1", values)
     with pytest.raises(ValueError):
         evaluate_condition("p", values)
+    # A name that is not a valid identifier cannot be read as a variable,
+    # and says so rather than reporting a fragment of itself as missing
+    with pytest.raises(ValueError, match="valid Python identifier"):
+        evaluate_condition("paired-gain > 0.1", {"paired-gain": 0.25})
     # Clauses are tried in the order written, with None marking the else
     clauses = {
         "if p < 0.05": "strong, rho {rho:.2f}",

@@ -351,7 +351,24 @@ def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
         tree = ast.parse(expression, mode="eval")
     except SyntaxError as e:
         raise ValueError(f"cannot parse condition {expression!r}: {e}") from e
-    return bool(_truth(tree.body, values))
+    try:
+        return bool(_truth(tree.body, values))
+    except KeyError:
+        # A name like 'paired-gain.vawt-8' reads as arithmetic and
+        # attribute access, so the failure would otherwise name a
+        # fragment of it and look like missing evidence.
+        unusable = [
+            name
+            for name in values
+            if not name.isidentifier() and name in expression
+        ]
+        if unusable:
+            raise ValueError(
+                f"condition {expression!r} refers to {unusable[0]!r}, which "
+                "cannot be read as a variable; give that evidence a 'name' "
+                "that is a valid Python identifier"
+            ) from None
+        raise
 
 
 def select_branch(clauses: dict, values: dict[str, Any]) -> str:

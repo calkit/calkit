@@ -1,0 +1,103 @@
+# TinyTeX image
+
+`ghcr.io/calkit/latex`: TinyTeX plus a curated set of packages and
+`latexdiff`, which comes to about 991 MB against roughly 9 GB for
+`texlive/texlive:latest-full`.
+
+Nothing in Calkit points at it yet. It is published on its own so a
+LaTeX stage can use it instead of a full TeX Live image, which is a
+separate change.
+
+Originally developed at
+[`calkit/tinytex-latexmk-docker`](https://github.com/calkit/tinytex-latexmk-docker),
+and based on [carteakey/tinytex-docker](https://github.com/carteakey/tinytex-docker).
+
+## What's in it, and why that set
+
+Whole TeX Live collections would make this a 5 GB image, which is barely
+better than what it replaces. The packages here are instead the ones
+real papers turned out to need, found by compiling a document in each
+class against a bare TinyTeX and installing whatever it asked for.
+
+Journal classes that build with nothing installed at run time:
+Elsevier (`elsarticle`), APS (`revtex4-2`), IEEE (`IEEEtran`), ACM
+(`acmart`), ACS (`achemso`), MNRAS, Springer LNCS (`llncs`), AMS
+(`amsart`), and the JFM class that ships with its paper rather than
+through TeX Live. The workflow builds one of each on every pull request,
+so trimming a package that only one class needs fails there rather than
+when someone submits a paper.
+
+`revtex4-1` and `txfonts` are here because nothing could fetch them on
+demand. `aastex631.cls` refuses to load without `revtex4-1` and stops
+without TeX ever reporting a missing file, and `newtx` needs `txfonts`'
+metrics, which surface as `Metric (TFM) file not found` rather than as a
+missing `.sty`. Every other package here surfaces as a normal
+`File 'foo.sty' not found`, which means a document needing something
+else can install it at run time.
+
+AASTeX itself is not built in CI, because its class isn't redistributable
+here and isn't in TeX Live. `revtex4-1` was found by compiling a real
+AASTeX paper against this image during development, so the support is
+real but unguarded: removing `revtex4-1` would break AASTeX without
+failing any test.
+
+`cm-super` is here for a subtler reason. Elsevier and MNRAS ask for EC
+fonts, which TeX Live otherwise carries only as bitmaps, so TeX
+generates them at run time into `texmf-var` -- which the user running
+the container may not be able to write to. With `cm-super` those fonts
+exist as Type 1 and nothing is generated, which also makes for better
+PDFs. `texmf-var` is writable anyway, for whatever else asks.
+
+The image tracks whatever `tlmgr` installs at build time rather than a
+pinned TeX Live snapshot, so two builds of this Dockerfile on different
+days can carry different package versions. That is why a project should
+pin a tag rather than track `:latest`.
+
+`latexdiff` is included because `calkit latex diff` needs it. It is a Perl
+script, and the `perl` in the first layer is what makes it work here, on a
+machine that may have no Perl of its own.
+
+## Packages a document needs beyond this set
+
+Install them into the mounted cache rather than rebuilding the image:
+
+```sh
+tlmgr --usermode install <package>
+```
+
+The package lands in whatever is mounted at `TEXMFHOME`, so it is there
+the next time the container runs.
+
+## Running it directly
+
+```sh
+mkdir -p "$HOME/.cache/calkit-texmf"
+
+docker run --rm -it \
+	--user "$(id -u):$(id -g)" \
+	-v "$PWD":/work \
+	-v "$HOME/.cache/calkit-texmf":/texmf \
+	-w /work \
+	ghcr.io/calkit/latex:latest \
+	latexmk -pdf -cd paper/main.tex
+```
+
+The cache mounts at `/texmf`, which is `TEXMFHOME`, and **not** over
+`/opt/.TinyTeX`, where the distribution itself lives. Mounting anything
+over the latter hides TinyTeX, leaving no `latexmk` or `pdflatex` in the
+container at all. For the same reason the user tree is initialized by
+`entrypoint.sh` at run time rather than in a build layer: a mounted cache
+starts empty and would hide whatever the image had put there.
+
+TinyTeX lives in `/opt` rather than `/root` so the image works when run
+as the invoking user, which is how Calkit runs it so output isn't owned
+by root. `/root` is `0700`, which left a non-root user with no TeX.
+
+## Releasing
+
+Publish a release tagged `latex-image/vX.Y.Z`, the same way the other
+subprojects are released, and the workflow builds it for amd64 and arm64
+and pushes it to ghcr.io with a provenance attestation.
+
+The image is versioned on its own rather than with the Calkit release,
+since it changes rarely.

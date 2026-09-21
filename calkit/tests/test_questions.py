@@ -95,6 +95,16 @@ def test_history_is_read_once_for_all_questions(tmp_dir):
     with open("results/findings.json", "w") as f:
         json.dump({f"k{i}": i for i in range(4)}, f)
     ck_info = {
+        "pipeline": {
+            "stages": {
+                "summarize": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": ["results/findings.json"],
+                }
+            }
+        },
         "questions": [
             {
                 "question": f"Q{i}?",
@@ -109,7 +119,7 @@ def test_history_is_read_once_for_all_questions(tmp_dir):
                 ],
             }
             for i in range(4)
-        ]
+        ],
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -238,6 +248,32 @@ def test_check_questions(tmp_dir):
     # makes it and it is not declared with an import or a person
     assert q4.evidence[4].status == "unattributed"
     assert [ev.path for ev in status.unattributed] == ["figures/plot.png"]
+    # A value no stage computes is a magic number, so it fails rather than
+    # being advice; an import is traceable, a person typing it in is not
+    with open("results/typed.json", "w") as f:
+        json.dump({"n": 3}, f)
+    typed = {
+        "question": "Typed?",
+        "answer": "{n}",
+        "evidence": [
+            {"kind": "value", "path": "results/typed.json", "key": "n"}
+        ],
+    }
+    for declared, expected in [
+        (None, "error"),
+        ({"created_by": "someone"}, "error"),
+        ({"imported_from": {"project": "a/b"}}, "ok"),
+    ]:
+        info = dict(ck_info)
+        if declared:
+            info["datasets"] = [{"path": "results/typed.json"} | declared]
+        checked = check_question(5, typed, info, ".")
+        assert checked.status == expected, declared
+        if expected == "error":
+            assert "no pipeline stage computes" in (
+                checked.evidence[0].message or ""
+            )
+    os.remove("results/typed.json")
     rendered = render_question(ck_info["questions"][3], ck_info, ".")
     assert rendered["answer"] == "8 of eight do, a 5.1x gain."
     assert rendered["evidence"][2]["explanation"] == "The best is a."
@@ -625,11 +661,23 @@ def test_conditional_answers(tmp_dir):
             ],
         ),
     ]
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "scan": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": ["r.json"],
+                }
+            }
+        }
+    }
     for answer, expected in cases:
         checked = check_question(
             1,
             {"question": "q", "answer": answer, "evidence": evidence},
-            {},
+            ck_info,
             ".",
         )
         messages = checked.message or ""

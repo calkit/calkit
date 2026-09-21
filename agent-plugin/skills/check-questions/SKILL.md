@@ -26,9 +26,12 @@ Deterministic, done by `calkit check questions` — never re-derive by hand:
 - every publication `label` still exists in the LaTeX source;
 - no evidence has changed (Git history for Git-tracked outputs, `dvc.lock`
   for DVC-tracked ones) since the commit that last edited the question;
-- each evidence path is produced by a pipeline stage, or declared with
-  `imported_from` or `created_by`. This one is advisory: it is reported as
-  `unattributed` and does not fail the check.
+- each `value` entry reads a file a pipeline stage produces, or one
+  declared with `imported_from`; anything else is an error, since a number
+  nothing computes is a magic number;
+- each other evidence path is produced by a pipeline stage, or declared
+  with `imported_from` or `created_by`. This one is advisory: it is
+  reported as `unattributed` and does not fail the check.
 
 Judgment, done here — the check reads paths and hashes, and cannot read a
 sentence:
@@ -37,7 +40,6 @@ sentence:
   this skill exists;
 - does the answer still follow from the evidence, given what changed;
 - are numbers retyped into the prose that should be `{name}` placeholders;
-- does every `value` entry read a file a pipeline stage writes;
 - does a claim resting on a threshold use a conditional answer, with a
   threshold chosen before the value was known;
 - is the answer concise, and does it point at the publication section that
@@ -109,9 +111,8 @@ evidence without showing them both.
    from. If a stage should produce it, that is a pipeline gap worth
    reporting. If it was imported or made by hand, declare it under
    `figures`, `datasets`, or `publications` with `imported_from` or
-   `created_by` so the project says so. A `value` entry is the exception:
-   a number no stage computes is a retyped number however it reaches the
-   prose, so give it a stage.
+   `created_by` so the project says so. A `value` entry with no stage is
+   reported as an error rather than `unattributed`: give it a stage.
 4. For each **error**, fix the reference: a missing path means the pipeline
    has not been run or pulled; a bad key or placeholder means a results
    file was restructured; a missing label means the publication was
@@ -137,11 +138,11 @@ project, not a tidy-up.
   precision the claim needs: `{ratio:.1f}x`, `{error:.0%}`.
 - A `value` entry must read a file a pipeline stage writes. A placeholder
   over a results file written by hand, including one you write, is a
-  retyped number with extra steps: it renders, passes the check, and goes
-  stale the same way, since no rerun ever recomputes it. If no stage
+  retyped number with extra steps, and the check fails it. If no stage
   produces the number, add one (`/calkit:add-pipeline-stage`) instead of
-  writing the file, and never edit a results file to change what an
-  answer says.
+  writing the file. Never declare a file `imported_from` or `created_by`
+  to clear that error unless it really came from there, and never edit a
+  results file to change what an answer says.
 - When the claim itself depends on a value, not just the number in it,
   e.g., significant or not, which method wins, write a conditional answer
   so the wording follows the evidence on a rerun:

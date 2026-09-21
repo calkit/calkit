@@ -792,7 +792,11 @@ def _check_publication_label(
 
 
 def _is_attributed(
-    path: str, stage: str | None, ck_info: dict, wdir: str
+    path: str,
+    stage: str | None,
+    ck_info: dict,
+    wdir: str,
+    computed: bool = False,
 ) -> bool:
     """Whether the project says where an evidence path came from.
 
@@ -801,7 +805,9 @@ def _is_attributed(
     may be declared as an artifact that records an import or a person,
     which is what :func:`calkit.provenance.has_provenance` reads---an
     imported dataset or a hand-drawn schematic is accounted for even
-    though there is nothing upstream to point at.
+    though there is nothing upstream to point at. With ``computed``, a
+    person doesn't count, since a number someone typed into a file is
+    still a magic number.
     """
     from calkit.provenance import has_provenance
 
@@ -820,7 +826,12 @@ def _is_attributed(
             if (
                 isinstance(artifact, dict)
                 and artifact.get("path") == path
-                and has_provenance(artifact)
+                and (
+                    artifact.get("stage") is not None
+                    or artifact.get("imported_from") is not None
+                    if computed
+                    else has_provenance(artifact)
+                )
             ):
                 return True
     return False
@@ -1004,7 +1015,19 @@ def check_evidence(
                     ],
                 )
             )
-    if out.status == "ok" and not _is_attributed(
+    if (
+        out.status in ("ok", "changed")
+        and is_value_evidence(ev)
+        and not _is_attributed(path, out.stage, ck_info, wdir, computed=True)
+    ):
+        out.status = "error"
+        out.message = (
+            "no pipeline stage computes this value, so nothing can show "
+            "where the number came from or keep it current; produce the file "
+            "with a stage, or declare it with 'imported_from' if another "
+            "project computed it"
+        )
+    elif out.status == "ok" and not _is_attributed(
         path, out.stage, ck_info, wdir
     ):
         out.status = "unattributed"

@@ -36,7 +36,7 @@ artifacts, e.g., raw data and code, to verify with zero ambiguity
 This also ties everything together and gives a structured summary
 of the project's findings.
 
-## Evidence kinds
+## Kinds of evidence
 
 - `figure`, `table`, and `publication` point at an artifact by path.
 - `result` points at a whole results file: a set of values, a table, a
@@ -60,7 +60,7 @@ Keys are looked up literally at the top level first, then split on dots
 and walked into nested objects, with integers indexing lists,
 so `results.case-a.score` reaches into structured output.
 
-## Values become named variables
+## Using values as variables
 
 A `value` entry reads one value out of a results file and gives it a
 name, and those names are the variables a question can use:
@@ -77,7 +77,7 @@ evidence:
     name: leader
 ```
 
-The `path` is the results file a stage wrote, `key` finds the value
+The `path` is the results file a pipeline stage wrote, `key` finds the value
 inside it, and `name` is what the question calls it.
 `name` defaults to the key, so it can be left out when the key is already
 a good variable name.

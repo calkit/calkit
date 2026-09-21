@@ -57,10 +57,30 @@ test.describe("Notebook pipeline workflow", () => {
     // Wait for notebook to be created and opened
     await page.waitForSelector(".jp-NotebookPanel", { timeout: 20000 })
 
+    // Creating a notebook can bring up the kernel selection dialog, which
+    // is modal, so every click after it goes to the dialog instead of what
+    // the test is aiming at. It doesn't always appear, and when it does it
+    // can arrive late, so check for it both before focusing the notebook
+    // and before opening the File menu.
+    const dismissDialog = async () => {
+      const dialog = page.locator(".jp-Dialog").first()
+      const shown = await dialog
+        .waitFor({ state: "visible", timeout: 2000 })
+        .then(() => true)
+        .catch(() => false)
+      if (shown) {
+        // Accept whatever it's asking, i.e., the kernel it preselected
+        await page.keyboard.press("Enter")
+        await dialog.waitFor({ state: "hidden", timeout: 10000 })
+      }
+    }
+    await dismissDialog()
+
     // Focus the notebook area to ensure toolbar renders
     await page.click(".jp-NotebookPanel", { position: { x: 10, y: 10 } })
 
     // Rename the notebook to main.ipynb using the File menu
+    await dismissDialog()
     await page.click('text=File')
     await page.waitForTimeout(200)
     await page.click('text=Rename Notebook…')

@@ -24,6 +24,12 @@ ENV PATH="${PATH}:/opt/.TinyTeX/bin/x86_64-linux"
 ENV TEXMFHOME=/texmf
 RUN mkdir -p /texmf && chmod 1777 /texmf
 
+# Running as the invoking user means there is no passwd entry for them,
+# so Docker falls back to HOME=/, which they can't write to. Anything
+# that caches under HOME, e.g., fontconfig, fails against that.
+ENV HOME=/home/calkit
+RUN mkdir -p /home/calkit && chmod 1777 /home/calkit
+
 RUN fmtutil-sys --all
 
 # A curated core rather than whole collections: the tools, the classes
@@ -35,6 +41,9 @@ RUN fmtutil-sys --all
 # revtex4-1 and stops without reporting a missing file. newtx needs
 # txfonts' metrics, which surface as "Metric (TFM) file not found"
 # rather than as a missing .sty. Nothing can auto-install either.
+# sectsty and cite are what Calkit's own paper templates ask for, which
+# is what someone starting a project gets before they have asked for
+# anything.
 # latexdiff is here because `calkit latex diff` needs it; perl above is
 # what makes that possible.
 # cm-super supplies Type 1 versions of the EC fonts that elsarticle and
@@ -92,7 +101,9 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
             comment \
             fancyhdr \
             preprint \
-            cm-super && break; \
+            cm-super \
+            sectsty \
+            cite && break; \
         echo "tlmgr failed on attempt ${i}/3, retrying in 15s..." >&2; \
         i=$((i + 1)); \
         sleep 15; \

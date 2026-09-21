@@ -712,7 +712,9 @@ def get_status(
         from calkit.questions import format_summary
 
         print_sep("Questions")
-        typer.echo(format_summary(questions_status))
+        # The summary can carry a check mark, which a Windows console
+        # can't encode
+        calkit.echo(format_summary(questions_status))
         if not questions_status.ok:
             typer.echo("Run 'calkit check questions' for detail.")
         typer.echo()

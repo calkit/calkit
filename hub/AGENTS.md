@@ -15,6 +15,12 @@ This runs `npm run generate-client` in the frontend directory, which:
 - Generates TypeScript client SDK files in `frontend/src/client`
 - Formats the output with Biome
 
+The spec is fetched over HTTP, so a dev stack has to be up (`make dev`).
+Both `frontend/openapi.json` and `frontend/src/client` are committed, and
+the end-to-end CI job regenerates them against the stack it already runs
+and fails if either differs, so a backend change that lands without a
+regenerated client won't merge.
+
 ## Code Formatting
 
 Format all code (frontend and backend) in one command:
@@ -178,7 +184,7 @@ divergence from that baseline noise.
 ### Modifying API Contracts
 
 1. Update backend route in `backend/app/api/routes/`
-2. Regenerate the client: `make frontend-client`
+2. Regenerate the client: `make frontend-client` (required; CI checks it)
 3. Update frontend code to use new/changed SDK methods
 4. Format both: `make format`
 

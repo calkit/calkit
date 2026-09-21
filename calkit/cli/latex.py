@@ -283,6 +283,21 @@ def build(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
+    # latexmk records a failed run in its file database and then refuses
+    # to try again, reporting "Nothing to do" and exiting non-zero with no
+    # PDF. Running it again is the first thing anyone does after a
+    # failure, so the record is cleared when there is no PDF to show for
+    # it, which makes a retry a real retry.
+    tex_dir = os.path.dirname(tex_file) or "."
+    stem = Path(tex_file).stem
+    pdf_dir = output_dir if output_dir is not None else tex_dir
+    if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
+        fdb_dir = aux_dir if aux_dir is not None else tex_dir
+        fdb_fpath = os.path.join(fdb_dir, stem + ".fdb_latexmk")
+        if os.path.isfile(fdb_fpath):
+            if verbose:
+                typer.echo(f"Removing {fdb_fpath} so latexmk will retry")
+            os.remove(fdb_fpath)
     # Now formulate the command
     latexmk_cmd = ["latexmk", "-pdf", "-cd"]
     if latexmk_rc_path is not None:
@@ -296,7 +311,6 @@ def build(
     # latexmk runs with -cd, so its -outdir/-auxdir are relative to the .tex
     # file's directory; convert the (current-directory-relative) Calkit paths
     # into that frame.
-    tex_dir = os.path.dirname(tex_file) or "."
     if output_dir is not None:
         rel = Path(os.path.relpath(output_dir, tex_dir)).as_posix()
         latexmk_cmd.append(f"-outdir={rel}")

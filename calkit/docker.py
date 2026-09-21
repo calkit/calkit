@@ -582,15 +582,17 @@ def get_remote_image_ref(
     return f"{path}:{tag or 'latest'}"
 
 
-# How long Docker may say nothing at all before we give up on it. A real
-# transfer reports progress continuously, so silence this long is a stall
-# rather than a slow network: pulling a tag that doesn't exist sits there
-# indefinitely instead of reporting that it doesn't exist.
-PULL_STALL_TIMEOUT = 120.0
+# How long Docker may say nothing at all, before it has said anything, be-
+# fore we give up on it. It applies only until the first line: Docker
+# announces what it's pulling straight away, so silence before that is a
+# stall rather than a slow network, while silence afterward can just be a
+# large layer on a bad connection. Waiting on a wedged credential helper
+# looks like the former and used to hang indefinitely.
+PULL_START_TIMEOUT = 60.0
 
 
 def _run_showing_output(
-    cmd: list[str], stall_timeout: float | None = None
+    cmd: list[str], start_timeout: float | None = None
 ) -> tuple[bool, str]:
     """Run a command, showing its output as it happens and keeping it.
 
@@ -599,10 +601,10 @@ def _run_showing_output(
     the output goes to the terminal as it arrives. It's captured too, since
     what a registry says on refusal decides what happens next.
 
-    ``stall_timeout`` gives up when Docker produces no output at all for
-    that long, which is what a pull of a missing image does here rather
-    than failing. It measures silence, not total time, so a genuinely slow
-    transfer is left alone as long as it's still reporting progress.
+    ``start_timeout`` gives up when Docker says nothing at all before it
+    has said anything, which is what waiting on a credential helper that
+    never answers looks like. It stops applying once output starts, so a
+    slow transfer is left alone however long its layers take.
     """
     import queue
     import threading
@@ -638,16 +640,18 @@ def _run_showing_output(
     last_status: dict[str, str] = {}
     while True:
         try:
-            line = line_queue.get(timeout=stall_timeout)
+            # Only the wait for the first line is bounded; once Docker is
+            # talking, it is working
+            line = line_queue.get(timeout=start_timeout if not lines else None)
         except queue.Empty:
             proc.kill()
             proc.wait()
             message = (
-                f"Docker produced no output for {stall_timeout:.0f} seconds; "
-                "giving up"
+                f"Docker said nothing for {start_timeout:.0f} seconds and "
+                "never started; giving up"
             )
             print(message, flush=True)
-            return False, "".join(lines) + "\n" + message
+            return False, message
         if line is None:
             break
         lines.append(line)
@@ -724,7 +728,7 @@ def pull_image(ref: str, platform: str | None = None) -> tuple[bool, str]:
     if platform is not None:
         cmd += ["--platform", platform]
     cmd.append(ref)
-    return _run_showing_output(cmd, stall_timeout=PULL_STALL_TIMEOUT)
+    return _run_showing_output(cmd, start_timeout=PULL_START_TIMEOUT)
 
 
 def pull_image_with_login(ref: str, platform: str | None = None) -> bool:
@@ -915,8 +919,12 @@ def get_lock_digest_refs(
             refs.append(f"{remote_repo}@{digest}")
     if remote_repo is None:
         return refs
-    preferred = [r for r in refs if r.split("@", 1)[0] == remote_repo]
-    return preferred + [r for r in refs if r not in preferred]
+    # A digest only names this environment's image if it came from this
+    # environment's repository. One recorded against another repository is
+    # left over from an image the project no longer uses, and pulling it
+    # would quietly go on building with the old image however the
+    # environment was changed.
+    return [r for r in refs if _same_repo(get_repo_from_ref(r), remote_repo)]
 
 
 def build_lock(
@@ -929,6 +937,7 @@ def build_lock(
 
     Key order is fixed so that a lock written for a platform from a registry
     matches byte-for-byte the one that platform would write for itself.
+
     """
     lock = {key: identity.get(key) for key in LOCK_INSPECT_KEYS}
     # Normalize here rather than at each call site, so that a lock carried
@@ -975,6 +984,24 @@ def resolve_registry_prefix(env: dict, wdir: str | None = None) -> str | None:
     if registry.lower() in AUTO_REGISTRY_VALUES:
         return get_default_registry_prefix(wdir=wdir)
     return registry
+
+
+def _same_repo(a: str, b: str) -> bool:
+    """Whether two repositories are the same one written two ways.
+
+    Docker reports what it pulled in full, e.g., ``docker.io/library/foo``,
+    while a project names it as ``foo``.
+    """
+
+    def canonical(repo: str) -> str:
+        for prefix in ("docker.io/library/", "docker.io/", "index."):
+            if repo.startswith(prefix):
+                repo = repo[len(prefix) :]
+        if repo.startswith("docker.io/"):
+            repo = repo[len("docker.io/") :]
+        return repo
+
+    return canonical(a) == canonical(b)
 
 
 def get_repo_from_ref(ref: str) -> str:

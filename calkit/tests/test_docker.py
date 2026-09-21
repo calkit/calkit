@@ -505,7 +505,7 @@ def test_ensure_image_available() -> None:
     with mock.patch("calkit.docker.image_exists_locally", return_value=False):
         with mock.patch(
             "calkit.docker.pull_image",
-            return_value=(False, "Docker produced no output for 120 seconds"),
+            return_value=(False, "Docker said nothing for 60 seconds"),
         ):
             with pytest.raises(ValueError, match="never reached the registry"):
                 calkit.docker.ensure_image_available("some/image:1")
@@ -521,3 +521,33 @@ def test_ensure_image_available() -> None:
             "calkit.docker.pull_image", return_value=(True, "1: Pulling")
         ):
             calkit.docker.ensure_image_available("some/image:1")
+
+
+def test_lock_digest_refs_stay_with_their_repo() -> None:
+    # A digest recorded against another repository is left over from an
+    # image the project no longer uses. Pulling it would go on building
+    # with the old image however the environment was changed, which is
+    # what made changing an image in calkit.yaml do nothing.
+    stale = {"RepoDigests": ["texlive/texlive@sha256:abc"]}
+    assert (
+        calkit.docker.get_lock_digest_refs(stale, "ghcr.io/calkit/latex:0.1.0")
+        == []
+    )
+    same = {"RepoDigests": ["ghcr.io/calkit/latex@sha256:abc"]}
+    assert calkit.docker.get_lock_digest_refs(
+        same, "ghcr.io/calkit/latex:0.1.0"
+    ) == ["ghcr.io/calkit/latex@sha256:abc"]
+    # Docker reports what it pulled in full while a project names it short
+    assert calkit.docker.get_lock_digest_refs(
+        {"RepoDigests": ["docker.io/library/alpine@sha256:abc"]}, "alpine:3.19"
+    ) == ["docker.io/library/alpine@sha256:abc"]
+    # A bare digest names no repository, so it belongs to whichever one
+    # the environment now points at; a digest that isn't there fails the
+    # pull and the tag is fetched instead
+    assert calkit.docker.get_lock_digest_refs(
+        {"RepoDigests": ["sha256:abc"]}, "ghcr.io/calkit/latex:0.1.0"
+    ) == ["ghcr.io/calkit/latex@sha256:abc"]
+    # With nowhere to pull from, only self-describing digests are usable
+    assert calkit.docker.get_lock_digest_refs(
+        {"RepoDigests": ["sha256:abc", "foo/bar@sha256:def"]}, None
+    ) == ["foo/bar@sha256:def"]

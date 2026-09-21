@@ -78,3 +78,8 @@ since it changes rarely, and `DEFAULT_LATEX_IMAGE` in `calkit/latex.py`
 pins an exact tag. Bump that constant deliberately when a new image
 should be the default, so an environment that resolved to Docker keeps
 building against the same TeX until someone decides otherwise.
+
+Until a `latex-image/v1.0.0` tag is pushed, nothing has been published
+under this name, so `DEFAULT_LATEX_IMAGE` still points at
+`texlive/texlive:latest-full`. Publishing the first tag and switching
+that constant is what puts this image in use.

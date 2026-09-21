@@ -51,12 +51,14 @@ LOCAL_DIFF_DIR = os.path.join(LOCAL_DIR, "latex-diffs")
 WORKING_NAME = "working"
 
 # The image a flexible LaTeX environment reaches for when it falls back to
-# Docker. TinyTeX plus a curated package set and latexdiff, which is a
-# fraction of the size of a full TeX Live image; built from images/latex.
-# Pinned to an exact tag rather than :latest, since an environment that
-# resolved to Docker should keep building against the same TeX until the
-# default is deliberately moved.
-DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:1.0.0"
+# Docker. TODO: move this to "ghcr.io/calkit/latex:1.0.0", which is built
+# from images/latex and a twelfth the size, once a latex-image/v1.0.0 tag
+# has been pushed and the image is actually pullable. Pointing at it
+# before then makes every Docker-backed LaTeX build fail on an image that
+# doesn't exist. The replacement is pinned to an exact tag rather than
+# :latest so an environment that resolved to Docker keeps building
+# against the same TeX until the default is deliberately moved.
+DEFAULT_LATEX_IMAGE = "texlive/texlive:latest-full"
 
 # Backends a flexible LaTeX environment can resolve to, most preferred
 # first. System latexmk wins when it's there: a machine that already has a

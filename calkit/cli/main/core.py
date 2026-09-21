@@ -3080,13 +3080,6 @@ def run(
         "dvc_data_status_before": dvc_data_status_before,
         "dvc_status_after": dvc_status_after,
         "dvc_data_status_after": dvc_data_status_after,
-        # What a flexible LaTeX environment resolved to. Recorded here
-        # rather than in a lock file because an environment that pins
-        # nothing has none, which is the point: the backend is worth
-        # knowing without being worth rerunning stages over.
-        "latex_backends": calkit.latex.read_backend_records(
-            env_names=list(ck_info.get("environments") or {})
-        ),
     }
     run_info_fname = run_fname_prefix + ".json"
     local_runs_dir = os.path.join(calkit.ensure_local_dir(), "runs")
@@ -3862,58 +3855,49 @@ def run_in_env(
                 subprocess.check_call(shell_cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in system environment")
-    elif env["kind"] in ("latex", "tectonic", "tinytex"):
+    elif env["kind"] == "tinytex-docker":
         from calkit import latex as _latex
 
-        backend, _ = calkit.environments.resolve_latex_backend(env, ck_info)
+        image = env.get("image") or _latex.DEFAULT_LATEX_IMAGE
         if not no_check:
-            from calkit.cli.check import check_latex_env
+            from calkit.cli.check import check_tinytex_docker_env
 
-            check_latex_env(
-                env_name=env_name, env=env, ck_info=ck_info, verbose=verbose
-            )
-            save_env_check_cache()
-        if backend == "docker":
-            # The cache is mounted at TEXMFHOME rather than over the
-            # image's own tree, which is what a package installed at run
-            # time writes into and what makes it persist between runs.
-            texmf = _latex.get_texmf_cache_dir()
-            os.makedirs(texmf, exist_ok=True)
-            image = env.get("image") or _latex.DEFAULT_LATEX_IMAGE
-            # docker run would pull this itself, but a pull of an image
-            # that isn't there waits on the registry rather than failing
             try:
-                calkit.docker.ensure_image_available(image)
+                check_tinytex_docker_env(
+                    env_name=env_name, env=env, verbose=verbose
+                )
             except ValueError as e:
-                raise_error(str(e))
-            docker_cmd = [
-                "docker",
-                "run",
-                "--rm",
-                "-v",
-                f"{os.getcwd()}:/work",
-                "-v",
-                f"{texmf}:/root/texmf",
-                "-w",
-                posixpath.join("/work", wdir) if wdir else "/work",
-                image,
-            ] + cmd
-            if verbose:
-                typer.echo(f"Running command: {docker_cmd}")
-            try:
-                subprocess.check_call(docker_cmd)
-            except subprocess.CalledProcessError:
-                raise_error(f"Failed to run in {image}")
-        else:
-            # The backend's tools are on PATH, so the command runs here.
-            if verbose:
-                typer.echo(f"Running command: {cmd} ({backend})")
-            try:
-                subprocess.check_call(cmd, cwd=wdir)
-            except subprocess.CalledProcessError:
-                raise_error(f"Failed to run with {backend}")
-            except FileNotFoundError:
-                raise_error(f"'{cmd[0]}' not found in the {backend} backend")
+                raise_error(f"Environment '{env_name}': {e}")
+            save_env_check_cache()
+        # The package tree is mounted at TEXMFHOME rather than over the
+        # image's own, which would hide the distribution entirely.
+        texmf = _latex.get_texmf_cache_dir()
+        os.makedirs(texmf, exist_ok=True)
+        docker_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{os.getcwd()}:/work",
+            "-v",
+            f"{texmf}:/root/texmf",
+            "-w",
+            posixpath.join("/work", wdir) if wdir else "/work",
+        ]
+        # Run as the user, like every other Docker environment here, so a
+        # PDF doesn't come back owned by root
+        try:
+            docker_cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        except AttributeError:
+            # Windows has no UID to map
+            pass
+        docker_cmd += [image] + cmd
+        if verbose:
+            typer.echo(f"Running command: {docker_cmd}")
+        try:
+            subprocess.check_call(docker_cmd)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to run in {image}")
     else:
         raise_error("Environment kind not supported")
 

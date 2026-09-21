@@ -4,10 +4,38 @@
 !!! note
     This document was written by Anthropic's Claude Code.
 
-Status: accepted, partially implemented.
+Status: superseded in part on 2026-09-20; see "Scope cut" below.
 Date: 2026-09-18.
 Related: [#407](https://github.com/calkit/calkit/issues/407),
-[#961](https://github.com/calkit/calkit/issues/961).
+[#961](https://github.com/calkit/calkit/issues/961),
+[#1695](https://github.com/calkit/calkit/pull/1695).
+
+## Scope cut
+
+Decisions 1 and 3 were not built. `kind: latex`, `kind: tectonic`,
+backend resolution and ordering, diff-capability filtering, Tectonic
+command translation, and the soft/hard lock split were all dropped
+before merging, and the code implementing them was removed.
+
+What shipped instead is the part that carries the benefit: the image,
+and one environment kind, `tinytex-docker`, whose `packages` list is how
+a project installs what the image doesn't ship. Both the image and the
+packages are locked, since a missing TeX package fails a build rather
+than changing how it looks.
+
+The reasoning, from the pull request this came from: the 9 GB to 766 MB
+reduction comes entirely from the image, while the flexible machinery is
+where every sharp edge lives. The priority for that PR was the
+quickstart -- getting someone to a working project quickly -- and a
+smaller image serves it while backend resolution does not. Anyone who
+wants to build with their own system TeX can still say so with a system
+environment.
+
+The sections below are kept for the evidence they record, which is
+unchanged: the measurements, the two bugs in the image and how they were
+found, and what a real journal paper needs to build. Read decisions 1
+and 3 as a design that was considered and declined, not as what Calkit
+does.
 
 ## Context
 

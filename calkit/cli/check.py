@@ -302,60 +302,53 @@ def check_nix_env(env: dict, verbose: bool = False) -> str:
     return lock_fpath
 
 
-def check_latex_env(
+def check_tinytex_docker_env(
     env_name: str,
     env: dict,
-    ck_info: dict | None = None,
     verbose: bool = False,
 ) -> str | None:
-    """Resolve a LaTeX environment's backend and install what it needs.
+    """Pull the image and install whatever packages the project asks for.
 
-    Returns the lock file path, or None for an environment that pins
-    nothing, in which case there is nothing for stages to depend on.
+    Packages go into the user's own TeX tree, which is mounted into the
+    container, so they're installed once per machine rather than baked
+    into an image or refetched every run.
     """
+    import calkit.docker
     import calkit.environments
     import calkit.latex
 
-    backend, version = calkit.environments.resolve_latex_backend(env, ck_info)
-    # Noted whether or not anything is pinned: an environment that locks
-    # nothing still has a backend worth reporting with the run
-    calkit.latex.record_backend(env_name, backend, version)
-    if verbose:
-        typer.echo(
-            f"Environment '{env_name}' resolved to {backend}"
-            + (f" {version}" if version else "")
-        )
-    # Tectonic fetches what a document needs as it compiles, and the
-    # Docker backend installs into the image's user tree at run time, so
-    # only a local TeX Live has packages to install here.
+    image = env.get("image") or calkit.latex.DEFAULT_LATEX_IMAGE
+    calkit.docker.ensure_image_available(image)
     packages = env.get("packages") or []
-    if packages and backend in ("system", "tinytex"):
-        missing = []
-        for package in packages:
-            result = subprocess.run(
-                ["kpsewhich", f"{package}.sty"],
-                capture_output=True,
-                text=True,
+    if packages:
+        texmf = calkit.latex.get_texmf_cache_dir()
+        os.makedirs(texmf, exist_ok=True)
+        # Installed one at a time so an already-present package is a
+        # no-op rather than a reason to reinstall the rest
+        install = " && ".join(
+            [f"tlmgr --usermode install {p}" for p in packages]
+        )
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{texmf}:/root/texmf",
+            image,
+            "sh",
+            "-c",
+            f"kpsewhich {packages[0]}.sty > /dev/null 2>&1 || ({install})",
+        ]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            raise_error(
+                f"Failed to install TeX packages: {', '.join(packages)}"
             )
-            if not result.stdout.strip():
-                missing.append(package)
-        if missing:
-            cmd = ["tlmgr", "install"] + missing
-            if verbose:
-                typer.echo(f"Running command: {cmd}")
-            try:
-                subprocess.check_call(cmd)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                raise_error(
-                    f"Failed to install TeX packages: {', '.join(missing)}"
-                )
-            # tlmgr doesn't symlink the scripts a package ships, so one
-            # installed after setup is on disk but not on PATH
-            subprocess.run(
-                ["tlmgr", "path", "add"], capture_output=True, check=False
-            )
-    return calkit.environments.write_latex_env_lock(
-        env_name=env_name, env=env, ck_info=ck_info
+    return calkit.environments.write_tinytex_docker_env_lock(
+        env_name=env_name, env=env
     )
 
 
@@ -795,13 +788,10 @@ def check_environment(
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
-    elif env["kind"] in ("latex", "tectonic", "tinytex"):
+    elif env["kind"] == "tinytex-docker":
         try:
-            check_latex_env(
-                env_name=env_name,
-                env=env,
-                ck_info=ck_info,
-                verbose=verbose,
+            check_tinytex_docker_env(
+                env_name=env_name, env=env, verbose=verbose
             )
         except ValueError as e:
             raise_error(f"Environment '{env_name}': {e}")

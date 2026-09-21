@@ -137,26 +137,6 @@ def from_json(
             json2latex.dump(cmd_name, formatted, f)
 
 
-def _resolve_latex_backend(environment: str | None) -> str | None:
-    """What a named environment will build with, if it's a LaTeX one.
-
-    None for anything else, e.g., a Docker environment holding a TeX Live
-    image, which says nothing about backends and needs no translating.
-    """
-    if environment is None:
-        return None
-    import calkit.environments
-
-    ck_info = calkit.load_calkit_info()
-    env = (ck_info.get("environments") or {}).get(environment)
-    if not isinstance(env, dict):
-        return None
-    if env.get("kind") not in ("latex", "tectonic", "tinytex"):
-        return None
-    backend, _ = calkit.environments.resolve_latex_backend(env, ck_info)
-    return backend
-
-
 def _tex_cmd(
     tex_cmd: list[str],
     environment: str | None,
@@ -167,25 +147,12 @@ def _tex_cmd(
     """Wrap a TeX command so it runs wherever the project's TeX lives.
 
     In the project's Calkit environment if one was named, else directly if
-    the tool is installed, else in Calkit's LaTeX container. The container
+    the tool is installed, else in a TeX Live container. The container
     mounts the working directory, so anything the command reads has to be
     inside the project -- which is why the diff builds its copy of the
     base revision there rather than in a temp directory.
     """
     if environment is not None:
-        # A backend that can't run latexdiff fails deep inside the
-        # container with "not found", which reads as a broken image rather
-        # than an environment that was never going to work
-        if dep == "latexdiff":
-            backend = _resolve_latex_backend(environment)
-            if backend is not None and not calkit.latex.backend_can_diff(
-                backend
-            ):
-                raise_error(
-                    f"Environment '{environment}' resolved to {backend}, "
-                    "which can't run latexdiff; pin the environment to a "
-                    "backend that can, e.g., kind: tinytex"
-                )
         cmd = (
             ["calkit", "xenv", "--name", environment]
             + (["--no-check"] if no_check else [])
@@ -195,18 +162,18 @@ def _tex_cmd(
     elif calkit.check_dep_exists(dep):
         cmd = tex_cmd
     else:
-        # The package cache goes to TEXMFHOME rather than over the image's
-        # own tree, which mounting at /root/.TinyTeX would hide entirely.
-        texmf = calkit.latex.get_texmf_cache_dir()
-        os.makedirs(texmf, exist_ok=True)
         # Pulled deliberately, since docker run's implicit pull of an
-        # image that isn't there stalls instead of reporting it
+        # image that isn't there can stall rather than report it
         try:
             calkit.docker.ensure_image_available(
                 calkit.latex.DEFAULT_LATEX_IMAGE
             )
         except ValueError as e:
             raise_error(str(e))
+        # The package tree mounts at TEXMFHOME rather than over the
+        # image's own, which would hide the distribution entirely
+        texmf = calkit.latex.get_texmf_cache_dir()
+        os.makedirs(texmf, exist_ok=True)
         cmd = [
             "docker",
             "run",
@@ -214,11 +181,17 @@ def _tex_cmd(
             "-v",
             f"{os.getcwd()}:/work",
             "-v",
-            f"{texmf}:/root/texmf",
+            f"{texmf}:/texmf",
             "-w",
             "/work",
-            calkit.latex.DEFAULT_LATEX_IMAGE,
-        ] + tex_cmd
+        ]
+        # As the user, so a PDF doesn't come back owned by root
+        try:
+            cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        except AttributeError:
+            # Windows has no UID to map
+            pass
+        cmd += [calkit.latex.DEFAULT_LATEX_IMAGE] + tex_cmd
     if verbose:
         typer.echo(f"Running command: {cmd}")
     return cmd
@@ -310,34 +283,6 @@ def build(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
-    # Tectonic is a different program rather than a different place to run
-    # latexmk, so the command is built for it instead of translated after
-    if _resolve_latex_backend(environment) == "tectonic":
-        try:
-            tectonic_cmd = calkit.latex.get_tectonic_cmd(
-                target_path=tex_file,
-                output_dir=output_dir,
-                synctex=not no_synctex,
-                force=force,
-                verbose=verbose,
-                latexmkrc_path=latexmk_rc_path,
-                aux_dir=aux_dir,
-                latexmk_args=latexmk_args,
-            )
-        except ValueError as e:
-            raise_error(str(e))
-        cmd = _tex_cmd(
-            tectonic_cmd,
-            environment=environment,
-            no_check=no_check,
-            verbose=verbose,
-            dep="tectonic",
-        )
-        try:
-            subprocess.check_call(cmd)
-        except subprocess.CalledProcessError:
-            raise_error("tectonic failed")
-        return
     # Now formulate the command
     latexmk_cmd = ["latexmk", "-pdf", "-cd"]
     if latexmk_rc_path is not None:

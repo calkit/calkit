@@ -10,14 +10,12 @@ from calkit.models.core import (
     Dataset,
     Figure,
     ImportedDataset,
-    LatexEnvironment,
     MiscArtifact,
     Procedure,
     ProcedureFile,
     ProjectInfo,
     Publication,
-    TectonicEnvironment,
-    TinyTexEnvironment,
+    TinyTexDockerEnvironment,
     _ImportedFromDoi,
 )
 
@@ -462,52 +460,40 @@ def test_procedure_entries():
     assert schema["$defs"]["Procedure"]["not"] == {"required": ["path"]}
 
 
-def test_latex_environments() -> None:
+def test_tinytex_docker_environment() -> None:
     info = ProjectInfo.model_validate(
         {
             "environments": {
-                "flexible": {"kind": "latex"},
-                "pinned": {
-                    "kind": "latex",
-                    "lock": ["backend", "version"],
-                    "backends": ["tinytex", "docker"],
-                    "packages": ["revtex4-1"],
-                    "image": "ghcr.io/calkit/tinytex-latexmk-docker:latest",
+                "tex": {"kind": "tinytex-docker"},
+                "tex2": {
+                    "kind": "tinytex-docker",
+                    "packages": ["revtex4-1", "epsf"],
+                    "image": "ghcr.io/calkit/latex:1.0.0",
                 },
-                "tt": {"kind": "tinytex", "packages": ["revtex4-1", "epsf"]},
-                "tec": {"kind": "tectonic", "version": "0.15.0"},
             }
         }
     )
-    flexible = info.environments["flexible"]
-    tinytex = info.environments["tt"]
-    tectonic = info.environments["tec"]
-    pinned = info.environments["pinned"]
-    assert isinstance(flexible, LatexEnvironment)
-    assert isinstance(tinytex, TinyTexEnvironment)
-    assert isinstance(tectonic, TectonicEnvironment)
-    assert isinstance(pinned, LatexEnvironment)
-    # A flexible environment pins nothing by default, so stages that use it
-    # gain no dependency on whatever it resolved to
-    assert flexible.lock == []
-    assert flexible.backends is None
-    assert flexible.packages == []
-    assert pinned.lock == ["backend", "version"]
-    assert pinned.backends == ["tinytex", "docker"]
-    assert tinytex.packages == ["revtex4-1", "epsf"]
-    assert tectonic.version == "0.15.0"
-    # Neither the kinds nor what they can pin are open sets
-    for bad in [
-        {"kind": "latex", "lock": ["image"]},
-        {"kind": "latex", "backends": ["mactex"]},
-        {"kind": "tex"},
-    ]:
+    tex = info.environments["tex"]
+    tex2 = info.environments["tex2"]
+    assert isinstance(tex, TinyTexDockerEnvironment)
+    assert isinstance(tex2, TinyTexDockerEnvironment)
+    # Nothing beyond what the image ships unless the project says so
+    assert tex.packages == []
+    assert tex.image is None
+    assert tex2.packages == ["revtex4-1", "epsf"]
+    # The kinds an earlier design had are not accepted, so a project
+    # written against them is told rather than silently validated
+    for bad in [{"kind": "latex"}, {"kind": "tectonic"}, {"kind": "tinytex"}]:
         with pytest.raises(ValidationError):
             ProjectInfo.model_validate({"environments": {"x": bad}})
     # Round-tripping through YAML keeps the kind-specific class
     roundtripped = _roundtrip(
-        {"environments": {"tt": {"kind": "tinytex", "packages": ["epsf"]}}}
+        {
+            "environments": {
+                "tex": {"kind": "tinytex-docker", "packages": ["epsf"]}
+            }
+        }
     )
-    tt = roundtripped.environments["tt"]
-    assert isinstance(tt, TinyTexEnvironment)
-    assert tt.packages == ["epsf"]
+    rt = roundtripped.environments["tex"]
+    assert isinstance(rt, TinyTexDockerEnvironment)
+    assert rt.packages == ["epsf"]

@@ -10,7 +10,6 @@ from datetime import timedelta
 from unittest import mock
 
 import pytest
-from pytest_test_utils import TmpDir
 
 import calkit
 import calkit.environments
@@ -1641,87 +1640,3 @@ def test_env_inputs_must_be_inside_the_project():
     assert envs.get_env_input_paths(
         {"kind": "docker", "inputs": ["../outside.C"]}
     ) == ["../outside.C"]
-
-
-def test_latex_env_locking(tmp_dir: TmpDir) -> None:
-    import calkit.latex
-
-    flexible: dict = {"kind": "latex"}
-    pinned: dict = {"kind": "latex", "lock": ["backend", "version"]}
-    backend_only: dict = {"kind": "latex", "lock": ["backend"]}
-    tinytex: dict = {"kind": "tinytex", "packages": ["revtex4-1", "epsf"]}
-    tectonic: dict = {"kind": "tectonic", "version": "0.15.0"}
-    # Pinning nothing means no lock file, so stages that use the
-    # environment gain no dependency and a collaborator on another backend
-    # doesn't rerun them
-    assert (
-        calkit.environments.get_env_lock_fpath(env=flexible, env_name="tex")
-        is None
-    )
-    # The explicit kinds always lock, since what they install decides
-    # whether the document builds at all
-    for env in [tinytex, tectonic, pinned]:
-        assert (
-            calkit.environments.get_env_lock_fpath(env=env, env_name="tex")
-            is not None
-        )
-    with mock.patch.object(
-        calkit.latex, "backend_is_available", lambda b: b == "docker"
-    ):
-        with mock.patch.object(
-            calkit.latex, "get_backend_version", lambda b: "29.7.2"
-        ):
-            # The image is what typeset the document, so that is what a
-            # docker backend records rather than the engine's version
-            assert calkit.environments.resolve_latex_backend(flexible) == (
-                "docker",
-                calkit.latex.DEFAULT_LATEX_IMAGE,
-            )
-            assert (
-                calkit.environments.write_latex_env_lock("tex", flexible)
-                is None
-            )
-            # Only what was asked for is recorded, so adding 'version'
-            # later doesn't rewrite what 'backend' alone already meant
-            path = calkit.environments.write_latex_env_lock(
-                "tex", backend_only
-            )
-            assert path is not None
-            with open(path) as f:
-                assert json.load(f) == {"backend": "docker"}
-            path = calkit.environments.write_latex_env_lock("tex2", pinned)
-            assert path is not None
-            with open(path) as f:
-                assert json.load(f) == {
-                    "backend": "docker",
-                    "version": calkit.latex.DEFAULT_LATEX_IMAGE,
-                }
-    # An explicit kind is its own backend rather than resolving, and its
-    # packages are part of what's pinned
-    with mock.patch.object(
-        calkit.latex, "get_backend_version", lambda b: "2026"
-    ):
-        assert calkit.environments.resolve_latex_backend(tinytex) == (
-            "tinytex",
-            "2026",
-        )
-        path = calkit.environments.write_latex_env_lock("tt", tinytex)
-        assert path is not None
-        with open(path) as f:
-            assert json.load(f) == {
-                "backend": "tinytex",
-                "version": "2026",
-                "packages": ["epsf", "revtex4-1"],
-            }
-    # A version written down is used as-is rather than read off the machine
-    assert calkit.environments.resolve_latex_backend(tectonic) == (
-        "tectonic",
-        "0.15.0",
-    )
-    # Nothing available is an error naming what would satisfy it, not a
-    # silent fallback to something that can't build the document
-    with mock.patch.object(
-        calkit.latex, "backend_is_available", lambda b: False
-    ):
-        with pytest.raises(ValueError, match="No LaTeX backend"):
-            calkit.environments.resolve_latex_backend(flexible)

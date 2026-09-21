@@ -2211,89 +2211,6 @@
       "title": "JupyterNotebookStage",
       "type": "object"
     },
-    "LatexEnvironment": {
-      "description": "A LaTeX toolchain, without saying which one.\n\nResolves to one of the explicit kinds---system ``latexmk``, Tectonic,\nTinyTeX, or Docker---the first time it's used, and records what it\nresolved to. The point is that a document builds on a machine that has\nno TeX at all, without the project having to decide which distribution\neveryone installs.\n\nUnlike other environments, what this resolves to is not pinned by\ndefault. A backend determines typesetting, while the results a paper\nreports come from its inputs, which upstream stages lock; PDFs are not\nbyte-reproducible across runs anyway. So ``lock`` is empty by default\nand the backend is recorded as provenance, leaving collaborators on\ndifferent machines free to build without rerunning each other's\nstages. Lock 'backend' when the toolchain has to be the same\neverywhere, e.g., for a camera-ready submission.",
-      "properties": {
-        "backends": {
-          "anyOf": [
-            {
-              "items": {
-                "enum": [
-                  "system",
-                  "tectonic",
-                  "tinytex",
-                  "docker"
-                ],
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Backends to consider, most preferred first. Defaults to system latexmk, then Tectonic, then TinyTeX, then Docker, with Tectonic skipped when the project keeps LaTeX diffs, since it can't run latexdiff.",
-          "title": "Backends"
-        },
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A description of the environment.",
-          "title": "Description"
-        },
-        "image": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Image for the Docker backend. Defaults to Calkit's own TinyTeX image.",
-          "title": "Image"
-        },
-        "kind": {
-          "const": "latex",
-          "default": "latex",
-          "title": "Kind",
-          "type": "string"
-        },
-        "lock": {
-          "default": [],
-          "description": "What to pin about the resolved backend. Empty means the backend is recorded but stages don't depend on it, so a collaborator building with a different one doesn't rerun them.",
-          "items": {
-            "enum": [
-              "backend",
-              "version"
-            ],
-            "type": "string"
-          },
-          "title": "Lock",
-          "type": "array"
-        },
-        "packages": {
-          "default": [],
-          "description": "TeX packages the document needs beyond what the backend ships, installed with tlmgr where the backend supports it. Ignored by Tectonic, which fetches what it needs itself.",
-          "items": {
-            "type": "string"
-          },
-          "title": "Packages",
-          "type": "array"
-        }
-      },
-      "title": "LatexEnvironment",
-      "type": "object"
-    },
     "LatexStage": {
       "additionalProperties": false,
       "properties": {
@@ -8273,8 +8190,8 @@
       "title": "TableEvidence",
       "type": "object"
     },
-    "TectonicEnvironment": {
-      "description": "Tectonic, which fetches the packages a document needs as it runs.\n\nThe smallest way to build a document, and the only backend that cannot\nrun ``latexdiff``, since it ships neither the script nor a Perl to run\nit. A project that keeps diffs needs one of the others.",
+    "TinyTexDockerEnvironment": {
+      "description": "TeX Live in a container, small enough to be worth pulling.\n\nTinyTeX plus the packages most documents need, which is a fraction of\nthe size of a full TeX Live image, and what a LaTeX stage uses unless\nthe project says otherwise.\n\n``packages`` is what this document needs beyond that set. It is a hard\ndependency rather than a preference: a missing TeX package doesn't\ntypeset differently, it fails to build, so it's part of what stages\ndepend on.",
       "properties": {
         "description": {
           "anyOf": [
@@ -8289,13 +8206,7 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
-        "kind": {
-          "const": "tectonic",
-          "default": "tectonic",
-          "title": "Kind",
-          "type": "string"
-        },
-        "version": {
+        "image": {
           "anyOf": [
             {
               "type": "string"
@@ -8305,59 +8216,26 @@
             }
           ],
           "default": null,
-          "description": "Tectonic version to use. Resolved from what's installed when not given.",
-          "title": "Version"
-        }
-      },
-      "title": "TectonicEnvironment",
-      "type": "object"
-    },
-    "TinyTexEnvironment": {
-      "description": "TinyTeX, a small TeX Live that grows by installing what's asked for.\n\n``packages`` is that list. It is a hard dependency rather than a\npreference: a document whose class or package is missing doesn't\ntypeset differently, it fails to build, so the list is locked and\nchanging it reruns the stages that use it.",
-      "properties": {
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A description of the environment.",
-          "title": "Description"
+          "description": "Image to run in. Defaults to Calkit's own.",
+          "title": "Image"
         },
         "kind": {
-          "const": "tinytex",
-          "default": "tinytex",
+          "const": "tinytex-docker",
+          "default": "tinytex-docker",
           "title": "Kind",
           "type": "string"
         },
         "packages": {
           "default": [],
-          "description": "TeX packages to install with tlmgr, beyond what TinyTeX ships. Names are tlmgr package names, e.g. 'revtex4-1'.",
+          "description": "TeX packages to install with tlmgr, beyond what the image ships. Names are tlmgr package names, e.g. 'revtex4-1'.",
           "items": {
             "type": "string"
           },
           "title": "Packages",
           "type": "array"
-        },
-        "version": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "TeX Live version to use. Resolved from what's installed when not given.",
-          "title": "Version"
         }
       },
-      "title": "TinyTexEnvironment",
+      "title": "TinyTexDockerEnvironment",
       "type": "object"
     },
     "UvEnvironment": {
@@ -9256,7 +9134,6 @@
             "conda": "#/$defs/CondaEnvironment",
             "docker": "#/$defs/DockerEnvironment",
             "julia": "#/$defs/JuliaEnvironment",
-            "latex": "#/$defs/LatexEnvironment",
             "matlab": "#/$defs/MatlabEnvironment",
             "nix": "#/$defs/NixEnvironment",
             "pbs": "#/$defs/PBSEnvironment",
@@ -9264,8 +9141,7 @@
             "renv": "#/$defs/REnvironment",
             "slurm": "#/$defs/SlurmEnvironment",
             "system": "#/$defs/SystemEnvironment",
-            "tectonic": "#/$defs/TectonicEnvironment",
-            "tinytex": "#/$defs/TinyTexEnvironment",
+            "tinytex-docker": "#/$defs/TinyTexDockerEnvironment",
             "uv": "#/$defs/UvEnvironment",
             "uv-venv": "#/$defs/UvVenvEnvironment",
             "venv": "#/$defs/VenvEnvironment"
@@ -9283,13 +9159,7 @@
             "$ref": "#/$defs/JuliaEnvironment"
           },
           {
-            "$ref": "#/$defs/LatexEnvironment"
-          },
-          {
-            "$ref": "#/$defs/TectonicEnvironment"
-          },
-          {
-            "$ref": "#/$defs/TinyTexEnvironment"
+            "$ref": "#/$defs/TinyTexDockerEnvironment"
           },
           {
             "$ref": "#/$defs/MatlabEnvironment"

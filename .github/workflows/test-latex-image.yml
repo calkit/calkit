@@ -154,20 +154,29 @@ jobs:
             fi
           done
           exit "$fail"
-      # JFM ships its class with the template rather than through TeX
-      # Live, and needs txfonts' metrics, which report as a font error
-      # rather than a missing file, so nothing would fetch it on demand.
-      - name: Build the JFM template
+      # Every paper template Calkit ships has to build, since that is what
+      # someone gets before they have asked for anything. JFM also needs
+      # txfonts' metrics, which report as a font error rather than a
+      # missing file, so nothing would fetch it on demand.
+      - name: Build each paper template
         run: |
           set -euxo pipefail
           work="$(mktemp -d)"
-          mkdir -p "$work/paper"
-          cp calkit/templates/latex/jfm/* "$work/paper/"
-          mv "$work/paper/paper.tex" "$work/paper/main.tex"
-          docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            -v "$work":/work \
-            -w /work \
-            calkit/latex:pr \
-            latexmk -pdf -cd -interaction=nonstopmode paper/main.tex
-          test -f "$work/paper/main.pdf"
+          fail=0
+          for t in calkit/templates/latex/*/; do
+            name="$(basename "$t")"
+            mkdir -p "$work/$name"
+            cp "$t"* "$work/$name/"
+            mv "$work/$name/paper.tex" "$work/$name/main.tex"
+            if docker run --rm --user "$(id -u):$(id -g)" \
+                -v "$work/$name":/work -w /work calkit/latex:pr \
+                latexmk -pdf -interaction=nonstopmode main.tex \
+                > "$work/$name/build.log" 2>&1; then
+              echo "$name: ok"
+            else
+              echo "$name: FAILED"
+              grep -E '^! ' "$work/$name/main.log" | head -3 || true
+              fail=1
+            fi
+          done
+          exit "$fail"

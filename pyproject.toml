@@ -273,4 +273,7 @@ env = [
 # The hub backend's tests need the compose stack and its own environment,
 # and the assistant's need Qt; they run via test-hub.yml and
 # test-assistant.yml, not from the workspace root
-addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub --ignore=assistant"
+# loadgroup so tests marked with the same xdist_group run on one
+# worker, e.g., the ones that build conda environments, which
+# corrupt each other's half-extracted packages in the shared cache
+addopts = "-n auto --dist loadgroup -p pytest_jupyter.jupyter_server --ignore=hub --ignore=assistant"

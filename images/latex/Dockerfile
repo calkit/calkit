@@ -50,6 +50,8 @@ RUN fmtutil-sys --all
 # mnras ask for. Without it TeX generates bitmaps at run time, which
 # needs a writable texmf-var and produces worse PDFs; texmf-var is made
 # writable below anyway, for whatever else wants to generate a font.
+# The last four are asked for by documents rather than by any class:
+# units, cross-references and algorithm listings. About 110 kB together.
 RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
     i=1; \
     until [ "$i" -gt 3 ]; do \
@@ -103,7 +105,11 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
             preprint \
             cm-super \
             sectsty \
-            cite && break; \
+            cite \
+            siunitx \
+            cleveref \
+            algorithms \
+            algorithmicx && break; \
         echo "tlmgr failed on attempt ${i}/3, retrying in 15s..." >&2; \
         i=$((i + 1)); \
         sleep 15; \

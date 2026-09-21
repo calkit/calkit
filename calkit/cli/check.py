@@ -317,6 +317,9 @@ def check_latex_env(
     import calkit.latex
 
     backend, version = calkit.environments.resolve_latex_backend(env, ck_info)
+    # Noted whether or not anything is pinned: an environment that locks
+    # nothing still has a backend worth reporting with the run
+    calkit.latex.record_backend(env_name, backend, version)
     if verbose:
         typer.echo(
             f"Environment '{env_name}' resolved to {backend}"

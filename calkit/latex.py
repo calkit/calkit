@@ -136,6 +136,61 @@ def get_tectonic_cmd(
     return cmd
 
 
+# Where a resolved backend is noted so the run that used it can report
+# it. An environment that pins nothing has no lock file to carry this,
+# and that is the point: what built the document is worth knowing without
+# being worth rerunning stages over.
+BACKEND_RECORD_DIR = os.path.join(LOCAL_DIR, "latex-backends")
+
+
+def record_backend(env_name: str, backend: str, version: str | None) -> None:
+    """Note what a LaTeX environment resolved to.
+
+    Kept between runs rather than cleared at the start of each one. An
+    environment check is itself a cached stage, so a run with nothing to
+    rebuild doesn't resolve anything---and the backend that last built
+    the document is what produced the PDF that is still there.
+    """
+    import json
+
+    import calkit
+
+    os.makedirs(BACKEND_RECORD_DIR, exist_ok=True)
+    fpath = os.path.join(BACKEND_RECORD_DIR, f"{env_name}.json")
+    record = {
+        "backend": backend,
+        "version": version,
+        "time": calkit.utcnow(remove_tz=False).isoformat(),
+    }
+    with open(fpath, "w", newline="\n") as f:
+        json.dump(record, f, indent=2)
+
+
+def read_backend_records(env_names: list[str] | None = None) -> dict:
+    """What each LaTeX environment resolved to, keyed by name.
+
+    Limited to ``env_names`` when given, so an environment that has since
+    been removed from the project doesn't go on being reported.
+    """
+    import json
+
+    records: dict[str, dict] = {}
+    if not os.path.isdir(BACKEND_RECORD_DIR):
+        return records
+    for fname in sorted(os.listdir(BACKEND_RECORD_DIR)):
+        if not fname.endswith(".json"):
+            continue
+        env_name = fname[: -len(".json")]
+        if env_names is not None and env_name not in env_names:
+            continue
+        try:
+            with open(os.path.join(BACKEND_RECORD_DIR, fname)) as f:
+                records[env_name] = json.load(f)
+        except (OSError, ValueError):
+            continue
+    return records
+
+
 def backend_can_diff(backend: str) -> bool:
     """Whether ``latexdiff`` can be run in this backend."""
     return backend in LATEX_DIFF_CAPABLE

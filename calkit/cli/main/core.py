@@ -3080,6 +3080,13 @@ def run(
         "dvc_data_status_before": dvc_data_status_before,
         "dvc_status_after": dvc_status_after,
         "dvc_data_status_after": dvc_data_status_after,
+        # What a flexible LaTeX environment resolved to. Recorded here
+        # rather than in a lock file because an environment that pins
+        # nothing has none, which is the point: the backend is worth
+        # knowing without being worth rerunning stages over.
+        "latex_backends": calkit.latex.read_backend_records(
+            env_names=list(ck_info.get("environments") or {})
+        ),
     }
     run_info_fname = run_fname_prefix + ".json"
     local_runs_dir = os.path.join(calkit.ensure_local_dir(), "runs")

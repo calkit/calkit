@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest import mock
 
 import pytest
+from pytest_test_utils import TmpDir
 
 import calkit.latex
 
@@ -125,3 +126,24 @@ def test_tectonic_cmd() -> None:
     for kwargs in unsupported:
         with pytest.raises(ValueError, match="Tectonic doesn't support"):
             calkit.latex.get_tectonic_cmd(target_path="main.tex", **kwargs)
+
+
+def test_backend_records(tmp_dir: TmpDir) -> None:
+    calkit.latex.record_backend("tex", "docker", "ghcr.io/calkit/latex:1.0.0")
+    calkit.latex.record_backend("tex2", "tectonic", "0.15.0")
+    records = calkit.latex.read_backend_records()
+    assert records["tex"]["backend"] == "docker"
+    assert records["tex"]["version"] == "ghcr.io/calkit/latex:1.0.0"
+    assert records["tex2"]["backend"] == "tectonic"
+    # Recorded when it was resolved, so a cached run can say when the
+    # document was last actually built
+    assert records["tex"]["time"]
+    # An environment the project no longer has shouldn't go on being
+    # reported, but records survive between runs: an environment check is
+    # itself a cached stage, so a run with nothing to rebuild resolves
+    # nothing and the last backend is still what produced the PDF
+    assert set(calkit.latex.read_backend_records(env_names=["tex"])) == {"tex"}
+    assert calkit.latex.read_backend_records(env_names=[]) == {}
+    # Re-resolving replaces rather than accumulates
+    calkit.latex.record_backend("tex", "system", "4.88")
+    assert calkit.latex.read_backend_records()["tex"]["backend"] == "system"

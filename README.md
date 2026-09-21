@@ -152,6 +152,14 @@ which is a critical feature to have when using generative AI.
   Simply call `calkit run`.
   Compose your pipeline from many different kinds of stages,
   including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
+- Tools for automatically building reproducible pipelines from work you're
+  already doing.
+  Run a script, notebook, or LaTeX document with
+  [`calkit xr`](https://docs.calkit.org/pipeline#automatic-stage-and-environment-detection)
+  and it becomes a pipeline stage,
+  with its environment, inputs, and outputs detected and recorded,
+  so an existing project becomes reproducible a command at a time rather
+  than all at once.
 - A complementary self-hostable and GitHub-integrated
   [hub](https://github.com/calkit/calkit/tree/main/hub)
   web app to facilitate backup, collaboration,
@@ -295,7 +303,7 @@ This re-execs the CLI via `uvx --from calkit-python@<version> calkit`,
 so it requires [uv](https://docs.astral.sh/uv/) on `PATH`.
 You can also declare a minimum version in `calkit.yaml`;
 see
-[Pinning the Calkit CLI version](https://docs.calkit.org/requirements.md#pinning-the-calkit-cli-version).
+[Pinning the Calkit CLI version](https://docs.calkit.org/requirements#pinning-the-calkit-cli-version).
 
 ### Calkit Assistant
 

@@ -15,7 +15,6 @@ from calkit.models.core import (
     ProcedureFile,
     ProjectInfo,
     Publication,
-    TinyTexDockerEnvironment,
     _ImportedFromDoi,
 )
 
@@ -458,42 +457,3 @@ def test_procedure_entries():
     ]
     assert schema["$defs"]["ProcedureFile"]["additionalProperties"] is False
     assert schema["$defs"]["Procedure"]["not"] == {"required": ["path"]}
-
-
-def test_tinytex_docker_environment() -> None:
-    info = ProjectInfo.model_validate(
-        {
-            "environments": {
-                "tex": {"kind": "tinytex-docker"},
-                "tex2": {
-                    "kind": "tinytex-docker",
-                    "packages": ["revtex4-1", "epsf"],
-                    "image": "ghcr.io/calkit/latex:1.0.0",
-                },
-            }
-        }
-    )
-    tex = info.environments["tex"]
-    tex2 = info.environments["tex2"]
-    assert isinstance(tex, TinyTexDockerEnvironment)
-    assert isinstance(tex2, TinyTexDockerEnvironment)
-    # Nothing beyond what the image ships unless the project says so
-    assert tex.packages == []
-    assert tex.image is None
-    assert tex2.packages == ["revtex4-1", "epsf"]
-    # The kinds an earlier design had are not accepted, so a project
-    # written against them is told rather than silently validated
-    for bad in [{"kind": "latex"}, {"kind": "tectonic"}, {"kind": "tinytex"}]:
-        with pytest.raises(ValidationError):
-            ProjectInfo.model_validate({"environments": {"x": bad}})
-    # Round-tripping through YAML keeps the kind-specific class
-    roundtripped = _roundtrip(
-        {
-            "environments": {
-                "tex": {"kind": "tinytex-docker", "packages": ["epsf"]}
-            }
-        }
-    )
-    rt = roundtripped.environments["tex"]
-    assert isinstance(rt, TinyTexDockerEnvironment)
-    assert rt.packages == ["epsf"]

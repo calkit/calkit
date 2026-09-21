@@ -8190,54 +8190,6 @@
       "title": "TableEvidence",
       "type": "object"
     },
-    "TinyTexDockerEnvironment": {
-      "description": "TeX Live in a container, small enough to be worth pulling.\n\nTinyTeX plus the packages most documents need, which is a fraction of\nthe size of a full TeX Live image, and what a LaTeX stage uses unless\nthe project says otherwise.\n\n``packages`` is what this document needs beyond that set. It is a hard\ndependency rather than a preference: a missing TeX package doesn't\ntypeset differently, it fails to build, so it's part of what stages\ndepend on.",
-      "properties": {
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A description of the environment.",
-          "title": "Description"
-        },
-        "image": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Image to run in. Defaults to Calkit's own.",
-          "title": "Image"
-        },
-        "kind": {
-          "const": "tinytex-docker",
-          "default": "tinytex-docker",
-          "title": "Kind",
-          "type": "string"
-        },
-        "packages": {
-          "default": [],
-          "description": "TeX packages to install with tlmgr, beyond what the image ships. Names are tlmgr package names, e.g. 'revtex4-1'.",
-          "items": {
-            "type": "string"
-          },
-          "title": "Packages",
-          "type": "array"
-        }
-      },
-      "title": "TinyTexDockerEnvironment",
-      "type": "object"
-    },
     "UvEnvironment": {
       "properties": {
         "description": {
@@ -9141,7 +9093,6 @@
             "renv": "#/$defs/REnvironment",
             "slurm": "#/$defs/SlurmEnvironment",
             "system": "#/$defs/SystemEnvironment",
-            "tinytex-docker": "#/$defs/TinyTexDockerEnvironment",
             "uv": "#/$defs/UvEnvironment",
             "uv-venv": "#/$defs/UvVenvEnvironment",
             "venv": "#/$defs/VenvEnvironment"
@@ -9157,9 +9108,6 @@
           },
           {
             "$ref": "#/$defs/JuliaEnvironment"
-          },
-          {
-            "$ref": "#/$defs/TinyTexDockerEnvironment"
           },
           {
             "$ref": "#/$defs/MatlabEnvironment"

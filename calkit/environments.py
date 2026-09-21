@@ -655,10 +655,6 @@ def get_env_lock_fpath(
         # itself even when ``for_dvc``: there's exactly one of them, so
         # there's no reason to make a stage depend on the whole directory.
         lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
-    elif env_kind == "tinytex-docker":
-        # The image and the packages installed into it are both part of
-        # what decides whether a document builds, so both are pinned.
-        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
     elif env_kind in ("slurm", "pbs"):
         # Job-scheduler envs have no external dependency manifest, so the
         # "lock" is just a JSON dump of the env config. The file is
@@ -928,36 +924,6 @@ def write_system_env_lock(
             if f.read() == content:
                 return lock_fpath
     # newline="\n" so the file is byte-identical on every platform.
-    with open(lock_fpath, "w", newline="\n") as f:
-        f.write(content)
-    return lock_fpath
-
-
-def write_tinytex_docker_env_lock(
-    env_name: str,
-    env: dict,
-    wdir: str | None = None,
-) -> str | None:
-    """Write a JSON lock file for a TinyTeX Docker environment."""
-    import calkit.latex
-
-    lock_fpath = get_env_lock_fpath(
-        env=env, env_name=env_name, wdir=wdir, as_posix=True
-    )
-    if lock_fpath is None:
-        return None
-    lock_data = {
-        "image": env.get("image") or calkit.latex.DEFAULT_LATEX_IMAGE,
-        "packages": sorted(env.get("packages") or []),
-    }
-    content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
-    parent = os.path.dirname(lock_fpath)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    if os.path.isfile(lock_fpath):
-        with open(lock_fpath, "r") as f:
-            if f.read() == content:
-                return lock_fpath
     with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
     return lock_fpath

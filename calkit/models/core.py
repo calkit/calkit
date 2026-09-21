@@ -875,7 +875,6 @@ class Environment(BaseModel):
         "pbs",
         "slurm",
         "system",
-        "tinytex-docker",
         "uv",
         "pixi",
         "venv",
@@ -1102,31 +1101,6 @@ class REnvironment(Environment):
     )
     prefix: str | None = Field(
         default=None, description="Path at which to create the environment."
-    )
-
-
-class TinyTexDockerEnvironment(Environment):
-    """TeX Live in a container, small enough to be worth pulling.
-
-    TinyTeX plus the packages most documents need, which is a fraction of
-    the size of a full TeX Live image, and what a LaTeX stage uses unless
-    the project says otherwise.
-
-    ``packages`` is what this document needs beyond that set. It is a hard
-    dependency rather than a preference: a missing TeX package doesn't
-    typeset differently, it fails to build, so it's part of what stages
-    depend on.
-    """
-
-    kind: Literal["tinytex-docker"] = "tinytex-docker"
-    packages: list[str] = Field(
-        default=[],
-        description="TeX packages to install with tlmgr, beyond what the "
-        "image ships. Names are tlmgr package names, e.g. 'revtex4-1'.",
-    )
-    image: str | None = Field(
-        default=None,
-        description="Image to run in. Defaults to Calkit's own.",
     )
 
 
@@ -2010,7 +1984,6 @@ class ProjectInfo(BaseModel):
             CondaEnvironment
             | DockerEnvironment
             | JuliaEnvironment
-            | TinyTexDockerEnvironment
             | MatlabEnvironment
             | PixiEnvironment
             | REnvironment

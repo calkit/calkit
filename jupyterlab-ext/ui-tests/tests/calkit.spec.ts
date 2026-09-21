@@ -31,6 +31,17 @@ test.describe("Notebook pipeline workflow", () => {
     // Set a wide viewport to ensure toolbar badges are visible (not collapsed to 3-dot menu)
     await page.setViewportSize({ width: 1400, height: 900 })
 
+    // Anything the page logs or throws is the only view into why a click
+    // produced no request when this fails on CI
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        console.log(`Console error: ${message.text()}`)
+      }
+    })
+    page.on("pageerror", (error) => {
+      console.log(`Page error: ${error.message}`)
+    })
+
     // Navigate to JupyterLab
     await page.goto()
 
@@ -69,6 +80,8 @@ test.describe("Notebook pipeline workflow", () => {
         .then(() => true)
         .catch(() => false)
       if (shown) {
+        // Which dialog it was is worth knowing when this test fails in CI
+        console.log(`Dismissing dialog: ${await dialog.innerText()}`)
         // Accept whatever it's asking, i.e., the kernel it preselected
         await page.keyboard.press("Enter")
         await dialog.waitFor({ state: "hidden", timeout: 10000 })
@@ -177,13 +190,15 @@ test.describe("Notebook pipeline workflow", () => {
 
     // Prepare network waits to observe the stage save request/response
     const saveStageButton = stageDropdown.locator('button:has-text("Save")').first()
+    // A slow runner has taken well over 15s to get here, and the request
+    // waits start before the click
     const stageRequestPromise = page.waitForRequest(
       (request) => request.url().includes("notebook/stage") && request.method() === "PUT",
-      { timeout: 15000 }
+      { timeout: 45000 }
     )
     const stageResponsePromise = page.waitForResponse(
       (response) => response.url().includes("notebook/stage") && response.request().method() === "PUT",
-      { timeout: 15000 }
+      { timeout: 45000 }
     )
     await Promise.all([stageRequestPromise, stageResponsePromise, saveStageButton.click()])
 

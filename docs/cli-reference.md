@@ -743,6 +743,8 @@ Arguments:
 
 Set up the Calkit hub as the default DVC remote and store a token in the local config.
 
+Deprecated: this configures the project, not Calkit itself, which is what the rest of this app is for.
+
 Usage:
 
 ```text
@@ -2506,6 +2508,7 @@ Update objects.
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
+| [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2918,6 +2921,36 @@ Options:
 | `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
 | `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                                                                |
 | `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                                                                                                                                |
+
+<a id="subcommand-update-hub"></a>
+
+#### `calkit update hub`
+
+Connect this project to a Calkit hub.
+
+Creates the project on the hub if it isn't there, then points DVC at the hub's storage so data and outputs have somewhere to go. This is what 'calkit new project --hub' does at creation time, for a project that was created without it.
+
+A project that already has a Git remote keeps it: the hub adopts that repository rather than creating a second one for the same work. One with no remote is offered a new repository, since otherwise there is nowhere to push code.
+
+Usage:
+
+```text
+calkit update hub [OPTIONS] [HUB]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                                                              |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hub`    | str  | no       |         | Hub to connect this project to, e.g., 'calkit.io'. Defaults to the one already set for the project, else the 'default_hub' config value, else calkit.io. |
+
+Options:
+
+| Option          | Type    | Required | Default | Description                                                                                                                     |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--public`      | boolean | no       | False   | Create the project as public.                                                                                                   |
+| `--create-repo` | boolean | no       | False   | Let the hub create a Git repository without asking, for a project that has no remote. Asked about interactively when not given. |
+| `--no-commit`   | boolean | no       | False   | Do not commit the changes.                                                                                                      |
 
 <a id="command-group-check"></a>
 

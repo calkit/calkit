@@ -545,7 +545,7 @@ def get_status(
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
                 raise_error(f"Failed to initialize DVC repository: {e}")
-    valid_categories = ["project", "git", "dvc", "pipeline"]
+    valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
             if category not in valid_categories:
@@ -580,6 +580,37 @@ def get_status(
                 "Failed pipeline environment checks for: "
                 + ", ".join(pipeline_status.failed_environment_checks)
             )
+    # Checking questions needs to know which stages are stale, which is the
+    # expensive part of the pipeline status computed above, so reuse that
+    # rather than asking DVC a second time
+    questions_status = None
+    if "questions" in categories and ck_info.get("questions"):
+        from calkit.pipeline import frozen_tainted_stage_names
+        from calkit.questions import check_questions
+
+        stale_stages = None
+        frozen_stages = None
+        # A pipeline status that bailed out, e.g., on a failed environment
+        # check, has no staleness in it; let the check work it out itself
+        # rather than reporting evidence as current because nothing was
+        # computed
+        if (
+            pipeline_status is not None
+            and not pipeline_status.errors
+            and not pipeline_status.failed_environment_checks
+        ):
+            stale_stages = {
+                n.split("@")[0] for n in pipeline_status.stale_stage_names
+            }
+            try:
+                frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
+            except Exception:
+                frozen_stages = set()
+        questions_status = check_questions(
+            ck_info=ck_info,
+            stale_stages=stale_stages,
+            frozen_stages=frozen_stages,
+        )
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:
@@ -593,6 +624,8 @@ def get_status(
                     "timestamp": status.timestamp.isoformat(),
                 }
             )
+        if questions_status is not None:
+            status_dict["questions"] = questions_status.model_dump(mode="json")
         if "git" in categories:
             try:
                 repo = calkit.git.get_repo()
@@ -674,6 +707,14 @@ def get_status(
             typer.echo(
                 'Project status not set. Use "calkit new status" to update.'
             )
+        typer.echo()
+    if questions_status is not None:
+        from calkit.questions import format_summary
+
+        print_sep("Questions")
+        typer.echo(format_summary(questions_status))
+        if not questions_status.ok:
+            typer.echo("Run 'calkit check questions' for detail.")
         typer.echo()
     if "git" in categories:
         print_sep("Git")

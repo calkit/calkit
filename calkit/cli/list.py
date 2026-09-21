@@ -197,16 +197,25 @@ def _echo_question(n: int, question: str | dict) -> None:
     question = dict(question)
     text = question.pop("question", "")
     typer.echo(f"{n}. question: {text}")
+    # A rendered question is a full model dump, so every field it doesn't
+    # use is there as None; listing those is noise
     for k, v in question.items():
+        if v is None:
+            continue
         if isinstance(v, dict):
             typer.echo(f"    {k}:")
             for k1, v1 in v.items():
+                if v1 is None:
+                    continue
                 typer.echo(f"      {k1}: {v1}")
         elif isinstance(v, list):
             typer.echo(f"    {k}:")
             for item in v:
                 if isinstance(item, dict):
-                    for n1, (k1, v1) in enumerate(item.items()):
+                    pairs = [
+                        (k1, v1) for k1, v1 in item.items() if v1 is not None
+                    ]
+                    for n1, (k1, v1) in enumerate(pairs):
                         if n1 == 0:
                             typer.echo(f"      - {k1}: {v1}")
                         else:

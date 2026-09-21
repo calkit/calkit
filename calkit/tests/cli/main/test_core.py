@@ -1048,6 +1048,43 @@ def test_status(tmp_dir):
     calkit.get_project_status_history()
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(["calkit", "new", "status", "very-cool"])
+    # Questions are summarized in a section of their own
+    os.makedirs("results", exist_ok=True)
+    with open("results/summary.json", "w") as f:
+        json.dump({"r2": 0.985}, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"] = [
+        {
+            "question": "Does it work?",
+            "answer": "Yes, $R^2 = {r2:.3f}$.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/summary.json",
+                    "key": "r2",
+                }
+            ],
+        },
+        {"question": "Is there more?"},
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "questions"]
+    ).decode()
+    assert "Questions" in out
+    assert "2 questions, 1 unanswered" in out
+    # The value isn't attributed to any stage, which is an error, so the
+    # summary says to go look
+    assert "calkit check questions" in out
+    # A project with no questions gets no section at all
+    ck_info.pop("questions")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "questions"]
+    ).decode()
+    assert "Questions" not in out
 
 
 def test_save(tmp_dir):

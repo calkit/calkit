@@ -138,7 +138,7 @@ def from_json(
 
 
 def _tex_env(source_date_epoch: str | None) -> dict[str, str] | None:
-    """The environment a TeX command runs in, or None to inherit it.
+    r"""The environment a TeX command runs in, or None to inherit it.
 
     ``FORCE_SOURCE_DATE`` is what makes pdfTeX apply the date to
     ``\pdfcreationdate`` and friends, not only to the trailer ID.

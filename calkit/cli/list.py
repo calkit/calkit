@@ -243,7 +243,7 @@ def list_questions(
         render_question,
     )
 
-    def _texts(question: dict) -> list[str]:
+    def _texts(question: dict) -> list[str | dict]:
         evidence = question.get("evidence") or []
         return [question.get(f) or "" for f in TEMPLATED_FIELDS] + [
             ev.get("explanation") or ""
@@ -260,16 +260,18 @@ def list_questions(
         # let a fresh clone read as a project that types its braces. Any
         # placeholder left standing counts, whether it names evidence that
         # could not be read or names nothing at all: a brace meant to stay
-        # in the text is written '{{' and never reaches here.
+        # in the text is written '{{' and never reaches here. A conditional
+        # answer still in clauses is one whose conditions could not be read.
         unfilled = any(
-            placeholders(text)
+            isinstance(text, dict) or placeholders(text)
             for q in rendered
             if isinstance(q, dict)
             for text in _texts(q)
         )
         if unfilled:
             warn(
-                "Some placeholders could not be filled from the evidence. "
+                "Some placeholders or conditions could not be filled from "
+                "the evidence. "
                 "Run 'calkit check questions' to see why; 'calkit pull' if "
                 "the results files are not here yet.",
                 err=json_output,

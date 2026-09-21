@@ -12,6 +12,19 @@ on:
   push:
     branches:
       - main
+    # Only what the hub is actually built from. The backend image builds
+    # with the repository root as its context, so it takes in the Calkit
+    # package and the agent plugin as well as hub/ itself. Without this,
+    # anything merged to main deployed staging, e.g., a change to a
+    # Docker image we publish.
+    paths:
+      - "hub/**"
+      - "calkit/**"
+      - "agent-plugin/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "README.md"
+      - ".github/workflows/deploy-hub-staging.yml"
   workflow_dispatch:
 
 jobs:

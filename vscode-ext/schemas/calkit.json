@@ -5579,10 +5579,17 @@
               "type": "string"
             },
             {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
               "type": "null"
             }
           ],
           "default": null,
+          "description": "The claim the evidence supports. A mapping keyed by 'if <condition>', 'elif <condition>' and 'else' picks its wording from the evidence, so an answer resting on a threshold states the other outcome instead of going stale when a value moves.",
           "title": "Answer"
         },
         "evidence": {

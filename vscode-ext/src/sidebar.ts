@@ -41,6 +41,20 @@ function questionText(question: string | QuestionEntry): string {
   return typeof question === "string" ? question : question.question;
 }
 
+// Conditional answers show every clause, since picking one needs the evidence
+// values, which only the CLI reads.
+function answerText(question: string | QuestionEntry): string | undefined {
+  if (typeof question === "string" || question.answer === undefined) {
+    return undefined;
+  }
+  if (typeof question.answer === "string") {
+    return question.answer;
+  }
+  return Object.entries(question.answer)
+    .map(([clause, wording]) => `${clause}: ${wording}`)
+    .join("; ");
+}
+
 // Base codicon for each artifact kind (used when the artifact has provenance and
 // isn't stale; imported artifacts use a cloud icon instead).
 const ARTIFACT_ICONS: Record<ArtifactKind, string> = {
@@ -422,7 +436,7 @@ export class CalkitSidebarProvider
         this.matchesFilter(
           questionText(question),
           typeof question === "string" ? undefined : question.hypothesis,
-          typeof question === "string" ? undefined : question.answer,
+          answerText(question),
         ),
       );
     if (filtered.length === 0) {
@@ -474,8 +488,9 @@ export class CalkitSidebarProvider
     if (question.hypothesis) {
       detail("Hypothesis", question.hypothesis, "lightbulb");
     }
-    if (question.answer) {
-      detail("Answer", question.answer, "check");
+    const answer = answerText(question);
+    if (answer) {
+      detail("Answer", answer, "check");
     }
     for (const ev of question.evidence ?? []) {
       // Evidence references a figure or result file with an optional

@@ -1597,6 +1597,27 @@ def push(
         if excluded:
             selected.discard(target)
     _warn_on_hub_mismatch()
+    # Pushing a project with nowhere to push to fails on the Git remote
+    # that isn't there, which says nothing about what to do next. What it
+    # needs is a hub, so offer one rather than reporting the symptom.
+    if selected & {"git", "dvc"} and not _has_somewhere_to_push():
+        from calkit.cli.update import update_hub
+        from calkit.dependencies import _is_interactive
+
+        typer.echo(
+            "This project isn't connected to a hub, so there's nowhere to "
+            "push its code and data."
+        )
+        if not _is_interactive():
+            warn("Skipping push; run 'calkit update hub' to connect")
+            return
+        answer = typer.prompt(
+            "Connect it now? [Y/n]", default="y", show_default=False
+        )
+        if answer.strip().lower() not in ("", "y", "yes"):
+            warn("Skipping push; run 'calkit update hub' when you want to")
+            return
+        update_hub()
     if "dvc" in selected:
         remotes = calkit.dvc.get_remotes()
         if not no_check_auth:
@@ -1684,6 +1705,24 @@ def push(
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
     _tell_hub_we_pushed(sorted(selected), git_args)
+
+
+def _has_somewhere_to_push() -> bool:
+    """Whether a push has anywhere at all to go.
+
+    Any remote counts, not only a hub's. Plenty of projects push to a Git
+    remote they set up themselves and keep their data elsewhere, and a
+    push for them works exactly as it always did.
+    """
+    try:
+        if calkit.git.get_repo().remotes:
+            return True
+    except Exception:
+        pass
+    try:
+        return bool(calkit.dvc.get_remotes())
+    except Exception:
+        return False
 
 
 def _is_connected_to_a_hub() -> bool:

@@ -1538,7 +1538,7 @@ def update_dataset(
     calkit.save_calkit_info(ck_info)
 
 
-def _is_connected_to_hub() -> bool:
+def is_connected_to_hub() -> bool:
     """Whether this project already has somewhere to push code and data.
 
     Both halves have to be there: a Git remote without DVC storage leaves
@@ -1620,7 +1620,7 @@ def update_hub(
     # Connecting a project that is already connected is nothing to do, so
     # running this a second time costs no requests and changes no files.
     # Naming a hub is how someone asks to move, which is a real change.
-    if hub is None and _is_connected_to_hub():
+    if hub is None and is_connected_to_hub():
         typer.echo(
             f"Already connected to {calkit.hub.get_hub_url()}; name a hub "
             "to connect to a different one"

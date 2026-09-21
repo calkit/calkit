@@ -129,34 +129,29 @@ be.
 ## Save it
 
 ```sh
-calkit save -am "Tweak the fit" --no-push
+calkit save -am "Tweak the fit"
 ```
 
 This stages and commits in one step, sending code to Git and data and
 outputs to DVC storage, so you don't have to decide which goes where.
 
-`--no-push` is there because this project has nowhere to push yet.
-Connect it to a hub, below, and you can drop the flag.
+The project so far is on your machine and nowhere else, so there's
+nothing to push to yet, and Calkit offers to fix that:
 
-## Give it somewhere to live
-
-The project so far is on your machine and nowhere else.
-A [hub](hub/index.md) is what backs it up and lets other people see it,
-and it holds the data and outputs that are too big for Git.
-
-```sh
-calkit update hub
+```
+This project isn't connected to a hub, so there's nowhere to push its
+code and data.
+Connect it now? [Y/n]
 ```
 
-This creates the project on the hub, sets up a Git repository if it
-doesn't have one, and points DVC at the hub's storage.
-After that, `calkit save -am "..."` pushes everything to where it
-belongs, and a collaborator can clone the project and run `calkit run`
-to reproduce it.
+Saying yes creates the project on a [hub](hub/index.md), which backs it
+up, holds the data and outputs that are too big for Git, and is how
+other people get to it.
+From then on `calkit save` pushes everything where it belongs, and a
+collaborator can clone the project and run `calkit run` to reproduce it.
 
-Running it again does nothing, so it's safe to leave in a script.
-Naming a hub, e.g., `calkit update hub calkit.io`, is how you say you
-want a different one.
+Saying no is fine too: the commit is already made, and
+`calkit update hub` connects the project whenever you want.
 
 ## Where to go next
 

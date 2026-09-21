@@ -937,7 +937,6 @@ def build_lock(
 
     Key order is fixed so that a lock written for a platform from a registry
     matches byte-for-byte the one that platform would write for itself.
-
     """
     lock = {key: identity.get(key) for key in LOCK_INSPECT_KEYS}
     # Normalize here rather than at each call site, so that a lock carried

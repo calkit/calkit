@@ -139,7 +139,7 @@ which is a critical feature to have when using generative AI.
   [`calkit xr`](pipeline/index.md#automatic-stage-and-environment-detection)
   and it becomes a pipeline stage,
   with its environment, inputs, and outputs detected and recorded,
-  so an existing project becomes reproducible a command at a time rather
+  so an existing project becomes reproducible one command at a time rather
   than all at once.
 - A complementary self-hostable and GitHub-integrated
   [hub](https://github.com/calkit/calkit/tree/main/hub)

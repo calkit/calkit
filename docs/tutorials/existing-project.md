@@ -377,15 +377,18 @@ The project also compiles some LaTeX documents.
 We can create a Docker environment called `tex` for these with:
 
 ```sh
-calkit new docker-env --name tex --image texlive/texlive:latest-full
+calkit new docker-env --name tex --image ghcr.io/calkit/latex:0.1.2
 ```
 
-This environment is referencing a TeXLive Docker image from Docker Hub,
+This environment uses Calkit's LaTeX image,
 which requires [Docker](https://docker.com) to be installed,
-but will not require a separate LaTeX distribution to be installed.
-If you don't need the full TeXLive distribution, you can
-select any other image you'd like from
-[this list](https://hub.docker.com/r/texlive/texlive/tags).
+but not a LaTeX distribution.
+It carries the packages most documents use, and any other a document
+loads is fetched into the project the first time it's built
+(see [Packages](../latex.md#packages)).
+Any other TeX Live image works too, e.g., one from
+[this list](https://hub.docker.com/r/texlive/texlive/tags),
+though packages aren't fetched in those.
 
 ### Add pipeline stages
 

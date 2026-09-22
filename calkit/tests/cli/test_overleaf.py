@@ -11,6 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 import calkit
+import calkit.latex
 from calkit.cli.overleaf import _extract_title_from_tex, overleaf_app
 from calkit.git import ls_files
 
@@ -83,7 +84,7 @@ def test_overleaf(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["tex"]
     assert env["kind"] == "docker"
-    assert env["image"] == "texlive/texlive:latest-full"
+    assert env["image"] == calkit.latex.DEFAULT_LATEX_IMAGE
     stage = ck_info["pipeline"]["stages"]["build-ol-project"]
     assert stage["kind"] == "latex"
     assert stage["environment"] == "tex"

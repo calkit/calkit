@@ -49,9 +49,22 @@ calkit new publication paper --template latex/jfm --stage paper \
 
 Available templates are `latex/article` (generic), `latex/ieee-conference`
 (IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
-(chapters, for a thesis or technical report). Each uses packages that ship
-with TeX Live, so the `texlive/texlive:latest-full` Docker environment
-builds all of them.
+(chapters, for a thesis or technical report). The environment it creates
+uses Calkit's LaTeX image, which builds all of them.
+
+## Packages
+
+Calkit's LaTeX image is TeX Live cut down to the packages journal classes
+and most papers use, a fraction of the size of a full distribution.
+When a document loads something the image doesn't carry,
+`calkit latex build` fetches the package the first time it's needed and
+keeps it in the project, under the gitignored `.calkit/local/texmf`, so
+later builds don't fetch it again and nothing fetched ends up in Git.
+
+This happens when building with the image directly, i.e., with no
+environment, or in a Docker environment built on it.
+Other images, and a TeX distribution installed on the machine, are left
+alone: install what they need the usual way.
 
 ## Inputs
 

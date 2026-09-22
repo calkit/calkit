@@ -6566,19 +6566,24 @@ async def post_project_overleaf_publication(
         raise HTTPException(
             400, f"A stage named '{stage_name}' already exists; please provide"
         )
-    # Check environment spec, auto-detecting a TeXlive env to use
+    # Check environment spec, auto-detecting a TeX Live env to use, which
+    # is either a TeX Live image or Calkit's own
     envs = ck_info.get("environments", {})
     env_name = environment_name
+
+    def is_tex_image(image: str) -> bool:
+        return "texlive" in image or "calkit/latex" in image
+
     if not env_name:
         for en, e in envs.items():
-            if e.get("kind") == "docker" and "texlive" in e.get("image", ""):
+            if e.get("kind") == "docker" and is_tex_image(e.get("image", "")):
                 env_name = en
-                logger.info(f"Detected TeXlive env '{en}'")
+                logger.info(f"Detected TeX Live env '{en}'")
                 break
     elif env_name and env_name in envs:
         env = envs[env_name]
-        if env.get("kind") != "docker" and "texlive" not in env.get(
-            "image", ""
+        if env.get("kind") != "docker" and not is_tex_image(
+            env.get("image", "")
         ):
             raise HTTPException(
                 400,
@@ -6593,7 +6598,7 @@ async def post_project_overleaf_publication(
         while env_name in envs:
             env_name = f"tex-{n}"
             n += 1
-        env = {"kind": "docker", "image": "texlive/texlive:latest-full"}
+        env = {"kind": "docker", "image": calkit.latex.DEFAULT_LATEX_IMAGE}
         envs[env_name] = env
         ck_info["environments"] = envs
     # Determine mode: link vs zip

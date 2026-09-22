@@ -1573,10 +1573,12 @@ def new_publication(
     repo = calkit.git.get_repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
+        from calkit.latex import DEFAULT_LATEX_IMAGE
+
         env = dict(
             kind="docker",
-            image="texlive/texlive:latest-full",
-            description="TeXlive full.",
+            image=DEFAULT_LATEX_IMAGE,
+            description="TeX Live via Calkit's LaTeX image.",
         )
         envs[env_name] = env
         ck_info["environments"] = envs

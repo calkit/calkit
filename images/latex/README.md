@@ -6,9 +6,10 @@ roughly 9 GB for `texlive/texlive:latest-full`.
 
 It is what `calkit latex build` runs in when a document names no
 environment of its own, and what Calkit's dev container and VS Code
-settings use. All three pin an exact tag, set in `calkit/latex.py`,
+settings use, and what new LaTeX environments are created with. All of
+them pin an exact tag, set in `calkit/latex.py`,
 `calkit/resources/vscode/settings.json`, and the dev container config
-generated from it.
+generated from it, and the docs' examples do the same.
 
 Originally developed at
 [`calkit/tinytex-latexmk-docker`](https://github.com/calkit/tinytex-latexmk-docker),
@@ -158,8 +159,8 @@ Publish a release tagged `latex-image/vX.Y.Z`, the same way the other
 subprojects are released, and the workflow builds it for amd64 and arm64
 and pushes it to ghcr.io with a provenance attestation.
 
-It then opens a pull request moving the three pinned tags to the new
-one. That pull request is opened with the workflow's own token, which
+It then opens a pull request moving the pinned tags, in the code and in
+the docs' examples, to the new one. That pull request is opened with the workflow's own token, which
 doesn't start other workflows, so its checks run only once someone pushes
 to it or closes and reopens it.
 

@@ -12,6 +12,7 @@ from unittest.mock import patch
 import git
 from fastapi.testclient import TestClient
 
+import calkit.latex
 from app.core import ryaml
 
 URL = "/projects/o/p/publications"
@@ -402,3 +403,51 @@ def test_get_project_publication_components(
             headers=normal_user_token_headers,
         )
         assert resp.status_code == 400, resp.text
+
+
+def test_post_project_overleaf_publication_creates_tex_env(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    repo, _ = _make_repo(tmp_path, {"README.md": b"Hi\n"}, {"name": "p"})
+    wdir = str(repo.working_dir)
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        id=uuid.uuid4(),
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
+    zip_data = _zip_bytes(
+        {
+            "main.tex": (
+                b"\\documentclass{article}\n\\title{A paper}\n"
+                b"\\begin{document}\\maketitle\\end{document}\n"
+            ),
+        }
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=repo),
+    ):
+        for path in ["paper", "talk"]:
+            resp = client.post(
+                f"{URL}/overleaf",
+                data={"path": path, "kind": "journal-article"},
+                files={"file": ("paper.zip", zip_data, "application/zip")},
+                headers=normal_user_token_headers,
+            )
+            assert resp.status_code == 200, resp.text
+    with open(os.path.join(wdir, "calkit.yaml")) as f:
+        ck = ryaml.load(f)
+    # Built with Calkit's LaTeX image, and found again by the second import
+    # rather than duplicated
+    assert ck["environments"] == {
+        "tex": {"kind": "docker", "image": calkit.latex.DEFAULT_LATEX_IMAGE}
+    }
+    stages = ck["pipeline"]["stages"]
+    assert {s["environment"] for s in stages.values()} == {"tex"}

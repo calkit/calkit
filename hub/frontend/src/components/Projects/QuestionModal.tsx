@@ -28,7 +28,7 @@ import { MdEdit } from "react-icons/md"
 import { TiFlowMerge } from "react-icons/ti"
 
 import { ProjectsService } from "../../client"
-import { encodeBase64Utf8 } from "../../lib/strings"
+import { decodeBase64Utf8, encodeBase64Utf8 } from "../../lib/strings"
 import type { QuestionEvidence, QuestionPublic } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import {
@@ -369,6 +369,7 @@ function EvidenceDetail({
   const citedByPath =
     evidence.kind === "document" ||
     (evidence.kind === "publication" && !evidence.publication)
+  const isHtml = evidence.path.toLowerCase().endsWith(".html")
   const documentRequest = useQuery({
     queryKey: [
       "projects",
@@ -439,10 +440,30 @@ function EvidenceDetail({
         </Text>
       )
     }
-    if (!documentRequest.data) {
+    const item = documentRequest.data
+    if (!item?.content) {
       return <NotFound evidence={evidence} />
     }
-    return <FileContent item={documentRequest.data} />
+    if (isHtml) {
+      return (
+        <Box height="100%">
+          {/* A project's HTML is untrusted. Scripts may run, since a rendered
+              report needs them, but without allow-same-origin they run in an
+              opaque origin with no access to this page or its storage, and
+              forms, popups, dialogs and top-level navigation stay blocked.
+              srcDoc rather than the signed download URL, which the page's
+              scripts could otherwise read and send elsewhere. */}
+          <iframe
+            title={evidence.path}
+            style={{ height: "100%", width: "100%", border: "none" }}
+            sandbox="allow-scripts"
+            referrerPolicy="no-referrer"
+            srcDoc={decodeBase64Utf8(item.content)}
+          />
+        </Box>
+      )
+    }
+    return <FileContent item={item} />
   }
   if (evidence.kind === "publication") {
     if (publicationsRequest.isPending) {

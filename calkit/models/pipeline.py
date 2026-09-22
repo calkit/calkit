@@ -580,6 +580,21 @@ class Stage(BaseModel):
         return f"calkit xenv -n {self.inner_environment} --no-check --"
 
     @property
+    def runs_in_shell(self) -> bool:
+        """Whether the command reaches a shell with no runtime in between.
+
+        True for ``_system``, for a system or scheduler environment used on
+        its own, i.e., wrapping no inner environment, since then the stage's
+        command runs as it is on that machine. Stages whose command is code
+        for an interpreter, e.g., MATLAB, have to start it themselves then.
+        """
+        if self.environment == "_system":
+            return True
+        if self._system_env is not None or self.scheduler is not None:
+            return self.inner_environment == self.outer_environment
+        return False
+
+    @property
     def dvc_out_paths(self) -> list[str]:
         """The paths this stage writes, however its outputs are spelled."""
         paths = []
@@ -1360,8 +1375,8 @@ class MatlabScriptStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = self.xenv_cmd
-        if self.environment == "_system":
-            cmd += "matlab -noFigureWindows -batch"
+        if self.runs_in_shell:
+            cmd = f"{cmd} matlab -noFigureWindows -batch".lstrip()
         matlab_cmd = ""
         if self.matlab_path is not None:
             matlab_cmd += f"addpath(genpath('{self.matlab_path}')); "
@@ -1379,8 +1394,8 @@ class MatlabCommandStage(Stage):
         # We need to escape quotes in the command
         matlab_cmd = self.command.replace('"', '\\"')
         cmd = self.xenv_cmd
-        if self.environment == "_system":
-            cmd += "matlab -noFigureWindows -batch"
+        if self.runs_in_shell:
+            cmd = f"{cmd} matlab -noFigureWindows -batch".lstrip()
         cmd += f' "{matlab_cmd}"'
         return cmd
 

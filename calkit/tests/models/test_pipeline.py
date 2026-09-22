@@ -344,6 +344,21 @@ def test_matlabcommandstage():
     assert sd["cmd"] == (
         'matlab -noFigureWindows -batch "disp(\\"Hello, MATLAB!\\");"'
     )
+    # A named system environment on its own is the machine's own MATLAB,
+    # so the stage starts it, as it does for _system
+    s = MatlabCommandStage(name="d", environment="lab", command="disp(1);")
+    s._system_env = "lab"
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n lab --no-check -- matlab -noFigureWindows -batch "
+        '"disp(1);"'
+    )
+    # Wrapping a MATLAB environment, that environment starts MATLAB
+    s = MatlabCommandStage(name="e", environment="lab:m1", command="disp(1);")
+    s._system_env = "lab"
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n lab --no-check -- calkit xenv -n m1 --no-check -- "
+        '"disp(1);"'
+    )
 
 
 def test_matlabscriptstage():

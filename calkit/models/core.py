@@ -1820,6 +1820,10 @@ class PublicationEvidence(BaseModel):
 class DocumentEvidence(BaseModel):
     """Evidence in the form of a document cited by path, e.g., a Markdown
     write-up, without declaring it as a publication.
+
+    The document must be built by a pipeline stage, usually a Markdown
+    stage, so its numbers are injected from the results and go stale with
+    them; one written by hand is an error, like a typed-in value.
     """
 
     kind: Literal["document"] = "document"

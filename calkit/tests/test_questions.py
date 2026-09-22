@@ -192,6 +192,11 @@ def test_check_questions(tmp_dir):
                     "script_path": "s.py",
                     "outputs": [{"path": "results/findings.json"}],
                 },
+                "notes": {
+                    "kind": "markdown",
+                    "environment": "py",
+                    "target_path": "docs/notes.md",
+                },
             }
         },
         "questions": [
@@ -256,8 +261,9 @@ def test_check_questions(tmp_dir):
     # makes it and it is not declared with an import or a person
     assert q4.evidence[4].status == "unattributed"
     assert [ev.path for ev in status.unattributed] == ["figures/plot.png"]
-    # A document is written by hand, so it only has to exist
+    # A document is attributed to the Markdown stage that builds it
     assert q4.evidence[6].status == "ok"
+    assert q4.evidence[6].stage == "notes"
     # A value no stage computes is a magic number, so it fails rather than
     # being advice; an import is traceable, a person typing it in is not
     with open("results/typed.json", "w") as f:
@@ -284,6 +290,29 @@ def test_check_questions(tmp_dir):
                 checked.evidence[0].message or ""
             )
     os.remove("results/typed.json")
+    # Likewise a document nothing builds: whatever it says was typed in
+    with open("docs/typed.md", "w") as f:
+        f.write("It is 3.\n")
+    handwritten = {
+        "question": "Written by hand?",
+        "answer": "See the notes.",
+        "evidence": [{"kind": "document", "path": "docs/typed.md"}],
+    }
+    for declared, expected in [
+        (None, "error"),
+        ({"created_by": "someone"}, "error"),
+        ({"imported_from": {"project": "a/b"}}, "ok"),
+    ]:
+        info = dict(ck_info)
+        if declared:
+            info["publications"] = [{"path": "docs/typed.md"} | declared]
+        checked = check_question(5, handwritten, info, ".")
+        assert checked.status == expected, declared
+        if expected == "error":
+            assert "no pipeline stage builds" in (
+                checked.evidence[0].message or ""
+            )
+    os.remove("docs/typed.md")
     rendered = render_question(ck_info["questions"][3], ck_info, ".")
     assert rendered["answer"] == "8 of eight do, a 5.1x gain."
     assert rendered["evidence"][2]["explanation"] == "The best is a."

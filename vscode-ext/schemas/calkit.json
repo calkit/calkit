@@ -954,7 +954,7 @@
       "type": "object"
     },
     "DocumentEvidence": {
-      "description": "Evidence in the form of a document cited by path, e.g., a Markdown\nwrite-up, without declaring it as a publication.",
+      "description": "Evidence in the form of a document cited by path, e.g., a Markdown\nwrite-up, without declaring it as a publication.\n\nThe document must be built by a pipeline stage, usually a Markdown\nstage, so its numbers are injected from the results and go stale with\nthem; one written by hand is an error, like a typed-in value.",
       "properties": {
         "explanation": {
           "anyOf": [

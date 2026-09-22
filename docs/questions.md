@@ -185,7 +185,11 @@ and the argument in the publication.
 
 When the reasoning lives in a document that isn't a publication, e.g.,
 notes kept in `docs/`, cite it with `kind: document` and a `section`.
-It only needs to exist, so no pipeline stage has to produce it.
+A document has to be built by a pipeline stage, usually a Markdown stage
+that injects its numbers from the results, so they're checked like any
+other evidence and reported stale when their stage is.
+Like a value no stage computes, a document written by hand is an error,
+since nothing checks what it says.
 
 ```yaml
 evidence:

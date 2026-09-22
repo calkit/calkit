@@ -1037,7 +1037,7 @@ def check_evidence(
             )
     if (
         out.status in ("ok", "changed")
-        and is_value_evidence(ev)
+        and (is_value_evidence(ev) or kind == "document")
         and not _is_attributed(path, out.stage, ck_info, wdir, computed=True)
     ):
         out.status = "error"
@@ -1046,11 +1046,14 @@ def check_evidence(
             "where the number came from or keep it current; produce the file "
             "with a stage, or declare it with 'imported_from' if another "
             "project computed it"
+            if kind != "document"
+            else "no pipeline stage builds this document, so nothing checks "
+            "what it says against the results; build it with a Markdown "
+            "stage, or declare it with 'imported_from' if another project "
+            "produced it"
         )
-    elif (
-        out.status == "ok"
-        and kind != "document"
-        and not _is_attributed(path, out.stage, ck_info, wdir)
+    elif out.status == "ok" and not _is_attributed(
+        path, out.stage, ck_info, wdir
     ):
         out.status = "unattributed"
         out.message = (

@@ -955,6 +955,9 @@ def check_evidence(
     if kind == "publication":
         out.status, out.message = _check_publication_label(ev, ck_info, wdir)
         return out
+    # Written by hand, so there is no stage to attribute it to
+    if kind == "document":
+        return out
     if kind == "value" and not key:
         out.status = "error"
         out.message = "value evidence needs a key"

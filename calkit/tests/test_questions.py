@@ -164,6 +164,9 @@ def test_check_questions(tmp_dir):
         f.write("pdf")
     with open("figures/plot.png", "w") as f:
         f.write("png")
+    os.makedirs("docs")
+    with open("docs/notes.md", "w") as f:
+        f.write("# Method\n")
     # A DVC-tracked output known only through dvc.lock
     with open("dvc.lock", "w") as f:
         f.write(
@@ -224,6 +227,11 @@ def test_check_questions(tmp_dir):
                     },
                     {"kind": "figure", "path": "figures/plot.png"},
                     {"kind": "result", "path": "results/big.h5"},
+                    {
+                        "kind": "document",
+                        "path": "docs/notes.md",
+                        "section": "Method",
+                    },
                 ],
             },
         ],
@@ -248,6 +256,8 @@ def test_check_questions(tmp_dir):
     # makes it and it is not declared with an import or a person
     assert q4.evidence[4].status == "unattributed"
     assert [ev.path for ev in status.unattributed] == ["figures/plot.png"]
+    # A document is written by hand, so it only has to exist
+    assert q4.evidence[6].status == "ok"
     # A value no stage computes is a magic number, so it fails rather than
     # being advice; an import is traceable, a person typing it in is not
     with open("results/typed.json", "w") as f:

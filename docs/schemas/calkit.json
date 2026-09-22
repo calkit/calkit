@@ -953,6 +953,64 @@
       "title": "DockerEnvironment",
       "type": "object"
     },
+    "DocumentEvidence": {
+      "description": "Evidence in the form of a document cited by path, e.g., a Markdown\nwrite-up, without declaring it as a publication.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the document can be found.",
+          "title": "Git Ref"
+        },
+        "kind": {
+          "const": "document",
+          "default": "document",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Section of the document where the evidence is presented, as a reader would find it, e.g., '4.2' or 'Results'.",
+          "title": "Section"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "DocumentEvidence",
+      "type": "object"
+    },
     "Figure": {
       "description": "A figure, usually produced by a pipeline stage.\n\nCarries attribution for the ones that aren't: a schematic drawn by hand\nor laid out with a generative AI tool has no stage to point at, and is\nexactly the kind of thing a reader wants told. One obtained from\nelsewhere records ``imported_from`` instead, like a dataset does.",
       "not": {
@@ -5611,6 +5669,9 @@
                   },
                   {
                     "$ref": "#/$defs/PublicationEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/DocumentEvidence"
                   }
                 ]
               },

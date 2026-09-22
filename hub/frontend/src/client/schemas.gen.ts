@@ -6923,7 +6923,7 @@ export const QuestionEvidenceSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "result", "value", "table", "publication", "document"],
       title: "Kind",
     },
     path: {
@@ -6940,6 +6940,39 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Key",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    section: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Section",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
     },
     explanation: {
       anyOf: [
@@ -7058,7 +7091,7 @@ export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "result", "value", "table", "publication", "document"],
       title: "Kind",
     },
     path: {
@@ -7075,6 +7108,39 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Key",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    section: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Section",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
     },
     explanation: {
       anyOf: [

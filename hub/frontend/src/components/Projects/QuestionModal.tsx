@@ -41,6 +41,7 @@ import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import Tooltip from "../Common/Tooltip"
 import FigureView from "../Figures/FigureView"
+import FileContent from "../Files/FileContent"
 import PublicationView from "../Publications/PublicationView"
 import TableView from "../Tables/TableView"
 
@@ -106,7 +107,9 @@ const evidencePage = (evidence: QuestionEvidence) => {
   if (evidence.kind === "table") {
     return "tables"
   }
-  if (evidence.kind === "publication") {
+  // Only a declared publication is on the publications page; a document, or
+  // a publication cited without declaring it, opens as a file
+  if (evidence.kind === "publication" && evidence.publication) {
     return "publications"
   }
   return "files"
@@ -116,8 +119,9 @@ const evidenceTitle = (evidence: QuestionEvidence) => {
   if (evidence.kind === "figure") {
     return evidence.figure?.title ?? evidence.path
   }
-  if (evidence.kind === "publication") {
-    return evidence.publication?.title ?? evidence.path
+  if (evidence.kind === "publication" || evidence.kind === "document") {
+    const title = evidence.publication?.title ?? evidence.path
+    return evidence.section ? `${title}, section ${evidence.section}` : title
   }
   return evidence.result?.title ?? evidence.path
 }
@@ -261,7 +265,7 @@ function EvidenceCard({
   let icon = null
   if (evidence.kind === "table") {
     icon = <Icon as={FiGrid} color="gray.500" flexShrink={0} />
-  } else if (evidence.kind === "publication") {
+  } else if (evidence.kind === "publication" || evidence.kind === "document") {
     icon = <Icon as={FaRegFileAlt} color="gray.500" flexShrink={0} />
   }
   const body = (
@@ -358,8 +362,31 @@ function EvidenceDetail({
     accountName,
     projectName,
     ref,
-    evidence.kind === "publication",
+    evidence.kind === "publication" && !!evidence.publication,
   )
+  // Cited by path rather than declared, so its content comes from the tree
+  const citedByPath =
+    evidence.kind === "document" ||
+    (evidence.kind === "publication" && !evidence.publication)
+  const documentRequest = useQuery({
+    queryKey: [
+      "projects",
+      accountName,
+      projectName,
+      "contents",
+      evidence.path,
+      ref,
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectContents({
+        owner_name: accountName,
+        project_name: projectName,
+        path: evidence.path,
+        ref,
+      }).then((response) => response.data),
+    enabled: citedByPath && evidence.stale_reason !== "missing",
+    retry: false,
+  })
   if (evidence.kind === "figure") {
     if (!evidence.figure) {
       return <NotFound evidence={evidence} />
@@ -386,6 +413,15 @@ function EvidenceDetail({
       return <NotFound evidence={evidence} />
     }
     return <TableView table={table} maxHeight="calc(92vh - 300px)" />
+  }
+  if (citedByPath) {
+    if (documentRequest.isPending && evidence.stale_reason !== "missing") {
+      return <LoadingSpinner height="200px" />
+    }
+    if (!documentRequest.data) {
+      return <NotFound evidence={evidence} />
+    }
+    return <FileContent item={documentRequest.data} />
   }
   if (evidence.kind === "publication") {
     if (publicationsRequest.isPending) {

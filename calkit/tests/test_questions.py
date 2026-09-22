@@ -429,6 +429,9 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     for name, value in [("fresh", 1), ("drifted", 2), ("pinned", 3)]:
         with open(f"results/{name}.json", "w") as f:
             json.dump({"v": value}, f)
+    os.makedirs("docs")
+    with open("docs/write-up.md", "w") as f:
+        f.write("# Write-up\n")
     with open("dvc.lock", "w") as f:
         calkit.ryaml.dump(
             {
@@ -466,6 +469,12 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
                     "environment": "py",
                     "script_path": "s.py",
                     "outputs": [{"path": "results/drifted.json"}],
+                },
+                # Builds the document it names as its target
+                "write-up": {
+                    "kind": "markdown",
+                    "environment": "py",
+                    "target_path": "docs/write-up.md",
                 },
             }
         },
@@ -518,6 +527,11 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
                     }
                 ],
             },
+            {
+                "question": "And a document its stage would rebuild?",
+                "answer": "The write-up says so.",
+                "evidence": [{"kind": "document", "path": "docs/write-up.md"}],
+            },
         ],
     }
     _write_yaml(ck_info)
@@ -525,7 +539,7 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     # Stand in for DVC: only 'drift' needs re-running
     status = check_questions(ck_info=ck_info, wdir=".", check_pipeline=False)
     stale, frozen = (
-        {"drift"},
+        {"drift", "write-up/analyze"},
         frozen_tainted_stage_names(ck_info=ck_info, wdir="."),
     )
     # The freeze taints itself and everything reading what it wrote
@@ -549,7 +563,9 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
         "frozen",
         "frozen",
         "missing",
+        "stale",
     ]
+    assert status.questions[4].evidence[0].stage == "write-up"
     assert "out of date" in (status.questions[0].evidence[0].message or "")
     assert "git_ref" in (status.questions[1].evidence[0].message or "")
     assert "exp/never-pushed" in (
@@ -559,7 +575,7 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert not status.ok
     report = format_status(status)
     assert "Answers citing evidence that isn't there: 1" in report
-    assert "Answers whose evidence the pipeline would rebuild: 1" in report
+    assert "Answers whose evidence the pipeline would rebuild: 2" in report
     assert "Answers resting on a frozen stage, unpinned: 2 (worth a look)" in (
         report
     )

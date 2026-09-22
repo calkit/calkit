@@ -451,7 +451,17 @@ const EditQuestion = ({
           </FormControl>
         </ModalBody>
         <ModalFooter gap={3}>
-          <Button variant="danger" mr="auto" onClick={deleteDisclosure.onOpen}>
+          {/* Deleting writes to the default branch, where question numbers
+              may not match those at the ref being browsed */}
+          <Button
+            variant="danger"
+            mr="auto"
+            onClick={deleteDisclosure.onOpen}
+            isDisabled={!!gitRef}
+            title={
+              gitRef ? "Switch to the default branch to delete" : undefined
+            }
+          >
             Delete
           </Button>
           <Button

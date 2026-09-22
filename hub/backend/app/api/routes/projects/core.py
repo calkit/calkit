@@ -2410,6 +2410,9 @@ def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
         return item.publication is None and item.path not in present_paths
     if item.kind == "document":
         return item.path not in present_paths
+    # A value is the number itself, so without a key there's nothing to show
+    if item.kind == "value":
+        return item.value is None
     return bool(item.key) and item.value is None
 
 

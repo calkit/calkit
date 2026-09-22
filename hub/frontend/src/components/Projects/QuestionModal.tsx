@@ -28,6 +28,7 @@ import { MdEdit } from "react-icons/md"
 import { TiFlowMerge } from "react-icons/ti"
 
 import { ProjectsService } from "../../client"
+import { encodeBase64Utf8 } from "../../lib/strings"
 import type { QuestionEvidence, QuestionPublic } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import {
@@ -377,13 +378,26 @@ function EvidenceDetail({
       evidence.path,
       ref,
     ],
-    queryFn: () =>
-      ProjectsService.getProjectContents({
-        owner_name: accountName,
-        project_name: projectName,
-        path: evidence.path,
-        ref,
-      }).then((response) => response.data),
+    queryFn: async () => {
+      const item = (
+        await ProjectsService.getProjectContents({
+          owner_name: accountName,
+          project_name: projectName,
+          path: evidence.path,
+          ref,
+        })
+      ).data
+      // A large file comes back as a download URL rather than inline, which
+      // the viewer can't render as text, so read it from there
+      if (!item.content && item.url) {
+        const response = await fetch(item.url)
+        if (!response.ok) {
+          throw new Error(`Could not read ${evidence.path}`)
+        }
+        return { ...item, content: encodeBase64Utf8(await response.text()) }
+      }
+      return item
+    },
     enabled: citedByPath && evidence.stale_reason !== "missing",
     retry: false,
   })
@@ -417,6 +431,13 @@ function EvidenceDetail({
   if (citedByPath) {
     if (documentRequest.isPending && evidence.stale_reason !== "missing") {
       return <LoadingSpinner height="200px" />
+    }
+    if (documentRequest.isError) {
+      return (
+        <Text fontSize="sm" color="gray.500">
+          Couldn't load {evidence.path}. Open it from the link above.
+        </Text>
+      )
     }
     if (!documentRequest.data) {
       return <NotFound evidence={evidence} />

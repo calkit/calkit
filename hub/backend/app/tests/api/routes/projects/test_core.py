@@ -4242,6 +4242,8 @@ def test_question_evidence_values_documents_and_publications() -> None:
         {"kind": "publication", "path": "docs/draft.md", "section": "2b-i"},
         {"kind": "publication", "path": "docs/nowhere.md"},
         {"kind": "publication", "path": "paper/main.pdf", "label": "sec:x"},
+        # A value with no key names no number, so there's nothing to show
+        {"kind": "value", "path": "results/summary.json"},
     ]
 
     def fake_contents(project, repo, path, ref):
@@ -4288,6 +4290,7 @@ def test_question_evidence_values_documents_and_publications() -> None:
         "publication",
         "publication",
         "publication",
+        "value",
     ]
     assert evidence[0].value == "2.5"
     assert evidence[0].name == "mean"
@@ -4302,6 +4305,7 @@ def test_question_evidence_values_documents_and_publications() -> None:
     assert evidence[5].publication == declared
     assert evidence[5].label == "sec:x"
     assert evidence[5].stale_reason is None
+    assert evidence[6].stale_reason == "missing"
 
 
 def test_saving_a_question_keeps_names_sections_and_labels() -> None:

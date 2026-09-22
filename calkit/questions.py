@@ -955,9 +955,21 @@ def check_evidence(
     if kind == "publication":
         out.status, out.message = _check_publication_label(ev, ck_info, wdir)
         return out
-    # Written by hand, so there is no stage to attribute it to
-    if kind == "document":
-        return out
+    # A document may be written by hand or built by a stage, e.g., a
+    # Markdown stage, which declares it as its target rather than an output
+    if kind == "document" and out.stage is None:
+        out.stage = next(
+            (
+                name
+                for name, stage in (
+                    ck_info.get("pipeline", {}).get("stages") or {}
+                ).items()
+                if isinstance(stage, dict)
+                and stage.get("kind") == "markdown"
+                and stage.get("target_path") == path
+            ),
+            None,
+        )
     if kind == "value" and not key:
         out.status = "error"
         out.message = "value evidence needs a key"
@@ -993,8 +1005,13 @@ def check_evidence(
             # said
             out.message = "; ".join(filter(None, [out.message, change]))
     base = (out.stage or "").split("@")[0]
+    # A Markdown stage runs as sub-stages named after it, e.g., 'doc/analyze'
+    stale_hit, frozen_hit = (
+        any(n == base or n.startswith(base + "/") for n in names or ())
+        for names in (stale_stages, frozen_stages)
+    )
     if out.status in ("ok", "changed") and base:
-        if base in (stale_stages or set()):
+        if stale_hit:
             out.status = "stale"
             out.message = "; ".join(
                 filter(
@@ -1005,7 +1022,7 @@ def check_evidence(
                     ],
                 )
             )
-        elif base in (frozen_stages or set()):
+        elif frozen_hit:
             out.status = "frozen"
             out.message = "; ".join(
                 filter(
@@ -1030,8 +1047,10 @@ def check_evidence(
             "with a stage, or declare it with 'imported_from' if another "
             "project computed it"
         )
-    elif out.status == "ok" and not _is_attributed(
-        path, out.stage, ck_info, wdir
+    elif (
+        out.status == "ok"
+        and kind != "document"
+        and not _is_attributed(path, out.stage, ck_info, wdir)
     ):
         out.status = "unattributed"
         out.message = (

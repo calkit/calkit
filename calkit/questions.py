@@ -1052,6 +1052,25 @@ def check_evidence(
             "stage, or declare it with 'imported_from' if another project "
             "produced it"
         )
+        # A Quarto source is only evidence once rendered, so point there
+        for name, stage in (
+            ck_info.get("pipeline", {}).get("stages") or {}
+        ).items():
+            if (
+                kind == "document"
+                and isinstance(stage, dict)
+                and stage.get("kind") == "quarto"
+                and stage.get("target_path") == path
+            ):
+                rendered = [
+                    o.get("path") if isinstance(o, dict) else o
+                    for o in stage.get("outputs") or []
+                ]
+                out.message = (
+                    f"this is the source Quarto stage '{name}' renders; cite "
+                    "what it renders instead"
+                    + (f", e.g., {rendered[0]}" if rendered else "")
+                )
     elif out.status == "ok" and not _is_attributed(
         path, out.stage, ck_info, wdir
     ):

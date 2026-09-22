@@ -190,6 +190,8 @@ that injects its numbers from the results, so they're checked like any
 other evidence and reported stale when their stage is.
 Like a value no stage computes, a document written by hand is an error,
 since nothing checks what it says.
+For a Quarto stage, cite what it renders, e.g., the HTML or PDF, rather
+than the `.qmd` source, since its numbers are only computed on render.
 
 ```yaml
 evidence:

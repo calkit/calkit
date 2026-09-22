@@ -313,6 +313,38 @@ def test_check_questions(tmp_dir):
                 checked.evidence[0].message or ""
             )
     os.remove("docs/typed.md")
+    # A Quarto document is evidence as rendered, not as its source
+    with open("docs/report.qmd", "w") as f:
+        f.write("It is `{python} 3`.\n")
+    with open("docs/report.html", "w") as f:
+        f.write("It is 3.\n")
+    info = dict(ck_info)
+    info["pipeline"] = {
+        "stages": ck_info["pipeline"]["stages"]
+        | {
+            "report": {
+                "kind": "quarto",
+                "environment": "py",
+                "target_path": "docs/report.qmd",
+                "outputs": ["docs/report.html"],
+            }
+        }
+    }
+    for path, expected in [
+        ("docs/report.html", "ok"),
+        ("docs/report.qmd", "error"),
+    ]:
+        quarto = {
+            "question": "Rendered?",
+            "answer": "See the report.",
+            "evidence": [{"kind": "document", "path": path}],
+        }
+        checked = check_question(5, quarto, info, ".")
+        assert checked.status == expected, path
+    assert checked.evidence[0].message == (
+        "this is the source Quarto stage 'report' renders; cite what it "
+        "renders instead, e.g., docs/report.html"
+    )
     rendered = render_question(ck_info["questions"][3], ck_info, ".")
     assert rendered["answer"] == "8 of eight do, a 5.1x gain."
     assert rendered["evidence"][2]["explanation"] == "The best is a."

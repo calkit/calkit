@@ -66,9 +66,9 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-  # The CLI, the dev container, the VS Code settings, and the docs' examples
-  # all pin an exact tag, so a release that doesn't reach them changes
-  # nothing for anyone
+  # The CLI, the dev container, the VS Code settings, the docs' examples,
+  # and the hub's environment preset all pin an exact tag, so a release
+  # that doesn't reach them changes nothing for anyone
   pin:
     name: Pin the new tag 📌
     needs: publish
@@ -89,6 +89,7 @@ jobs:
         calkit/resources/vscode/settings.json
         docs/pipeline/index.md
         docs/tutorials/existing-project.md
+        hub/frontend/src/lib/environments.ts
     steps:
       - uses: actions/checkout@v7
         with:

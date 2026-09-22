@@ -3621,6 +3621,10 @@ export type ProjectPost = {
    */
   keep_template_history?: boolean
   /**
+   * Empty Repo
+   */
+  empty_repo?: boolean
+  /**
    * Overleaf Project Url
    */
   overleaf_project_url?: string | null

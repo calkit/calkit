@@ -16,10 +16,10 @@ This runs `npm run generate-client` in the frontend directory, which:
 - Formats the output with Biome
 
 The spec is fetched over HTTP, so a dev stack has to be up (`make dev`).
-Both `frontend/openapi.json` and `frontend/src/client` are committed, and
-the end-to-end CI job regenerates them against the stack it already runs
-and fails if either differs, so a backend change that lands without a
-regenerated client won't merge.
+`frontend/openapi.json` is gitignored, but `frontend/src/client` is
+committed, and the end-to-end CI job regenerates it against the stack it
+already runs and fails if it differs, so a backend change that lands
+without a regenerated client won't merge.
 
 ## Code Formatting
 

@@ -161,9 +161,10 @@ subprojects are released, and the workflow builds it for amd64 and arm64
 and pushes it to ghcr.io with a provenance attestation.
 
 It then opens a pull request moving the pinned tags, in the code, the
-docs' examples, and the hub's environment preset, to the new one. That pull request is opened with the workflow's own token, which
-doesn't start other workflows, so its checks run only once someone pushes
-to it or closes and reopens it.
+docs' examples, and the hub's environment preset, to the new one. That
+pull request is opened with the workflow's own token, which doesn't start
+other workflows, so its checks run only once someone pushes to it or
+closes and reopens it.
 
 The image is versioned on its own rather than with the Calkit release,
 since it changes rarely.

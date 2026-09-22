@@ -39,6 +39,8 @@ findings.
 There are a few kinds of evidence:
 
 - `figure`, `table`, and `publication` refer to an artifact by path.
+- `document` refers to a written document by path, e.g., a Markdown
+  write-up, without declaring it as a publication.
 - `result` refers to a whole results file.
 - `value` refers to one value inside a JSON or YAML results file,
   found by its `key`.
@@ -180,6 +182,17 @@ source, e.g., `sec:scaling`.
 of the LaTeX stage that builds the publication.
 This keeps answers short, with the numbers coming from `value` evidence
 and the argument in the publication.
+
+When the reasoning lives in a document that isn't a publication, e.g.,
+notes kept in `docs/`, cite it with `kind: document` and a `section`.
+It only needs to exist, so no pipeline stage has to produce it.
+
+```yaml
+evidence:
+  - kind: document
+    path: docs/notes.md
+    section: Method
+```
 
 A question that is still open should have no `answer`.
 Use `notes` to say why it's open and what would settle it.

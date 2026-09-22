@@ -2371,6 +2371,9 @@ class _EvidenceLookups(NamedTuple):
     dvc_lock: dict[str, Any]
     stage_statuses: dict[str, PipelineStageStatus]
     frozen_stages: set[str]
+    # Cited documents and publications present in the tree or dvc.lock,
+    # since those need not be declared to be cited
+    present_paths: set[str] = set()
 
 
 def _declared_git_ref(ev: dict) -> str | None:
@@ -2386,6 +2389,13 @@ def _declared_git_ref(ev: dict) -> str | None:
     return git_ref if isinstance(git_ref, str) else str(git_ref)
 
 
+def _optional_str(value: Any) -> str | None:
+    """A hand-written scalar as a string, e.g., a section YAML read as 4.2."""
+    if value is None or value == "":
+        return None
+    return value if isinstance(value, str) else str(value)
+
+
 def _evidence_ref(ev: dict, ref: str | None) -> str | None:
     """The ref an evidence entry resolves at.
 
@@ -2394,7 +2404,7 @@ def _evidence_ref(ev: dict, ref: str | None) -> str | None:
     return _declared_git_ref(ev) or ref
 
 
-def _evidence_missing(item: QuestionEvidence) -> bool:
+def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
     """Whether the citation resolves to anything the reader can look at.
 
     Matches what the question modal would draw: a figure or publication that
@@ -2407,7 +2417,12 @@ def _evidence_missing(item: QuestionEvidence) -> bool:
     if item.kind == "figure":
         return item.figure is None
     if item.kind == "publication":
-        return item.publication is None
+        return item.publication is None and item.path not in present_paths
+    if item.kind == "document":
+        return item.path not in present_paths
+    # A value is the number itself, so without a key there's nothing to show
+    if item.kind == "value":
+        return item.value is None
     return bool(item.key) and item.value is None
 
 
@@ -2496,14 +2511,16 @@ def _build_question_evidence(
     evidence cites; a ref missing from it is one that could not be read, and
     its evidence comes back unresolved rather than failing the question.
     """
-    empty = _EvidenceLookups({}, {}, {}, {}, {}, {}, set())
+    empty = _EvidenceLookups({}, {}, {}, {}, {}, {}, set(), set())
     evidence = []
     for ev in evidence_ck:
         if not isinstance(ev, dict) or ev.get("kind") not in (
             "figure",
             "result",
+            "value",
             "table",
             "publication",
+            "document",
         ):
             continue
         path = ev.get("path", "")
@@ -2516,6 +2533,9 @@ def _build_question_evidence(
             kind=ev["kind"],
             path=path,
             key=ev.get("key"),
+            name=_optional_str(ev.get("name")),
+            section=_optional_str(ev.get("section")),
+            label=_optional_str(ev.get("label")),
             explanation=explanation,
             explanation_path=explanation_path,
             # What the entry declares, not what it resolved at: this is the
@@ -2527,7 +2547,7 @@ def _build_question_evidence(
             item.figure = lookups.figures_by_path.get(path)
         elif item.kind == "publication":
             item.publication = lookups.publications_by_path.get(path)
-        elif item.kind in ("result", "table"):
+        elif item.kind in ("result", "value", "table"):
             # A declared table answers table evidence first; a result at
             # the same path answers result evidence. Falling through to
             # results covers a table nobody declared, which is still worth
@@ -2553,7 +2573,7 @@ def _build_question_evidence(
         _set_evidence_stage(item, lookups)
         # Last word: an answer resting on something nobody can see is worse
         # off than one resting on something merely out of date.
-        if _evidence_missing(item):
+        if _evidence_missing(item, lookups.present_paths):
             item.stale_reason = "missing"
         evidence.append(item)
     return evidence
@@ -2603,7 +2623,7 @@ def _build_questions_public(
                 )
             }
         results_by_path: dict[tuple[str, str | None], Result] = {}
-        if kinds & {"result", "table"}:
+        if kinds & {"result", "value", "table"}:
             # Keyed by (path, key), since several results can point at one
             # file. A keyless result lands under (path, None), which is what
             # keyless evidence resolves against; a keyed one must not stand in
@@ -2655,6 +2675,34 @@ def _build_questions_public(
                 f"Failed to compute pipeline status for questions at "
                 f"{ev_ref}: {e}"
             )
+        present_paths: set[str] = set()
+        cited_paths = {
+            ev["path"]
+            for ev in entries
+            if ev.get("kind") in ("document", "publication")
+            and isinstance(ev.get("path"), str)
+        }
+        if cited_paths:
+            try:
+                tree = get_repo_tree_for_ref(repo, ev_ref)
+                dvc_outs = {
+                    out.get("path")
+                    for stage in (dvc_lock.get("stages") or {}).values()
+                    if isinstance(stage, dict)
+                    for out in stage.get("outs") or []
+                    if isinstance(out, dict)
+                }
+                present_paths = {
+                    path
+                    for path in cited_paths
+                    if tree.is_file(path)
+                    or tree.is_file(path + ".dvc")
+                    or path in dvc_outs
+                }
+            except Exception as e:
+                logger.warning(
+                    f"Failed to find cited documents at {ev_ref}: {e}"
+                )
         return _EvidenceLookups(
             figures_by_path=figures_by_path,
             results_by_path=results_by_path,
@@ -2663,6 +2711,7 @@ def _build_questions_public(
             dvc_lock=dvc_lock,
             stage_statuses=stage_statuses,
             frozen_stages=frozen_stages,
+            present_paths=present_paths,
         )
 
     # Group the citations by the ref each resolves at, so a project whose
@@ -2888,8 +2937,14 @@ def _apply_question_update(
     evidence = []
     for ev in req.evidence:
         entry: dict = {"kind": ev.kind, "path": ev.path}
-        if ev.kind == "result" and ev.key:
+        if ev.kind in ("result", "value") and ev.key:
             entry["key"] = ev.key
+        if ev.kind == "value" and ev.name:
+            entry["name"] = ev.name
+        if ev.kind in ("publication", "document") and ev.section:
+            entry["section"] = ev.section
+        if ev.kind == "publication" and ev.label:
+            entry["label"] = ev.label
         if ev.explanation_path:
             entry["explanation"] = {"path": ev.explanation_path}
         elif ev.explanation:
@@ -2966,6 +3021,45 @@ def put_project_question(
         ref=None,
         ck_info=ck_info,
     )[idx]
+
+
+@router.delete("/projects/{owner_name}/{project_name}/questions/{number}")
+def delete_project_question(
+    owner_name: str,
+    project_name: str,
+    number: int,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Message:
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    ck_info = app.projects.get_ck_info_from_repo(repo=repo)
+    ck_questions = ck_info.get("questions", [])
+    if number < 1 or number > len(ck_questions):
+        raise HTTPException(404, "Question not found")
+    ck_questions.pop(number - 1)
+    # Drop the key rather than leave an empty list behind
+    if ck_questions:
+        ck_info["questions"] = ck_questions
+    else:
+        ck_info.pop("questions", None)
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    repo.git.commit(["-m", f"Delete question {number}"])
+    push_and_expire(project, repo)
+    app.index.index_questions(
+        session=session, project=project, ck_info=ck_info
+    )
+    return Message(message="success")
 
 
 class _FigureContext(NamedTuple):

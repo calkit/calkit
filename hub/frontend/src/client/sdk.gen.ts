@@ -50,6 +50,8 @@ import type {
   DeleteProjectMapPathsResponses,
   DeleteProjectNativeCollaboratorErrors,
   DeleteProjectNativeCollaboratorResponses,
+  DeleteProjectQuestionErrors,
+  DeleteProjectQuestionResponses,
   DeleteProjectReferenceItemErrors,
   DeleteProjectReferenceItemResponses,
   DeleteProjectReferencesErrors,
@@ -3597,6 +3599,46 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Delete Project Question
+   */
+  public static deleteProjectQuestion<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      number: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteProjectQuestionResponses,
+    DeleteProjectQuestionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "number" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteProjectQuestionResponses,
+      DeleteProjectQuestionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/questions/{number}",
+      ...options,
+      ...params,
     })
   }
 

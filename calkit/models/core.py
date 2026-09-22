@@ -1817,6 +1817,34 @@ class PublicationEvidence(BaseModel):
     )
 
 
+class DocumentEvidence(BaseModel):
+    """Evidence in the form of a document cited by path, e.g., a Markdown
+    write-up, without declaring it as a publication.
+
+    The document must be built by a pipeline stage, usually a Markdown
+    stage, so its numbers are injected from the results and go stale with
+    them; one written by hand is an error, like a typed-in value.
+    """
+
+    kind: Literal["document"] = "document"
+    path: str
+    section: str | None = Field(
+        default=None,
+        description=(
+            "Section of the document where the evidence is presented, as a "
+            "reader would find it, e.g., '4.2' or 'Results'."
+        ),
+    )
+    explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the document can be found."
+        ),
+    )
+
+
 class Question(BaseModel):
     """A question the project hopes to answer.
 
@@ -1866,6 +1894,7 @@ class Question(BaseModel):
             | ValueEvidence
             | TableEvidence
             | PublicationEvidence
+            | DocumentEvidence
         ]
         | None
     ) = None

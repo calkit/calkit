@@ -2952,6 +2952,26 @@ def test_xenv_env_var(tmp_dir):
     assert "KEY=VALUE" in proc.stderr
 
 
+def test_add_says_why_git_refused(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open(".gitignore", "w") as f:
+        f.write("secret.txt\n")
+    with open("secret.txt", "w") as f:
+        f.write("shh")
+    # What Git refuses is said rather than passed over, and doesn't stop
+    # the rest of what was asked for
+    proc = subprocess.run(
+        ["calkit", "add", "secret.txt", "-t", "git"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    said = proc.stdout + proc.stderr
+    assert "Failed to add secret.txt to Git" in said
+    assert "ignored by one of your .gitignore files" in said
+    assert not git.Repo().git.ls_files("secret.txt")
+
+
 def test_push_carries_annotated_tags(tmp_dir):
     """Annotated tags should reach the remote along with their commits.
 

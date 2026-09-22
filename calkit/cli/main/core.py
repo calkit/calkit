@@ -898,7 +898,27 @@ def add(
     """
     import dvc.repo
     from dvc.exceptions import NotDvcRepoError
-    from git.exc import InvalidGitRepositoryError
+    from git.exc import GitCommandError, InvalidGitRepositoryError
+
+    def git_add(*paths_to_add: str) -> None:
+        """Stage paths, saying why rather than stopping if Git refuses.
+
+        Git refuses for reasons that don't make the rest of what was asked
+        for wrong, e.g., a path a .gitignore excludes, and this used to
+        shell out and ignore the exit status entirely. Paths are relative
+        to the working directory, which is what someone running this from
+        a subdirectory means.
+        """
+        try:
+            # Resolved here, since GitPython runs Git from the repo's root
+            # while these paths are relative to the working directory
+            repo.git.add(*[os.path.abspath(p) for p in paths_to_add])
+        except GitCommandError as e:
+            # GitPython labels and quotes what Git wrote; what it wrote is
+            # the part worth reading
+            reason = (e.stderr or str(e)).strip()
+            reason = reason.removeprefix("stderr: ").strip("'")
+            warn(f"Failed to add {', '.join(paths_to_add)} to Git: {reason}")
 
     if dry_run:
         typer.echo("Dry run: No files will be added")
@@ -981,7 +1001,7 @@ def add(
             for path in paths:
                 typer.echo(f"Would add {path} to {to}")
         elif to == "git":
-            subprocess.call(["git", "add"] + paths)
+            git_add(*paths)
         elif to == "dvc":
             for path in paths:
                 calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
@@ -1100,7 +1120,7 @@ def add(
                     typer.echo(
                         f"Adding {path} to Git since it's already in the repo"
                     )
-                    subprocess.call(["git", "add", path])
+                    git_add(path)
             elif path in dvc_paths:
                 if dry_run:
                     typer.echo(
@@ -1126,7 +1146,7 @@ def add(
                         typer.echo(
                             f"Adding {path} to Git per pipeline output storage"
                         )
-                        subprocess.call(["git", "add", path])
+                        git_add(path)
                 elif pipeline_storage == "dvc-zip":
                     if dry_run:
                         typer.echo(
@@ -1150,7 +1170,7 @@ def add(
                             f"Adding dvc.lock to Git "
                             f"({path} is a DVC pipeline output)"
                         )
-                        subprocess.call(["git", "add", "dvc.lock"])
+                        git_add("dvc.lock")
             elif (
                 locked_out := next(
                     (
@@ -1215,10 +1235,17 @@ def add(
                     typer.echo(f"Would add {path} to Git")
                 else:
                     typer.echo(f"Adding {path} to Git")
-                    subprocess.call(["git", "add", path])
+                    git_add(path)
     if not dry_run:
         if commit_message is not None:
-            subprocess.call(["git", "commit", "-m", commit_message])
+            try:
+                repo.git.commit("-m", commit_message)
+            except GitCommandError as e:
+                # Nothing staged is a normal outcome here, e.g., when what
+                # was asked for was already committed
+                output = f"{e.stdout or ''}{e.stderr or ''}"
+                if "nothing to commit" not in output:
+                    warn(f"Failed to commit: {output.strip() or e}")
         if push_commit:
             push()
     else:

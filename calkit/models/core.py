@@ -1839,6 +1839,15 @@ class Question(BaseModel):
     new evidence is how to say it still holds.
     """
 
+    name: str | None = Field(
+        default=None,
+        description=(
+            "Name for the question, e.g., for quoting its answer in a "
+            "document through 'calkit latex from-questions'. Unlike its "
+            "position in the list, it survives questions being added or "
+            "reordered."
+        ),
+    )
     question: str
     hypothesis: str | None = None
     answer: str | dict[str, str] | None = Field(
@@ -1869,6 +1878,18 @@ class Question(BaseModel):
         ]
         | None
     ) = None
+
+    @field_validator("name")
+    @classmethod
+    def check_name_not_a_position(cls, v: str | None) -> str | None:
+        # A question is also addressable by its position, so an all-digit
+        # name would be ambiguous with some other question's number
+        if v is not None and v.isdigit():
+            raise ValueError(
+                f"Question name {v!r} can't be a number, since questions "
+                "are also addressed by position"
+            )
+        return v
 
 
 class ProjectInfo(BaseModel):

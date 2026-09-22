@@ -10,6 +10,7 @@ import pytest
 
 import calkit
 import calkit.git
+import calkit.pipeline
 
 skipif_windows_docker = pytest.mark.skipif(
     sys.platform == "win32",
@@ -616,3 +617,66 @@ def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     )
     assert "Couldn't open" not in result.stderr
     assert result.returncode == 0, result.stderr
+
+
+def test_from_questions(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("results.json", "w") as f:
+        json.dump({"gain": 0.25}, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"] = [
+        {
+            "name": "staging",
+            "question": "Does staging help?",
+            "answer": "Yes, by {gain:+.2f} on 50% & more_problems.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results.json",
+                    "key": "gain",
+                    "name": "gain",
+                }
+            ],
+        }
+    ]
+    ck_info["pipeline"] = {
+        "stages": {
+            "qa": {
+                "kind": "questions-to-latex",
+                "outputs": ["paper/qa.tex"],
+                "command_name": "qa",
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # The compiled stage reads calkit.yaml and the evidence
+    stage = calkit.pipeline.to_dvc()["qa"]
+    assert stage["cmd"] == (
+        "calkit latex from-questions --output 'paper/qa.tex' --command qa"
+    )
+    assert set(stage["deps"]) >= {"calkit.yaml", "results.json"}
+    subprocess.check_call(["calkit", "run"])
+    with open("paper/qa.tex") as f:
+        tex = f.read()
+    # Rendered, then escaped for LaTeX
+    assert "\\newcommand\\qa" in tex
+    assert "Yes, by +0.25 on 50\\% \\& more\\_problems." in tex
+    assert "{staging.answer}" in tex and "{1.question}" in tex
+    # A change to the evidence reruns the stage
+    with open("results.json", "w") as f:
+        json.dump({"gain": -0.1}, f)
+    subprocess.check_call(["calkit", "run"])
+    with open("paper/qa.tex") as f:
+        # json2latex braces a hyphen so it can't form a ligature
+        assert "Yes, by {-}0.10" in f.read()
+    # A template that can't render fails rather than writing a placeholder
+    ck_info["questions"][0]["answer"] = "Up {missing}."
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = subprocess.run(
+        ["calkit", "latex", "from-questions", "-o", "x.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 and not os.path.exists("x.tex")

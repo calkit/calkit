@@ -468,13 +468,18 @@ TEMPLATED_FIELDS = ("hypothesis", "answer", "notes")
 
 
 def render_question(
-    question: str | dict, ck_info: dict | None = None, wdir: str | None = None
+    question: str | dict,
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    strict: bool = False,
 ) -> str | dict:
     """A copy of a question with its templates filled from the evidence.
 
     A placeholder that cannot be filled is left as written rather than
     raising, since this is for display; ``check_questions`` is where a
-    broken template is an error.
+    broken template is an error. With ``strict``, an unreadable value or
+    an unfillable placeholder raises instead, for output such as a paper
+    where a literal ``{name}`` would be printed as though it were prose.
     """
     if isinstance(question, str):
         return question
@@ -487,14 +492,22 @@ def render_question(
         try:
             data = read_evidence_file(os.path.join(wdir, ev["path"]))
             values[name or ""] = resolve_key(data, ev["key"])
-        except Exception:
+        except Exception as e:
+            if strict:
+                raise ValueError(
+                    f"Can't read value {name!r} from {ev['path']}: {e}"
+                ) from e
             continue
     out = dict(question)
     for field in TEMPLATED_FIELDS:
         try:
             out[field] = render(out.get(field), values)
-        except (KeyError, ValueError, IndexError):
-            pass
+        except (KeyError, ValueError, IndexError) as e:
+            if strict:
+                raise ValueError(
+                    f"Can't render the {field} of question "
+                    f"{question.get('question')!r}: {e}"
+                ) from e
     if out.get("evidence"):
         rendered_evidence = []
         for ev in out["evidence"]:
@@ -505,6 +518,103 @@ def render_question(
                 pass
             rendered_evidence.append(ev)
         out["evidence"] = rendered_evidence
+    return out
+
+
+#: The parts of a question a document can quote.
+LATEX_FIELDS = ("question", "hypothesis", "answer", "notes")
+
+
+def latex_values(ck_info: dict, wdir: str | None = None) -> dict[str, str]:
+    """Every question's rendered text, keyed for a document to quote.
+
+    Each field is keyed ``<name>.<field>``, where the name is the question's
+    1-based position and, when it has one, also its ``name``, which survives
+    reordering where the position does not. Rendering is strict, so a
+    template that cannot be filled is an error here rather than a literal
+    placeholder in a paper.
+
+    Parameters
+    ----------
+    ck_info : dict
+        The project's ``calkit.yaml`` content.
+    wdir : str, optional
+        Directory evidence paths are relative to.
+
+    Returns
+    -------
+    dict of str to str
+        Rendered text by key, e.g., ``{"staging.answer": "Yes..."}``.
+
+    Raises
+    ------
+    ValueError
+        If two questions share a name, or a template cannot be rendered.
+    """
+    out: dict[str, str] = {}
+    seen: set[str] = set()
+    for position, question in enumerate(ck_info.get("questions") or [], 1):
+        rendered = render_question(question, ck_info, wdir=wdir, strict=True)
+        fields: dict[str, Any] = (
+            {"question": rendered}
+            if isinstance(rendered, str)
+            else {f: rendered.get(f) for f in LATEX_FIELDS}
+        )
+        names = [str(position)]
+        qname = question.get("name") if isinstance(question, dict) else None
+        if qname:
+            if qname in seen:
+                raise ValueError(f"Two questions have the name {qname!r}")
+            seen.add(qname)
+            names.append(qname)
+        for name in names:
+            for field, text in fields.items():
+                if text is not None:
+                    out[f"{name}.{field}"] = " ".join(str(text).split())
+    return out
+
+
+def evidence_paths(ck_info: dict) -> list[str]:
+    """Every path the project's questions cite as evidence."""
+    paths = {
+        ev["path"]
+        for question in ck_info.get("questions") or []
+        if isinstance(question, dict)
+        for ev in question.get("evidence") or []
+        if ev.get("path")
+    }
+    return sorted(paths)
+
+
+def expand_questions_stages(ck_info: dict) -> dict:
+    """Give each ``questions-to-latex`` stage the files its output reads.
+
+    Its text comes from ``calkit.yaml`` and its numbers from the evidence
+    files, so the stage has to rerun when either changes. The evidence is
+    listed once here, from the questions themselves, rather than repeated
+    by hand in the stage.
+    """
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if not any(
+        isinstance(st, dict) and st.get("kind") == "questions-to-latex"
+        for st in stages.values()
+    ):
+        return ck_info
+    derived = ["calkit.yaml", *evidence_paths(ck_info)]
+    expanded = {}
+    for name, stage in stages.items():
+        if (
+            isinstance(stage, dict)
+            and stage.get("kind") == "questions-to-latex"
+        ):
+            stage = dict(stage)
+            declared = list(stage.get("inputs") or [])
+            stage["inputs"] = declared + [
+                p for p in derived if p not in declared
+            ]
+        expanded[name] = stage
+    out = dict(ck_info)
+    out["pipeline"] = {**ck_info["pipeline"], "stages": expanded}
     return out
 
 

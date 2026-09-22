@@ -254,6 +254,7 @@ class Stage(BaseModel):
         "marimo-html-wasm",
         "markdown",
         "procedure",
+        "questions-to-latex",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1343,6 +1344,51 @@ class JsonToLatexStage(Stage):
         return outs
 
 
+class QuestionsToLatexStage(Stage):
+    """The project's questions and answers, rendered for a LaTeX document.
+
+    Its inputs are ``calkit.yaml`` and every file the questions cite as
+    evidence, added when the pipeline is compiled, so the output reruns
+    when an answer or a value it reads changes.
+    """
+
+    kind: Literal["questions-to-latex"] = "questions-to-latex"
+    environment: str = "_system"
+    command_name: str = Field(
+        default="questions",
+        description=(
+            "Name of the LaTeX command the document quotes questions "
+            "through, e.g., 'questions' for \\questions[staging.answer]."
+        ),
+    )
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = "calkit latex from-questions"
+        for out in self.outputs:
+            out_path = out if isinstance(out, str) else out.path
+            cmd += f" --output '{out_path}'"
+        return cmd + f" --command {shlex.quote(self.command_name)}"
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        """Stored with Git by default, like other generated LaTeX."""
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=out.storage == "dvc",
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
     script_path: RelativeChildPathString = Field(
@@ -2096,6 +2142,7 @@ class Pipeline(BaseModel):
                 | LatexStage
                 | QuartoStage
                 | JsonToLatexStage
+                | QuestionsToLatexStage
                 | MatlabScriptStage
                 | MatlabCommandStage
                 | ShellCommandStage

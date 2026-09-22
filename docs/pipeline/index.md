@@ -581,6 +581,21 @@ instead.
 | `to`                    | str \| None | no       | null    | Output format, passed to 'quarto render --to'. Defaults to what the document's metadata specifies. |
 | `args`                  | list[str]   | no       |         | Extra arguments passed to 'quarto render'.                                                         |
 
+### `questions-to-latex`
+
+Model class: `QuestionsToLatexStage`
+
+The project's questions and answers, rendered for a LaTeX document.
+
+Its inputs are `calkit.yaml` and every file the questions cite as
+evidence, added when the pipeline is compiled, so the output reruns
+when an answer or a value it reads changes.
+
+| Kind-specific parameter | Type | Required | Default     | Description                                                                                                        |
+| ----------------------- | ---- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| `environment`           | str  | no       | '\_system'  | Name of the environment in which to run this stage.                                                                |
+| `command_name`          | str  | no       | 'questions' | Name of the LaTeX command the document quotes questions through, e.g., 'questions' for \questions[staging.answer]. |
+
 ### `r-script`
 
 Model class: `RScriptStage`

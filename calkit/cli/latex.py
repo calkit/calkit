@@ -137,6 +137,42 @@ def from_json(
             json2latex.dump(cmd_name, formatted, f)
 
 
+@latex_app.command(name="from-questions")
+def from_questions(
+    output_fpaths: Annotated[
+        list[str],
+        typer.Option("--output", "-o", help="Output LaTeX file path(s)."),
+    ],
+    command_name: Annotated[
+        str,
+        typer.Option("--command", help="Command name to use in LaTeX output."),
+    ] = "questions",
+) -> None:
+    """Write the project's questions and answers as a LaTeX command.
+
+    Each question's text, hypothesis, answer, and notes are rendered from
+    their evidence and exposed as, e.g., ``\\questions[staging.answer]``,
+    keyed by the question's ``name`` or its 1-based position.
+    """
+    import json2latex
+
+    import calkit.questions
+
+    ck_info = calkit.load_calkit_info()
+    try:
+        values = calkit.questions.latex_values(ck_info)
+    except ValueError as e:
+        raise_error(str(e))
+    for out_path in output_fpaths:
+        if not out_path.endswith(".tex"):
+            raise_error("Output file must be a .tex file")
+        outdir = os.path.dirname(out_path)
+        if outdir:
+            os.makedirs(outdir, exist_ok=True)
+        with open(out_path, "w") as f:
+            json2latex.dump(command_name, values, f)
+
+
 def _tex_cmd(
     tex_cmd: list[str],
     environment: str | None,

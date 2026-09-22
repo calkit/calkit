@@ -200,27 +200,35 @@ def read_evidence_file(path: str) -> Any:
 def resolve_key(data: Any, key: str) -> Any:
     """Look up ``key`` in a loaded results file.
 
-    A key that exists literally at the top level wins, so a key containing
-    dots keeps working. Otherwise the key is split on dots and walked, with
-    integer parts indexing into lists, so ``results.case-a.score`` reaches
-    into nested output.
+    The key is split on dots and walked, with integer parts indexing into
+    lists, so ``results.case-a.score`` reaches into nested output. At each
+    level the longest run of parts that names a key wins, so keys that
+    contain dots work at any depth, e.g., ``sweep.back_off_1.50_k.failed``.
     """
-    if isinstance(data, dict) and key in data:
-        return data[key]
-    node = data
-    for part in key.split("."):
-        if isinstance(node, dict) and part in node:
-            node = node[part]
-        elif isinstance(node, list) and re.fullmatch(r"-?\d+", part):
+
+    def walk(node: Any, parts: list[str]) -> Any:
+        if not parts:
+            return node
+        if isinstance(node, dict):
+            for end in range(len(parts), 0, -1):
+                name = ".".join(parts[:end])
+                if name in node:
+                    try:
+                        return walk(node[name], parts[end:])
+                    except KeyError:
+                        continue
+            raise KeyError(key)
+        if isinstance(node, list) and re.fullmatch(r"-?\d+", parts[0]):
             try:
-                node = node[int(part)]
+                item = node[int(parts[0])]
             except IndexError:
                 # An index past the end of a list is a key that isn't
                 # there, and callers handle a missing key
                 raise KeyError(key)
-        else:
-            raise KeyError(key)
-    return node
+            return walk(item, parts[1:])
+        raise KeyError(key)
+
+    return walk(data, key.split("."))
 
 
 class _Formatter(string.Formatter):
@@ -355,7 +363,16 @@ def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
                 return False
             left = right
         return True
-    raise ValueError("a condition must compare values, e.g., 'p < 0.05'")
+    if isinstance(node, ast.Name):
+        value = _operand(node, values)
+        # Only a true/false value stands alone, so a number is never
+        # silently read as its truthiness
+        if isinstance(value, bool):
+            return value
+    raise ValueError(
+        "a condition must compare values, e.g., 'p < 0.05', "
+        "or name a true/false value"
+    )
 
 
 def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:

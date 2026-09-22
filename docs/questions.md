@@ -74,10 +74,13 @@ evidence:
     name: leader
 ```
 
-The key is looked up as written at the top level of the file first.
-If it isn't there, it's split on dots and used to walk into nested
-objects, with integers indexing into lists,
+The key is split on dots and used to walk into nested objects,
+with integers indexing into lists,
 so `features.0.p-family-wise-all` reads a field of the first feature.
+At each level, the longest run of parts that names a key is used,
+so keys that contain dots work at any depth,
+e.g., `sweep.back_off_1.50_k.failed` reads `failed` from the
+`back_off_1.50_k` entry of `sweep`.
 
 The `name` defaults to the key, so it can be left out when the key is
 already a good name.
@@ -126,6 +129,10 @@ Conditions use the names of `value` evidence.
 They can compare values, including chained comparisons like
 `0.05 <= p < 0.1`, combine them with `and`, `or`, and `not`, and do
 arithmetic like `n / 2 > 8`.
+A true/false value can also be used on its own,
+e.g., `passes and not flaky`,
+but other values have to be compared,
+so a number is never read as true or false.
 Function calls and attribute access aren't allowed.
 Since conditions are Python expressions, the names in them must be valid
 Python identifiers.

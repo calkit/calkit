@@ -209,6 +209,8 @@ def test_list_questions(tmp_dir):
     assert "- kind: publication" in out
     assert "path: paper/paper.pdf" in out
     assert "explanation: See the results section." in out
+    # Fields that aren't set aren't listed
+    assert "None" not in out
 
 
 def test_list_remotes(tmp_dir):

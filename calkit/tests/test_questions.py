@@ -32,6 +32,17 @@ def test_resolve_key():
     assert resolve_key(data, "a.list.1.c") == 3
     assert resolve_key(data, "a.list.0") == 10
     assert resolve_key(data, "top") == 4
+    # Keys containing dots are found below the top level too, and a dotted
+    # key that leads nowhere falls back to shorter ones
+    nested = {
+        "sweep": {"back_off_1.50_k": {"failed": 13}, "back_off_1": {"x": 1}},
+        "v1.2": {"a": {"b": 5}},
+    }
+    assert resolve_key(nested, "sweep.back_off_1.50_k.failed") == 13
+    assert resolve_key(nested, "sweep.back_off_1.x") == 1
+    assert resolve_key(nested, "v1.2.a.b") == 5
+    with pytest.raises(KeyError):
+        resolve_key(nested, "sweep.back_off_1.50_k.missing")
     with pytest.raises(KeyError):
         resolve_key(data, "a.missing")
     with pytest.raises(KeyError):
@@ -677,6 +688,15 @@ def test_conditional_answers(tmp_dir):
         evaluate_condition("len(leader) > 1", values)
     with pytest.raises(ValueError):
         evaluate_condition("p", values)
+    # A true/false value can stand alone, e.g., a 'passes' flag in results
+    flags = {"ok": True, "bad": False, "p": 0.007}
+    assert evaluate_condition("ok", flags)
+    assert evaluate_condition("ok and not bad", flags)
+    assert not evaluate_condition("bad or p > 0.5", flags)
+    with pytest.raises(ValueError, match="true/false"):
+        evaluate_condition("ok and p", flags)
+    with pytest.raises(KeyError):
+        evaluate_condition("missing", flags)
     # A comparison the values can't make is a ValueError like the rest
     with pytest.raises(ValueError, match="cannot evaluate"):
         evaluate_condition("leader < 0.5", values)

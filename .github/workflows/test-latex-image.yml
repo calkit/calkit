@@ -107,6 +107,18 @@ jobs:
           test -f "$work/paper/main.pdf"
           # Owned by the user who ran it, not by root
           test -O "$work/paper/main.pdf"
+          # In a Calkit project, packages fetched at run time go to the
+          # project's .calkit/local, which is how a Docker environment
+          # built on this image can fetch them with nothing extra mounted
+          project="$(mktemp -d)"
+          mkdir -p "$project/.calkit/local"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "$project":/work \
+            -w /work \
+            calkit/latex:pr \
+            sh -c 'test "$TEXMFHOME" = /work/.calkit/local/texmf &&
+              test -d "$TEXMFHOME/tlpkg"'
           # A package outside the curated set installs into the mounted
           # cache and persists there, which is how a project gets what the
           # image doesn't ship

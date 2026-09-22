@@ -104,18 +104,28 @@ machine that may have no Perl of its own.
 
 ## Packages a document needs beyond this set
 
-Install them into the mounted cache rather than rebuilding the image:
+`calkit latex build` fetches them. When a build fails on a missing style,
+class, or font file, it finds the TeX Live package that provides it,
+installs it with `tlmgr --usermode`, and tries again, for as many rounds
+as a package's own dependencies take.
 
-```sh
-tlmgr --usermode install <package>
-```
+What it fetches goes in the project, under the gitignored
+`.calkit/local/texmf`, so nothing fetched can be committed, and each
+project keeps what its documents need. That directory is inside the
+working directory every container mounts, so nothing else is mounted:
+Calkit sets `TEXMFHOME` to it when it runs this image itself, and when the
+image runs as a Docker environment, including one built `FROM` it, the
+entrypoint switches to it on finding `.calkit/local` in the working
+directory. It leaves `TEXMFHOME` alone if something else set it.
 
-The package lands in whatever is mounted at `TEXMFHOME`, so it is there
-the next time the container runs.
+Nothing is fetched into a system TeX, which is the user's to manage, or
+in another image, where what's installed is gone when the container
+exits.
 
-Through `calkit latex build -e <environment>` nothing is mounted there by
-default, so a project using one has to mount `/texmf` itself through the
-environment's `args` and set `TEXMFHOME` to match.
+A font's install ends with `tlmgr` reporting an error, since updating the
+font map isn't possible in user mode here, but that comes after the font
+files are in place, and TeX finds them. What decides whether a fetch
+worked is the build that follows it.
 
 ## Running it directly
 

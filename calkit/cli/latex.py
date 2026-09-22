@@ -185,18 +185,18 @@ def _tex_cmd(
             )
         except ValueError as e:
             raise_error(str(e))
-        # The package tree mounts at TEXMFHOME rather than over the
-        # image's own, which would hide the distribution entirely
-        texmf = calkit.latex.get_texmf_cache_dir()
-        os.makedirs(texmf, exist_ok=True)
+        # Packages fetched at run time go to the project's cache, which
+        # the working directory mount already covers, rather than over
+        # the image's own tree, which would hide the distribution entirely
+        os.makedirs(calkit.latex.get_texmf_cache_dir(), exist_ok=True)
         cmd = [
             "docker",
             "run",
             "--rm",
             "-v",
             f"{os.getcwd()}:/work",
-            "-v",
-            f"{texmf}:/texmf",
+            "-e",
+            f"TEXMFHOME={calkit.latex.CONTAINER_TEXMF_DIR}",
             "-w",
             "/work",
         ]
@@ -219,6 +219,109 @@ def _tex_cmd(
     if verbose:
         typer.echo(f"Running command: {cmd}")
     return cmd
+
+
+def _run_latexmk(
+    cmd: list[str],
+    env: dict[str, str] | None,
+    log_path: str,
+    fdb_path: str,
+    environment: str | None,
+    verbose: bool,
+) -> int:
+    """Run latexmk, fetching the TeX packages it's missing and retrying.
+
+    Only where what's fetched is kept with the project, i.e., Calkit's
+    LaTeX image, run directly or as a Docker environment built on it. A
+    system TeX is the user's to manage, and anything installed in another
+    container is gone when it exits. Returns latexmk's exit status.
+    """
+    import shlex
+
+    def in_tex(tex_cmd: list[str]) -> list[str]:
+        # Where the build runs, so what's installed is what it sees
+        return _tex_cmd(
+            tex_cmd,
+            environment=environment,
+            no_check=True,
+            verbose=verbose,
+            dep="latexmk",
+        )
+
+    def can_fetch() -> bool:
+        if environment is None:
+            return not calkit.check_dep_exists("latexmk")
+        envs = calkit.load_calkit_info().get("environments", {})
+        if envs.get(environment, {}).get("kind") != "docker":
+            return False
+        # The image switches to the project's cache when it's there
+        os.makedirs(calkit.latex.get_texmf_cache_dir(), exist_ok=True)
+        out = subprocess.run(
+            in_tex(["printenv", "TEXMFHOME"]), capture_output=True, text=True
+        ).stdout.strip()
+        return out.endswith("/.calkit/local/texmf")
+
+    fetched: set[str] = set()
+    fetchable = None
+    while True:
+        try:
+            subprocess.check_call(cmd, env=env)
+            return 0
+        except subprocess.CalledProcessError as e:
+            status = e.returncode
+        try:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
+                log = f.read()
+        except OSError:
+            return status
+        # A file still missing after fetching it is one fetching can't fix
+        missing = [
+            f
+            for f in calkit.latex.find_missing_tex_files(log)
+            if f not in fetched
+        ]
+        if not missing:
+            return status
+        if fetchable is None:
+            fetchable = can_fetch()
+        if not fetchable:
+            return status
+        packages = []
+        for name in missing:
+            out = subprocess.run(
+                in_tex(["tlmgr", "search", "--global", "--file", f"/{name}"]),
+                capture_output=True,
+                text=True,
+            ).stdout
+            # Package names end with a colon; the paths under them are
+            # indented, and the first one ending in the file is its owner
+            owner = None
+            for line in out.splitlines():
+                if line.endswith(":") and not line.startswith((" ", "\t")):
+                    owner = line[:-1]
+                elif owner and line.strip().endswith(f"/{name}"):
+                    packages.append(owner)
+                    break
+        packages = list(dict.fromkeys(packages))
+        if not packages:
+            return status
+        typer.echo(
+            f"Fetching TeX packages for {', '.join(missing)}: "
+            f"{', '.join(packages)}"
+        )
+        install = in_tex(["tlmgr", "--usermode", "install", *packages])
+        if verbose:
+            typer.echo(f"Running command: {shlex.join(install)}")
+        # A font's install fails at its last step, updating the font map,
+        # which user mode can't do in this image, with the files already in
+        # place and usable. Whether it worked is the retry's to say.
+        if subprocess.run(install, capture_output=not verbose).returncode:
+            if verbose:
+                warn(f"tlmgr reported an error installing {packages}")
+        fetched.update(missing)
+        # Otherwise latexmk remembers the failure and won't try again
+        if os.path.isfile(fdb_path):
+            os.remove(fdb_path)
 
 
 @latex_app.command(name="build")
@@ -354,9 +457,15 @@ def build(
         dep="latexmk",
         source_date_epoch=source_date_epoch,
     )
-    try:
-        subprocess.check_call(cmd, env=_tex_env(source_date_epoch))
-    except subprocess.CalledProcessError:
+    log_dir = aux_dir or output_dir or tex_dir
+    if _run_latexmk(
+        cmd,
+        env=_tex_env(source_date_epoch),
+        log_path=os.path.join(log_dir, stem + ".log"),
+        fdb_path=os.path.join(log_dir, stem + ".fdb_latexmk"),
+        environment=environment,
+        verbose=verbose,
+    ):
         raise_error("latexmk failed")
 
 
@@ -1000,7 +1109,16 @@ def _build_diff(
         )
         typer.echo("Building the marked-up document")
         try:
-            subprocess.check_call(cmd, env=_tex_env(source_date_epoch))
+            status = _run_latexmk(
+                cmd,
+                env=_tex_env(source_date_epoch),
+                log_path=os.path.join(aux_dir, f"{stem}-diff.log"),
+                fdb_path=os.path.join(aux_dir, f"{stem}-diff.fdb_latexmk"),
+                environment=environment,
+                verbose=verbose,
+            )
+            if status:
+                raise subprocess.CalledProcessError(status, cmd)
         except subprocess.CalledProcessError as e:
             # -silent hides why, so show the errors LaTeX logged
             log_path = Path(aux_dir, f"{stem}-diff.log")

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from calkit.core import LOCAL_DIR
+from calkit.core import LOCAL_DIR, ensure_local_dir
 
 if TYPE_CHECKING:
     # Only ever named in annotations here, which this module's
@@ -100,17 +100,40 @@ def get_source_date_epoch(tex_file: str) -> str | None:
     return None
 
 
-def get_texmf_cache_dir() -> str:
-    """Where TeX packages installed at run time are kept.
+# Where the project's TeX package cache is inside a container, with the
+# working directory mounted at /work, as Calkit mounts it
+CONTAINER_TEXMF_DIR = "/work/.calkit/local/texmf"
+# LaTeX's messages for a file it couldn't find, and a font whose metrics it
+# couldn't, e.g., "Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable"
+_MISSING_FILE_RE = re.compile(r"File `([^']+)' not found")
+_MISSING_TFM_RE = re.compile(
+    r"Font \S+=(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
+)
 
-    Per user rather than per project, since a package a document needs is
-    the same package for every project that needs it, and mounted into the
-    container as ``TEXMFHOME``. Not the distribution's own tree: mounting
-    over that hides TinyTeX and leaves the container with no TeX at all.
+
+def get_texmf_cache_dir(wdir: str | None = None) -> str:
+    """Where TeX packages fetched at run time are kept, per project.
+
+    Inside the project's gitignored ``.calkit/local``, so the working
+    directory a container mounts already covers it, whatever environment
+    the container comes from, and nothing fetched can be committed. It is
+    ``TEXMFHOME`` in the container, not the distribution's own tree, since
+    mounting over that hides TinyTeX and leaves no TeX at all.
     """
-    from calkit.config import get_user_home
+    return os.path.join(ensure_local_dir(wdir), "texmf")
 
-    return os.path.join(get_user_home(), ".calkit", "texmf")
+
+def find_missing_tex_files(log: str) -> list[str]:
+    """The files a LaTeX log says it couldn't find, in the order it says.
+
+    Style and class files are named as they are; a font whose metrics are
+    missing is named as its ``.tfm`` file, which is what finds the package
+    providing it.
+    """
+    found = _MISSING_FILE_RE.findall(log) + [
+        f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)
+    ]
+    return list(dict.fromkeys(found))
 
 
 def _ref_dirname(ref: str) -> str:

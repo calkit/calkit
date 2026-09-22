@@ -162,3 +162,18 @@ calkit new project my-paper \
 ```
 
 See the [LaTeX and Word tutorial](tutorials/latex-word.md) for the workflow.
+
+## Harbor and Terminal-Bench-Science
+
+[GitHub repo](https://github.com/calkit/calkit/tree/main/examples/harbor-tb-science)
+
+Features:
+
+- A benchmark task's authoring scripts run as a pipeline in a Docker
+  environment, with questions answered from their outputs
+- A variant of the task whose submission must be a Calkit project,
+  checked and rerun by the task's verifier with no network access
+- Run with [Harbor](https://github.com/harbor-framework/harbor)'s oracle
+  agent, and regraded with tampered submissions
+
+See [Calkit and other tools](comparisons.md) for the results.

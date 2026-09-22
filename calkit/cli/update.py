@@ -7,12 +7,16 @@ import os
 import shutil
 from datetime import datetime
 from importlib import resources
+from typing import TYPE_CHECKING
 
 import typer
 from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import raise_error, warn
+
+if TYPE_CHECKING:
+    import git
 
 update_app = typer.Typer(no_args_is_help=True)
 
@@ -1538,6 +1542,42 @@ def update_dataset(
     calkit.save_calkit_info(ck_info)
 
 
+def _adopt_hub_history(repo: git.Repo) -> None:
+    """Make the first push of an existing project fast-forward.
+
+    A hub that doesn't know to leave a new repo empty scaffolds it with
+    commits of its own, which share no history with the project, so the
+    push is rejected. Everything the hub wrote the project already has in
+    its own form, so its commits are joined without taking any of their
+    content, i.e., merged with the ``ours`` strategy.
+    """
+    if "origin" not in [r.name for r in repo.remotes]:
+        return
+    try:
+        branch = repo.active_branch.name
+        repo.git.fetch(["origin", branch])
+    except Exception:
+        # Nothing there yet, or no branch of that name: nothing to join
+        return
+    remote_ref = f"origin/{branch}"
+    try:
+        repo.git.merge_base(["--is-ancestor", remote_ref, "HEAD"])
+        return
+    except Exception:
+        pass
+    typer.echo("Joining the commits the hub made when creating the repo")
+    repo.git.merge(
+        [
+            "-s",
+            "ours",
+            "--allow-unrelated-histories",
+            "-m",
+            "Join the hub's initial commits",
+            remote_ref,
+        ]
+    )
+
+
 def is_connected_to_hub() -> bool:
     """Whether this project already has somewhere to push code and data.
 
@@ -1688,6 +1728,9 @@ def update_hub(
                 git_repo_url=git_repo_url,
                 git_repo_exists=git_repo_url is not None,
                 is_public=public,
+                # This project already has its own history to push, which
+                # a repo the hub scaffolded would reject
+                empty_repo=git_repo_url is None,
             ),
         )
         typer.echo("Created project on the hub")
@@ -1722,15 +1765,25 @@ def update_hub(
         ck_info["owner"] = owner
     if ck_info.get("name") != name:
         ck_info["name"] = name
+    if ck_info.get("hub") is None:
+        ck_info["hub"] = hub_url
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    paths = [".dvc/config", "calkit.yaml"]
+    # The hub would have written one, and a repo it didn't scaffold has none
+    if not os.path.isfile("README.md"):
+        with open("README.md", "w") as f:
+            f.write(f"# {ck_info.get('title') or name}\n")
+            if ck_info.get("description"):
+                f.write(f"\n{ck_info['description']}\n")
+        paths.append("README.md")
     if not no_commit:
         repo = calkit.git.get_repo()
-        paths = [".dvc/config", "calkit.yaml"]
         repo.git.add(paths)
         staged = calkit.git.get_staged_files()
         to_commit = [p for p in paths if p in staged]
         if to_commit:
             typer.echo("Committing changes")
             repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
+        _adopt_hub_history(repo)
     typer.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")

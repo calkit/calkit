@@ -887,6 +887,10 @@ def post_project(
         project_in.git_repo_url = (
             f"https://github.com/{current_user.account.name}/{project_in.name}"
         )
+    if project_in.empty_repo and project_in.template is not None:
+        raise HTTPException(
+            400, "A project from a template can't have an empty repo"
+        )
     # First check if template even exists, if specified
     template_project: Project | None = None
     template_git_repo_url: str | None = None
@@ -1018,7 +1022,7 @@ def post_project(
             "has_wiki": True,
         }
         # If creating from a template repo, we want it to be empty
-        if project_in.template is None:
+        if project_in.template is None and not project_in.empty_repo:
             body["gitignore_template"] = "Python"
         if is_user_org:
             post_url = f"https://api.github.com/orgs/{owner_name}/repos"
@@ -1064,6 +1068,10 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
+        # The client pushes its own history, which already has everything
+        # the scaffold below would write
+        if project_in.empty_repo:
+            return project
         try:
             # Clone the repo and set up the Calkit DVC remote
             repo = get_repo(
@@ -1107,7 +1115,9 @@ def post_project(
             # Add a calkit.yaml file
             # First existing info, which is empty unless we're using a template
             ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
-            _ = ck_info.pop("questions", None)
+            # A template's questions are kept, as 'calkit new project' keeps
+            # them: an example's question and the stages that answer it are
+            # the working example, and the new project reproduces the answer
             ck_info |= {
                 "owner": owner_name,
                 "name": project.name,

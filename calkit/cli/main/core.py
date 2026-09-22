@@ -1180,8 +1180,8 @@ def add(
                         dvc_scm = calkit.dvc.get_dvc_repo().scm
                     gitignore = dvc_scm.ignore(os.path.abspath(locked_out))
                     if gitignore:
-                        subprocess.call(["git", "add", gitignore])
-                    subprocess.call(["git", "add", "dvc.lock"])
+                        repo.git.add(gitignore)
+                    repo.git.add("dvc.lock")
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 if dry_run:
                     typer.echo(f"Would add {path} to DVC (per extension)")
@@ -3391,6 +3391,18 @@ def run_in_env(
             ),
         ),
     ] = None,
+    env_var: Annotated[
+        list[str],
+        typer.Option(
+            "--env-var",
+            help=(
+                "Environmental variable to set for the command, as "
+                "KEY=VALUE. Can be given multiple times. Set in the "
+                "process the command runs in, and passed into a container "
+                "for an environment that runs in one."
+            ),
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -3437,6 +3449,15 @@ def run_in_env(
             "--setup only applies to a 'system' environment, and "
             f"'{env_name}' is of kind '{env.get('kind')}'"
         )
+    # Set here rather than per kind: a container is handed them below,
+    # and everything else runs as a child of this process
+    extra_env_vars = {}
+    for item in env_var:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise_error(f"Invalid --env-var '{item}'; write it as KEY=VALUE")
+        extra_env_vars[key] = value
+        os.environ[key] = value
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
     if wdir is not None:
@@ -3566,12 +3587,10 @@ def run_in_env(
                 if isinstance(value, str):
                     value = os.path.expandvars(value)
                 docker_cmd += ["-e", f"{key}={value}"]
-        # Set by whatever is calling xenv, e.g., 'calkit latex build'
-        # stamping a reproducible date into the PDF, and pointless unless
-        # it reaches the container
-        for key in ["SOURCE_DATE_EPOCH", "FORCE_SOURCE_DATE"]:
-            if key in os.environ and key not in env_vars:
-                docker_cmd += ["-e", f"{key}={os.environ[key]}"]
+        # A container inherits nothing from here, so what --env-var asked
+        # for has to be handed to it
+        for key, value in extra_env_vars.items():
+            docker_cmd += ["-e", f"{key}={value}"]
         if (gpus := env.get("gpus")) is not None:
             docker_cmd += ["--gpus", gpus]
         if ports := env.get("ports"):

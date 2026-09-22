@@ -1361,15 +1361,11 @@ def env_from_name_or_path(
                     return EnvDetectResult(name=env_name, env=env, exists=True)
         # Only create default docker environment for latex
         if language.lower() == "latex":
-            from calkit.latex import DEFAULT_LATEX_IMAGE
+            from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
 
-            env_name = "latex"
             return EnvDetectResult(
-                name=env_name,
-                env={
-                    "kind": "docker",
-                    "image": DEFAULT_LATEX_IMAGE,
-                },
+                name="latex",
+                env=dict(DEFAULT_LATEX_ENVIRONMENT),
                 exists=False,
             )
         # For shell language, use _system environment

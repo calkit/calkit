@@ -6692,7 +6692,7 @@ async def post_project_overleaf_publication(
         while env_name in envs:
             env_name = f"tex-{n}"
             n += 1
-        env = {"kind": "docker", "image": calkit.latex.DEFAULT_LATEX_IMAGE}
+        env = dict(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
         envs[env_name] = env
         ck_info["environments"] = envs
     # Determine mode: link vs zip

@@ -2919,6 +2919,39 @@ def test_outputs_stay_out_of_git_after_failed_run(tmp_dir):
     assert "dvc.lock" in repo.git.ls_files().splitlines()
 
 
+@skipif_windows_docker
+def test_xenv_env_var(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "here": {"kind": "system"},
+        "box": {"kind": "docker", "image": "alpine:3.20"},
+    }
+    calkit.save_calkit_info(ck_info)
+
+    def echo(env_name, *args):
+        return subprocess.check_output(
+            ["calkit", "xenv", "-n", env_name, "--no-check", *args]
+            + ["--", "sh", "-c", "echo [$FOO][$BAR]"],
+            text=True,
+        )
+
+    # Set in the process the command runs in, and handed to a container,
+    # which inherits nothing from here
+    for env_name in ["here", "box"]:
+        out = echo(env_name, "--env-var", "FOO=bar", "--env-var", "BAR=2")
+        assert "[bar][2]" in out, out
+        assert "[][]" in echo(env_name)
+    # Written as KEY=VALUE, and said so when it isn't
+    proc = subprocess.run(
+        ["calkit", "xenv", "-n", "here", "--env-var", "FOO", "--", "sh"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "KEY=VALUE" in proc.stderr
+
+
 def test_push_carries_annotated_tags(tmp_dir):
     """Annotated tags should reach the remote along with their commits.
 

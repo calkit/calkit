@@ -275,7 +275,7 @@ def import_publication(
             tex_env_name = name
             break
     if tex_env_name is None:
-        from calkit.latex import DEFAULT_LATEX_IMAGE
+        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
 
         typer.echo("Creating TeX Live Docker environment")
         tex_env_name = "tex"
@@ -283,11 +283,7 @@ def import_publication(
         while tex_env_name in envs:
             tex_env_name = f"tex-{n}"
             n += 1
-        envs[tex_env_name] = dict(
-            kind="docker",
-            image=DEFAULT_LATEX_IMAGE,
-            description="TeX Live via Calkit's LaTeX image.",
-        )
+        envs[tex_env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)

@@ -137,15 +137,15 @@ def from_json(
             json2latex.dump(cmd_name, formatted, f)
 
 
-def _tex_env(source_date_epoch: str | None) -> dict[str, str] | None:
-    r"""The environment a TeX command runs in, or None to inherit it.
+def _tex_env_vars(source_date_epoch: str | None) -> dict[str, str]:
+    r"""The environmental variables a TeX command needs, beyond the ambient.
 
     ``FORCE_SOURCE_DATE`` is what makes pdfTeX apply the date to
     ``\pdfcreationdate`` and friends, not only to the trailer ID.
     """
     if source_date_epoch is None:
-        return None
-    return os.environ | {
+        return {}
+    return {
         "SOURCE_DATE_EPOCH": source_date_epoch,
         "FORCE_SOURCE_DATE": "1",
     }
@@ -157,7 +157,7 @@ def _tex_cmd(
     no_check: bool,
     verbose: bool,
     dep: str,
-    source_date_epoch: str | None = None,
+    env_vars: dict[str, str] | None = None,
 ) -> list[str]:
     """Wrap a TeX command so it runs wherever the project's TeX lives.
 
@@ -167,10 +167,14 @@ def _tex_cmd(
     inside the project -- which is why the diff builds its copy of the
     base revision there rather than in a temp directory.
     """
+    env_vars = env_vars or {}
     if environment is not None:
         cmd = (
             ["calkit", "xenv", "--name", environment]
             + (["--no-check"] if no_check else [])
+            # Named rather than inherited: the environment may run in a
+            # container, which inherits nothing from here
+            + [f"--env-var={k}={v}" for k, v in env_vars.items()]
             + ["--"]
             + tex_cmd
         )
@@ -206,15 +210,10 @@ def _tex_cmd(
         except AttributeError:
             # Windows has no UID to map
             pass
-        # The container gets its own environment, so the date has to be
-        # handed to it rather than inherited like the other two paths
-        if source_date_epoch is not None:
-            cmd += [
-                "-e",
-                f"SOURCE_DATE_EPOCH={source_date_epoch}",
-                "-e",
-                "FORCE_SOURCE_DATE=1",
-            ]
+        # The container gets its own environment, so anything the command
+        # needs has to be handed to it rather than inherited
+        for key, value in env_vars.items():
+            cmd += ["-e", f"{key}={value}"]
         cmd += [calkit.latex.DEFAULT_LATEX_IMAGE] + tex_cmd
     if verbose:
         typer.echo(f"Running command: {cmd}")
@@ -448,19 +447,19 @@ def build(
     # User pass-through args come last so they can override Calkit's defaults.
     latexmk_cmd += latexmk_args
     latexmk_cmd.append(tex_file)
-    source_date_epoch = calkit.latex.get_source_date_epoch(tex_file)
+    tex_env_vars = _tex_env_vars(calkit.latex.get_source_date_epoch(tex_file))
     cmd = _tex_cmd(
         latexmk_cmd,
         environment=environment,
         no_check=no_check,
         verbose=verbose,
         dep="latexmk",
-        source_date_epoch=source_date_epoch,
+        env_vars=tex_env_vars,
     )
     log_dir = aux_dir or output_dir or tex_dir
     if _run_latexmk(
         cmd,
-        env=_tex_env(source_date_epoch),
+        env=(os.environ | tex_env_vars) if tex_env_vars else None,
         log_path=os.path.join(log_dir, stem + ".log"),
         fdb_path=os.path.join(log_dir, stem + ".fdb_latexmk"),
         environment=environment,
@@ -1098,20 +1097,22 @@ def _build_diff(
         # defaults
         latexmk_cmd += latexmk_args
         latexmk_cmd.append(diff_tex)
-        source_date_epoch = calkit.latex.get_source_date_epoch(tex_file)
+        tex_env_vars = _tex_env_vars(
+            calkit.latex.get_source_date_epoch(tex_file)
+        )
         cmd = _tex_cmd(
             latexmk_cmd,
             environment=environment,
             no_check=no_check,
             verbose=verbose,
             dep="latexmk",
-            source_date_epoch=source_date_epoch,
+            env_vars=tex_env_vars,
         )
         typer.echo("Building the marked-up document")
         try:
             status = _run_latexmk(
                 cmd,
-                env=_tex_env(source_date_epoch),
+                env=(os.environ | tex_env_vars) if tex_env_vars else None,
                 log_path=os.path.join(aux_dir, f"{stem}-diff.log"),
                 fdb_path=os.path.join(aux_dir, f"{stem}-diff.fdb_latexmk"),
                 environment=environment,

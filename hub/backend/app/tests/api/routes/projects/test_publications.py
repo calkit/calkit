@@ -447,7 +447,7 @@ def test_post_project_overleaf_publication_creates_tex_env(
     # Built with Calkit's LaTeX image, and found again by the second import
     # rather than duplicated
     assert ck["environments"] == {
-        "tex": {"kind": "docker", "image": calkit.latex.DEFAULT_LATEX_IMAGE}
+        "tex": dict(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
     }
     stages = ck["pipeline"]["stages"]
     assert {s["environment"] for s in stages.values()} == {"tex"}

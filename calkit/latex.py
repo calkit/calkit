@@ -56,6 +56,15 @@ WORKING_NAME = "working"
 # a document keeps building against the same TeX until this is moved
 # deliberately; what it carries is recorded in images/latex/README.md.
 DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.2"
+# The environment created for a document that doesn't have one, wherever
+# that happens: a new publication, an Overleaf import, or a stage whose
+# environment is worked out from what it runs. Copied where it's used,
+# since what's written into a project is the caller's to amend.
+DEFAULT_LATEX_ENVIRONMENT = {
+    "kind": "docker",
+    "image": DEFAULT_LATEX_IMAGE,
+    "description": "TeX Live via Calkit's LaTeX image.",
+}
 
 
 def get_source_date_epoch(tex_file: str) -> str | None:

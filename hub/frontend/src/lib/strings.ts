@@ -10,6 +10,15 @@ export const decodeBase64Utf8 = (b64: string): string => {
   return new TextDecoder("utf-8").decode(bytes)
 }
 
+// The inverse, for text fetched separately that a viewer expects as base64.
+export const encodeBase64Utf8 = (text: string): string => {
+  let bin = ""
+  for (const byte of new TextEncoder().encode(text)) {
+    bin += String.fromCharCode(byte)
+  }
+  return btoa(bin)
+}
+
 export const capitalizeFirstLetter = (val: string) => {
   return val.charAt(0).toUpperCase() + val.slice(1)
 }

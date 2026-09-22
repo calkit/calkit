@@ -164,6 +164,9 @@ def test_check_questions(tmp_dir):
         f.write("pdf")
     with open("figures/plot.png", "w") as f:
         f.write("png")
+    os.makedirs("docs")
+    with open("docs/notes.md", "w") as f:
+        f.write("# Method\n")
     # A DVC-tracked output known only through dvc.lock
     with open("dvc.lock", "w") as f:
         f.write(
@@ -188,6 +191,11 @@ def test_check_questions(tmp_dir):
                     "environment": "py",
                     "script_path": "s.py",
                     "outputs": [{"path": "results/findings.json"}],
+                },
+                "notes": {
+                    "kind": "markdown",
+                    "environment": "py",
+                    "target_path": "docs/notes.md",
                 },
             }
         },
@@ -224,6 +232,11 @@ def test_check_questions(tmp_dir):
                     },
                     {"kind": "figure", "path": "figures/plot.png"},
                     {"kind": "result", "path": "results/big.h5"},
+                    {
+                        "kind": "document",
+                        "path": "docs/notes.md",
+                        "section": "Method",
+                    },
                 ],
             },
         ],
@@ -248,6 +261,9 @@ def test_check_questions(tmp_dir):
     # makes it and it is not declared with an import or a person
     assert q4.evidence[4].status == "unattributed"
     assert [ev.path for ev in status.unattributed] == ["figures/plot.png"]
+    # A document is attributed to the Markdown stage that builds it
+    assert q4.evidence[6].status == "ok"
+    assert q4.evidence[6].stage == "notes"
     # A value no stage computes is a magic number, so it fails rather than
     # being advice; an import is traceable, a person typing it in is not
     with open("results/typed.json", "w") as f:
@@ -274,6 +290,61 @@ def test_check_questions(tmp_dir):
                 checked.evidence[0].message or ""
             )
     os.remove("results/typed.json")
+    # Likewise a document nothing builds: whatever it says was typed in
+    with open("docs/typed.md", "w") as f:
+        f.write("It is 3.\n")
+    handwritten = {
+        "question": "Written by hand?",
+        "answer": "See the notes.",
+        "evidence": [{"kind": "document", "path": "docs/typed.md"}],
+    }
+    for declared, expected in [
+        (None, "error"),
+        ({"created_by": "someone"}, "error"),
+        ({"imported_from": {"project": "a/b"}}, "ok"),
+    ]:
+        info = dict(ck_info)
+        if declared:
+            info["publications"] = [{"path": "docs/typed.md"} | declared]
+        checked = check_question(5, handwritten, info, ".")
+        assert checked.status == expected, declared
+        if expected == "error":
+            assert "no pipeline stage builds" in (
+                checked.evidence[0].message or ""
+            )
+    os.remove("docs/typed.md")
+    # A Quarto document is evidence as rendered, not as its source
+    with open("docs/report.qmd", "w") as f:
+        f.write("It is `{python} 3`.\n")
+    with open("docs/report.html", "w") as f:
+        f.write("It is 3.\n")
+    info = dict(ck_info)
+    info["pipeline"] = {
+        "stages": ck_info["pipeline"]["stages"]
+        | {
+            "report": {
+                "kind": "quarto",
+                "environment": "py",
+                "target_path": "docs/report.qmd",
+                "outputs": ["docs/report.html"],
+            }
+        }
+    }
+    for path, expected in [
+        ("docs/report.html", "ok"),
+        ("docs/report.qmd", "error"),
+    ]:
+        quarto = {
+            "question": "Rendered?",
+            "answer": "See the report.",
+            "evidence": [{"kind": "document", "path": path}],
+        }
+        checked = check_question(5, quarto, info, ".")
+        assert checked.status == expected, path
+    assert checked.evidence[0].message == (
+        "this is the source Quarto stage 'report' renders; cite what it "
+        "renders instead, e.g., docs/report.html"
+    )
     rendered = render_question(ck_info["questions"][3], ck_info, ".")
     assert rendered["answer"] == "8 of eight do, a 5.1x gain."
     assert rendered["evidence"][2]["explanation"] == "The best is a."
@@ -419,6 +490,9 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     for name, value in [("fresh", 1), ("drifted", 2), ("pinned", 3)]:
         with open(f"results/{name}.json", "w") as f:
             json.dump({"v": value}, f)
+    os.makedirs("docs")
+    with open("docs/write-up.md", "w") as f:
+        f.write("# Write-up\n")
     with open("dvc.lock", "w") as f:
         calkit.ryaml.dump(
             {
@@ -456,6 +530,12 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
                     "environment": "py",
                     "script_path": "s.py",
                     "outputs": [{"path": "results/drifted.json"}],
+                },
+                # Builds the document it names as its target
+                "write-up": {
+                    "kind": "markdown",
+                    "environment": "py",
+                    "target_path": "docs/write-up.md",
                 },
             }
         },
@@ -508,6 +588,11 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
                     }
                 ],
             },
+            {
+                "question": "And a document its stage would rebuild?",
+                "answer": "The write-up says so.",
+                "evidence": [{"kind": "document", "path": "docs/write-up.md"}],
+            },
         ],
     }
     _write_yaml(ck_info)
@@ -515,7 +600,7 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     # Stand in for DVC: only 'drift' needs re-running
     status = check_questions(ck_info=ck_info, wdir=".", check_pipeline=False)
     stale, frozen = (
-        {"drift"},
+        {"drift", "write-up/analyze"},
         frozen_tainted_stage_names(ck_info=ck_info, wdir="."),
     )
     # The freeze taints itself and everything reading what it wrote
@@ -539,7 +624,9 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
         "frozen",
         "frozen",
         "missing",
+        "stale",
     ]
+    assert status.questions[4].evidence[0].stage == "write-up"
     assert "out of date" in (status.questions[0].evidence[0].message or "")
     assert "git_ref" in (status.questions[1].evidence[0].message or "")
     assert "exp/never-pushed" in (
@@ -549,7 +636,7 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert not status.ok
     report = format_status(status)
     assert "Answers citing evidence that isn't there: 1" in report
-    assert "Answers whose evidence the pipeline would rebuild: 1" in report
+    assert "Answers whose evidence the pipeline would rebuild: 2" in report
     assert "Answers resting on a frozen stage, unpinned: 2 (worth a look)" in (
         report
     )

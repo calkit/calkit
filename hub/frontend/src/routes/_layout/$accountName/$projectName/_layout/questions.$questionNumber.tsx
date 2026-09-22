@@ -124,6 +124,7 @@ function QuestionDetail() {
         isOpen={!!edit}
         onClose={() => setEdit(false)}
         gitRef={ref}
+        onDeleted={goToProject}
       />
     </>
   )

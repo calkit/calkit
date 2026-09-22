@@ -1533,10 +1533,21 @@ class MiscArtifact(BaseModel):
 
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
+EvidenceKind = Literal[
+    "figure", "result", "value", "table", "publication", "document"
+]
+
+
 class QuestionEvidence(SQLModel):
-    kind: Literal["figure", "result", "table", "publication"]
+    kind: EvidenceKind
     path: str
     key: str | None = None
+    # What a value is called in the question's templates
+    name: str | None = None
+    # Where in a publication or document the evidence is, for the reader
+    section: str | None = None
+    # A publication's source anchor, e.g., a LaTeX label
+    label: str | None = None
     # Why this piece of evidence answers the question. Written inline in
     # calkit.yaml, or kept in a file and cited by path -- a paragraph of
     # reasoning belongs in a file the pipeline can rebuild, not in a YAML
@@ -1575,9 +1586,12 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "result", "table", "publication"]
+    kind: EvidenceKind
     path: str
     key: str | None = None
+    name: str | None = None
+    section: str | None = None
+    label: str | None = None
     explanation: str | None = None
     # Set instead of ``explanation`` to point at a file holding it. The two
     # are alternatives: a path wins, since the file is the record and the

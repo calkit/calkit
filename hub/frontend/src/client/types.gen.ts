@@ -3949,7 +3949,7 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "table" | "publication"
+  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
   /**
    * Path
    */
@@ -3958,6 +3958,18 @@ export type QuestionEvidence = {
    * Key
    */
   key?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Section
+   */
+  section?: string | null
+  /**
+   * Label
+   */
+  label?: string | null
   /**
    * Explanation
    */
@@ -3995,7 +4007,7 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "table" | "publication"
+  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
   /**
    * Path
    */
@@ -4004,6 +4016,18 @@ export type QuestionEvidencePost = {
    * Key
    */
   key?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Section
+   */
+  section?: string | null
+  /**
+   * Label
+   */
+  label?: string | null
   /**
    * Explanation
    */
@@ -9363,6 +9387,46 @@ export type PostProjectQuestionResponses = {
 
 export type PostProjectQuestionResponse =
   PostProjectQuestionResponses[keyof PostProjectQuestionResponses]
+
+export type DeleteProjectQuestionData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Number
+     */
+    number: number
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/questions/{number}"
+}
+
+export type DeleteProjectQuestionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteProjectQuestionError =
+  DeleteProjectQuestionErrors[keyof DeleteProjectQuestionErrors]
+
+export type DeleteProjectQuestionResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteProjectQuestionResponse =
+  DeleteProjectQuestionResponses[keyof DeleteProjectQuestionResponses]
 
 export type PutProjectQuestionData = {
   body: QuestionPut

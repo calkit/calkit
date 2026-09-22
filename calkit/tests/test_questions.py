@@ -248,6 +248,13 @@ def test_check_questions(tmp_dir):
                         "path": "docs/notes.md",
                         "section": "Method",
                     },
+                    # Related values from one file, named in one entry
+                    {
+                        "kind": "result",
+                        "path": "results/findings.json",
+                        "values": {"top": "n_top", "r": "ratio"},
+                        "explanation": "{top} and {r:.2f}",
+                    },
                 ],
             },
         ],
@@ -275,6 +282,42 @@ def test_check_questions(tmp_dir):
     # A document is attributed to the Markdown stage that builds it
     assert q4.evidence[6].status == "ok"
     assert q4.evidence[6].stage == "notes"
+    assert q4.evidence[7].status == "ok"
+    assert q4.evidence[7].values == {"top": 8, "r": 5.1014}
+    assert q4.evidence[7].stage == "summarize"
+    # A result's values are checked like value entries: every key has to
+    # resolve, key and values are exclusive, and names can't repeat
+    for values, extra, expected in [
+        ({"top": "n_top", "x": "nope", "y": "nested.nope"}, {}, "'nope', "),
+        ({"top": "n_top"}, {"key": "ratio"}, "'values' or 'key'"),
+        ({}, {}, "map each name"),
+        ({"n_top": "ratio"}, {}, None),
+    ]:
+        grouped = {
+            "question": "Grouped?",
+            "answer": "{n_top}",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/findings.json",
+                    "key": "n_top",
+                },
+                {
+                    "kind": "result",
+                    "path": "results/findings.json",
+                    "values": values,
+                }
+                | extra,
+            ],
+        }
+        checked = check_question(5, grouped, ck_info, ".")
+        assert checked.status == "error", values
+        if expected is None:
+            assert "duplicate evidence name(s): n_top" in (
+                checked.message or ""
+            )
+        else:
+            assert expected in (checked.evidence[1].message or ""), values
     # A value no stage computes is a magic number, so it fails rather than
     # being advice; an import is traceable, a person typing it in is not
     with open("results/typed.json", "w") as f:
@@ -359,6 +402,7 @@ def test_check_questions(tmp_dir):
     rendered = render_question(ck_info["questions"][3], ck_info, ".")
     assert rendered["answer"] == "8 of eight do, a 5.1x gain."
     assert rendered["evidence"][2]["explanation"] == "The best is a."
+    assert rendered["evidence"][7]["explanation"] == "8 and 5.10"
     assert render_question("plain", ck_info, ".") == "plain"
     # Committed: the question dates from this commit and nothing has changed
     sha1 = _commit("Answer the question")
@@ -398,14 +442,21 @@ def test_check_questions(tmp_dir):
     assert "n_top was 8 at" in (q4.evidence[0].message or "")
     assert q4.evidence[1].status == "ok"
     assert q4.evidence[4].status == "unattributed"
+    # Each of a result's values is compared on its own
+    assert q4.evidence[7].status == "changed"
+    assert "n_top was 8 at" in (q4.evidence[7].message or "")
+    assert "ratio" not in (q4.evidence[7].message or "")
     assert status.ok
-    assert [ev.path for ev in status.changed] == ["results/findings.json"]
+    assert [ev.path for ev in status.changed] == [
+        "results/findings.json",
+        "results/findings.json",
+    ]
     report = format_status(status)
     # It still earns a block, since nothing else would say it
     assert "[ok] Do the top structures use the rectifier?" in report
     assert "editing the question" in report
     assert (
-        "Evidence that changed after the answer was written: 1 (worth a look)"
+        "Evidence that changed after the answer was written: 2 (worth a look)"
         in report
     )
     assert "Answers given without evidence: 1 (worth a look)" in report

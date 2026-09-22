@@ -1703,8 +1703,11 @@ class FigureEvidence(BaseModel):
 
 class ResultsEvidence(BaseModel):
     """Evidence in the form of a results file: a set of values, a table, a
-    map, whatever the pipeline wrote. For one value inside such a file, use
-    ``value`` evidence, which can be templated into the answer.
+    map, whatever the pipeline wrote.
+
+    ``values`` names related values within it, like the fields of a struct,
+    so each can be templated into the answer as ``value`` evidence would be
+    without an entry per value.
     """
 
     kind: Literal["result"] = "result"
@@ -1716,6 +1719,14 @@ class ResultsEvidence(BaseModel):
             "results file."
         ),
     )
+    values: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Values within the results file, mapping each name, under which "
+            "it can be templated into the question's text, to its key. Names "
+            "must be unique within the question."
+        ),
+    )
     explanation: str | None = None
     git_ref: str | None = Field(
         default=None,
@@ -1725,11 +1736,17 @@ class ResultsEvidence(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def _key_or_values(self) -> ResultsEvidence:
+        if self.key is not None and self.values is not None:
+            raise ValueError("a result takes 'values' or 'key', not both")
+        return self
+
 
 _KEY_DESCRIPTION = (
-    "Key of the value within the results file. A key present at the top "
-    "level is used as-is; otherwise it is split on dots and walked into "
-    "nested objects, with integers indexing lists."
+    "Key of the value within the results file. It is split on dots and "
+    "walked into nested objects, taking the longest run of parts that names "
+    "a key at each level, with integers indexing lists."
 )
 
 

@@ -41,7 +41,8 @@ There are a few kinds of evidence:
 - `figure`, `table`, and `publication` refer to an artifact by path.
 - `document` refers to a written document by path, e.g., a Markdown
   write-up, without declaring it as a publication.
-- `result` refers to a whole results file.
+- `result` refers to a whole results file,
+  optionally naming several `values` inside it.
 - `value` refers to one value inside a JSON or YAML results file,
   found by its `key`.
 
@@ -85,6 +86,26 @@ e.g., `sweep.back_off_1.50_k.failed` reads `failed` from the
 The `name` defaults to the key, so it can be left out when the key is
 already a good name.
 Names must be unique within a question.
+
+When several values come from one file,
+e.g., the outputs of one calculation,
+a `result` entry can name them together, like the fields of a struct,
+mapping each name to its key:
+
+```yaml
+evidence:
+  - kind: result
+    path: results/calibration.json
+    values:
+      worst: reference.worst_ratio
+      mean: reference.mean_ratio
+      margin: reference.minimum_safety_margin_k
+```
+
+Each value works just like a `value` entry's:
+it can be used in the text and in conditions,
+and it's checked and compared with history on its own.
+A `result` takes either `values` or the older `key`, not both.
 
 ## Putting numbers in the text
 

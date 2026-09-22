@@ -166,8 +166,10 @@ function EvidenceCard({
   const stale = isEvidenceStale(evidence)
   // A cited value is the whole artifact -- there is nothing to open that the
   // card doesn't already show -- so it links out to the file it was read
-  // from instead of expanding, and names the stage that wrote it.
-  const isValue = evidence.value != null
+  // from instead of expanding, and names the stage that wrote it. A result
+  // naming several values is the same, with the values listed together.
+  const values = evidence.values ?? []
+  const isValue = evidence.value != null || values.length > 0
   const pathLabel = `${evidence.path}${evidence.key ? `:${evidence.key}` : ""}`
   const pathLine = isValue ? (
     <Link
@@ -262,6 +264,28 @@ function EvidenceCard({
       <Text fontSize="3xl" fontWeight="bold" lineHeight="1.1" noOfLines={1}>
         {evidence.value}
       </Text>
+    )
+  } else if (values.length > 0) {
+    preview = (
+      <Box mb={1}>
+        {values.map((v) => (
+          <Flex key={v.name} align="baseline" justify="space-between" gap={3}>
+            <Tooltip label={v.key}>
+              <Code fontSize="xs" noOfLines={1}>
+                {v.name}
+              </Code>
+            </Tooltip>
+            <Text
+              fontSize="lg"
+              fontWeight="bold"
+              noOfLines={1}
+              color={v.value == null ? missingBorderColor : undefined}
+            >
+              {v.value ?? "not found"}
+            </Text>
+          </Flex>
+        ))}
+      </Box>
     )
   }
   let icon = null

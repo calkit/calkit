@@ -6525,7 +6525,7 @@
       "type": "object"
     },
     "ResultsEvidence": {
-      "description": "Evidence in the form of a results file: a set of values, a table, a\nmap, whatever the pipeline wrote. For one value inside such a file, use\n``value`` evidence, which can be templated into the answer.",
+      "description": "Evidence in the form of a results file: a set of values, a table, a\nmap, whatever the pipeline wrote.\n\n``values`` names related values within it, like the fields of a struct,\nso each can be templated into the answer as ``value`` evidence would be\nwithout an entry per value.",
       "properties": {
         "explanation": {
           "anyOf": [
@@ -6574,6 +6574,22 @@
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Values within the results file, mapping each name, under which it can be templated into the question's text, to its key. Names must be unique within the question.",
+          "title": "Values"
         }
       },
       "required": [
@@ -8379,7 +8395,7 @@
           "title": "Git Ref"
         },
         "key": {
-          "description": "Key of the value within the results file. A key present at the top level is used as-is; otherwise it is split on dots and walked into nested objects, with integers indexing lists.",
+          "description": "Key of the value within the results file. It is split on dots and walked into nested objects, taking the longest run of parts that names a key at each level, with integers indexing lists.",
           "title": "Key",
           "type": "string"
         },

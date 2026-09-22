@@ -1538,10 +1538,22 @@ EvidenceKind = Literal[
 ]
 
 
+class QuestionEvidenceValue(SQLModel):
+    """One of the named values a result evidence entry cites."""
+
+    name: str
+    key: str
+    # Read from the result file, like QuestionEvidence.value
+    value: str | None = None
+
+
 class QuestionEvidence(SQLModel):
     kind: EvidenceKind
     path: str
     key: str | None = None
+    # For result evidence citing several values in its file, each by name,
+    # shown together on one card
+    values: list[QuestionEvidenceValue] | None = None
     # What a value is called in the question's templates
     name: str | None = None
     # Where in a publication or document the evidence is, for the reader
@@ -1589,6 +1601,8 @@ class QuestionEvidencePost(SQLModel):
     kind: EvidenceKind
     path: str
     key: str | None = None
+    # Name to key, for result evidence citing several values
+    values: dict[str, str] | None = None
     name: str | None = None
     section: str | None = None
     label: str | None = None

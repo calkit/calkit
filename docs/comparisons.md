@@ -126,10 +126,116 @@ Harbor jobs could be frozen pipeline stages,
 with questions citing values from each trial's `result.json`.
 We haven't tried this yet.
 
-## Other tools
+## Agentic research tools
 
-<!-- TODO: workflow and pipeline tools, see
-https://github.com/calkit/calkit/issues/214 -->
+These run AI agents that do research.
+Calkit doesn't run agents itself;
+it gives them, and the people checking their work,
+a declared structure to work within.
 
-<!-- TODO: OpenResearch, see
-https://github.com/calkit/calkit/issues/1689 -->
+### Claude Science
+
+[Claude Science](https://claude.com/docs/claude-science/overview)
+is a desktop app in beta, launched in June 2026,
+that pairs Claude with an analysis environment on the user's computer,
+aimed at the life sciences first.
+Claude runs Python, R, and shell code in a sandbox,
+in conda environments it manages,
+and connects to scientific databases and compute clusters.
+It requires a paid Claude plan, and its source isn't published.
+
+Its record of the work is per
+[artifact](https://claude.com/docs/claude-science/artifacts),
+i.e., a saved figure, dataset, report, or notebook.
+Each version of an artifact records the conversation around it,
+a reproducible script, the log of every command that ran,
+and the environment's packages and versions.
+[The reviewer](https://claude.com/docs/claude-science/the-reviewer)
+checks Claude's claims against that record,
+e.g., a value that contradicts the file it came from,
+but it doesn't re-run analyses.
+Artifacts live in the app's data folder, `~/.claude-science`,
+not in a repository.
+
+Checking claims against evidence is common to both tools.
+Calkit keeps that record in the project repository instead,
+as a declared pipeline that anyone who clones it can rerun,
+and `calkit check questions` also reports evidence whose stage is out of
+date.
+
+### OpenResearch
+
+[OpenResearch](https://github.com/alphaXiv/OpenResearch), by alphaXiv,
+is a local-first workspace that turns coding agents,
+e.g., Claude Code or Codex,
+into research agents that review literature, form hypotheses,
+and run experiments.
+A project is a tree of experiments,
+each on its own Git branch,
+sharing one fixed run command.
+Each run uses a snapshot of its branch's commit,
+and the run record keeps the command, commit, and exit code.
+
+Environments are left to the project,
+with the agent told to prefer uv with committed lock files.
+There's no pipeline of stages or caching of outputs.
+Agents are told to cite runs and files after claims in their replies,
+but nothing checks the citations.
+Run logs, reports, and figures are kept in a data directory outside the
+repository.
+
+A project's run command could be `calkit run`,
+which would add declared environments, stages that are skipped when
+unchanged, and versioned outputs in the repository.
+In the other direction, OpenResearch's experiment trees and launching on
+remote compute are things Calkit doesn't do.
+
+## Workflow and pipeline tools
+
+These run a graph of steps and skip the ones that are up to date.
+Calkit's pipeline is one of these:
+it's compiled to a DVC pipeline.
+What Calkit adds is mainly around it:
+environments declared per stage and checked before running,
+and questions whose answers are checked against the outputs.
+
+| Tool                                          | Unit of work            | Environments                                         | Skips unchanged work by               |
+| --------------------------------------------- | ----------------------- | ---------------------------------------------------- | ------------------------------------- |
+| [DVC](https://doc.dvc.org/user-guide)         | Stage in `dvc.yaml`     | Not part of the tool                                 | Hashes of inputs and outputs          |
+| [Snakemake](https://snakemake.readthedocs.io) | Rule                    | Conda or a container per rule                        | Rerun triggers, optional cache        |
+| [Nextflow](https://docs.seqera.io/nextflow/)  | Process                 | A container, conda, or Spack per process             | A hash of each task (`-resume`)       |
+| [Make](https://www.gnu.org/software/make/)    | Rule                    | Not part of the tool                                 | File timestamps                       |
+| [Airflow](https://airflow.apache.org/docs/)   | Task in a scheduled DAG | Virtualenv, Docker, or Kubernetes operators          | Not its purpose                       |
+| Calkit                                        | Stage in `calkit.yaml`  | Many kinds per stage, e.g., uv, conda, Docker, Julia | DVC, with environment locks as inputs |
+
+Snakemake and Nextflow run on clusters and in the cloud without changes
+to the workflow, and Nextflow has a large library of community pipelines
+in [nf-core](https://nf-co.re/).
+Airflow is for workflows that run on a schedule,
+rather than for reproducing a result.
+None of these link claims in a paper to their outputs.
+
+### showyourwork
+
+[showyourwork](https://show-your.work/) is the closest to Calkit.
+It builds a LaTeX article from a Snakemake workflow on every push with
+GitHub Actions, and it uses conda for environments.
+`\script` ties a figure to the script that made it,
+`\variable` inserts a file's contents, e.g., a computed number,
+into the text as a workflow dependency,
+and the PDF gets margin icons linking figures to their scripts.
+Expensive outputs can be cached on Zenodo.
+The project layout is fixed,
+and as of September 2026 its docs note that the last release is over two
+years old.
+
+Calkit isn't limited to one article, layout, or kind of environment,
+and its questions state claims apart from any document,
+with the check reporting stale or untraceable evidence.
+
+### The Turing Way
+
+[The Turing Way](https://book.the-turing-way.org/) is a community-written
+handbook on reproducible research, rather than a tool.
+Its guidance, e.g., on environments and version control,
+is what tools like these put into practice.

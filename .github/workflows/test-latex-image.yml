@@ -48,24 +48,53 @@ jobs:
             latexmk --version
             latexdiff --version
           '
-          # A document that needs the curated set, built the way the docs
-          # say to build it: with a cache mounted at TEXMFHOME. Mounting
-          # it over the distribution instead is what used to leave the
-          # container with no TeX at all
+          # A document that needs the curated set and the packages papers
+          # load most, built the way the docs say to build it: with a
+          # cache mounted at TEXMFHOME. Mounting it over the distribution
+          # instead is what used to leave the container with no TeX at
+          # all. Courier (via times' \texttt) and tcolorbox's libraries
+          # are here because each needs packages nothing loads by name.
           work="$(mktemp -d)"
           cache="$(mktemp -d)"
           mkdir -p "$work/paper"
           cat > "$work/paper/main.tex" <<'EOF'
           \documentclass{article}
+          \usepackage[english]{babel}
+          \usepackage{times}
           \usepackage{threeparttable}
           \usepackage{multirow}
           \usepackage{enumitem}
           \usepackage{todonotes}
+          \usepackage{mathtools}
+          \usepackage{mathrsfs}
+          \usepackage{bbm}
+          \usepackage{dsfont}
+          \usepackage{physics}
+          \usepackage{placeins}
+          \usepackage{makecell}
+          \usepackage{soul}
+          \usepackage{wrapfig}
+          \usepackage{titlesec}
+          \usepackage{colortbl}
+          \usepackage{adjustbox}
+          \usepackage{appendix}
+          \usepackage{xurl}
+          \usepackage{listings}
+          \usepackage{tcolorbox}
+          \tcbuselibrary{most}
+          \usepackage{pgfplots}
+          \pgfplotsset{compat=1.18}
           \begin{document}
-          Smoke test.
+          Smoke test in \texttt{Courier}, with $\mathscr{L}$, $\mathbbm{1}$,
+          $\mathds{R}$ and $\dv{f}{x}$, \hl{highlighted}, at
+          \url{https://calkit.io}.
           \begin{itemize}[noitemsep]
           \item One
           \end{itemize}
+          \begin{tcolorbox}Boxed\end{tcolorbox}
+          \begin{tikzpicture}
+          \begin{axis}[width=4cm]\addplot {x^2};\end{axis}
+          \end{tikzpicture}
           \end{document}
           EOF
           docker run --rm \

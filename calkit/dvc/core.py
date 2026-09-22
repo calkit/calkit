@@ -936,6 +936,45 @@ def out_paths_from_stage(dvc_stage: dict) -> list[str]:
     return out_paths
 
 
+def get_lock_out_paths(wdir: str | None = None) -> list[str]:
+    """Paths of the outputs recorded in ``dvc.lock``, as POSIX paths.
+
+    A stage iterated over values is written there once per item, so this
+    is the one place its outputs' concrete paths appear.
+    """
+    lock_path = os.path.join(wdir or ".", "dvc.lock")
+    if not os.path.isfile(lock_path):
+        return []
+    with open(lock_path) as f:
+        lock = calkit.ryaml.load(f) or {}
+    paths = []
+    for stage in (lock.get("stages") or {}).values():
+        for out in stage.get("outs") or []:
+            if isinstance(out, dict) and "path" in out:
+                paths.append(Path(out["path"]).as_posix())
+    return paths
+
+
+def restore_output_ignores(wdir: str | None = None) -> list[str]:
+    """Re-ignore the pipeline's cached outputs that exist but aren't ignored.
+
+    When a command fails, DVC removes every ignore entry it added during
+    it, including those for stages that ran successfully and are recorded
+    in ``dvc.lock`` -- so after a failed repro their outputs show up as
+    untracked files, ready to be committed to Git alongside DVC's copy.
+    Returns the ``.gitignore`` files written.
+    """
+    repo = get_dvc_repo(wdir)
+    written = []
+    for out in repo.index.outs:
+        if not out.use_scm_ignore or not out.exists:
+            continue
+        gitignore = repo.scm.ignore(out.fs_path)
+        if gitignore:
+            written.append(gitignore)
+    return written
+
+
 def hash_file(path: str) -> dict:
     """Compute MD5 hash and size of a file.
 

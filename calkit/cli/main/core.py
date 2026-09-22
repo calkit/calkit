@@ -1077,6 +1077,8 @@ def add(
                 paths.append(changed_file)
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
         pipeline_output_storage = calkit.pipeline.get_output_storage_map()
+        lock_out_paths = calkit.dvc.get_lock_out_paths()
+        dvc_scm = None
         for path in paths:
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()
@@ -1149,6 +1151,37 @@ def add(
                             f"({path} is a DVC pipeline output)"
                         )
                         subprocess.call(["git", "add", "dvc.lock"])
+            elif (
+                locked_out := next(
+                    (
+                        out
+                        for out in lock_out_paths
+                        if posix_path == out
+                        or posix_path.startswith(out + "/")
+                    ),
+                    None,
+                )
+            ) is not None:
+                # DVC already caches this, and it's only showing up at all
+                # because its ignore entry went missing, e.g., DVC removes
+                # every entry a failed repro added, including those for the
+                # stages that succeeded. Sized up like a new file, a small
+                # one would go to Git alongside DVC's copy.
+                if dry_run:
+                    typer.echo(
+                        f"Would ignore {path} ({path} is a DVC pipeline output)"
+                    )
+                else:
+                    typer.echo(
+                        f"Ignoring {path} since it's a DVC pipeline output"
+                    )
+                    # Where and how DVC itself would have written the entry
+                    if dvc_scm is None:
+                        dvc_scm = calkit.dvc.get_dvc_repo().scm
+                    gitignore = dvc_scm.ignore(os.path.abspath(locked_out))
+                    if gitignore:
+                        subprocess.call(["git", "add", gitignore])
+                    subprocess.call(["git", "add", "dvc.lock"])
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 if dry_run:
                     typer.echo(f"Would add {path} to DVC (per extension)")
@@ -1427,6 +1460,10 @@ def save(
     """
     if not paths and not save_all:
         raise_error("Paths must be provided if not using --all")
+    # Asked before anything else runs: the Git and DVC commands below read
+    # from the terminal too, and would take an answer typed ahead
+    if not no_push and not _has_somewhere_to_push():
+        no_push = not _offer_to_connect()
     if paths is not None:
         add(paths, to=to)
     elif save_all:
@@ -1640,27 +1677,9 @@ def push(
         if excluded:
             selected.discard(target)
     _warn_on_hub_mismatch()
-    # Pushing a project with nowhere to push to fails on the Git remote
-    # that isn't there, which says nothing about what to do next. What it
-    # needs is a hub, so offer one rather than reporting the symptom.
     if selected & {"git", "dvc"} and not _has_somewhere_to_push():
-        from calkit.cli.update import update_hub
-        from calkit.dependencies import _is_interactive
-
-        typer.echo(
-            "This project isn't connected to a hub, so there's nowhere to "
-            "push its code and data."
-        )
-        if not _is_interactive():
-            warn("Skipping push; run 'calkit update hub' to connect")
+        if not _offer_to_connect():
             return
-        answer = typer.prompt(
-            "Connect it now? [Y/n]", default="y", show_default=False
-        )
-        if answer.strip().lower() not in ("", "y", "yes"):
-            warn("Skipping push; run 'calkit update hub' when you want to")
-            return
-        update_hub()
     if "dvc" in selected:
         remotes = calkit.dvc.get_remotes()
         if not no_check_auth:
@@ -1748,6 +1767,33 @@ def push(
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
     _tell_hub_we_pushed(sorted(selected), git_args)
+
+
+def _offer_to_connect() -> bool:
+    """Offer to connect a project that has nowhere to push to a hub.
+
+    Pushing it would fail on a Git remote that isn't there, which says
+    nothing about what to do next. What it needs is a hub, so offer one
+    rather than reporting the symptom. True if it can be pushed now.
+    """
+    from calkit.cli.update import update_hub
+    from calkit.dependencies import _is_interactive
+
+    typer.echo(
+        "This project isn't connected to a hub, so there's nowhere to "
+        "push its code and data."
+    )
+    if not _is_interactive():
+        warn("Skipping push; run 'calkit update hub' to connect")
+        return False
+    answer = typer.prompt(
+        "Connect it now? [Y/n]", default="y", show_default=False
+    )
+    if answer.strip().lower() not in ("", "y", "yes"):
+        warn("Skipping push; run 'calkit update hub' when you want to")
+        return False
+    update_hub()
+    return True
 
 
 def _has_somewhere_to_push() -> bool:
@@ -3188,6 +3234,10 @@ def run(
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
     if failed:
+        try:
+            calkit.dvc.restore_output_ignores()
+        except Exception as e:
+            warn(f"Failed to re-ignore pipeline outputs: {e}")
         raise_error("Pipeline failed")
     else:
         calkit.echo("Pipeline completed successfully ✅")

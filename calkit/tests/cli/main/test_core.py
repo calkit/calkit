@@ -2823,6 +2823,102 @@ def test_push_reports_what_was_pushed(monkeypatch, tmp_dir):
     assert sent[-1]["targets"] == ["dvc", "docker", "git"]
 
 
+def test_save_offers_hub_before_committing(
+    tmp_dir, tmp_path_factory, monkeypatch
+):
+    from typer.testing import CliRunner
+
+    import calkit.cli.main.core as core
+    import calkit.cli.update
+    import calkit.dependencies
+
+    subprocess.check_call(["calkit", "init"])
+    monkeypatch.setattr(calkit.dependencies, "_is_interactive", lambda: True)
+    bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
+    subprocess.check_call(["git", "init", "-q", "--bare", bare])
+    events: list[str] = []
+
+    def connect():
+        events.append("connect")
+        subprocess.check_call(["git", "remote", "add", "origin", bare])
+
+    real_add = core.add
+
+    def add(*args, **kwargs):
+        events.append("add")
+        return real_add(*args, **kwargs)
+
+    monkeypatch.setattr(calkit.cli.update, "update_hub", connect)
+    monkeypatch.setattr(core, "add", add)
+    runner = CliRunner()
+    # Asked before anything runs, since the Git and DVC commands save
+    # starts read the same terminal and would swallow an answer typed ahead
+    with open("a.txt", "w") as f:
+        f.write("a")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add a"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert events == ["connect", "add"]
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Add a"
+    assert git.Repo(bare).head.commit.hexsha == repo.head.commit.hexsha
+    # Declining still commits, and skips the push
+    subprocess.check_call(["git", "remote", "remove", "origin"])
+    events.clear()
+    with open("b.txt", "w") as f:
+        f.write("b")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add b"], input="n\n")
+    assert result.exit_code == 0, result.output
+    assert events == ["add"]
+    assert repo.head.commit.message.strip() == "Add b"
+    assert git.Repo(bare).head.commit.message.strip() == "Add a"
+
+
+def test_outputs_stay_out_of_git_after_failed_run(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "ev": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p results/s{s} && echo {n} > "
+                "results/s{s}/seed-{n}.txt",
+                "iterate_over": [
+                    {"arg_name": "s", "values": [1, 3]},
+                    {"arg_name": "n", "values": [1, 2]},
+                ],
+                "outputs": ["results/s{s}/seed-{n}.txt"],
+            },
+            "boom": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "exit 1",
+                "inputs": [{"from_stage_outputs": "ev"}],
+                "outputs": ["results/other.txt"],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    outputs = [f"results/s{s}/seed-{n}.txt" for s in [1, 3] for n in [1, 2]]
+    # DVC drops the ignore entries of stages that succeeded when a later
+    # one fails, so a failed run has to put them back
+    proc = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert proc.returncode != 0
+    repo = git.Repo()
+    assert all(repo.ignored(path) for path in outputs)
+    # And an output left unignored anyway, e.g., by an older Calkit, is
+    # still not committed to Git by save
+    for path in ["results/s1/.gitignore", "results/s3/.gitignore"]:
+        os.remove(path)
+    assert not any(repo.ignored(path) for path in outputs)
+    subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+    tracked = repo.git.ls_files("results").splitlines()
+    assert not set(outputs) & set(tracked)
+    assert all(repo.ignored(path) for path in outputs)
+    assert "dvc.lock" in repo.git.ls_files().splitlines()
+
+
 def test_push_carries_annotated_tags(tmp_dir):
     """Annotated tags should reach the remote along with their commits.
 

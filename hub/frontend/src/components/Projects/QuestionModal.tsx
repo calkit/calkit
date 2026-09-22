@@ -28,7 +28,7 @@ import { MdEdit } from "react-icons/md"
 import { TiFlowMerge } from "react-icons/ti"
 
 import { ProjectsService } from "../../client"
-import { decodeBase64Utf8, encodeBase64Utf8 } from "../../lib/strings"
+import { encodeBase64Utf8 } from "../../lib/strings"
 import type { QuestionEvidence, QuestionPublic } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import {
@@ -43,6 +43,7 @@ import Markdown from "../Common/Markdown"
 import Tooltip from "../Common/Tooltip"
 import FigureView from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
+import SandboxedHtml from "../Common/SandboxedHtml"
 import PublicationView from "../Publications/PublicationView"
 import TableView from "../Tables/TableView"
 
@@ -447,19 +448,7 @@ function EvidenceDetail({
     if (isHtml) {
       return (
         <Box height="100%">
-          {/* A project's HTML is untrusted. Scripts may run, since a rendered
-              report needs them, but without allow-same-origin they run in an
-              opaque origin with no access to this page or its storage, and
-              forms, popups, dialogs and top-level navigation stay blocked.
-              srcDoc rather than the signed download URL, which the page's
-              scripts could otherwise read and send elsewhere. */}
-          <iframe
-            title={evidence.path}
-            style={{ height: "100%", width: "100%", border: "none" }}
-            sandbox="allow-scripts"
-            referrerPolicy="no-referrer"
-            srcDoc={decodeBase64Utf8(item.content)}
-          />
+          <SandboxedHtml title={evidence.path} content={item.content} />
         </Box>
       )
     }

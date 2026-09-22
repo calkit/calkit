@@ -5,6 +5,7 @@ import { Suspense, lazy } from "react"
 import SyntaxHighlighter from "react-syntax-highlighter"
 import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
 
+import SandboxedHtml from "../Common/SandboxedHtml"
 import { type Notebook } from "../../client"
 import { decodeBase64Utf8 } from "../../lib/strings"
 import LoadingSpinner from "../Common/LoadingSpinner"
@@ -121,28 +122,12 @@ function NotebookView({ notebook }: NotebookViewProps) {
     )
   }
   if (notebook.output_format === "html" && notebook.content) {
-    return (
-      <embed
-        height="100%"
-        width="100%"
-        type="text/html"
-        src={`data:text/html;base64,${notebook.content}`}
-        style={{ borderRadius: "0px" }}
-      />
-    )
+    return <SandboxedHtml title="notebook" content={notebook.content} />
   }
   // An HTML rendering stored outside Git (e.g., in DVC) comes back as a URL,
   // and that one really is a page to embed. A raw .ipynb is handled above.
   if (notebook.url && notebook.output_format !== "notebook") {
-    return (
-      <iframe
-        height="100%"
-        width="100%"
-        title="notebook"
-        src={String(notebook.url)}
-        style={{ border: "none" }}
-      />
-    )
+    return <SandboxedHtml title="notebook" url={notebook.url} />
   }
   return (
     <Flex align="center" justify="center" height="300px" color="gray.500">

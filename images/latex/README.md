@@ -1,12 +1,14 @@
 # TinyTeX image
 
-`ghcr.io/calkit/latex`: TinyTeX plus a curated set of packages and
-`latexdiff`, which comes to about 991 MB against roughly 9 GB for
-`texlive/texlive:latest-full`.
+`ghcr.io/calkit/latex`: TinyTeX plus the packages journal classes and
+recent papers need, and `latexdiff`, which comes to about 1.15 GB against
+roughly 9 GB for `texlive/texlive:latest-full`.
 
-Nothing in Calkit points at it yet. It is published on its own so a
-LaTeX stage can use it instead of a full TeX Live image, which is a
-separate change.
+It is what `calkit latex build` runs in when a document names no
+environment of its own, and what Calkit's dev container and VS Code
+settings use. All three pin an exact tag, set in `calkit/latex.py`,
+`calkit/resources/vscode/settings.json`, and the dev container config
+generated from it.
 
 Originally developed at
 [`calkit/tinytex-latexmk-docker`](https://github.com/calkit/tinytex-latexmk-docker),
@@ -52,6 +54,44 @@ PDFs. `texmf-var` is writable anyway, for whatever else asks.
 documents rather than by any class: units, cross-references and algorithm
 listings, which most papers need wherever they submit. About 110 kB
 together.
+
+## Packages papers load
+
+The classes above turned out to be the smaller part of what documents
+need. Of 175 recent arXiv papers across 16 categories, only 27 loaded
+nothing that set lacked, and a quarter of them loaded `mathtools`.
+Compiled in version 0.1.2, which had only that set, 5 of 48 of them
+built.
+
+`packages.txt` is the rest: every package those papers loaded that the
+core lacks, plus what those packages load in turn, which only compiling
+the papers shows, e.g., `tcolorbox`'s libraries need `tikzfill`, `pdfcol`
+and `listingsutf8`, and `times` needs Courier for monospace text. With it
+39 of the 48 build, for about 160 MB. It is installed in a layer of its
+own so the core stays cached when the list changes.
+
+Some things are left out on purpose, as too large for how rarely they're
+used, and are better installed at run time by the documents that need
+them: `cjk`, whose fonts are 90 MB for three papers in 175, `tex-gyre`,
+and a few font families one paper used, e.g., `libertine` and `dejavu`.
+Whole collections are no substitute either: the ones these papers draw
+from would add over 600 MB and still leave a third of them unbuildable,
+because the packages people load are spread across collections that each
+carry far more than anyone uses.
+
+`scan-arxiv.py` regenerates the list. It samples recent papers, checks
+what they load against an image, and adds the TeX Live packages that
+provide whatever's missing:
+
+```sh
+python scan-arxiv.py --image ghcr.io/calkit/latex:latest \
+    --write packages.txt --exclude cjk libertine dejavu
+```
+
+It only sees what papers load directly, so compile a sample in the new
+image afterwards and add whatever it asks for in turn. The smoke test
+in `test-latex-image.yml` loads the most common of these, so trimming one
+fails there.
 
 The image tracks whatever `tlmgr` installs at build time rather than a
 pinned TeX Live snapshot, so two builds of this Dockerfile on different
@@ -107,6 +147,11 @@ by root. `/root` is `0700`, which left a non-root user with no TeX.
 Publish a release tagged `latex-image/vX.Y.Z`, the same way the other
 subprojects are released, and the workflow builds it for amd64 and arm64
 and pushes it to ghcr.io with a provenance attestation.
+
+It then opens a pull request moving the three pinned tags to the new
+one. That pull request is opened with the workflow's own token, which
+doesn't start other workflows, so its checks run only once someone pushes
+to it or closes and reopens it.
 
 The image is versioned on its own rather than with the Calkit release,
 since it changes rarely.

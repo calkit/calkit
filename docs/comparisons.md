@@ -2,7 +2,8 @@
 
 There are many other tools and platforms out there for doing open,
 reproducible, AI agent-compatible research.
-This page compares them against Calkit.
+This page compares them against Calkit,
+and explores how they can fit together.
 
 Calkit is an interface on top of a project's files.
 It declares how to set up and run the project
@@ -19,13 +20,11 @@ managing environments, tracking experiments,
 versioning data and recording its provenance,
 describing a project with metadata,
 or sharing and collaborating on the results.
-Calkit is vertically integrated to make it so users don't
-need to learn all of these separate tools and assemble their own
-bespoke workflows.
-Calkit manages
-environments, the pipeline, data versioning, provenance, publications,
-and the project's claims are declared in one place and work together,
-so there's no need to build a workflow from separate components.
+Calkit is vertically integrated,
+so users don't need to learn all of these separate tools
+and assemble their own bespoke workflows.
+Environments, the pipeline, data versioning, provenance, publications,
+and the project's claims are declared in one place and work together.
 
 The project's artifacts are also front and center.
 The publication, figures, and results are what other people see and use

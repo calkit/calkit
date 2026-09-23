@@ -1,14 +1,14 @@
 # Calkit vs. other tools
 
 Calkit is an interface on top of a project's files.
-It declares how to run the project (environments and the pipeline),
+It declares how to set up and run the project (environments and the pipeline),
 what the project claims (questions answered with evidence),
-and whether those claims are current (`calkit check questions`).
+and whether those are up to date (`calkit status` and `calkit check questions`).
 Without it, that structure is usually implicit,
 or described in prose, e.g., in a README.
 
 Other tools overlap with parts of this.
-This page compares them on the facts, and says where they fit together.
+This page compares them and explores how they fit together.
 
 ## Harbor and Terminal-Bench-Science
 

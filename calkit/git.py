@@ -131,7 +131,10 @@ def get_staged_files(
         repo = get_repo(path)
     cmd = ["--staged", "--name-only"]
     if path is not None:
-        cmd.append(path)
+        # The path goes after `--` so that a path which isn't in the working
+        # tree isn't read as a revision, which fails the command with exit 128
+        # (`fatal: ambiguous argument`) instead of matching nothing
+        cmd += ["--", path]
     diff = repo.git.diff(cmd)
     paths = diff.split("\n")
     return [p for p in paths if p]

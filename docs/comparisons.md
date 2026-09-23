@@ -1,15 +1,20 @@
 # Calkit vs. other tools
 
 Calkit is an interface on top of a project's files.
-It declares how to set up and run the project (environments and the pipeline),
+It declares how to set up and run the project
+(environments and the pipeline),
 what the project claims (questions answered with evidence),
-and whether those are up to date (`calkit status` and `calkit check questions`).
+and whether those are up to date
+(`calkit status` and `calkit check questions`).
 Without it, that structure is usually implicit,
 or described in prose, e.g., in a README.
 
 Other tools cover parts of this:
-running a pipeline, versioning data and recording its provenance,
-describing a project with metadata, or building a document from code.
+building a document from code, running a pipeline,
+managing environments, tracking experiments,
+versioning data and recording its provenance,
+describing a project with metadata,
+or sharing and collaborating on the results.
 Calkit is vertically integrated:
 environments, the pipeline, data versioning, provenance, publications,
 and the project's claims are declared in one place and work together,
@@ -23,8 +28,9 @@ that produced them.
 Many tools keep them elsewhere,
 e.g., on a tracking server or in an app's data folder.
 
-This page compares Calkit with those tools and explores how they fit
-together.
+This page compares Calkit with those tools,
+and with AI tools that do or evaluate research,
+and explores how they fit together.
 
 ## Literate programming
 
@@ -52,9 +58,6 @@ A Quarto document can itself be a Calkit pipeline stage.
 These run a graph of steps and skip the ones that are up to date.
 Calkit's pipeline is one of these:
 it's compiled to a DVC pipeline.
-What Calkit adds is mainly around it:
-environments declared per stage and checked before running,
-and questions whose answers are checked against the outputs.
 
 | Tool                                           | Unit of work            | Environments                                         | Skips unchanged work by                    |
 | ---------------------------------------------- | ----------------------- | ---------------------------------------------------- | ------------------------------------------ |
@@ -97,12 +100,13 @@ Since Calkit's pipeline runs on DVC, it's worth saying what Calkit adds:
   and a check that reports evidence that's stale, missing,
   or not computed by any stage.
 
-Neither records who ran a stage beyond the Git commit, or signs that
-record.
-Neither replays a project and reports which outputs came out differently,
-with tolerances for results that aren't reproducible bit for bit,
-e.g., from training on a GPU.
-And Calkit doesn't yet record who reviewed an answer;
+Some things neither does yet.
+Neither records who ran a stage beyond the Git commit,
+or signs that record,
+and neither replays a project and reports which outputs came out
+differently, with tolerances for results that aren't reproducible bit
+for bit, e.g., from training on a GPU.
+Calkit also doesn't record who reviewed an answer;
 see [issue #1606](https://github.com/calkit/calkit/issues/1606).
 
 ### showyourwork
@@ -136,9 +140,9 @@ What Calkit adds is making sure they're used reproducibly:
 
 - Every environment has a lock file.
   Where the tool doesn't write one, Calkit does,
-  e.g., for conda, venv, and Docker environments,
-  where the lock records the image's digest for each architecture,
-  and a pulled image is checked against it.
+  e.g., for conda, venv, and Docker environments.
+  A Docker environment's lock records the image's digest for each
+  architecture, and a pulled image is checked against it.
 - Before a command runs in an environment,
   `calkit xenv` checks that the environment matches its specification,
   and rebuilds it if it doesn't.
@@ -180,8 +184,6 @@ and a question and hypothesis say up front what the runs are meant to
 show, with the answer checked against the outputs.
 
 ## Data management and provenance
-
-### DataLad
 
 [DataLad](https://www.datalad.org/) manages data in Git repositories,
 using [git-annex](https://git-annex.branchable.com/) for large files.
@@ -260,7 +262,7 @@ its DOIs can be versioned, institutions can run branded instances of it,
 and its code isn't open source.
 
 These are for sharing artifacts once they're done.
-Calkit's hub is for collaborating on them while they're being made:
+The Calkit hub is for collaborating on them while they're being made:
 it stores every version of a project's data, figures, and publications,
 and it's where collaborators work on them together.
 The two meet at a release:
@@ -278,6 +280,8 @@ its repositories hold models, datasets, and Spaces,
 i.e., demo apps,
 with large files stored through Xet,
 and model and dataset cards describing what's in them.
+[Overleaf](https://www.overleaf.com/) is built for writing:
+it's a web app for editing LaTeX documents together.
 
 The Calkit hub does the same for research.
 Its unit is a research project,
@@ -289,9 +293,7 @@ It integrates with GitHub rather than replacing it,
 and serves as a DVC remote,
 so a project's data and outputs are stored alongside its repository.
 
-[Overleaf](https://www.overleaf.com/) is built for writing:
-it's a web app for editing LaTeX documents together.
-It's only for writing, though,
+Overleaf is only for writing, though,
 so figures and tables made by scripts elsewhere have to be uploaded by
 hand whenever they change.
 Calkit keeps writing integrated with analysis,
@@ -306,7 +308,7 @@ so collaborators can keep writing there.
 
 These are places to do the work, with compute and collaboration built in.
 A Calkit project lives in its repository and runs anywhere,
-including in these platforms' sessions and terminals.
+including in these environments' sessions and terminals.
 
 ### Renku
 
@@ -331,7 +333,7 @@ with terminals and a per-file revision history.
 Its source is available under the Microsoft Reference Source License.
 As of September 2026, cocalc.com redirects to CoCalc.ai,
 a rewrite built around AI.
-Pipelines, data versioning, and provenance aren't part of either.
+Pipelines, data versioning, and provenance aren't part of either version.
 
 ## Agentic research tools
 

@@ -1238,7 +1238,14 @@ def commit(
 
         commit_paths = []
         for requested_path in requested_paths:
-            for staged_path in staged_for(requested_path):
+            staged = staged_for(requested_path)
+            if not staged:
+                # A path the user named resolved to nothing staged for it.
+                # Keep going so the rest of the save still lands, but say so:
+                # silently dropping one is how a caller ends up believing a
+                # file was committed when it wasn't
+                warn(f"No changes staged for {requested_path}; skipping")
+            for staged_path in staged:
                 if staged_path not in commit_paths:
                     commit_paths.append(staged_path)
         if not commit_paths:

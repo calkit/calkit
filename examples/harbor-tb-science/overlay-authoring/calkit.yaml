@@ -6,7 +6,6 @@ environments:
   authoring:
     kind: docker
     path: authoring/Dockerfile
-    image: tbs-reactor-safety-control-authoring
 pipeline:
   stages:
     generate-fixtures:

@@ -64,8 +64,10 @@ interface EvidenceRow {
   name?: string
   section?: string
   label?: string
-  // A result's named values, which the form doesn't edit but must keep
+  // A result's named values, which the form doesn't edit but must keep,
+  // and the file they're keys into, since they mean nothing in another
   values?: Record<string, string>
+  valuesPath?: string
 }
 
 interface EditQuestionForm {
@@ -172,6 +174,7 @@ const EditQuestion = ({
         values: ev.values
           ? Object.fromEntries(ev.values.map((v) => [v.name, v.key]))
           : undefined,
+        valuesPath: ev.values ? ev.path : undefined,
       })),
     })
   }, [question, reset])
@@ -201,7 +204,9 @@ const EditQuestion = ({
                     : undefined,
                 name: row.name ? row.name : undefined,
                 values:
-                  parsed.kind === "result" && row.values
+                  parsed.kind === "result" &&
+                  row.values &&
+                  parsed.path === row.valuesPath
                     ? row.values
                     : undefined,
                 section: row.section ? row.section : undefined,
@@ -312,7 +317,10 @@ const EditQuestion = ({
             {fields.map((field, index) => {
               const selection = watch(`evidence.${index}.selection`) || ""
               const parsed = parseSelection(selection)
-              const rowValues = watch(`evidence.${index}.values`)
+              const rowValues =
+                parsed?.path === watch(`evidence.${index}.valuesPath`)
+                  ? watch(`evidence.${index}.values`)
+                  : undefined
               const figures = figuresRequest.data ?? []
               const results = resultsRequest.data ?? []
               const publications = publicationsRequest.data ?? []

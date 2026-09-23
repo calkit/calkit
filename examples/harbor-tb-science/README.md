@@ -5,7 +5,7 @@
 This example applies Calkit to the `reactor-safety-control` task from
 [Terminal-Bench-Science](https://github.com/harbor-framework/terminal-bench-science),
 which runs on [Harbor](https://github.com/harbor-framework/harbor).
-See [Calkit and other tools](../../docs/comparisons.md) for the results.
+See [Calkit vs. other tools](../../docs/comparisons.md) for the results.
 
 The task's files aren't copied here.
 `setup.sh` fetches them at a pinned commit, then adds the files in

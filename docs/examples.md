@@ -176,4 +176,4 @@ Features:
 - Run with [Harbor](https://github.com/harbor-framework/harbor)'s oracle
   agent, and regraded with tampered submissions
 
-See [Calkit and other tools](comparisons.md) for the results.
+See [Calkit vs. other tools](comparisons.md) for the results.

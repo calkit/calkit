@@ -2244,8 +2244,8 @@ def _resolve_result_value(
 ) -> str | None:
     """Read a result file and return the value at ``key`` as a string.
 
-    Supports JSON, YAML and TOML result files and dot-separated nested keys
-    (e.g. ``metrics.mean``). ``cache`` memoizes parsed files across evidence
+    Supports JSON, YAML and TOML result files and keys as
+    ``calkit.questions.resolve_key`` reads them, e.g., ``metrics.mean``. ``cache`` memoizes parsed files across evidence
     items, keyed by ref as well as path: two evidence entries can cite one
     file at two refs, and they are not the same file.
     Returns None if the file or key cannot be resolved.
@@ -2274,12 +2274,12 @@ def _resolve_result_value(
     data = cache[cache_key]
     if data is None:
         return None
-    value: object = data
-    for part in key.split("."):
-        if isinstance(value, dict) and part in value:
-            value = value[part]
-        else:
-            return None
+    # The CLI's lookup, so a key it resolves resolves here too, e.g., one
+    # containing dots or indexing a list
+    try:
+        value = calkit.questions.resolve_key(data, key)
+    except KeyError:
+        return None
     if isinstance(value, (dict, list)):
         return None
     return str(value)

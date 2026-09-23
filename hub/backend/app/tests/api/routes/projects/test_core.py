@@ -4249,7 +4249,12 @@ def test_question_evidence_values_documents_and_publications() -> None:
         {
             "kind": "result",
             "path": "results/summary.json",
-            "values": {"avg": "stats.mean", "total": "stats.n"},
+            # Keys resolve as the CLI reads them, dots in names and all
+            "values": {
+                "avg": "stats.mean",
+                "total": "stats.n",
+                "failed": "sweep.back_off_1.50_k.failed",
+            },
         },
         {
             "kind": "result",
@@ -4266,7 +4271,12 @@ def test_question_evidence_values_documents_and_publications() -> None:
             size=1,
             in_repo=True,
             content=base64.b64encode(
-                json.dumps({"stats": {"mean": 2.5, "n": 40}}).encode()
+                json.dumps(
+                    {
+                        "stats": {"mean": 2.5, "n": 40},
+                        "sweep": {"back_off_1.50_k": {"failed": 13}},
+                    }
+                ).encode()
             ).decode(),
             url=None,
             storage="git",
@@ -4307,6 +4317,7 @@ def test_question_evidence_values_documents_and_publications() -> None:
         "mean": 2.5,
         "avg": 2.5,
         "total": 40,
+        "failed": 13,
         "avg2": 2.5,
     }
     assert [ev.kind for ev in evidence] == [
@@ -4337,6 +4348,7 @@ def test_question_evidence_values_documents_and_publications() -> None:
     assert [(v.name, v.key, v.value) for v in evidence[7].values or []] == [
         ("avg", "stats.mean", "2.5"),
         ("total", "stats.n", "40"),
+        ("failed", "sweep.back_off_1.50_k.failed", "13"),
     ]
     assert evidence[7].stale_reason is None
     # One value that can't be read is enough to call the card missing

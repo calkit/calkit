@@ -1,4 +1,4 @@
-# Calkit and other tools
+# Calkit vs. other tools
 
 Calkit is an interface on top of a project's files.
 It declares how to run the project (environments and the pipeline),
@@ -65,7 +65,7 @@ an alternate-noise sweep, and an identification check.
 The pipeline took 13 minutes to run.
 The regenerated fixtures, including the hidden scenarios, reference times,
 and hash manifest, were byte-identical to the committed ones.
-Four questions answer from `value` evidence,
+Four questions answer from values in the results files,
 reproducing numbers the README states by hand,
 e.g., the independent controller's worst productivity ratio of 1.04981,
 and a baseline failing 7 and 13 of 21 scenarios with 1.0 K and 1.5 K of

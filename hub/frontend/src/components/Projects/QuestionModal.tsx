@@ -500,6 +500,21 @@ function EvidenceDetail({
         <Text fontSize="5xl" fontWeight="bold" lineHeight="1.1">
           {evidence.value}
         </Text>
+      ) : evidence.values?.length ? (
+        // Several values from one file, each under its name
+        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+          {evidence.values.map((v) => (
+            <Box key={v.name}>
+              <Text fontSize="3xl" fontWeight="bold" lineHeight="1.1">
+                {v.value ?? "not found"}
+              </Text>
+              <Code fontSize="xs">{v.name}</Code>{" "}
+              <Text as="span" fontSize="xs" color="gray.500">
+                {v.key}
+              </Text>
+            </Box>
+          ))}
+        </SimpleGrid>
       ) : (
         <NotFound evidence={evidence} />
       )}

@@ -272,6 +272,6 @@ env = [
 ]
 # The hub backend's tests need the compose stack and its own environment,
 # and the assistant's need Qt; they run via test-hub.yml and
-# test-assistant.yml, not from the workspace root. The Harbor example's
-# tests only run inside its task's verifier container
-addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub --ignore=assistant --ignore=examples/harbor-tb-science"
+# test-assistant.yml, not from the workspace root. Examples are projects
+# with their own environments, and their tests aren't Calkit's
+addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub --ignore=assistant --ignore=examples"

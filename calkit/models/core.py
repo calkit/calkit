@@ -1705,7 +1705,8 @@ class ResultsEvidence(BaseModel):
     """Evidence in the form of a results file: a set of values, a table, a
     map, whatever the pipeline wrote.
 
-    ``values`` names related values within it, like the fields of a struct,
+    ``values`` names related values within it, like the fields of a struct
+    or object,
     so each can be templated into the answer as ``value`` evidence would be
     without an entry per value.
     """

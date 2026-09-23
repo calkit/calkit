@@ -6525,7 +6525,7 @@
       "type": "object"
     },
     "ResultsEvidence": {
-      "description": "Evidence in the form of a results file: a set of values, a table, a\nmap, whatever the pipeline wrote.\n\n``values`` names related values within it, like the fields of a struct,\nso each can be templated into the answer as ``value`` evidence would be\nwithout an entry per value.",
+      "description": "Evidence in the form of a results file: a set of values, a table, a\nmap, whatever the pipeline wrote.\n\n``values`` names related values within it, like the fields of a struct\nor object,\nso each can be templated into the answer as ``value`` evidence would be\nwithout an entry per value.",
       "properties": {
         "explanation": {
           "anyOf": [

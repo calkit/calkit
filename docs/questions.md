@@ -89,7 +89,8 @@ Names must be unique within a question.
 
 When several values come from one file,
 e.g., the outputs of one calculation,
-a `result` entry can name them together, like the fields of a struct,
+a `result` entry can name them together, like the fields of a struct
+or object,
 mapping each name to its key:
 
 ```yaml

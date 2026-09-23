@@ -49,22 +49,26 @@ calkit new publication paper --template latex/jfm --stage paper \
 
 Available templates are `latex/article` (generic), `latex/ieee-conference`
 (IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
-(chapters, for a thesis or technical report). The environment it creates
-uses Calkit's LaTeX image, which builds all of them.
+(chapters, for a thesis or technical report).
+The environment created uses Calkit's LaTeX Docker image,
+which can build all of them.
 
 ## Packages
 
-Calkit's LaTeX image is TeX Live cut down to the packages journal classes
-and most papers use, a fraction of the size of a full distribution.
-When a document loads something the image doesn't carry,
-`calkit latex build` fetches the package the first time it's needed and
-keeps it in the project, under the gitignored `.calkit/local/texmf`, so
-later builds don't fetch it again and nothing fetched ends up in Git.
+Calkit's LaTeX image includes the packages used by common journal classes
+and most papers,
+which makes it a fraction of the size of a full TeX Live distribution.
+If a document uses a package the image doesn't include,
+`calkit latex build` will install it the first time it's needed.
+Installed packages are kept in the project in `.calkit/local/texmf`,
+which is ignored by Git,
+so they don't need to be installed again on the next build.
 
-This happens when building with the image directly, i.e., with no
-environment, or in a Docker environment built on it.
-Other images, and a TeX distribution installed on the machine, are left
-alone: install what they need the usual way.
+Packages are only installed automatically when building with Calkit's
+image, either directly, i.e., with no environment specified,
+or in a Docker environment built from it.
+For other images or a LaTeX distribution installed on your machine,
+you'll need to install packages the usual way.
 
 ## Inputs
 
@@ -87,16 +91,16 @@ can't compile the document at all.
 
 ## Build dates
 
-pdfTeX stamps the time of the build into the PDF, so building the same
-document twice gives two different files, and every rebuild writes a new
-hash into `dvc.lock` even when nothing about the document changed.
+pdfTeX writes the build time into the PDF,
+so building the same document twice produces two different files,
+and each rebuild writes a new hash to `dvc.lock`,
+even if the document didn't change.
 
-Calkit sets the date from the last commit that touched the document's
-directory, which keeps the date meaningful and the bytes stable until the
-document itself changes.
-With edits still in the working tree there's no commit that describes
-what's being built, so the date is the current time, as it would be
-otherwise.
+To avoid this, Calkit sets the build date to that of the last commit
+that modified the document's directory.
+This way the date is still meaningful,
+and the PDF won't change until the document does.
+If there are uncommitted changes, the current time is used instead.
 
 ## Comparing revisions
 

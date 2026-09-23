@@ -1,16 +1,18 @@
 # TinyTeX image
 
-`ghcr.io/calkit/latex`: TinyTeX plus the packages journal classes and
-recent papers need, and `latexdiff`, which comes to about 1.15 GB against
-roughly 9 GB for `texlive/texlive:latest-full`.
+`ghcr.io/calkit/latex` is TinyTeX plus the packages needed by journal
+classes and recent papers, along with `latexdiff`.
+It's about 1.15 GB,
+compared with roughly 9 GB for `texlive/texlive:latest-full`.
 
-It is what `calkit latex build` runs in when a document names no
-environment of its own, and what Calkit's dev container and VS Code
-settings use, and what new LaTeX environments are created with. All of
-them pin an exact tag, set in `calkit/latex.py`,
-`calkit/resources/vscode/settings.json`, and the dev container config
-generated from it, and the docs' examples and the hub's environment
-preset do the same.
+This image is used by `calkit latex build` when a document has no
+environment specified,
+by Calkit's dev container and VS Code settings,
+and for new LaTeX environments.
+Each of these pins an exact tag,
+set in `calkit/latex.py`, `calkit/resources/vscode/settings.json`,
+and the dev container config generated from it.
+The examples in the docs and the hub's environment preset also pin one.
 
 Originally developed at
 [`calkit/tinytex-latexmk-docker`](https://github.com/calkit/tinytex-latexmk-docker),
@@ -59,41 +61,51 @@ together.
 
 ## Packages papers load
 
-The classes above turned out to be the smaller part of what documents
-need. Of 175 recent arXiv papers across 16 categories, only 27 loaded
-nothing that set lacked, and a quarter of them loaded `mathtools`.
-Compiled in version 0.1.2, which had only that set, 5 of 48 of them
-built.
+It turns out the classes above are only a small part of what documents
+need.
+Of 175 recent arXiv papers across 16 categories,
+only 27 used no packages outside that set,
+and a quarter of them used `mathtools`.
+With version 0.1.2, which only had that set,
+5 of 48 sampled papers compiled.
 
-`packages.txt` is the rest: every package those papers loaded that the
-core lacks, plus what those packages load in turn, which only compiling
-the papers shows, e.g., `tcolorbox`'s libraries need `tikzfill`, `pdfcol`
-and `listingsutf8`, and `times` needs Courier for monospace text. With it
-39 of the 48 build, for about 160 MB. It is installed in a layer of its
-own so the core stays cached when the list changes.
+`packages.txt` contains the rest:
+every package those papers used that the core set doesn't include,
+plus their dependencies,
+which can only be found by compiling the papers,
+e.g., `tcolorbox`'s libraries need `tikzfill`, `pdfcol`, and
+`listingsutf8`, and `times` needs Courier for monospace text.
+With these, 39 of the 48 papers compile, for about 160 MB.
+They're installed in their own layer
+so the core stays cached when the list changes.
 
-Some things are left out on purpose, as too large for how rarely they're
-used, and are better installed at run time by the documents that need
-them: `cjk`, whose fonts are 90 MB for three papers in 175, `tex-gyre`,
-and a few font families one paper used, e.g., `libertine` and `dejavu`.
-Whole collections are no substitute either: the ones these papers draw
-from would add over 600 MB and still leave a third of them unbuildable,
-because the packages people load are spread across collections that each
-carry far more than anyone uses.
+Some packages are left out on purpose,
+since they're large and rarely used,
+so it's better to install them at run time for the documents that need
+them.
+These include `cjk`, whose fonts are 90 MB and were used by 3 of 175
+papers, `tex-gyre`, and a few font families only one paper used, e.g.,
+`libertine` and `dejavu`.
+Installing whole collections instead would add over 600 MB and still
+leave a third of the papers unable to compile,
+since the packages people use are spread across collections that each
+include far more than is needed.
 
-`scan-arxiv.py` regenerates the list. It samples recent papers, checks
-what they load against an image, and adds the TeX Live packages that
-provide whatever's missing:
+`scan-arxiv.py` regenerates the list.
+It samples recent papers, checks what they use against an image,
+and adds the TeX Live packages that provide whatever is missing:
 
 ```sh
 python scan-arxiv.py --image ghcr.io/calkit/latex:latest \
     --write packages.txt --exclude cjk libertine dejavu
 ```
 
-It only sees what papers load directly, so compile a sample in the new
-image afterwards and add whatever it asks for in turn. The smoke test
-in `test-latex-image.yml` loads the most common of these, so trimming one
-fails there.
+It only finds packages that papers load directly,
+so afterwards, compile a sample of papers with the new image and add any
+dependencies that are still missing.
+The smoke test in `test-latex-image.yml` loads the most common of these
+packages,
+so it will fail if one is removed.
 
 The image tracks whatever `tlmgr` installs at build time rather than a
 pinned TeX Live snapshot, so two builds of this Dockerfile on different
@@ -106,28 +118,35 @@ machine that may have no Perl of its own.
 
 ## Packages a document needs beyond this set
 
-`calkit latex build` fetches them. When a build fails on a missing style,
-class, or font file, it finds the TeX Live package that provides it,
-installs it with `tlmgr --usermode`, and tries again, for as many rounds
-as a package's own dependencies take.
+`calkit latex build` installs these automatically.
+When a build fails because of a missing style, class, or font file,
+it finds the TeX Live package that provides it,
+installs it with `tlmgr --usermode`,
+and tries again,
+repeating as many times as needed to install the package's dependencies.
 
-What it fetches goes in the project, under the gitignored
-`.calkit/local/texmf`, so nothing fetched can be committed, and each
-project keeps what its documents need. That directory is inside the
-working directory every container mounts, so nothing else is mounted:
-Calkit sets `TEXMFHOME` to it when it runs this image itself, and when the
-image runs as a Docker environment, including one built `FROM` it, the
-entrypoint switches to it on finding `.calkit/local` in the working
-directory. It leaves `TEXMFHOME` alone if something else set it.
+Packages are installed into the project in `.calkit/local/texmf`,
+which is ignored by Git,
+so each project keeps only what its documents need.
+That directory is inside the working directory, which every container
+already mounts, so no additional mounts are needed.
+Calkit sets `TEXMFHOME` to it when running this image itself.
+When the image runs as a Docker environment,
+including one built `FROM` it,
+the entrypoint sets `TEXMFHOME` if it finds `.calkit/local` in the working
+directory,
+unless `TEXMFHOME` is already set.
 
-Nothing is fetched into a system TeX, which is the user's to manage, or
-in another image, where what's installed is gone when the container
-exits.
+Packages are not installed into a system TeX distribution,
+since that's for the user to manage,
+or into other images,
+where anything installed would be lost when the container exits.
 
-A font's install ends with `tlmgr` reporting an error, since updating the
-font map isn't possible in user mode here, but that comes after the font
-files are in place, and TeX finds them. What decides whether a fetch
-worked is the build that follows it.
+Installing a font ends with `tlmgr` reporting an error,
+since the font map can't be updated in user mode,
+but the font files are already in place by then and TeX can find them.
+Whether an install worked is determined by whether the next build
+succeeds.
 
 ## Running it directly
 
@@ -160,11 +179,11 @@ Publish a release tagged `latex-image/vX.Y.Z`, the same way the other
 subprojects are released, and the workflow builds it for amd64 and arm64
 and pushes it to ghcr.io with a provenance attestation.
 
-It then opens a pull request moving the pinned tags, in the code, the
-docs' examples, and the hub's environment preset, to the new one. That
-pull request is opened with the workflow's own token, which doesn't start
-other workflows, so its checks run only once someone pushes to it or
-closes and reopens it.
+The workflow then opens a pull request to update the pinned tags in the
+code, docs examples, and hub environment preset.
+Since that pull request is opened with the workflow's own token,
+which doesn't trigger other workflows,
+its checks won't run until someone pushes to it or closes and reopens it.
 
 The image is versioned on its own rather than with the Calkit release,
 since it changes rarely.

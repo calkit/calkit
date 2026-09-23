@@ -5,15 +5,19 @@
     `ck` is an abbreviated alias for the `calkit` executable.
     All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
 
-Calkit is a system for answering questions with calculations, then
-writing about them.
-This walks through a small but complete project shaped that way: a
-question, the data collected to answer it, a figure and a number computed
-from that data, and a paper that shows both.
-It takes about a minute, and the point isn't the example's findings.
-It's that from here on, changing anything upstream tells you what
-downstream is now out of date, and one command brings it all back into
-line.
+Research projects exist to answer questions.
+We collect data,
+analyze it,
+make figures and compute numbers,
+and then write about what we found.
+In this quickstart we'll create a small project shaped this way,
+with a question, the data to answer it,
+a figure and a number computed from that data,
+and a paper that includes both.
+The findings don't matter here.
+What matters is that when something upstream changes,
+Calkit will tell you what's out of date downstream,
+and one command will bring everything back up to date.
 
 ## Create a project
 
@@ -23,24 +27,25 @@ calkit new project phd \
     --template calkit/example-basic
 ```
 
-This gives you a working project rather than an empty one, so there is
-something to run before there is something to write.
+This creates a project from a template,
+so we have something to run right away.
 
-The title is easy to change later but the name isn't, so keep the name
-general.
-A project can hold more than one investigation, so a single one for a
-thesis, with a question and a paper per study in it, is a perfectly good
-way to work.
+The title can be changed later, but the name is more difficult to change,
+so it's a good idea to keep the name general.
+A single project can hold multiple investigations,
+e.g., a grad student might use one project for their entire PhD,
+with a question and a paper for each study.
 
-Add `--hub` to also create it on [a Calkit hub](hub/index.md), which is
-how projects get backed up and shared.
-It needs an account, and can be set up later, so leave it off for now if
-you just want to see the thing work.
+Add the `--hub` flag to also create the project on
+[a Calkit hub](hub/index.md) for backup and sharing.
+This requires an account,
+but can be set up later,
+so we'll leave it off for now.
 
 ## Look at the question
 
-Open `calkit.yaml`.
-Near the top is what this project is for:
+Open up `calkit.yaml`.
+Near the top you'll see the project's research question:
 
 ```yaml
 questions:
@@ -57,8 +62,9 @@ questions:
         name: r2
 ```
 
-The answer names the files that back it up, and `{r2}` is read out of one
-of them rather than typed in:
+The answer lists the evidence that supports it,
+and `{r2}` is read from one of those files rather than typed in by hand.
+We can see the rendered answer with:
 
 ```sh
 calkit list questions
@@ -77,15 +83,16 @@ calkit list questions
         name: r2
 ```
 
-Those files are produced by the pipeline, so the claim and the evidence
-for it can't drift apart: if the data changes, the figure and the number
-are stale, and so is the answer that rests on them.
+The evidence files are produced by the pipeline,
+so if the data changes,
+the figure and number become stale,
+and so does the answer that depends on them.
 
-This is the part worth copying into your own work.
-Writing the question down first makes it obvious what evidence you owe,
-and the rest of the project exists to produce it.
+We recommend writing questions down first in your own projects as well.
+It makes clear what evidence you need to produce,
+and everything else in the project exists to produce it.
 
-## Run it
+## Run the pipeline
 
 ```sh
 cd phd
@@ -105,14 +112,18 @@ Running stage 'build-paper':
 Pipeline completed successfully ✅
 ```
 
-Five stages ran: data was collected, analyzed into a figure and a
-results file, the figure was copied into the paper's folder, the results
-were turned into LaTeX, and the paper was compiled.
-You now have `paper/main.pdf`.
+The pipeline has five stages:
+collect the data,
+analyze it to produce a figure and a results file,
+copy the figure into the paper folder,
+convert the results to LaTeX,
+and compile the paper.
+You should now have a `paper/main.pdf` file.
 
-Calkit created the Python environment and pulled the TeX image itself.
-If something it needs isn't installed, Docker most often, it says so,
-shows you the command, and offers to run it:
+Calkit created the Python environment and pulled the LaTeX Docker image
+automatically.
+If something it needs isn't installed, e.g., Docker,
+it will show you the command to install it and offer to run it:
 
 ```
 App 'docker' is not installed.
@@ -120,11 +131,11 @@ App 'docker' is not installed.
 Run this to install 'docker'? [Y/n]
 ```
 
-You can ask for that check at any time with `calkit check reqs`.
+You can also run this check on its own with `calkit check reqs`.
 
-## Change something
+## Make a change
 
-Edit `scripts/analyze.py`, then ask what that affected:
+Next, make an edit to `scripts/analyze.py` and check the project status:
 
 ```sh
 calkit status
@@ -145,8 +156,10 @@ Stale stages:
             scripts/analyze.py
 ```
 
-The figure and the results file are stale because the script that makes
-them changed, and the answer is stale because it rests on them:
+The figure and results file are stale because the script that produces
+them changed,
+and the answer is stale because its evidence is.
+We can see more detail with:
 
 ```sh
 calkit check questions
@@ -161,31 +174,33 @@ Questions answered: 1/1
 Answers backed by current evidence: 0/1 ❌
 ```
 
-That's the whole idea: editing a script put the project's answer in
-doubt, and it said so, without anyone remembering to check.
+So, editing the script made the project's answer out of date,
+and Calkit told us so without us needing to remember to check.
+To bring everything back up to date, run the pipeline again:
 
 ```sh
 calkit run
 ```
 
-Only what needed to run runs again, the paper is rebuilt with the new
-figure and the new numbers in it, and the answer is backed by current
-evidence again.
-That loop, edit and run, is the whole working rhythm.
-The document is never out of step with the analysis, because it can't
-be.
+Only the stages affected by the change will rerun.
+The paper is rebuilt with the new figure and numbers,
+and the answer is backed by current evidence again.
+This edit-and-run loop is the main way of working in a Calkit project,
+and it keeps the paper in sync with the analysis.
 
-## Save it
+## Save the project
 
 ```sh
 calkit save -am "Tweak the fit"
 ```
 
-This stages and commits in one step, sending code to Git and data and
-outputs to DVC storage, so you don't have to decide which goes where.
+This adds and commits all changes in one step,
+putting code in Git and data and outputs in DVC,
+so you don't need to decide which goes where.
 
-The project so far is on your machine and nowhere else, so there's
-nothing to push to yet, and Calkit offers to fix that:
+At this point the project only exists on your machine,
+so there's nowhere to push to.
+Calkit will offer to set that up:
 
 ```
 This project isn't connected to a hub, so there's nowhere to push its
@@ -193,28 +208,30 @@ code and data.
 Connect it now? [Y/n]
 ```
 
-Saying yes creates the project on a [hub](hub/index.md), which backs it
-up, holds the data and outputs that are too big for Git, and is how
-other people get to it.
-From then on `calkit save` pushes everything where it belongs, and a
-collaborator can clone the project and run `calkit run` to reproduce it.
+Answering yes creates the project on a [hub](hub/index.md),
+which backs it up,
+stores data and outputs that are too big for Git,
+and makes it available to collaborators.
+After that, `calkit save` will push everything to the right place,
+and a collaborator can clone the project and reproduce it with
+`calkit run`.
 
-Saying no is fine too: the commit is already made, and
-`calkit update hub` connects the project whenever you want.
+Answering no is fine too.
+The commit has already been made,
+and the project can be connected later with `calkit update hub`.
 
-## Where to go next
+## Next steps
 
 Add your own data and a script to process it with
-[`calkit xr`](pipeline/index.md), which runs a command and records it as
-a pipeline stage.
-To bring an existing project into Calkit instead of starting from a
-template, see
+[`calkit xr`](pipeline/index.md),
+which executes a command and records it as a pipeline stage.
+To use Calkit with an existing project rather than a template, see
 [the tutorial on existing projects](tutorials/existing-project.md).
 
-A project grows by adding questions.
-`questions` is a list, and each entry names its own evidence, so a
-second study is another entry and the stages that answer it rather than
-a second project.
+As the research goes on, add more questions.
+Each entry in `questions` lists its own evidence,
+so a new study can be a new question and the stages that answer it,
+rather than a new project.
 
 ## With an AI coding agent
 

@@ -380,15 +380,16 @@ We can create a Docker environment called `tex` for these with:
 calkit new docker-env --name tex --image ghcr.io/calkit/latex:0.1.2
 ```
 
-This environment uses Calkit's LaTeX image,
+This environment uses Calkit's LaTeX Docker image,
 which requires [Docker](https://docker.com) to be installed,
-but not a LaTeX distribution.
-It carries the packages most documents use, and any other a document
-loads is fetched into the project the first time it's built
+but will not require a separate LaTeX distribution to be installed.
+The image includes the packages most documents use,
+and any others will be installed into the project automatically
+the first time the document is built
 (see [Packages](../latex.md#packages)).
-Any other TeX Live image works too, e.g., one from
+You can also use any other TeX Live image, e.g., one from
 [this list](https://hub.docker.com/r/texlive/texlive/tags),
-though packages aren't fetched in those.
+though missing packages won't be installed automatically.
 
 ### Add pipeline stages
 

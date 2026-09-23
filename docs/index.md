@@ -133,14 +133,14 @@ which is a critical feature to have when using generative AI.
   Simply call `calkit run`.
   Compose your pipeline from many different kinds of stages,
   including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
-- Tools for automatically building reproducible pipelines from work you're
+- Tools to automatically build a reproducible pipeline from work you're
   already doing.
   Run a script, notebook, or LaTeX document with
   [`calkit xr`](pipeline/index.md#automatic-stage-and-environment-detection)
-  and it becomes a pipeline stage,
-  with its environment, inputs, and outputs detected and recorded,
-  so an existing project becomes reproducible one command at a time rather
-  than all at once.
+  and it will be added as a pipeline stage,
+  with its environment, inputs, and outputs detected automatically.
+  This way, an existing project can be made reproducible
+  one step at a time.
 - A complementary self-hostable and GitHub-integrated
   [hub](https://github.com/calkit/calkit/tree/main/hub)
   web app to facilitate backup, collaboration,

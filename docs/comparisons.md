@@ -92,7 +92,7 @@ Since Calkit's pipeline runs on DVC, it's worth saying what Calkit adds:
 - Named environments, whose lock files are inputs to the stages that use
   them.
   A DVC stage is just a command.
-- Kinds of stage, e.g., Python scripts, notebooks, and LaTeX documents,
+- Kinds of stages, e.g., Python scripts, notebooks, and LaTeX documents,
   and `calkit xr`, which works out a stage's kind, environment, inputs,
   and outputs from a script.
 - One file, `calkit.yaml`, that ties datasets, figures, publications,

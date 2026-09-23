@@ -181,6 +181,11 @@ def test_list_questions(tmp_dir):
                     "path": "paper/paper.pdf",
                     "explanation": "See the results section.",
                 },
+                {
+                    "kind": "result",
+                    "path": "results/metrics.json",
+                    "values": {"acc": "accuracy", "f1": "scores.f1"},
+                },
             ],
         }
     )
@@ -209,6 +214,13 @@ def test_list_questions(tmp_dir):
     assert "- kind: publication" in out
     assert "path: paper/paper.pdf" in out
     assert "explanation: See the results section." in out
+    # A result's values are listed one per line under it
+    assert (
+        "        values:\n          acc: accuracy\n          f1: scores.f1"
+        in out
+    )
+    # Fields that aren't set aren't listed
+    assert "None" not in out
 
 
 def test_list_remotes(tmp_dir):

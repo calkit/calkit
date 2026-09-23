@@ -4222,6 +4222,7 @@ def test_question_evidence_values_documents_and_publications() -> None:
 
     from app.api.routes.projects.core import (
         _build_question_evidence,
+        _evidence_values,
         _EvidenceLookups,
     )
     from app.models.core import ContentsItem, Publication
@@ -4244,6 +4245,22 @@ def test_question_evidence_values_documents_and_publications() -> None:
         {"kind": "publication", "path": "paper/main.pdf", "label": "sec:x"},
         # A value with no key names no number, so there's nothing to show
         {"kind": "value", "path": "results/summary.json"},
+        # Several values from one file on one card, each by name
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            # Keys resolve as the CLI reads them, dots in names and all
+            "values": {
+                "avg": "stats.mean",
+                "total": "stats.n",
+                "failed": "sweep.back_off_1.50_k.failed",
+            },
+        },
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "values": {"avg2": "stats.mean", "gone": "stats.nope"},
+        },
     ]
 
     def fake_contents(project, repo, path, ref):
@@ -4254,7 +4271,12 @@ def test_question_evidence_values_documents_and_publications() -> None:
             size=1,
             in_repo=True,
             content=base64.b64encode(
-                json.dumps({"stats": {"mean": 2.5}}).encode()
+                json.dumps(
+                    {
+                        "stats": {"mean": 2.5, "n": 40},
+                        "sweep": {"back_off_1.50_k": {"failed": 13}},
+                    }
+                ).encode()
             ).decode(),
             url=None,
             storage="git",
@@ -4283,6 +4305,21 @@ def test_question_evidence_values_documents_and_publications() -> None:
             },
             result_value_cache={},
         )
+        template_values = _evidence_values(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            cache={},
+        )
+    # The templates see every named value, typed as the file holds them
+    assert template_values == {
+        "mean": 2.5,
+        "avg": 2.5,
+        "total": 40,
+        "failed": 13,
+        "avg2": 2.5,
+    }
     assert [ev.kind for ev in evidence] == [
         "value",
         "document",
@@ -4291,6 +4328,8 @@ def test_question_evidence_values_documents_and_publications() -> None:
         "publication",
         "publication",
         "value",
+        "result",
+        "result",
     ]
     assert evidence[0].value == "2.5"
     assert evidence[0].name == "mean"
@@ -4306,6 +4345,15 @@ def test_question_evidence_values_documents_and_publications() -> None:
     assert evidence[5].label == "sec:x"
     assert evidence[5].stale_reason is None
     assert evidence[6].stale_reason == "missing"
+    assert [(v.name, v.key, v.value) for v in evidence[7].values or []] == [
+        ("avg", "stats.mean", "2.5"),
+        ("total", "stats.n", "40"),
+        ("failed", "sweep.back_off_1.50_k.failed", "13"),
+    ]
+    assert evidence[7].stale_reason is None
+    # One value that can't be read is enough to call the card missing
+    assert [v.value for v in evidence[8].values or []] == ["2.5", None]
+    assert evidence[8].stale_reason == "missing"
 
 
 def test_saving_a_question_keeps_names_sections_and_labels() -> None:
@@ -4338,6 +4386,13 @@ def test_saving_a_question_keeps_names_sections_and_labels() -> None:
             QuestionEvidencePost(
                 kind="figure", path="figures/x.png", name="x", section="1"
             ),
+            # A result's values survive an edit, and replace any key
+            QuestionEvidencePost(
+                kind="result",
+                path="results/summary.json",
+                key="stats.mean",
+                values={"avg": "stats.mean", "total": "stats.n"},
+            ),
         ],
     )
     out = _apply_question_update("q?", req)
@@ -4358,6 +4413,11 @@ def test_saving_a_question_keeps_names_sections_and_labels() -> None:
             "git_ref": "v1.0",
         },
         {"kind": "figure", "path": "figures/x.png"},
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "values": {"avg": "stats.mean", "total": "stats.n"},
+        },
     ]
 
 

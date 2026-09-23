@@ -6946,6 +6946,20 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Key",
     },
+    values: {
+      anyOf: [
+        {
+          items: {
+            $ref: "#/components/schemas/QuestionEvidenceValue",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
     name: {
       anyOf: [
         {
@@ -7114,6 +7128,20 @@ export const QuestionEvidencePostSchema = {
       ],
       title: "Key",
     },
+    values: {
+      anyOf: [
+        {
+          additionalProperties: {
+            type: "string",
+          },
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
     name: {
       anyOf: [
         {
@@ -7184,6 +7212,34 @@ export const QuestionEvidencePostSchema = {
   type: "object",
   required: ["kind", "path"],
   title: "QuestionEvidencePost",
+} as const
+
+export const QuestionEvidenceValueSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    value: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value",
+    },
+  },
+  type: "object",
+  required: ["name", "key"],
+  title: "QuestionEvidenceValue",
+  description: "One of the named values a result evidence entry cites.",
 } as const
 
 export const QuestionPostSchema = {

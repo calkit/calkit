@@ -1,6 +1,7 @@
 import {
   Box,
   Button,
+  Code,
   Flex,
   FormControl,
   FormErrorMessage,
@@ -63,6 +64,10 @@ interface EvidenceRow {
   name?: string
   section?: string
   label?: string
+  // A result's named values, which the form doesn't edit but must keep,
+  // and the file they're keys into, since they mean nothing in another
+  values?: Record<string, string>
+  valuesPath?: string
 }
 
 interface EditQuestionForm {
@@ -166,6 +171,10 @@ const EditQuestion = ({
         name: ev.name ?? undefined,
         section: ev.section ?? undefined,
         label: ev.label ?? undefined,
+        values: ev.values
+          ? Object.fromEntries(ev.values.map((v) => [v.name, v.key]))
+          : undefined,
+        valuesPath: ev.values ? ev.path : undefined,
       })),
     })
   }, [question, reset])
@@ -194,6 +203,12 @@ const EditQuestion = ({
                     ? row.key
                     : undefined,
                 name: row.name ? row.name : undefined,
+                values:
+                  parsed.kind === "result" &&
+                  row.values &&
+                  parsed.path === row.valuesPath
+                    ? row.values
+                    : undefined,
                 section: row.section ? row.section : undefined,
                 label: row.label ? row.label : undefined,
                 explanation: row.explanation ? row.explanation : undefined,
@@ -302,6 +317,10 @@ const EditQuestion = ({
             {fields.map((field, index) => {
               const selection = watch(`evidence.${index}.selection`) || ""
               const parsed = parseSelection(selection)
+              const rowValues =
+                parsed?.path === watch(`evidence.${index}.valuesPath`)
+                  ? watch(`evidence.${index}.values`)
+                  : undefined
               const figures = figuresRequest.data ?? []
               const results = resultsRequest.data ?? []
               const publications = publicationsRequest.data ?? []
@@ -421,7 +440,20 @@ const EditQuestion = ({
                       ) : null}
                     </Select>
                   </FormControl>
-                  {parsed?.kind === "result" || parsed?.kind === "value" ? (
+                  {parsed?.kind === "result" && rowValues ? (
+                    // Kept as written in calkit.yaml, since the form has no
+                    // editor for a map of names to keys
+                    <Box mb={2} fontSize="xs">
+                      <Text mb={1} fontWeight="medium">
+                        Values
+                      </Text>
+                      {Object.entries(rowValues).map(([name, key]) => (
+                        <Text key={name} color="gray.500">
+                          <Code fontSize="xs">{name}</Code>: {key}
+                        </Text>
+                      ))}
+                    </Box>
+                  ) : parsed?.kind === "result" || parsed?.kind === "value" ? (
                     <FormControl mb={2}>
                       <FormLabel fontSize="xs" mb={1}>
                         Key (optional)

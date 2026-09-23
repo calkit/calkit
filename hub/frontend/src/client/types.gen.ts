@@ -3959,6 +3959,10 @@ export type QuestionEvidence = {
    */
   key?: string | null
   /**
+   * Values
+   */
+  values?: Array<QuestionEvidenceValue> | null
+  /**
    * Name
    */
   name?: string | null
@@ -4017,6 +4021,12 @@ export type QuestionEvidencePost = {
    */
   key?: string | null
   /**
+   * Values
+   */
+  values?: {
+    [key: string]: string
+  } | null
+  /**
    * Name
    */
   name?: string | null
@@ -4040,6 +4050,26 @@ export type QuestionEvidencePost = {
    * Git Ref
    */
   git_ref?: string | null
+}
+
+/**
+ * QuestionEvidenceValue
+ *
+ * One of the named values a result evidence entry cites.
+ */
+export type QuestionEvidenceValue = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Value
+   */
+  value?: string | null
 }
 
 /**

@@ -1072,6 +1072,7 @@ export type {
   Question,
   QuestionEvidence,
   QuestionEvidencePost,
+  QuestionEvidenceValue,
   QuestionPost,
   QuestionPublic,
   QuestionPut,

@@ -135,7 +135,9 @@ project, not a tidy-up.
 - One claim per question, two to four sentences. Say what was found and
   what it means; leave the reasoning to the publication.
 - Numbers come from `value` evidence via placeholders, formatted to the
-  precision the claim needs: `{ratio:.1f}x`, `{error:.0%}`.
+  precision the claim needs: `{ratio:.1f}x`, `{error:.0%}`. When several
+  come from one file, e.g., the outputs of one calculation, name them
+  together in one `result` entry's `values`, a map of name to key.
 - A `value` entry must read a file a pipeline stage writes. A placeholder
   over a results file written by hand, including one you write, is a
   retyped number with extra steps, and the check fails it. If no stage
@@ -152,17 +154,15 @@ project, not a tidy-up.
     if p < 0.05: "The closure cuts error by {improvement:.1f}x."
     else: "The closure does not measurably reduce error."
   evidence:
-    - kind: value
+    - kind: result
       path: results/closure.json
-      key: p-value
-      name: p
-    - kind: value
-      path: results/closure.json
-      key: improvement
+      values:
+        p: p-value
+        improvement: improvement
   ```
 
-  Conditions name `value` evidence, so those names must be valid Python
-  identifiers; give the entry a `name` otherwise. Every branch must be a
+  Conditions use the names of values, so those names must be valid Python
+  identifiers. Every branch must be a
   claim the evidence would support if it held. The threshold is part of
   the claim: take it from the field's convention or the user, never pick
   it to make the current branch hold, and don't use branches to hedge a

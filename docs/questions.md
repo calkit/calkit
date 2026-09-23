@@ -41,7 +41,8 @@ There are a few kinds of evidence:
 - `figure`, `table`, and `publication` refer to an artifact by path.
 - `document` refers to a written document by path, e.g., a Markdown
   write-up, without declaring it as a publication.
-- `result` refers to a whole results file.
+- `result` refers to a whole results file,
+  optionally naming several `values` inside it.
 - `value` refers to one value inside a JSON or YAML results file,
   found by its `key`.
 
@@ -74,14 +75,38 @@ evidence:
     name: leader
 ```
 
-The key is looked up as written at the top level of the file first.
-If it isn't there, it's split on dots and used to walk into nested
-objects, with integers indexing into lists,
+The key is split on dots and used to walk into nested objects,
+with integers indexing into lists,
 so `features.0.p-family-wise-all` reads a field of the first feature.
+At each level, the longest run of parts that names a key is used,
+so keys that contain dots work at any depth,
+e.g., `sweep.back_off_1.50_k.failed` reads `failed` from the
+`back_off_1.50_k` entry of `sweep`.
 
 The `name` defaults to the key, so it can be left out when the key is
 already a good name.
 Names must be unique within a question.
+
+When several values come from one file,
+e.g., the outputs of one calculation,
+a `result` entry can name them together, like the fields of a struct
+or object,
+mapping each name to its key:
+
+```yaml
+evidence:
+  - kind: result
+    path: results/calibration.json
+    values:
+      worst: reference.worst_ratio
+      mean: reference.mean_ratio
+      margin: reference.minimum_safety_margin_k
+```
+
+Each value works just like a `value` entry's:
+it can be used in the text and in conditions,
+and it's checked and compared with history on its own.
+A `result` takes either `values` or the older `key`, not both.
 
 ## Putting numbers in the text
 
@@ -126,6 +151,10 @@ Conditions use the names of `value` evidence.
 They can compare values, including chained comparisons like
 `0.05 <= p < 0.1`, combine them with `and`, `or`, and `not`, and do
 arithmetic like `n / 2 > 8`.
+A true/false value can also be used on its own,
+e.g., `passes and not flaky`,
+but other values have to be compared,
+so a number is never read as true or false.
 Function calls and attribute access aren't allowed.
 Since conditions are Python expressions, the names in them must be valid
 Python identifiers.
@@ -206,7 +235,7 @@ Use `notes` to say why it's open and what would settle it.
 <!-- prettier-ignore -->
 !!! note
     These records are designed to be compatible in spirit with the
-    [ASTRA](https://github.com/lightcone-research/astra) analysis
+    [ASTRA](https://github.com/LightconeResearch/astra-spec) analysis
     specification, whose evidence entries likewise cite an analysis
     artifact by identifier, note the commit it came from, and carry a
     selector locating the claim within a document.

@@ -160,6 +160,7 @@ from app.models import (
     PublicationKind,
     Question,
     QuestionEvidence,
+    QuestionEvidenceValue,
     QuestionPublic,
     QuestionPut,
     Result,
@@ -2243,8 +2244,8 @@ def _resolve_result_value(
 ) -> str | None:
     """Read a result file and return the value at ``key`` as a string.
 
-    Supports JSON, YAML and TOML result files and dot-separated nested keys
-    (e.g. ``metrics.mean``). ``cache`` memoizes parsed files across evidence
+    Supports JSON, YAML and TOML result files and keys as
+    ``calkit.questions.resolve_key`` reads them, e.g., ``metrics.mean``. ``cache`` memoizes parsed files across evidence
     items, keyed by ref as well as path: two evidence entries can cite one
     file at two refs, and they are not the same file.
     Returns None if the file or key cannot be resolved.
@@ -2273,12 +2274,12 @@ def _resolve_result_value(
     data = cache[cache_key]
     if data is None:
         return None
-    value: object = data
-    for part in key.split("."):
-        if isinstance(value, dict) and part in value:
-            value = value[part]
-        else:
-            return None
+    # The CLI's lookup, so a key it resolves resolves here too, e.g., one
+    # containing dots or indexing a list
+    try:
+        value = calkit.questions.resolve_key(data, key)
+    except KeyError:
+        return None
     if isinstance(value, (dict, list)):
         return None
     return str(value)
@@ -2300,13 +2301,11 @@ def _evidence_values(
     """
     values: dict[str, Any] = {}
     for ev in evidence_ck:
-        if not isinstance(ev, dict) or not calkit.questions.is_value_evidence(
-            ev
-        ):
+        if not isinstance(ev, dict):
             continue
-        name = calkit.questions.evidence_name(ev)
-        path, key = ev.get("path"), ev.get("key")
-        if not name or not isinstance(path, str) or not isinstance(key, str):
+        keys = calkit.questions.named_keys(ev)
+        path = ev.get("path")
+        if not keys or not isinstance(path, str):
             continue
         cache_key = (_evidence_ref(ev, ref), path)
         if cache_key not in cache:
@@ -2317,16 +2316,17 @@ def _evidence_values(
                 repo=repo,
                 ref=cache_key[0],
                 path=path,
-                key=key,
+                key=next(iter(keys.values())),
                 cache=cache,
             )
         data = cache.get(cache_key)
         if not isinstance(data, dict):
             continue
-        try:
-            values[name] = calkit.questions.resolve_key(data, key)
-        except Exception:
-            continue
+        for name, key in keys.items():
+            try:
+                values[name] = calkit.questions.resolve_key(data, key)
+            except Exception:
+                continue
     return values
 
 
@@ -2413,6 +2413,9 @@ def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
     # A value is the number itself, so without a key there's nothing to show
     if item.kind == "value":
         return item.value is None
+    # Likewise each value a result names
+    if item.values is not None:
+        return any(v.value is None for v in item.values)
     return bool(item.key) and item.value is None
 
 
@@ -2560,6 +2563,22 @@ def _build_question_evidence(
                     key=item.key,
                     cache=result_value_cache,
                 )
+            elif item.kind == "result" and isinstance(ev.get("values"), dict):
+                item.values = [
+                    QuestionEvidenceValue(
+                        name=name,
+                        key=key,
+                        value=_resolve_result_value(
+                            project=project,
+                            repo=repo,
+                            ref=ev_ref,
+                            path=path,
+                            key=key,
+                            cache=result_value_cache,
+                        ),
+                    )
+                    for name, key in calkit.questions.named_keys(ev).items()
+                ]
         _set_evidence_stage(item, lookups)
         # Last word: an answer resting on something nobody can see is worse
         # off than one resting on something merely out of date.
@@ -2927,7 +2946,9 @@ def _apply_question_update(
     evidence = []
     for ev in req.evidence:
         entry: dict = {"kind": ev.kind, "path": ev.path}
-        if ev.kind in ("result", "value") and ev.key:
+        if ev.kind == "result" and ev.values:
+            entry["values"] = dict(ev.values)
+        elif ev.kind in ("result", "value") and ev.key:
             entry["key"] = ev.key
         if ev.kind == "value" and ev.name:
             entry["name"] = ev.name

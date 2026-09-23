@@ -269,8 +269,7 @@ and releasing again makes a new version of the same record.
 
 ## Collaboration platforms
 
-These are hubs where work happens in Git repositories,
-each built for one kind of work.
+These are where people work together, each built for one kind of work.
 [GitHub](https://github.com) is built for software development,
 with issues, pull requests, and CI through GitHub Actions.
 The [Hugging Face Hub](https://huggingface.co/docs/hub/index)
@@ -290,7 +289,20 @@ It integrates with GitHub rather than replacing it,
 and serves as a DVC remote,
 so a project's data and outputs are stored alongside its repository.
 
-## Research platforms
+[Overleaf](https://www.overleaf.com/) is built for writing:
+it's a web app for editing LaTeX documents together.
+It's only for writing, though,
+so figures and tables made by scripts elsewhere have to be uploaded by
+hand whenever they change.
+Calkit keeps writing integrated with analysis,
+since the two are tightly coupled,
+and any friction between them slows iteration and lowers quality.
+A Calkit publication can be [linked to an Overleaf project](overleaf.md):
+edits sync both ways,
+and figures made by the pipeline are sent up to Overleaf,
+so collaborators can keep writing there.
+
+## Hosted computing environments
 
 These are places to do the work, with compute and collaboration built in.
 A Calkit project lives in its repository and runs anywhere,

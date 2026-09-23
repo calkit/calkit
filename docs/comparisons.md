@@ -7,124 +7,319 @@ and whether those are up to date (`calkit status` and `calkit check questions`).
 Without it, that structure is usually implicit,
 or described in prose, e.g., in a README.
 
-Other tools overlap with parts of this.
-This page compares them and explores how they fit together.
+Other tools cover parts of this:
+running a pipeline, versioning data and recording its provenance,
+describing a project with metadata, or building a document from code.
+Calkit is vertically integrated:
+environments, the pipeline, data versioning, provenance, publications,
+and the project's claims are declared in one place and work together,
+so there's no need to build a workflow from separate components.
 
-## Harbor and Terminal-Bench-Science
+The project's artifacts are also front and center.
+The publication, figures, and results are what other people see and use
+first, and they're tightly coupled to the findings,
+so Calkit keeps them in the project, versioned with the code and data
+that produced them.
+Many tools keep them elsewhere,
+e.g., on a tracking server or in an app's data folder.
 
-[Harbor](https://github.com/harbor-framework/harbor) is a framework for
-evaluating agents and models in containers.
-[Terminal-Bench-Science](https://github.com/harbor-framework/terminal-bench-science)
-(TB-Science) is a benchmark built on it,
-with 70 research tasks written by domain scientists as of v0.1.
+This page compares Calkit with those tools and explores how they fit
+together.
 
-A Harbor task is a directory with:
+## Literate programming
 
-- `instruction.md`, the prompt the agent receives
-- `task.toml`, with metadata, resource limits, timeouts, network policy,
-  and the paths to collect from the sandbox after the agent finishes
-- `environment/Dockerfile`, the agent's container
-- `tests/`, a verifier that writes a reward, optionally in its own container
-- `solution/`, a reference solution the `oracle` agent runs
+[Quarto](https://quarto.org/) builds documents,
+e.g., articles, websites, and books,
+from files that mix prose and code.
+The code runs when the document is rendered,
+through Jupyter, knitr, Julia, or Observable,
+and its outputs are embedded in the document.
+With `freeze: auto`, a document is re-rendered only when its source changes;
+changes to input data aren't tracked,
+and the docs say to re-render in full when they happen.
+Environments are left to the user.
 
-A trial is one agent's attempt at one task.
-A job is a set of trials.
-Each trial directory records its configuration, a `lock.json`,
-the agent's logs, the collected artifacts with a manifest,
-and the verifier's output and reward.
-`harbor trial regrade` reruns a new verifier on the recorded artifacts
-without rerunning the agent,
-and records which trial the new result was derived from.
+Calkit has the same integrative spirit, with more modularity.
+A figure doesn't have to be made inside the document:
+it's made by its own pipeline stage,
+and the document is built by another stage that uses it,
+so the two stay connected through the pipeline,
+and a change to the data reruns everything that depends on it.
+A Quarto document can itself be a Calkit pipeline stage.
 
-|                   | Harbor                                     | Calkit                                        |
-| ----------------- | ------------------------------------------ | --------------------------------------------- |
-| Unit              | A trial: an agent's attempt and its reward | A project: its pipeline, outputs, and claims  |
-| Question answered | Did this agent solve this task?            | Do these outputs follow from these inputs?    |
-| Environment       | A container per task                       | Named environments per stage, of many kinds   |
-| What reruns       | The verifier, on recorded artifacts        | Stages whose inputs or environments changed   |
-| Claims            | A reward from the verifier                 | Questions whose answers cite pipeline outputs |
+## Workflow and pipeline tools
 
-They answer different questions, so they don't compete.
-They meet in three places.
+These run a graph of steps and skip the ones that are up to date.
+Calkit's pipeline is one of these:
+it's compiled to a DVC pipeline.
+What Calkit adds is mainly around it:
+environments declared per stage and checked before running,
+and questions whose answers are checked against the outputs.
 
-### Task authoring
+| Tool                                           | Unit of work            | Environments                                         | Skips unchanged work by                    |
+| ---------------------------------------------- | ----------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| [DVC](https://doc.dvc.org/user-guide)          | Stage in `dvc.yaml`     | Not part of the tool                                 | Hashes of inputs and outputs               |
+| [Snakemake](https://snakemake.readthedocs.io)  | Rule                    | Conda or a container per rule                        | Rerun triggers, optional cache             |
+| [Nextflow](https://docs.seqera.io/nextflow/)   | Process                 | A container, conda, or Spack per process             | A hash of each task (`-resume`)            |
+| [targets](https://books.ropensci.org/targets/) | Target in `_targets.R`  | Not part of the tool                                 | Hashes of code, data, and upstream targets |
+| [Make](https://www.gnu.org/software/make/)     | Rule                    | Not part of the tool                                 | File timestamps                            |
+| [Airflow](https://airflow.apache.org/docs/)    | Task in a scheduled DAG | Virtualenv, Docker, or Kubernetes operators          | Not its purpose                            |
+| [explore](https://github.com/vacoa/explore)    | MATLAB function         | Not part of the tool                                 | Memoized results, rerun when code changes  |
+| Calkit                                         | Stage in `calkit.yaml`  | Many kinds per stage, e.g., uv, conda, Docker, Julia | DVC, with environment locks as inputs      |
 
-TB-Science tasks can include an `authoring/` directory, holding
-`provenance/` (generators, checksums, source URLs) and
-`evidence/` (independent reimplementations, calibration studies).
-48 of the 70 tasks in v0.1 have one.
-The contributing guide says CI doesn't inspect it.
-How to rerun it, and which script backs which number in the task's
-README, is described in prose.
+Snakemake and Nextflow run on clusters and in the cloud without changes
+to the workflow, and Nextflow has a large library of community pipelines
+in [nf-core](https://nf-co.re/).
+targets, from rOpenSci, is for R:
+targets are R objects kept in a `_targets/` store,
+and `tar_quarto()`, from the companion tarchetypes package,
+renders Quarto documents as part of the pipeline.
+Airflow is for workflows that run on a schedule,
+rather than for reproducing a result.
+explore is a MATLAB class that saves each function's outputs and reruns
+only what changed; it hasn't been updated since 2020.
+None of these link claims in a paper to their outputs.
 
-As a prototype, we added a `calkit.yaml` to the `reactor-safety-control`
-task, with a Docker environment pinned to the same base image and packages
-as the task's, and four stages:
-generating the fixtures, calibrating the accept region,
-an alternate-noise sweep, and an identification check.
-The pipeline took 13 minutes to run.
-The regenerated fixtures, including the hidden scenarios, reference times,
-and hash manifest, were byte-identical to the committed ones.
-Four questions answer from values in the results files,
-reproducing numbers the README states by hand,
-e.g., the independent controller's worst productivity ratio of 1.04981,
-and a baseline failing 7 and 13 of 21 scenarios with 1.0 K and 1.5 K of
-safety back-off.
+### Calkit and DVC
 
-### Agent submissions
+Since Calkit's pipeline runs on DVC, it's worth saying what Calkit adds:
 
-A task can ask the agent to deliver a Calkit project,
-so the verifier can check that its claims trace back to its pipeline,
-and a person reviewing the trial has an entry point into the files.
+- Named environments, whose lock files are inputs to the stages that use
+  them.
+  A DVC stage is just a command.
+- Kinds of stage, e.g., Python scripts, notebooks, and LaTeX documents,
+  and `calkit xr`, which works out a stage's kind, environment, inputs,
+  and outputs from a script.
+- One file, `calkit.yaml`, that ties datasets, figures, publications,
+  and references to the pipeline,
+  along with the questions the project answers and the evidence for them.
+- Answers whose numbers are read from pipeline outputs,
+  and a check that reports evidence that's stale, missing,
+  or not computed by any stage.
 
-We made a variant of the same task whose instructions require the
-submission to be a committed Calkit project,
-with a pipeline that produces the design report,
-and an answered question backed by `value` evidence.
-Its verifier copies the project, removes untracked files with
-`git clean -fdx`, then runs `calkit check questions` and
-`calkit run --force` and requires an identical report.
-The oracle solution passed all 34 tests under `harbor run`.
-Two tampered copies of the recorded submission,
-rescored with `harbor trial regrade`, were both rejected:
+Neither records who ran a stage beyond the Git commit, or signs that
+record.
+Neither replays a project and reports which outputs came out differently,
+with tolerances for results that aren't reproducible bit for bit,
+e.g., from training on a GPU.
+And Calkit doesn't yet record who reviewed an answer;
+see [issue #1606](https://github.com/calkit/calkit/issues/1606).
 
-| Tampering                                    | Original tests              | Calkit checks                                                   |
-| -------------------------------------------- | --------------------------- | --------------------------------------------------------------- |
-| Report edited by 1% and committed            | Pass, since tolerance is 2% | Fail: the evidence is `stale`, and the rerun changes the report |
-| Answer cites a number in a hand-written file | Pass                        | Fail: `error`, since no pipeline stage computes the value       |
+### showyourwork
 
-Calkit checks that claims are traceable and current, not that they're
-correct.
-The verifier's own tests still do that.
+[showyourwork](https://show-your.work/) is the closest to Calkit.
+It builds a LaTeX article from a Snakemake workflow on every push with
+GitHub Actions, and it uses conda for environments.
+`\script` ties a figure to the script that made it,
+`\variable` inserts a file's contents, e.g., a computed number,
+into the text as a workflow dependency,
+and the PDF gets margin icons linking figures to their scripts.
+Expensive outputs can be cached on Zenodo.
+The project layout is fixed,
+and as of September 2026 its docs note that the last release is over two
+years old.
 
-Some constraints came from the verifier's sandbox:
+Calkit isn't limited to one article, layout, or kind of environment,
+and its questions state claims apart from any document,
+with the check reporting stale or untraceable evidence.
 
-- Rerunning the pipeline executes the agent's code,
-  so it has to run as an unprivileged user,
-  or it could read the hidden fixtures or write its own reward.
-- The verifier has no network,
-  so the project uses a `system` environment,
-  and must carry its own copies of its inputs.
-- The verifier makes `/var/tmp` unwritable for other users,
-  so `DVC_SITE_CACHE_DIR` has to point somewhere the unprivileged user can
-  write.
+## Environment management
 
-The prototype turned up some gaps in Calkit, since fixed:
-`calkit run` reported a DVC repo it couldn't open as a missing one,
-`value` keys containing dots could only be read at the top level,
-and a true/false value couldn't be used on its own in a condition.
+Tools like conda, uv, pixi, renv, Docker, and Julia's package manager
+create environments,
+and some pin them in lock files.
+[conda-lock](https://conda.github.io/conda-lock/), for example,
+solves an `environment.yml` for each platform and writes a lock file,
+so installing from it doesn't run the solver again.
+Calkit doesn't replace these tools; they plug in as kinds of environment.
+What Calkit adds is making sure they're used reproducibly:
 
-Both prototypes can be rebuilt from the
-[example](https://github.com/calkit/calkit/tree/main/examples/harbor-tb-science),
-which fetches the task at a pinned commit rather than copying it.
+- Every environment has a lock file.
+  Where the tool doesn't write one, Calkit does,
+  e.g., for conda, venv, and Docker environments,
+  where the lock records the image's digest for each architecture,
+  and a pulled image is checked against it.
+- Before a command runs in an environment,
+  `calkit xenv` checks that the environment matches its specification,
+  and rebuilds it if it doesn't.
+- Julia runs with the global environment left off its load path,
+  so code can't use packages the project doesn't declare.
+- A `system` environment can lock properties of the machine,
+  e.g., the Python version.
+- Lock files are inputs to the stages that use them,
+  so changing an environment reruns what depends on it.
 
-### Benchmark results
+## Experiment tracking
 
-A claim like "model A outperforms model B on the physical sciences tasks"
-is itself a research result.
-Harbor jobs could be frozen pipeline stages,
-with questions citing values from each trial's `result.json`.
-We haven't tried this yet.
+[W&B](https://docs.wandb.ai/) and
+[MLflow](https://mlflow.org/docs/latest/ml/tracking/) record runs as code
+executes:
+each run logs its configuration, metrics, and output files,
+and a web app compares runs.
+W&B's Artifacts version datasets and models as the inputs and outputs of
+runs, and show the lineage between them.
+W&B is hosted by W&B or self-managed, and its client library is
+MIT-licensed.
+MLflow keeps runs in stores you configure, and is open source under the
+Apache 2.0 license.
+[DVC experiments](https://doc.dvc.org/user-guide/experiment-management)
+run a DVC pipeline with changed parameters,
+keep each run as a hidden Git reference,
+and compare them with `dvc exp show`.
+
+These are built for exploring:
+runs are logged as they happen,
+and comparing them is how a result is found.
+With W&B and MLflow, the logged outputs live on the tracking server
+rather than in the project;
+DVC keeps its experiments in the project's Git repository.
+Calkit's approach is more designed.
+A parameter sweep is a pipeline stage with `iterate_over`,
+its outputs are versioned like any other,
+and a question and hypothesis say up front what the runs are meant to
+show, with the answer checked against the outputs.
+
+## Data management and provenance
+
+### DataLad
+
+[DataLad](https://www.datalad.org/) manages data in Git repositories,
+using [git-annex](https://git-annex.branchable.com/) for large files.
+A dataset can nest others as subdatasets,
+so a project can bring in someone else's data with `datalad clone`
+and fetch only the files it needs with `datalad get`.
+`datalad run` records the command that produced an output in the commit,
+and `datalad rerun` runs it again.
+The datalad-container extension runs commands in Singularity or Docker
+images, and the metalad extension extracts metadata.
+There's no declared pipeline that skips steps that are up to date.
+
+Calkit covers the same ground with DVC:
+versioned data, datasets imported from other projects with
+`imported_from`, and a record of how each output was made.
+The difference is that each output comes from a declared pipeline stage,
+with its inputs and environment, rather than from a logged command,
+so Calkit can tell when an output is out of date.
+
+## Project metadata
+
+### RO-Crate
+
+[RO-Crate](https://www.researchobject.org/ro-crate/) is a specification,
+at version 1.3 as of June 2026, for describing research data and what it
+came from.
+A crate is a directory with an `ro-crate-metadata.json` file,
+JSON-LD using mostly schema.org terms,
+that describes its files, the people and organizations involved,
+and licenses.
+The Workflow Run Crate profiles record a workflow's execution:
+its inputs, outputs, and code.
+RO-Crate describes and packages but doesn't run anything.
+It's widely adopted,
+e.g., by WorkflowHub, Galaxy, and Dataverse.
+
+`calkit.yaml` is also project metadata,
+but it's the same file Calkit runs the project from,
+so the description can't drift from what the project does.
+Exporting a project as an RO-Crate would make it readable by the tools
+that use the format.
+
+### ASTRA
+
+[ASTRA](https://github.com/LightconeResearch/astra-spec),
+by Lightcone Research, is a YAML format, `astra.yaml`,
+for describing an analysis:
+its inputs, outputs, and the decisions made along the way,
+each with the options that were considered.
+Findings are claims with evidence,
+each citing a declared output or a DOI,
+the commit that produced it,
+and optionally the quoted text that supports it.
+ASTRA doesn't run anything itself:
+each output has a recipe, a shell command for a runner of your choice.
+Its companion runner, `lightcone-cli`, stores data with git-annex and
+publishes an RO-Crate.
+As of September 2026 it's in early alpha.
+
+Calkit's questions were designed to be compatible in spirit with ASTRA's
+findings.
+Where ASTRA leaves running to other tools,
+Calkit's pipeline is part of the same file as the claims,
+so a claim can be checked against whether its evidence is current.
+
+## Archiving and sharing
+
+[Zenodo](https://about.zenodo.org/) and
+[Figshare](https://info.figshare.com/about/) publish research outputs,
+e.g., data, software, and papers,
+with a DOI so they can be cited.
+Zenodo is operated by CERN with OpenAIRE,
+and its code is open source, built on InvenioRDM.
+Figshare is part of Digital Science;
+its DOIs can be versioned, institutions can run branded instances of it,
+and its code isn't open source.
+
+These are for sharing artifacts once they're done.
+Calkit's hub is for collaborating on them while they're being made:
+it stores every version of a project's data, figures, and publications,
+and it's where collaborators work on them together.
+The two meet at a release:
+`calkit new release` uploads the project's files to Zenodo for a DOI,
+and releasing again makes a new version of the same record.
+
+## Collaboration platforms
+
+These are hubs where work happens in Git repositories,
+each built for one kind of work.
+[GitHub](https://github.com) is built for software development,
+with issues, pull requests, and CI through GitHub Actions.
+The [Hugging Face Hub](https://huggingface.co/docs/hub/index)
+is built for machine learning:
+its repositories hold models, datasets, and Spaces,
+i.e., demo apps,
+with large files stored through Xet,
+and model and dataset cards describing what's in them.
+
+The Calkit hub does the same for research.
+Its unit is a research project,
+and it shows what the project is made of,
+e.g., its figures, publications, pipeline,
+and the questions it answers,
+along with whether each is up to date.
+It integrates with GitHub rather than replacing it,
+and serves as a DVC remote,
+so a project's data and outputs are stored alongside its repository.
+
+## Research platforms
+
+These are places to do the work, with compute and collaboration built in.
+A Calkit project lives in its repository and runs anywhere,
+including in these platforms' sessions and terminals.
+
+### Renku
+
+[Renku](https://renkulab.io/), by the Swiss Data Science Center,
+is an open source platform that connects a project's data, code,
+and compute.
+Data connectors mount external storage, e.g., S3,
+and sessions run Jupyter, VS Code, or RStudio in a Docker image.
+It's hosted at renkulab.io or self-hosted on Kubernetes.
+The original Renku, with its `renku` CLI, workflow capture,
+and provenance graph,
+[was turned off](https://blog.renkulab.io/sunsetting-legacy/) in October
+2025 in favor of Renku 2.0,
+whose docs don't cover workflows or provenance.
+
+### CoCalc
+
+[CoCalc](https://cocalc.ai/), by SageMath, Inc.,
+is an online environment for real-time collaboration on Jupyter
+notebooks, LaTeX documents, and SageMath,
+with terminals and a per-file revision history.
+Its source is available under the Microsoft Reference Source License.
+As of September 2026, cocalc.com redirects to CoCalc.ai,
+a rewrite built around AI.
+Pipelines, data versioning, and provenance aren't part of either.
 
 ## Agentic research tools
 
@@ -190,52 +385,26 @@ unchanged, and versioned outputs in the repository.
 In the other direction, OpenResearch's experiment trees and launching on
 remote compute are things Calkit doesn't do.
 
-## Workflow and pipeline tools
+## Agent evaluation
 
-These run a graph of steps and skip the ones that are up to date.
-Calkit's pipeline is one of these:
-it's compiled to a DVC pipeline.
-What Calkit adds is mainly around it:
-environments declared per stage and checked before running,
-and questions whose answers are checked against the outputs.
+[Harbor](https://github.com/harbor-framework/harbor) is a harness for
+evaluating AI agents:
+it runs an agent on tasks in containers and scores each attempt with a
+verifier.
+[Terminal-Bench-Science](https://github.com/harbor-framework/terminal-bench-science)
+is a benchmark of 70 research tasks built on it.
+Harbor makes the scoring of an agent's attempt reproducible,
+while Calkit makes a project's results reproducible,
+so they answer different questions.
 
-| Tool                                          | Unit of work            | Environments                                         | Skips unchanged work by               |
-| --------------------------------------------- | ----------------------- | ---------------------------------------------------- | ------------------------------------- |
-| [DVC](https://doc.dvc.org/user-guide)         | Stage in `dvc.yaml`     | Not part of the tool                                 | Hashes of inputs and outputs          |
-| [Snakemake](https://snakemake.readthedocs.io) | Rule                    | Conda or a container per rule                        | Rerun triggers, optional cache        |
-| [Nextflow](https://docs.seqera.io/nextflow/)  | Process                 | A container, conda, or Spack per process             | A hash of each task (`-resume`)       |
-| [Make](https://www.gnu.org/software/make/)    | Rule                    | Not part of the tool                                 | File timestamps                       |
-| [Airflow](https://airflow.apache.org/docs/)   | Task in a scheduled DAG | Virtualenv, Docker, or Kubernetes operators          | Not its purpose                       |
-| Calkit                                        | Stage in `calkit.yaml`  | Many kinds per stage, e.g., uv, conda, Docker, Julia | DVC, with environment locks as inputs |
-
-Snakemake and Nextflow run on clusters and in the cloud without changes
-to the workflow, and Nextflow has a large library of community pipelines
-in [nf-core](https://nf-co.re/).
-Airflow is for workflows that run on a schedule,
-rather than for reproducing a result.
-None of these link claims in a paper to their outputs.
-
-### showyourwork
-
-[showyourwork](https://show-your.work/) is the closest to Calkit.
-It builds a LaTeX article from a Snakemake workflow on every push with
-GitHub Actions, and it uses conda for environments.
-`\script` ties a figure to the script that made it,
-`\variable` inserts a file's contents, e.g., a computed number,
-into the text as a workflow dependency,
-and the PDF gets margin icons linking figures to their scripts.
-Expensive outputs can be cached on Zenodo.
-The project layout is fixed,
-and as of September 2026 its docs note that the last release is over two
-years old.
-
-Calkit isn't limited to one article, layout, or kind of environment,
-and its questions state claims apart from any document,
-with the check reporting stale or untraceable evidence.
-
-### The Turing Way
-
-[The Turing Way](https://book.the-turing-way.org/) is a community-written
-handbook on reproducible research, rather than a tool.
-Its guidance, e.g., on environments and version control,
-is what tools like these put into practice.
+Calkit could supplement them in a few places.
+The scripts a task's author uses to generate its test data and calibrate
+its pass thresholds could be a Calkit pipeline,
+with the numbers behind the thresholds as answers to questions.
+A task could require the agent to deliver a Calkit project,
+so the verifier can check that the submission's claims come from its
+pipeline, and a person reviewing it has a way in.
+And a benchmark's own results, e.g., comparing models,
+could cite Harbor's run records as evidence.
+The [example](https://github.com/calkit/calkit/tree/main/examples/harbor-tb-science)
+shows the first two.

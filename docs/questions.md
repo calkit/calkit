@@ -235,7 +235,7 @@ Use `notes` to say why it's open and what would settle it.
 <!-- prettier-ignore -->
 !!! note
     These records are designed to be compatible in spirit with the
-    [ASTRA](https://github.com/lightcone-research/astra) analysis
+    [ASTRA](https://github.com/LightconeResearch/astra-spec) analysis
     specification, whose evidence entries likewise cite an analysis
     artifact by identifier, note the commit it came from, and carry a
     selector locating the claim within a document.

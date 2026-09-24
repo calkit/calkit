@@ -197,7 +197,10 @@ def _echo_question(n: int, question: str | dict) -> None:
     question = dict(question)
     text = question.pop("question", "")
     typer.echo(f"{n}. question: {text}")
+    # Rendering fills every field, so leave out the ones that aren't set
     for k, v in question.items():
+        if v is None:
+            continue
         if isinstance(v, dict):
             typer.echo(f"    {k}:")
             for k1, v1 in v.items():
@@ -206,11 +209,17 @@ def _echo_question(n: int, question: str | dict) -> None:
             typer.echo(f"    {k}:")
             for item in v:
                 if isinstance(item, dict):
+                    item = {
+                        k1: v1 for k1, v1 in item.items() if v1 is not None
+                    }
                     for n1, (k1, v1) in enumerate(item.items()):
-                        if n1 == 0:
-                            typer.echo(f"      - {k1}: {v1}")
+                        prefix = "      - " if n1 == 0 else "        "
+                        if isinstance(v1, dict):
+                            typer.echo(f"{prefix}{k1}:")
+                            for k2, v2 in v1.items():
+                                typer.echo(f"          {k2}: {v2}")
                         else:
-                            typer.echo(f"        {k1}: {v1}")
+                            typer.echo(f"{prefix}{k1}: {v1}")
                 else:
                     typer.echo(f"        - {item}")
         else:

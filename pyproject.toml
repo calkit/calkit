@@ -2,7 +2,7 @@
 requires = [
   # 1.32.1 made the build hook interface take two type parameters, which
   # hatch-jupyter-builder (last released 2024) subscripts with one
-  "hatchling>=1.5.0,<1.32.1",
+  "hatchling>=1.5.0,<1.32.5",
   "jupyter-builder>=1.2.3",
   "hatch-nodejs-version>=0.3.2",
   "hatch-vcs>=0.3.0",
@@ -272,5 +272,6 @@ env = [
 ]
 # The hub backend's tests need the compose stack and its own environment,
 # and the assistant's need Qt; they run via test-hub.yml and
-# test-assistant.yml, not from the workspace root
-addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub --ignore=assistant"
+# test-assistant.yml, not from the workspace root. Examples are projects
+# with their own environments, and their tests aren't Calkit's
+addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub --ignore=assistant --ignore=examples"

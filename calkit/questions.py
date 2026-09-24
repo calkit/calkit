@@ -7,7 +7,8 @@ Numbers are templated, not retyped. A ``value`` evidence entry names one
 value in a results file, and the question's text can refer to it with
 Python format syntax, ``"about {improvement:.1f}x"``; the text is rendered
 from the file whenever it is shown, so a number in an answer is always the
-pipeline's own.
+pipeline's own. A ``result`` entry with ``values`` names several related
+values in one file, e.g., the outputs of one calculation, the same way.
 
 What can go wrong, worst first: the evidence isn't there at all (never run,
 never pushed, or pinned to a Git ref that doesn't exist); a reference is
@@ -79,6 +80,8 @@ class EvidenceCheck(BaseModel):
     message: str | None = None
     #: Current value, for value evidence
     current: Any = None
+    #: Current values by name, for result evidence with values
+    values: dict[str, Any] | None = None
     #: The pipeline stage that produces the path, if any
     stage: str | None = None
     #: The Git ref this citation pins itself to, if any
@@ -200,27 +203,35 @@ def read_evidence_file(path: str) -> Any:
 def resolve_key(data: Any, key: str) -> Any:
     """Look up ``key`` in a loaded results file.
 
-    A key that exists literally at the top level wins, so a key containing
-    dots keeps working. Otherwise the key is split on dots and walked, with
-    integer parts indexing into lists, so ``results.case-a.score`` reaches
-    into nested output.
+    The key is split on dots and walked, with integer parts indexing into
+    lists, so ``results.case-a.score`` reaches into nested output. At each
+    level the longest run of parts that names a key wins, so keys that
+    contain dots work at any depth, e.g., ``sweep.back_off_1.50_k.failed``.
     """
-    if isinstance(data, dict) and key in data:
-        return data[key]
-    node = data
-    for part in key.split("."):
-        if isinstance(node, dict) and part in node:
-            node = node[part]
-        elif isinstance(node, list) and re.fullmatch(r"-?\d+", part):
+
+    def walk(node: Any, parts: list[str]) -> Any:
+        if not parts:
+            return node
+        if isinstance(node, dict):
+            for end in range(len(parts), 0, -1):
+                name = ".".join(parts[:end])
+                if name in node:
+                    try:
+                        return walk(node[name], parts[end:])
+                    except KeyError:
+                        continue
+            raise KeyError(key)
+        if isinstance(node, list) and re.fullmatch(r"-?\d+", parts[0]):
             try:
-                node = node[int(part)]
+                item = node[int(parts[0])]
             except IndexError:
                 # An index past the end of a list is a key that isn't
                 # there, and callers handle a missing key
                 raise KeyError(key)
-        else:
-            raise KeyError(key)
-    return node
+            return walk(item, parts[1:])
+        raise KeyError(key)
+
+    return walk(data, key.split("."))
 
 
 class _Formatter(string.Formatter):
@@ -355,7 +366,16 @@ def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
                 return False
             left = right
         return True
-    raise ValueError("a condition must compare values, e.g., 'p < 0.05'")
+    if isinstance(node, ast.Name):
+        value = _operand(node, values)
+        # Only a true/false value stands alone, so a number is never
+        # silently read as its truthiness
+        if isinstance(value, bool):
+            return value
+    raise ValueError(
+        "a condition must compare values, e.g., 'p < 0.05', "
+        "or name a true/false value"
+    )
 
 
 def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
@@ -464,6 +484,21 @@ def evidence_name(ev: dict) -> str | None:
     return ev.get("name") or ev.get("key")
 
 
+def named_keys(ev: dict) -> dict[str, str]:
+    """The values an entry cites, as a map of name to key.
+
+    One for ``value`` evidence, or a ``result`` with a key, and one per
+    entry for a ``result`` with ``values``.
+    """
+    if is_value_evidence(ev):
+        name = evidence_name(ev)
+        return {name: ev["key"]} if name else {}
+    values = ev.get("values")
+    if ev.get("kind", "result") == "result" and isinstance(values, dict):
+        return {str(n): str(k) for n, k in values.items()}
+    return {}
+
+
 TEMPLATED_FIELDS = ("hypothesis", "answer", "notes")
 
 
@@ -486,18 +521,23 @@ def render_question(
     wdir = wdir or os.getcwd()
     values: dict[str, Any] = {}
     for ev in question.get("evidence") or []:
-        if not is_value_evidence(ev):
+        keys = named_keys(ev)
+        if not keys:
             continue
-        name = evidence_name(ev)
         try:
             data = read_evidence_file(os.path.join(wdir, ev["path"]))
-            values[name or ""] = resolve_key(data, ev["key"])
         except Exception as e:
             if strict:
-                raise ValueError(
-                    f"Can't read value {name!r} from {ev['path']}: {e}"
-                ) from e
+                raise ValueError(f"Can't read {ev['path']}: {e}") from e
             continue
+        for name, key in keys.items():
+            try:
+                values[name] = resolve_key(data, key)
+            except Exception as e:
+                if strict:
+                    raise ValueError(
+                        f"Can't read value {name!r} from {ev['path']}: {e}"
+                    ) from e
     out = dict(question)
     for field in TEMPLATED_FIELDS:
         try:
@@ -995,7 +1035,7 @@ def check_pinned_evidence(
         if lock is not None and _lock_hash(lock, out.path) is not None:
             # Tracked by DVC at that commit: present, but its content lives
             # in storage, so a cited value can't be read from here.
-            if is_value_evidence(ev):
+            if named_keys(ev):
                 out.status = "skipped"
                 out.message = (
                     f"DVC-tracked at {git_ref}; value not read from storage"
@@ -1019,6 +1059,28 @@ def check_pinned_evidence(
             out.message = (
                 f"cannot read {out.path} at {git_ref}: "
                 f"{e.__class__.__name__}: {e}"
+            )
+    elif named_keys(ev):
+        try:
+            data = parse_evidence_text(text, out.path)
+        except Exception as e:
+            out.status = "error"
+            out.message = (
+                f"cannot read {out.path} at {git_ref}: "
+                f"{e.__class__.__name__}: {e}"
+            )
+            return out
+        out.values = {}
+        not_found = []
+        for name, value_key in named_keys(ev).items():
+            try:
+                out.values[name] = resolve_key(data, value_key)
+            except KeyError:
+                not_found.append(value_key)
+        if not_found:
+            out.status = "error"
+            out.message = f"key(s) not found in {out.path} at {git_ref}: " + (
+                ", ".join(repr(k) for k in not_found)
             )
     return out
 
@@ -1065,9 +1127,28 @@ def check_evidence(
     if kind == "publication":
         out.status, out.message = _check_publication_label(ev, ck_info, wdir)
         return out
+    # A document may be written by hand or built by a stage, e.g., a
+    # Markdown stage, which declares it as its target rather than an output
+    if kind == "document" and out.stage is None:
+        out.stage = next(
+            (
+                name
+                for name, stage in (
+                    ck_info.get("pipeline", {}).get("stages") or {}
+                ).items()
+                if isinstance(stage, dict)
+                and stage.get("kind") == "markdown"
+                and stage.get("target_path") == path
+            ),
+            None,
+        )
     if kind == "value" and not key:
         out.status = "error"
         out.message = "value evidence needs a key"
+        return out
+    if kind == "result" and key and "values" in ev:
+        out.status = "error"
+        out.message = "a result takes 'values' or 'key', not both"
         return out
     if is_value_evidence(ev):
         try:
@@ -1084,15 +1165,54 @@ def check_evidence(
             return out
         if kind == "result":
             out.message = "a result with a key is a value; use kind: value"
+    elif kind == "result" and "values" in ev:
+        if not isinstance(ev["values"], dict) or not ev["values"]:
+            out.status = "error"
+            out.message = "values must map each name to a key"
+            return out
+        try:
+            data = read_evidence_file(os.path.join(wdir, path))
+        except Exception as e:
+            out.status = "error"
+            out.message = f"cannot read {path}: {e.__class__.__name__}: {e}"
+            return out
+        out.values = {}
+        not_found = []
+        for name, value_key in named_keys(ev).items():
+            try:
+                out.values[name] = resolve_key(data, value_key)
+            except KeyError:
+                not_found.append(value_key)
+        if not_found:
+            out.status = "error"
+            out.message = f"key(s) not found in {path}: " + ", ".join(
+                repr(k) for k in not_found
+            )
+            return out
     if since is not None and repo is not None:
-        change = evidence_change(
-            path,
-            since,
-            repo,
-            wdir,
-            key=key if is_value_evidence(ev) else None,
-            current=out.current,
-        )
+        if out.values is not None:
+            # Each value is compared on its own, as a value entry would be
+            changes = [
+                evidence_change(
+                    path,
+                    since,
+                    repo,
+                    wdir,
+                    key=value_key,
+                    current=out.values[name],
+                )
+                for name, value_key in named_keys(ev).items()
+            ]
+            change = "; ".join(dict.fromkeys(c for c in changes if c)) or None
+        else:
+            change = evidence_change(
+                path,
+                since,
+                repo,
+                wdir,
+                key=key if is_value_evidence(ev) else None,
+                current=out.current,
+            )
         if change:
             out.status = "changed"
             # Not overwritten: a deprecated entry that also changed is
@@ -1100,8 +1220,13 @@ def check_evidence(
             # said
             out.message = "; ".join(filter(None, [out.message, change]))
     base = (out.stage or "").split("@")[0]
+    # A Markdown stage runs as sub-stages named after it, e.g., 'doc/analyze'
+    stale_hit, frozen_hit = (
+        any(n == base or n.startswith(base + "/") for n in names or ())
+        for names in (stale_stages, frozen_stages)
+    )
     if out.status in ("ok", "changed") and base:
-        if base in (stale_stages or set()):
+        if stale_hit:
             out.status = "stale"
             out.message = "; ".join(
                 filter(
@@ -1112,7 +1237,7 @@ def check_evidence(
                     ],
                 )
             )
-        elif base in (frozen_stages or set()):
+        elif frozen_hit:
             out.status = "frozen"
             out.message = "; ".join(
                 filter(
@@ -1127,7 +1252,11 @@ def check_evidence(
             )
     if (
         out.status in ("ok", "changed")
-        and is_value_evidence(ev)
+        and (
+            is_value_evidence(ev)
+            or out.values is not None
+            or kind == "document"
+        )
         and not _is_attributed(path, out.stage, ck_info, wdir, computed=True)
     ):
         out.status = "error"
@@ -1136,7 +1265,31 @@ def check_evidence(
             "where the number came from or keep it current; produce the file "
             "with a stage, or declare it with 'imported_from' if another "
             "project computed it"
+            if kind != "document"
+            else "no pipeline stage builds this document, so nothing checks "
+            "what it says against the results; build it with a Markdown "
+            "stage, or declare it with 'imported_from' if another project "
+            "produced it"
         )
+        # A Quarto source is only evidence once rendered, so point there
+        for name, stage in (
+            ck_info.get("pipeline", {}).get("stages") or {}
+        ).items():
+            if (
+                kind == "document"
+                and isinstance(stage, dict)
+                and stage.get("kind") == "quarto"
+                and stage.get("target_path") == path
+            ):
+                rendered = [
+                    o.get("path") if isinstance(o, dict) else o
+                    for o in stage.get("outputs") or []
+                ]
+                out.message = (
+                    f"this is the source Quarto stage '{name}' renders; cite "
+                    "what it renders instead"
+                    + (f", e.g., {rendered[0]}" if rendered else "")
+                )
     elif out.status == "ok" and not _is_attributed(
         path, out.stage, ck_info, wdir
     ):
@@ -1196,6 +1349,9 @@ def check_question(
     # Every placeholder in the prose must name a value and format with it
     values = {c.name: c.current for c in checks if c.name is not None}
     names = [c.name for c in checks if c.name is not None]
+    for c in checks:
+        values.update(c.values or {})
+        names += list(c.values or {})
     dupes = sorted({n for n in names if names.count(n) > 1})
     if dupes:
         messages.append(f"duplicate evidence name(s): {', '.join(dupes)}")

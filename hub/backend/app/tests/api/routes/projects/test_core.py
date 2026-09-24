@@ -4216,6 +4216,265 @@ def test_evidence_git_ref_round_trips_through_calkit_yaml() -> None:
     ]
 
 
+def test_question_evidence_values_documents_and_publications() -> None:
+    import base64
+    import json
+
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _evidence_values,
+        _EvidenceLookups,
+    )
+    from app.models.core import ContentsItem, Publication
+
+    declared = Publication(path="paper/main.pdf", title="The paper")
+    evidence_ck = [
+        # The kind calkit recommends for one value, named for the templates
+        {
+            "kind": "value",
+            "path": "results/summary.json",
+            "key": "stats.mean",
+            "name": "mean",
+        },
+        # A section YAML reads as a number is still a section
+        {"kind": "document", "path": "docs/notes.md", "section": 4.2},
+        {"kind": "document", "path": "docs/gone.md"},
+        # Undeclared but there: calkit doesn't require declaring it
+        {"kind": "publication", "path": "docs/draft.md", "section": "2b-i"},
+        {"kind": "publication", "path": "docs/nowhere.md"},
+        {"kind": "publication", "path": "paper/main.pdf", "label": "sec:x"},
+        # A value with no key names no number, so there's nothing to show
+        {"kind": "value", "path": "results/summary.json"},
+        # Several values from one file on one card, each by name
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            # Keys resolve as the CLI reads them, dots in names and all
+            "values": {
+                "avg": "stats.mean",
+                "total": "stats.n",
+                "failed": "sweep.back_off_1.50_k.failed",
+            },
+        },
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "values": {"avg2": "stats.mean", "gone": "stats.nope"},
+        },
+    ]
+
+    def fake_contents(project, repo, path, ref):
+        return ContentsItem(
+            name="summary.json",
+            path=path,
+            type="file",
+            size=1,
+            in_repo=True,
+            content=base64.b64encode(
+                json.dumps(
+                    {
+                        "stats": {"mean": 2.5, "n": 40},
+                        "sweep": {"back_off_1.50_k": {"failed": 13}},
+                    }
+                ).encode()
+            ).decode(),
+            url=None,
+            storage="git",
+        )
+
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        side_effect=fake_contents,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={},
+                    tables_by_path={},
+                    publications_by_path={declared.path: declared},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                    present_paths={"docs/notes.md", "docs/draft.md"},
+                )
+            },
+            result_value_cache={},
+        )
+        template_values = _evidence_values(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            cache={},
+        )
+    # The templates see every named value, typed as the file holds them
+    assert template_values == {
+        "mean": 2.5,
+        "avg": 2.5,
+        "total": 40,
+        "failed": 13,
+        "avg2": 2.5,
+    }
+    assert [ev.kind for ev in evidence] == [
+        "value",
+        "document",
+        "document",
+        "publication",
+        "publication",
+        "publication",
+        "value",
+        "result",
+        "result",
+    ]
+    assert evidence[0].value == "2.5"
+    assert evidence[0].name == "mean"
+    assert evidence[0].stale_reason is None
+    assert evidence[1].section == "4.2"
+    assert evidence[1].stale_reason is None
+    assert evidence[2].stale_reason == "missing"
+    assert evidence[3].publication is None
+    assert evidence[3].section == "2b-i"
+    assert evidence[3].stale_reason is None
+    assert evidence[4].stale_reason == "missing"
+    assert evidence[5].publication == declared
+    assert evidence[5].label == "sec:x"
+    assert evidence[5].stale_reason is None
+    assert evidence[6].stale_reason == "missing"
+    assert [(v.name, v.key, v.value) for v in evidence[7].values or []] == [
+        ("avg", "stats.mean", "2.5"),
+        ("total", "stats.n", "40"),
+        ("failed", "sweep.back_off_1.50_k.failed", "13"),
+    ]
+    assert evidence[7].stale_reason is None
+    # One value that can't be read is enough to call the card missing
+    assert [v.value for v in evidence[8].values or []] == ["2.5", None]
+    assert evidence[8].stale_reason == "missing"
+
+
+def test_saving_a_question_keeps_names_sections_and_labels() -> None:
+    from app.api.routes.projects.core import _apply_question_update
+    from app.models.core import QuestionEvidencePost, QuestionPut
+
+    # A template names its value, so an edit that dropped the name would
+    # leave the answer rendering a raw placeholder
+    req = QuestionPut(
+        question="q?",
+        answer="About {mean:.1f}.",
+        evidence=[
+            QuestionEvidencePost(
+                kind="value",
+                path="results/summary.json",
+                key="stats.mean",
+                name="mean",
+            ),
+            QuestionEvidencePost(
+                kind="document", path="docs/notes.md", section="4.2"
+            ),
+            QuestionEvidencePost(
+                kind="publication",
+                path="paper/main.pdf",
+                section="3",
+                label="sec:results",
+                git_ref="v1.0",
+            ),
+            # Fields a kind doesn't carry aren't written for it
+            QuestionEvidencePost(
+                kind="figure", path="figures/x.png", name="x", section="1"
+            ),
+            # A result's values survive an edit, and replace any key
+            QuestionEvidencePost(
+                kind="result",
+                path="results/summary.json",
+                key="stats.mean",
+                values={"avg": "stats.mean", "total": "stats.n"},
+            ),
+        ],
+    )
+    out = _apply_question_update("q?", req)
+    assert isinstance(out, dict)
+    assert out["evidence"] == [
+        {
+            "kind": "value",
+            "path": "results/summary.json",
+            "key": "stats.mean",
+            "name": "mean",
+        },
+        {"kind": "document", "path": "docs/notes.md", "section": "4.2"},
+        {
+            "kind": "publication",
+            "path": "paper/main.pdf",
+            "section": "3",
+            "label": "sec:results",
+            "git_ref": "v1.0",
+        },
+        {"kind": "figure", "path": "figures/x.png"},
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "values": {"avg": "stats.mean", "total": "stats.n"},
+        },
+    ]
+
+
+def test_delete_project_question(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    fake_repo = _make_fake_repo(str(tmp_path))
+
+    def delete(number: int, questions: list):
+        ck_info = {"name": project.name, "questions": questions}
+        with (
+            patch(
+                "app.api.routes.projects.core.get_repo",
+                return_value=fake_repo,
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects"
+                ".get_ck_info_from_repo",
+                return_value=ck_info,
+            ),
+            patch("app.api.routes.projects.core.push_and_expire"),
+        ):
+            r = client.delete(f"{base}/questions/{number}", headers=headers)
+        with open(tmp_path / "calkit.yaml") as f:
+            written = ryaml.load(f)
+        return r, written
+
+    questions = ["First?", {"question": "Second?", "answer": "Yes."}, "Third?"]
+    r, written = delete(2, list(questions))
+    assert r.status_code == 200, r.text
+    assert written["questions"] == ["First?", "Third?"]
+    # The index follows, so the numbers close up behind the deleted one
+    db.refresh(project)
+    assert sorted((q.number, q.question) for q in project.questions) == [
+        (1, "First?"),
+        (2, "Third?"),
+    ]
+    # Deleting the last one drops the key rather than leaving an empty list
+    r, written = delete(1, ["Only?"])
+    assert r.status_code == 200, r.text
+    assert "questions" not in written
+    # A number past the end is not found, and nothing is written
+    (tmp_path / "calkit.yaml").unlink()
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_from_repo",
+            return_value={"questions": ["One?"]},
+        ),
+    ):
+        r = client.delete(f"{base}/questions/5", headers=headers)
+    assert r.status_code == 404
+    assert not (tmp_path / "calkit.yaml").exists()
+
+
 def test_tables_listing_skips_evidence_at_another_ref() -> None:
     from app.api.routes.projects.core import _build_tables
 

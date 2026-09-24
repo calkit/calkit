@@ -6923,7 +6923,7 @@ export const QuestionEvidenceSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "result", "value", "table", "publication", "document"],
       title: "Kind",
     },
     path: {
@@ -6940,6 +6940,53 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Key",
+    },
+    values: {
+      anyOf: [
+        {
+          items: {
+            $ref: "#/components/schemas/QuestionEvidenceValue",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    section: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Section",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
     },
     explanation: {
       anyOf: [
@@ -7058,7 +7105,7 @@ export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "result", "value", "table", "publication", "document"],
       title: "Kind",
     },
     path: {
@@ -7075,6 +7122,53 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Key",
+    },
+    values: {
+      anyOf: [
+        {
+          additionalProperties: {
+            type: "string",
+          },
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    section: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Section",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
     },
     explanation: {
       anyOf: [
@@ -7113,6 +7207,34 @@ export const QuestionEvidencePostSchema = {
   type: "object",
   required: ["kind", "path"],
   title: "QuestionEvidencePost",
+} as const
+
+export const QuestionEvidenceValueSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    value: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value",
+    },
+  },
+  type: "object",
+  required: ["name", "key"],
+  title: "QuestionEvidenceValue",
+  description: "One of the named values a result evidence entry cites.",
 } as const
 
 export const QuestionPostSchema = {

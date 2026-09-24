@@ -42,6 +42,7 @@ import {
   FaLink,
 } from "react-icons/fa"
 import { useDebounce } from "use-debounce"
+import SandboxedHtml from "./SandboxedHtml"
 import Tooltip from "./Tooltip"
 
 import {
@@ -181,25 +182,14 @@ function ArtifactContent({
     if (nb.content && nb.output_format === "html") {
       return (
         <Box height="75vh" width="100%">
-          <embed
-            height="100%"
-            width="100%"
-            type="text/html"
-            src={`data:text/html;base64,${nb.content}`}
-          />
+          <SandboxedHtml title="notebook" content={nb.content} />
         </Box>
       )
     }
     if (nb.url) {
       return (
         <Box height="75vh" width="100%">
-          <iframe
-            height="100%"
-            width="100%"
-            title="notebook"
-            src={nb.url}
-            style={{ border: "none" }}
-          />
+          <SandboxedHtml title="notebook" url={nb.url} />
         </Box>
       )
     }

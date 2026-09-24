@@ -684,10 +684,16 @@ def get_status(
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
+        from dvc.exceptions import NotDvcRepoError
+
         try:
             calkit.dvc.get_dvc_repo()
-        except Exception:
+        except NotDvcRepoError:
             typer.echo("This is not a DVC repository.\n")
+        except Exception as e:
+            typer.echo(
+                f"Failed to open DVC repo: {e.__class__.__name__}: {e}\n"
+            )
         else:
             zip_path_map = calkit.dvc.zip.get_zip_path_map()
             dvc_repo = calkit.dvc.get_dvc_repo()
@@ -2699,14 +2705,19 @@ def run(
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
+    from dvc.exceptions import NotDvcRepoError
+
     try:
         calkit.dvc.get_dvc_repo()
-    except Exception:
+    except NotDvcRepoError:
         if not quiet:
             typer.echo("Initializing DVC repo")
         result = calkit.dvc.init()
         if result != 0:
             raise_error("Failed to initialize DVC repo")
+    except Exception as e:
+        # E.g., DVC's site cache dir isn't writable, which 'dvc init' can't fix
+        raise_error(f"Failed to open DVC repo: {e.__class__.__name__}: {e}")
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:

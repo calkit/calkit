@@ -368,7 +368,9 @@ def get_repo(
     """Ensure that the repo exists and is ready for operating upon for the user.
 
     Handles concurrency in case multiple API calls request the repo
-    simultaneously. If TTL is None, the latest version is always fetched.
+    simultaneously. With a TTL of None, the remote is checked on every call
+    and fetched from if it moved. A TTL of 0 forces a fetch, e.g., to pick up
+    a new branch.
 
     ``read_only`` promises the caller will only read, which lets every
     reader of a project share one warm checkout instead of cloning their
@@ -664,7 +666,12 @@ def get_repo(
                 # so most expiries are settled without touching the network,
                 # and when it matches ours there is nothing to fetch at all.
                 already_current = False
-                if not is_shallow and ref is None:
+                # An epoch marker means a push was reported, possibly to a
+                # branch other than the one checked below, e.g., a new one,
+                # so only a fetch can tell us what changed. Same for a
+                # caller forcing one with a TTL of 0.
+                force_fetch = ttl == 0 or last_updated == 0
+                if not is_shallow and ref is None and not force_fetch:
                     branch_name = repo.active_branch.name
                     try:
                         local_head: str | None = repo.head.commit.hexsha
@@ -695,11 +702,14 @@ def get_repo(
                 if not is_shallow and not already_current:
                     logger.info("Git fetching")
                     if ref is None:
+                        branch_name = repo.active_branch.name
+                        # Every branch, not just the active one, so new ones
+                        # show up in the branch list
                         with _timed(
                             "fetch", repo=repo_label, branch=branch_name
                         ):
                             repo.git.fetch(
-                                ["origin", branch_name],
+                                ["origin"],
                                 kill_after_timeout=GIT_FETCH_TIMEOUT,
                             )
                         # Only rewrite the working tree when the remote

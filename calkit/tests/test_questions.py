@@ -9,7 +9,7 @@ import subprocess
 import pytest
 
 import calkit
-from calkit.models.core import Question
+from calkit.models.core import ProjectInfo, Question
 from calkit.pipeline import frozen_tainted_stage_names
 from calkit.questions import (
     QuestionsStatus,
@@ -907,6 +907,15 @@ def test_latex_values(tmp_dir):
     # A name can't be a number, which would collide with a position
     with pytest.raises(ValueError, match="can't be a number"):
         Question(name="2", question="Q?")
+    numeric = {"questions": [{"name": "2", "question": "Q?"}, "Other?"]}
+    with pytest.raises(ValueError, match="can't be a number"):
+        latex_values(numeric)
+    # The project model also rejects duplicate names
+    with pytest.raises(ValueError, match="must be unique"):
+        ProjectInfo.model_validate(duplicate)
+    ProjectInfo.model_validate(
+        {"questions": [{"name": "a", "question": "One?"}, "Two?"]}
+    )
     # The stage gains calkit.yaml and the evidence, keeping declared
     # inputs and listing nothing twice
     ck_info["pipeline"] = {

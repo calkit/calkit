@@ -158,14 +158,15 @@ def from_questions(
 
     import calkit.questions
 
+    for out_path in output_fpaths:
+        if not out_path.endswith(".tex"):
+            raise_error("Output file must be a .tex file")
     ck_info = calkit.load_calkit_info()
     try:
         values = calkit.questions.latex_values(ck_info)
     except ValueError as e:
         raise_error(str(e))
     for out_path in output_fpaths:
-        if not out_path.endswith(".tex"):
-            raise_error("Output file must be a .tex file")
         outdir = os.path.dirname(out_path)
         if outdir:
             os.makedirs(outdir, exist_ok=True)

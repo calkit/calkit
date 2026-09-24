@@ -1361,6 +1361,11 @@ class QuestionsToLatexStage(Stage):
             "through, e.g., 'questions' for \\questions[staging.answer]."
         ),
     )
+    wdir: None = Field(
+        default=None,
+        description="Not supported; the stage reads the project's "
+        "calkit.yaml and evidence from the project root.",
+    )
 
     @property
     def dvc_cmd(self) -> str:

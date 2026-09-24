@@ -589,7 +589,8 @@ def latex_values(ck_info: dict, wdir: str | None = None) -> dict[str, str]:
     Raises
     ------
     ValueError
-        If two questions share a name, or a template cannot be rendered.
+        If two questions share a name, a name is a number, or a template
+        cannot be rendered.
     """
     out: dict[str, str] = {}
     seen: set[str] = set()
@@ -603,6 +604,11 @@ def latex_values(ck_info: dict, wdir: str | None = None) -> dict[str, str]:
         names = [str(position)]
         qname = question.get("name") if isinstance(question, dict) else None
         if qname:
+            if str(qname).isdigit():
+                raise ValueError(
+                    f"Question name {qname!r} can't be a number, since "
+                    "questions are also addressed by position"
+                )
             if qname in seen:
                 raise ValueError(f"Two questions have the name {qname!r}")
             seen.add(qname)

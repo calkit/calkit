@@ -201,7 +201,7 @@ This mechanism is being replaced with an explicit review record; see
 Checking questions is separate from `calkit status` because it needs to
 read the history of `calkit.yaml`.
 
-## Quoting answers in a LaTeX document
+## Quoting questions and answers in a LaTeX document
 
 A `questions-to-latex` stage renders every question, hypothesis, answer,
 and note, with conditionals resolved and values filled from their evidence,

@@ -680,3 +680,17 @@ def test_from_questions(tmp_dir):
         text=True,
     )
     assert result.returncode != 0 and not os.path.exists("x.tex")
+    # A bad output path fails before any other output is written
+    ck_info["questions"][0]["answer"] = "Yes."
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = subprocess.run(
+        ["calkit", "latex", "from-questions", "-o", "a.tex", "-o", "b.txt"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 and not os.path.exists("a.tex")
+    # The stage reads from the project root, so it can't set a wdir
+    ck_info["pipeline"]["stages"]["qa"]["wdir"] = "paper"
+    with pytest.raises(Exception, match="wdir"):
+        calkit.pipeline.to_dvc(ck_info=ck_info)

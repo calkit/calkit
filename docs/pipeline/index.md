@@ -594,6 +594,7 @@ when an answer or a value it reads changes.
 | Kind-specific parameter | Type | Required | Default     | Description                                                                                                        |
 | ----------------------- | ---- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
 | `environment`           | str  | no       | '\_system'  | Name of the environment in which to run this stage.                                                                |
+| `wdir`                  | None | no       | null        | Not supported; the stage reads the project's calkit.yaml and evidence from the project root.                       |
 | `command_name`          | str  | no       | 'questions' | Name of the LaTeX command the document quotes questions through, e.g., 'questions' for \questions[staging.answer]. |
 
 ### `r-script`

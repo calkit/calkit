@@ -596,7 +596,7 @@ def _normalize_requirement(req) -> dict:
     required there. A ``setup`` requirement may omit it, since a single
     anonymous setup step is common and forcing users to invent a name adds
     friction; a stable one is synthesized from a short hash of
-    ``check_command``. A machine-property requirement has no name at all --
+    ``check_command``. A ``file`` requirement is named by its path. A machine-property requirement has no name at all --
     ``kind: cpu-count`` already says everything there is to say about which
     property it constrains -- so the kind is used as the name in messages.
     """
@@ -631,6 +631,9 @@ def _normalize_requirement(req) -> dict:
                     check_command.encode("utf-8")
                 ).hexdigest()[:8]
                 out["name"] = f"setup-{short}"
+            elif kind == "file" and out.get("path"):
+                # The path is what a file requirement is
+                out["name"] = out["path"]
             else:
                 raise ValueError(f"Requirement missing required 'name': {dep}")
         return out
@@ -857,7 +860,8 @@ def check_requirements(
     # Process in dependency order: machine properties first, since a
     # machine that is too small to run the project at all should say so
     # before we start installing things on it, then env-vars (some
-    # installers and setup commands read from them), then apps (env
+    # installers and setup commands read from them), then files (a
+    # template is filled from env-vars), then apps (env
     # managers like pixi / uv need to exist before setup steps that run
     # inside an env), then setup steps last. The setup-step
     # ``check_command`` typically wraps ``calkit xenv``, which validates
@@ -866,6 +870,7 @@ def check_requirements(
     buckets: dict[str, list[dict]] = {
         "_property": [],
         "env-var": [],
+        "file": [],
         "app": [],
         "setup": [],
     }
@@ -906,6 +911,11 @@ def check_requirements(
             if value is not None:
                 continue
         raise ValueError(f"env-var '{dep_name}' not found")
+    # After env-vars, since a file's template is filled from them
+    for dep in buckets["file"]:
+        from calkit.dependencies import check_file_requirement
+
+        check_file_requirement(dep, interactive=interactive, wdir=wdir)
     for dep in buckets["app"]:
         dep_name = dep["name"]
         # The ``calkit`` app is always satisfied by the running process,

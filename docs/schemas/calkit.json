@@ -1171,6 +1171,153 @@
       "title": "FigureEvidence",
       "type": "object"
     },
+    "FileRequirement": {
+      "description": "A file that must exist, typically a credential or a per-machine\nconfiguration file kept out of version control.\n\nThe path is its identity, so ``name`` may be omitted. It may start with\n``~`` and may refer to environmental variables; a relative path is\nrelative to the project. If it's missing and a ``template`` is given,\nthe file is written from the template, with environmental variables\nsubstituted (``$NAME`` or ``${NAME}``), and ignored by Git if it's\ninside the project. An ``env_var`` names a variable whose being set\nsatisfies the requirement instead, for tools that read a credential from\neither a file or the environment.",
+      "properties": {
+        "cache_ttl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Ttl"
+        },
+        "check_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Command"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "env_var": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Environmental variable that satisfies the requirement instead of the file when it's set.",
+          "title": "Env Var"
+        },
+        "kind": {
+          "const": "file",
+          "default": "file",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "path": {
+          "description": "Where the file must exist. May start with '~'; a relative path is relative to the project.",
+          "title": "Path",
+          "type": "string"
+        },
+        "setup_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setup Command"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Template to write the file from when it's missing, with environmental variables substituted, e.g., '${API_KEY}'. Relative to the project.",
+          "title": "Template"
+        },
+        "version_spec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Version specifier an 'app' must satisfy, e.g. '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.",
+          "title": "Version Spec"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FileRequirement",
+      "type": "object"
+    },
     "Formula": {
       "properties": {
         "description": {
@@ -6430,7 +6577,7 @@
       "type": "object"
     },
     "Requirement": {
-      "description": "Something that must be true of a machine before the project runs.\n\nFour kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file -- e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --`` explicitly\n  rather than relying on an implicit wrap. ``cache_ttl`` skips\n  re-probing slow checks.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed -- how many CPUs it\nhas, what OS it runs -- are constrained by\n``SystemNumberRequirement`` and ``SystemValueRequirement``\ninstead, which name a property rather than a thing.",
+      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file -- e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --`` explicitly\n  rather than relying on an implicit wrap. ``cache_ttl`` skips\n  re-probing slow checks.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n- ``file``: a file that must exist and is kept out of version control,\n  e.g., a credentials or configuration file; see ``FileRequirement``.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed -- how many CPUs it\nhas, what OS it runs -- are constrained by\n``SystemNumberRequirement`` and ``SystemValueRequirement``\ninstead, which name a property rather than a thing.",
       "properties": {
         "cache_ttl": {
           "anyOf": [
@@ -6489,7 +6636,8 @@
             "app",
             "env-var",
             "setup",
-            "calkit-config"
+            "calkit-config",
+            "file"
           ],
           "title": "Kind",
           "type": "string"
@@ -6596,13 +6744,26 @@
           "default": null,
           "title": "Description"
         },
+        "env_var": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Env Var"
+        },
         "kind": {
           "default": "app",
           "enum": [
             "app",
             "env-var",
             "setup",
-            "calkit-config"
+            "calkit-config",
+            "file"
           ],
           "title": "Kind",
           "type": "string"
@@ -6619,6 +6780,18 @@
           "default": null,
           "title": "Notes"
         },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
         "setup_command": {
           "anyOf": [
             {
@@ -6630,6 +6803,18 @@
           ],
           "default": null,
           "title": "Setup Command"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Template"
         },
         "version_spec": {
           "anyOf": [
@@ -8177,6 +8362,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/FileRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -9312,6 +9500,9 @@
             "$ref": "#/$defs/SetupRequirement"
           },
           {
+            "$ref": "#/$defs/FileRequirement"
+          },
+          {
             "$ref": "#/$defs/Requirement"
           },
           {
@@ -9662,6 +9853,9 @@
           },
           {
             "$ref": "#/$defs/SetupRequirement"
+          },
+          {
+            "$ref": "#/$defs/FileRequirement"
           },
           {
             "$ref": "#/$defs/Requirement"

@@ -4,6 +4,7 @@ import csv
 import logging
 import os
 import posixpath
+import re
 import threading
 from datetime import UTC, datetime
 from typing import Any
@@ -188,6 +189,37 @@ INVALID_ACCOUNT_NAMES = [
 # own name as a personal account while hub operators can still create
 # an org under it
 ORG_ONLY_ACCOUNT_NAMES = ["calkit"]
+
+# What an account may be named: GitHub's own rule for usernames, which also
+# happens to be what is safe as a single directory under CLONE_ROOT. Without
+# it ".." and "_shared" are both a signup away, and both name a directory
+# that means something else (see ``app.git._clone_dir_segment``).
+ACCOUNT_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+ACCOUNT_NAME_RULE = (
+    "Account names may use lowercase letters, numbers and single hyphens, "
+    "and must start and end with a letter or number."
+)
+
+
+def account_name_is_valid(name: str) -> bool:
+    """Whether ``name`` is allowed as an account name."""
+    return bool(
+        name
+        and 2 <= len(name) <= 64
+        and ACCOUNT_NAME_RE.fullmatch(name)
+        and name not in INVALID_ACCOUNT_NAMES
+    )
+
+
+def sanitize_account_name(name: str) -> str:
+    """Coerce ``name`` into the account-name shape, for names nobody chose.
+
+    A name derived from an email address or a display name is not the
+    user's choice, so it is cleaned up rather than rejected. A name they
+    typed is checked instead -- see ``account_name_is_valid``.
+    """
+    cleaned = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return cleaned[:64].rstrip("-")
 
 
 def utcnow() -> datetime:

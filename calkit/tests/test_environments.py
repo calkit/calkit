@@ -239,6 +239,34 @@ def test_check_cache_can_bypass_ttl(tmp_dir):
     )
 
 
+def test_get_venv_activate_cmd():
+    get_venv_activate_cmd = calkit.environments.get_venv_activate_cmd
+    # POSIX activates by sourcing the script
+    assert (
+        get_venv_activate_cmd(".venv", system="Linux")
+        == ". .venv/bin/activate"
+    )
+    assert (
+        get_venv_activate_cmd(".calkit/envs/a/.venv", system="Darwin")
+        == ". .calkit/envs/a/.venv/bin/activate"
+    )
+    # Windows needs native separators throughout; cmd reads a forward slash
+    # as a switch and would take a nested prefix for a '.calkit' command
+    assert (
+        get_venv_activate_cmd(".venv", system="Windows")
+        == ".venv\\Scripts\\activate"
+    )
+    assert (
+        get_venv_activate_cmd(".calkit/envs/a/.venv", system="Windows")
+        == ".calkit\\envs\\a\\.venv\\Scripts\\activate"
+    )
+    assert "/" not in get_venv_activate_cmd("sub/.venv", system="Windows")
+    # Defaults to the running platform
+    assert get_venv_activate_cmd(".venv") == get_venv_activate_cmd(
+        ".venv", system=platform.system()
+    )
+
+
 def test_get_default_venv_prefix():
     get_default_venv_prefix = calkit.environments.get_default_venv_prefix
     # With no existing environments, default to .venv next to the spec file

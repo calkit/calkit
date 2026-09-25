@@ -480,7 +480,13 @@ function ComponentsModal({
   const target = { ownerName, projectName, publication, folder }
   const sorted = sortComponents(items)
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="3xl" scrollBehavior="inside">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="3xl"
+      scrollBehavior="inside"
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalHeader pb={1}>

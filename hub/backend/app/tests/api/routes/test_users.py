@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app import users
+from app import mixpanel, users
 from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
@@ -190,6 +190,26 @@ def test_update_user_me(
     assert user_db.full_name == full_name
 
 
+def test_update_user_me_analytics_consent(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    r = client.get("/user", headers=normal_user_token_headers)
+    assert r.status_code == 200
+    user_id = r.json()["id"]
+    for consent in (True, False):
+        r = client.patch(
+            "/user",
+            headers=normal_user_token_headers,
+            json={"analytics_consent": consent},
+        )
+        assert r.status_code == 200
+        assert r.json()["analytics_consent"] is consent
+        user_db = db.get(User, uuid.UUID(user_id))
+        assert user_db
+        db.refresh(user_db)
+        assert user_db.analytics_consent is consent
+
+
 def test_update_password_me(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
@@ -300,6 +320,26 @@ def test_register_user(client: TestClient, db: Session) -> None:
     assert user is not None
     assert user.account.github_name is None
     assert verify_password(password, user.hashed_password)
+
+
+def test_register_user_saves_consent_and_reports_signup(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    data = {
+        "email": email,
+        "password": random_lower_string(),
+        "analytics_consent": True,
+    }
+    with patch.object(mixpanel.mp, "track") as mp_track:
+        r = client.post("/users/signup", json=data)
+    assert r.status_code == 200, r.text
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.analytics_consent is True
+    mp_track.assert_called_once()
+    assert mp_track.call_args.kwargs["event_name"] == "Signed up"
+    assert mp_track.call_args.kwargs["properties"] == {"provider": "email"}
 
 
 def test_register_user_already_exists_error(client: TestClient) -> None:

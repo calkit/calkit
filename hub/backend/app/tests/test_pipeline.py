@@ -9,6 +9,7 @@ from app.pipeline import (
     _precompute_storage_presence,
     calc_overall_pipeline_status,
     compute_stage_statuses,
+    find_frozen_tainted_stages,
     find_stage_for_path,
 )
 
@@ -979,3 +980,64 @@ def test_cleaned_notebook_dep_tracks_the_notebook(tmp_path):
     )
     assert statuses["run"].status == "stale"
     assert cleaned_dep in statuses["run"].modified_inputs
+
+
+def test_find_frozen_tainted_stages() -> None:
+    # collect (frozen) -> clean -> plot, with the plot reading the directory
+    # rather than the file, and a summarize stage off on its own. A stage
+    # dropped from dvc.yaml and one whose out nobody reads are both left out.
+    dvc_yaml = {
+        "stages": {
+            "collect": {"cmd": "collect", "frozen": True},
+            "clean": {"cmd": "clean"},
+            "plot": {"cmd": "plot"},
+            "summarize": {"cmd": "summarize"},
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            "collect": {"outs": [{"path": "data/raw.csv"}]},
+            "clean": {
+                "deps": [{"path": "data/raw.csv"}],
+                "outs": [{"path": "data/clean"}],
+            },
+            "plot": {
+                # Reads the whole directory the upstream stage writes into.
+                "deps": [{"path": "data/clean/values.csv"}],
+                "outs": [{"path": "figures/plot.png"}],
+            },
+            "summarize": {
+                "deps": [{"path": "notes.md"}],
+                "outs": [{"path": "results/summary.json"}],
+            },
+            "removed": {
+                "deps": [{"path": "data/raw.csv"}],
+                "outs": [{"path": "old.txt"}],
+            },
+        }
+    }
+    assert find_frozen_tainted_stages(dvc_yaml, dvc_lock) == {
+        "collect",
+        "clean",
+        "plot",
+    }
+    # Nothing frozen, nothing tainted -- including a cycle's worth of stages,
+    # which the walk must not loop on.
+    assert (
+        find_frozen_tainted_stages(
+            {"stages": {k: {"cmd": k} for k in ("a", "b")}},
+            {
+                "stages": {
+                    "a": {
+                        "deps": [{"path": "b.txt"}],
+                        "outs": [{"path": "a.txt"}],
+                    },
+                    "b": {
+                        "deps": [{"path": "a.txt"}],
+                        "outs": [{"path": "b.txt"}],
+                    },
+                }
+            },
+        )
+        == set()
+    )

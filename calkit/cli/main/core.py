@@ -6,7 +6,6 @@ import csv
 import json
 import logging
 import os
-import platform as _platform
 import posixpath
 import shlex
 import shutil
@@ -685,10 +684,16 @@ def get_status(
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
+        from dvc.exceptions import NotDvcRepoError
+
         try:
             calkit.dvc.get_dvc_repo()
-        except Exception:
+        except NotDvcRepoError:
             typer.echo("This is not a DVC repository.\n")
+        except Exception as e:
+            typer.echo(
+                f"Failed to open DVC repo: {e.__class__.__name__}: {e}\n"
+            )
         else:
             zip_path_map = calkit.dvc.zip.get_zip_path_map()
             dvc_repo = calkit.dvc.get_dvc_repo()
@@ -1673,6 +1678,14 @@ def push(
             git_cmd = ["git", "push"]
             if not no_recursive and "--recurse-submodules" not in git_args:
                 git_cmd.append("--recurse-submodules=on-demand")
+            # A plain `git push` leaves tags behind, so annotated tags end
+            # up only on the machine that made them
+            if not {
+                "--follow-tags",
+                "--no-follow-tags",
+                "--tags",
+            }.intersection(git_args):
+                git_cmd.append("--follow-tags")
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
@@ -2692,14 +2705,19 @@ def run(
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
+    from dvc.exceptions import NotDvcRepoError
+
     try:
         calkit.dvc.get_dvc_repo()
-    except Exception:
+    except NotDvcRepoError:
         if not quiet:
             typer.echo("Initializing DVC repo")
         result = calkit.dvc.init()
         if result != 0:
             raise_error("Failed to initialize DVC repo")
+    except Exception as e:
+        # E.g., DVC's site cache dir isn't writable, which 'dvc init' can't fix
+        raise_error(f"Failed to open DVC repo: {e.__class__.__name__}: {e}")
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:
@@ -2770,9 +2788,13 @@ def run(
         dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
-    args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
-        deepcopy(targets), ck_info=ck_info
-    )
+    try:
+        args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
+            deepcopy(targets), ck_info=ck_info
+        )
+    except ValueError as e:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(str(e))
     # Extract any boolean args
     for name in [
         "quiet",
@@ -2925,10 +2947,11 @@ def run(
         in_main_thread = threading.current_thread() is threading.main_thread()
         old_handler = None
         handler_set = False
-        with open(log_fpath, "a", encoding="utf-8") as log_f:
+        with open(log_fpath, "a", encoding="utf-8", errors="replace") as log_f:
             log_f.write(STAGE_OUTPUT_START + "\n")
             log_f.flush()
             try:
+                kwargs.setdefault("errors", "replace")
                 p = subprocess.Popen(exec_cmd, **kwargs)
                 if in_main_thread:
                     old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -3471,8 +3494,11 @@ def run_in_env(
             typer.echo(f"Running command: {docker_cmd}")
         try:
             subprocess.check_call(docker_cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
-            raise_error("Failed to run in Docker environment")
+        except subprocess.CalledProcessError as e:
+            raise_error(
+                "Failed to run in Docker environment: command exited with "
+                f"status {e.returncode}"
+            )
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
@@ -3543,10 +3569,7 @@ def run_in_env(
                 envs, path, env_name
             )
         shell_cmd = _to_shell_cmd(cmd)
-        if _platform.system() == "Windows":
-            activate_cmd = f"{prefix}\\Scripts\\activate"
-        else:
-            activate_cmd = f". {prefix}/bin/activate"
+        activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
         if verbose:
             typer.echo(f"Raw command: {cmd}")
             typer.echo(f"Shell command: {shell_cmd}")

@@ -18,6 +18,7 @@ import app.projects
 from app.api.deps import CurrentUserOptional, SessionDep
 from app.api.routes.projects.core import (
     FULL_HISTORY_REPO_TTL,
+    comment_artifact_label,
     comment_artifact_route,
 )
 from app.git import get_commit_history, get_repo
@@ -161,7 +162,10 @@ def _db_activity(
     ).all()
     for comment in comments:
         what = (
-            f" on {comment.artifact_path}"
+            " on "
+            + comment_artifact_label(
+                comment.artifact_type, comment.artifact_path
+            )
             if comment.artifact_path
             else " on the project"
         )

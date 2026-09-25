@@ -29,6 +29,7 @@ from app.git import (
     get_ck_info_from_repo,
     get_repo,
     get_repo_tree_for_ref,
+    push_and_expire,
     record_project_update,
 )
 from app.models import PipelineStage
@@ -295,5 +296,5 @@ def _commit_pipeline(
         raise HTTPException(422, f"Could not compile the pipeline: {e}")
     if repo.is_dirty():
         repo.git.commit(["-m", message])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
         record_project_update(project, repo, session)

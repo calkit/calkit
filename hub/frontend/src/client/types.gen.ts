@@ -73,6 +73,10 @@ export type ArtifactUsages = {
  */
 export type BodyLoginLoginAccessToken = {
   /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+  /**
    * Grant Type
    */
   grant_type?: string | null
@@ -2448,20 +2452,6 @@ export type Notification = {
 }
 
 /**
- * OAuthCodeExchange
- */
-export type OAuthCodeExchange = {
-  /**
-   * Code
-   */
-  code: string
-  /**
-   * Redirect Uri
-   */
-  redirect_uri: string
-}
-
-/**
  * OnboardingFlagPost
  */
 export type OnboardingFlagPost = {
@@ -2896,6 +2886,20 @@ export type Pipeline = {
 }
 
 /**
+ * PipelinePut
+ */
+export type PipelinePut = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
  * PipelineStage
  *
  * One stage of the Calkit pipeline, as editable YAML.
@@ -2961,6 +2965,21 @@ export type PipelineStagePut = {
    * Message
    */
   message?: string | null
+}
+
+/**
+ * PipelineYaml
+ *
+ * The project's whole pipeline, as editable YAML.
+ *
+ * The YAML is the ``pipeline:`` block of calkit.yaml, exactly as the
+ * pipeline page shows it -- same key order, same comments.
+ */
+export type PipelineYaml = {
+  /**
+   * Yaml
+   */
+  yaml: string
 }
 
 /**
@@ -3590,7 +3609,7 @@ export type ProjectPost = {
   /**
    * Title
    */
-  title: string
+  title?: string | null
   /**
    * Description
    */
@@ -3639,6 +3658,10 @@ export type ProjectPost = {
    * Keep Template History
    */
   keep_template_history?: boolean
+  /**
+   * Overleaf Project Url
+   */
+  overleaf_project_url?: string | null
 }
 
 /**
@@ -4035,7 +4058,7 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "value" | "result" | "table" | "publication"
+  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
   /**
    * Path
    */
@@ -4045,13 +4068,33 @@ export type QuestionEvidence = {
    */
   key?: string | null
   /**
+   * Values
+   */
+  values?: Array<QuestionEvidenceValue> | null
+  /**
    * Name
    */
   name?: string | null
   /**
+   * Section
+   */
+  section?: string | null
+  /**
+   * Label
+   */
+  label?: string | null
+  /**
    * Explanation
    */
   explanation?: string | null
+  /**
+   * Explanation Path
+   */
+  explanation_path?: string | null
+  /**
+   * Git Ref
+   */
+  git_ref?: string | null
   figure?: Figure | null
   result?: Result | null
   publication?: Publication | null
@@ -4059,6 +4102,15 @@ export type QuestionEvidence = {
    * Value
    */
   value?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  stage_status?: StageStatus | null
+  /**
+   * Stale Reason
+   */
+  stale_reason?: "missing" | "pipeline" | "frozen" | null
 }
 
 /**
@@ -4068,7 +4120,7 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "value" | "result" | "table" | "publication"
+  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
   /**
    * Path
    */
@@ -4078,13 +4130,55 @@ export type QuestionEvidencePost = {
    */
   key?: string | null
   /**
+   * Values
+   */
+  values?: {
+    [key: string]: string
+  } | null
+  /**
    * Name
    */
   name?: string | null
   /**
+   * Section
+   */
+  section?: string | null
+  /**
+   * Label
+   */
+  label?: string | null
+  /**
    * Explanation
    */
   explanation?: string | null
+  /**
+   * Explanation Path
+   */
+  explanation_path?: string | null
+  /**
+   * Git Ref
+   */
+  git_ref?: string | null
+}
+
+/**
+ * QuestionEvidenceValue
+ *
+ * One of the named values a result evidence entry cites.
+ */
+export type QuestionEvidenceValue = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Value
+   */
+  value?: string | null
 }
 
 /**
@@ -4136,7 +4230,15 @@ export type QuestionPublic = {
   /**
    * Status
    */
-  status?: "ok" | "stale" | "error" | "unanswered" | "no-evidence" | null
+  status?:
+    | "ok"
+    | "stale"
+    | "frozen"
+    | "missing"
+    | "error"
+    | "unanswered"
+    | "no-evidence"
+    | null
   /**
    * Status Message
    */
@@ -5835,6 +5937,10 @@ export type UserPublic = {
    */
   email_verified: boolean
   subscription: UserSubscription | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -5857,6 +5963,10 @@ export type UserRegister = {
    * Full Name
    */
   full_name?: string | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -6001,6 +6111,10 @@ export type UserUpdateMe = {
    * Github Username
    */
   github_username?: string | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -6234,6 +6348,38 @@ export type ContentsItemBase = {
    * Stage
    */
   stage?: string | null
+}
+
+/**
+ * OAuthCodeExchange
+ */
+export type AppApiRoutesLoginOAuthCodeExchange = {
+  /**
+   * Code
+   */
+  code: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+}
+
+/**
+ * OAuthCodeExchange
+ */
+export type AppApiRoutesUsersOAuthCodeExchange = {
+  /**
+   * Code
+   */
+  code: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
 }
 
 /**
@@ -6571,6 +6717,10 @@ export type UserPublicWritable = {
    */
   email_verified: boolean
   subscription: UserSubscriptionWritable | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -6846,7 +6996,7 @@ export type RecoverPasswordHtmlContentResponse =
   RecoverPasswordHtmlContentResponses[keyof RecoverPasswordHtmlContentResponses]
 
 export type LoginWithGithubData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesLoginOAuthCodeExchange
   path?: never
   query?: never
   url: "/login/github"
@@ -6873,7 +7023,7 @@ export type LoginWithGithubResponse =
   LoginWithGithubResponses[keyof LoginWithGithubResponses]
 
 export type LoginWithGoogleData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesLoginOAuthCodeExchange
   path?: never
   query?: never
   url: "/login/google"
@@ -7639,7 +7789,7 @@ export type GetUserConnectedAccountsResponse =
   GetUserConnectedAccountsResponses[keyof GetUserConnectedAccountsResponses]
 
 export type PostUserZenodoAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/zenodo-auth"
@@ -7744,7 +7894,7 @@ export type PutUserOverleafTokenResponse =
   PutUserOverleafTokenResponses[keyof PutUserOverleafTokenResponses]
 
 export type PostUserGoogleAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/google-auth"
@@ -7771,7 +7921,7 @@ export type PostUserGoogleAuthResponse =
   PostUserGoogleAuthResponses[keyof PostUserGoogleAuthResponses]
 
 export type PostUserGithubAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/github-auth"
@@ -9393,6 +9543,46 @@ export type PostProjectQuestionResponses = {
 export type PostProjectQuestionResponse =
   PostProjectQuestionResponses[keyof PostProjectQuestionResponses]
 
+export type DeleteProjectQuestionData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Number
+     */
+    number: number
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/questions/{number}"
+}
+
+export type DeleteProjectQuestionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteProjectQuestionError =
+  DeleteProjectQuestionErrors[keyof DeleteProjectQuestionErrors]
+
+export type DeleteProjectQuestionResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteProjectQuestionResponse =
+  DeleteProjectQuestionResponses[keyof DeleteProjectQuestionResponses]
+
 export type PutProjectQuestionData = {
   body: QuestionPut
   path: {
@@ -10579,6 +10769,42 @@ export type GetProjectPipelineResponses = {
 
 export type GetProjectPipelineResponse =
   GetProjectPipelineResponses[keyof GetProjectPipelineResponses]
+
+export type PutProjectPipelineData = {
+  body: PipelinePut
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline"
+}
+
+export type PutProjectPipelineErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutProjectPipelineError =
+  PutProjectPipelineErrors[keyof PutProjectPipelineErrors]
+
+export type PutProjectPipelineResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineYaml
+}
+
+export type PutProjectPipelineResponse =
+  PutProjectPipelineResponses[keyof PutProjectPipelineResponses]
 
 export type GetProjectPipelineStageData = {
   body?: never

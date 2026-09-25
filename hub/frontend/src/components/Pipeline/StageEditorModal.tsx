@@ -33,6 +33,7 @@ import { handleError } from "../../lib/errors"
 import { stageKindFromYaml } from "../../lib/pipelineYaml"
 import { trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 
 interface StageEditorModalProps {
   isOpen: boolean
@@ -56,12 +57,16 @@ const StageEditorModal = ({
   const baseRef = useRef<string>("")
   const commitInputRef = useRef<HTMLInputElement>(null)
   const [dirty, setDirty] = useState(false)
-  const [commitMessage, setCommitMessage] = useState("")
+  // Pre-filled so saving is one keystroke away and the history stays
+  // readable for anyone who doesn't stop to write one.
+  const defaultMessage = `Update pipeline stage ${stageName}`
+  const [commitMessage, setCommitMessage] = useState(defaultMessage)
   // Bumped to remount the editor with content we replaced wholesale (the
   // stage as loaded, or as returned by input detection).
   const [docNonce, setDocNonce] = useState(0)
   const [doc, setDoc] = useState<string | null>(null)
   const commitModal = useDisclosure()
+  const discardDialog = useDisclosure()
   const showToast = useCustomToast()
   const queryClient = useQueryClient()
 
@@ -80,6 +85,16 @@ const StageEditorModal = ({
     enabled: isOpen,
     staleTime: 0,
   })
+
+  // Switching stages under an open editor changes what the default
+  // describes, so follow it -- unless the commit box is open, where it
+  // would overwrite something being typed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the stage, not the message
+  useEffect(() => {
+    if (!commitModal.isOpen) {
+      setCommitMessage(defaultMessage)
+    }
+  }, [stageName])
 
   // Load the stage into the editor, and reset when switching stages.
   useEffect(() => {
@@ -147,8 +162,8 @@ const StageEditorModal = ({
   })
 
   const saveMutation = useMutation({
-    mutationFn: (message: string) =>
-      ProjectsService.putProjectPipelineStage({
+    mutationFn: async (message: string) => {
+      const saved = await ProjectsService.putProjectPipelineStage({
         owner_name: ownerName,
         project_name: projectName,
         stage_name: stageName,
@@ -156,18 +171,22 @@ const StageEditorModal = ({
           yaml: trimForSave(textRef.current, stage?.yaml),
           message: message || null,
         },
-      }).then((response) => response.data),
+      }).then((response) => response.data)
+      // Part of the save rather than a follow-up, so the button keeps
+      // spinning until a read can see the commit. Closing on the write alone
+      // put the pipeline back in view still showing the old stage.
+      await refreshProjectContents(ownerName, projectName, queryClient)
+      return saved
+    },
     onSuccess: (saved) => {
       // The saved stage comes back normalized, so show what actually landed
       // in calkit.yaml rather than what was typed.
       baseRef.current = saved.yaml
       replaceDoc(saved.yaml)
       setDirty(false)
-      setCommitMessage("")
+      setCommitMessage(defaultMessage)
       commitModal.onClose()
       showToast("Saved", `Stage ${stageName} was updated.`, "success")
-      // Fire-and-forget: the save already succeeded, and this never rejects.
-      void refreshProjectContents(ownerName, projectName, queryClient)
       onClose()
     },
     onError: (err: AxiosError) => {
@@ -201,7 +220,8 @@ const StageEditorModal = ({
   }, [isOpen])
 
   const handleClose = () => {
-    if (dirty && !window.confirm("Discard unsaved changes?")) {
+    if (dirty) {
+      discardDialog.onOpen()
       return
     }
     onClose()
@@ -225,6 +245,7 @@ const StageEditorModal = ({
         onClose={handleClose}
         size={{ base: "full", md: "3xl" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent maxH="90vh">
@@ -309,6 +330,7 @@ const StageEditorModal = ({
         size={{ base: "sm", md: "md" }}
         isCentered
         initialFocusRef={commitInputRef}
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent
@@ -326,7 +348,7 @@ const StageEditorModal = ({
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder="Ex: Declare the paper's class file as an input"
+              placeholder={defaultMessage}
             />
           </ModalBody>
           <ModalFooter gap={3}>
@@ -341,6 +363,14 @@ const StageEditorModal = ({
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <DiscardChangesDialog
+        isOpen={discardDialog.isOpen}
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          discardDialog.onClose()
+          onClose()
+        }}
+      />
     </>
   )
 }

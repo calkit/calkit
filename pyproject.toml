@@ -1,7 +1,9 @@
 [build-system]
 requires = [
-  "hatchling>=1.5.0",
-  "jupyterlab>=4.0.0,<5",
+  # 1.32.1 made the build hook interface take two type parameters, which
+  # hatch-jupyter-builder (last released 2024) subscripts with one
+  "hatchling>=1.5.0,<1.32.5",
+  "jupyter-builder>=1.2.3",
   "hatch-nodejs-version>=0.3.2",
   "hatch-vcs>=0.3.0",
 ]
@@ -30,6 +32,7 @@ dependencies = [
   "bibtexparser",
   "checksumdir",
   "docx2pdf",
+  "dulwich>=1.2.5",
   "dvc[all]==3.67.1",
   "fastapi",
   "gitpython",
@@ -74,6 +77,8 @@ xet = ["xet>=0.0.1"]  # For fast large file transfers with XeT protocol
 dev = [
   "deptry>=0.22.0",
   "ipykernel",
+  # Builds the JupyterLab extension outside of an isolated build
+  "jupyter-builder>=1.2.3",
   "jsonschema",
   "types-jsonschema",
   "kaleido==0.2.1",
@@ -154,7 +159,7 @@ version_cmd = "hatch version"
 
 [tool.jupyter-releaser.hooks]
 before-build-npm = [
-  "python -m pip install 'jupyterlab>=4.0.0,<5'",
+  "python -m pip install 'jupyter-builder>=1.2.3'",
   "cd jupyterlab-ext && jlpm",
   "cd jupyterlab-ext && jlpm build:prod",
 ]
@@ -185,7 +190,15 @@ show_error_codes = true
 
 # Third-party modules that ship no type stubs.
 [[tool.mypy.overrides]]
-module = ["sqlitedict", "networkx", "yaml", "dvc", "dvc.*", "requests"]
+module = [
+    "sqlitedict",
+    "networkx",
+    "yaml",
+    "dvc",
+    "dvc.*",
+    "requests",
+    "pypdfium2",
+]
 ignore_missing_imports = true
 
 # jsonschema's stubs come from the types-jsonschema dev dependency, which
@@ -257,6 +270,8 @@ env = [
   # and the config falls back to its YAML file, which is what tests want.
   "PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring",
 ]
-# The hub backend's tests need the compose stack and its own environment;
-# they run via test-hub.yml, not from the workspace root
-addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub"
+# The hub backend's tests need the compose stack and its own environment,
+# and the assistant's need Qt; they run via test-hub.yml and
+# test-assistant.yml, not from the workspace root. Examples are projects
+# with their own environments, and their tests aren't Calkit's
+addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub --ignore=assistant --ignore=examples"

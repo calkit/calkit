@@ -436,9 +436,17 @@ function componentProblem(
 export type QuestionStatus =
   | "ok"
   | "stale"
+  | "frozen"
+  | "missing"
   | "error"
   | "unanswered"
   | "no-evidence";
+
+export interface EvidenceCheck {
+  path: string;
+  /** "changed" when it moved after the answer was last edited */
+  status: string;
+}
 
 export interface QuestionCheck {
   /** 1-based, matching `calkit list questions`. */
@@ -447,6 +455,7 @@ export interface QuestionCheck {
   answered: boolean;
   status: QuestionStatus;
   message?: string | null;
+  evidence?: EvidenceCheck[];
 }
 
 export interface QuestionsReport {
@@ -464,8 +473,15 @@ const QUESTION_DEFAULT_MESSAGES: Record<QuestionStatus, string | undefined> = {
   ok: undefined,
   unanswered: undefined,
   stale:
-    "The evidence has changed since this answer was last edited. Read it " +
-    "again and edit the question, even if the answer still holds.",
+    "A stage that produces this question's evidence is out of date. Run " +
+    "the pipeline, then read the answer again.",
+  frozen:
+    "Some of this question's evidence comes from a frozen stage, so " +
+    "nothing will report it out of date. Cite a git_ref to pin the " +
+    "version the answer is based on.",
+  missing:
+    "Some of this question's evidence doesn't exist. Run the pipeline or " +
+    "pull.",
   error: "This question's evidence could not be read as written.",
   "no-evidence":
     "This question is answered but cites no evidence, so there is nothing " +
@@ -480,9 +496,17 @@ const QUESTION_SEVERITIES: Record<
   // Not yet answered is work outstanding, not a fault to report
   unanswered: undefined,
   stale: "warning",
+  frozen: "info",
+  missing: "error",
   error: "error",
   "no-evidence": "info",
 };
+
+// Not a status of its own: an answer can stay true while a number it cites
+// moves, so the check passes it and only says so
+const EVIDENCE_CHANGED_MESSAGE =
+  "The evidence has changed since this answer was last edited. Read it " +
+  "again and edit the question, even if the answer still holds.";
 
 /**
  * Where each question sits in `calkit.yaml`, by its position in the list.
@@ -533,9 +557,19 @@ export function questionDiagnostics(
   const lines = questionLines(calkitYaml);
   const diagnostics: QuestionDiagnostic[] = [];
   for (const question of report.questions ?? []) {
-    const severity = QUESTION_SEVERITIES[question.status];
     const line = lines[question.index - 1];
-    if (!severity || line === undefined) {
+    if (line === undefined) {
+      continue;
+    }
+    const severity = QUESTION_SEVERITIES[question.status];
+    if (!severity) {
+      if ((question.evidence ?? []).some((e) => e.status === "changed")) {
+        diagnostics.push({
+          line,
+          severity: "info",
+          message: EVIDENCE_CHANGED_MESSAGE,
+        });
+      }
       continue;
     }
     diagnostics.push({

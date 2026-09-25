@@ -15,7 +15,12 @@ from sqlmodel import Field, SQLModel, select
 import app.stripe
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.config import settings
-from app.core import INVALID_ACCOUNT_NAMES, utcnow
+from app.core import (
+    ACCOUNT_NAME_RULE,
+    INVALID_ACCOUNT_NAMES,
+    account_name_is_valid,
+    utcnow,
+)
 from app.models import (
     ROLE_IDS,
     Account,
@@ -137,6 +142,8 @@ def post_org(
     org_name = (req.name or req.github_name).lower()
     if org_name in INVALID_ACCOUNT_NAMES:
         raise HTTPException(422, "Invalid account name")
+    if not account_name_is_valid(org_name):
+        raise HTTPException(422, ACCOUNT_NAME_RULE)
     if get_org_from_db(org_name=org_name, session=session) is not None:
         raise HTTPException(400, "This org already exists")
     token = get_github_token(session=session, user=current_user)

@@ -82,6 +82,7 @@ const CreateQuestion = ({ isOpen, onClose }: CreateQuestionProps) => {
         onClose={onClose}
         size={{ base: "sm", md: "md" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent

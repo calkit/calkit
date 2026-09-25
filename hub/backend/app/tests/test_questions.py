@@ -13,7 +13,7 @@ import pytest
 
 from app.api.routes.projects.core import (
     _build_question_evidence,
-    _read_result_file,
+    _EvidenceLookups,
     _resolve_result_value,
 )
 from app.models.core import ContentsItem
@@ -80,7 +80,7 @@ def test_reads_each_results_file_once_per_request() -> None:
     reads: list[str] = []
     cache: dict = {}
     with _patched_contents(reads):
-        for key in ("improvement", "cases.a.cp"):
+        for key in ("improvement", "cases.a.cp", "stations.0.cf"):
             _resolve_result_value(
                 project=None,
                 repo=None,
@@ -89,13 +89,6 @@ def test_reads_each_results_file_once_per_request() -> None:
                 key=key,
                 cache=cache,
             )
-        _read_result_file(
-            project=None,
-            repo=None,
-            ref=None,
-            path="results/bench.json",
-            cache=cache,
-        )
     assert reads == ["results/bench.json"]
 
 
@@ -117,10 +110,17 @@ def test_value_evidence_resolves_rather_than_being_dropped() -> None:
                 },
                 {"kind": "nonsense", "path": "x"},
             ],
-            figures_by_path={},
-            results_by_path={},
-            tables_by_path={},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert len(evidence) == 1

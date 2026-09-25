@@ -18,8 +18,27 @@ export HUB_VERSION ?= $(shell git describe --tags --match 'hub/v*' --always 2>/d
 tex-engine: ## Download the TeX Live bundles for the LaTeX editor (idempotent).
 	@bash frontend/scripts/download-tex-engine.sh
 
+# A `up` that fails partway (a port already bound, most often) can leave
+# containers running but attached to no network, which every log reports as
+# a healthy start and every client as a dead service.
+.PHONY: fix-unattached
+fix-unattached: ## Recreate containers left with no network by a failed up.
+	@broken=""; \
+	for s in $$(${DOCKER_COMPOSE_DEV} ps --services --status running); do \
+		cid=$$(${DOCKER_COMPOSE_DEV} ps -q $$s); \
+		[ -n "$$cid" ] || continue; \
+		ip=$$(docker inspect $$cid \
+			--format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' \
+			| tr -d ' '); \
+		[ -n "$$ip" ] || broken="$$broken $$s"; \
+	done; \
+	if [ -n "$$broken" ]; then \
+		echo "Recreating unattached containers:$$broken"; \
+		${DOCKER_COMPOSE_DEV} up -d --force-recreate $$broken; \
+	fi
+
 .PHONY: dev
-dev: tex-engine ## Start up all containers for development.
+dev: tex-engine fix-unattached ## Start up all containers for development.
 	${DOCKER_COMPOSE_DEV} up
 
 .PHONY: api-dev
@@ -33,6 +52,15 @@ local-api: ## Run the FastAPI backend directly.
 .PHONY: build-dev
 build-dev: ## Build containers for development.
 	${DOCKER_COMPOSE_DEV} build
+
+# The regular (non-superuser) account to wipe, so the next sign-in with it
+# sees what a new user sees
+DEV_USER_EMAIL ?= $(shell grep -E '^DEV_USER_EMAIL=' .env 2>/dev/null | cut -d= -f2-)
+
+.PHONY: dev-reset-user
+dev-reset-user: ## Delete the dev user and their projects (DEV_USER_EMAIL in .env, or EMAIL=...).
+	@test -n "$(or $(EMAIL),$(DEV_USER_EMAIL))" || (echo "Set DEV_USER_EMAIL in .env or pass EMAIL=you@example.com"; exit 1)
+	${DOCKER_COMPOSE_DEV} run --rm --no-deps -T backend python scripts/delete-user.py $(or $(EMAIL),$(DEV_USER_EMAIL))
 
 .PHONY: format
 format: ## Format all code (runs every pre-commit hook over all files).

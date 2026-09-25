@@ -2342,7 +2342,13 @@ def test_translate_run_targets(tmp_dir):
                             "kind": "shell-command",
                             "command": "echo a",
                             "environment": "env",
-                        }
+                        },
+                        "paper": {
+                            "kind": "latex",
+                            "environment": "env",
+                            "target_path": "main.tex",
+                            "diffs": ["v1"],
+                        },
                     }
                 }
             },
@@ -2357,7 +2363,13 @@ def test_translate_run_targets(tmp_dir):
                             "kind": "shell-command",
                             "command": "echo b",
                             "environment": "env",
-                        }
+                        },
+                        "paper": {
+                            "kind": "latex",
+                            "environment": "env",
+                            "target_path": "main.tex",
+                            "diffs": ["v1"],
+                        },
                     }
                 }
             },
@@ -2393,6 +2405,12 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == []
     assert isolated == [("isolated-sp", "stage-b")]
+    # A subproject's latex stage's diffs can be named all at once too
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:paper.diffs", "isolated-sp:paper.diffs"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml:paper-diff-v1"]
+    assert isolated == [("isolated-sp", "paper-diff-v1")]
     # Unrecognized targets pass through unchanged
     parent, isolated = calkit.pipeline.translate_run_targets(
         ["my-parent-stage"], ck_info=ck_info
@@ -2754,12 +2772,19 @@ def test_to_dvc_latex_diff_stages():
         "environments": {"tex": {"kind": "docker", "image": "texlive"}},
         "pipeline": {
             "stages": {
+                "make-figs": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo hi",
+                    "outputs": ["figs/plot.png"],
+                },
                 "paper": {
                     "kind": "latex",
                     "environment": "tex",
                     "target_path": "pubs/paper-1/main.tex",
+                    "inputs": [{"from_stage_outputs": "make-figs"}],
                     "diffs": [["v1", "v2"], "main"],
-                }
+                },
             }
         },
     }
@@ -2767,6 +2792,7 @@ def test_to_dvc_latex_diff_stages():
     # Building the document and comparing revisions of it are separate
     # stages, so adding a comparison doesn't rebuild the paper
     assert set(stages) == {
+        "make-figs",
         "paper",
         "paper-diff-v1-v2",
         "paper-diff-main",
@@ -2775,6 +2801,30 @@ def test_to_dvc_latex_diff_stages():
     assert stages["paper-diff-v1-v2"]["outs"] == [
         ".calkit/latex-diffs/v1..v2/pubs/paper-1/main.pdf"
     ]
+    # A diff reads another stage's outputs just like the build does
+    assert "figs/plot.png" in stages["paper"]["deps"]
+    assert "figs/plot.png" in stages["paper-diff-main"]["deps"]
+    for name in ["paper-diff-main", "paper-diff-v1-v2"]:
+        assert "--input figs/plot.png" in stages[name]["cmd"]
+    # A latex stage's diffs can be run together by naming them after it
+    targets, _ = calkit.pipeline.translate_run_targets(
+        ["paper.diffs", "other"], ck_info=ck_info
+    )
+    assert targets == ["paper-diff-v1-v2", "paper-diff-main", "other"]
+    targets, _ = calkit.pipeline.translate_run_targets(
+        ["paper-diff-main"], ck_info=ck_info
+    )
+    assert targets == ["paper-diff-main"]
+    ck_info["pipeline"]["stages"]["no-diffs"] = {
+        "kind": "latex",
+        "environment": "tex",
+        "target_path": "other/main.tex",
+    }
+    with pytest.raises(ValueError, match="has no diffs"):
+        calkit.pipeline.translate_run_targets(
+            ["no-diffs.diffs"], ck_info=ck_info
+        )
+    del ck_info["pipeline"]["stages"]["no-diffs"]
     # A generated name that collides with one the user wrote is an error,
     # not something to work around: the name is addressable and is the
     # stage's identity in dvc.lock, so it can't be allowed to shift
@@ -2787,19 +2837,10 @@ def test_to_dvc_latex_diff_stages():
         calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
 
 
-def test_ref_resolver_is_not_shared_between_projects(tmp_dir):
-    # A resolver is bound to one repo. Caching it on wdir looked harmless
-    # until you notice wdir is usually None, which made every project in a
-    # process share whichever repo was compiled first.
+def test_revision_key(tmp_dir):
     import calkit.pipeline
 
-    shas = {}
-    for name in ["one", "two"]:
-        path = os.path.join(tmp_dir, name)
-        os.makedirs(path)
-        subprocess.check_call(["git", "init", "-q", "-b", "main", path])
-        with open(os.path.join(path, "f.txt"), "w") as f:
-            f.write(name)
+    def commit(path: str, message: str) -> None:
         subprocess.check_call(["git", "-C", path, "add", "-A"])
         subprocess.check_call(
             [
@@ -2812,18 +2853,56 @@ def test_ref_resolver_is_not_shared_between_projects(tmp_dir):
                 "user.name=T",
                 "commit",
                 "-qm",
-                name,
+                message,
             ]
         )
-        cwd = os.getcwd()
+
+    # A key is bound to one repo. Caching it on wdir looked harmless until
+    # you notice wdir is usually None, which made every project in a
+    # process share whichever repo was compiled first.
+    keys = {}
+    cwd = os.getcwd()
+    for name in ["one", "two"]:
+        path = os.path.join(tmp_dir, name)
+        os.makedirs(os.path.join(path, "paper"))
+        subprocess.check_call(["git", "init", "-q", "-b", "main", path])
+        with open(os.path.join(path, "paper", "main.tex"), "w") as f:
+            f.write(name)
+        commit(path, name)
         os.chdir(path)
         try:
-            resolve = calkit.pipeline._ref_resolver(None)
-            assert resolve is not None
-            shas[name] = resolve("HEAD")
+            key = calkit.pipeline._revision_key(None, ["paper/"])
+            assert key is not None
+            keys[name] = key("HEAD")
         finally:
             os.chdir(cwd)
-    assert shas["one"] != shas["two"]
+    assert keys["one"] != keys["two"]
+    # A key names what's read rather than a commit, so a commit that leaves
+    # that alone doesn't change it, including a .gitignore beside it
+    one = os.path.join(tmp_dir, "one")
+    os.chdir(one)
+    try:
+        key = calkit.pipeline._revision_key(None, ["paper/"])
+        assert key is not None
+        with open("other.txt", "w") as f:
+            f.write("unrelated")
+        with open("paper/.gitignore", "w") as f:
+            f.write("*.aux\n")
+        commit(one, "unrelated")
+        assert key("HEAD") == keys["one"]
+        with open("paper/main.tex", "a") as f:
+            f.write(" edited")
+        commit(one, "edit")
+        assert key("HEAD") != keys["one"]
+        # The same content reached by different commits, e.g., after a
+        # rebase, has the same key
+        subprocess.check_call(["git", "checkout", "-qb", "redo", "HEAD~2"])
+        with open("paper/main.tex", "w") as f:
+            f.write("one edited")
+        commit(one, "same edit, different commit")
+        assert key("HEAD") == key("main")
+    finally:
+        os.chdir(cwd)
 
 
 def test_to_dvc_unfilters_notebook_outputs(tmp_dir):

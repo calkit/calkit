@@ -57,4 +57,39 @@ describe("Markdown", () => {
     expect(clamp?.[2]).toContain("display:-webkit-box")
     expect(clamp?.[2]).not.toContain("display:inline")
   })
+
+  it("restores paragraphs YAML folding collapsed, except in code", () => {
+    const folded =
+      "First paragraph.\nSecond paragraph.\n\n```py\nx = 1\n\ny = 2\n```"
+    const html = renderToStaticMarkup(
+      <ChakraProvider>
+        <Markdown foldedProse>{folded}</Markdown>
+      </ChakraProvider>,
+    )
+    // Two paragraphs plus the fence, rather than one wall of text.
+    expect(html.match(/Second paragraph\./)).not.toBeNull()
+    expect(html.match(/<p[ >]/g)?.length).toBe(2)
+    // A blank line inside a fence is content, so the code is left alone.
+    expect(html).toContain("x = 1\n\ny = 2")
+    // Without the flag, the single newline stays a soft break.
+    const plain = renderToStaticMarkup(
+      <ChakraProvider>
+        <Markdown>{folded}</Markdown>
+      </ChakraProvider>,
+    )
+    expect(plain.match(/<p[ >]/g)?.length).toBe(1)
+  })
+
+  it("keeps long code blocks within the markdown container", () => {
+    const html = renderToStaticMarkup(
+      <ChakraProvider>
+        <Markdown>{"```sh\ncommand --with-a-very-long-argument\n```"}</Markdown>
+      </ChakraProvider>,
+    )
+    const preClass = html.match(/<pre[^>]*class="(css-[a-z0-9]+)"/i)?.[1]
+    expect(preClass).toBeDefined()
+    const preStyles = html.match(new RegExp(`\\.${preClass}\\{([^}]*)\\}`))?.[1]
+    expect(preStyles).toContain("max-width:100%")
+    expect(preStyles).toContain("overflow-x:auto")
+  })
 })

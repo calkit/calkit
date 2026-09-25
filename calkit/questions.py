@@ -1,51 +1,72 @@
 """Checking a project's questions against their evidence.
 
-An answer is a claim about the evidence as it was when the answer was last
-edited. The pipeline keeps the evidence current, but nothing keeps the prose
-current: re-run a stage, and a number an answer relies on can change without
-anything noticing. Two things close that gap here, and neither copies a
-value into ``calkit.yaml``.
+An answer is a claim about evidence, and the check asks whether that
+evidence is there and current. Nothing here judges the prose.
 
 Numbers are templated, not retyped. A ``value`` evidence entry names one
 value in a results file, and the question's text can refer to it with
 Python format syntax, ``"about {improvement:.1f}x"``; the text is rendered
 from the file whenever it is shown, so a number in an answer is always the
-pipeline's own.
+pipeline's own. A ``result`` entry with ``values`` names several related
+values in one file, e.g., the outputs of one calculation, the same way.
 
-Staleness comes from history, not from a record. Git already knows when a
-question was last edited: the commit at which its entry in ``calkit.yaml``
-last changed. If any of its evidence changed after that commit -- in Git
-history for Git-tracked outputs, in ``dvc.lock`` for DVC-tracked ones --
-the answer was written against evidence that no longer exists, and the
-check reports it as stale until someone reads it again and edits the
-question, which for an answer that still holds means editing it after
-reading it again.
+What can go wrong, worst first: the evidence isn't there at all (never run,
+never pushed, or pinned to a Git ref that doesn't exist); a reference is
+broken (a key that doesn't resolve, a placeholder that names no evidence, a
+label missing from the LaTeX); the stage that produces it is out of date, so
+what's on disk isn't what the project would produce now; or the stage is
+frozen, or downstream of one, in which case the pipeline will never call it
+out of date however far its inputs have moved -- and only a ``git_ref`` on
+the citation says which version is meant.
 
-Both checks are deterministic and cheap. Judging whether the prose still
-follows from changed evidence is neither, and is left to the reader or to
-the ``check-questions`` agent skill, which uses this module's report to know
-which questions to read.
+Evidence pinned with ``git_ref`` is checked at that ref rather than in the
+working tree. A pin is a claim about one version, so nothing about the
+current pipeline can make it stale; what can go wrong is the ref or the
+path not being there.
+
+Git history is read for context, not for a verdict: when a cited value
+changed after the commit that last edited the question, the report says so
+and what it was, since that is worth a reader's attention. It is not a
+failure -- prose can stay true while a number moves, and a templated number
+updates itself.
 """
 
 from __future__ import annotations
 
+import ast
 import glob
 import io
 import json
+import operator
 import os
 import re
 import string
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any, Literal, TypeGuard
 
 from pydantic import BaseModel, Field
 
 import calkit
 
 EvidenceStatus = Literal[
-    "ok", "changed", "missing", "error", "skipped", "unattributed"
+    "ok",
+    "changed",
+    "missing",
+    "stale",
+    "frozen",
+    "error",
+    "skipped",
+    "unattributed",
 ]
-QuestionStatus = Literal["ok", "stale", "error", "unanswered", "no-evidence"]
+QuestionStatus = Literal[
+    "ok",
+    "stale",
+    "frozen",
+    "missing",
+    "error",
+    "unanswered",
+    "no-evidence",
+]
 CALKIT_YAML = "calkit.yaml"
 
 
@@ -60,8 +81,12 @@ class EvidenceCheck(BaseModel):
     message: str | None = None
     #: Current value, for value evidence
     current: Any = None
+    #: Current values by name, for result evidence with values
+    values: dict[str, Any] | None = None
     #: The pipeline stage that produces the path, if any
     stage: str | None = None
+    #: The Git ref this citation pins itself to, if any
+    git_ref: str | None = None
 
 
 class QuestionCheck(BaseModel):
@@ -85,7 +110,18 @@ class QuestionsStatus(BaseModel):
 
     @property
     def stale(self) -> list[QuestionCheck]:
+        """Answers whose evidence the pipeline would rebuild."""
         return [q for q in self.questions if q.status == "stale"]
+
+    @property
+    def frozen(self) -> list[QuestionCheck]:
+        """Answers resting on a frozen stage, with no ref pinning them."""
+        return [q for q in self.questions if q.status == "frozen"]
+
+    @property
+    def missing(self) -> list[QuestionCheck]:
+        """Answers citing evidence that isn't there."""
+        return [q for q in self.questions if q.status == "missing"]
 
     @property
     def errors(self) -> list[QuestionCheck]:
@@ -96,9 +132,27 @@ class QuestionsStatus(BaseModel):
         return [q for q in self.questions if q.answered]
 
     @property
+    def changed(self) -> list[EvidenceCheck]:
+        """Evidence that moved after the question was last edited.
+
+        Context rather than a verdict: a number can change without making
+        the sentence around it wrong, and a templated one rewrites itself.
+        """
+        return [
+            ev
+            for q in self.questions
+            for ev in q.evidence
+            if ev.status == "changed"
+        ]
+
+    @property
     def ok(self) -> bool:
-        """True if no answered question is stale or broken."""
-        return not self.stale and not self.errors
+        """True if no answered question is missing, stale, or broken.
+
+        Frozen evidence doesn't fail the check: nothing can be re-run to fix
+        it, and whether a pin is wanted is the author's call.
+        """
+        return not self.missing and not self.stale and not self.errors
 
     @property
     def unattributed(self) -> list[EvidenceCheck]:
@@ -124,44 +178,61 @@ class QuestionsStatus(BaseModel):
 # -- values and templates ---------------------------------------------------
 
 
+def parse_evidence_text(text: str, path: str) -> Any:
+    """Parse the contents of a results file, by the extension of ``path``."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".yaml", ".yml"):
+        return calkit.ryaml.load(text)
+    if ext == ".json":
+        return json.loads(text)
+    if ext == ".toml":
+        import tomllib
+
+        return tomllib.loads(text)
+    raise ValueError(
+        f"Cannot read a value from {path}: only JSON, YAML, and TOML "
+        "results files are supported"
+    )
+
+
 def read_evidence_file(path: str) -> Any:
     """Read a results file, by extension."""
-    ext = os.path.splitext(path)[1].lower()
     with open(path, encoding="utf-8") as f:
-        if ext in (".yaml", ".yml"):
-            return calkit.ryaml.load(f)
-        if ext == ".json":
-            return json.load(f)
-    raise ValueError(
-        f"Cannot read a value from {path}: only JSON and YAML results "
-        "files are supported"
-    )
+        return parse_evidence_text(f.read(), path)
 
 
 def resolve_key(data: Any, key: str) -> Any:
     """Look up ``key`` in a loaded results file.
 
-    A key that exists literally at the top level wins, so a key containing
-    dots keeps working. Otherwise the key is split on dots and walked, with
-    integer parts indexing into lists, so ``results.case-a.score`` reaches
-    into nested output.
+    The key is split on dots and walked, with integer parts indexing into
+    lists, so ``results.case-a.score`` reaches into nested output. At each
+    level the longest run of parts that names a key wins, so keys that
+    contain dots work at any depth, e.g., ``sweep.back_off_1.50_k.failed``.
     """
-    if isinstance(data, dict) and key in data:
-        return data[key]
-    node = data
-    for part in key.split("."):
-        if isinstance(node, dict) and part in node:
-            node = node[part]
-        elif isinstance(node, list) and re.fullmatch(r"-?\d+", part):
+
+    def walk(node: Any, parts: list[str]) -> Any:
+        if not parts:
+            return node
+        if isinstance(node, dict):
+            for end in range(len(parts), 0, -1):
+                name = ".".join(parts[:end])
+                if name in node:
+                    try:
+                        return walk(node[name], parts[end:])
+                    except KeyError:
+                        continue
+            raise KeyError(key)
+        if isinstance(node, list) and re.fullmatch(r"-?\d+", parts[0]):
             try:
-                node = node[int(part)]
+                item = node[int(parts[0])]
             except IndexError:
                 # An index past the end of a list is a key that isn't
                 # there, and callers handle a missing key
                 raise KeyError(key)
-        else:
-            raise KeyError(key)
-    return node
+            return walk(item, parts[1:])
+        raise KeyError(key)
+
+    return walk(data, key.split("."))
 
 
 class _Formatter(string.Formatter):
@@ -188,14 +259,217 @@ def placeholders(text: str) -> list[str]:
     return [m.group(1) for m in _PLACEHOLDER.finditer(text or "")]
 
 
-def render(text: str | None, values: dict[str, Any]) -> str | None:
+def _placeholder_problems(text: str, values: dict[str, Any]) -> list[str]:
+    if "{" not in text:
+        return []
+    try:
+        _FORMATTER.vformat(text, (), values)
+    except KeyError as e:
+        return [
+            f"placeholder {{{e.args[0]}}} names no evidence; write "
+            "'{{' and '}}' for braces meant to stay in the text"
+        ]
+    except (ValueError, IndexError) as e:
+        return [f"cannot render {text[:40]!r}...: {e}"]
+    return []
+
+
+_IF_KEY = re.compile(r"^\s*(if|elif)\s+(.+?)\s*$")
+_ELSE_KEY = re.compile(r"^\s*else\s*$")
+_COMPARISONS = {
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+}
+
+
+def is_conditional(value: Any) -> TypeGuard[dict]:
+    """Whether a value picks its wording with ``if``/``elif``/``else``."""
+    return isinstance(value, dict)
+
+
+def parse_conditional(clauses: dict) -> list[tuple[str | None, str]]:
+    """Read a conditional's keys into ordered ``(condition, wording)``.
+
+    The condition is ``None`` for ``else``. Keys are read in the order
+    they appear in the file, so the clauses are tried in the order they
+    were written.
+    """
+    parsed: list[tuple[str | None, str]] = []
+    for position, (key, wording) in enumerate(clauses.items()):
+        opened = _IF_KEY.match(str(key))
+        if opened:
+            keyword, condition = opened.groups()
+            if keyword == "if" and position:
+                raise ValueError("only the first clause may be 'if'")
+            if keyword == "elif" and not parsed:
+                raise ValueError("'elif' with no 'if' before it")
+            parsed.append((condition, str(wording)))
+            continue
+        if _ELSE_KEY.match(str(key)):
+            if not parsed:
+                raise ValueError("'else' with no 'if' before it")
+            parsed.append((None, str(wording)))
+            continue
+        raise ValueError(f"expected 'if', 'elif' or 'else', got {key!r}")
+    if not parsed:
+        raise ValueError("a conditional needs at least an 'if' clause")
+    for condition, _ in parsed[:-1]:
+        if condition is None:
+            raise ValueError("'else' must be the last clause")
+    return parsed
+
+
+def _operand(node: ast.AST, values: dict[str, Any]) -> Any:
+    """One side of a comparison, resolved against the evidence values.
+
+    Names and literals are read directly; anything else is arithmetic and
+    goes to the same evaluator the calculations use, so there is one
+    audited path for arithmetic rather than two.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id not in values:
+            raise KeyError(node.id)
+        return values[node.id]
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Name) and inner.id not in values:
+            raise KeyError(inner.id)
+    import arithmetic_eval  # type: ignore[import-untyped]
+
+    return arithmetic_eval.evaluate(ast.unparse(node), values)
+
+
+def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
+    if isinstance(node, ast.BoolOp):
+        # Not short-circuited, so a misspelled name is an error whatever
+        # the current values are
+        outcomes = [_truth(v, values) for v in node.values]
+        if isinstance(node.op, ast.And):
+            return all(outcomes)
+        return any(outcomes)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return not _truth(node.operand, values)
+    if isinstance(node, ast.Compare):
+        left = _operand(node.left, values)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _operand(comparator, values)
+            compare = _COMPARISONS.get(type(op))
+            if compare is None:
+                raise ValueError(
+                    f"{type(op).__name__} is not a supported comparison"
+                )
+            if not compare(left, right):
+                return False
+            left = right
+        return True
+    if isinstance(node, ast.Name):
+        value = _operand(node, values)
+        # Only a true/false value stands alone, so a number is never
+        # silently read as its truthiness
+        if isinstance(value, bool):
+            return value
+    raise ValueError(
+        "a condition must compare values, e.g., 'p < 0.05', "
+        "or name a true/false value"
+    )
+
+
+def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
+    """Evaluate one ``if``/``elif`` condition against the evidence values.
+
+    Only comparisons, ``and``/``or``/``not`` and arithmetic are allowed, so
+    a condition read from ``calkit.yaml`` cannot call anything.
+    """
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as e:
+        raise ValueError(f"cannot parse condition {expression!r}: {e}") from e
+    try:
+        return bool(_truth(tree.body, values))
+    except KeyError:
+        # A name like 'paired-gain.vawt-8' reads as arithmetic and
+        # attribute access, so the failure would otherwise name a
+        # fragment of it and look like missing evidence.
+        unusable = [
+            name
+            for name in values
+            if not name.isidentifier() and name in expression
+        ]
+        if unusable:
+            raise ValueError(
+                f"condition {expression!r} refers to {unusable[0]!r}, which "
+                "cannot be read as a variable; give that evidence a 'name' "
+                "that is a valid Python identifier"
+            ) from None
+        raise
+    except ValueError:
+        raise
+    except Exception as e:
+        # E.g., comparing a string to a number, or syntax arithmetic_eval
+        # refuses, so callers only have to handle one kind of bad condition
+        raise ValueError(
+            f"cannot evaluate condition {expression!r}: {e}"
+        ) from e
+
+
+def check_conditional(clauses: dict, values: dict[str, Any]) -> list[str]:
+    """Problems with every clause of a conditional, not just the one chosen.
+
+    The clauses the current values don't select are the ones a rerun will
+    reach, so a typo in them is an error now rather than after the rerun.
+    """
+    try:
+        parsed = parse_conditional(clauses)
+    except ValueError as e:
+        return [f"conditional answer: {e}"]
+    messages: list[str] = []
+    held = False
+    for condition, wording in parsed:
+        if condition is None:
+            held = True
+        else:
+            try:
+                held = evaluate_condition(condition, values) or held
+            except KeyError as e:
+                messages.append(
+                    f"condition {condition!r} names no evidence {e.args[0]!r}"
+                )
+            except ValueError as e:
+                messages.append(str(e))
+        messages += _placeholder_problems(wording, values)
+    if not messages and not held:
+        messages.append(
+            "no condition of the conditional answer holds and there is no "
+            "'else' clause"
+        )
+    return messages
+
+
+def select_branch(clauses: dict, values: dict[str, Any]) -> str:
+    """The wording whose condition holds, for a conditional answer."""
+    for condition, wording in parse_conditional(clauses):
+        if condition is None or evaluate_condition(condition, values):
+            return wording
+    raise ValueError("no condition held and there is no 'else' clause")
+
+
+def render(text: str | dict | None, values: dict[str, Any]) -> str | None:
     """Fill a question text's placeholders from its evidence values.
 
     Raises ``KeyError`` for a name with no evidence and ``ValueError`` for
     a format spec the value cannot satisfy, so a template that cannot be
     rendered is an error rather than a silently unfilled sentence.
     """
-    if text is None or "{" not in text:
+    if text is None:
+        return text
+    if isinstance(text, dict):
+        text = select_branch(text, values)
+    if "{" not in text:
         return text
     return _FORMATTER.vformat(text, (), values)
 
@@ -209,6 +483,21 @@ def is_value_evidence(ev: dict) -> bool:
 
 def evidence_name(ev: dict) -> str | None:
     return ev.get("name") or ev.get("key")
+
+
+def named_keys(ev: dict) -> dict[str, str]:
+    """The values an entry cites, as a map of name to key.
+
+    One for ``value`` evidence, or a ``result`` with a key, and one per
+    entry for a ``result`` with ``values``.
+    """
+    if is_value_evidence(ev):
+        name = evidence_name(ev)
+        return {name: ev["key"]} if name else {}
+    values = ev.get("values")
+    if ev.get("kind", "result") == "result" and isinstance(values, dict):
+        return {str(n): str(k) for n, k in values.items()}
+    return {}
 
 
 TEMPLATED_FIELDS = ("hypothesis", "answer", "notes")
@@ -238,17 +527,21 @@ def render_question(
     wdir = wdir or os.getcwd()
     values: dict[str, Any] = {}
     for ev in question.get("evidence") or []:
-        if not is_value_evidence(ev):
+        keys = named_keys(ev)
+        if not keys:
             continue
-        name = evidence_name(ev)
         try:
             if read_evidence is not None:
                 data = read_evidence(ev["path"])
             else:
                 data = read_evidence_file(os.path.join(wdir, ev["path"]))
-            values[name or ""] = resolve_key(data, ev["key"])
         except Exception:
             continue
+        for name, key in keys.items():
+            try:
+                values[name] = resolve_key(data, key)
+            except Exception:
+                continue
     out = dict(question)
     for field in TEMPLATED_FIELDS:
         try:
@@ -670,7 +963,11 @@ def _check_publication_label(
 
 
 def _is_attributed(
-    path: str, stage: str | None, ck_info: dict, view: QuestionsView
+    path: str,
+    stage: str | None,
+    ck_info: dict,
+    view: QuestionsView,
+    computed: bool = False,
 ) -> bool:
     """Whether the project says where an evidence path came from.
 
@@ -679,7 +976,9 @@ def _is_attributed(
     may be declared as an artifact that records an import or a person,
     which is what :func:`calkit.provenance.has_provenance` reads---an
     imported dataset or a hand-drawn schematic is accounted for even
-    though there is nothing upstream to point at.
+    though there is nothing upstream to point at. With ``computed``, a
+    person doesn't count, since a number someone typed into a file is
+    still a magic number.
     """
     from calkit.provenance import has_provenance
 
@@ -694,22 +993,135 @@ def _is_attributed(
             if (
                 isinstance(artifact, dict)
                 and artifact.get("path") == path
-                and has_provenance(artifact)
+                and (
+                    artifact.get("stage") is not None
+                    or artifact.get("imported_from") is not None
+                    if computed
+                    else has_provenance(artifact)
+                )
             ):
                 return True
     return False
 
 
+def _declared_git_ref(ev: dict) -> str | None:
+    """The ``git_ref`` an evidence entry declares, as a string.
+
+    calkit.yaml is hand-written, and YAML reads an all-digit short SHA as an
+    int. That's still a ref, so coerce rather than refusing it.
+    """
+    git_ref = ev.get("git_ref")
+    if git_ref is None or git_ref == "":
+        return None
+    return git_ref if isinstance(git_ref, str) else str(git_ref)
+
+
+def _read_at_ref(repo: Any, git_ref: str, path: str) -> str | None:
+    """The text of ``path`` at ``git_ref``, or None if it isn't there."""
+    try:
+        return str(repo.git.show(f"{git_ref}:{path}"))
+    except Exception:
+        return None
+
+
+def check_pinned_evidence(
+    out: EvidenceCheck, ev: dict, repo: Any, wdir: str
+) -> EvidenceCheck:
+    """Check evidence pinned to a Git ref, at that ref.
+
+    A pin is a claim about one version of an artifact, so the working tree
+    and the current pipeline have nothing to say about it -- only whether
+    the ref and the path are there, and whether a cited value still reads.
+    A DVC-tracked path won't be in the tree at all; the lock naming it is as
+    much as can be checked without fetching the content.
+    """
+    git_ref = out.git_ref or ""
+    if repo is None:
+        out.status = "skipped"
+        out.message = f"no repo to resolve {git_ref} against"
+        return out
+    try:
+        repo.commit(git_ref)
+    except Exception:
+        out.status = "missing"
+        out.message = f"Git ref {git_ref!r} was not found; push it or fix it"
+        return out
+    text = _read_at_ref(repo, git_ref, out.path)
+    if text is None:
+        lock = _read_at_ref(repo, git_ref, "dvc.lock")
+        if lock is not None and lock_hash(lock, out.path) is not None:
+            # Tracked by DVC at that commit: present, but its content lives
+            # in storage, so a cited value can't be read from here.
+            if named_keys(ev):
+                out.status = "skipped"
+                out.message = (
+                    f"DVC-tracked at {git_ref}; value not read from storage"
+                )
+            return out
+        out.status = "missing"
+        out.message = f"not found at {git_ref}; run the pipeline or push it"
+        return out
+    if is_value_evidence(ev):
+        try:
+            out.current = resolve_key(
+                parse_evidence_text(text, out.path), out.key or ""
+            )
+        except KeyError:
+            out.status = "error"
+            out.message = (
+                f"key {out.key!r} not found in {out.path} at {git_ref}"
+            )
+        except Exception as e:
+            out.status = "error"
+            out.message = (
+                f"cannot read {out.path} at {git_ref}: "
+                f"{e.__class__.__name__}: {e}"
+            )
+    elif named_keys(ev):
+        try:
+            data = parse_evidence_text(text, out.path)
+        except Exception as e:
+            out.status = "error"
+            out.message = (
+                f"cannot read {out.path} at {git_ref}: "
+                f"{e.__class__.__name__}: {e}"
+            )
+            return out
+        out.values = {}
+        not_found = []
+        for name, value_key in named_keys(ev).items():
+            try:
+                out.values[name] = resolve_key(data, value_key)
+            except KeyError:
+                not_found.append(value_key)
+        if not_found:
+            out.status = "error"
+            out.message = f"key(s) not found in {out.path} at {git_ref}: " + (
+                ", ".join(repr(k) for k in not_found)
+            )
+    return out
+
+
 def check_evidence(
     ev: dict,
     ck_info: dict,
-    view: QuestionsView,
+    view: QuestionsView | str,
     repo: Any,
     since: str | None,
+    stale_stages: set[str] | None = None,
+    frozen_stages: set[str] | None = None,
 ) -> EvidenceCheck:
-    """Check one evidence entry against the project and its history."""
+    """Check one evidence entry against the project and its history.
+
+    ``stale_stages`` and ``frozen_stages`` are base stage names from the
+    pipeline: the ones DVC would re-run, and the ones it never will because
+    they're frozen or downstream of a freeze.
+    """
     from calkit.pipeline import get_stage_for_output
 
+    # A plain directory is the CLI's view, and what older callers pass
+    if isinstance(view, str):
+        view = LocalQuestions(view)
     kind = ev.get("kind", "result")
     path = ev.get("path", "")
     key = ev.get("key")
@@ -720,11 +1132,14 @@ def check_evidence(
         name=evidence_name(ev) if is_value_evidence(ev) else None,
         status="ok",
         stage=get_stage_for_output(path, ck_info) if path else None,
+        git_ref=_declared_git_ref(ev),
     )
     if not path:
         out.status = "error"
         out.message = "evidence has no path"
         return out
+    if out.git_ref is not None:
+        return check_pinned_evidence(out, ev, repo, view.wdir)
     if not view.exists(path):
         out.status = "missing"
         out.message = "path does not exist; run the pipeline or pull"
@@ -732,9 +1147,28 @@ def check_evidence(
     if kind == "publication":
         out.status, out.message = _check_publication_label(ev, ck_info, view)
         return out
+    # A document may be written by hand or built by a stage, e.g., a
+    # Markdown stage, which declares it as its target rather than an output
+    if kind == "document" and out.stage is None:
+        out.stage = next(
+            (
+                name
+                for name, stage in (
+                    ck_info.get("pipeline", {}).get("stages") or {}
+                ).items()
+                if isinstance(stage, dict)
+                and stage.get("kind") == "markdown"
+                and stage.get("target_path") == path
+            ),
+            None,
+        )
     if kind == "value" and not key:
         out.status = "error"
         out.message = "value evidence needs a key"
+        return out
+    if kind == "result" and key and "values" in ev:
+        out.status = "error"
+        out.message = "a result takes 'values' or 'key', not both"
         return out
     if is_value_evidence(ev):
         try:
@@ -749,23 +1183,134 @@ def check_evidence(
             return out
         if kind == "result":
             out.message = "a result with a key is a value; use kind: value"
+    elif kind == "result" and "values" in ev:
+        if not isinstance(ev["values"], dict) or not ev["values"]:
+            out.status = "error"
+            out.message = "values must map each name to a key"
+            return out
+        try:
+            data = view.read_results(path)
+        except Exception as e:
+            out.status = "error"
+            out.message = f"cannot read {path}: {e.__class__.__name__}: {e}"
+            return out
+        out.values = {}
+        not_found = []
+        for name, value_key in named_keys(ev).items():
+            try:
+                out.values[name] = resolve_key(data, value_key)
+            except KeyError:
+                not_found.append(value_key)
+        if not_found:
+            out.status = "error"
+            out.message = f"key(s) not found in {path}: " + ", ".join(
+                repr(k) for k in not_found
+            )
+            return out
     if since is not None and repo is not None:
-        change = evidence_change(
-            path,
-            since,
-            repo,
-            view.wdir,
-            key=key if is_value_evidence(ev) else None,
-            current=out.current,
-            ref=view.ref,
-        )
+        if out.values is not None:
+            # Each value is compared on its own, as a value entry would be
+            changes = [
+                evidence_change(
+                    path,
+                    since,
+                    repo,
+                    view.wdir,
+                    key=value_key,
+                    current=out.values[name],
+                    ref=view.ref,
+                )
+                for name, value_key in named_keys(ev).items()
+            ]
+            change = "; ".join(dict.fromkeys(c for c in changes if c)) or None
+        else:
+            change = evidence_change(
+                path,
+                since,
+                repo,
+                view.wdir,
+                key=key if is_value_evidence(ev) else None,
+                current=out.current,
+                ref=view.ref,
+            )
         if change:
             out.status = "changed"
             # Not overwritten: a deprecated entry that also changed is
             # still worth migrating, and the hint is the only place it is
             # said
             out.message = "; ".join(filter(None, [out.message, change]))
-    if out.status == "ok" and not _is_attributed(
+    base = (out.stage or "").split("@")[0]
+    # A Markdown stage runs as sub-stages named after it, e.g., 'doc/analyze'
+    stale_hit, frozen_hit = (
+        any(n == base or n.startswith(base + "/") for n in names or ())
+        for names in (stale_stages, frozen_stages)
+    )
+    if out.status in ("ok", "changed") and base:
+        if stale_hit:
+            out.status = "stale"
+            out.message = "; ".join(
+                filter(
+                    None,
+                    [
+                        out.message,
+                        f"stage '{base}' is out of date; run the pipeline",
+                    ],
+                )
+            )
+        elif frozen_hit:
+            out.status = "frozen"
+            out.message = "; ".join(
+                filter(
+                    None,
+                    [
+                        out.message,
+                        f"stage '{base}' is frozen, or downstream of one, so "
+                        "nothing will report it out of date; cite a git_ref "
+                        "to pin which version this is",
+                    ],
+                )
+            )
+    if (
+        out.status in ("ok", "changed")
+        and (
+            is_value_evidence(ev)
+            or out.values is not None
+            or kind == "document"
+        )
+        and not _is_attributed(path, out.stage, ck_info, view, computed=True)
+    ):
+        out.status = "error"
+        out.message = (
+            "no pipeline stage computes this value, so nothing can show "
+            "where the number came from or keep it current; produce the file "
+            "with a stage, or declare it with 'imported_from' if another "
+            "project computed it"
+            if kind != "document"
+            else "no pipeline stage builds this document, so nothing checks "
+            "what it says against the results; build it with a Markdown "
+            "stage, or declare it with 'imported_from' if another project "
+            "produced it"
+        )
+        # A Quarto source is only evidence once rendered, so point there
+        for name, stage in (
+            ck_info.get("pipeline", {}).get("stages") or {}
+        ).items():
+            if (
+                kind == "document"
+                and isinstance(stage, dict)
+                and stage.get("kind") == "quarto"
+                and stage.get("target_path") == path
+            ):
+                rendered = [
+                    o.get("path") if isinstance(o, dict) else o
+                    for o in stage.get("outputs") or []
+                ]
+                out.message = (
+                    f"this is the source Quarto stage '{name}' renders; cite "
+                    "what it renders instead"
+                    + (f", e.g., {rendered[0]}" if rendered else "")
+                )
+    elif out.status == "ok" and not _is_attributed(
         path, out.stage, ck_info, view
     ):
         out.status = "unattributed"
@@ -781,11 +1326,15 @@ def check_question(
     index: int,
     question: str | dict,
     ck_info: dict,
-    view: QuestionsView,
+    view: QuestionsView | str,
     repo: Any = None,
     history: CalkitYamlHistory | None = None,
+    stale_stages: set[str] | None = None,
+    frozen_stages: set[str] | None = None,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
+    if isinstance(view, str):
+        view = LocalQuestions(view)
     if isinstance(question, str):
         return QuestionCheck(
             index=index, question=question, answered=False, status="unanswered"
@@ -807,12 +1356,24 @@ def check_question(
         else None
     )
     checks = [
-        check_evidence(ev, ck_info, view, repo, since) for ev in evidence
+        check_evidence(
+            ev,
+            ck_info,
+            view,
+            repo,
+            since,
+            stale_stages=stale_stages,
+            frozen_stages=frozen_stages,
+        )
+        for ev in evidence
     ]
     messages: list[str] = []
     # Every placeholder in the prose must name a value and format with it
     values = {c.name: c.current for c in checks if c.name is not None}
     names = [c.name for c in checks if c.name is not None]
+    for c in checks:
+        values.update(c.values or {})
+        names += list(c.values or {})
     dupes = sorted({n for n in names if names.count(n) > 1})
     if dupes:
         messages.append(f"duplicate evidence name(s): {', '.join(dupes)}")
@@ -820,26 +1381,29 @@ def check_question(
         ev.get("explanation") for ev in evidence
     ]
     for t in texts:
-        if not t or "{" not in t:
-            continue
-        try:
-            render(t, values)
-        except KeyError as e:
-            messages.append(
-                f"placeholder {{{e.args[0]}}} names no evidence; write "
-                "'{{' and '}}' for braces meant to stay in the text"
-            )
-        except (ValueError, IndexError) as e:
-            messages.append(f"cannot render {t[:40]!r}...: {e}")
+        if is_conditional(t):
+            messages += check_conditional(t, values)
+        elif t:
+            messages += _placeholder_problems(t, values)
+    # Worst first, matching what the hub shows against each question: an
+    # answer resting on nothing anyone can find is worse off than one
+    # resting on something merely out of date.
     statuses = {c.status for c in checks}
     status: QuestionStatus = "ok"
-    if messages or statuses & {"error", "missing"}:
+    if "missing" in statuses:
+        status = "missing"
+    elif messages or "error" in statuses:
         status = "error"
-    elif "changed" in statuses:
+    elif "stale" in statuses:
         status = "stale"
+    elif "frozen" in statuses:
+        status = "frozen"
+    if "changed" in statuses:
+        # Said either way, since it is the one thing here that asks for a
+        # reader rather than a command.
         messages.append(
-            "evidence changed since the answer was last edited; re-read it "
-            "and edit the question if it still holds"
+            "evidence changed since the answer was last edited; worth "
+            "re-reading, and editing the question if it no longer holds"
         )
     if since is None and repo is not None:
         messages.append("not yet committed, so history cannot be checked")
@@ -854,18 +1418,57 @@ def check_question(
     )
 
 
+def pipeline_stage_sets(
+    ck_info: dict, wdir: str, check_pipeline: bool = True
+) -> tuple[set[str], set[str]]:
+    """The stages that are out of date, and the ones frozen out of reach.
+
+    Best-effort: a pipeline that can't be read leaves both empty rather than
+    failing the whole check, since most of what it reports doesn't depend on
+    the pipeline at all.
+    """
+    from calkit.pipeline import frozen_tainted_stage_names, get_status
+
+    if not check_pipeline:
+        return set(), set()
+    stale: set[str] = set()
+    frozen: set[str] = set()
+    try:
+        status = get_status(
+            ck_info=ck_info,
+            wdir=wdir,
+            check_environments=False,
+            clean_notebooks=False,
+            compile_to_dvc=False,
+        )
+        stale = {n.split("@")[0] for n in status.stale_stage_names}
+    except Exception:
+        pass
+    try:
+        frozen = frozen_tainted_stage_names(ck_info=ck_info, wdir=wdir)
+    except Exception:
+        pass
+    return stale, frozen
+
+
 def check_questions(
     ck_info: dict | None = None,
     wdir: str | None = None,
+    check_pipeline: bool = True,
     view: QuestionsView | None = None,
     repo: Any = None,
 ) -> QuestionsStatus:
     """Check every question in a project against its evidence.
 
+    ``check_pipeline`` asks DVC which stages are out of date, which is the
+    slowest thing here; turning it off skips that and the frozen check with
+    it, leaving the rest of the report intact.
+
     ``view`` says how to reach the project's files, and ``repo`` how to
     reach its history. Without either, both are taken from ``wdir``, which
     is the checkout the CLI runs in. A server passes a view over a Git
-    tree at the ref it is serving, and the same judgment answers for it.
+    tree at the ref it is serving, and the same judgment answers for it;
+    it has no pipeline to ask, so it passes ``check_pipeline=False``.
     """
     wdir = wdir or os.getcwd()
     if ck_info is None:
@@ -878,15 +1481,28 @@ def check_questions(
         except Exception:
             repo = None
     questions = ck_info.get("questions", []) or []
-    # One reading of calkit.yaml's history for all of them
+    # One reading of calkit.yaml's history, and one of the pipeline, for all
+    # of them
     history = (
         CalkitYamlHistory(repo, view.wdir, ref=view.ref)
         if repo is not None
         else None
     )
+    stale_stages, frozen_stages = pipeline_stage_sets(
+        ck_info, wdir, check_pipeline
+    )
     return QuestionsStatus(
         questions=[
-            check_question(n, q, ck_info, view, repo, history)
+            check_question(
+                n,
+                q,
+                ck_info,
+                view,
+                repo,
+                history,
+                stale_stages=stale_stages,
+                frozen_stages=frozen_stages,
+            )
             for n, q in enumerate(questions, start=1)
         ]
     )
@@ -904,9 +1520,12 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     for q in status.questions:
         # An unattributed entry is advisory rather than a failure, but it
         # is only ever said here, so it earns the question a block
-        needs_attention = q.status in ("stale", "error") or any(
-            ev.status == "unattributed" for ev in q.evidence
-        )
+        needs_attention = q.status in (
+            "missing",
+            "error",
+            "stale",
+            "frozen",
+        ) or any(ev.status in ("unattributed", "changed") for ev in q.evidence)
         if not verbose and not needs_attention:
             continue
         lines.append(f"{q.index}. [{q.status}] {q.question}")
@@ -926,22 +1545,36 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     )
     if answered:
         lines.append(
-            f"Answers whose evidence checks out: {n_ok}/{len(answered)} "
+            f"Answers backed by current evidence: {n_ok}/{len(answered)} "
             f"{calkit.check_or_x(n_ok == len(answered))}"
         )
         lines.append(
-            f"Answers whose evidence changed since: {len(status.stale)} "
-            f"{calkit.check_or_x(not status.stale)}"
+            f"Answers citing evidence that isn't there: "
+            f"{len(status.missing)} {calkit.check_or_x(not status.missing)}"
         )
         lines.append(
             f"Answers with broken references: {len(status.errors)} "
             f"{calkit.check_or_x(not status.errors)}"
         )
+        lines.append(
+            f"Answers whose evidence the pipeline would rebuild: "
+            f"{len(status.stale)} {calkit.check_or_x(not status.stale)}"
+        )
     # No check mark either way on the rest: worth a look, not a verdict
+    if status.frozen:
+        lines.append(
+            f"Answers resting on a frozen stage, unpinned: "
+            f"{len(status.frozen)} (worth a look)"
+        )
     no_evidence = sum(1 for q in answered if q.status == "no-evidence")
     if no_evidence:
         lines.append(
             f"Answers given without evidence: {no_evidence} (worth a look)"
+        )
+    if status.changed:
+        lines.append(
+            f"Evidence that changed after the answer was written: "
+            f"{len(status.changed)} (worth a look)"
         )
     if status.unattributed:
         lines.append(

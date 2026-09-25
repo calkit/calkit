@@ -53,6 +53,7 @@ from TexSoup import TexSoup
 
 import app.components
 import app.imports
+import app.index
 import app.projects
 import app.questions
 import app.tasks
@@ -62,6 +63,7 @@ import calkit.detect
 import calkit.environments
 import calkit.latex
 import calkit.pipeline
+import calkit.provenance
 import calkit.questions
 import calkit.resources
 import calkit.templates
@@ -103,6 +105,7 @@ from app.dvc import (
 )
 from app.git import (
     RepoTree,
+    expire_shared_read_clone,
     get_ck_info,
     get_ck_info_from_repo,
     get_commit_history,
@@ -111,6 +114,8 @@ from app.git import (
     get_repo,
     get_repo_tree_for_ref,
     get_zip_path_map_from_repo,
+    push_and_expire,
+    read_overleaf_title,
     record_project_update,
     resolve_commit_sha,
     search_refs,
@@ -134,10 +139,12 @@ from app.models import (
     OrgSubscription,
     OverleafLink,
     Pipeline,
+    PipelinePut,
     PipelineStage,
     PipelineStageEdit,
     PipelineStageEdited,
     PipelineStagePut,
+    PipelineYaml,
     Presentation,
     Project,
     ProjectComment,
@@ -157,6 +164,7 @@ from app.models import (
     PublicationKind,
     Question,
     QuestionEvidence,
+    QuestionEvidenceValue,
     QuestionPublic,
     QuestionPut,
     Result,
@@ -183,10 +191,12 @@ from app.models.projects import (
     ShowcaseYaml,
     ShowcaseYamlFileInput,
 )
+from app.pipeline import StageStatus as PipelineStageStatus
 from app.pipeline import (
     calc_overall_pipeline_status,
     color_mermaid_by_status,
     compute_stage_statuses,
+    find_frozen_tainted_stages,
     find_stage_for_path,
 )
 from app.security import generate_refresh_token, hash_refresh_token
@@ -228,6 +238,7 @@ RESULT_EXTS = {
     ".tsv",
     ".yaml",
     ".yml",
+    ".toml",
     ".parquet",
     ".h5",
     ".hdf5",
@@ -682,7 +693,7 @@ def post_project_upload(
     repo.git.add(["-A"])
     if repo.git.diff("--staged"):
         repo.git.commit(["-m", "Import existing project files"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.user_uploaded_project(
         user=current_user,
         owner_name=project.owner_account_name,
@@ -791,6 +802,56 @@ def get_owned_projects(
     return ProjectsPublic(data=projects, count=count)  # type: ignore
 
 
+def _resolve_project_template(
+    session: Session, current_user: User, template: str
+) -> tuple[Project | None, str]:
+    """Work out which repo a new project should be started from.
+
+    A template hosted here is preferred: being a project on this hub is
+    what lets its outputs be copied into the new project's storage, so the
+    figures and paper are there before the first run.
+
+    Failing that, a template this package knows lives on its own hub, and
+    its Git repo is readable from anywhere, so it can still be used --
+    which is what makes the built-in templates work on a hub that doesn't
+    host them, a local dev instance included.
+
+    Returns the project if this hub has one, and the Git repo URL to pull
+    from either way.
+    """
+    if template.count("/") != 1:
+        raise HTTPException(
+            422, "A template is named owner/project, e.g. calkit/example"
+        )
+    owner_name, project_name = template.split("/")
+    try:
+        template_project = app.projects.get_project(
+            session=session,
+            owner_name=owner_name,
+            project_name=project_name,
+            current_user=current_user,
+            min_access_level="read",
+        )
+        return template_project, template_project.git_repo_url
+    except HTTPException as e:
+        if e.status_code not in (403, 404):
+            raise
+    known = calkit.templates.find_project_template(template)
+    if known is None:
+        # The template came off a list this hub offered, so "Project not
+        # found" reads as though the project being created is the one
+        # missing. Say which template, and that it is the problem.
+        raise HTTPException(
+            404,
+            f"Template {template} isn't available on this hub; "
+            "pick another one",
+        )
+    logger.info(
+        f"Template {template} isn't hosted here; using {known.git_repo_url}"
+    )
+    return None, known.git_repo_url
+
+
 @router.post("/projects")
 def post_project(
     *,
@@ -807,6 +868,23 @@ def post_project(
             "A linked GitHub account is required to create or own projects.",
         )
     project_in.name = project_in.name.lower()
+    # Starting from Overleaf, the title is in the paper already, so asking
+    # for it again is asking the user to copy it across.
+    if not project_in.title and project_in.overleaf_project_url:
+        overleaf_id = project_in.overleaf_project_url.rstrip("/").split("/")[
+            -1
+        ]
+        project_in.title = read_overleaf_title(
+            user=current_user, session=session, overleaf_project_id=overleaf_id
+        )
+        if not project_in.title:
+            raise HTTPException(
+                400,
+                "Could not read a title from that Overleaf project; please "
+                "give one",
+            )
+    if not project_in.title:
+        raise HTTPException(400, "A title is required")
     if project_in.git_repo_exists and project_in.git_repo_url is None:
         raise HTTPException(
             400, "Git repo URL must be specified if Git repo exists"
@@ -816,16 +894,13 @@ def post_project(
             f"https://github.com/{current_user.account.name}/{project_in.name}"
         )
     # First check if template even exists, if specified
+    template_project: Project | None = None
+    template_git_repo_url: str | None = None
     if project_in.template is not None:
-        template_owner_name, template_project_name = project_in.template.split(
-            "/"
-        )
-        template_project = app.projects.get_project(
+        template_project, template_git_repo_url = _resolve_project_template(
             session=session,
-            owner_name=template_owner_name,
-            project_name=template_project_name,
             current_user=current_user,
-            min_access_level="read",
+            template=project_in.template,
         )
     # Validate the git repo URL is on github.com to prevent SSRF
     parsed_git_url = urlparse(project_in.git_repo_url)
@@ -986,7 +1061,9 @@ def post_project(
         else:
             owner_account_id = current_user.account.id
         add_info = {"owner_account_id": owner_account_id}
-        if project_in.template is not None:
+        if template_project is not None:
+            # Only a template hosted here can be a parent: the column is a
+            # foreign key into this hub's projects.
             add_info["parent_project_id"] = template_project.id
         project = Project.model_validate(project_in, update=add_info)
         logger.info("Adding project to database")
@@ -1003,11 +1080,23 @@ def post_project(
             )
             # If we have a template, set as upstream and pull from it
             if project_in.template is not None:
-                template_git_repo_url = template_project.git_repo_url
                 repo.git.remote(["add", "upstream", template_git_repo_url])
                 repo.git.pull(["upstream", repo.active_branch.name])
+                # Read off the remote-tracking ref while it is still here.
+                # This is the revision the project was taken from, and it
+                # costs nothing; cloning the template again to ask it was a
+                # second full clone of a repo we just pulled.
+                template_git_rev = repo.git.rev_parse(
+                    f"upstream/{repo.active_branch.name}"
+                )
                 # Remove upstream remote so we don't have any confusion later
                 repo.git.remote(["remove", "upstream"])
+                # A new project hasn't run anything yet, and dvc.lock is how
+                # that is known -- it records what the pipeline produced and
+                # from what. Inheriting the template's would say this
+                # project's results already exist, which is the one thing
+                # someone starting from a template still has to do.
+                _clear_template_pipeline_outputs(str(repo.working_dir))
                 if not project_in.keep_template_history:
                     # The template's commits are its history, not this
                     # project's. Start from one commit holding its tree;
@@ -1021,15 +1110,6 @@ def post_project(
                     )
                     repo.git.branch("-D", branch)
                     repo.git.branch("-m", branch)
-                template_repo = get_repo(
-                    project=template_project,
-                    session=session,
-                    user=current_user,
-                    fresh=True,
-                )
-                # dvc.lock stays: its hashes name the template's outputs,
-                # which are copied into this project's storage below, so
-                # the figures and paper are there before the first run.
             # Add a calkit.yaml file
             # First existing info, which is empty unless we're using a template
             ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
@@ -1048,7 +1128,7 @@ def post_project(
                 ck_info["derived_from"] = dict(
                     project=project_in.template,
                     git_repo_url=template_git_repo_url,
-                    git_rev=template_repo.git.rev_parse("HEAD"),
+                    git_rev=template_git_rev,
                 )
             with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
                 ryaml.dump(ck_info, f)
@@ -1097,13 +1177,7 @@ def post_project(
             else:
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
-            repo.git.push(["origin", repo.active_branch.name])
-            if project_in.template is not None:
-                _copy_template_dvc_objects(
-                    repo_dir=str(repo.working_dir),
-                    template_project=template_project,
-                    project=project,
-                )
+            push_and_expire(project, repo)
         except Exception as e:
             # The project row is already committed, and it would block a retry
             # since a Git repo can only back one project, so remove it and let
@@ -1204,65 +1278,49 @@ def post_project(
     return project  # type: ignore
 
 
-def _copy_template_dvc_objects(
-    repo_dir: str, template_project: Project, project: Project
-) -> int:
-    """Copy the template's pipeline outputs into the new project's storage.
+def _clear_template_pipeline_outputs(repo_dir: str) -> list[str]:
+    """Strip a template's results out of a project just started from it.
 
-    The new repo carries the template's dvc.lock, whose hashes point at
-    objects in the template's storage. Copying them across is what lets the
-    project page show the figures and the paper immediately, and what lets
-    `calkit run` on a fresh clone find everything up to date instead of
-    rebuilding from scratch. Best-effort: a missing object only means that
-    output isn't shown until the pipeline runs. Returns how many were
-    copied.
+    ``dvc.lock`` is the record of what the pipeline produced and from
+    what, so a project carrying the template's says the work has already
+    been done here. Running the pipeline is the one step starting from a
+    template doesn't do for you, and the setup checklist reads this to
+    know whether it has happened.
+
+    The outputs the lock names go with it. Leaving them would show the
+    template's figures and paper as though this project had made them,
+    and the first run would overwrite them anyway. Only files actually
+    in the tree are affected: a DVC-tracked output isn't in the clone to
+    begin with. Returns what was removed.
     """
     lock_path = os.path.join(repo_dir, "dvc.lock")
     if not os.path.isfile(lock_path):
-        return 0
+        return []
+    removed: list[str] = []
     try:
         with open(lock_path) as f:
-            dvc_lock = yaml.safe_load(f) or {}
-        fs = get_object_fs()
-        outs = expand_dvc_lock_outs(
-            dvc_lock,
-            owner_name=template_project.owner_account_name,
-            project_name=template_project.name,
-            fs=fs,
-        )
+            lock = load_yaml_fast(f.read()) or {}
     except Exception as e:
-        logger.warning(f"Could not read template outputs for copying: {e}")
-        return 0
-    count = 0
-    for out in outs.values():
-        md5 = out.get("md5")
-        if not md5:
+        logger.warning(f"Could not read the template's dvc.lock: {e}")
+        lock = {}
+    for stage in (lock.get("stages") or {}).values():
+        if not isinstance(stage, dict):
             continue
-        src = make_data_fpath(
-            owner_name=template_project.owner_account_name,
-            project_name=template_project.name,
-            idx=md5[:2],
-            md5=md5[2:],
-        )
-        dst = make_data_fpath(
-            owner_name=project.owner_account_name,
-            project_name=project.name,
-            idx=md5[:2],
-            md5=md5[2:],
-        )
-        try:
-            if fs.exists(dst) or not fs.exists(src):
+        for out in stage.get("outs") or []:
+            out_path = out.get("path") if isinstance(out, dict) else None
+            if not out_path:
                 continue
-            fs.copy(src, dst)
-            count += 1
-        except Exception as e:
-            logger.warning(f"Could not copy template object {md5}: {e}")
-    logger.info(
-        f"Copied {count} template objects from "
-        f"{template_project.owner_account_name}/{template_project.name} "
-        f"to {project.owner_account_name}/{project.name}"
-    )
-    return count
+            abs_path = _abs_path_within(repo_dir, str(out_path))
+            if os.path.isdir(abs_path):
+                shutil.rmtree(abs_path, ignore_errors=True)
+                removed.append(str(out_path))
+            elif os.path.isfile(abs_path):
+                os.remove(abs_path)
+                removed.append(str(out_path))
+    os.remove(lock_path)
+    removed.append("dvc.lock")
+    logger.info(f"Cleared the template's pipeline outputs: {removed}")
+    return removed
 
 
 class ProjectOptionalExtended(ProjectPublic):
@@ -1298,6 +1356,7 @@ def get_project(
             session=session,
             ttl=DEFAULT_REPO_TTL,
             ref=ref,
+            read_only=True,
         )
         # Read at the requested ref. get_repo only fetches a ref, it does
         # not check it out, so get_ck_info_from_repo (working tree) would
@@ -1307,7 +1366,9 @@ def get_project(
         # the difference between a few milliseconds and a quarter of a
         # second, and this request is what the whole project page waits on.
         ck_info = app.projects.get_ck_info_for_ref(
-            project=project, repo=repo, ref=ref, read_only=True
+            project=project,
+            repo=repo,
+            ref=ref,
         )
         resp.calkit_info_keys = list(ck_info.keys())
         # Read status if present
@@ -1511,11 +1572,14 @@ def search_project_refs(
         current_user=current_user,
         min_access_level="read",
     )
+    # The shared checkout is the one push notifications expire, so it's
+    # the one that learns about new branches
     repo = get_repo(
         project=project,
         user=current_user,
         session=session,
         ttl=FULL_HISTORY_REPO_TTL,
+        read_only=True,
     )
     refs = search_refs(repo, query=q)
     return cast(list[GitRef], refs)
@@ -1558,6 +1622,7 @@ def get_project_history(
         user=current_user,
         session=session,
         ttl=FULL_HISTORY_REPO_TTL,
+        read_only=True,
     )
     history = get_commit_history(repo, max_count=limit + offset, ref=ref)
     return history[offset : offset + limit]
@@ -1730,6 +1795,7 @@ def get_project_file_history(
         user=current_user,
         session=session,
         ttl=FULL_HISTORY_REPO_TTL,
+        read_only=True,
     )
     return get_file_history(repo, path=path, max_count=limit, storage=storage)
 
@@ -1817,6 +1883,7 @@ def get_project_contents(
         session=session,
         ttl=ttl,
         ref=ref,
+        read_only=True,
     )
     return app.projects.get_contents_from_repo(
         project=project,
@@ -1995,7 +2062,12 @@ def get_project_content_paths(
         min_access_level="read",
     )
     repo = get_repo(
-        project=project, user=current_user, session=session, ttl=ttl, ref=ref
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=ttl,
+        ref=ref,
+        read_only=True,
     )
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
     dvc_lock_outs = app.projects.get_ck_info_and_dvc_outs_from_tree(
@@ -2057,7 +2129,7 @@ def put_project_contents(
     if repo.git.diff(["--staged", path]):
         commit_message = message or f"Upload {path} from web"
         repo.git.commit(["-m", commit_message])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     else:
         raise HTTPException(
             400,
@@ -2166,75 +2238,28 @@ def patch_project_contents(
         message = f"Add {path} to {target_category}"
     repo.git.commit(["-m", message])
     logger.info("Pushing Git repo")
-    repo.git.push(["origin", repo.branches[0].name])
+    push_and_expire(project, repo, repo.branches[0].name)
     return current_object
 
 
-def _extract_question_text(question: str | dict) -> str:
-    """Extract the question text from a calkit.yaml question entry.
-
-    A question may be a plain string or an object with a ``question`` field.
-    Any other/unexpected type (e.g. a list) yields an empty string rather than
-    a coerced repr, so a non-string never reaches the DB model's ``question``
-    field (and the empty text signals to the user that something is off).
-    """
-    if isinstance(question, dict):
-        value = question.get("question", "")
-    else:
-        value = question
-    return value if isinstance(value, str) else ""
-
-
-def _sync_questions_with_db(
-    ck_info: dict, project: Project, session: Session
-) -> Project:
-    questions_ck = list(ck_info.get("questions", []))
-    questions = deepcopy(questions_ck)
-    logger.info(f"Found {len(questions)} questions in Calkit info")
-    # Put these in the database idempotently
-    existing_questions = project.questions
-    logger.info(f"Found {len(existing_questions)} existing questions in DB")
-    for n, (new, existing) in enumerate(zip(questions_ck, existing_questions)):
-        logger.info(f"Updating existing question number {n + 1}")
-        existing.question = _extract_question_text(questions.pop(0))
-        existing.number = n + 1  # Should already be done, but just in case
-    start_number = len(existing_questions) + 1
-    logger.info(f"Adding {len(questions)} new questions to DB")
-    for n, new in enumerate(questions):
-        number = start_number + n
-        logger.info(f"Appending new question with number: {number}")
-        project.questions.append(
-            Question(
-                project_id=project.id,
-                number=number,
-                question=_extract_question_text(new),
-            )
-        )
-    # Delete extra questions in DB
-    while len(project.questions) > len(questions_ck):
-        q = project.questions.pop(-1)
-        logger.info(f"Deleting question number {q.number}")
-        session.delete(q)
-    session.commit()
-    session.refresh(project)
-    return project
-
-
-def _read_result_file(
+def _resolve_result_value(
     project: Project,
     repo: git.Repo,
     ref: str | None,
     path: str,
-    cache: dict[str, dict | None],
-) -> dict | None:
-    """Parse a JSON or YAML results file out of the repo, once per request.
+    key: str,
+    cache: dict[tuple[str | None, str], dict | None],
+) -> str | None:
+    """Read a result file and return the value at ``key`` as a string.
 
-    ``cache`` memoizes it across every evidence entry and every answer
-    that reads the same file, which is the common case: a question's
-    values and the numbers templated into its prose usually come from one
-    results file.
+    Supports JSON, YAML and TOML result files and keys as
+    ``calkit.questions.resolve_key`` reads them, e.g., ``metrics.mean``. ``cache`` memoizes parsed files across evidence
+    items, keyed by ref as well as path: two evidence entries can cite one
+    file at two refs, and they are not the same file.
+    Returns None if the file or key cannot be resolved.
     """
-    if path not in cache:
+    cache_key = (ref, path)
+    if cache_key not in cache:
         data: dict | None = None
         try:
             item = app.projects.get_contents_from_repo(
@@ -2247,42 +2272,228 @@ def _read_result_file(
                     data = json.loads(text)
                 elif lower.endswith((".yaml", ".yml")):
                     data = ryaml.load(text)
+                elif lower.endswith(".toml"):
+                    import tomllib
+
+                    data = tomllib.loads(text)
         except Exception as e:
-            logger.warning(f"Failed to read result {path}: {e}")
-        cache[path] = data if isinstance(data, dict) else None
-    return cache[path]
-
-
-def _resolve_result_value(
-    project: Project,
-    repo: git.Repo,
-    ref: str | None,
-    path: str,
-    key: str,
-    cache: dict[str, dict | None],
-) -> str | None:
-    """Read a result file and return the value at ``key`` as a string.
-
-    Supports JSON and YAML result files and dot-separated nested keys (e.g.
-    ``metrics.mean``). ``cache`` memoizes parsed files across evidence items.
-    Returns None if the file or key cannot be resolved.
-    """
-    data = _read_result_file(
-        project=project, repo=repo, ref=ref, path=path, cache=cache
-    )
+            logger.warning(f"Failed to read result {path} at {ref}: {e}")
+        cache[cache_key] = data if isinstance(data, dict) else None
+    data = cache[cache_key]
     if data is None:
         return None
-    # calkit's own lookup rather than a walk of our own: a key present
-    # literally at the top level wins even when it contains dots, and
-    # integer parts index into lists, so 'stations.0.cf' resolves here the
-    # way it does in `calkit list questions`
+    # The CLI's lookup, so a key it resolves resolves here too, e.g., one
+    # containing dots or indexing a list
     try:
-        value: object = calkit.questions.resolve_key(data, key)
-    except (KeyError, ValueError, IndexError, TypeError):
+        value = calkit.questions.resolve_key(data, key)
+    except KeyError:
         return None
     if isinstance(value, (dict, list)):
         return None
     return str(value)
+
+
+def _evidence_values(
+    project: Project,
+    repo: git.Repo,
+    ref: str | None,
+    evidence_ck: list,
+    cache: dict[tuple[str | None, str], dict | None],
+) -> dict[str, Any]:
+    """What a question's templates can refer to, keyed by evidence name.
+
+    The same values the evidence cards show, in the types the result files
+    hold them in rather than as strings, so a spec like ``{speedup:,.0f}``
+    has a number to format. Named by the entry's ``name``, falling back to
+    its ``key``, which is how calkit.questions names them too.
+    """
+    values: dict[str, Any] = {}
+    for ev in evidence_ck:
+        if not isinstance(ev, dict):
+            continue
+        keys = calkit.questions.named_keys(ev)
+        path = ev.get("path")
+        if not keys or not isinstance(path, str):
+            continue
+        cache_key = (_evidence_ref(ev, ref), path)
+        if cache_key not in cache:
+            # _resolve_result_value fills the same cache; calling it here
+            # for its side effect keeps one reader of these files.
+            _resolve_result_value(
+                project=project,
+                repo=repo,
+                ref=cache_key[0],
+                path=path,
+                key=next(iter(keys.values())),
+                cache=cache,
+            )
+        data = cache.get(cache_key)
+        if not isinstance(data, dict):
+            continue
+        for name, key in keys.items():
+            try:
+                values[name] = calkit.questions.resolve_key(data, key)
+            except Exception:
+                continue
+    return values
+
+
+def _render_template(
+    text: str | dict[str, str] | None, values: dict[str, Any]
+) -> str | None:
+    """Fill a question's placeholders, leaving what can't be filled alone.
+
+    This is for display: a template naming evidence that isn't there shows
+    as written rather than breaking the page. ``calkit check questions`` is
+    where an unfillable template is an error.
+    """
+    try:
+        return calkit.questions.render(text, values)
+    except (KeyError, ValueError, IndexError, TypeError):
+        if isinstance(text, dict):
+            return "; ".join(f"{k}: {v}" for k, v in text.items())
+        return text
+
+
+class _EvidenceLookups(NamedTuple):
+    """What evidence resolves against, at one Git ref.
+
+    Evidence can name a ref of its own, so there is one of these per
+    distinct ref a question's evidence cites rather than one per request.
+    """
+
+    figures_by_path: dict[str, Figure]
+    results_by_path: dict[tuple[str, str | None], Result]
+    tables_by_path: dict[str, Result]
+    publications_by_path: dict[str, Publication]
+    dvc_lock: dict[str, Any]
+    stage_statuses: dict[str, PipelineStageStatus]
+    frozen_stages: set[str]
+    # Cited documents and publications present in the tree or dvc.lock,
+    # since those need not be declared to be cited
+    present_paths: set[str] = set()
+
+
+def _declared_git_ref(ev: dict) -> str | None:
+    """The ``git_ref`` an evidence entry declares, as a string.
+
+    calkit.yaml is hand-written, and YAML reads an all-digit short SHA as an
+    int. That's still a ref, so coerce rather than letting it fail validation
+    and take the whole question with it.
+    """
+    git_ref = ev.get("git_ref")
+    if git_ref is None or git_ref == "":
+        return None
+    return git_ref if isinstance(git_ref, str) else str(git_ref)
+
+
+def _optional_str(value: Any) -> str | None:
+    """A hand-written scalar as a string, e.g., a section YAML read as 4.2."""
+    if value is None or value == "":
+        return None
+    return value if isinstance(value, str) else str(value)
+
+
+def _evidence_ref(ev: dict, ref: str | None) -> str | None:
+    """The ref an evidence entry resolves at.
+
+    Its own ``git_ref`` when it names one, otherwise the ref being browsed.
+    """
+    return _declared_git_ref(ev) or ref
+
+
+def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
+    """Whether the citation resolves to anything the reader can look at.
+
+    Matches what the question modal would draw: a figure or publication that
+    didn't resolve, or a cited value that couldn't be read, shows "nothing
+    was found" there, whether the path is gone, the artifact was never
+    pushed, or the ref it names doesn't exist. Keyless result and table
+    evidence is left alone -- its content comes from the listings rather
+    than from here, so not resolving a title says nothing about it.
+    """
+    if item.kind == "figure":
+        return item.figure is None
+    if item.kind == "publication":
+        return item.publication is None and item.path not in present_paths
+    if item.kind == "document":
+        return item.path not in present_paths
+    # A value is the number itself, so without a key there's nothing to show
+    if item.kind == "value":
+        return item.value is None
+    # Likewise each value a result names
+    if item.values is not None:
+        return any(v.value is None for v in item.values)
+    return bool(item.key) and item.value is None
+
+
+def _set_evidence_stage(
+    item: QuestionEvidence, lookups: _EvidenceLookups
+) -> None:
+    """Attach the stage that produces the cited path, and what it's worth.
+
+    The resolved artifact's own declaration wins, since a project that names
+    a figure's stage knows better than a path match does; otherwise the path
+    is matched against the pipeline's outs the way every other listing does
+    it. Both are at the evidence's ref, so a citation pinned to an older
+    commit reports the pipeline as it stood there.
+
+    A frozen stage is the case staleness can't speak to: DVC won't re-run it
+    whatever its inputs do, so it reports up to date forever, and so does
+    everything built from its outputs. Naming a Git ref settles it -- the
+    citation then refers to one version of the artifact rather than to
+    whatever the frozen stage last happened to leave behind -- so only an
+    unpinned one is flagged.
+    """
+    stage = (
+        (item.figure.stage if item.figure else None)
+        or (item.result.stage if item.result else None)
+        or (item.publication.stage if item.publication else None)
+        or find_stage_for_path(
+            item.path,
+            lookups.dvc_lock,
+            valid_stages=set(lookups.stage_statuses),
+        )
+    )
+    if stage is None:
+        return
+    item.stage = stage
+    status = lookups.stage_statuses.get(stage)
+    if status is not None:
+        item.stage_status = StageStatus.model_validate(status.model_dump())
+    if status is not None and status.status == "stale":
+        item.stale_reason = "pipeline"
+    elif stage in lookups.frozen_stages and not item.git_ref:
+        item.stale_reason = "frozen"
+
+
+def _resolve_explanation(explanation: Any) -> tuple[str | None, str | None]:
+    """The text of an evidence explanation, or the file it is kept in.
+
+    Written inline as a string, or as ``{path: ...}`` naming a file that
+    holds it. The file is deliberately not read: an explanation kept in a
+    document stays a citation of that document, linked rather than spliced
+    into the card as though it had been written there.
+    """
+    if isinstance(explanation, str):
+        return explanation, None
+    if explanation is None:
+        return None, None
+    # The only other spelling is ``{path: <string>}``, exactly. A mapping
+    # that is anything else isn't a citation we can follow, and guessing
+    # at it would show the reader something nobody wrote.
+    if (
+        not isinstance(explanation, dict)
+        or set(explanation) != {"path"}
+        or not isinstance(explanation.get("path"), str)
+        or not explanation["path"]
+    ):
+        logger.warning(
+            f"Ignoring an explanation that is neither text nor "
+            f"{{path: <string>}}: {explanation!r}"
+        )
+        return None, None
+    return None, explanation["path"]
 
 
 def _build_question_evidence(
@@ -2290,36 +2501,55 @@ def _build_question_evidence(
     repo: git.Repo,
     ref: str | None,
     evidence_ck: list,
-    figures_by_path: dict[str, Figure],
-    results_by_path: dict[tuple[str, str | None], Result],
-    tables_by_path: dict[str, Result],
-    publications_by_path: dict[str, Publication],
-    result_value_cache: dict[str, dict | None],
+    lookups_by_ref: dict[str | None, _EvidenceLookups],
+    result_value_cache: dict[tuple[str | None, str], dict | None],
 ) -> list[QuestionEvidence]:
-    """Turn calkit.yaml evidence entries into resolved QuestionEvidence."""
+    """Turn calkit.yaml evidence entries into resolved QuestionEvidence.
+
+    Each entry resolves at its own ``git_ref`` if it names one, so an answer
+    can keep pointing at the figure it was written against after the branch
+    has moved on. ``lookups_by_ref`` holds the artifacts for every ref the
+    evidence cites; a ref missing from it is one that could not be read, and
+    its evidence comes back unresolved rather than failing the question.
+    """
+    empty = _EvidenceLookups({}, {}, {}, {}, {}, {}, set(), set())
     evidence = []
     for ev in evidence_ck:
         if not isinstance(ev, dict) or ev.get("kind") not in (
             "figure",
             "value",
             "result",
+            "value",
             "table",
             "publication",
+            "document",
         ):
             continue
         path = ev.get("path", "")
+        ev_ref = _evidence_ref(ev, ref)
+        lookups = lookups_by_ref.get(ev_ref, empty)
+        explanation, explanation_path = _resolve_explanation(
+            ev.get("explanation")
+        )
         item = QuestionEvidence(
             kind=ev["kind"],
             path=path,
             key=ev.get("key"),
-            name=ev.get("name"),
-            explanation=ev.get("explanation"),
+            name=_optional_str(ev.get("name")),
+            section=_optional_str(ev.get("section")),
+            label=_optional_str(ev.get("label")),
+            explanation=explanation,
+            explanation_path=explanation_path,
+            # What the entry declares, not what it resolved at: this is the
+            # field an edit writes back, so filling it in from the browsed
+            # ref would pin every citation on the next save.
+            git_ref=_declared_git_ref(ev),
         )
         if item.kind == "figure":
-            item.figure = figures_by_path.get(path)
+            item.figure = lookups.figures_by_path.get(path)
         elif item.kind == "publication":
-            item.publication = publications_by_path.get(path)
-        elif item.kind in ("value", "result", "table"):
+            item.publication = lookups.publications_by_path.get(path)
+        elif item.kind in ("result", "value", "table"):
             # A declared table answers table evidence first; a result at
             # the same path answers result evidence. Falling through to
             # results covers a table nobody declared, which is still worth
@@ -2330,18 +2560,39 @@ def _build_question_evidence(
             # description on a value it says nothing about. Keyless
             # evidence already looks up (path, None).
             if item.kind == "table":
-                item.result = tables_by_path.get(path)
+                item.result = lookups.tables_by_path.get(path)
             if item.result is None:
-                item.result = results_by_path.get((path, item.key))
+                item.result = lookups.results_by_path.get((path, item.key))
             if item.key:
                 item.value = _resolve_result_value(
                     project=project,
                     repo=repo,
-                    ref=ref,
+                    ref=ev_ref,
                     path=path,
                     key=item.key,
                     cache=result_value_cache,
                 )
+            elif item.kind == "result" and isinstance(ev.get("values"), dict):
+                item.values = [
+                    QuestionEvidenceValue(
+                        name=name,
+                        key=key,
+                        value=_resolve_result_value(
+                            project=project,
+                            repo=repo,
+                            ref=ev_ref,
+                            path=path,
+                            key=key,
+                            cache=result_value_cache,
+                        ),
+                    )
+                    for name, key in calkit.questions.named_keys(ev).items()
+                ]
+        _set_evidence_stage(item, lookups)
+        # Last word: an answer resting on something nobody can see is worse
+        # off than one resting on something merely out of date.
+        if _evidence_missing(item, lookups.present_paths):
+            item.stale_reason = "missing"
         evidence.append(item)
     return evidence
 
@@ -2362,112 +2613,198 @@ def _build_questions_public(
     def _evidence_of(q: str | dict) -> list:
         return q.get("evidence") or [] if isinstance(q, dict) else []
 
-    kinds = {
-        ev.get("kind")
-        for q in questions_ck
-        for ev in _evidence_of(q)
-        if isinstance(ev, dict)
-    }
-    figures_by_path: dict[str, Figure] = {}
-    if "figure" in kinds:
-        # Only the figures actually cited as evidence need their content
-        # resolved; resolving every figure in the project would make this
-        # scale with the project rather than with the questions.
-        evidence_fig_paths = {
-            ev.get("path")
-            for q in questions_ck
-            for ev in _evidence_of(q)
-            if isinstance(ev, dict) and ev.get("kind") == "figure"
-        }
-        fig_ctx = _discover_figures(project=project, repo=repo, ref=ref)
-        cited = [f for f in fig_ctx.figures if f["path"] in evidence_fig_paths]
-        figures_by_path = {
-            fig.path: fig
-            for fig in _resolve_figures(
-                project=project,
-                repo=repo,
-                session=session,
-                ref=ref,
-                ctx=fig_ctx,
-                figures=cited,
+    def _build_lookups(
+        ev_ref: str | None, entries: list[dict]
+    ) -> _EvidenceLookups:
+        """Resolve everything ``entries`` cites, all of it at ``ev_ref``."""
+        kinds = {ev.get("kind") for ev in entries}
+        figures_by_path: dict[str, Figure] = {}
+        if "figure" in kinds:
+            # Only the figures actually cited as evidence need their content
+            # resolved; resolving every figure in the project would make this
+            # scale with the project rather than with the questions.
+            evidence_fig_paths = {
+                ev.get("path") for ev in entries if ev.get("kind") == "figure"
+            }
+            fig_ctx = _discover_figures(project=project, repo=repo, ref=ev_ref)
+            cited = [
+                f for f in fig_ctx.figures if f["path"] in evidence_fig_paths
+            ]
+            figures_by_path = {
+                fig.path: fig
+                for fig in _resolve_figures(
+                    project=project,
+                    repo=repo,
+                    session=session,
+                    ref=ev_ref,
+                    ctx=fig_ctx,
+                    figures=cited,
+                )
+            }
+        results_by_path: dict[tuple[str, str | None], Result] = {}
+        if kinds & {"result", "value", "table"}:
+            # Keyed by (path, key), since several results can point at one
+            # file. A keyless result lands under (path, None), which is what
+            # keyless evidence resolves against; a keyed one must not stand in
+            # for it, or evidence citing an undeclared key would show that
+            # value under an unrelated result's title.
+            for res in _build_results(project=project, repo=repo, ref=ev_ref):
+                results_by_path[(res.path, res.key)] = res
+        # Kept apart from results rather than merged into them. A project can
+        # declare a table and a result at one path, and they are different
+        # things with different titles: folding them into one lookup means
+        # whichever is built second decides what the other one is called.
+        tables_by_path: dict[str, Result] = {}
+        if "table" in kinds:
+            for tbl in _build_declared_tables(
+                project=project, repo=repo, ref=ev_ref
+            ):
+                tables_by_path[tbl.path] = tbl
+        publications_by_path: dict[str, Publication] = {}
+        if "publication" in kinds:
+            publications_by_path = {
+                pub.path: pub
+                for pub in _build_publications(
+                    project=project, repo=repo, ref=ev_ref
+                )
+            }
+        # Staleness is best-effort: never let it block the questions.
+        dvc_lock: dict[str, Any] = {}
+        stage_statuses: dict[str, PipelineStageStatus] = {}
+        frozen_stages: set[str] = set()
+        try:
+            tree = get_repo_tree_for_ref(repo, ev_ref)
+            if tree.is_file("dvc.lock"):
+                dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+            dvc_yaml: dict[str, Any] = {}
+            if tree.is_file("dvc.yaml"):
+                dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
+            stage_statuses = compute_stage_statuses(
+                dvc_yaml=dvc_yaml,
+                dvc_lock=dvc_lock,
+                tree=tree,
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                fs=get_object_fs(),
+                cache_token=resolve_commit_sha(repo, ev_ref),
             )
+            frozen_stages = find_frozen_tainted_stages(dvc_yaml, dvc_lock)
+        except Exception as e:
+            logger.warning(
+                f"Failed to compute pipeline status for questions at "
+                f"{ev_ref}: {e}"
+            )
+        present_paths: set[str] = set()
+        cited_paths = {
+            ev["path"]
+            for ev in entries
+            if ev.get("kind") in ("document", "publication")
+            and isinstance(ev.get("path"), str)
         }
-    results_by_path: dict[tuple[str, str | None], Result] = {}
-    if kinds & {"value", "result", "table"}:
-        # Keyed by (path, key), since several results can point at one file.
-        # A keyless result lands under (path, None), which is what keyless
-        # evidence resolves against; a keyed one must not stand in for it,
-        # or evidence citing an undeclared key would show that value under
-        # an unrelated result's title.
-        for res in _build_results(project=project, repo=repo, ref=ref):
-            results_by_path[(res.path, res.key)] = res
-    # Kept apart from results rather than merged into them. A project can
-    # declare a table and a result at one path, and they are different
-    # things with different titles: folding them into one lookup means
-    # whichever is built second decides what the other one is called.
-    tables_by_path: dict[str, Result] = {}
-    if "table" in kinds:
-        for tbl in _build_declared_tables(project=project, repo=repo, ref=ref):
-            tables_by_path[tbl.path] = tbl
-    publications_by_path: dict[str, Publication] = {}
-    if "publication" in kinds:
-        publications_by_path = {
-            pub.path: pub
-            for pub in _build_publications(project=project, repo=repo, ref=ref)
-        }
-    db_questions = sorted(project.questions, key=lambda q: q.number)
-    # Keyed by the check's own 1-based index, which is the question's
-    # position in calkit.yaml and so the same number the DB rows carry
-    by_index = {q.index: q for q in (status.questions if status else [])}
-    result_value_cache: dict[str, dict | None] = {}
-    questions_public = []
+        if cited_paths:
+            try:
+                tree = get_repo_tree_for_ref(repo, ev_ref)
+                dvc_outs = {
+                    out.get("path")
+                    for stage in (dvc_lock.get("stages") or {}).values()
+                    if isinstance(stage, dict)
+                    for out in stage.get("outs") or []
+                    if isinstance(out, dict)
+                }
+                present_paths = {
+                    path
+                    for path in cited_paths
+                    if tree.is_file(path)
+                    or tree.is_file(path + ".dvc")
+                    or path in dvc_outs
+                }
+            except Exception as e:
+                logger.warning(
+                    f"Failed to find cited documents at {ev_ref}: {e}"
+                )
+        return _EvidenceLookups(
+            figures_by_path=figures_by_path,
+            results_by_path=results_by_path,
+            tables_by_path=tables_by_path,
+            publications_by_path=publications_by_path,
+            dvc_lock=dvc_lock,
+            stage_statuses=stage_statuses,
+            frozen_stages=frozen_stages,
+            present_paths=present_paths,
+        )
 
-    # An answer keeps its numbers in the results file and templates them
-    # into the prose, so what is stored is "{improvement:.1f}x" and what a
-    # reader should see is what that is now. Rendered with calkit's own
-    # function, reading through this request's cache, so the hub and
-    # `calkit list questions` cannot fill the same sentence two ways.
-    def _read_evidence(path: str) -> Any:
-        data = _read_result_file(
+    # Group the citations by the ref each resolves at, so a project whose
+    # evidence all sits on the ref being browsed still reads its figures,
+    # results and publications once, and one citing an older commit pays for
+    # that commit only.
+    entries_by_ref: dict[str | None, list[dict]] = {}
+    for q_ck in questions_ck:
+        for ev in _evidence_of(q_ck):
+            if not isinstance(ev, dict):
+                continue
+            entries_by_ref.setdefault(_evidence_ref(ev, ref), []).append(ev)
+    lookups_by_ref: dict[str | None, _EvidenceLookups] = {}
+    for ev_ref, entries in entries_by_ref.items():
+        try:
+            lookups_by_ref[ev_ref] = _build_lookups(ev_ref, entries)
+        except HTTPException as e:
+            # A ref that isn't there is a stale citation, not a broken
+            # project: leave its evidence unresolved and keep serving the
+            # rest of the questions rather than failing the whole page.
+            if e.status_code != 404 or ev_ref == ref:
+                raise
+            logger.warning(
+                f"Could not resolve question evidence at ref {ev_ref}: "
+                f"{e.detail}"
+            )
+    # By number rather than by position: the index is rebuilt after a push
+    # rather than on this read, so it can be behind (or ahead of) what this
+    # ref declares. Zipping the two would silently drop the questions past
+    # wherever the shorter list ended.
+    db_by_number = {q.number: q for q in project.questions}
+    # The check's own 1-based index is the question's position in
+    # calkit.yaml, which is the number the DB rows carry
+    by_index = {q.index: q for q in (status.questions if status else [])}
+    result_value_cache: dict[tuple[str | None, str], dict | None] = {}
+    questions_public = []
+    for number, q_ck in enumerate(questions_ck, start=1):
+        hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
+        answer = q_ck.get("answer") if isinstance(q_ck, dict) else None
+        # Templates are filled from the question's own value evidence, so a
+        # number in an answer is read out of the results file rather than
+        # retyped into calkit.yaml and left to drift. The CLI already does
+        # this; the page showed the raw `{name}` instead.
+        values = _evidence_values(
             project=project,
             repo=repo,
             ref=ref,
-            path=path,
+            evidence_ck=_evidence_of(q_ck),
             cache=result_value_cache,
         )
-        if data is None:
-            raise ValueError(f"Could not read {path}")
-        return data
-
-    for q_ck, q_db in zip(questions_ck, db_questions):
-        rendered = (
-            calkit.questions.render_question(
-                q_ck, read_evidence=_read_evidence
-            )
-            if isinstance(q_ck, dict)
-            else {}
-        )
-        rendered = rendered if isinstance(rendered, dict) else {}
-        hypothesis = rendered.get("hypothesis")
-        answer = rendered.get("answer")
+        hypothesis = _render_template(hypothesis, values)
+        answer = _render_template(answer, values)
         evidence = _build_question_evidence(
             project=project,
             repo=repo,
             ref=ref,
             evidence_ck=_evidence_of(q_ck),
-            figures_by_path=figures_by_path,
-            results_by_path=results_by_path,
-            tables_by_path=tables_by_path,
-            publications_by_path=publications_by_path,
+            lookups_by_ref=lookups_by_ref,
             result_value_cache=result_value_cache,
         )
-        check = by_index.get(q_db.number)
+        for item in evidence:
+            item.explanation = _render_template(item.explanation, values)
+        q_db = db_by_number.get(number)
+        check = by_index.get(number)
         questions_public.append(
             QuestionPublic(
-                id=q_db.id,
-                project_id=q_db.project_id,
-                number=q_db.number,
-                question=q_db.question,
+                id=(
+                    q_db.id
+                    if q_db is not None
+                    else _unindexed_question_id(project.id, number)
+                ),
+                project_id=project.id,
+                number=number,
+                question=app.index.extract_question_text(q_ck),
                 hypothesis=hypothesis,
                 answer=answer,
                 evidence=evidence,
@@ -2476,6 +2813,17 @@ def _build_questions_public(
             )
         )
     return questions_public
+
+
+def _unindexed_question_id(project_id: uuid.UUID, number: int) -> uuid.UUID:
+    """A stable id for a question the index hasn't caught up with yet.
+
+    Derived from what identifies the question -- its project and its
+    position -- so it doesn't change between requests, and so a client
+    using it to key a list doesn't see the row replaced once the warm job
+    indexes it for real.
+    """
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"{project_id}/questions/{number}")
 
 
 @router.get("/projects/{owner_name}/{project_name}/questions")
@@ -2502,18 +2850,17 @@ def get_project_questions(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
         repo=repo,
         ref=ref,
-        # This route only reads; the POST/PUT handlers below load their own
-        # copy through ruamel so their rewrites keep comments intact.
-        read_only=True,
     )
-    project = _sync_questions_with_db(
-        ck_info=ck_info, project=project, session=session
-    )
+    # Deliberately not indexed here. The index is for finding questions
+    # across projects; this response is built from calkit.yaml at `ref`,
+    # and writing rows on every read made a page load cost a transaction
+    # per question. The warm job keeps the index up with the pushes.
     # TODO: Maybe questions don't belong in the Calkit file?
     return _build_questions_public(
         project=project,
@@ -2571,9 +2918,9 @@ def post_project_question(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
-    repo.git.push(["origin", repo.active_branch.name])
-    project = _sync_questions_with_db(
-        ck_info=ck_info, project=project, session=session
+    push_and_expire(project, repo)
+    app.index.index_questions(
+        session=session, project=project, ck_info=ck_info
     )
     mixpanel.user_added_question(
         user=current_user,
@@ -2585,13 +2932,19 @@ def post_project_question(
 
 
 def _apply_question_update(
-    existing: str | dict, req: "QuestionPut"
+    existing: str | dict,
+    req: "QuestionPut",
+    rendered_answer: str | None = None,
 ) -> str | dict:
     """Apply a QuestionPut to a calkit.yaml question entry.
 
     Normalizes the entry to object form, sets provided fields (dropping an
     empty hypothesis/answer/evidence so calkit.yaml stays clean), and collapses
     back to a bare string when only the question text remains.
+
+    ``rendered_answer`` is what the editor was shown for a conditional
+    answer; sending it back unchanged keeps the conditional rather than
+    freezing it to the branch that currently holds.
     """
     if isinstance(existing, str):
         question: dict = {"question": existing}
@@ -2605,10 +2958,13 @@ def _apply_question_update(
         question["hypothesis"] = req.hypothesis
     else:
         question.pop("hypothesis", None)
-    if req.answer:
-        question["answer"] = req.answer
-    else:
+    unchanged = calkit.questions.is_conditional(question.get("answer")) and (
+        req.answer == rendered_answer
+    )
+    if not req.answer:
         question.pop("answer", None)
+    elif not unchanged:
+        question["answer"] = req.answer
     evidence = []
     for ev in req.evidence:
         entry: dict = {"kind": ev.kind, "path": ev.path}
@@ -2616,12 +2972,22 @@ def _apply_question_update(
         # whole point of the entry; without one there is nothing to read
         if ev.kind == "value" and not ev.key:
             raise HTTPException(422, "Value evidence needs a key")
-        if ev.key and ev.kind in ("value", "result"):
+        if ev.kind == "result" and ev.values:
+            entry["values"] = dict(ev.values)
+        elif ev.kind in ("result", "value") and ev.key:
             entry["key"] = ev.key
-        if ev.name and ev.kind == "value":
+        if ev.kind == "value" and ev.name:
             entry["name"] = ev.name
-        if ev.explanation:
+        if ev.kind in ("publication", "document") and ev.section:
+            entry["section"] = ev.section
+        if ev.kind == "publication" and ev.label:
+            entry["label"] = ev.label
+        if ev.explanation_path:
+            entry["explanation"] = {"path": ev.explanation_path}
+        elif ev.explanation:
             entry["explanation"] = ev.explanation
+        if ev.git_ref:
+            entry["git_ref"] = ev.git_ref
         evidence.append(entry)
     if evidence:
         question["evidence"] = evidence
@@ -2657,16 +3023,33 @@ def put_project_question(
     if number < 1 or number > len(ck_questions):
         raise HTTPException(404, "Question not found")
     idx = number - 1
-    ck_questions[idx] = _apply_question_update(ck_questions[idx], req)
+    existing = ck_questions[idx]
+    rendered_answer = None
+    if isinstance(existing, dict) and calkit.questions.is_conditional(
+        existing.get("answer")
+    ):
+        rendered_answer = _render_template(
+            existing["answer"],
+            _evidence_values(
+                project=project,
+                repo=repo,
+                ref=None,
+                evidence_ck=existing.get("evidence") or [],
+                cache={},
+            ),
+        )
+    ck_questions[idx] = _apply_question_update(
+        existing, req, rendered_answer=rendered_answer
+    )
     ck_info["questions"] = ck_questions
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
-        repo.git.push(["origin", repo.active_branch.name])
-    project = _sync_questions_with_db(
-        ck_info=ck_info, project=project, session=session
+        push_and_expire(project, repo)
+    app.index.index_questions(
+        session=session, project=project, ck_info=ck_info
     )
     return _build_questions_public(
         project=project,
@@ -2675,6 +3058,45 @@ def put_project_question(
         ref=None,
         ck_info=ck_info,
     )[idx]
+
+
+@router.delete("/projects/{owner_name}/{project_name}/questions/{number}")
+def delete_project_question(
+    owner_name: str,
+    project_name: str,
+    number: int,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Message:
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    ck_info = app.projects.get_ck_info_from_repo(repo=repo)
+    ck_questions = ck_info.get("questions", [])
+    if number < 1 or number > len(ck_questions):
+        raise HTTPException(404, "Question not found")
+    ck_questions.pop(number - 1)
+    # Drop the key rather than leave an empty list behind
+    if ck_questions:
+        ck_info["questions"] = ck_questions
+    else:
+        ck_info.pop("questions", None)
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    repo.git.commit(["-m", f"Delete question {number}"])
+    push_and_expire(project, repo)
+    app.index.index_questions(
+        session=session, project=project, ck_info=ck_info
+    )
+    return Message(message="success")
 
 
 class _FigureContext(NamedTuple):
@@ -2693,6 +3115,93 @@ class _FigureContext(NamedTuple):
     dvc_lock: dict[str, Any]
 
 
+def _looks_like_figure(path: str) -> bool:
+    """Whether ``path`` is a file we'd show as a figure without being told."""
+    parts = path.split("/")
+    if any(p.startswith(".") for p in parts):
+        return False
+    ext = "." + parts[-1].rsplit(".", 1)[-1] if "." in parts[-1] else ""
+    dir_parts = [p.lower() for p in parts[:-1]]
+    return ext.lower() in FIGURE_EXTS and any(
+        d in FIGURE_DIRS for d in dir_parts
+    )
+
+
+def _tree_figure_paths(repo: git.Repo, ref: str | None) -> list[str]:
+    """Figure-looking paths in the tree, including via `.dvc` pointers.
+
+    A full tree walk plus a YAML parse of every `.dvc` file, which is tens
+    of milliseconds on a large project and the same answer for every viewer
+    of a commit, so it is cached against that commit and warmed on push.
+    """
+    sha = resolve_commit_sha(repo, ref)
+    key = cache.make_key("figpaths", sha) if sha else None
+    if key is not None:
+        cached = cache.get_json(key)
+        if isinstance(cached, list):
+            return cached
+    paths: list[str] = []
+    try:
+        commit = repo.commit(ref) if ref else repo.head.commit
+        for blob in commit.tree.traverse():
+            if blob.type != "blob":  # type: ignore[union-attr]
+                continue
+            blob_path: str = blob.path  # type: ignore[union-attr]
+            if _looks_like_figure(blob_path):
+                paths.append(blob_path)
+            # Figures stored via standalone `.dvc` pointer files (tracked
+            # with `dvc add`, not via a pipeline stage).
+            if not blob_path.endswith(".dvc"):
+                continue
+            actual_path = blob_path[:-4]
+            try:
+                dvc_data = yaml.safe_load(blob.data_stream.read())  # type: ignore[union-attr]
+                outs = (
+                    dvc_data.get("outs")
+                    if isinstance(dvc_data, dict)
+                    else None
+                )
+                out = outs[0] if isinstance(outs, list) and outs else None
+                out_path = out.get("path") if isinstance(out, dict) else None
+                if isinstance(out_path, str) and out_path:
+                    actual_path = os.path.normpath(
+                        os.path.join(os.path.dirname(blob_path), out_path)
+                    )
+            except Exception:
+                pass
+            if actual_path and _looks_like_figure(actual_path):
+                paths.append(actual_path)
+    except Exception:
+        return paths
+    if key is not None:
+        cache.set_json(key, paths)
+    return paths
+
+
+def _map_paths_outputs(ck_info: dict[str, Any]) -> list[str]:
+    """The files and directories the project's map-paths stages write."""
+    outs: list[str] = []
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage_map in stages.items():
+        try:
+            stage = _validate_ck_stage(stage_map, name)
+        except HTTPException:
+            continue
+        if stage.kind == "map-paths":
+            outs.extend(
+                normalize_artifact_path(p) for p in stage.dvc_out_paths
+            )
+    return outs
+
+
+def _under_any(path: str, roots: list[str]) -> bool:
+    path = normalize_artifact_path(path)
+    return any(
+        path == root or path.startswith(root.rstrip("/") + "/")
+        for root in roots
+    )
+
+
 def _discover_figures(
     project: Project,
     repo: git.Repo,
@@ -2709,10 +3218,6 @@ def _discover_figures(
         project=project,
         repo=repo,
         ref=ref,
-        # Discovery only reads this metadata, so skip ruamel's round-trip
-        # parser; on a 42 KB calkit.yaml that is ~5 ms instead of ~78 ms,
-        # paid on every page of the listing.
-        read_only=True,
     )
     figures = ck_info.get("figures", [])
     # Declared figures (from calkit.yaml) may omit a title; fill one in so
@@ -2721,59 +3226,6 @@ def _discover_figures(
         if not fig.get("title"):
             fig["title"] = title_from_path(fig["path"])
     declared_paths = {fig["path"] for fig in figures}
-
-    def _maybe_add_figure(path: str) -> None:
-        """Add `path` to figures if it looks like a figure and is not yet
-        known.
-        """
-        parts = path.split("/")
-        if any(p.startswith(".") for p in parts):
-            return
-        ext = "." + parts[-1].rsplit(".", 1)[-1] if "." in parts[-1] else ""
-        dir_parts = [p.lower() for p in parts[:-1]]
-        if ext.lower() in FIGURE_EXTS and any(
-            d in FIGURE_DIRS for d in dir_parts
-        ):
-            if path not in declared_paths:
-                figures.append({"path": path, "title": title_from_path(path)})
-                declared_paths.add(path)
-
-    # Auto-detect figures from the repo tree
-    try:
-        commit = repo.commit(ref) if ref else repo.head.commit
-        for blob in commit.tree.traverse():
-            if blob.type != "blob":  # type: ignore[union-attr]
-                continue
-            blob_path: str = blob.path  # type: ignore[union-attr]
-            _maybe_add_figure(blob_path)
-            # Also detect figures stored via standalone .dvc pointer files
-            # (tracked with `dvc add`, not via a DVC pipeline stage).
-            if blob_path.endswith(".dvc"):
-                try:
-                    dvc_data = yaml.safe_load(blob.data_stream.read())  # type: ignore[union-attr]
-                    outs = (
-                        dvc_data.get("outs")
-                        if isinstance(dvc_data, dict)
-                        else None
-                    )
-                    out = outs[0] if isinstance(outs, list) and outs else None
-                    out_path = (
-                        out.get("path") if isinstance(out, dict) else None
-                    )
-                    if isinstance(out_path, str) and out_path:
-                        actual_path = os.path.normpath(
-                            os.path.join(os.path.dirname(blob_path), out_path)
-                        )
-                    else:
-                        actual_path = blob_path[:-4]
-                    if actual_path:
-                        _maybe_add_figure(actual_path)
-                except Exception:
-                    actual_path = blob_path[:-4]
-                    if actual_path:
-                        _maybe_add_figure(actual_path)
-    except Exception:
-        pass
     # Pre-compute calkit.yaml / dvc.lock metadata once for the tree so we
     # don't re-read and re-expand on every iteration.
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
@@ -2783,6 +3235,24 @@ def _discover_figures(
         zip_path_map,
         dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
+    # A map-paths stage's outputs are copies of figures found elsewhere,
+    # e.g., into the paper's folder, so they aren't figures of their own
+    copies = _map_paths_outputs(ck_info_full)
+
+    def _maybe_add_figure(path: str) -> None:
+        """Add `path` to figures if it looks like a figure and is not yet
+        known.
+        """
+        if (
+            _looks_like_figure(path)
+            and path not in declared_paths
+            and not _under_any(path, copies)
+        ):
+            figures.append({"path": path, "title": title_from_path(path)})
+            declared_paths.add(path)
+
+    for path in _tree_figure_paths(repo, ref):
+        _maybe_add_figure(path)
     # Also auto-detect figures from DVC lock outs (files stored with DVC)
     for dvc_path, dvc_out in dvc_lock_outs.items():
         if dvc_out.get("type") == "dir":
@@ -2850,6 +3320,7 @@ def _resolve_figures(
             .group_by(ProjectComment.artifact_path)
         ).all()
     )
+    sha = resolve_commit_sha(repo, ref)
     # Staleness is best-effort: never let it block the figure listing.
     stage_statuses = {}
     try:
@@ -2863,7 +3334,7 @@ def _resolve_figures(
             owner_name=project.owner_account_name,
             project_name=project.name,
             fs=get_object_fs(),
-            cache_token=resolve_commit_sha(repo, ref),
+            cache_token=sha,
         )
     except Exception as e:
         logger.warning(f"Failed to compute pipeline status for figures: {e}")
@@ -2881,7 +3352,33 @@ def _resolve_figures(
             fig["stage_status"] = stage_statuses[fig["stage"]].model_dump()
         return fig
 
+    def _thumb_key(path: str) -> str | None:
+        # By commit and path rather than by content hash: the content hash
+        # is only knowable once the bytes are in hand, so keying on it means
+        # downloading a full-size figure to discover we already have its
+        # thumbnail. What lives at a path in a commit never changes, so this
+        # answers before any download.
+        #
+        # Scoped to the project, not just the commit: a fork shares its
+        # parent's commits but not its DVC storage, so a figure tracked by
+        # DVC is a different file at the same commit and path. Without this
+        # a public fork could be served a private parent's thumbnail.
+        if not sha or project.id is None:
+            return None
+        return cache.make_key("figthumb", str(project.id), sha, path)
+
     def _resolve(fig: dict[str, Any]) -> dict[str, Any]:
+        key = _thumb_key(fig["path"]) if thumbnails else None
+        if key is not None:
+            hit = cache.get_json(key)
+            if isinstance(hit, dict) and hit.get("thumbnail"):
+                # The grid renders the thumbnail and nothing else, so the
+                # bytes it would otherwise download go unread.
+                fig["thumbnail"] = hit["thumbnail"]
+                fig["storage"] = hit.get("storage")
+                fig["content"] = None
+                fig["url"] = None
+                return _annotate(fig)
         item = app.projects.get_contents_from_tree(
             project=project,
             tree=tree,
@@ -2909,6 +3406,14 @@ def _resolve_figures(
             # The full-size bytes are what this call was avoiding sending.
             if fig.get("thumbnail"):
                 fig["content"] = None
+                if key is not None:
+                    cache.set_json(
+                        key,
+                        {
+                            "thumbnail": fig["thumbnail"],
+                            "storage": item.storage,
+                        },
+                    )
         return _annotate(fig)
 
     if not resolve_content:
@@ -2993,6 +3498,7 @@ def get_project_figures(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     ctx = _discover_figures(project=project, repo=repo, ref=ref)
     # Filter before paging, so search covers every figure in the project
@@ -3048,8 +3554,10 @@ def _build_results(
         res = dict(res)
         if not res.get("title"):
             # A result's name is a better title than its path, since several
-            # results can share one file and only the name tells them apart
-            res["title"] = res.get("name") or title_from_path(res["path"])
+            # results can share one file and only the name tells them apart.
+            # Both go through the same tidying, since a name is a key like
+            # ``r_squared_quadratic`` rather than something written to read.
+            res["title"] = title_from_path(res.get("name") or res["path"])
         results.append(res)
     declared_paths = {res["path"] for res in results}
 
@@ -3171,7 +3679,6 @@ def _build_tables(
         project=project,
         repo=repo,
         ref=ref,
-        read_only=True,
     )
     tables: list[dict[str, Any]] = []
     known_paths: set[str] = set()
@@ -3190,20 +3697,29 @@ def _build_tables(
     # Evidence declares what it points at inline, so a question can cite a
     # table nobody listed up top. That's still a table, and this page is
     # where a reader goes looking for it.
+    #
+    # Evidence naming a ref of its own is the exception: this listing is of
+    # one ref, and that table lives at another, where the path may not exist
+    # at all. It's reachable from the question that cites it, which is the
+    # only place it's a table.
     for question in ck_info.get("questions") or []:
         if not isinstance(question, dict):
             continue
         for ev in question.get("evidence") or []:
             if not isinstance(ev, dict) or ev.get("kind") != "table":
                 continue
+            if _evidence_ref(ev, ref) != ref:
+                continue
             path = ev.get("path")
             if path and path not in known_paths:
                 tables.append({"path": path, "title": title_from_path(path)})
                 known_paths.add(path)
     auto: list[dict[str, Any]] = []
+    # Copies a map-paths stage makes, e.g., into the paper's folder
+    copies = _map_paths_outputs(ck_info)
 
     def _maybe_add_table(path: str, tex_text: str | None = None) -> None:
-        if path in known_paths:
+        if path in known_paths or _under_any(path, copies):
             return
         if PurePosixPath(path).suffix.lower() == ".tex":
             # Only Git-tracked TeX is checked; reading a DVC-tracked one
@@ -3350,6 +3866,7 @@ def get_project_tables(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     return _build_tables(
         project=project,
@@ -3401,6 +3918,7 @@ def get_project_results(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     return _build_results(project=project, repo=repo, ref=ref)
 
@@ -3438,6 +3956,7 @@ def get_project_figure(
         session=session,
         ttl=ttl,
         ref=ref,
+        read_only=True,
     )
     ctx = _discover_figures(project=project, repo=repo, ref=ref)
     matched = [fig for fig in ctx.figures if fig["path"] == figure_path]
@@ -3572,7 +4091,7 @@ def post_project_figure(
     # Make a commit
     repo.git.commit(["-m", f"Add figure {path}"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.branches[0].name])
+    push_and_expire(project, repo, repo.branches[0].name)
     url = None
     if file is not None:
         if file_data is None or full_fig_path is None:
@@ -3638,6 +4157,20 @@ def get_project_comments(
     return comments
 
 
+def comment_artifact_label(
+    artifact_type: str | None, artifact_path: str
+) -> str:
+    """How the artifact a comment is about reads in a sentence.
+
+    A path names itself. A question doesn't have one -- it's identified by
+    its number -- so say what the number is, or "commented on 3" is the
+    whole notification.
+    """
+    if artifact_type == "question":
+        return f"question {artifact_path}"
+    return artifact_path
+
+
 def comment_artifact_route(
     artifact_type: str | None, artifact_path: str
 ) -> str:
@@ -3651,6 +4184,9 @@ def comment_artifact_route(
     encoded = quote(artifact_path, safe="")
     if artifact_type == "release":
         return f"releases/{encoded}"
+    # A question has a page of its own, addressed by number.
+    if artifact_type == "question":
+        return f"questions/{encoded}"
     route_map = {
         "figure": "figures",
         "publication": "publications",
@@ -3704,6 +4240,12 @@ def post_project_comment(
                 repo.head.commit.tree[comment_in.artifact_path]
             except KeyError:
                 raise HTTPException(404)
+    # Question comments are keyed by number rather than path, so check the
+    # question is real -- nothing else would catch a bad one.
+    if comment_in.artifact_type == "question" and comment_in.artifact_path:
+        numbers = {str(q.number) for q in project.questions}
+        if comment_in.artifact_path not in numbers:
+            raise HTTPException(404)
     # Resolve the commit hash for the git context at comment time
     try:
         if comment_in.git_ref:
@@ -3739,8 +4281,11 @@ def post_project_comment(
             comment_in.artifact_type,
             comment_in.artifact_path,
         )
+        label = comment_artifact_label(
+            comment_in.artifact_type, comment_in.artifact_path
+        )
         body_lines = [
-            f"Comment on [{comment_in.artifact_path}]({artifact_link}):",
+            f"Comment on [{label}]({artifact_link}):",
             "",
             comment_in.comment,
         ]
@@ -3763,7 +4308,12 @@ def post_project_comment(
             session=session,
             project=project,
             commenter_id=current_user.id,
-            message=f"{commenter_name} commented on {comment_in.artifact_path}",
+            message=(
+                f"{commenter_name} commented on "
+                + comment_artifact_label(
+                    comment_in.artifact_type, comment_in.artifact_path
+                )
+            ),
             link=_make_comment_artifact_link(
                 owner_name,
                 project_name,
@@ -4301,6 +4851,7 @@ def get_project_datasets(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     project = _sync_datasets_with_db(
         ck_info=ck_info, project=project, session=session
@@ -4322,14 +4873,26 @@ def get_project_datasets(
             DatasetPublic.model_validate(
                 row,
                 update=dict(
-                    imported_from_info=(
-                        imported if isinstance(imported, dict) else None
-                    ),
+                    imported_from_info=_imported_from_info(imported),
                     created_by=created if created else None,
                 ),
             )
         )
     return out
+
+
+def _imported_from_info(value: Any) -> dict[str, Any] | None:
+    """The structured origin, reading a bare string the way the calkit.yaml
+    schema does, so ``imported_from: https://doi.org/...`` is a DOI here too.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return calkit.provenance.source_from_location(value)
+        except ValueError:
+            return {"description": value}
+    return None
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")
@@ -4902,7 +5465,7 @@ def post_project_dataset(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Add dataset {ds['path']}"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if storage == "dvc":
         # The pointer is pushed with Git; the bytes go to this project's
         # object storage so a clone can pull them
@@ -5045,7 +5608,7 @@ def post_project_dataset_upload(
     # Make a commit
     repo.git.commit(["-m", f"Add dataset {path}"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if storage == "dvc":
         # If using the DVC remote, we can just put it in the expected
         # location since we'll have the md5 hash in the dvc file
@@ -5109,6 +5672,7 @@ def get_project_publications(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     # Read declared metadata at the requested ref. get_repo only fetches a
     # ref, it does not check it out, so reading the working tree would return
@@ -5345,7 +5909,9 @@ def get_project_publication_components(
     )
     tree = get_repo_tree_for_ref(repo, ref)
     ck_info = app.projects.get_ck_info_for_ref(
-        project=project, repo=repo, ref=ref, read_only=True
+        project=project,
+        repo=repo,
+        ref=ref,
     )
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
     # Every file in the folder, from Git and from DVC
@@ -5765,7 +6331,7 @@ def post_project_misc(
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     record_project_update(project, repo, session)
     return MiscArtifact.model_validate(entry)
 
@@ -5791,6 +6357,7 @@ def get_project_presentations(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     # Read declared metadata at the requested ref. get_repo only fetches a
     # ref, it does not check it out, so reading the working tree would return
@@ -6115,7 +6682,7 @@ def post_project_publication(
     # Make a commit
     repo.git.commit(["-m", f"Add publication {path} ({kind})"])
     # Push to GitHub, and optionally DVC remote if we used it
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     url = None
     if file is not None:
         # If using the DVC remote, we can just put it in the expected location
@@ -6590,7 +7157,7 @@ async def post_project_overleaf_publication(
         else f"Import Overleaf ZIP to '{path}'"
     )
     repo.git.commit(["-m", commit_msg])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     if not import_zip_mode:
         app.projects.record_overleaf_links(
             session=session, project=project, repo=repo
@@ -6672,7 +7239,7 @@ def post_project_overleaf_sync(
             400, "Overleaf sync failed; try locally with Calkit CLI"
         )
     # Push the main repo (Overleaf has already been pushed in sync)
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     # Get data from the result of the sync
     commits_since = res.get("commits_since_last_sync", [])
     last_overleaf_commit = res.get("overleaf_commit_after", "")
@@ -6750,7 +7317,7 @@ def get_project_overleaf_sync_status(
         min_access_level="read",
     )
     repo = get_repo(project=project, user=current_user, session=session)
-    ck_info = get_ck_info_from_repo(repo)
+    ck_info = get_ck_info_from_repo(repo, read_only=True)
     sync_info = calkit.overleaf.get_sync_info(
         wdir=repo.working_dir, ck_info=deepcopy(ck_info)
     )
@@ -6994,16 +7561,7 @@ def post_project_sync(
     current_user: CurrentUser,
     session: SessionDep,
 ) -> Message:
-    """Synchronize a project with its Git repo.
-
-    Do we actually need this? It will give us a way to operate if GitHub is
-    down, at least in read-only mode.
-    Or perhaps we can bidirectionally sync, allowing users to update Calkit
-    entities and we'll commit them back on sync.
-    It would probably be better to use Git for that, so we can handle
-    asynchronous edits with merges.
-    """
-    # First refresh the local cache of the repo
+    """Fetch the latest from a project's Git repo, e.g., to see a new branch."""
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7011,12 +7569,13 @@ def post_project_sync(
         current_user=current_user,
         min_access_level="read",
     )
-    get_repo(project=project, user=current_user, session=session, ttl=None)
-    # Get and save project questions
-    # Figures
-    # Datasets
-    # Publications
-    # TODO: Update files in Git repo with IDs?
+    get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=0,
+        read_only=True,
+    )
     return Message(message="success")
 
 
@@ -7083,6 +7642,10 @@ def post_project_push_event(
     # Warming is normally skipped when the commit is already warm. That is
     # the wrong answer for a push that moved data rather than code: the
     # commit is the same and what it resolves to is not.
+    # Warming is a queued job, so reads arriving before it finishes would
+    # keep serving the project as it was. Expiring here costs one ls-remote
+    # on the next read and makes the push visible immediately.
+    expire_shared_read_clone(project, req.branch)
     moved_data = bool(set(req.targets or []) - {"git"})
     queued = app.tasks.enqueue_warm(
         project.owner_account_name, project.name, force=moved_data
@@ -7111,6 +7674,7 @@ def get_project_pipeline(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     # Read files at the requested ref rather than the live checkout, which
     # always reflects the default branch (get_repo only fetches a ref, it
@@ -7496,9 +8060,100 @@ def put_project_pipeline_stage(
         repo.git.commit(
             ["-m", req.message or f"Update pipeline stage {stage_name}"]
         )
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
         record_project_update(project, repo, session)
     return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage_map))
+
+
+def _load_ck_pipeline(pipeline_yaml: str) -> Any:
+    """Parse the pipeline block the editor holds.
+
+    The page shows the ``pipeline:`` key and its body, so that's what comes
+    back; a body on its own is accepted too, since that's what someone who
+    deleted the wrapper would send.
+
+    Emptying the editor means an empty pipeline, not a malformed one:
+    clearing the pane, leaving a bare ``pipeline:``, or leaving ``stages:``
+    with nothing under it all save as no stages.
+    """
+    try:
+        loaded = ryaml.load(pipeline_yaml)
+    except Exception as e:
+        raise HTTPException(422, f"Invalid YAML: {e}")
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise HTTPException(422, "A pipeline must be a YAML mapping")
+    if "pipeline" in loaded:
+        loaded = loaded["pipeline"]
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise HTTPException(422, "A pipeline must be a YAML mapping")
+    if loaded.get("stages", False) is None:
+        # `stages:` with nothing under it reads as no stages, not as a
+        # stages key that failed to parse.
+        del loaded["stages"]
+    try:
+        CkPipeline(**dict(loaded))
+    except Exception as e:
+        raise HTTPException(422, f"Invalid pipeline: {e}")
+    return loaded
+
+
+def _dump_ck_pipeline(pipeline: Any) -> str:
+    stream = io.StringIO()
+    ryaml.dump({"pipeline": pipeline}, stream)
+    return stream.getvalue()
+
+
+@router.put("/projects/{owner_name}/{project_name}/pipeline")
+def put_project_pipeline(
+    owner_name: str,
+    project_name: str,
+    req: PipelinePut,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineYaml:
+    """Replace the project's pipeline with the YAML the editor holds.
+
+    Only the ``pipeline`` key of calkit.yaml is touched, so editing the
+    pipeline can't disturb the datasets, figures, or publications sitting
+    beside it in the same file.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    ck_info = get_ck_info_from_repo(repo=repo)
+    pipeline = _load_ck_pipeline(req.yaml)
+    # Written as the user wrote it: same key order, same comments.
+    ck_info["pipeline"] = pipeline
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
+    # read; otherwise the edit sits in calkit.yaml until the next run.
+    try:
+        calkit.pipeline.to_dvc(
+            ck_info=ck_info, wdir=str(repo.working_dir), write=True
+        )
+        repo.git.add("-A")
+    except Exception as e:
+        repo.git.checkout("--", ".")
+        repo.git.clean("-fd")
+        raise HTTPException(422, f"Could not compile the pipeline: {e}")
+    if repo.is_dirty():
+        repo.git.commit(["-m", req.message or "Update pipeline"])
+        push_and_expire(project, repo)
+        record_project_update(project, repo, session)
+    return PipelineYaml(yaml=_dump_ck_pipeline(pipeline))
 
 
 class Collaborator(BaseModel):
@@ -8239,8 +8894,9 @@ def get_project_references(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
-    ck_info = get_ck_info_from_repo(repo)
+    ck_info = get_ck_info_from_repo(repo, read_only=True)
     # An empty "references:" key in calkit.yaml parses to None.
     ref_collections = ck_info.get("references") or []
     declared_paths = {
@@ -8476,7 +9132,7 @@ def post_project_references(
     repo.git.add("calkit.yaml")
     verb = "Label" if req.label_existing else "Add"
     repo.git.commit(["-m", f"{verb} references collection '{req.path}'"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Created references collection",
@@ -8552,7 +9208,7 @@ def delete_project_references(
         repo.git.add(["-f", zotero.SYNC_INFO_REL_PATH])
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Delete references collection '{path}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Deleted references collection",
@@ -8659,7 +9315,7 @@ def post_project_reference_item(
             else f"Add reference '{req.key}' in new collection '{req.path}'"
         )
         repo.git.commit(["-m", message])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Added reference item",
@@ -8736,7 +9392,7 @@ def put_project_reference_item(
     # commit rather than letting git error on an empty commit.
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Edit reference '{req.key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Edited reference item",
@@ -8786,7 +9442,7 @@ def delete_project_reference_item(
     repo.git.add(path)
     if repo.git.diff("--cached", "--name-only").strip():
         repo.git.commit(["-m", f"Delete reference '{bib_key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Deleted reference item",
@@ -9025,7 +9681,7 @@ def post_project_zotero_import(
     repo.git.add(req.bib_path)
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Import Zotero collection into '{req.bib_path}'"])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Imported Zotero collection",
@@ -9434,7 +10090,7 @@ def post_project_zotero_sync(
     committed = bool(repo.git.diff("--cached", "--name-only").strip())
     if committed:
         repo.git.commit(["-m", f"Sync Zotero collection into '{req.path}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Synced Zotero collection",
@@ -9716,7 +10372,7 @@ def put_project_reference_notes(
     if changed:
         repo.git.add(req.path)
         repo.git.commit(["-m", f"Edit notes on '{bib_key}'"])
-        repo.git.push(["origin", repo.active_branch.name])
+        push_and_expire(project, repo)
     mixpanel.track(
         user=current_user,
         event_name="Edited reference note",
@@ -9848,6 +10504,7 @@ def get_project_environments(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -9896,11 +10553,10 @@ def post_project_environment(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    ck_info = app.projects.get_ck_info_for_ref(
-        project=project,
-        repo=repo,
-        ref=ref,
-    )
+    # Written back below, so it has to come through the round-trip parser
+    # and without the path normalization ``get_ck_info_for_ref`` applies:
+    # both would be silently saved into the user's calkit.yaml.
+    ck_info = app.projects.get_ck_info_from_repo(repo)
     envs = ck_info.get("environments", {})
     if req.name in envs:
         raise HTTPException(400, "Environment with same name already exists")
@@ -9920,7 +10576,7 @@ def post_project_environment(
             f.write(req.file_content)
         repo.git.add(fpath)
     repo.git.commit(["-m", f"Add environment {req.name}"])
-    repo.git.push(["origin", repo.active_branch])
+    push_and_expire(project, repo)
     mixpanel.user_created_environment(
         user=current_user,
         owner_name=owner_name,
@@ -9970,6 +10626,7 @@ def get_project_software(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -10082,6 +10739,7 @@ def get_project_notebooks(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -10187,6 +10845,7 @@ def get_project_repro_check(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     # A pure function of the tree at this commit, and a second and a half of
     # work on a large project, so it is worked out once per commit rather
@@ -10240,7 +10899,7 @@ def put_project_dev_container(
     repo.git.add(".devcontainer")
     if repo.git.diff("--staged"):
         repo.git.commit(["-m", "Add dev container spec"])
-        repo.git.push(["origin", repo.active_branch])
+        push_and_expire(project, repo)
     return Message(message="Success")
 
 
@@ -10362,7 +11021,6 @@ def get_project_apps(
         project=project,
         repo=repo,
         ref=ref,
-        read_only=True,
     )
     return _project_apps_from_ck_info(
         ck_info, owner_name=owner_name, project_name=project_name
@@ -10459,7 +11117,9 @@ def serve_project_app_file(
         )
         return RedirectResponse(base + path.strip("/"), status_code=302)
     ck_info = app.projects.get_ck_info_for_ref(
-        project=project, repo=repo, ref=git_sha, read_only=True
+        project=project,
+        repo=repo,
+        ref=git_sha,
     )
     apps = _project_apps_from_ck_info(
         ck_info, owner_name=owner_name, project_name=project_name
@@ -10544,6 +11204,7 @@ def get_project_showcase(
         session=session,
         ttl=ttl,
         ref=ref,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -10902,7 +11563,7 @@ def post_project_status(
     try:
         subprocess.check_call(cmd, cwd=repo.working_dir)
         logger.info("Git pushing")
-        repo.git.push(["origin", repo.active_branch])
+        push_and_expire(project, repo)
     except Exception as e:
         logger.error(f"Failed to set project status: {e}")
         raise HTTPException(400, f"Failed to set project status: {e}")

@@ -604,13 +604,21 @@ class LocalProject(ProjectView):
         from calkit.questions import check_questions
 
         try:
-            status = check_questions(ck_info=self.ck_info, wdir=self.wdir)
+            # The pipeline's own staleness is judged per stage elsewhere in
+            # this view, so only what the answers rest on is asked here
+            status = check_questions(
+                ck_info=self.ck_info, wdir=self.wdir, check_pipeline=False
+            )
         except Exception:
             return None
+        # An answer is stale when what it cites has moved since it was
+        # written, which the check reports per evidence entry as 'changed',
+        # or when that evidence is gone or its references broken
         self._stale_answers = {
             str(q.index)
             for q in status.questions
-            if q.status in ("stale", "error")
+            if q.status in ("stale", "missing", "error")
+            or any(e.status == "changed" for e in q.evidence)
         }
         return self._stale_answers
 

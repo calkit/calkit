@@ -4,13 +4,19 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
 
 import git
 import pytest
+import typer
+from typer.testing import CliRunner
 
 import calkit
 import calkit.schema
+from calkit.cli.main.core import app
 from calkit.environments import get_env_lock_fpath
+
+runner = CliRunner()
 
 
 def test_new_foreach_stage(tmp_dir):
@@ -2008,23 +2014,284 @@ def test_new_release_license_and_cff_authors(tmp_dir, monkeypatch):
     assert "Read 1 author(s) from CITATION.cff" in out
 
 
-def test_split_template_subdir():
-    # A template may name a directory inside a repo.
-    #
-    # One repo can hold several self-contained examples, e.g.
-    # 'calkit/calkit/examples/markdown'.
-    from calkit.cli.new import _split_template_subdir
+def test_parse_template():
+    from functools import partial
 
-    assert _split_template_subdir(
-        "calkit/example-basic", "https://github.com/calkit/example-basic"
-    ) == ("https://github.com/calkit/example-basic", None)
-    assert _split_template_subdir(
-        "calkit/calkit/examples/markdown",
-        "https://github.com/calkit/calkit/examples/markdown",
-    ) == ("https://github.com/calkit/calkit", "examples/markdown")
-    # A full URL's path belongs to the repo, so it is left alone
-    for url in [
-        "https://github.com/calkit/example-basic",
-        "file:///tmp/x/examples/demo",
+    from calkit.cli.new import _parse_template as parse
+
+    _parse_template = partial(parse, hub_url="https://calkit.io")
+    gh = "https://github.com/"
+    # Shorthand, or the hub URL with or without its scheme, names a hub
+    # project, whose Git URL is looked up later
+    for t in [
+        "calkit/example-basic",
+        "https://calkit.io/calkit/example-basic",
+        "calkit.io/calkit/example-basic",
     ]:
-        assert _split_template_subdir(url, url) == (url, None)
+        assert _parse_template(t) == ("calkit/example-basic", None, None)
+    assert _parse_template("owner/project/dir") == (
+        "owner/project/dir",
+        None,
+        "dir",
+    )
+    # URLs work on any host, HTTPS or SSH, with or without .git, and may
+    # name a directory inside the repo so one repo can hold several
+    # self-contained examples
+    assert _parse_template(gh + "calkit/calkit/examples/latex-word") == (
+        "calkit/calkit/examples/latex-word",
+        gh + "calkit/calkit",
+        "examples/latex-word",
+    )
+    assert _parse_template("https://gitlab.com/owner/repo.git") == (
+        "owner/repo",
+        "https://gitlab.com/owner/repo",
+        None,
+    )
+    assert _parse_template("git@codeberg.org:owner/repo.git/dir") == (
+        "owner/repo/dir",
+        "git@codeberg.org:owner/repo",
+        "dir",
+    )
+    # Other schemes have no owner/repo convention, so they're used as is
+    url = "file:///tmp/x/examples/demo"
+    assert _parse_template(url) == (url, url, None)
+    with pytest.raises(typer.Exit):
+        _parse_template("just-a-name")
+
+
+def test_new_project_from_a_known_template_skips_the_hub(tmp_dir, monkeypatch):
+    # A template this package knows needs no hub to resolve. The repo URL is in
+    # the registry, so `calkit new project --from calkit/example-r` works
+    # without being logged in, or online to anything but the repo host.
+    import calkit.hub
+    from calkit.cli.new import _parse_template
+
+    asked: list[str] = []
+
+    def fake_get(path, *args, **kwargs):
+        asked.append(path)
+        raise AssertionError(f"should not have asked the hub for {path}")
+
+    monkeypatch.setattr(calkit.hub, "get", fake_get)
+    # The resolution the CLI does before cloning: parse, then look the
+    # project up. A known one comes back from the registry.
+    name, url, subdir = _parse_template(
+        "calkit/example-r", calkit.hub.get_hub_url()
+    )
+    assert (name, url, subdir) == ("calkit/example-r", None, None)
+    known = calkit.templates.find_template(name, kind="project")
+    assert known is not None
+    assert known.git_repo_url == "https://github.com/calkit/example-r"
+    assert asked == []
+    # Something unregistered still has to be asked about, which is the
+    # path that keeps any other project usable as a template
+    assert calkit.templates.find_template(
+        "someone/theirs", kind="project"
+    ) is (None)
+
+
+def test_release_with_pipeline(tmp_dir):
+    ck_info = {
+        "title": "Test Project",
+        "description": "Test",
+        "environments": {
+            "used": {"kind": "uv-venv", "path": "requirements.txt"},
+            "unused": {"kind": "uv-venv", "path": "other-requirements.txt"},
+        },
+        "publications": [
+            {
+                "path": "out2.txt",
+                "kind": "journal-article",
+                "title": "Test Publication",
+            }
+        ],
+        "pipeline": {
+            "stages": {
+                "upstream": {
+                    "kind": "command",
+                    "command": "echo '1' > out1.txt",
+                    "environment": "_system",
+                    "outputs": ["out1.txt"],
+                },
+                "target": {
+                    "kind": "command",
+                    "command": "cat out1.txt > out2.txt",
+                    "environment": "used",
+                    "inputs": ["out1.txt"],
+                    "outputs": ["out2.txt"],
+                },
+                "unrelated": {
+                    "kind": "command",
+                    "command": "echo '3' > out3.txt",
+                    "environment": "unused",
+                    "outputs": ["out3.txt"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("")
+    with open("other-requirements.txt", "w") as f:
+        f.write("")
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "test@test.com"])
+    subprocess.check_call(["git", "config", "user.name", "Test"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(["dvc", "config", "core.analytics", "false"])
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {"stages": calkit.pipeline.to_dvc(ck_info=ck_info)}, f
+        )
+    # Run through calkit rather than DVC directly so the environments get
+    # built and locked, which the generated stages depend on
+    subprocess.check_call([sys.executable, "-m", "calkit", "run"])
+    subprocess.check_call(["git", "add", "."])
+    subprocess.check_call(["git", "commit", "-m", "init"])
+
+    class MockStatus:
+        errors = []
+        failed_environment_checks = []
+        stale_stage_names = []
+        is_stale = False
+
+    original_get_status = calkit.pipeline.get_status
+    original_check = calkit.releases.check_project_release_archive
+    calkit.pipeline.get_status = lambda *args, **kwargs: MockStatus()
+    checked = []
+    calkit.releases.check_project_release_archive = lambda zip_path, **kwargs: (
+        checked.append(zip_path)
+    )
+    try:
+        # Without --pipeline, a single-file release stores just that file
+        res = runner.invoke(
+            app,
+            [
+                "new",
+                "release",
+                "-n",
+                "plain",
+                "--internal",
+                "--no-push",
+                "out2.txt",
+            ],
+        )
+        assert res.exit_code == 0, res.stdout
+        stored = os.listdir(".calkit/releases/plain")
+        assert any(f.endswith(".txt") for f in stored)
+        assert not any(f.endswith(".zip") for f in stored)
+        assert not checked
+        # With --pipeline, it becomes an archive holding the artifact plus
+        # what builds it, and the archive gets run before being released
+        res = runner.invoke(
+            app,
+            [
+                "new",
+                "release",
+                "-n",
+                "v1",
+                "--internal",
+                "--no-push",
+                "--pipeline",
+                "out2.txt",
+            ],
+        )
+        assert res.exit_code == 0, res.stdout
+        zip_names = [
+            f for f in os.listdir(".calkit/releases/v1") if f.endswith(".zip")
+        ]
+        assert len(zip_names) == 1
+        zip_path = os.path.join(".calkit/releases/v1", zip_names[0])
+        assert checked == [zip_path]
+        # --pipeline on a project release is redundant, not an error
+        res = runner.invoke(
+            app,
+            [
+                "new",
+                "release",
+                "-n",
+                "v2",
+                "--internal",
+                "--no-push",
+                "--dry-run",
+                "--pipeline",
+                ".",
+            ],
+        )
+        assert res.exit_code == 0, res.stdout
+        assert "already include the pipeline" in res.stdout
+    finally:
+        calkit.pipeline.get_status = original_get_status
+        calkit.releases.check_project_release_archive = original_check
+
+    with zipfile.ZipFile(zip_path) as z:
+        names = z.namelist()
+        assert "calkit.yaml" in names
+        assert "dvc.yaml" in names
+        assert "dvc.lock" in names
+        assert "requirements.txt" in names
+        # The target and its upstream are needed to rebuild it
+        assert "out1.txt" in names
+        assert "out2.txt" in names
+        # The unrelated stage's output and environment are not
+        assert "out3.txt" not in names
+        assert "other-requirements.txt" not in names
+        dvc_yaml = calkit.ryaml.load(z.read("dvc.yaml").decode())
+        assert set(dvc_yaml["stages"]) == {"upstream", "target"}
+        dvc_lock = calkit.ryaml.load(z.read("dvc.lock").decode())
+        assert set(dvc_lock["stages"]) == {"upstream", "target"}
+        ck_yaml = calkit.ryaml.load(z.read("calkit.yaml").decode())
+        assert set(ck_yaml["pipeline"]["stages"]) == {"upstream", "target"}
+        assert set(ck_yaml["environments"]) == {"used"}
+        # The release record notes that it carries its own pipeline
+        assert ck_yaml["releases"]["plain"]["includes_pipeline"] is False
+        # The archive says what produced it, pointing back at the project
+        # release, without disturbing the project's own README
+        note = z.read("CALKIT-RELEASE.md").decode()
+        assert f"Calkit v{calkit.__version__}" in note
+        assert "from project release v1" in note
+        assert "Git rev:" in note
+        assert "README.md" not in names or z.read("README.md") != note
+
+
+def test_release_detached_head(tmp_dir):
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"title": "Test", "description": "Test"}, f)
+    with open("out.txt", "w") as f:
+        f.write("hi\n")
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "test@test.com"])
+    subprocess.check_call(["git", "config", "user.name", "Test"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(["dvc", "config", "core.analytics", "false"])
+    subprocess.check_call(["git", "add", "."])
+    subprocess.check_call(["git", "commit", "-m", "init"])
+    subprocess.check_call(["git", "checkout", "--detach", "HEAD"])
+    # A release that would push has no branch to push from, and says so
+    # before anything gets uploaded
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v1", "--internal", "--kind", "dataset", "."],
+    )
+    assert res.exit_code != 0
+    assert "HEAD is detached" in res.stdout + str(res.stderr)
+    # Nothing was written for the release before bailing out
+    assert not os.path.exists(".calkit/releases/v1")
+    # Skipping the commit means there's nothing to push, so it goes ahead,
+    # even though that leaves the release unrecorded in the repo
+    res = runner.invoke(
+        app,
+        [
+            "new",
+            "release",
+            "-n",
+            "v1",
+            "--internal",
+            "--kind",
+            "dataset",
+            "--no-commit",
+            ".",
+        ],
+    )
+    assert res.exit_code == 0, res.stdout

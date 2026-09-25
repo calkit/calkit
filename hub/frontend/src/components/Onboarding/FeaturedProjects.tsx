@@ -17,14 +17,6 @@ import mixpanel from "mixpanel-browser"
 
 import { ProjectsService } from "../../client"
 
-/**
- * The hub's curated example projects.
- *
- * What a newcomer needs to see is a finished project -- environment,
- * pipeline, figures, paper, all connected -- not whatever happened to be
- * created most recently. The list is configured server-side, so curating it
- * doesn't mean shipping a frontend.
- */
 const FeaturedProjects = ({ heading }: { heading?: string }) => {
   const cardBg = useColorModeValue("white", "ui.darkSlate")
   const borderColor = useColorModeValue("gray.200", "gray.600")
@@ -40,15 +32,12 @@ const FeaturedProjects = ({ heading }: { heading?: string }) => {
   }
   return (
     <Box>
-      <Flex align="baseline" gap={3} mb={1}>
-        <Heading size="md">{heading ?? "See it put together"}</Heading>
+      <Flex align="baseline" gap={3} mb={3}>
+        <Heading size="md">{heading ?? "Check out some examples"}</Heading>
         <Link as={RouterLink} to="/projects" fontSize="sm" variant="blue">
           Browse all projects →
         </Link>
       </Flex>
-      <Text color="ui.dim" fontSize="sm" mb={4}>
-        Real projects, each one runnable end to end from its repo.
-      </Text>
       {featuredQuery.isPending ? (
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
           {new Array(3).fill(null).map((_, index) => (

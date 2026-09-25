@@ -148,6 +148,11 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose build
       - run: docker compose down -v --remove-orphans
+      # The container's own `npm install` would otherwise run inside the
+      # window "Wait for services" is timing, which is what made that step
+      # fail on a slow runner.
+      - name: Install frontend dependencies in the dev container
+        run: docker compose run --rm --no-deps frontend npm ci
       - run: docker compose --profile objects up -d
       - name: Wait for services
         run: |
@@ -157,9 +162,24 @@ jobs:
           echo "Waiting for frontend..."
           timeout 300 bash -c 'until curl -sf http://localhost:5173 > /dev/null 2>&1; do sleep 3; done'
           echo "All services ready"
+      # The client can only be generated against a running backend, so
+      # this job is the only place CI can catch one that has drifted from
+      # the API.
+      - name: Check the generated client is up to date
+        working-directory: hub/frontend
+        run: |
+          make client
+          if ! git diff --exit-code -- openapi.json src/client; then
+            echo "::error::The frontend client is stale; run 'make frontend-client' and commit the result"
+            exit 1
+          fi
       - name: Run Playwright tests
         run: npx playwright test
         working-directory: hub/frontend
+      # Logs are otherwise torn down with the runner.
+      - name: Show container logs
+        if: failure()
+        run: docker compose logs --no-color --tail 200
       - name: Tear down
         if: always()
         run: docker compose down -v --remove-orphans

@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+import app.index
 from app import users, zotero
 from app.api.routes.projects.core import (
     _normalize_artifact_file_path,
@@ -18,7 +19,7 @@ from app.api.routes.projects.core import (
 from app.config import settings
 from app.core import ryaml
 from app.models import Project, UserCreate
-from app.models.core import ContentsItem, UserProjectAccess
+from app.models.core import Account, ContentsItem, UserProjectAccess
 from app.projects import CkInfoAndOuts
 from app.tests import authentication_token_from_email, create_random_user
 
@@ -223,6 +224,26 @@ def test_project_routes_are_case_insensitive(client: TestClient) -> None:
         current_user=None,
         min_access_level="read",
     )
+
+
+def test_comment_artifact_route_and_label() -> None:
+    from app.api.routes.projects.core import (
+        comment_artifact_label,
+        comment_artifact_route,
+    )
+
+    # A question is identified by number and has a page of its own;
+    # everything else is a path on a section page.
+    assert comment_artifact_route("question", "3") == "questions/3"
+    assert comment_artifact_label("question", "3") == "question 3"
+    assert comment_artifact_route("release", "v1 0") == "releases/v1%200"
+    assert (
+        comment_artifact_route("figure", "figures/x.png")
+        == "figures?path=figures%2Fx.png"
+    )
+    assert comment_artifact_label("figure", "figures/x.png") == "figures/x.png"
+    # An unknown type falls back to the files page.
+    assert comment_artifact_route(None, "a.txt") == "files?path=a.txt"
 
 
 def test_get_project_comments_uses_all_results() -> None:
@@ -990,7 +1011,12 @@ def _get_declared_at_ref(
     client: TestClient, endpoint: str, ck_key: str, declared: list
 ):
     """GET an artifact listing at a ref with ``declared`` in calkit.yaml."""
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     fake_repo = SimpleNamespace(
         working_dir="/tmp/nonexistent",
         commit=lambda _ref: SimpleNamespace(tree=_EmptyTree()),
@@ -1325,7 +1351,17 @@ def test_get_project_results_autodetects_and_reads_ref(
         ) as mock_get_repo,
         patch(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
-            return_value={},
+            return_value={
+                "results": [
+                    # A declared result whose name is the key it is stored
+                    # under, not something written to be read
+                    {"path": "results/stats.json", "name": "r_squared"},
+                    # A declared result with neither, so the path is tidied
+                    {"path": "results/mean-velocity.json"},
+                    # A title someone wrote is left exactly as it is
+                    {"path": "results/rmse.json", "title": "RMSE by run"},
+                ]
+            },
         ) as mock_ck_for_ref,
         patch(
             "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
@@ -1341,33 +1377,138 @@ def test_get_project_results_autodetects_and_reads_ref(
             "/projects/test-owner/test-project/results?ref=some-branch"
         )
     assert response.status_code == 200, response.text
-    paths = {res["path"] for res in response.json()}
+    body = response.json()
+    paths = {res["path"] for res in body}
     for path in detected_paths:
         assert path in paths, f"Expected {path!r} to be detected"
     for path in ignored_paths:
         assert path not in paths, f"Expected {path!r} to be ignored"
+    titles = {res["path"]: res["title"] for res in body}
+    # A derived title reads as a title, whether it came from the name or
+    # the path; one the user wrote is never rewritten
+    assert titles["results/stats.json"] == "R squared"
+    assert titles["results/mean-velocity.json"] == "Mean velocity"
+    assert titles["results/rmse.json"] == "RMSE by run"
+    assert titles["results/data.csv"] == "Data"
     assert mock_get_repo.call_args.kwargs["ref"] == "some-branch"
     assert mock_ck_for_ref.call_args.kwargs["ref"] == "some-branch"
 
 
-def test_question_text_handles_string_and_object() -> None:
-    from app.api.routes.projects.core import _extract_question_text
+def test_get_project_questions_without_an_index(
+    client: TestClient, db: Session
+) -> None:
+    # Reading questions doesn't write the cross-project index, and doesn't
+    # depend on it either: the warm job rebuilds it after a push, so it can
+    # be empty or behind while the page still shows every question.
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    ck_info = {
+        "questions": [
+            "Does it work?",
+            {"question": "How well?", "hypothesis": "Very"},
+            "And for how long?",
+        ]
+    }
+    fake_repo = _make_fake_repo("/tmp/does-not-matter")
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        r = client.get(f"{base}/questions", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [q["question"] for q in body] == [
+        "Does it work?",
+        "How well?",
+        "And for how long?",
+    ]
+    assert [q["number"] for q in body] == [1, 2, 3]
+    assert body[1]["hypothesis"] == "Very"
+    # Nothing was indexed by the read
+    db.refresh(project)
+    assert list(project.questions) == []
+    # Ids are stable across reads, so a client keying a list on them isn't
+    # re-rendering every question on every poll
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        again = client.get(f"{base}/questions", headers=headers).json()
+    assert [q["id"] for q in again] == [q["id"] for q in body]
+    # Once the index catches up, the real row ids are what come back
+    app.index.index_questions(session=db, project=project, ck_info=ck_info)
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        indexed = client.get(f"{base}/questions", headers=headers).json()
+    by_number = {q.number: str(q.id) for q in project.questions}
+    assert [q["id"] for q in indexed] == [by_number[n] for n in (1, 2, 3)]
 
-    assert _extract_question_text("Plain question?") == "Plain question?"
+
+def test_render_template() -> None:
+    # A number in an answer is read out of the results file rather than
+    # retyped, so the page can't show a figure the pipeline has moved past.
+    from app.api.routes.projects.core import _render_template
+
+    values = {"speedup": 3.2571, "launches": 1480000, "name": "RRTMGP"}
     assert (
-        _extract_question_text({"question": "Rich?", "hypothesis": "h"})
-        == "Rich?"
+        _render_template("{speedup:.1f}x faster on {name}", values)
+        == "3.3x faster on RRTMGP"
     )
-    assert _extract_question_text({}) == ""
-    # A non-string/non-dict value (e.g. a list) yields empty text, not a repr.
-    assert _extract_question_text(["a", "b"]) == ""  # type: ignore
+    # A format spec needs the value's own type, not a stringified copy
+    assert _render_template("{launches:,}", values) == "1,480,000"
+    # Nothing to fill, nothing to do
+    assert _render_template("Plain prose.", values) == "Plain prose."
+    assert _render_template(None, values) is None
+    # For display: a name with no evidence, and a spec the value can't
+    # satisfy, are left as written rather than breaking the page
+    assert _render_template("{missing}", values) == "{missing}"
+    assert _render_template("{name:.2f}", values) == "{name:.2f}"
+
+
+def test_resolve_explanation() -> None:
+    # An explanation is either the reasoning itself or a citation of the
+    # file holding it. The file is not read: a document stays a document,
+    # linked rather than spliced into the card.
+    from app.api.routes.projects.core import _resolve_explanation
+
+    assert _resolve_explanation("Because the slope is flat.") == (
+        "Because the slope is flat.",
+        None,
+    )
+    assert _resolve_explanation({"path": "docs/why.md"}) == (
+        None,
+        "docs/why.md",
+    )
+    # A file explanation is `{path: <string>}` and nothing else. Anything
+    # that only resembles one is ignored rather than guessed at.
+    assert _resolve_explanation(None) == (None, None)
+    assert _resolve_explanation({}) == (None, None)
+    assert _resolve_explanation({"path": ""}) == (None, None)
+    assert _resolve_explanation({"path": 3}) == (None, None)
+    assert _resolve_explanation({"path": "a.md", "title": "x"}) == (None, None)
+    assert _resolve_explanation({"file": "a.md"}) == (None, None)
+    assert _resolve_explanation(["a"]) == (None, None)
 
 
 def test_build_question_evidence_resolves_figures_and_results() -> None:
     import base64
     import json
 
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Figure, Publication, Result
 
     fig = Figure(path="figures/x.png", title="X")
@@ -1413,10 +1554,17 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={fig.path: fig},
-            results_by_path={(res.path, res.key): res},
-            tables_by_path={},
-            publications_by_path={pub.path: pub},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={fig.path: fig},
+                    results_by_path={(res.path, res.key): res},
+                    tables_by_path={},
+                    publications_by_path={pub.path: pub},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert len(evidence) == 4
@@ -1435,6 +1583,99 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
     assert evidence[2].publication.title == "Paper"
     # An unresolved figure path leaves the resolved figure as None.
     assert evidence[3].figure is None
+
+
+def test_question_evidence_carries_pipeline_stage_status() -> None:
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
+    from app.models.core import Figure
+    from app.pipeline import StageStatus
+
+    # One figure declaring its own stage, one the pipeline claims by path, and
+    # one nothing produces.
+    declared = Figure(
+        path="figures/declared.png", title="Declared", stage="plot-declared"
+    )
+    matched = Figure(path="figures/matched.png", title="Matched")
+    frozen = Figure(path="figures/frozen.png", title="Frozen")
+    evidence_ck = [
+        {"kind": "figure", "path": "figures/declared.png"},
+        {"kind": "figure", "path": "figures/matched.png"},
+        {"kind": "figure", "path": "figures/orphan.png"},
+        {"kind": "figure", "path": "figures/frozen.png"},
+        # The same frozen output, pinned: the ref says which version is
+        # meant, so there's nothing left for the freeze to hide.
+        {"kind": "figure", "path": "figures/frozen.png", "git_ref": "v1.0"},
+    ]
+    dvc_lock = {
+        "stages": {
+            "plot-matched": {"outs": [{"path": "figures/matched.png"}]},
+            # Also produces the declared figure, and must lose to what the
+            # figure itself says.
+            "plot-by-path": {"outs": [{"path": "figures/declared.png"}]},
+            "plot-frozen": {"outs": [{"path": "figures/frozen.png"}]},
+        }
+    }
+    stage_statuses = {
+        "plot-declared": StageStatus(status="up-to-date"),
+        "plot-matched": StageStatus(
+            status="stale", modified_inputs=["scripts/plot.py"]
+        ),
+        "plot-by-path": StageStatus(status="stale"),
+        # Frozen reads as up-to-date forever, which is the whole problem.
+        "plot-frozen": StageStatus(status="frozen"),
+    }
+    evidence = _build_question_evidence(
+        project=SimpleNamespace(),  # type: ignore
+        repo=SimpleNamespace(),
+        ref=None,
+        evidence_ck=evidence_ck,
+        lookups_by_ref={
+            None: _EvidenceLookups(
+                figures_by_path={
+                    declared.path: declared,
+                    matched.path: matched,
+                    frozen.path: frozen,
+                },
+                results_by_path={},
+                tables_by_path={},
+                publications_by_path={},
+                dvc_lock=dvc_lock,
+                stage_statuses=stage_statuses,
+                frozen_stages={"plot-frozen"},
+            ),
+            # The pinned citation resolves at its own ref, where the stage is
+            # just as frozen -- the ref is what settles it, not the status.
+            "v1.0": _EvidenceLookups(
+                figures_by_path={frozen.path: frozen},
+                results_by_path={},
+                tables_by_path={},
+                publications_by_path={},
+                dvc_lock=dvc_lock,
+                stage_statuses=stage_statuses,
+                frozen_stages={"plot-frozen"},
+            ),
+        },
+        result_value_cache={},
+    )
+    assert evidence[0].stage == "plot-declared"
+    assert evidence[0].stage_status is not None
+    assert evidence[0].stage_status.status == "up-to-date"
+    assert evidence[1].stage == "plot-matched"
+    assert evidence[1].stage_status is not None
+    assert evidence[1].stage_status.status == "stale"
+    assert evidence[1].stage_status.modified_inputs == ["scripts/plot.py"]
+    assert evidence[2].stage is None
+    assert evidence[2].stage_status is None
+    assert evidence[0].stale_reason is None
+    assert evidence[1].stale_reason == "pipeline"
+    # Nothing resolved for the orphan, so it's missing rather than merely
+    # unattributed -- worse news than a stale stage, and it wins.
+    assert evidence[2].stale_reason == "missing"
+    assert evidence[3].stale_reason == "frozen"
+    assert evidence[4].stale_reason is None
 
 
 def test_apply_question_update_builds_object() -> None:
@@ -1469,6 +1710,18 @@ def test_apply_question_update_builds_object() -> None:
             {"kind": "result", "path": "results/summary.json", "key": "mean"},
         ],
     }
+    # A conditional answer sent back as the branch it rendered to is kept,
+    # while an edited answer replaces it
+    conditional = {"if p < 0.05": "yes", "else": "no"}
+    existing = {"question": "q?", "answer": conditional}
+    out = _apply_question_update(
+        existing, QuestionPut(answer="no"), rendered_answer="no"
+    )
+    assert isinstance(out, dict) and out["answer"] == conditional
+    out = _apply_question_update(
+        existing, QuestionPut(answer="maybe"), rendered_answer="no"
+    )
+    assert isinstance(out, dict) and out["answer"] == "maybe"
 
 
 def test_apply_question_update_figure_evidence_drops_key() -> None:
@@ -1509,6 +1762,7 @@ def _make_fake_repo(working_dir: str) -> SimpleNamespace:
     return SimpleNamespace(
         working_dir=working_dir,
         active_branch=SimpleNamespace(name="main"),
+        head=SimpleNamespace(commit=SimpleNamespace(hexsha="0" * 40)),
         ignored=lambda *a, **k: [],
         git=SimpleNamespace(
             add=lambda *a, **k: None,
@@ -2996,6 +3250,215 @@ def test_project_pipeline_stage_edit(
         assert "slurm" in ryaml.load(r.json()["yaml"])
 
 
+def test_project_pipeline_edit(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    # The whole pipeline can be replaced without disturbing the rest of
+    # calkit.yaml.
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    url = f"/projects/{owner_name}/{project.name}/pipeline"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "scripts/plot.py",
+                }
+            }
+        },
+        # Everything else in the file, which an edit here must leave alone
+        "datasets": [{"path": "data/raw.csv", "title": "Raw"}],
+        "questions": ["Does it work?"],
+    }
+
+    def fake_ck_info(*args, **kwargs) -> dict:
+        return ck_info
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=fake_ck_info,
+        ),
+        # Saving recompiles dvc.yaml from the whole project, which this
+        # stand-in repo can't support; the compile has its own tests
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
+    ):
+        # The page shows the `pipeline:` key and its body, so that is what
+        # comes back, and a second stage is added by sending it whole
+        edited = (
+            "pipeline:\n"
+            "  stages:\n"
+            "    plot:\n"
+            "      kind: python-script\n"
+            "      environment: py\n"
+            "      script_path: scripts/plot.py\n"
+            "    # keep this comment\n"
+            "    report:\n"
+            "      kind: latex\n"
+            "      environment: tex\n"
+            "      target_path: paper/paper.tex\n"
+        )
+        r = client.put(
+            url,
+            headers=headers,
+            json={"yaml": edited, "message": "Add report"},
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert list(written["pipeline"]["stages"]) == ["plot", "report"]
+        # Nothing outside the pipeline was touched
+        assert written["datasets"] == [
+            {"path": "data/raw.csv", "title": "Raw"}
+        ]
+        assert written["questions"] == ["Does it work?"]
+        # Comments survive the round trip, in the response and on disk
+        assert "# keep this comment" in r.json()["yaml"]
+        assert "# keep this comment" in (tmp_path / "calkit.yaml").read_text()
+        # A body without the wrapper is what someone who deleted the
+        # `pipeline:` line would send, so it means the same thing
+        r = client.put(
+            url,
+            headers=headers,
+            json={
+                "yaml": (
+                    "stages:\n"
+                    "  plot:\n"
+                    "    kind: python-script\n"
+                    "    environment: py\n"
+                    "    script_path: scripts/plot.py\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert list(
+            ryaml.load((tmp_path / "calkit.yaml").read_text())["pipeline"][
+                "stages"
+            ]
+        ) == ["plot"]
+        # Bad YAML, a non-mapping, an unknown kind, and a missing required
+        # field are all rejected before anything is written
+        for bad in [
+            "pipeline:\n  stages:\n   bad indent: true\n",
+            "- not a mapping\n",
+            "stages:\n  plot:\n    kind: not-a-real-kind\n",
+            "stages:\n  plot:\n    kind: latex\n    environment: tex\n",
+        ]:
+            r = client.put(url, headers=headers, json={"yaml": bad})
+            assert r.status_code == 422, f"{bad!r} -> {r.status_code}"
+        assert list(
+            ryaml.load((tmp_path / "calkit.yaml").read_text())["pipeline"][
+                "stages"
+            ]
+        ) == ["plot"]
+
+
+def test_project_pipeline_edit_creates_one_where_there_was_none(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    # A project gets its first pipeline from the same editor.
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    url = f"/projects/{owner_name}/{project.name}/pipeline"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    # No pipeline key, and other things in the file that must survive
+    ck_info = {"questions": ["Does it work?"]}
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=lambda *a, **k: ck_info,
+        ),
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
+    ):
+        # The empty shape the editor opens on saves as-is, so someone can
+        # commit the key and fill it in from there
+        r = client.put(
+            url, headers=headers, json={"yaml": "pipeline:\n  stages: {}\n"}
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert written["pipeline"] == {"stages": {}}
+        assert written["questions"] == ["Does it work?"]
+        # Emptying the editor means an empty pipeline, not a broken one:
+        # a cleared pane, a bare key, and a bare `stages:` all save
+        for emptied in ["", "   \n", "pipeline:\n", "pipeline:\n  stages:\n"]:
+            r = client.put(url, headers=headers, json={"yaml": emptied})
+            assert r.status_code == 200, f"{emptied!r} -> {r.text}"
+            written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+            assert written["pipeline"] in ({}, {"stages": {}}), emptied
+            assert written["questions"] == ["Does it work?"]
+        r = client.put(
+            url,
+            headers=headers,
+            json={
+                "yaml": (
+                    "pipeline:\n"
+                    "  stages:\n"
+                    "    plot:\n"
+                    "      kind: python-script\n"
+                    "      environment: py\n"
+                    "      script_path: scripts/plot.py\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert list(written["pipeline"]["stages"]) == ["plot"]
+
+
+def test_resolve_project_template(client: TestClient, db: Session) -> None:
+    # A template doesn't have to be hosted by the hub using it.
+    from app.api.routes.projects.core import _resolve_project_template
+
+    project, _ = _make_owner_with_project(db, client)
+    owner = project.owner_account.user
+    # A template this hub hosts is preferred: being a project here is what
+    # lets its outputs be copied into the new project's storage
+    found, url = _resolve_project_template(
+        session=db,
+        current_user=owner,
+        template=f"{project.owner_account.name}/{project.name}",
+    )
+    assert found is not None and found.id == project.id
+    assert url == project.git_repo_url
+    # One this hub has never heard of still works if the package knows it:
+    # it lives on its own hub and its repo is readable from anywhere, which
+    # is what makes the built-in templates usable from a dev instance
+    assert (
+        db.exec(
+            select(Project)
+            .join(Account, Account.id == Project.owner_account_id)  # type: ignore
+            .where(Account.name == "calkit")
+            .where(Project.name == "example-r")
+        ).first()
+        is None
+    ), "this test means nothing if the hub happens to host the template"
+    found, url = _resolve_project_template(
+        session=db, current_user=owner, template="calkit/example-r"
+    )
+    assert found is None
+    assert url == "https://github.com/calkit/example-r"
+    # Neither hosted nor known is a 404 that names the template, since it
+    # came off a list this hub offered
+    with pytest.raises(HTTPException) as exc:
+        _resolve_project_template(
+            session=db, current_user=owner, template="nobody/nothing"
+        )
+    assert exc.value.status_code == 404
+    assert "nobody/nothing" in str(exc.value.detail)
+    # A name that isn't owner/project can't be either
+    with pytest.raises(HTTPException) as exc:
+        _resolve_project_template(
+            session=db, current_user=owner, template="just-a-name"
+        )
+    assert exc.value.status_code == 422
+
+
 def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:
     # A declared path is joined onto the repo's working dir and written to,
     # so anything that could resolve outside the project is refused
@@ -3462,7 +3925,10 @@ def test_get_project_tables_declares_detects_and_resolves(
 
 
 def test_build_question_evidence_keyed_results_and_tables() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # Two results share a file, told apart only by their keys
@@ -3491,10 +3957,17 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={},
-            results_by_path={(mean.path, mean.key): mean},
-            tables_by_path={table.path: table},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(mean.path, mean.key): mean},
+                    tables_by_path={table.path: table},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is None
@@ -3540,7 +4013,10 @@ def test_declared_tables_reach_the_evidence_lookup() -> None:
 
 
 def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # A project can declare both at one path. They are different things
@@ -3561,10 +4037,17 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
-            figures_by_path={},
-            results_by_path={(result.path, None): result},
-            tables_by_path={table.path: table},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(result.path, None): result},
+                    tables_by_path={table.path: table},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is not None
@@ -3574,7 +4057,10 @@ def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
 
 
 def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
-    from app.api.routes.projects.core import _build_question_evidence
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
     from app.models.core import Result
 
     # A result is identified by (path, key). Falling back to the whole-file
@@ -3595,13 +4081,446 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
                     "key": "metrics.p95",
                 }
             ],
-            figures_by_path={},
-            results_by_path={(whole.path, None): whole},
-            tables_by_path={},
-            publications_by_path={},
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={(whole.path, None): whole},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                )
+            },
             result_value_cache={},
         )
     assert evidence[0].result is None
+
+
+def test_evidence_resolves_at_its_own_git_ref() -> None:
+    import base64
+    import json
+
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _EvidenceLookups,
+    )
+    from app.models.core import ContentsItem, Figure, Result
+
+    # The same paths exist at both refs and mean different things there, so
+    # an entry naming a ref must resolve against that ref's artifacts and
+    # not against the ones for the ref being browsed.
+    here_fig = Figure(path="figures/x.png", title="X now")
+    there_fig = Figure(path="figures/x.png", title="X at v1")
+    here_res = Result(path="results/summary.json", title="Now", key="mean")
+    there_res = Result(path="results/summary.json", title="At v1", key="mean")
+    evidence_ck = [
+        {"kind": "figure", "path": "figures/x.png"},
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "v1.0"},
+        {"kind": "result", "path": "results/summary.json", "key": "mean"},
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "key": "mean",
+            "git_ref": "v1.0",
+        },
+        # A ref nothing could be built for: the entry still comes back, with
+        # its git_ref intact, just unresolved.
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "gone"},
+    ]
+    values = {None: 2.0, "v1.0": 1.0}
+
+    def fake_contents(project, repo, path, ref):
+        return ContentsItem(
+            name="summary.json",
+            path=path,
+            type="file",
+            size=1,
+            in_repo=True,
+            content=base64.b64encode(
+                json.dumps({"mean": values[ref]}).encode()
+            ).decode(),
+            url=None,
+            storage="git",
+        )
+
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        side_effect=fake_contents,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={here_fig.path: here_fig},
+                    results_by_path={(here_res.path, "mean"): here_res},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                ),
+                "v1.0": _EvidenceLookups(
+                    figures_by_path={there_fig.path: there_fig},
+                    results_by_path={(there_res.path, "mean"): there_res},
+                    tables_by_path={},
+                    publications_by_path={},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                ),
+            },
+            result_value_cache={},
+        )
+    assert evidence[0].git_ref is None
+    assert evidence[0].figure is not None
+    assert evidence[0].figure.title == "X now"
+    assert evidence[1].git_ref == "v1.0"
+    assert evidence[1].figure is not None
+    assert evidence[1].figure.title == "X at v1"
+    assert evidence[2].result is not None
+    assert evidence[2].result.title == "Now"
+    # The value is read from the file at the entry's own ref, and the cache
+    # is keyed by ref, so one ref's value can't be served for the other's.
+    assert evidence[2].value == "2.0"
+    assert evidence[3].result is not None
+    assert evidence[3].result.title == "At v1"
+    assert evidence[3].value == "1.0"
+    assert evidence[4].git_ref == "gone"
+    assert evidence[4].figure is None
+
+
+def test_evidence_git_ref_round_trips_through_calkit_yaml() -> None:
+    from app.api.routes.projects.core import _apply_question_update
+    from app.models.core import QuestionEvidencePost, QuestionPut
+
+    req = QuestionPut(
+        question="q?",
+        evidence=[
+            QuestionEvidencePost(
+                kind="figure", path="figures/x.png", git_ref="v1.0"
+            ),
+            QuestionEvidencePost(kind="table", path="tables/t.csv"),
+        ],
+    )
+    out = _apply_question_update("q?", req)
+    assert isinstance(out, dict)
+    assert out["evidence"] == [
+        {"kind": "figure", "path": "figures/x.png", "git_ref": "v1.0"},
+        # Nothing written for an entry that names no ref, so calkit.yaml
+        # stays as clean as it was.
+        {"kind": "table", "path": "tables/t.csv"},
+    ]
+
+
+def test_question_evidence_values_documents_and_publications() -> None:
+    import base64
+    import json
+
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _evidence_values,
+        _EvidenceLookups,
+    )
+    from app.models.core import ContentsItem, Publication
+
+    declared = Publication(path="paper/main.pdf", title="The paper")
+    evidence_ck = [
+        # The kind calkit recommends for one value, named for the templates
+        {
+            "kind": "value",
+            "path": "results/summary.json",
+            "key": "stats.mean",
+            "name": "mean",
+        },
+        # A section YAML reads as a number is still a section
+        {"kind": "document", "path": "docs/notes.md", "section": 4.2},
+        {"kind": "document", "path": "docs/gone.md"},
+        # Undeclared but there: calkit doesn't require declaring it
+        {"kind": "publication", "path": "docs/draft.md", "section": "2b-i"},
+        {"kind": "publication", "path": "docs/nowhere.md"},
+        {"kind": "publication", "path": "paper/main.pdf", "label": "sec:x"},
+        # A value with no key names no number, so there's nothing to show
+        {"kind": "value", "path": "results/summary.json"},
+        # Several values from one file on one card, each by name
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            # Keys resolve as the CLI reads them, dots in names and all
+            "values": {
+                "avg": "stats.mean",
+                "total": "stats.n",
+                "failed": "sweep.back_off_1.50_k.failed",
+            },
+        },
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "values": {"avg2": "stats.mean", "gone": "stats.nope"},
+        },
+    ]
+
+    def fake_contents(project, repo, path, ref):
+        return ContentsItem(
+            name="summary.json",
+            path=path,
+            type="file",
+            size=1,
+            in_repo=True,
+            content=base64.b64encode(
+                json.dumps(
+                    {
+                        "stats": {"mean": 2.5, "n": 40},
+                        "sweep": {"back_off_1.50_k": {"failed": 13}},
+                    }
+                ).encode()
+            ).decode(),
+            url=None,
+            storage="git",
+        )
+
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        side_effect=fake_contents,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={},
+                    tables_by_path={},
+                    publications_by_path={declared.path: declared},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                    present_paths={"docs/notes.md", "docs/draft.md"},
+                )
+            },
+            result_value_cache={},
+        )
+        template_values = _evidence_values(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            cache={},
+        )
+    # The templates see every named value, typed as the file holds them
+    assert template_values == {
+        "mean": 2.5,
+        "avg": 2.5,
+        "total": 40,
+        "failed": 13,
+        "avg2": 2.5,
+    }
+    assert [ev.kind for ev in evidence] == [
+        "value",
+        "document",
+        "document",
+        "publication",
+        "publication",
+        "publication",
+        "value",
+        "result",
+        "result",
+    ]
+    assert evidence[0].value == "2.5"
+    assert evidence[0].name == "mean"
+    assert evidence[0].stale_reason is None
+    assert evidence[1].section == "4.2"
+    assert evidence[1].stale_reason is None
+    assert evidence[2].stale_reason == "missing"
+    assert evidence[3].publication is None
+    assert evidence[3].section == "2b-i"
+    assert evidence[3].stale_reason is None
+    assert evidence[4].stale_reason == "missing"
+    assert evidence[5].publication == declared
+    assert evidence[5].label == "sec:x"
+    assert evidence[5].stale_reason is None
+    assert evidence[6].stale_reason == "missing"
+    assert [(v.name, v.key, v.value) for v in evidence[7].values or []] == [
+        ("avg", "stats.mean", "2.5"),
+        ("total", "stats.n", "40"),
+        ("failed", "sweep.back_off_1.50_k.failed", "13"),
+    ]
+    assert evidence[7].stale_reason is None
+    # One value that can't be read is enough to call the card missing
+    assert [v.value for v in evidence[8].values or []] == ["2.5", None]
+    assert evidence[8].stale_reason == "missing"
+
+
+def test_saving_a_question_keeps_names_sections_and_labels() -> None:
+    from app.api.routes.projects.core import _apply_question_update
+    from app.models.core import QuestionEvidencePost, QuestionPut
+
+    # A template names its value, so an edit that dropped the name would
+    # leave the answer rendering a raw placeholder
+    req = QuestionPut(
+        question="q?",
+        answer="About {mean:.1f}.",
+        evidence=[
+            QuestionEvidencePost(
+                kind="value",
+                path="results/summary.json",
+                key="stats.mean",
+                name="mean",
+            ),
+            QuestionEvidencePost(
+                kind="document", path="docs/notes.md", section="4.2"
+            ),
+            QuestionEvidencePost(
+                kind="publication",
+                path="paper/main.pdf",
+                section="3",
+                label="sec:results",
+                git_ref="v1.0",
+            ),
+            # Fields a kind doesn't carry aren't written for it
+            QuestionEvidencePost(
+                kind="figure", path="figures/x.png", name="x", section="1"
+            ),
+            # A result's values survive an edit, and replace any key
+            QuestionEvidencePost(
+                kind="result",
+                path="results/summary.json",
+                key="stats.mean",
+                values={"avg": "stats.mean", "total": "stats.n"},
+            ),
+        ],
+    )
+    out = _apply_question_update("q?", req)
+    assert isinstance(out, dict)
+    assert out["evidence"] == [
+        {
+            "kind": "value",
+            "path": "results/summary.json",
+            "key": "stats.mean",
+            "name": "mean",
+        },
+        {"kind": "document", "path": "docs/notes.md", "section": "4.2"},
+        {
+            "kind": "publication",
+            "path": "paper/main.pdf",
+            "section": "3",
+            "label": "sec:results",
+            "git_ref": "v1.0",
+        },
+        {"kind": "figure", "path": "figures/x.png"},
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "values": {"avg": "stats.mean", "total": "stats.n"},
+        },
+    ]
+
+
+def test_delete_project_question(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    fake_repo = _make_fake_repo(str(tmp_path))
+
+    def delete(number: int, questions: list):
+        ck_info = {"name": project.name, "questions": questions}
+        with (
+            patch(
+                "app.api.routes.projects.core.get_repo",
+                return_value=fake_repo,
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects"
+                ".get_ck_info_from_repo",
+                return_value=ck_info,
+            ),
+            patch("app.api.routes.projects.core.push_and_expire"),
+        ):
+            r = client.delete(f"{base}/questions/{number}", headers=headers)
+        with open(tmp_path / "calkit.yaml") as f:
+            written = ryaml.load(f)
+        return r, written
+
+    questions = ["First?", {"question": "Second?", "answer": "Yes."}, "Third?"]
+    r, written = delete(2, list(questions))
+    assert r.status_code == 200, r.text
+    assert written["questions"] == ["First?", "Third?"]
+    # The index follows, so the numbers close up behind the deleted one
+    db.refresh(project)
+    assert sorted((q.number, q.question) for q in project.questions) == [
+        (1, "First?"),
+        (2, "Third?"),
+    ]
+    # Deleting the last one drops the key rather than leaving an empty list
+    r, written = delete(1, ["Only?"])
+    assert r.status_code == 200, r.text
+    assert "questions" not in written
+    # A number past the end is not found, and nothing is written
+    (tmp_path / "calkit.yaml").unlink()
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_from_repo",
+            return_value={"questions": ["One?"]},
+        ),
+    ):
+        r = client.delete(f"{base}/questions/5", headers=headers)
+    assert r.status_code == 404
+    assert not (tmp_path / "calkit.yaml").exists()
+
+
+def test_tables_listing_skips_evidence_at_another_ref() -> None:
+    from app.api.routes.projects.core import _build_tables
+
+    # A table cited only at another ref isn't a table of this one: the path
+    # may not even exist here, so listing it gives the reader a dead link.
+    ck_info = {
+        "questions": [
+            {
+                "question": "q?",
+                "evidence": [
+                    {"kind": "table", "path": "tables/here.csv"},
+                    {
+                        "kind": "table",
+                        "path": "tables/elsewhere.csv",
+                        "git_ref": "v1.0",
+                    },
+                ],
+            }
+        ]
+    }
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo_tree_for_ref",
+            return_value=SimpleNamespace(is_file=lambda path: False),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=({}, {}, {}, {}),
+        ),
+    ):
+        tables = _build_tables(
+            project=SimpleNamespace(
+                owner_account_name="someone", name="proj", file_locks=[]
+            ),
+            repo=SimpleNamespace(),
+            ref=None,
+            resolve_content=False,
+        )
+    paths = [t.path for t in tables]
+    assert "tables/here.csv" in paths
+    assert "tables/elsewhere.csv" not in paths
 
 
 def test_get_featured_projects(client: TestClient, db: Session) -> None:
@@ -3652,6 +4571,133 @@ def test_get_featured_projects(client: TestClient, db: Session) -> None:
         response = client.get("/projects/featured")
     assert response.status_code == 200
     assert response.json() == {"data": [], "count": 0}
+
+
+# A pipeline that copies a figure and a table into the paper's folder, the
+# way a map-paths stage stands in for a symlink
+MAP_PATHS_CK_INFO = {
+    "pipeline": {
+        "stages": {
+            "copy-to-paper": {
+                "kind": "map-paths",
+                "paths": [
+                    {
+                        "kind": "file-to-file",
+                        "src": "figures/plot.png",
+                        "dest": "paper/figures/plot.png",
+                    },
+                    {
+                        "kind": "file-to-dir",
+                        "src": "tables/t.csv",
+                        "dest": "paper/tables",
+                    },
+                ],
+            }
+        }
+    }
+}
+
+
+def _committed_repo(tmp_path, files: dict[str, str]):
+    import git
+
+    repo = git.Repo.init(tmp_path / "repo")
+    for path, content in files.items():
+        full = tmp_path / "repo" / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Initial")
+    return repo
+
+
+def test_figures_listing_skips_map_paths_copies(tmp_path) -> None:
+    from app.api.routes.projects.core import _discover_figures
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "figures/plot.png": "png",
+            "paper/figures/plot.png": "png",
+            "paper/figures/hand-drawn.png": "png",
+        },
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(MAP_PATHS_CK_INFO, {}, {}, {}),
+        ),
+    ):
+        ctx = _discover_figures(
+            project=SimpleNamespace(
+                owner_account_name="o",
+                name="p",
+                owner_github_name="o",
+                git_repo_url="https://github.com/o/p",
+            ),
+            repo=repo,
+            ref=None,
+        )
+    # The copy is the same figure; a file only in the paper's folder isn't
+    assert sorted(f["path"] for f in ctx.figures) == [
+        "figures/plot.png",
+        "paper/figures/hand-drawn.png",
+    ]
+
+
+def test_imported_from_info_reads_bare_strings() -> None:
+    from app.api.routes.projects.core import _imported_from_info
+
+    assert _imported_from_info(None) is None
+    assert _imported_from_info({"doi": "10.1/x"}) == {"doi": "10.1/x"}
+    assert _imported_from_info("https://doi.org/10.5281/zenodo.3960218") == {
+        "doi": "10.5281/zenodo.3960218"
+    }
+    assert _imported_from_info("https://example.com/data.csv") == {
+        "url": "https://example.com/data.csv"
+    }
+    assert _imported_from_info("a colleague's USB stick") == {
+        "description": "a colleague's USB stick"
+    }
+
+
+def test_tables_listing_skips_map_paths_copies(tmp_path) -> None:
+    from app.api.routes.projects.core import _build_tables
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "tables/t.csv": "a,b\n1,2\n",
+            "paper/tables/t.csv": "a,b\n1,2\n",
+        },
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=MAP_PATHS_CK_INFO,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(MAP_PATHS_CK_INFO, {}, {}, {}),
+        ),
+    ):
+        tables = _build_tables(
+            project=SimpleNamespace(
+                owner_account_name="o", name="p", file_locks=[]
+            ),
+            repo=repo,
+            ref=None,
+            resolve_content=False,
+        )
+    assert [t.path for t in tables] == ["tables/t.csv"]
 
 
 def test_post_project_when_account_name_differs_from_github(
@@ -3734,6 +4780,7 @@ def test_post_project_dataset_provenance(
             push=lambda *a, **k: None,
         )
         active_branch = SimpleNamespace(name="main")
+        head = SimpleNamespace(commit=SimpleNamespace(hexsha="0" * 40))
 
     def post(body: dict, existing_path: bool = False):
         ck_info: dict = {"datasets": list(written)}

@@ -923,14 +923,17 @@ def write_system_env_lock(
         with open(lock_fpath, "r") as f:
             if f.read() == content:
                 return lock_fpath
-    with open(lock_fpath, "w") as f:
+    # newline="\n" so the file is byte-identical on every platform.
+    with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
     return lock_fpath
 
 
 def get_cache_db(name="cache") -> SqliteDict:
+    from calkit.config import get_user_home
+
     env_check_cache_dir = os.path.join(
-        os.path.expanduser("~"), ".calkit", "env-checks"
+        get_user_home(), ".calkit", "env-checks"
     )
     os.makedirs(env_check_cache_dir, exist_ok=True)
     env_check_cache_path = os.path.join(env_check_cache_dir, f"{name}.sqlite")
@@ -1139,10 +1142,20 @@ def check_all_in_pipeline(
             for t in targets
             if t in md_stages
         ]
+        # A latex stage's diffs run in its environment, whether they're
+        # named one at a time or all together
+        import calkit.latex
+
         stages = {
             k: v
             for k, v in stages.items()
-            if k in targets or any(k.startswith(p) for p in prefixes)
+            if k in targets
+            or any(k.startswith(p) for p in prefixes)
+            or k + calkit.latex.DIFFS_TARGET_SUFFIX in targets
+            or any(
+                name in targets
+                for name in calkit.latex.get_diff_stage_names(k, v)
+            )
         }
     envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
     envs_in_pipeline = [
@@ -1287,6 +1300,20 @@ def get_default_venv_prefix(envs: dict, path: str, name: str) -> str:
     if os.path.normpath(base) in claimed:
         base = os.path.join(".calkit", "envs", name, ".venv")
     return Path(base).as_posix()
+
+
+def get_venv_activate_cmd(prefix: str, system: str | None = None) -> str:
+    """Get the shell command that activates the virtualenv at ``prefix``.
+
+    Prefixes are kept POSIX-style, but cmd reads a forward slash as the start
+    of a switch, so it takes ``.calkit/envs/x/.venv`` for a command named
+    ``.calkit``. Hand Windows native separators instead.
+    """
+    if system is None:
+        system = platform.system()
+    if system == "Windows":
+        return prefix.replace("/", "\\") + "\\Scripts\\activate"
+    return f". {prefix}/bin/activate"
 
 
 def env_from_name_or_path(

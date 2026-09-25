@@ -10,9 +10,9 @@ inputs:
     description: Whether or not to save (commit and push) results to Git and DVC remotes.
     default: "true"
   dvc_token:
-    description:
-      DVC token for pushing results. If not provided, will be obtained
-      via GitHub OIDC.
+    description: >-
+      Calkit token used to pull, push, and reach the hub from pipeline
+      stages. If not provided, will be obtained via GitHub OIDC.
     required: false
   pull_dvc:
     description: Whether or not to pull DVC data before running.
@@ -303,38 +303,53 @@ runs:
           ${{ runner.os }}-dvc-cache-${{ github.head_ref || github.ref_name }}-
           ${{ runner.os }}-dvc-cache-${{ github.event.repository.default_branch }}-
 
+    # A stage can need the hub itself, e.g., 'calkit latex diff' fetching a
+    # revision's DVC-tracked figures, so a token is obtained whether or not
+    # anything is pulled or saved. A workflow that grants no id-token
+    # permission keeps working; only a save or a pull fails without one.
     - name: Get GitHub OIDC token
-      if: ${{ !inputs.dvc_token && (inputs.save == 'true' || inputs.pull_dvc ==
-        'true') }}
+      if: ${{ !inputs.dvc_token }}
       id: get-oidc-token
       shell: bash
+      env:
+        TOKEN_REQUIRED: ${{ inputs.save == 'true' || inputs.pull_dvc == 'true' }}
       run: |
-        OIDC_TOKEN=$(curl -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=calkit.io" -s | jq -r '.value')
+        OIDC_TOKEN=$(curl -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" "${ACTIONS_ID_TOKEN_REQUEST_URL:-}&audience=calkit.io" -s | jq -r '.value' || true)
         if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" == "null" ]; then
-          echo "Failed to obtain OIDC token"
-          exit 1
+          if [ "$TOKEN_REQUIRED" == "true" ]; then
+            echo "Failed to obtain OIDC token"
+            exit 1
+          fi
+          echo "No OIDC token available; stages will run unauthenticated"
+          exit 0
         fi
         echo "::add-mask::$OIDC_TOKEN"
         echo "oidc-token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
 
     - name: Exchange OIDC token for Calkit token
-      if: ${{ !inputs.dvc_token && (inputs.save == 'true' || inputs.pull_dvc ==
-        'true') }}
+      if: ${{ !inputs.dvc_token && steps.get-oidc-token.outputs.oidc-token }}
       id: get-calkit-token
       shell: bash
+      env:
+        TOKEN_REQUIRED: ${{ inputs.save == 'true' || inputs.pull_dvc == 'true' }}
       run: |
         CALKIT_TOKEN=$(curl -X POST https://api.calkit.io/login/github-oidc \
           -H "Authorization: Bearer ${{ steps.get-oidc-token.outputs.oidc-token }}" \
-          -s | jq -r '.access_token')
+          -s | jq -r '.access_token' || true)
         if [ -z "$CALKIT_TOKEN" ] || [ "$CALKIT_TOKEN" == "null" ]; then
-          echo "Failed to obtain Calkit token"
-          exit 1
+          if [ "$TOKEN_REQUIRED" == "true" ]; then
+            echo "Failed to obtain Calkit token"
+            exit 1
+          fi
+          echo "No Calkit token available; stages will run unauthenticated"
+          exit 0
         fi
         echo "::add-mask::$CALKIT_TOKEN"
         echo "calkit-token=$CALKIT_TOKEN" >> $GITHUB_OUTPUT
 
     - run: calkit config remote-auth
-      if: ${{ inputs.save == 'true' || inputs.pull_dvc == 'true' }}
+      if: ${{ inputs.save == 'true' || inputs.pull_dvc == 'true' ||
+        inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
       shell: bash
       env:
         CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
@@ -350,6 +365,9 @@ runs:
 
     - run: calkit run ${{ inputs.run_args }}
       shell: bash
+      env:
+        CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+        CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
 
     - run: calkit save -am "Run pipeline"
       if: ${{ inputs.save == 'true' }}

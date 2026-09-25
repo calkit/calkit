@@ -18,6 +18,7 @@ from calkit.models.pipeline import (
     LatexStage,
     PathOutput,
     Pipeline,
+    Stage,
 )
 
 
@@ -57,6 +58,79 @@ def frozen_stage_base_names(
             ):
                 names.add(name)
     return names
+
+
+def frozen_tainted_stage_names(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> set[str]:
+    """Base names of frozen stages, plus every stage downstream of one.
+
+    A frozen stage doesn't re-run when its inputs change, so DVC never calls
+    it out of date -- and never calls anything built from its outputs out of
+    date either. Nothing in a status report will say so, which is the point
+    of naming them here: an answer resting on one of those outputs is
+    resting on whatever the stage last happened to produce.
+
+    Read from ``dvc.lock`` where there is one, since its deps and outs are
+    concrete, falling back to ``dvc.yaml``. Names come back without their
+    ``@`` expansion, matching :func:`frozen_stage_base_names`.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    tainted = frozen_stage_base_names(ck_info=ck_info, wdir=wdir)
+    if not tainted:
+        return set()
+    stages: dict = {}
+    for fname in ("dvc.lock", "dvc.yaml"):
+        fpath = os.path.join(wdir or ".", fname)
+        if os.path.isfile(fpath):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+            except Exception:
+                stages = {}
+            if stages:
+                break
+    if not stages:
+        return tainted
+
+    def _paths(stage: object, key: str) -> list[str]:
+        if not isinstance(stage, dict):
+            return []
+        out = []
+        for item in stage.get(key) or []:
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str):
+                out.append(path.rstrip("/"))
+        return out
+
+    producers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        for path in _paths(stage, "outs"):
+            producers.setdefault(path, set()).add(name.split("@")[0])
+    # A dep matches an out either way around the directory: a stage writing
+    # ``figures`` feeds one reading ``figures/x.png``, and one writing
+    # ``figures/x.png`` feeds one reading the whole ``figures`` directory.
+    consumers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        base = name.split("@")[0]
+        for dep in _paths(stage, "deps"):
+            for out, names in producers.items():
+                if (
+                    out == dep
+                    or dep.startswith(out + "/")
+                    or out.startswith(dep + "/")
+                ):
+                    for producer in names:
+                        if producer != base:
+                            consumers.setdefault(producer, set()).add(base)
+    queue = list(tainted)
+    while queue:
+        for consumer in consumers.get(queue.pop(), set()):
+            if consumer not in tainted:
+                tainted.add(consumer)
+                queue.append(consumer)
+    return tainted
 
 
 class PipelineStatus(BaseModel):
@@ -1510,41 +1584,63 @@ def _write_managed_gitignore_block(
     return True
 
 
-def _ref_resolver(
-    wdir: str | None, paths: list[str] | None = None
+def _revision_key(
+    wdir: str | None, paths: list[str]
 ) -> Callable[[str], str] | None:
-    """Return something that turns a Git revision into its commit hash.
+    """Return something that names a Git revision by what ``paths`` hold.
 
-    Stages whose inputs are revisions rather than files put the resolved
-    hash in their command, so DVC can see when a branch has moved. None
+    Stages whose inputs are revisions rather than files put the key in
+    their command, so DVC can see when either revision's content changes.
+    Content rather than commits, since a merge, a rebase, or a commit to
+    anything else makes a new commit without changing what's read. None
     when there's no repo to ask, in which case those stages fall back to
     running every time.
     """
+    import hashlib
+
     try:
         repo = calkit.git.get_repo(wdir)
     except Exception:
         return None
+    # Git paths are relative to the repo root, not the stage's directory
+    prefix = os.path.relpath(
+        os.path.realpath(wdir or "."), os.path.realpath(repo.working_dir)
+    )
+    pathspecs = []
+    for path in paths:
+        path = path.rstrip("/")
+        if prefix != "." and not prefix.startswith(".."):
+            path = f"{Path(prefix).as_posix()}/{path}"
+        # A DVC-tracked input's content is named by its pointer
+        pathspecs += [path, f"{path}.dvc"]
 
-    def resolve(ref: str) -> str:
+    def key(ref: str) -> str:
         sha = calkit.git.resolve_ref(repo, ref)
         if sha is None:
             # A revision that isn't there at all compiles as written; the
             # command reports it properly when the stage runs
-            return ref
-        # The commit this revision last changed the document in describes
-        # the same document as the tip does, and doesn't move when
-        # something else is committed
-        return calkit.git.last_change(repo, sha, paths or []) or sha
+            return "missing"
+        try:
+            listing = str(repo.git.ls_tree("-r", sha, "--", *pathspecs))
+        except Exception:
+            return sha[:12]
+        # A .gitignore beside the inputs doesn't change what's read
+        entries = [
+            line
+            for line in listing.splitlines()
+            if Path(line.split("\t", 1)[-1]).name != ".gitignore"
+        ]
+        return hashlib.sha256("\n".join(entries).encode()).hexdigest()[:12]
 
-    return resolve
+    return key
 
 
-def _stage_ref_resolver(
-    wdir: str | None, stage
+def _stage_revision_key(
+    wdir: str | None, stage: Stage
 ) -> Callable[[str], str] | None:
-    """A resolver that pins revisions by what this stage reads."""
+    """A revision key over what this stage reads."""
     paths = [p for p in stage.dvc_deps if not p.startswith(".calkit/")]
-    return _ref_resolver(wdir, paths)
+    return _revision_key(wdir, paths)
 
 
 def to_dvc(
@@ -1950,11 +2046,11 @@ def to_dvc(
         dvc_stages[stage_name] = dvc_stage
         # A Calkit stage can compile into more than one DVC stage when the
         # work has genuinely different inputs
-        # Per stage, since which commits count depends on what the stage
-        # reads. Never cached across calls: a resolver is bound to one
+        # Per stage, since what a revision's key covers depends on what the
+        # stage reads. Never cached across calls: a key is bound to one
         # repo, and a process can compile pipelines in several.
         for extra_name, extra_stage in stage.extra_dvc_stages(
-            resolve_ref=_stage_ref_resolver(wdir, stage)
+            revision_key=_stage_revision_key(wdir, stage)
         ).items():
             # Raised rather than worked around with a suffix: a generated
             # name is addressable (calkit run <name>) and is the stage's
@@ -1974,6 +2070,18 @@ def to_dvc(
         # spawning a git subprocess per output (~100 ms each).
         if write and manage_gitignore:
             repo = calkit.git.get_repo(wdir)
+            # A subproject is usually a plain subdirectory rather than its
+            # own git repo, so an output path relative to it (``wdir``) must
+            # be re-based onto the enclosing repo's root before it's handed
+            # to the ignore helpers below, or they'd write the rule into the
+            # top-level .gitignore under the wrong, subproject-relative path.
+            repo_root = Path(repo.working_dir).resolve()
+            wdir_rel = Path(wdir or ".").resolve().relative_to(repo_root)
+            wdir_rel_posix = wdir_rel.as_posix()
+
+            def _repo_rel(p: str) -> str:
+                return f"{wdir_rel_posix}/{p}" if wdir_rel_posix != "." else p
+
             # Ensure we catch any Jupyter Notebook outputs
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
@@ -1993,13 +2101,19 @@ def to_dvc(
             old_stage = existing_dvc_stages.get(stage_name, {})
             for old_path in calkit.dvc.out_paths_from_stage(old_stage):
                 if old_path not in current_out_paths:
-                    calkit.git.ensure_path_is_not_ignored(repo, path=old_path)
+                    calkit.git.ensure_path_is_not_ignored(
+                        repo, path=_repo_rel(old_path)
+                    )
             # Deal with any gitignore changes necessary
             for out in outputs:
                 if isinstance(out, PathOutput) and out.storage is None:
-                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                 elif isinstance(out, PathOutput) and out.storage == "git":
-                    calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_not_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                     if out.path.endswith(".ipynb"):
                         # A notebook stage's storage is declared here, in the
                         # pipeline, so a clean filter installed in the clone
@@ -2008,10 +2122,12 @@ def to_dvc(
                         # commit bytes that don't match what DVC hashed, with
                         # nothing showing as modified locally.
                         calkit.git.ensure_path_is_not_filtered(
-                            repo, path=out.path
+                            repo, path=_repo_rel(out.path)
                         )
                 elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
-                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.git.ensure_path_is_ignored(
+                        repo, path=_repo_rel(out.path)
+                    )
                     calkit.dvc.zip.add(out.path, is_stage_output=True)
         # For LaTeX stages, warn on a latexmkrc/output_dir mismatch and keep
         # the generated aux files out of Git via a managed .gitignore block.
@@ -2023,6 +2139,7 @@ def to_dvc(
                 _ensure_latex_aux_gitignore(stage, wdir=wdir)
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
+        stage_output_paths: list[str] = []
         for i in stage.inputs:
             if isinstance(i, InputsFromStageOutputs):
                 dvc_outs = dvc_stages[i.from_stage_outputs]["outs"]
@@ -2048,12 +2165,23 @@ def to_dvc(
                                     )
                                 extra_outs.append(out_i)
                             for out_i in extra_outs:
+                                stage_output_paths.append(out_i)
                                 if out_i not in dvc_stages[stage_name]["deps"]:
                                     dvc_stages[stage_name]["deps"].append(
                                         out_i
                                     )
                         else:
+                            stage_output_paths.append(out)
                             dvc_stages[stage_name]["deps"].append(out)
+        # Stages generated from this one read these too, e.g., a latex
+        # stage's diffs, but the paths are only known now
+        if stage_output_paths:
+            dvc_stages.update(
+                stage.extra_dvc_stages(
+                    revision_key=_stage_revision_key(wdir, stage),
+                    extra_inputs=stage_output_paths,
+                )
+            )
     if write:
         dvc_yaml = existing_dvc_yaml
         existing_stages = existing_dvc_stages
@@ -2201,6 +2329,7 @@ def translate_run_targets(
     - ``subproject:stage`` → ``subproject/dvc.yaml:stage`` (inline) or
       ``(sp_path, stage)`` in the second return value (isolated; must be run
       directly inside the subproject directory)
+    - ``stage.diffs`` → every diff stage a latex stage generates
 
     Any target that does not match a known subproject is passed through
     unchanged into the first return value.
@@ -2212,7 +2341,20 @@ def translate_run_targets(
         ``isolated_sp_targets`` is a list of ``(sp_path, stage_or_None)``
         pairs that must be reproduced by chdiring into the subproject.
     """
+    import calkit.latex
     import calkit.markdown
+
+    def expand_diffs(target: str, stages: dict) -> list[str]:
+        """Turn a target naming all of a latex stage's diffs into theirs."""
+        stage_name = target.removesuffix(calkit.latex.DIFFS_TARGET_SUFFIX)
+        if stage_name == target or stage_name not in stages:
+            return [target]
+        names = calkit.latex.get_diff_stage_names(
+            stage_name, stages[stage_name]
+        )
+        if not names:
+            raise ValueError(f"Stage '{stage_name}' has no diffs to run")
+        return names
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
@@ -2238,6 +2380,10 @@ def translate_run_targets(
                 continue
             expanded += calkit.markdown.get_stage_names(md_path, target)
         targets = expanded
+    # A latex stage's diffs are separate DVC stages, so a target addressing
+    # them all has to become their names
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    targets = [name for t in targets for name in expand_diffs(t, stages)]
     parent_targets: list[str] = []
     isolated_sp_targets: list[tuple[str, str | None]] = []
     for target in targets:
@@ -2252,14 +2398,41 @@ def translate_run_targets(
         sp_cfg = sp_map[sp_part]
         sp = Path(sp_cfg["path"]).as_posix()
         sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
-        if sp_is_isolated:
-            if stage_part:
-                isolated_sp_targets.append((sp, stage_part))
-            else:
+        if not stage_part:
+            if sp_is_isolated:
                 parent_targets.append(Path(sp).name)
-        else:
-            if stage_part:
-                parent_targets.append(f"{sp}/dvc.yaml:{stage_part}")
             else:
                 parent_targets.append(f"{sp}/dvc.yaml")
+            continue
+        # A subproject's diffs are named after its own stages
+        sp_stages: dict = {}
+        if stage_part.endswith(calkit.latex.DIFFS_TARGET_SUFFIX):
+            sp_info = calkit.load_calkit_info(wdir=sp)
+            sp_stages = sp_info.get("pipeline", {}).get("stages", {})
+        for stage_name in expand_diffs(stage_part, sp_stages):
+            if sp_is_isolated:
+                isolated_sp_targets.append((sp, stage_name))
+            else:
+                parent_targets.append(f"{sp}/dvc.yaml:{stage_name}")
     return parent_targets, isolated_sp_targets
+
+
+def get_upstream_stages(target: str, wdir: str | None = None) -> set[str]:
+    """Get a stage's name plus the names of all stages it depends on.
+
+    DVC already knows how to walk its own graph, including foreach/matrix
+    groups and stages defined in subdirectories, so we let it collect the
+    target with its dependencies rather than reimplementing the traversal.
+    Names of generated foreach stages come back as ``stage@item``, and both
+    ``calkit.yaml`` and ``dvc.yaml`` key off the base name, so we keep both.
+    """
+    import calkit.dvc
+
+    repo = calkit.dvc.get_dvc_repo(wdir)
+    names = set()
+    for stage in repo.stage.collect(target, with_deps=True):
+        name = getattr(stage, "name", None)
+        if name:
+            names.add(name)
+            names.add(name.split("@")[0])
+    return names

@@ -101,6 +101,9 @@ def questions_status(
     try:
         return check_questions(
             ck_info=ck_info,
+            # The pipeline's status is DVC's to report from a checkout, and
+            # the hub reports it per evidence entry from dvc.lock already
+            check_pipeline=False,
             view=RepoTreeQuestions(
                 tree=tree, ref=ref, wdir=str(repo.working_dir)
             ),

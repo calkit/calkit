@@ -86,6 +86,7 @@ class UserRegister(SQLModel):
     password: str = Field(min_length=8, max_length=40)
     account_name: str | None = Field(default=None, max_length=64)
     full_name: str | None = Field(default=None, max_length=255)
+    analytics_consent: bool | None = None
 
 
 # Properties to receive via API on update, all are optional
@@ -98,6 +99,7 @@ class UserUpdateMe(SQLModel):
     full_name: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     github_username: str | None = Field(default=None, max_length=255)
+    analytics_consent: bool | None = None
 
 
 class UpdatePassword(SQLModel):
@@ -197,6 +199,9 @@ class User(UserBase, table=True):
     # code or following its link; null until then. A Google or GitHub
     # sign-in that vouched for the address sets it too.
     email_verified_at: datetime | None = Field(default=None)
+    # Whether the user allows usage analytics; null until they answer. Saved
+    # on the account so server-side events can respect it too.
+    analytics_consent: bool | None = Field(default=None)
     # Relationships
     account: Account = Relationship(back_populates="user", cascade_delete=True)
     github_token: UserGitHubToken | None = Relationship(cascade_delete=True)
@@ -307,6 +312,7 @@ class UserPublic(UserBase):
     github_username: str | None
     email_verified: bool
     subscription: Union["UserSubscription", None]
+    analytics_consent: bool | None = None
 
 
 class UserEmailVerification(SQLModel, table=True):
@@ -730,7 +736,9 @@ class ProjectsPublic(SQLModel):
 
 class ProjectPost(ProjectBase):
     name: str = Field(min_length=4, max_length=255)
-    title: str = Field(min_length=4, max_length=255)
+    # Optional only when an Overleaf project is named below, since the title
+    # is then read from its main document
+    title: str | None = Field(default=None, min_length=4, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )
@@ -741,6 +749,8 @@ class ProjectPost(ProjectBase):
     # Whether a project made from a template keeps the template's commits.
     # Off by default: the new project's history starts with itself.
     keep_template_history: bool = False
+    # An Overleaf project to take the title from, when none is given
+    overleaf_project_url: str | None = Field(default=None, max_length=2048)
 
 
 class UserProjectAccess(SQLModel, table=True):
@@ -1021,6 +1031,21 @@ class Pipeline(SQLModel):
     ck_stages: list[str] = Field(default_factory=list)
     stage_statuses: dict[str, StageStatus] = Field(default_factory=dict)
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
+
+
+class PipelineYaml(SQLModel):
+    """The project's whole pipeline, as editable YAML.
+
+    The YAML is the ``pipeline:`` block of calkit.yaml, exactly as the
+    pipeline page shows it -- same key order, same comments.
+    """
+
+    yaml: str
+
+
+class PipelinePut(SQLModel):
+    yaml: str
+    message: str | None = None
 
 
 class PipelineStage(SQLModel):
@@ -1570,15 +1595,47 @@ class MiscArtifact(BaseModel):
 
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
+EvidenceKind = Literal[
+    "figure", "result", "value", "table", "publication", "document"
+]
+
+
+class QuestionEvidenceValue(SQLModel):
+    """One of the named values a result evidence entry cites."""
+
+    name: str
+    key: str
+    # Read from the result file, like QuestionEvidence.value
+    value: str | None = None
+
+
 class QuestionEvidence(SQLModel):
-    # "value" is one value inside a results file, which is what an answer
-    # templates a number from; "result" with a key is its deprecated form
-    kind: Literal["figure", "value", "result", "table", "publication"]
+    kind: EvidenceKind
     path: str
     key: str | None = None
-    # What the value is called in the answer's "{name}" placeholders
+    # For result evidence citing several values in its file, each by name,
+    # shown together on one card
+    values: list[QuestionEvidenceValue] | None = None
+    # What a value is called in the question's templates
     name: str | None = None
+    # Where in a publication or document the evidence is, for the reader
+    section: str | None = None
+    # A publication's source anchor, e.g., a LaTeX label
+    label: str | None = None
+    # Why this piece of evidence answers the question. Written inline in
+    # calkit.yaml, or kept in a file and cited by path -- a paragraph of
+    # reasoning belongs in a file the pipeline can rebuild, not in a YAML
+    # string nobody can diff. Either way this is the text to show.
     explanation: str | None = None
+    # The file the explanation was read from, when it came from one. Lets
+    # the page link to it, and say how to render it: a .md explanation is
+    # a document, not a YAML scalar that happens to contain markdown.
+    explanation_path: str | None = None
+    # The ref the evidence itself names, if any: evidence can cite a branch,
+    # tag, or commit other than the one being browsed, e.g. an answer backed
+    # by the figure as it stood when the answer was written. Carried through
+    # unresolved, since it's what links to the artifact have to point at.
+    git_ref: str | None = None
     # Resolved artifact the evidence points to, if it could be found
     figure: Figure | None = None
     result: Result | None = None
@@ -1586,14 +1643,37 @@ class QuestionEvidence(SQLModel):
     # For result evidence with a key, the value read from the result file so it
     # can be shown dashboard-style
     value: str | None = None
+    # The pipeline stage that produces the cited path, and its status, both
+    # resolved at the evidence's own ref. Evidence whose stage is stale is
+    # citing an artifact the pipeline would rebuild differently, which is
+    # worth knowing before trusting it as an answer.
+    stage: str | None = None
+    stage_status: "StageStatus | None" = None
+    # Why this citation shouldn't be taken at face value, if it shouldn't.
+    # 'missing': it resolves to nothing -- never pushed, deleted, or at a ref
+    # that isn't there. 'pipeline': the stage that made it is out of date.
+    # 'frozen': the stage is frozen, or downstream of one that is, so the
+    # pipeline will never call it stale however far its inputs have moved --
+    # and the citation doesn't name a Git ref that would pin what it refers
+    # to.
+    stale_reason: Literal["missing", "pipeline", "frozen"] | None = None
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "value", "result", "table", "publication"]
+    kind: EvidenceKind
     path: str
     key: str | None = None
+    # Name to key, for result evidence citing several values
+    values: dict[str, str] | None = None
     name: str | None = None
+    section: str | None = None
+    label: str | None = None
     explanation: str | None = None
+    # Set instead of ``explanation`` to point at a file holding it. The two
+    # are alternatives: a path wins, since the file is the record and the
+    # text the reader saw was only a copy of it.
+    explanation_path: str | None = None
+    git_ref: str | None = None
 
 
 class QuestionPublic(SQLModel):
@@ -1611,7 +1691,16 @@ class QuestionPublic(SQLModel):
     # prose. None when nothing checked, which is not the same as nothing
     # being wrong.
     status: (
-        Literal["ok", "stale", "error", "unanswered", "no-evidence"] | None
+        Literal[
+            "ok",
+            "stale",
+            "frozen",
+            "missing",
+            "error",
+            "unanswered",
+            "no-evidence",
+        ]
+        | None
     ) = None
     status_message: str | None = None
 

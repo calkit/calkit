@@ -39,11 +39,14 @@ export interface OnboardingStep {
 /** The flag that means "I'm finished with this checklist, hide it." */
 export const DISMISSED = "dismissed"
 
+export type StartPath = "existing" | "fresh" | "overleaf"
+
 export interface ProjectOnboardingInput {
   /** Research questions declared in calkit.yaml. */
   questionCount: number
+  /** Entries across the project's reference collections. */
+  referenceCount: number
   reproCheck?: ReproCheck | null
-  pipelineStatus?: "up-to-date" | "stale" | "unknown" | null
   /**
    * Per-stage statuses from the pipeline endpoint. A stage that's up to
    * date or stale has been run at least once; "not-run" hasn't.
@@ -74,8 +77,8 @@ export function pipelineHasRun(
  */
 export function buildProjectSteps({
   questionCount,
+  referenceCount,
   reproCheck,
-  pipelineStatus,
   stageStatuses,
   flags,
 }: ProjectOnboardingInput): OnboardingStep[] {
@@ -90,54 +93,44 @@ export function buildProjectSteps({
       done: questionCount > 0,
     },
     {
-      key: "dataset",
-      title: "Bring in your data",
+      key: "references",
+      title: "Add references",
       detail:
-        "Type it in, upload it, or import it by DOI, URL, or repo. " +
-        "Recording the source now is what lets anyone trace a figure back " +
-        "to it later.",
+        "Keep track of other relevant work inside the project for quick viewing and added context.",
+      done: referenceCount > 0,
+    },
+    {
+      key: "dataset",
+      title: "Collect some data",
+      detail:
+        "Collect with a script, type it in manually, or import by DOI, URL, or Git repo.",
       done: (reproCheck?.n_datasets ?? 0) > 0,
     },
     {
       key: "figure",
-      title: "Make a figure from it",
+      title: "Analyze and visualize",
       detail:
-        "Plot the data in the browser, then save it as a pipeline stage. " +
-        "That creates the environment it runs in, so the figure traces back " +
-        "to code, data, and a pinned set of packages.",
+        "Plot the data and calculate statistics to answer your research questions.",
       done: (reproCheck?.n_figures_with_import_or_stage ?? 0) > 0,
     },
     {
       key: "run",
-      title: hasRun
-        ? "Run the pipeline again"
-        : "Run the pipeline on your machine",
-      detail: hasRun
-        ? "Something changed since the last run. Run it again and push, " +
-          "so what's shown here matches the code."
-        : "Install the CLI, clone the project, and run it end to end. " +
-          "What it produces gets pushed back here, where the project page " +
-          "picks it up.",
-      done: pipelineStatus === "up-to-date",
+      title: "Run the pipeline",
+      detail:
+        "Install the CLI, clone the project, run it end to end, " +
+        "and push the results back here.",
+      // Having run at all is the milestone; a run that has since gone
+      // stale is ordinary work in progress, not an unfinished setup step,
+      // and the sidebar says so without reopening the checklist.
+      done: hasRun,
     },
     {
       key: "publication",
-      title: "Write it up",
+      title: "Write about the findings",
       detail:
         "Start a paper from a template or connect the Overleaf project " +
-        "you're already writing in, so its figures stop drifting out of " +
-        "date.",
+        "you're already writing in, so its figures and results stay up to date without manual uploads.",
       done: (reproCheck?.n_publications ?? 0) > 0,
-    },
-    {
-      key: "editor",
-      title: "Set up your editor",
-      detail:
-        "The VS Code, JupyterLab, and browser extensions put the pipeline " +
-        "and the hub where you're already working.",
-      done: false,
-      manual: true,
-      optional: true,
     },
   ]
   // A user can mark any step done by hand, not just the manual ones -- a
@@ -228,8 +221,8 @@ export function buildAccountSteps({
       key: "cli",
       title: "Install the Calkit CLI",
       detail:
-        "The CLI is what runs pipelines and moves results between your " +
-        "machine and the hub.",
+        "Builds environments, runs the pipeline, and moves results between " +
+        "your machine and the hub.",
       done: cliRunning,
       // The local server is usually not running even when the CLI is
       // installed, so an unanswered check is not evidence of absence.
@@ -239,9 +232,9 @@ export function buildAccountSteps({
       key: "browser_extension",
       title: "Install the browser extension",
       detail:
-        "Brings Calkit into GitHub, Overleaf, and journal pages: stale " +
-        "figures on Overleaf, DVC-tracked files on GitHub, and references " +
-        "saved straight from the paper you're reading.",
+        "Save references to BibTeX from the paper you're reading, view " +
+        "DVC-tracked files on GitHub, and keep Overleaf figures in sync, " +
+        "without leaving the browser.",
       done: false,
       // Nothing on the server can tell whether an extension is installed.
       manual: true,
@@ -250,7 +243,9 @@ export function buildAccountSteps({
     {
       key: "overleaf",
       title: "Connect Overleaf",
-      detail: "Link papers you're already writing to the projects behind them.",
+      detail:
+        "Keep a paper you're already writing in sync with the analysis " +
+        "behind it.",
       done: overleafConnected,
       optional: true,
       detectedOnly: true,
@@ -258,7 +253,8 @@ export function buildAccountSteps({
     {
       key: "zotero",
       title: "Connect Zotero",
-      detail: "Import a collection and keep the project's .bib file in step.",
+      detail:
+        "Import a collection and keep the project's .bib file in sync with it.",
       done: zoteroConnected,
       optional: true,
       detectedOnly: true,

@@ -19,6 +19,7 @@ import {
   Select,
   Text,
   Textarea,
+  useDisclosure,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi } from "@tanstack/react-router"
@@ -29,6 +30,7 @@ import { FaPlus, FaTrash } from "react-icons/fa"
 import type { AxiosError } from "axios"
 import { ProjectsService, type QuestionPublic } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import DeleteAlert from "../Common/DeleteAlert"
 import {
   useProjectFigures,
   useProjectPublications,
@@ -45,17 +47,30 @@ interface EditQuestionProps {
   // Git ref currently being browsed, so figure/result options come from the
   // same snapshot the question does.
   gitRef?: string
+  // Where to go once the question is deleted; defaults to closing
+  onDeleted?: () => void
 }
 
 interface EvidenceRow {
   // Combined "kind:path" so a single dropdown can pick figure or result.
   selection: string
   key: string
-  // What the value is called in the answer's "{name}" placeholders. Not
-  // edited here, but carried through the form: dropping it on save would
-  // unfill every placeholder in the answer that names it.
+  // What the value is called in the answer's "{name}" placeholders, and
+  // edited beside its key
   name: string
   explanation: string
+  // Not editable here: evidence can name the ref it was written against,
+  // and the form rewrites the whole list, so a row that carries one has to
+  // hand it back or saving an unrelated edit would quietly drop it.
+  gitRef?: string
+  // Carried back for the same reason: a citation of a publication or
+  // document points at a section of it.
+  section?: string
+  label?: string
+  // A result's named values, which the form doesn't edit but must keep,
+  // and the file they're keys into, since they mean nothing in another
+  values?: Record<string, string>
+  valuesPath?: string
 }
 
 interface EditQuestionForm {
@@ -81,8 +96,10 @@ const parseSelection = (selection: string) => {
       | "figure"
       | "value"
       | "result"
+      | "value"
       | "table"
-      | "publication",
+      | "publication"
+      | "document",
     path: selection.slice(idx + 1),
   }
 }
@@ -92,7 +109,9 @@ const EditQuestion = ({
   isOpen,
   onClose,
   gitRef,
+  onDeleted,
 }: EditQuestionProps) => {
+  const deleteDisclosure = useDisclosure()
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
   const routeApi = getRouteApi("/_layout/$accountName/$projectName")
@@ -157,6 +176,13 @@ const EditQuestion = ({
         key: ev.key ?? "",
         name: ev.name ?? "",
         explanation: ev.explanation ?? "",
+        gitRef: ev.git_ref ?? undefined,
+        section: ev.section ?? undefined,
+        label: ev.label ?? undefined,
+        values: ev.values
+          ? Object.fromEntries(ev.values.map((v) => [v.name, v.key]))
+          : undefined,
+        valuesPath: ev.values ? ev.path : undefined,
       })),
     })
   }, [question, reset])
@@ -186,7 +212,16 @@ const EditQuestion = ({
                 path: parsed.path,
                 key: keyed ? row.key : undefined,
                 name: keyed && row.name ? row.name : undefined,
+                values:
+                  parsed.kind === "result" &&
+                  row.values &&
+                  parsed.path === row.valuesPath
+                    ? row.values
+                    : undefined,
+                section: row.section ? row.section : undefined,
+                label: row.label ? row.label : undefined,
                 explanation: row.explanation ? row.explanation : undefined,
+                git_ref: row.gitRef ? row.gitRef : undefined,
               },
             ]
           }),
@@ -217,6 +252,23 @@ const EditQuestion = ({
       onClose={onClose}
       size={{ base: "sm", md: "lg" }}
       isCentered
+      // The evidence list grows without limit, so this form outgrows the
+      // viewport. Centered, that leaves it with nothing to scroll: the
+      // content runs off both ends and the page behind is locked. Scrolling
+      // inside keeps the header and the save button where they are and
+      // gives the body the overflow.
+      scrollBehavior="inside"
+      // This opens on top of the question's own modal, which already holds
+      // the page still. A second scroll lock takes the scrollbar away and
+      // puts it back, shifting everything underneath for a frame -- keeping
+      // the gap is what stops that.
+      preserveScrollBarGap
+      // No fade. The overlay's fade is a Web Animation whose final value is
+      // committed to the element a frame after the animation ends, and the
+      // form's own first render lands in exactly that gap -- so the page
+      // paints one frame undimmed before the overlay settles, which reads
+      // as a flash. Nothing to animate, nothing to race.
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent
@@ -279,6 +331,10 @@ const EditQuestion = ({
             {fields.map((field, index) => {
               const selection = watch(`evidence.${index}.selection`) || ""
               const parsed = parseSelection(selection)
+              const rowValues =
+                parsed?.path === watch(`evidence.${index}.valuesPath`)
+                  ? watch(`evidence.${index}.values`)
+                  : undefined
               const figures = figuresRequest.data ?? []
               const results = resultsRequest.data ?? []
               const publications = publicationsRequest.data ?? []
@@ -303,7 +359,26 @@ const EditQuestion = ({
                   p={3}
                   mb={2}
                 >
-                  <Flex justify="flex-end">
+                  {/* Registered so the ref this row was written against
+                      survives a save; there is nothing to edit here. */}
+                  <input
+                    type="hidden"
+                    {...register(`evidence.${index}.gitRef`)}
+                  />
+                  <input
+                    type="hidden"
+                    {...register(`evidence.${index}.section`)}
+                  />
+                  <input
+                    type="hidden"
+                    {...register(`evidence.${index}.label`)}
+                  />
+                  <Flex justify="flex-end" align="center" gap={2}>
+                    {field.gitRef ? (
+                      <Text fontSize="xs" color="gray.500" mr="auto">
+                        at {field.gitRef}
+                      </Text>
+                    ) : null}
                     <IconButton
                       aria-label="Remove evidence"
                       icon={<FaTrash />}
@@ -375,7 +450,20 @@ const EditQuestion = ({
                       ) : null}
                     </Select>
                   </FormControl>
-                  {parsed && KEYED_KINDS.has(parsed.kind) ? (
+                  {parsed?.kind === "result" && rowValues ? (
+                    // Kept as written in calkit.yaml, since the form has no
+                    // editor for a map of names to keys
+                    <Box mb={2} fontSize="xs">
+                      <Text mb={1} fontWeight="medium">
+                        Values
+                      </Text>
+                      {Object.entries(rowValues).map(([name, key]) => (
+                        <Text key={name} color="gray.500">
+                          <Code fontSize="xs">{name}</Code>: {key}
+                        </Text>
+                      ))}
+                    </Box>
+                  ) : parsed && KEYED_KINDS.has(parsed.kind) ? (
                     <>
                       <FormControl mb={2}>
                         <FormLabel fontSize="xs" mb={1}>
@@ -433,6 +521,19 @@ const EditQuestion = ({
           </FormControl>
         </ModalBody>
         <ModalFooter gap={3}>
+          {/* Deleting writes to the default branch, where question numbers
+              may not match those at the ref being browsed */}
+          <Button
+            variant="danger"
+            mr="auto"
+            onClick={deleteDisclosure.onOpen}
+            isDisabled={!!gitRef}
+            title={
+              gitRef ? "Switch to the default branch to delete" : undefined
+            }
+          >
+            Delete
+          </Button>
           <Button
             variant="primary"
             type="submit"
@@ -442,6 +543,15 @@ const EditQuestion = ({
           </Button>
           <Button onClick={onClose}>Cancel</Button>
         </ModalFooter>
+        <DeleteAlert
+          type="Question"
+          id={String(question?.number ?? "")}
+          isOpen={deleteDisclosure.isOpen}
+          onClose={deleteDisclosure.onClose}
+          onDeleted={onDeleted ?? onClose}
+          projectOwner={accountName}
+          projectName={projectName}
+        />
       </ModalContent>
     </Modal>
   )

@@ -433,6 +433,7 @@ Model class: `LatexStage`
 | `synctex`               | bool                          | no       | True    | Generate SyncTeX data for editor/PDF navigation.                                                                                                                                                                                                                                                     |
 | `latexmk_args`          | list[str]                     | no       |         | Extra arguments passed straight through to latexmk, for control Calkit does not model.                                                                                                                                                                                                               |
 | `provenance`            | bool                          | no       | False   | Mark and record where injected content came from: install calkit.sty beside the document, generate its artifact table before each build, and write <document>.provenance.json afterwards listing every value, figure and text block the document took from the project, with the stage that made it. |
+| `latexdiff_args`        | list[str]                     | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here.                                                                                                                        |
 
 ### `map-paths`
 

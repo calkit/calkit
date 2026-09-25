@@ -5,11 +5,11 @@ import {
   Code,
   IconButton,
   Text,
-  Tooltip,
   useClipboard,
 } from "@chakra-ui/react"
 import type { ReactNode } from "react"
 import { FiCheck, FiCopy } from "react-icons/fi"
+import Tooltip from "./Tooltip"
 
 // A full-width command block with a copy button in its right side, like a
 // fenced code block on GitHub.

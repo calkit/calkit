@@ -43,12 +43,12 @@ import {
 import mixpanel from "mixpanel-browser"
 import { useEffect, useState } from "react"
 import { BsThreeDots } from "react-icons/bs"
-import { FaCodeBranch } from "react-icons/fa"
+import { FaCodeBranch, FaSync } from "react-icons/fa"
 import { FaGithub, FaQuestion, FaRegClone, FaRegFileAlt } from "react-icons/fa"
-import { SiOverleaf } from "react-icons/si"
 import { FiCheckSquare } from "react-icons/fi"
 import { LuCopyPlus } from "react-icons/lu"
-import { MdEdit, MdOutlineLightbulb } from "react-icons/md"
+import { MdEdit } from "react-icons/md"
+import { SiOverleaf } from "react-icons/si"
 import { z } from "zod"
 
 import {
@@ -63,16 +63,16 @@ import CloneProject from "../../../../components/Projects/CloneProject"
 import EditProject from "../../../../components/Projects/EditProject"
 import HelpContent from "../../../../components/Projects/HelpContent"
 import MakeProjectPublic from "../../../../components/Projects/MakeProjectPublic"
-import NewProject from "../../../../components/Projects/NewProject"
+import NewProjectModal from "../../../../components/Projects/NewProjectModal"
 import ProjectStatus from "../../../../components/Projects/ProjectStatus"
 import ImportOverleaf from "../../../../components/Publications/ImportOverleaf"
 import NewPublication from "../../../../components/Publications/NewPublication"
 import useAuth from "../../../../hooks/useAuth"
 import useOnboardingFlags from "../../../../hooks/useOnboarding"
-import { DISMISSED } from "../../../../lib/onboarding"
 import useProject from "../../../../hooks/useProject"
+import useRefreshProject from "../../../../hooks/useRefreshProject"
 import { isAuthenticationError } from "../../../../lib/auth"
-import useTips from "../../../../hooks/useTips"
+import { DISMISSED } from "../../../../lib/onboarding"
 
 interface CommitHistory {
   hash: string
@@ -152,6 +152,7 @@ function SwitchVersionModal({
         setQuery("")
       }}
       size="md"
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent>
@@ -289,13 +290,13 @@ function ProjectMenu({
   const navigate = useNavigate()
   // Clearing the flag is what brings the checklist back on the home page.
   const { setFlag } = useOnboardingFlags(project.id)
-  const tips = useTips(project.id, userHasWriteAccess)
   const editProjectModal = useDisclosure()
   const newProjectModal = useDisclosure()
   const cloneProjectModal = useDisclosure()
   const switchVersionModal = useDisclosure()
   const newPubTemplateModal = useDisclosure()
   const overleafImportModal = useDisclosure()
+  const refreshProject = useRefreshProject(accountName, projectName)
   // Codespaces gives a browser editor that can also run the pipeline; the
   // CLI signs in on its own there, so no token setup stands in the way.
   const codespacesUrl = project.git_repo_url
@@ -377,15 +378,16 @@ function ProjectMenu({
                 Show setup checklist
               </MenuItem>
             ) : null}
-            {userHasWriteAccess ? (
+            <MenuDivider />
+            {user ? (
               <MenuItem
-                icon={<MdOutlineLightbulb fontSize={18} />}
-                onClick={tips.showing ? tips.dismissAll : tips.resetAll}
+                icon={<FaSync fontSize={14} />}
+                onClick={() => refreshProject.mutate()}
+                isDisabled={refreshProject.isPending}
               >
-                {tips.showing ? "Hide tips" : "Show tips again"}
+                Refresh
               </MenuItem>
             ) : null}
-            <MenuDivider />
             <MenuItem
               icon={<FaCodeBranch fontSize={16} />}
               onClick={switchVersionModal.onOpen}
@@ -413,7 +415,7 @@ function ProjectMenu({
         isOpen={editProjectModal.isOpen}
         onClose={editProjectModal.onClose}
       />
-      <NewProject
+      <NewProjectModal
         isOpen={newProjectModal.isOpen}
         onClose={newProjectModal.onClose}
         defaultTemplate={`${project.owner_account_name}/${project.name}`}

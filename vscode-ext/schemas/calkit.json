@@ -953,6 +953,64 @@
       "title": "DockerEnvironment",
       "type": "object"
     },
+    "DocumentEvidence": {
+      "description": "Evidence in the form of a document cited by path, e.g., a Markdown\nwrite-up, without declaring it as a publication.\n\nThe document must be built by a pipeline stage, usually a Markdown\nstage, so its numbers are injected from the results and go stale with\nthem; one written by hand is an error, like a typed-in value.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the document can be found.",
+          "title": "Git Ref"
+        },
+        "kind": {
+          "const": "document",
+          "default": "document",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Section of the document where the evidence is presented, as a reader would find it, e.g., '4.2' or 'Results'.",
+          "title": "Section"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "DocumentEvidence",
+      "type": "object"
+    },
     "Figure": {
       "description": "A figure, usually produced by a pipeline stage.\n\nCarries attribution for the ones that aren't: a schematic drawn by hand\nor laid out with a generative AI tool has no stage to point at, and is\nexactly the kind of thing a reader wants told. One obtained from\nelsewhere records ``imported_from`` instead, like a dataset does.",
       "not": {
@@ -1082,6 +1140,19 @@
           ],
           "default": null,
           "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the figure can be found.",
+          "title": "Git Ref"
         },
         "kind": {
           "const": "figure",
@@ -2344,6 +2415,15 @@
           "default": "latex",
           "title": "Kind",
           "type": "string"
+        },
+        "latexdiff_args": {
+          "default": [],
+          "description": "Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Latexdiff Args",
+          "type": "array"
         },
         "latexmk_args": {
           "default": [],
@@ -4429,13 +4509,11 @@
               }
             ]
           },
+          "description": "Stages to run, keyed by name. A project that has declared a pipeline but not yet written a stage has none, which is empty rather than invalid.",
           "title": "Stages",
           "type": "object"
         }
       },
-      "required": [
-        "stages"
-      ],
       "title": "Pipeline",
       "type": "object"
     },
@@ -5082,6 +5160,19 @@
           "default": null,
           "title": "Explanation"
         },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the publication can be found.",
+          "title": "Git Ref"
+        },
         "kind": {
           "const": "publication",
           "default": "publication",
@@ -5556,10 +5647,17 @@
               "type": "string"
             },
             {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
               "type": "null"
             }
           ],
           "default": null,
+          "description": "The claim the evidence supports. A mapping keyed by 'if <condition>', 'elif <condition>' and 'else' picks its wording from the evidence, so an answer resting on a threshold states the other outcome instead of going stale when a value moves.",
           "title": "Answer"
         },
         "evidence": {
@@ -5581,6 +5679,9 @@
                   },
                   {
                     "$ref": "#/$defs/PublicationEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/DocumentEvidence"
                   }
                 ]
               },
@@ -6229,6 +6330,11 @@
           "description": "Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to.",
           "title": "Git Rev"
         },
+        "includes_pipeline": {
+          "default": false,
+          "title": "Includes Pipeline",
+          "type": "boolean"
+        },
         "internal": {
           "default": false,
           "title": "Internal",
@@ -6616,7 +6722,7 @@
       "type": "object"
     },
     "ResultsEvidence": {
-      "description": "Evidence in the form of a results file: a set of values, a table, a\nmap, whatever the pipeline wrote. For one value inside such a file, use\n``value`` evidence, which can be templated into the answer.",
+      "description": "Evidence in the form of a results file: a set of values, a table, a\nmap, whatever the pipeline wrote.\n\n``values`` names related values within it, like the fields of a struct\nor object,\nso each can be templated into the answer as ``value`` evidence would be\nwithout an entry per value.",
       "properties": {
         "explanation": {
           "anyOf": [
@@ -6629,6 +6735,19 @@
           ],
           "default": null,
           "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the result can be found.",
+          "title": "Git Ref"
         },
         "key": {
           "anyOf": [
@@ -6652,6 +6771,22 @@
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Values within the results file, mapping each name, under which it can be templated into the question's text, to its key. Names must be unique within the question.",
+          "title": "Values"
         }
       },
       "required": [
@@ -8306,6 +8441,19 @@
           "default": null,
           "title": "Explanation"
         },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the table can be found.",
+          "title": "Git Ref"
+        },
         "kind": {
           "const": "table",
           "default": "table",
@@ -8430,8 +8578,21 @@
           "default": null,
           "title": "Explanation"
         },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the value can be found.",
+          "title": "Git Ref"
+        },
         "key": {
-          "description": "Key of the value within the results file. A key present at the top level is used as-is; otherwise it is split on dots and walked into nested objects, with integers indexing lists.",
+          "description": "Key of the value within the results file. It is split on dots and walked into nested objects, taking the longest run of parts that names a key at each level, with integers indexing lists.",
           "title": "Key",
           "type": "string"
         },

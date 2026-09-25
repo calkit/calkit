@@ -47,7 +47,7 @@ This guide will help you get started.
 1. Install the JupyterLab extension in development mode
    (if working on the JupyterLab extension):
    ```sh
-   uv run jupyter labextension develop . --overwrite
+   uv run jupyter-builder develop . --overwrite
    ```
 1. Start the JupyterLab extension TypeScript compiler in watch mode
    (if working on the JupyterLab extension):
@@ -124,6 +124,18 @@ directory loaded unpacked during development.
 The store listing's text lives in `browser-ext/store/listing.md`, and its
 screenshots are generated from `docs/img/browser-ext` by
 `browser-ext/scripts/store-screenshots.py`.
+
+## Releasing the assistant
+
+Publishing a GitHub release tagged `assistant/vX.Y.Z` builds the Windows
+executable with PyInstaller and attaches it to the release as
+`calkit-assistant-X.Y.Z-windows.exe`.
+As with the extensions, uncheck "set as the latest release" for these.
+Pull requests that touch `assistant/` run its offscreen smoke test on all
+three platforms and a Windows build, so a broken build is caught before a
+release is cut.
+`make assistant` runs the app locally and `make test-assistant` runs the
+same smoke test.
 
 ## 💡 Other ways to contribute
 

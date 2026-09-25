@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/python:dev-3.13-bullseye
+FROM mcr.microsoft.com/devcontainers/python:dev-3.13-bookworm
 
 # GHCR links a package to the repo named here, which is what makes the
 # package inherit this repo's permissions and show its source
@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.source=https://github.com/calkit/calkit
 
 # Install Miniforge
 ARG MINIFORGE_NAME=Miniforge3
-ARG MINIFORGE_VERSION=26.3.2-0
+ARG MINIFORGE_VERSION=26.7.2-0
 ARG TARGETPLATFORM
 
 ENV CONDA_DIR=/opt/conda
@@ -39,19 +39,17 @@ RUN rm -f /etc/apt/sources.list.d/yarn.list && \
     echo ". ${CONDA_DIR}/etc/profile.d/conda.sh && conda activate base" >> /etc/skel/.bashrc && \
     echo ". ${CONDA_DIR}/etc/profile.d/conda.sh && conda activate base" >> ~/.bashrc
 
-# Downgrade libsqlite
-# See https://github.com/iterative/dvc/issues/10692#issuecomment-2674679552
-RUN conda install -y libsqlite=3.48.0 && \
-    conda clean --tarballs --index-cache --packages --yes && \
+# Shrink the conda install
+RUN conda clean --tarballs --index-cache --packages --yes && \
     find ${CONDA_DIR} -follow -type f -name '*.a' -delete && \
     find ${CONDA_DIR} -follow -type f -name '*.pyc' -delete && \
     conda clean --force-pkgs-dirs --all --yes
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.11 /uv /uvx /bin/
 
 # Install Pixi
-ARG PIXI_VERSION=v0.69.0
+ARG PIXI_VERSION=v0.80.0
 RUN curl -L -o /usr/local/bin/pixi -fsSL --compressed "https://github.com/prefix-dev/pixi/releases/download/${PIXI_VERSION}/pixi-$(uname -m)-unknown-linux-musl" \
     && chmod +x /usr/local/bin/pixi \
     && pixi info

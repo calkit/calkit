@@ -16,7 +16,12 @@ def _call(
     body: dict | None = None,
     params: dict | None = None,
 ):
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     with (
         patch(
             "app.api.routes.projects.pipeline.app.projects.get_project",

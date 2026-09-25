@@ -1,5 +1,6 @@
 import {
   Button,
+  Container,
   HStack,
   Heading,
   Icon,
@@ -147,8 +148,8 @@ function ConnectedAccounts() {
   }
 
   return (
-    <>
-      <Heading size="md" mb={4}>
+    <Container maxW="full">
+      <Heading size="md" py={4}>
         Connected accounts
       </Heading>
       {connectedAccountsQuery.isPending ? (
@@ -165,7 +166,9 @@ function ConnectedAccounts() {
               <Button
                 size="xs"
                 variant="primary"
-                onClick={() => startGitHubOAuth()}
+                onClick={() =>
+                  startGitHubOAuth(undefined, { chooseAccount: true })
+                }
               >
                 Connect
               </Button>
@@ -342,7 +345,7 @@ function ConnectedAccounts() {
           />
         </>
       )}
-    </>
+    </Container>
   )
 }
 

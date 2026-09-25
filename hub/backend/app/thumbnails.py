@@ -20,6 +20,7 @@ import base64
 import hashlib
 import io
 import threading
+from typing import Any
 
 from app import cache
 from app.core import logger
@@ -57,7 +58,9 @@ def _render_pdf_first_page(data: bytes, max_px: int) -> bytes | None:
         return _render_pdf_locked(pypdfium2, data, max_px)
 
 
-def _render_pdf_locked(pypdfium2, data: bytes, max_px: int) -> bytes | None:
+def _render_pdf_locked(
+    pypdfium2: Any, data: bytes, max_px: int
+) -> bytes | None:
     pdf = pypdfium2.PdfDocument(data)
     try:
         if len(pdf) == 0:
@@ -86,17 +89,17 @@ def _render_pdf_locked(pypdfium2, data: bytes, max_px: int) -> bytes | None:
 def _render_raster(data: bytes, max_px: int) -> bytes | None:
     from PIL import Image
 
-    with Image.open(io.BytesIO(data)) as image:
-        image.thumbnail((max_px, max_px))
+    with Image.open(io.BytesIO(data)) as opened:
+        opened.thumbnail((max_px, max_px))
         # A plot saved with transparency goes on white rather than on
         # whatever the page behind it happens to be.
-        if image.mode in ("RGBA", "LA", "P"):
-            background = Image.new("RGB", image.size, (255, 255, 255))
-            converted = image.convert("RGBA")
-            background.paste(converted, mask=converted.split()[-1])
-            image = background
+        image: Image.Image
+        if opened.mode in ("RGBA", "LA", "P"):
+            image = Image.new("RGB", opened.size, (255, 255, 255))
+            converted = opened.convert("RGBA")
+            image.paste(converted, mask=converted.split()[-1])
         else:
-            image = image.convert("RGB")
+            image = opened.convert("RGB")
         buf = io.BytesIO()
         image.save(buf, format="WEBP", quality=_WEBP_QUALITY, method=4)
         return buf.getvalue()

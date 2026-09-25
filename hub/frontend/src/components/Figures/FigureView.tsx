@@ -1,13 +1,11 @@
 import { Box, Image, Text } from "@chakra-ui/react"
-import axios from "axios"
 import { Suspense, lazy } from "react"
 
 const Plot = lazy(() => import("react-plotly.js"))
-import { useQuery } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
 
 import type { Figure } from "../../client"
 import PdfCanvas from "../Common/PdfCanvas"
+import SandboxedHtml from "../Common/SandboxedHtml"
 
 interface FigureViewProps {
   figure: Figure
@@ -21,27 +19,9 @@ interface FigureViewProps {
 }
 
 function FigureView({ figure, width, fillHeight }: FigureViewProps) {
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
   const boxWidth = width ? width : "100%"
-  // Hooks must run in the same order on every render, so fetch HTML-figure
-  // content unconditionally and gate it with `enabled`; otherwise paging
-  // between a non-HTML and an HTML figure changes the hook count and
-  // triggers React error #310.
   const lowerPath = figure.path.toLowerCase()
   const isHtml = lowerPath.endsWith(".html")
-  const { data: htmlData, isPending: htmlIsPending } = useQuery({
-    queryFn: () => axios.get(String(figure.url)),
-    queryKey: [
-      "projects",
-      accountName,
-      projectName,
-      "figure-content",
-      figure.path,
-      figure.url,
-    ],
-    enabled: isHtml && Boolean(!figure.content && figure.url),
-  })
   let figView = <>Not set</>
   if (lowerPath.endsWith(".pdf")) {
     figView = (
@@ -157,26 +137,13 @@ function FigureView({ figure, width, fillHeight }: FigureViewProps) {
       figView = <Text>Cannot render this type of figure</Text>
     }
   } else if (isHtml) {
-    let figContent = figure.content
-    if (!figure.content && figure.url) {
-      figContent = htmlData?.data
-    } else {
-      figContent = "No content found"
-    }
     figView = (
       <Box width={boxWidth} height="400px">
-        {figContent ? (
-          <iframe
-            width="100%"
-            height="100%"
-            title="figure"
-            srcDoc={figContent}
-          />
-        ) : htmlIsPending ? (
-          "Loading..."
-        ) : (
-          ""
-        )}
+        <SandboxedHtml
+          title={figure.title || figure.path}
+          content={figure.content}
+          url={figure.url}
+        />
       </Box>
     )
   } else {

@@ -1517,7 +1517,9 @@ def check_docker_env(
             deps_md5s=deps_md5s,
             run_config=run_config,
         )
-        with open(arch_lock_fpath, "w") as f:
+        # newline="\n" so the file is byte-identical on every platform,
+        # rather than a Windows checkout flipping it to CRLF.
+        with open(arch_lock_fpath, "w", newline="\n") as f:
             json.dump(arch_lock, f, indent=4)
 
     current_arch = get_docker_arch()
@@ -1800,10 +1802,7 @@ def check_venv(
                 if verbose:
                     typer.echo(f"Using legacy lock file: {legacy_fpath}")
                 break
-    if _platform.system() == "Windows":
-        activate_cmd = f"{prefix}\\Scripts\\activate"
-    else:
-        activate_cmd = f". {prefix}/bin/activate"
+    activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
 
     def pip_install_and_freeze(reqs_arg: str) -> None:
         check_cmd = (
@@ -2058,24 +2057,37 @@ def check_questions(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output the report as JSON.")
     ] = False,
+    no_pipeline: Annotated[
+        bool,
+        typer.Option(
+            "--no-pipeline",
+            help="Skip asking DVC which stages are out of date, which is "
+            "the slowest part of the check.",
+        ),
+    ] = False,
 ) -> None:
-    """Check the evidence behind each answered question.
+    """Check that answered questions are backed by current evidence.
 
-    A question is stale if any of its evidence changed after the commit
-    that last edited the question, in Git history for Git-tracked outputs
-    or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value
-    keys must resolve, every placeholder in the text must render, and a
-    publication label must still be present in the LaTeX source. Exits
-    with an error if any answered question is stale or broken.
+    Reports, worst first: evidence that isn't there (never run, never
+    pushed, or pinned to a Git ref that doesn't exist); broken references
+    (a key that doesn't resolve, a placeholder that names no evidence, a
+    label missing from the LaTeX); evidence the pipeline would rebuild;
+    and evidence from a frozen stage, or downstream of one, which nothing
+    will ever report out of date unless the citation pins a git_ref.
+
+    Evidence pinned with a git_ref is checked at that ref rather than in
+    the working tree. Exits with an error if any answered question is
+    missing evidence, broken, or out of date with the pipeline.
 
     Whether the answer follows from the evidence is not checked here and
-    cannot be: that is about the sentence. A stale question is a prompt to
-    read it again, not a finding that it is wrong.
+    cannot be: that is about the sentence. Evidence that changed since the
+    answer was written is a prompt to read it again, not a finding that it
+    is wrong.
     """
     from calkit.questions import check_questions as _check_questions
     from calkit.questions import format_status
 
-    status = _check_questions(wdir=wdir)
+    status = _check_questions(wdir=wdir, check_pipeline=not no_pipeline)
     if json_output:
         calkit.echo(json.dumps(status.model_dump(mode="json"), indent=2))
     else:

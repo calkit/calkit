@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.x"
       - name: Setup uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -110,7 +110,7 @@ jobs:
           echo "calkit-python ${{ steps.version.outputs.version }} never appeared on PyPI"
           exit 1
       - name: Log in to the container registry
-        uses: docker/login-action@0a596b2e7a325f0cedf8e9bd21ab002cbd3c9241
+        uses: docker/login-action@783ae9cac559640a24c9212dfa6cd9e998252f9a
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

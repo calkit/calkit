@@ -102,6 +102,17 @@ export const ArtifactUsagesSchema = {
 
 export const Body_login_login_access_tokenSchema = {
   properties: {
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
     grant_type: {
       anyOf: [
         {
@@ -4200,22 +4211,6 @@ export const NotificationSchema = {
     "In-app notification delivered to a user when a comment is posted on\ntheir project (or a project they collaborate on).\n\nDesigned to be lightweight: no fan-out to external services here.\n``link`` stores a frontend URL (e.g., ``/owner/project/publications?path=…``)\nso the notification can deep-link directly to the relevant item.",
 } as const
 
-export const OAuthCodeExchangeSchema = {
-  properties: {
-    code: {
-      type: "string",
-      title: "Code",
-    },
-    redirect_uri: {
-      type: "string",
-      title: "Redirect Uri",
-    },
-  },
-  type: "object",
-  required: ["code", "redirect_uri"],
-  title: "OAuthCodeExchange",
-} as const
-
 export const OnboardingFlagPostSchema = {
   properties: {
     step: {
@@ -4897,6 +4892,29 @@ export const PipelineSchema = {
   title: "Pipeline",
 } as const
 
+export const PipelinePutSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelinePut",
+} as const
+
 export const PipelineStageSchema = {
   properties: {
     name: {
@@ -4971,6 +4989,20 @@ export const PipelineStagePutSchema = {
   type: "object",
   required: ["yaml"],
   title: "PipelineStagePut",
+} as const
+
+export const PipelineYamlSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineYaml",
+  description:
+    "The project's whole pipeline, as editable YAML.\n\nThe YAML is the ``pipeline:`` block of calkit.yaml, exactly as the\npipeline page shows it -- same key order, same comments.",
 } as const
 
 export const PresentationSchema = {
@@ -6170,9 +6202,16 @@ export const ProjectPostSchema = {
       title: "Name",
     },
     title: {
-      type: "string",
-      maxLength: 255,
-      minLength: 4,
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+          minLength: 4,
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Title",
     },
     description: {
@@ -6305,9 +6344,21 @@ export const ProjectPostSchema = {
       title: "Keep Template History",
       default: false,
     },
+    overleaf_project_url: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 2048,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Overleaf Project Url",
+    },
   },
   type: "object",
-  required: ["name", "title"],
+  required: ["name"],
   title: "ProjectPost",
 } as const
 
@@ -7047,7 +7098,7 @@ export const QuestionEvidenceSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "value", "result", "table", "publication"],
+      enum: ["figure", "result", "value", "table", "publication", "document"],
       title: "Kind",
     },
     path: {
@@ -7065,6 +7116,20 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Key",
     },
+    values: {
+      anyOf: [
+        {
+          items: {
+            $ref: "#/components/schemas/QuestionEvidenceValue",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
     name: {
       anyOf: [
         {
@@ -7076,6 +7141,28 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Name",
     },
+    section: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Section",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
+    },
     explanation: {
       anyOf: [
         {
@@ -7086,6 +7173,28 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Explanation",
+    },
+    explanation_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Explanation Path",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
     },
     figure: {
       anyOf: [
@@ -7128,6 +7237,39 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Value",
     },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    stale_reason: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["missing", "pipeline", "frozen"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Reason",
+    },
   },
   type: "object",
   required: ["kind", "path"],
@@ -7138,7 +7280,7 @@ export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "value", "result", "table", "publication"],
+      enum: ["figure", "result", "value", "table", "publication", "document"],
       title: "Kind",
     },
     path: {
@@ -7156,6 +7298,20 @@ export const QuestionEvidencePostSchema = {
       ],
       title: "Key",
     },
+    values: {
+      anyOf: [
+        {
+          additionalProperties: {
+            type: "string",
+          },
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
     name: {
       anyOf: [
         {
@@ -7166,6 +7322,28 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Name",
+    },
+    section: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Section",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
     },
     explanation: {
       anyOf: [
@@ -7178,10 +7356,60 @@ export const QuestionEvidencePostSchema = {
       ],
       title: "Explanation",
     },
+    explanation_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Explanation Path",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
+    },
   },
   type: "object",
   required: ["kind", "path"],
   title: "QuestionEvidencePost",
+} as const
+
+export const QuestionEvidenceValueSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    value: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value",
+    },
+  },
+  type: "object",
+  required: ["name", "key"],
+  title: "QuestionEvidenceValue",
+  description: "One of the named values a result evidence entry cites.",
 } as const
 
 export const QuestionPostSchema = {
@@ -7261,7 +7489,15 @@ export const QuestionPublicSchema = {
       anyOf: [
         {
           type: "string",
-          enum: ["ok", "stale", "error", "unanswered", "no-evidence"],
+          enum: [
+            "ok",
+            "stale",
+            "frozen",
+            "missing",
+            "error",
+            "unanswered",
+            "no-evidence",
+          ],
         },
         {
           type: "null",
@@ -10153,6 +10389,17 @@ export const UserPublicSchema = {
         },
       ],
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   required: [
@@ -10203,6 +10450,17 @@ export const UserRegisterSchema = {
         },
       ],
       title: "Full Name",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",
@@ -10478,6 +10736,17 @@ export const UserUpdateMeSchema = {
         },
       ],
       title: "Github Username",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",
@@ -10878,6 +11147,49 @@ export const _ContentsItemBaseSchema = {
   type: "object",
   required: ["name", "path", "type", "size", "in_repo"],
   title: "_ContentsItemBase",
+} as const
+
+export const app__api__routes__login__OAuthCodeExchangeSchema = {
+  properties: {
+    code: {
+      type: "string",
+      title: "Code",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
+  },
+  type: "object",
+  required: ["code", "redirect_uri"],
+  title: "OAuthCodeExchange",
+} as const
+
+export const app__api__routes__users__OAuthCodeExchangeSchema = {
+  properties: {
+    code: {
+      type: "string",
+      title: "Code",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+  },
+  type: "object",
+  required: ["code", "redirect_uri"],
+  title: "OAuthCodeExchange",
 } as const
 
 export const FileLockWritableSchema = {
@@ -11418,6 +11730,17 @@ export const UserPublicWritableSchema = {
           type: "null",
         },
       ],
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",

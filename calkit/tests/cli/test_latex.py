@@ -417,6 +417,220 @@ def test_latex_diff_setup(tmp_dir):
     assert "does not exist" in result.stderr
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Stands in for TeX with shell scripts"
+)
+def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
+    # Stand-ins for latexdiff and latexmk record what they were given and
+    # build a "PDF" from the figures the marked-up document names, so this
+    # runs without TeX Live
+    import shutil
+
+    from calkit.cli.latex import DIFF_TMP_DIR
+    from calkit.latex import get_diff_path
+
+    stubs = tmp_path_factory.mktemp("stubs")
+    with open(stubs / "latexdiff", "w") as f:
+        f.write(
+            "#!/usr/bin/env bash\n"
+            '[ "$1" = --version ] && exit 0\n'
+            'echo "$@" > "$RECORD_DIR/latexdiff-args.txt"\n'
+            'for a in "$@"; do case "$a" in -*) ;; *) cat "$a";; esac; done\n'
+        )
+    with open(stubs / "latexmk", "w") as f:
+        f.write(
+            "#!/usr/bin/env bash\n"
+            '[ "$1" = --version ] && exit 0\n'
+            'echo "$@" > "$RECORD_DIR/latexmk-args.txt"\n'
+            'for a in "$@"; do tex="$a"; case "$a" in '
+            '-outdir=*) out="${a#-outdir=}";; esac; done\n'
+            'cd "$(dirname "$tex")"\n'
+            '[ -f setup.tex ] && echo present > "$RECORD_DIR/setup.txt"\n'
+            'stem=$(basename "$tex" .tex)\n'
+            'if [ -n "$FAIL" ]; then\n'
+            '  printf "junk\\n! Undefined control sequence.\\nl.3 \\\\oops\\n"'
+            ' > "$out/$stem.log"\n'
+            "  exit 12\n"
+            "fi\n"
+            ': > "$out/$stem.pdf"\n'
+            "for fig in $(sed -n 's/.*includegraphics{\\([^}]*\\)}.*/\\1/p'"
+            ' "$stem.tex"); do cat "$fig"* >> "$out/$stem.pdf"; done\n'
+        )
+    for name in ["latexdiff", "latexmk"]:
+        os.chmod(stubs / name, 0o755)
+    env = os.environ | {
+        "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+        "RECORD_DIR": str(stubs),
+    }
+    # A figure tracked with DVC that changes between two revisions
+    subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
+    subprocess.check_call(["calkit", "dvc", "init", "-q"])
+    os.makedirs("paper/figs")
+    with open("paper/main.tex", "w", encoding="utf-8") as f:
+        f.write("\\documentclass{article}\n")
+        f.write("\\newcommand{\\wc}[1]{\\verbatiminput{#1.wcsum}}\n")
+        f.write("\\begin{document}\nGreen\u2019s function\n")
+        f.write("\\includegraphics{figs/plot}\n\\end{document}\n")
+    with open("paper/.latexmkrc", "w") as f:
+        f.write("$aux_dir = 'aux';\n")
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("old\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    # A copy another stage makes, which DVC records but doesn't store
+    os.makedirs("shared")
+    with open("shared/setup.tex", "w") as f:
+        f.write("% setup\n")
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  copy-setup:\n"
+            "    cmd: cp shared/setup.tex paper/setup.tex\n"
+            "    deps: [shared/setup.tex]\n"
+            "    outs:\n"
+            "      - paper/setup.tex:\n"
+            "          cache: false\n"
+        )
+    with open(".gitignore", "a") as f:
+        f.write("/paper/setup.tex\n")
+    subprocess.check_call(["calkit", "dvc", "repro", "-q"])
+    _commit("first")
+    subprocess.check_call(["git", "tag", "v1"])
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("new\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    _commit("second")
+    # Neither side can come from the working tree
+    shutil.rmtree("paper/figs")
+    diff = [
+        "calkit",
+        "latex",
+        "diff",
+        "paper/main.tex",
+        "--from",
+        "v1",
+        "-r",
+        "paper/.latexmkrc",
+    ]
+    cmd = diff + [
+        "--to",
+        "HEAD",
+        "--latexdiff-arg",
+        "--graphics-markup=new-only",
+        "--input",
+        "paper/figs/",
+        "--input",
+        "paper/setup.tex",
+        "--keep-tex",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    # Each side shows its own revision's figure: the older side's is
+    # repointed at its checkout, since it changed, and the newer side's is
+    # fetched into the checkout the document is built in. Relative, so it
+    # resolves inside a container too.
+    output = get_diff_path("paper/main.tex", "v1", "HEAD")
+    with open(output) as f:
+        assert f.read() == "old\nnew\n"
+    with open("paper/main-diff.tex", encoding="utf-8") as f:
+        marked_up = f.read()
+    # A verbatim input named by a macro parameter is broken onto its own
+    # line in each checkout rather than by latexdiff's --filter-script,
+    # which mangles non-ASCII text
+    assert "\\verbatiminput%\n{#1.wcsum}" in marked_up
+    assert "Green\u2019s function" in marked_up
+    with open(stubs / "latexdiff-args.txt") as f:
+        assert "--filter-script" not in f.read()
+    assert "\\includegraphics{../../base/paper/figs/plot.png}" in marked_up
+    assert "\\includegraphics{figs/plot}" in marked_up
+    assert not os.path.exists("paper/figs")
+    # The diff is built with the document's rc file, read before the
+    # directories Calkit sets so those win, and latexdiff gets its options
+    with open(stubs / "latexmk-args.txt") as f:
+        latexmk_args = f.read().split()
+    rc = latexmk_args[latexmk_args.index("-r") + 1]
+    assert rc.endswith("latex-diff-build/head/paper/.latexmkrc")
+    auxdir = next(a for a in latexmk_args if a.startswith("-auxdir="))
+    assert latexmk_args.index("-r") < latexmk_args.index(auxdir)
+    # Inside the directory the document is built in, since TeX refuses to
+    # write anywhere else and makeindex runs from inside it for glossaries
+    assert auxdir == "-auxdir=calkit-latex-diff-aux"
+    # An explicit --graphics-markup replaces Calkit's default
+    with open(stubs / "latexdiff-args.txt") as f:
+        latexdiff_args = f.read().split()
+    assert "--graphics-markup=new-only" in latexdiff_args
+    assert "--graphics-markup=both" not in latexdiff_args
+    # An output DVC doesn't store is copied from the working tree, since no
+    # checkout can have it
+    with open(stubs / "setup.txt") as f:
+        assert f.read() == "present\n"
+    assert DIFF_TMP_DIR not in subprocess.check_output(
+        ["git", "worktree", "list"], text=True
+    )
+    # Fetched without --input too, since a directory DVC tracks as a whole
+    # beside the document is included
+    result = subprocess.run(
+        diff + ["--to", "HEAD", "--force"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    with open(output) as f:
+        assert f.read() == "old\nnew\n"
+    # Changed figures are shown old and new by default, since each side has
+    # its own revision's figures
+    with open(stubs / "latexdiff-args.txt") as f:
+        assert "--graphics-markup=both" in f.read().split()
+    # Changing how a comparison between fixed revisions is built rebuilds
+    # it, since the pipeline only runs it when something has changed
+    head_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True
+    ).strip()
+    for markup in ["CFONT", "UNDERLINE"]:
+        result = subprocess.run(
+            diff + ["--to", head_sha, "--latexdiff-arg", f"--type={markup}"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        with open(stubs / "latexdiff-args.txt") as f:
+            assert f"--type={markup}" in f.read()
+    # Against the working tree, a changed figure or rc file rebuilds the
+    # diff even though the marked-up source is the same
+    working_output = get_diff_path("paper/main.tex", "v1")
+    os.makedirs("paper/figs")
+    for content in ["newer\n", "newest\n"]:
+        with open("paper/figs/plot.png", "w") as f:
+            f.write(content)
+        result = subprocess.run(diff, capture_output=True, text=True, env=env)
+        assert result.returncode == 0, result.stderr
+        with open(working_output) as f:
+            assert f.read() == "old\n" + content
+    # Building beside the working tree's document leaves nothing behind
+    assert not os.path.exists("paper/calkit-latex-diff-aux")
+    os.remove(stubs / "latexmk-args.txt")
+    result = subprocess.run(diff, capture_output=True, text=True, env=env)
+    assert "is up to date" in result.stdout
+    assert not os.path.exists(stubs / "latexmk-args.txt")
+    with open("paper/.latexmkrc", "a") as f:
+        f.write("$max_repeat = 5;\n")
+    result = subprocess.run(diff, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert os.path.exists(stubs / "latexmk-args.txt")
+    # -silent hides why latexmk failed, so the errors LaTeX logged are shown
+    result = subprocess.run(
+        cmd + ["--force"],
+        capture_output=True,
+        text=True,
+        env=env | {"FAIL": "1"},
+    )
+    assert result.returncode != 0
+    assert "! Undefined control sequence." in result.stderr
+    assert "l.3 \\oops" in result.stderr
+    assert "exit status 12" in result.stderr
+
+
 def test_marked_up_digest_ignores_the_header():
     # latexdiff writes both inputs' paths and modification times into a
     # header comment, and the older side is a fresh checkout every time,
@@ -439,6 +653,7 @@ def test_marked_up_digest_ignores_the_header():
     assert _marked_up_digest(changed) != _marked_up_digest(first)
 
 
+@skipif_windows_docker
 def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     # Two revisions that resolve to the same commit is what a pull request
     # diff looks like from the default branch. The pipeline resolves both
@@ -468,3 +683,17 @@ def test_latex_diff_of_one_revision_against_itself(tmp_dir):
         text=True,
     )
     assert "Nothing to compare" not in result.stderr
+    # A verbatim input that's a macro parameter used to make latexdiff try
+    # to open, e.g., '#1.wcsum' and fail
+    with open("paper/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n\\usepackage{verbatim}\n")
+        f.write("\\newcommand{\\wc}[1]{\\verbatiminput{#1.wcsum}}\n")
+        f.write("\\begin{document}\nHi\n\\end{document}\n")
+    _commit("macro")
+    result = subprocess.run(
+        ["calkit", "latex", "diff", "paper/main.tex", "--from", sha],
+        capture_output=True,
+        text=True,
+    )
+    assert "Couldn't open" not in result.stderr
+    assert result.returncode == 0, result.stderr

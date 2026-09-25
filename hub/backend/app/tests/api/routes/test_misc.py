@@ -87,28 +87,40 @@ def test_get_version_needs_no_auth(client: TestClient) -> None:
 
 
 def test_get_templates(client: TestClient) -> None:
-    from calkit.templates.core import TEMPLATES
+    import calkit.templates
 
     # Every kind, no login needed
     r = client.get("/templates")
     assert r.status_code == 200, r.text
-    names = {t["name"] for t in r.json()}
-    assert names == {
-        f"{kind}/{name}" for kind, ts in TEMPLATES.items() for name in ts
-    }
+    names = [t["name"] for t in r.json()]
+    assert names == [t.ref for t in calkit.templates.get_templates()]
     # One kind, with what a picker shows
     r = client.get("/templates", params={"kind": "latex"})
     assert r.status_code == 200
     latex = r.json()
-    assert len(latex) == len(TEMPLATES["latex"])
+    assert len(latex) == len(calkit.templates.get_templates(kind="latex"))
     article = next(t for t in latex if t["name"] == "latex/article")
     assert article == {
         "name": "latex/article",
         "kind": "latex",
         "title": "Article (generic)",
-        "description": TEMPLATES["latex"]["article"].description,
+        "description": calkit.templates.find_template(
+            "latex/article"
+        ).description,
     }
     assert all(t["kind"] == "latex" and t["title"] for t in latex)
+    # A project template is named the way a hub names a project, since that
+    # is what gets sent back to create one -- not `project/example-r`
+    r = client.get("/templates", params={"kind": "project"})
+    assert r.status_code == 200
+    projects = r.json()
+    assert projects[0]["name"] == "calkit/example-basic"
+    assert {t["kind"] for t in projects} == {"project"}
+    assert all(t["title"] and t["description"] for t in projects)
+    # Registry order, so the list is offered in the order it was written
+    assert [t["name"] for t in projects] == [
+        t.ref for t in calkit.templates.get_templates(kind="project")
+    ]
     # A kind the registry doesn't have
     r = client.get("/templates", params={"kind": "nope"})
     assert r.status_code == 404

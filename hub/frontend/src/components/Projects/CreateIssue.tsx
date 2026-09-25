@@ -97,6 +97,7 @@ const CreateIssue = ({ isOpen, onClose, onCreated }: CreateIssueProps) => {
         size={{ base: "sm", md: "md" }}
         isCentered
         initialFocusRef={initialFocusRef}
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent

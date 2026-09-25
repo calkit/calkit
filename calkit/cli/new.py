@@ -65,22 +65,37 @@ def _person_from_options(
     return person.model_dump(exclude_none=True)
 
 
-def _split_template_subdir(
-    template: str, git_url: str
-) -> tuple[str, str | None]:
-    """Split a directory out of an 'owner/repo/path' template.
+def _parse_template(
+    template: str, hub_url: str
+) -> tuple[str, str | None, str | None]:
+    """Resolve a template to its name, Git URL, and directory in the repo.
 
-    One repo can hold several self-contained example projects, so a
-    template may name a directory within it. Only the shorthand form is
-    split; a full URL is left alone, since its path is the repo's.
+    'owner/project[/dir]', or that under the hub URL, names a project on
+    the hub, whose Git URL is looked up later, so it comes back as None.
+    An HTTPS or SSH URL works on any host, e.g.,
+    'https://github.com/owner/repo/dir'. One repo can hold several
+    self-contained example projects, so a template may name a directory
+    within it; the first two path segments are the repo. Other URLs,
+    e.g., 'file://', are used as is.
     """
-    if "://" in template or "github.com" in template:
-        return git_url, None
-    parts = template.strip("/").split("/")
-    if len(parts) <= 2:
-        return git_url, None
-    subdir = "/".join(parts[2:])
-    return git_url.rsplit("/" + subdir, 1)[0], subdir
+    import re
+
+    hub_url = hub_url.rstrip("/")
+    for prefix in (hub_url + "/", hub_url.split("://", 1)[-1] + "/"):
+        if template.startswith(prefix):
+            template = template.removeprefix(prefix)
+            break
+    m = re.match(r"^(https?://[^/]+/|[\w.-]+@[\w.-]+:)(.+)$", template)
+    if m is None and "://" in template:
+        return template, template, None
+    base, path = m.groups() if m else (None, template)
+    parts = path.strip("/").split("/")
+    if len(parts) < 2:
+        raise_error(f"Template '{template}' should be 'owner/project'")
+    parts[1] = parts[1].removesuffix(".git")
+    subdir = "/".join(parts[2:]) or None
+    url = base + "/".join(parts[:2]) if base else None
+    return "/".join(parts), url, subdir
 
 
 @new_app.command(name="project", cls=_NewProjectCommand)
@@ -137,10 +152,12 @@ def new_project(
         str | None,
         typer.Option(
             "--template",
+            "--from",
             "-t",
             help=(
-                "Template from which to derive the project, e.g., "
-                "'calkit/example-basic'."
+                "Template from which to derive the project: a hub project "
+                "as 'owner/project' or its hub URL, or a Git URL on any "
+                "host, e.g., 'https://github.com/owner/repo/dir'."
             ),
         ),
     ] = None,
@@ -412,24 +429,31 @@ def new_project(
         return
     # If using a template, clone it first
     if template:
-        # TODO: If the template is not a Git repo URL, make a request to the
-        # the hub to get it?
-        # For now, assume consistency between hub projects and
-        # GitHub repo URLs
-        if "github.com" in template:
-            template_git_url = template
-            template_name = template.split("github.com")[-1][1:].removesuffix(
-                ".git"
-            )
-        else:
-            template_name = template
-            template_git_url = f"https://github.com/{template}"
-        # A template can name a directory inside a repo, e.g.
-        # 'calkit/calkit/examples/markdown', so one repo can hold several
-        # self-contained examples.
-        template_git_url, template_subdir = _split_template_subdir(
-            template, template_git_url
+        template_name, template_git_url, template_subdir = _parse_template(
+            template, calkit.hub.get_hub_url()
         )
+        if template_git_url is None:
+            project = "/".join(template_name.split("/")[:2])
+            # A template this package knows about carries its own repo URL,
+            # so the common case needs no hub: no request, no login, and it
+            # still works offline once the repo is reachable.
+            known = calkit.templates.find_project_template(project)
+            if known is not None:
+                if verbose:
+                    typer.echo(f"Using known template {project}")
+                template_git_url = known.git_repo_url
+            else:
+                typer.echo(f"Fetching Git repo URL for {project} from the hub")
+                try:
+                    template_git_url = calkit.hub.get(f"/projects/{project}")[
+                        "git_repo_url"
+                    ]
+                except Exception as e:
+                    raise_error(
+                        f"Could not fetch project {project} from the hub "
+                        f"({e}); for a repo not on the hub, pass its URL, "
+                        f"e.g., https://github.com/{template_name}"
+                    )
         if template_subdir is None:
             # Now clone it
             subprocess.run(["git", "clone", template_git_url, abs_path])
@@ -3419,6 +3443,18 @@ def new_release(
         str | None,
         typer.Option("--date", help="Release date. Will default to today."),
     ] = None,
+    include_pipeline: Annotated[
+        bool,
+        typer.Option(
+            "--pipeline",
+            help=(
+                "Include everything needed to reproduce the released path, "
+                "i.e., the pipeline, its lock file, and the stages, inputs, "
+                "and environments the path depends on. Stages unrelated to "
+                "the path are left out."
+            ),
+        ),
+    ] = False,
     no_docker_images: Annotated[
         bool,
         typer.Option(
@@ -3506,7 +3542,6 @@ def new_release(
     ] = False,
 ):
     """Create a new release."""
-    import bibtexparser
     import dotenv
 
     import calkit.pipeline
@@ -3521,6 +3556,20 @@ def new_release(
     repo = calkit.git.get_repo()
     if name in repo.tags:
         raise_error(f"Git tag with name '{name}' already exists")
+    # A release commits to calkit.yaml and pushes the branch it's on, neither
+    # of which works from a detached HEAD. Check before anything is uploaded,
+    # so a release can't get published and then fail on the way out.
+    will_push = (
+        not dry_run and not no_push and not no_commit and not draft_only
+    )
+    if repo.head.is_detached and will_push:
+        # Suggest creating a branch rather than checking one out, since in a
+        # worktree the branch they'd want may be checked out elsewhere
+        raise_error(
+            "HEAD is detached, so there is no branch to commit the release "
+            "record to and push; create a branch at this revision first, "
+            "e.g., with `git switch -c <branch>`"
+        )
     # Detect the release kind from the path unless it was given with --kind. A
     # "." path is always a project release; otherwise prefer a declared
     # artifact in calkit.yaml, falling back to auto-detection from the path
@@ -3574,10 +3623,24 @@ def new_release(
     # that produces the released artifact when releasing a single path.
     typer.echo("Checking pipeline is up-to-date for release")
     targets = None
+    # The stage that builds the released path, whose upstream stages define
+    # what a --pipeline release carries
+    pipeline_stage = ""
     if path != ".":
         stage_name = calkit.pipeline.get_stage_for_output(path, ck_info)
-        if stage_name is not None:
+        if stage_name is None:
+            if include_pipeline:
+                raise_error(
+                    f"No pipeline stage produces '{path}', "
+                    "so there is no pipeline to release along with it"
+                )
+        else:
             targets = [stage_name]
+            pipeline_stage = stage_name
+    elif include_pipeline:
+        # A project release carries the whole pipeline already
+        typer.echo("Project releases already include the pipeline")
+        include_pipeline = False
     status = calkit.pipeline.get_status(
         ck_info=ck_info,
         targets=targets,
@@ -3602,6 +3665,15 @@ def new_release(
         release_date = str(calkit.utcnow().date())
     typer.echo(f"Using release date: {release_date}")
     git_rev = repo.git.rev_parse(["--short", "HEAD"])
+    # This goes both beside the archive, which is the copy the archival
+    # service displays, and inside it, so an extracted copy still says what
+    # produced it. Rebuilt below once a more specific title is known.
+    release_readme = calkit.releases.create_release_readme(
+        release_kind=release_kind,
+        name=name,
+        git_rev=git_rev,
+        title=ck_info.get("title"),
+    )
     # Fields below are populated only for external (archival) releases;
     # internal releases leave them empty.
     doi = None
@@ -3621,9 +3693,15 @@ def new_release(
             stored_filename = f"{project_name}-{name}.zip"
             is_zip = True
         elif os.path.isfile(path):
-            _, ext = os.path.splitext(os.path.basename(path))
-            stored_filename = f"{project_name}-{name}{ext}"
-            is_zip = False
+            # Releasing the pipeline along with the artifact means shipping
+            # more than one file, so the artifact gets zipped up with it
+            if include_pipeline:
+                stored_filename = f"{project_name}-{name}.zip"
+                is_zip = True
+            else:
+                _, ext = os.path.splitext(os.path.basename(path))
+                stored_filename = f"{project_name}-{name}{ext}"
+                is_zip = False
         else:
             raise_error(f"Release path '{path}' does not exist")
         stored_path = os.path.join(release_dir, stored_filename)
@@ -3633,10 +3711,38 @@ def new_release(
             typer.echo(f"Would {action} {path} to {stored_path_posix}")
         else:
             os.makedirs(release_dir, exist_ok=True)
-            if is_zip:
+            overrides: dict[str, str] = {}
+            if include_pipeline:
+                typer.echo(f"Pruning project to what builds {path}")
+                try:
+                    overrides, paths = calkit.releases.prune_for_stage(
+                        ck_info, pipeline_stage
+                    )
+                except Exception as e:
+                    raise_error(
+                        f"Failed to prune project for stage "
+                        f"'{pipeline_stage}': {e}"
+                    )
+            elif is_zip:
                 paths = calkit.releases.ls_files() if path == "." else [path]
+            else:
+                paths = []
+            if is_zip:
                 typer.echo(f"Archiving {path} to {stored_path_posix}")
-                calkit.releases.zip_paths(stored_path, paths)
+                calkit.releases.zip_paths(
+                    stored_path,
+                    paths,
+                    overrides=overrides
+                    | {"CALKIT-RELEASE.md": release_readme},
+                )
+                if include_pipeline:
+                    typer.echo("Checking extracted release archive")
+                    try:
+                        calkit.releases.check_project_release_archive(
+                            stored_path, verbose=verbose
+                        )
+                    except Exception as e:
+                        raise_error(str(e))
             else:
                 typer.echo(f"Copying {path} to {stored_path_posix}")
                 shutil.copy2(path, stored_path)
@@ -3664,17 +3770,8 @@ def new_release(
         if path == ".":
             if release_kind is None:
                 release_kind = "project"
-            zip_path = release_files_dir + "/archive.zip"
-            all_paths = calkit.releases.ls_files()
-            typer.echo(f"Adding files to {zip_path}")
-            calkit.releases.zip_paths(zip_path, all_paths)
-            typer.echo("Checking extracted project release archive")
-            try:
-                calkit.releases.check_project_release_archive(
-                    zip_path, verbose=verbose
-                )
-            except Exception as e:
-                raise_error(str(e))
+            # Settle the title before building the archive, since the README
+            # that goes inside it is headed with the title
             title = ck_info.get("title")
             if title is None:
                 warn("Project has no title")
@@ -3683,6 +3780,27 @@ def new_release(
                 if not dry_run:
                     with open("calkit.yaml", "w") as f:
                         calkit.ryaml.dump(ck_info, f)
+            release_readme = calkit.releases.create_release_readme(
+                release_kind=release_kind,
+                name=name,
+                git_rev=git_rev,
+                title=title,
+            )
+            zip_path = release_files_dir + "/archive.zip"
+            all_paths = calkit.releases.ls_files()
+            typer.echo(f"Adding files to {zip_path}")
+            calkit.releases.zip_paths(
+                zip_path,
+                all_paths,
+                overrides={"CALKIT-RELEASE.md": release_readme},
+            )
+            typer.echo("Checking extracted project release archive")
+            try:
+                calkit.releases.check_project_release_archive(
+                    zip_path, verbose=verbose
+                )
+            except Exception as e:
+                raise_error(str(e))
         else:
             # TODO: Handle directories, e.g., datasets
             if not os.path.isfile(path):
@@ -3709,9 +3827,46 @@ def new_release(
                 )
             if title is None:
                 raise_error(f"{release_kind} at {path} has no title")
+            release_readme = calkit.releases.create_release_readme(
+                release_kind=release_kind,
+                name=name,
+                git_rev=git_rev,
+                title=title,
+            )
+            # Ship the artifact's provenance beside it: the stages that
+            # build it, their inputs and environments, and a pipeline and
+            # lock file pruned to match
+            if include_pipeline:
+                zip_path = release_files_dir + "/archive.zip"
+                typer.echo(f"Pruning project to what builds {path}")
+                try:
+                    overrides, all_paths = calkit.releases.prune_for_stage(
+                        ck_info, pipeline_stage
+                    )
+                except Exception as e:
+                    raise_error(
+                        f"Failed to prune project for stage "
+                        f"'{pipeline_stage}': {e}"
+                    )
+                typer.echo(f"Adding files to {zip_path}")
+                calkit.releases.zip_paths(
+                    zip_path,
+                    all_paths,
+                    overrides=overrides
+                    | {"CALKIT-RELEASE.md": release_readme},
+                )
+                typer.echo("Checking extracted project release archive")
+                try:
+                    calkit.releases.check_project_release_archive(
+                        zip_path, verbose=verbose
+                    )
+                except Exception as e:
+                    raise_error(str(e))
         # Save a metadata file with each DVC file's MD5 checksum
         dvc_md5s = calkit.releases.make_dvc_md5s(
-            zipfile="archive.zip" if path == "." else None,
+            zipfile=(
+                "archive.zip" if path == "." or include_pipeline else None
+            ),
             paths=None if path == "." else [path],
         )
         dvc_md5s_path = release_dir + "/dvc-md5s.yaml"
@@ -3723,7 +3878,7 @@ def new_release(
         # Archive the project's Docker images, so reproducing it doesn't
         # depend on a registry keeping them around, and leave breadcrumbs
         # behind so the environment check can fetch them back
-        if path == "." and not no_docker_images:
+        if (path == "." or include_pipeline) and not no_docker_images:
             typer.echo("Archiving Docker images")
             docker_images = calkit.releases.save_docker_images(
                 release_files_dir
@@ -3737,16 +3892,11 @@ def new_release(
                     calkit.ryaml.dump(docker_images, f)
                 if not dry_run:
                     repo.git.add(docker_images_path)
-        # Create a README for the Zenodo release
-        readme_txt = f"# {title}\n"
-        git_rev = repo.git.rev_parse(["--short", "HEAD"])
-        readme_txt += (
-            f"\nThis is a {release_kind} release ({name}) generated with "
-            f"Calkit v{calkit.__version__} from Git rev {git_rev}.\n"
-        )
+        # Write the same README beside the archive, since this is the copy
+        # the archival service renders on the record page
         readme_path = release_files_dir + "/README.md"
         with open(readme_path, "w") as f:
-            f.write(readme_txt)
+            f.write(release_readme)
         # Check size of files dir
         size = calkit.get_size(release_files_dir)
         typer.echo(f"Release size: {(size / 1e6):.1f} MB")
@@ -4099,6 +4249,7 @@ def new_release(
         description=release_description,
         internal=internal_release,
         stored_path=stored_path_posix,
+        includes_pipeline=include_pipeline,
     ).model_dump()
     releases[name] = release
     ck_info["releases"] = releases
@@ -4152,7 +4303,7 @@ def new_release(
                 record_id=record_id,  # type: ignore
                 service=to,  # type: ignore
             )
-            new_entries = bibtexparser.loads(invenio_bibtex).entries
+            new_entries = calkit.releases.parse_bibtex(invenio_bibtex)
             if not new_entries:
                 raise ValueError("Failed to parse generated BibTeX entry")
             new_entry = new_entries[0]
@@ -4164,9 +4315,9 @@ def new_release(
             replace_ids = []
             if new_doi:
                 try:
-                    existing_entries = bibtexparser.loads(
+                    existing_entries = calkit.releases.parse_bibtex(
                         existing_text
-                    ).entries
+                    )
                 except Exception as e:
                     warn(f"Could not parse existing references to dedupe: {e}")
                     existing_entries = []
@@ -4205,7 +4356,7 @@ def new_release(
     if not dry_run and calkit.git.get_staged_files() and not no_commit:
         repo.git.commit(["-m", f"Create new {release_kind} release {name}"])
     # Push with Git
-    if not dry_run and not no_push and not no_commit and not draft_only:
+    if will_push:
         repo.git.push(["origin", repo.active_branch.name, "--tags"])
         # Now create GitHub release (external releases only)
         if not internal_release and not no_github_release:

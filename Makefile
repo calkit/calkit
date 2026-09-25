@@ -15,6 +15,10 @@ install: ## Create the project's virtual environment.
 dev: ## Start up the hub containers for development.
 	@$(MAKE) -C hub dev
 
+.PHONY: dev-reset-user
+dev-reset-user: ## Reset the hub development user's data.
+	@$(MAKE) -C hub dev-reset-user
+
 .PHONY: frontend-client
 frontend-client: ## Regenerate the hub frontend's API client.
 	@$(MAKE) -C hub/frontend client
@@ -143,3 +147,11 @@ browser-ext-dev: ## Rebuild the browser extension on every change.
 .PHONY: browser-ext-clean-zips
 browser-ext-clean-zips: ## Delete all built browser extension ZIPs.
 	@rm -rf browser-ext/zip
+
+.PHONY: assistant
+assistant: ## Run the desktop assistant locally for development.
+	@cd assistant && uv run main.py
+
+.PHONY: test-assistant
+test-assistant: ## Run the desktop assistant's offscreen smoke tests.
+	@cd assistant && QT_QPA_PLATFORM=offscreen uv run pytest

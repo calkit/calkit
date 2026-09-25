@@ -474,10 +474,41 @@ test("places what the questions check found in calkit.yaml", () => {
       line: 9,
       severity: "warning",
       message:
-        "The evidence has changed since this answer was last edited. Read " +
-        "it again and edit the question, even if the answer still holds.",
+        "A stage that produces this question's evidence is out of date. " +
+        "Run the pipeline, then read the answer again.",
     },
   ]);
+});
+
+test("evidence that moved under a passing answer is worth a look", () => {
+  // The check passes it, since prose can stay true while a number moves,
+  // and says so on the evidence rather than in the question's status
+  assert.deepEqual(
+    questionDiagnostics(
+      {
+        questions: [
+          {
+            index: 1,
+            question: "Do the top structures use the rectifier?",
+            answered: true,
+            status: "ok",
+            evidence: [{ path: "results/findings.json", status: "changed" }],
+          },
+        ],
+      },
+      CALKIT_YAML,
+    ),
+    [
+      {
+        line: 2,
+        severity: "info",
+        message:
+          "The evidence has changed since this answer was last edited. " +
+          "Read it again and edit the question, even if the answer still " +
+          "holds.",
+      },
+    ],
+  );
 });
 
 test("an unanswered question is work outstanding, not a fault", () => {

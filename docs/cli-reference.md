@@ -864,18 +864,18 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                                                                                                 |
-| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | str     | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
-| `--title`           | str     | no       |         | Project title.                                                                                                                                                                                              |
-| `--description`     | str     | no       |         | Project description.                                                                                                                                                                                        |
-| `--hub`, `--cloud`  | str     | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
-| `--public`          | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                            |
-| `--git-url`         | str     | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
-| `--template`, `-t`  | str     | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                    |
-| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                               |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                    |
-| `--verbose`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                       |
+| Option                       | Type    | Required | Default | Description                                                                                                                                                                                                 |
+| ---------------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`               | str     | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
+| `--title`                    | str     | no       |         | Project title.                                                                                                                                                                                              |
+| `--description`              | str     | no       |         | Project description.                                                                                                                                                                                        |
+| `--hub`, `--cloud`           | str     | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
+| `--public`                   | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                            |
+| `--git-url`                  | str     | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
+| `--template`, `--from`, `-t` | str     | no       |         | Template from which to derive the project: a hub project as 'owner/project' or its hub URL, or a Git URL on any host, e.g., 'https://github.com/owner/repo/dir'.                                            |
+| `--no-commit`                | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                               |
+| `--overwrite`, `-f`          | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                    |
+| `--verbose`                  | boolean | no       | False   | Print verbose output.                                                                                                                                                                                       |
 
 <a id="subcommand-new-create-figure-fig"></a>
 
@@ -1655,22 +1655,23 @@ Arguments:
 
 Options:
 
-| Option                    | Type    | Required | Default | Description                                                                                                                                                                               |
-| ------------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`            | str     | yes      |         | A name for the release, typically kebab-case or a semantic version. Will be used for the Git tag and GitHub release title.                                                                |
-| `--kind`                  | str     | no       |         | What kind of release to create. Will attempt to infer from path if not provided.                                                                                                          |
-| `--description`, `--desc` | str     | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                     |
-| `--date`                  | str     | no       |         | Release date. Will default to today.                                                                                                                                                      |
-| `--no-docker-images`      | boolean | no       | False   | Do not archive the project's Docker images in the release.                                                                                                                                |
-| `--dry-run`               | boolean | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                               |
-| `--no-commit`             | boolean | no       | False   | Do not commit changes to Git repo.                                                                                                                                                        |
-| `--no-push`               | boolean | no       | False   | Do not push to Git remote.                                                                                                                                                                |
-| `--internal`              | boolean | no       | False   | Create an internal release that is not published to an archival service. Still creates a Git tag and release record in calkit.yaml, but does not upload files or create a GitHub release. |
-| `--no-github`             | boolean | no       | False   | Do not create a GitHub release.                                                                                                                                                           |
-| `--to`                    | str     | no       | zenodo  | Archival service to use for external releases (zenodo or caltechdata); ignored for --internal releases.                                                                                   |
-| `--draft`                 | boolean | no       | False   | Create draft record with reserved DOI but do not publish.                                                                                                                                 |
-| `--license`               | str     | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                  |
-| `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                     |
+| Option                    | Type    | Required | Default | Description                                                                                                                                                                                           |
+| ------------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`            | str     | yes      |         | A name for the release, typically kebab-case or a semantic version. Will be used for the Git tag and GitHub release title.                                                                            |
+| `--kind`                  | str     | no       |         | What kind of release to create. Will attempt to infer from path if not provided.                                                                                                                      |
+| `--description`, `--desc` | str     | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                                 |
+| `--date`                  | str     | no       |         | Release date. Will default to today.                                                                                                                                                                  |
+| `--pipeline`              | boolean | no       | False   | Include everything needed to reproduce the released path, i.e., the pipeline, its lock file, and the stages, inputs, and environments the path depends on. Stages unrelated to the path are left out. |
+| `--no-docker-images`      | boolean | no       | False   | Do not archive the project's Docker images in the release.                                                                                                                                            |
+| `--dry-run`               | boolean | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                                           |
+| `--no-commit`             | boolean | no       | False   | Do not commit changes to Git repo.                                                                                                                                                                    |
+| `--no-push`               | boolean | no       | False   | Do not push to Git remote.                                                                                                                                                                            |
+| `--internal`              | boolean | no       | False   | Create an internal release that is not published to an archival service. Still creates a Git tag and release record in calkit.yaml, but does not upload files or create a GitHub release.             |
+| `--no-github`             | boolean | no       | False   | Do not create a GitHub release.                                                                                                                                                                       |
+| `--to`                    | str     | no       | zenodo  | Archival service to use for external releases (zenodo or caltechdata); ignored for --internal releases.                                                                                               |
+| `--draft`                 | boolean | no       | False   | Create draft record with reserved DOI but do not publish.                                                                                                                                             |
+| `--license`               | str     | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                              |
+| `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                 |
 
 <a id="command-group-delete-rm"></a>
 
@@ -1865,7 +1866,7 @@ List Calkit objects.
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
 | [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.                                                     |
 | [`environments\|envs`](#subcommand-list-ls-environments-envs)   | List environments in the project.                                                              |
-| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates.                                                           |
+| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates, grouped by kind.                                          |
 | [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer.                                                  |
 | [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
@@ -2064,7 +2065,9 @@ Options:
 
 #### `calkit list|ls templates`
 
-List all available Calkit templates.
+List all available Calkit templates, grouped by kind.
+
+A template is named by its kind and name, except a project template, which names a project on a hub and so is `owner/project`.
 
 Usage:
 
@@ -2074,9 +2077,10 @@ calkit list|ls templates [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description            |
-| -------- | ------- | -------- | ------- | ---------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON. |
+| Option         | Type    | Required | Default | Description                      |
+| -------------- | ------- | -------- | ------- | -------------------------------- |
+| `--kind`, `-k` | str     | no       |         | Only show templates of one kind. |
+| `--json`       | boolean | no       | False   | Output result as JSON.           |
 
 <a id="subcommand-list-ls-installers"></a>
 
@@ -2973,7 +2977,7 @@ Check things.
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
-| [`questions`](#subcommand-check-questions)                  | Check the evidence behind each answered question.                                                            |
+| [`questions`](#subcommand-check-questions)                  | Check that answered questions are backed by current evidence.                                                |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3297,11 +3301,13 @@ Options:
 
 #### `calkit check questions`
 
-Check the evidence behind each answered question.
+Check that answered questions are backed by current evidence.
 
-A question is stale if any of its evidence changed after the commit that last edited the question, in Git history for Git-tracked outputs or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value keys must resolve, every placeholder in the text must render, and a publication label must still be present in the LaTeX source. Exits with an error if any answered question is stale or broken.
+Reports, worst first: evidence that isn't there (never run, never pushed, or pinned to a Git ref that doesn't exist); broken references (a key that doesn't resolve, a placeholder that names no evidence, a label missing from the LaTeX); evidence the pipeline would rebuild; and evidence from a frozen stage, or downstream of one, which nothing will ever report out of date unless the citation pins a git_ref.
 
-Whether the answer follows from the evidence is not checked here and cannot be: that is about the sentence. A stale question is a prompt to read it again, not a finding that it is wrong.
+Evidence pinned with a git_ref is checked at that ref rather than in the working tree. Exits with an error if any answered question is missing evidence, broken, or out of date with the pipeline.
+
+Whether the answer follows from the evidence is not checked here and cannot be: that is about the sentence. Evidence that changed since the answer was written is a prompt to read it again, not a finding that it is wrong.
 
 Usage:
 
@@ -3311,11 +3317,12 @@ calkit check questions [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                         |
-| ----------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------- |
-| `--wdir`          | str     | no       | .       | Project working directory.                                                          |
-| `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention. |
-| `--json`          | boolean | no       | False   | Output the report as JSON.                                                          |
+| Option            | Type    | Required | Default | Description                                                                           |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------- |
+| `--wdir`          | str     | no       | .       | Project working directory.                                                            |
+| `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention.   |
+| `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
+| `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
 
 <a id="command-group-latex-tex"></a>
 
@@ -3329,6 +3336,8 @@ Work with LaTeX.
 | [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as LaTeX commands. |
 | [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                |
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.        |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.           |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.   |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3426,6 +3435,8 @@ Marks up one revision of a document against another with latexdiff, so additions
 
 With the default `--to`, the newer side is the working tree, so the marked-up document is built with the current figures and bibliography and what's marked is what changed in the text.
 
+A revision's DVC-tracked inputs, e.g., figures and tables a pipeline generates, are fetched as they were at that revision, so each side of the comparison shows its own.
+
 Usage:
 
 ```text
@@ -3440,17 +3451,76 @@ Arguments:
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                                                                                                                                      |
-| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--from`          | str     | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                        |
-| `--to`            | str     | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                        |
-| `--env`, `-e`     | str     | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                               |
-| `--output`, `-o`  | str     | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                    |
-| `--output-dir`    | str     | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to. |
-| `--force`, `-f`   | boolean | no       | False   | Rebuild even if this comparison can't have changed and has already been built.                                                                                                                   |
-| `--keep-tex`      | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                |
-| `--no-check`      | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                             |
-| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                                                                                                            |
+| Option               | Type    | Required | Default | Description                                                                                                                                                                                                           |
+| -------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--from`             | str     | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                                             |
+| `--to`               | str     | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                                             |
+| `--env`, `-e`        | str     | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                                                    |
+| `--output`, `-o`     | str     | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                                         |
+| `--output-dir`       | str     | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to.                      |
+| `--latexmk-rc`, `-r` | str     | no       |         | Path to a latexmkrc file to build the marked-up document with.                                                                                                                                                        |
+| `--latexmk-arg`      | str     | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.                                                                                                                                   |
+| `--latexdiff-arg`    | str     | no       |         | Extra argument to pass through to latexdiff, e.g., '--type=CFONT'. Changed figures are shown old and new by default; pass '--graphics-markup=new-only' to show only the new. Repeat the option to pass more than one. |
+| `--input`            | str     | no       |         | File or directory the document reads. Anything in it tracked with DVC is fetched as it was at each revision. Defaults to the inputs detected in the document. Repeat the option to pass more than one.                |
+| `--force`, `-f`      | boolean | no       | False   | Rebuild even if nothing the diff depends on has changed since it was last built.                                                                                                                                      |
+| `--keep-tex`         | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                                     |
+| `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                                                  |
+| `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                 |
+
+<a id="subcommand-latex-tex-to-docx"></a>
+
+#### `calkit latex|tex to-docx`
+
+Export a Word copy of a LaTeX document for review.
+
+Uses Word's own PDF import, so the copy looks like the PDF, then records inside the file which source line each paragraph came from and the text as sent, so `merge-docx` can bring edits and comments back.
+
+Usage:
+
+```text
+calkit latex|tex to-docx [OPTIONS] PDF-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description             |
+| ---------- | ---- | -------- | ------- | ----------------------- |
+| `pdf_path` | str  | yes      |         | Compiled PDF to export. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                             |
+| ---------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------- |
+| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF. |
+| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                            |
+| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                          |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                           |
+
+<a id="subcommand-latex-tex-merge-docx"></a>
+
+#### `calkit latex|tex merge-docx`
+
+Merge a reviewed Word document back into the LaTeX source.
+
+Accepted changes are applied. Tracked changes not yet accepted or rejected, and edits that no longer fit the source, are left alone with a warning: deal with them in Word and merge again. Comments become comment blocks above the paragraph; threads resolved in Word are marked resolved.
+
+Usage:
+
+```text
+calkit latex|tex merge-docx [OPTIONS] DOCX-PATH
+```
+
+Arguments:
+
+| Argument    | Type | Required | Default | Description              |
+| ----------- | ---- | -------- | ------- | ------------------------ |
+| `docx_path` | str  | yes      |         | Reviewed .docx to merge. |
+
+Options:
+
+| Option          | Type    | Required | Default | Description                       |
+| --------------- | ------- | -------- | ------- | --------------------------------- |
+| `--no-comments` | boolean | no       | False   | Don't write comments to the .tex. |
 
 <a id="command-group-overleaf-ol"></a>
 

@@ -75,7 +75,9 @@ export interface QuestionEvidence {
 export interface QuestionEntry {
   question: string;
   hypothesis?: string;
-  answer?: string;
+  // A mapping keyed by "if <condition>", "elif <condition>" and "else" picks
+  // its wording from the evidence.
+  answer?: string | Record<string, string>;
   evidence?: QuestionEvidence[];
   [key: string]: unknown;
 }

@@ -52,7 +52,21 @@ def answered_then_rerun(tmp_path: Path) -> tuple[git.Repo, dict, str, str]:
     repo.config_writer().set_value("user", "email", "t@t.t").release()
     repo.config_writer().set_value("user", "name", "T").release()
     (tmp_path / "results").mkdir()
-    ck_info = {"questions": [QUESTION]}
+    # A stage computes the value: one nothing computes is a magic number,
+    # which the check reports as an error whatever the ref
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "summarize": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": ["results/findings.json"],
+                }
+            }
+        },
+        "questions": [QUESTION],
+    }
     (tmp_path / "calkit.yaml").write_text(yaml.safe_dump(ck_info))
     (tmp_path / "results/findings.json").write_text(json.dumps({"n_top": 8}))
     subprocess.check_call(["git", "add", "-A"], cwd=tmp_path)
@@ -80,12 +94,14 @@ def test_the_ref_decides_whether_an_answer_is_stale(
     at_answer = _status(repo, ck_info, answered)
     assert at_answer is not None
     assert at_answer.questions[0].status == "ok"
-    # After the rerun it does not, and the message says which value moved
+    # After the rerun it does not. That is worth a reader's attention
+    # rather than a failure, since the prose may still hold, and the
+    # message says which value moved
     after = _status(repo, ck_info, rerun)
     assert after is not None
     question = after.questions[0]
-    assert question.status == "stale"
-    assert "re-read it" in (question.message or "")
+    assert question.status == "ok"
+    assert "re-reading" in (question.message or "")
     evidence = question.evidence[0]
     assert evidence.status == "changed"
     assert evidence.current == 3

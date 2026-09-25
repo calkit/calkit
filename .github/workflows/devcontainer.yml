@@ -37,6 +37,16 @@ jobs:
             uv --version
             pixi --version
             conda --version
+            # Guards the conda sqlite build DVC needs; see
+            # https://github.com/iterative/dvc/issues/10692
+            cd "$(mktemp -d)"
+            git init -q .
+            git config user.email ci@calkit.org
+            git config user.name ci
+            dvc init -q
+            echo hello > data.txt
+            dvc add data.txt
+            test -f data.txt.dvc
             for script in post-create.sh post-start.sh update-content.sh \
                 check-envs.sh; do
               bash -n "$INIT_SCRIPTS_DIR/$script"

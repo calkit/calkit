@@ -1760,6 +1760,7 @@ def to_dvc(
     """
     import calkit.dvc.zip
     import calkit.markdown
+    import calkit.questions
     from calkit.environments import get_env_input_paths, get_env_lock_fpath
 
     if ck_info is None:
@@ -1771,6 +1772,8 @@ def to_dvc(
     # options and iteration need no knowledge of Markdown.
     markdown = calkit.markdown.expand_ck_info(ck_info, wdir=wdir)
     ck_info = markdown.ck_info
+    # Likewise give questions-to-latex stages the evidence they read
+    ck_info = calkit.questions.expand_questions_stages(ck_info)
     if write and markdown.environments:
         _write_markdown_environments(markdown, wdir=wdir)
     # Everything Markdown derives is rewritten on every compile, so it

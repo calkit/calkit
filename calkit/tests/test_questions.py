@@ -9,14 +9,17 @@ import subprocess
 import pytest
 
 import calkit
+from calkit.models.core import ProjectInfo, Question
 from calkit.pipeline import frozen_tainted_stage_names
 from calkit.questions import (
     QuestionsStatus,
     check_question,
     check_questions,
     evaluate_condition,
+    expand_questions_stages,
     format_status,
     format_summary,
+    latex_values,
     parse_conditional,
     placeholders,
     render,
@@ -879,3 +882,98 @@ def test_format_summary():
         "1 with missing evidence, 1 with broken references, "
         "1 resting on a frozen stage, 1 with no evidence"
     )
+
+
+def test_latex_values(tmp_dir):
+    with open("results.json", "w") as f:
+        json.dump({"gain": 0.2531, "p": 0.007}, f)
+    value = {"kind": "value", "path": "results.json"}
+    ck_info = {
+        "questions": [
+            {
+                "name": "staging",
+                "question": "Does staging help?",
+                "hypothesis": "Where the surrogate\n  fits poorly.",
+                "answer": {
+                    "if gain > 0": "Yes, by {gain:+.3f} (p {p:.3f}).",
+                    "else": "No.",
+                },
+                "evidence": [
+                    {**value, "key": "gain", "name": "gain"},
+                    {**value, "key": "p", "name": "p"},
+                ],
+            },
+            "Is this a bare question?",
+            {"question": "Unanswered?", "notes": "Needs a run."},
+        ]
+    }
+    values = latex_values(ck_info)
+    # Addressable by position and by name, with the conditional resolved,
+    # values templated, and folded YAML whitespace collapsed
+    assert values["1.answer"] == values["staging.answer"]
+    assert values["staging.answer"] == "Yes, by +0.253 (p 0.007)."
+    assert values["staging.hypothesis"] == "Where the surrogate fits poorly."
+    assert values["2.question"] == "Is this a bare question?"
+    # Absent fields are left out rather than exposed as empty
+    assert "3.answer" not in values and values["3.notes"] == "Needs a run."
+    # A placeholder that can't be filled is an error, not literal text
+    broken = {"questions": [{"question": "Q?", "answer": "Up {missing}."}]}
+    with pytest.raises(ValueError, match="answer"):
+        latex_values(broken)
+    unreadable = {
+        "questions": [
+            {
+                "question": "Q?",
+                "answer": "{x}",
+                "evidence": [
+                    {"kind": "value", "path": "gone.json", "key": "x"}
+                ],
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="gone.json"):
+        latex_values(unreadable)
+    duplicate = {
+        "questions": [
+            {"name": "a", "question": "One?"},
+            {"name": "a", "question": "Two?"},
+        ]
+    }
+    with pytest.raises(ValueError, match="'a'"):
+        latex_values(duplicate)
+    # A name can't be a number, which would collide with a position
+    with pytest.raises(ValueError, match="can't be a number"):
+        Question(name="2", question="Q?")
+    numeric = {"questions": [{"name": "2", "question": "Q?"}, "Other?"]}
+    with pytest.raises(ValueError, match="can't be a number"):
+        latex_values(numeric)
+    # The project model also rejects duplicate names
+    with pytest.raises(ValueError, match="must be unique"):
+        ProjectInfo.model_validate(duplicate)
+    ProjectInfo.model_validate(
+        {"questions": [{"name": "a", "question": "One?"}, "Two?"]}
+    )
+    # The stage gains calkit.yaml and the evidence, keeping declared
+    # inputs and listing nothing twice
+    ck_info["pipeline"] = {
+        "stages": {
+            "qa": {
+                "kind": "questions-to-latex",
+                "inputs": ["results.json", "extra.txt"],
+                "outputs": ["qa.tex"],
+            },
+            "other": {"kind": "shell-command", "command": "true"},
+        }
+    }
+    stages = expand_questions_stages(ck_info)["pipeline"]["stages"]
+    assert stages["qa"]["inputs"] == [
+        "results.json",
+        "extra.txt",
+        "calkit.yaml",
+    ]
+    assert "inputs" not in stages["other"]
+    assert "inputs" not in ck_info["pipeline"]["stages"]["other"]
+    assert ck_info["pipeline"]["stages"]["qa"]["inputs"] == [
+        "results.json",
+        "extra.txt",
+    ]

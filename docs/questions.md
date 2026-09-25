@@ -201,6 +201,53 @@ This mechanism is being replaced with an explicit review record; see
 Checking questions is separate from `calkit status` because it needs to
 read the history of `calkit.yaml`.
 
+## Quoting questions and answers in a LaTeX document
+
+A `questions-to-latex` stage renders every question, hypothesis, answer,
+and note, with conditionals resolved and values filled from their evidence,
+into a LaTeX command the document can quote from:
+
+```yaml
+questions:
+  - name: staging
+    question: Does staging help?
+    answer: Yes, by {gain:+.3f}.
+    evidence:
+      - kind: value
+        path: results/summary.json
+        key: gain
+        name: gain
+
+pipeline:
+  stages:
+    questions-tex:
+      kind: questions-to-latex
+      command_name: questions
+      outputs:
+        - paper/questions.tex
+```
+
+```latex
+\input{questions.tex}
+...
+\questions[staging.answer]
+```
+
+Each field is keyed `<question>.<field>`, where the question is its `name`
+or its 1-based position, and the field is `question`, `hypothesis`,
+`answer`, or `notes`.
+Give a question a `name` if a document quotes it, since positions change
+when questions are added or reordered.
+A key that doesn't exist renders as `??`.
+
+The stage depends on `calkit.yaml` and on every file the questions cite as
+evidence, so the text is rebuilt when an answer or a value it reads
+changes.
+Unlike the display in `calkit list questions`, a placeholder that can't be
+filled is an error here rather than being left in the text.
+The same output can be written without a stage with
+`calkit latex from-questions -o questions.tex`.
+
 ## Pointing at the publication
 
 The reasoning behind an answer belongs in the publication.

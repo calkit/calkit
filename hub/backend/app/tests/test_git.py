@@ -938,13 +938,84 @@ def test_a_read_after_a_write_touches_the_network_not_at_all(
         assert ops == [], f"a read after a write did {ops}"
 
         # For contrast, the path taken when the local push can't be made:
-        # the same read asks where the remote is and goes and gets it
+        # the reported push sends the same read straight to a fetch
         third = _commit(writer, "notes.txt", "three")
         writer.git.push(["origin", branch])
         app.git.expire_shared_read_clone(project, branch)
         repo = read()
         assert repo.head.commit.hexsha == third
-        assert "ls-remote" in ops and "fetch" in ops
+        assert ops == ["fetch"]
+
+
+def test_a_reported_push_to_a_new_branch_shows_up_in_the_branch_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typing import Any
+    from unittest.mock import patch
+
+    project: Any = _StubProject("ck-shared-new-branch")
+    session: Any = None
+    origin_dir = tmp_path / "origin.git"
+    git.Repo.init(str(origin_dir), bare=True)
+    seed_dir = tmp_path / "seed"
+    seed = git.Repo.clone_from(str(origin_dir), str(seed_dir))
+    _identify(seed)
+    _commit(seed, "notes.txt", "one")
+    main = seed.active_branch.name
+    seed.git.push(["origin", main])
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    shared_base.mkdir(parents=True)
+    git.Repo.clone_from(str(origin_dir), str(shared_base / "repo"))
+    (shared_base / "updated.txt").touch()
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+
+    def branches(ttl: int = 60) -> set[str]:
+        repo = app.git.get_repo(
+            project=project,
+            user=None,
+            session=session,
+            ttl=ttl,
+            read_only=True,
+        )
+        return {
+            r.name for r in app.git.search_refs(repo) if r.kind == "branch"
+        }
+
+    with patch("app.git.shared_reader_root", return_value=str(shared_root)):
+        # Leaves the remote head for the default branch cached, matching
+        # what the checkout has
+        assert branches() == {main}
+        # A push to a new branch leaves the default branch where it was, so
+        # its head says the checkout is current when it isn't
+        seed.git.checkout(["-b", "feature"])
+        feature = _commit(seed, "notes.txt", "two")
+        seed.git.push(["origin", "feature"])
+        app.git.expire_shared_read_clone(project, "feature")
+        assert branches() == {main, "feature"}
+        repo = git.Repo(str(shared_base / "repo"))
+        assert repo.commit("origin/feature").hexsha == feature
+        # The working tree stays on the default branch
+        assert repo.active_branch.name == main
+        assert (shared_base / "repo" / "notes.txt").read_text() == "one"
+        # With no push reported, the checkout is fresh and doesn't see it,
+        # until a TTL of 0 forces a fetch, e.g., from the refresh button
+        seed.git.checkout(["-b", "other"])
+        seed.git.push(["origin", "other"])
+        assert "other" not in branches()
+        assert "other" in branches(ttl=0)
+        # A forced refresh drops a branch deleted from the remote
+        seed.git.push(["origin", "--delete", "other"])
+        assert "other" not in branches(ttl=0)
+        # And says so when it can't reach the remote, rather than serving
+        # what it had
+        shared = git.Repo(str(shared_base / "repo"))
+        shared.remotes.origin.set_url(str(tmp_path / "missing.git"))
+        with pytest.raises(HTTPException) as exc:
+            branches(ttl=0)
+        assert exc.value.status_code == 502
+        # An ordinary read still serves the stale checkout
+        assert main in branches()
 
 
 def test_push_and_expire_falls_back_when_the_shared_checkout_wont_take_it(

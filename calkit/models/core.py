@@ -1885,6 +1885,15 @@ class Question(BaseModel):
     new evidence is how to say it still holds.
     """
 
+    name: str | None = Field(
+        default=None,
+        description=(
+            "Name for the question, e.g., for quoting its answer in a "
+            "document through 'calkit latex from-questions'. Unlike its "
+            "position in the list, it survives questions being added or "
+            "reordered. Must be unique among the project's questions."
+        ),
+    )
     question: str
     hypothesis: str | None = None
     answer: str | dict[str, str] | None = Field(
@@ -1916,6 +1925,18 @@ class Question(BaseModel):
         ]
         | None
     ) = None
+
+    @field_validator("name")
+    @classmethod
+    def check_name_not_a_position(cls, v: str | None) -> str | None:
+        # A question is also addressable by its position, so an all-digit
+        # name would be ambiguous with some other question's number
+        if v is not None and v.isdigit():
+            raise ValueError(
+                f"Question name {v!r} can't be a number, since questions "
+                "are also addressed by position"
+            )
+        return v
 
 
 class ProjectInfo(BaseModel):
@@ -2121,3 +2142,14 @@ class ProjectInfo(BaseModel):
         description="Overleaf sync configuration, keyed by the path of the "
         "synced directory.",
     )
+
+    @field_validator("questions")
+    @classmethod
+    def check_question_names_unique(
+        cls, v: list[str | Question]
+    ) -> list[str | Question]:
+        names = [q.name for q in v if isinstance(q, Question) and q.name]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            raise ValueError(f"Question names must be unique: {dupes}")
+        return v

@@ -4428,6 +4428,7 @@
                 "procedure": "#/$defs/ProcedureStage",
                 "python-script": "#/$defs/PythonScriptStage",
                 "quarto": "#/$defs/QuartoStage",
+                "questions-to-latex": "#/$defs/QuestionsToLatexStage",
                 "r-script": "#/$defs/RScriptStage",
                 "sbatch": "#/$defs/SBatchStage",
                 "shell-command": "#/$defs/ShellCommandStage",
@@ -4448,6 +4449,9 @@
               },
               {
                 "$ref": "#/$defs/JsonToLatexStage"
+              },
+              {
+                "$ref": "#/$defs/QuestionsToLatexStage"
               },
               {
                 "$ref": "#/$defs/MatlabScriptStage"
@@ -5696,6 +5700,19 @@
           "default": null,
           "title": "Hypothesis"
         },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name for the question, e.g., for quoting its answer in a document through 'calkit latex from-questions'. Unlike its position in the list, it survives questions being added or reordered. Must be unique among the project's questions.",
+          "title": "Name"
+        },
         "notes": {
           "anyOf": [
             {
@@ -5718,6 +5735,192 @@
         "question"
       ],
       "title": "Question",
+      "type": "object"
+    },
+    "QuestionsToLatexStage": {
+      "additionalProperties": false,
+      "description": "The project's questions and answers, rendered for a LaTeX document.\n\nIts inputs are ``calkit.yaml`` and every file the questions cite as\nevidence, added when the pipeline is compiled, so the output reruns\nwhen an answer or a value it reads changes.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "command_name": {
+          "default": "questions",
+          "description": "Name of the LaTeX command the document quotes questions through, e.g., 'questions' for \\questions[staging.answer].",
+          "title": "Command Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "questions-to-latex",
+          "default": "questions-to-latex",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "wdir": {
+          "default": null,
+          "description": "Not supported; the stage reads the project's calkit.yaml and evidence from the project root.",
+          "title": "Wdir",
+          "type": "null"
+        }
+      },
+      "title": "QuestionsToLatexStage",
       "type": "object"
     },
     "REnvironment": {

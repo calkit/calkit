@@ -3326,13 +3326,14 @@ Options:
 
 Work with LaTeX.
 
-| Command                                          | Description                                                |
-| ------------------------------------------------ | ---------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)   | Convert a JSON file to LaTeX.                              |
-| [`build`](#subcommand-latex-tex-build)           | Build a PDF of a LaTeX document with latexmk.              |
-| [`diff`](#subcommand-latex-tex-diff)             | Build a PDF showing what changed in a LaTeX document.      |
-| [`to-docx`](#subcommand-latex-tex-to-docx)       | Export a Word copy of a LaTeX document for review.         |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx) | Merge a reviewed Word document back into the LaTeX source. |
+| Command                                                  | Description                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                 |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                 |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3362,6 +3363,27 @@ Options:
 | `--command`      | str  | no       |         | Command name to use in LaTeX output.                                                                                            |
 | `--key`          | str  | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
 | `--format-json`  | str  | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
+
+<a id="subcommand-latex-tex-from-questions"></a>
+
+#### `calkit latex|tex from-questions`
+
+Write the project's questions and answers as a LaTeX command.
+
+Each question's text, hypothesis, answer, and notes are rendered from their evidence and exposed as, e.g., `\questions[staging.answer]`, keyed by the question's `name` or its 1-based position.
+
+Usage:
+
+```text
+calkit latex|tex from-questions [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default   | Description                          |
+| ---------------- | ---- | -------- | --------- | ------------------------------------ |
+| `--output`, `-o` | str  | yes      |           | Output LaTeX file path(s).           |
+| `--command`      | str  | no       | questions | Command name to use in LaTeX output. |
 
 <a id="subcommand-latex-tex-build"></a>
 

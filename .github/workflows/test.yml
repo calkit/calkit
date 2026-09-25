@@ -93,13 +93,13 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
           enable-cache: true
       - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
         with:
           miniforge-version: latest
           auto-activate-base: true
@@ -142,7 +142,7 @@ jobs:
         with:
           node-version: "20"
       - name: Setup R
-        uses: r-lib/actions/setup-r@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
+        uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           r-version: latest
       - name: Run tests
@@ -171,7 +171,7 @@ jobs:
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
       - name: Setup uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run

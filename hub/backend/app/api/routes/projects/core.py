@@ -1577,11 +1577,14 @@ def search_project_refs(
         current_user=current_user,
         min_access_level="read",
     )
+    # The shared checkout is the one push notifications expire, so it's
+    # the one that learns about new branches
     repo = get_repo(
         project=project,
         user=current_user,
         session=session,
         ttl=FULL_HISTORY_REPO_TTL,
+        read_only=True,
     )
     refs = search_refs(repo, query=q)
     return cast(list[GitRef], refs)
@@ -7399,16 +7402,7 @@ def post_project_sync(
     current_user: CurrentUser,
     session: SessionDep,
 ) -> Message:
-    """Synchronize a project with its Git repo.
-
-    Do we actually need this? It will give us a way to operate if GitHub is
-    down, at least in read-only mode.
-    Or perhaps we can bidirectionally sync, allowing users to update Calkit
-    entities and we'll commit them back on sync.
-    It would probably be better to use Git for that, so we can handle
-    asynchronous edits with merges.
-    """
-    # First refresh the local cache of the repo
+    """Fetch the latest from a project's Git repo, e.g., to see a new branch."""
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7416,12 +7410,13 @@ def post_project_sync(
         current_user=current_user,
         min_access_level="read",
     )
-    get_repo(project=project, user=current_user, session=session, ttl=None)
-    # Get and save project questions
-    # Figures
-    # Datasets
-    # Publications
-    # TODO: Update files in Git repo with IDs?
+    get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=0,
+        read_only=True,
+    )
     return Message(message="success")
 
 

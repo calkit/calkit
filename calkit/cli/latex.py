@@ -476,8 +476,8 @@ def diff(
         typer.Option(
             "--keep-tex",
             help=(
-                "Keep the old, new, and generated diff .tex files for "
-                "inspection."
+                "Keep the old, new, and diff .tex files beside the "
+                "document for inspection, e.g., paper/main-old.tex."
             ),
         ),
     ] = False,
@@ -1034,16 +1034,20 @@ def _build_diff(
         Path(state_path).write_text(digest)
         typer.echo(f"Wrote {output}")
     finally:
+        kept: list[str] = []
         if keep_tex:
-            for src, kept in (
+            for src, kept_fpath in (
                 (base_tex_fpath, kept_old_fpath),
                 (head_tex_fpath, kept_new_fpath),
             ):
                 # The working tree's own file is already beside the document,
                 # so only the checked-out sides need copying there
-                if os.path.isfile(src) and not _same_path(src, kept):
-                    os.makedirs(os.path.dirname(kept) or ".", exist_ok=True)
-                    shutil.copy(src, kept)
+                if os.path.isfile(src) and not _same_path(src, kept_fpath):
+                    os.makedirs(
+                        os.path.dirname(kept_fpath) or ".", exist_ok=True
+                    )
+                    shutil.copy(src, kept_fpath)
+                    kept.append(kept_fpath)
         if os.path.isfile(diff_tex_fpath):
             in_place = _same_path(diff_tex_fpath, kept_diff_fpath)
             if keep_tex and not in_place:
@@ -1051,8 +1055,12 @@ def _build_diff(
                     os.path.dirname(kept_diff_fpath) or ".", exist_ok=True
                 )
                 shutil.copy(diff_tex_fpath, kept_diff_fpath)
+            if keep_tex:
+                kept.append(kept_diff_fpath)
             if not keep_tex or not in_place:
                 os.remove(diff_tex_fpath)
+        for kept_fpath in kept:
+            typer.echo(f"Kept {kept_fpath} for inspection")
 
 
 @latex_app.command(name="to-docx")

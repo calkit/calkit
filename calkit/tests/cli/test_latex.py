@@ -653,7 +653,7 @@ def test_from_questions(tmp_dir):
     # The compiled stage reads calkit.yaml and the evidence
     stage = calkit.pipeline.to_dvc()["qa"]
     assert stage["cmd"] == (
-        "calkit latex from-questions --output 'paper/qa.tex' --command qa"
+        "calkit latex from-questions --output paper/qa.tex --command qa"
     )
     assert set(stage["deps"]) >= {"calkit.yaml", "results.json"}
     subprocess.check_call(["calkit", "run"])

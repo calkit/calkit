@@ -1372,7 +1372,7 @@ class QuestionsToLatexStage(Stage):
         cmd = "calkit latex from-questions"
         for out in self.outputs:
             out_path = out if isinstance(out, str) else out.path
-            cmd += f" --output '{out_path}'"
+            cmd += f" --output {shlex.quote(out_path)}"
         return cmd + f" --command {shlex.quote(self.command_name)}"
 
     @property

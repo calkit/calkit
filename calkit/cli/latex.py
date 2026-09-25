@@ -192,29 +192,65 @@ def from_json(
 
 @latex_app.command(name="from-questions")
 def from_questions(
-    output_fpath: Annotated[
-        str, typer.Option("--output", "-o", help="Output LaTeX file path.")
-    ] = "generated-questions.tex",
-):
-    """Write the project's questions and answers as LaTeX commands.
+    output_fpaths: Annotated[
+        list[str],
+        typer.Option("--output", "-o", help="Output LaTeX file path(s)."),
+    ],
+    command_name: Annotated[
+        str,
+        typer.Option("--command", help="Command name to use in LaTeX output."),
+    ] = "questions",
+    provenance: Annotated[
+        bool,
+        typer.Option(
+            "--provenance",
+            help="Write calkit.sty's provenance-marked commands instead.",
+        ),
+    ] = False,
+) -> None:
+    """Write the project's questions and answers as a LaTeX command.
 
-    Gives ``\\ckquestion[n]``, ``\\ckanswer[n]``, ``\\ckevidence[n]``
-    and friends, plus ``\\ckfindings`` for every answered question, with each
-    ``{name}`` placeholder rendered as a provenance-marked value from the
-    results file it points at.
+    Each question's text, hypothesis, answer, and notes are rendered from
+    their evidence and exposed as, e.g., ``\\questions[staging.answer]``,
+    keyed by the question's ``name`` or its 1-based position.
+
+    With ``--provenance``, writes ``\\ckquestion[n]``, ``\\ckanswer[n]``,
+    ``\\ckevidence[n]`` and friends instead, plus ``\\ckfindings`` for every
+    answered question, with each value marked with the results file it came
+    from, for a document built with a latex stage's ``provenance`` option.
     """
+    import json2latex
+
+    import calkit.questions
+
+    for out_path in output_fpaths:
+        if not out_path.endswith(".tex"):
+            raise_error("Output file must be a .tex file")
     ck_info = calkit.load_calkit_info()
+    if provenance:
+        try:
+            tex = calkit.latex.questions_tex(ck_info)
+        except KeyError as e:
+            raise_error(f"Placeholder {{{e.args[0]}}} names no value evidence")
+        except (FileNotFoundError, ValueError) as e:
+            raise_error(f"Cannot render questions: {e}")
+        for out_path in output_fpaths:
+            outdir = os.path.dirname(out_path)
+            if outdir:
+                os.makedirs(outdir, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(tex)
+        return
     try:
-        tex = calkit.latex.questions_tex(ck_info)
-    except KeyError as e:
-        raise_error(f"Placeholder {{{e.args[0]}}} names no value evidence")
-    except (FileNotFoundError, ValueError) as e:
-        raise_error(f"Cannot render questions: {e}")
-    outdir = os.path.dirname(output_fpath)
-    if outdir:
-        os.makedirs(outdir, exist_ok=True)
-    with open(output_fpath, "w", encoding="utf-8") as f:
-        f.write(tex)
+        values = calkit.questions.latex_values(ck_info)
+    except ValueError as e:
+        raise_error(str(e))
+    for out_path in output_fpaths:
+        outdir = os.path.dirname(out_path)
+        if outdir:
+            os.makedirs(outdir, exist_ok=True)
+        with open(out_path, "w") as f:
+            json2latex.dump(command_name, values, f)
 
 
 def _tex_cmd(

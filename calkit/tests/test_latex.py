@@ -166,7 +166,14 @@ def test_provenance(tmp_dir):
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     subprocess.check_call(
-        ["calkit", "latex", "from-questions", "-o", "paper/gq.tex"]
+        [
+            "calkit",
+            "latex",
+            "from-questions",
+            "-o",
+            "paper/gq.tex",
+            "--provenance",
+        ]
     )
     with open("paper/gq.tex") as f:
         assert r"\newcommand\ckanswer" in f.read()

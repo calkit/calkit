@@ -360,7 +360,7 @@ pipeline:
           storage: git
     questions-to-latex:
       kind: questions-to-latex
-      inputs: [results/findings.json]
+      provenance: true
       outputs:
         - path: paper/generated-questions.tex
           storage: git
@@ -493,7 +493,9 @@ numeric format applies to it. And when a stage merges several input files
 that disagree about a key, the stage stops: taking whichever file was read
 last would put a number in the paper that nobody could trace.
 
-The questions commands are `\ckquestion[n]`, `\ckhypothesis[n]`,
+A `questions-to-latex` stage with `provenance: true` writes the questions
+commands, and depends on the evidence its questions cite without listing
+it. They are `\ckquestion[n]`, `\ckhypothesis[n]`,
 `\ckanswer[n]`, `\cknotes[n]`, `\ckevidence[n]`, numbered as in
 `calkit list questions`, and `\ckfindings` for every answered question.
 A `{name}` placeholder in an answer becomes a marked value in the paper by

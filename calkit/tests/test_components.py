@@ -96,7 +96,14 @@ def _generate(ck_info: dict) -> None:
         ]
     )
     subprocess.check_call(
-        ["calkit", "latex", "from-questions", "-o", "paper/gq.tex"]
+        [
+            "calkit",
+            "latex",
+            "from-questions",
+            "-o",
+            "paper/gq.tex",
+            "--provenance",
+        ]
     )
 
 

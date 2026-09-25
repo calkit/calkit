@@ -5706,6 +5706,19 @@
           "default": null,
           "title": "Hypothesis"
         },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name for the question, e.g., for quoting its answer in a document through 'calkit latex from-questions'. Unlike its position in the list, it survives questions being added or reordered. Must be unique among the project's questions.",
+          "title": "Name"
+        },
         "notes": {
           "anyOf": [
             {
@@ -5732,13 +5745,19 @@
     },
     "QuestionsToLatexStage": {
       "additionalProperties": false,
-      "description": "Inject the project's questions and answers into a LaTeX document.\n\nReads ``calkit.yaml`` and the results files its value evidence points\nat, and writes commands giving each question's fields with every\nplaceholder rendered as a provenance-marked value.",
+      "description": "The project's questions and answers, rendered for a LaTeX document.\n\nIts inputs are ``calkit.yaml`` and every file the questions cite as\nevidence, added when the pipeline is compiled, so the output reruns\nwhen an answer or a value it reads changes.",
       "properties": {
         "always_run": {
           "default": false,
           "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
           "title": "Always Run",
           "type": "boolean"
+        },
+        "command_name": {
+          "default": "questions",
+          "description": "Name of the LaTeX command the document quotes questions through, e.g., 'questions' for \\questions[staging.answer].",
+          "title": "Command Name",
+          "type": "string"
         },
         "description": {
           "anyOf": [
@@ -5859,6 +5878,12 @@
           "description": "Paths this stage produces.",
           "title": "Outputs"
         },
+        "provenance": {
+          "default": false,
+          "description": "Write calkit.sty's provenance-marked commands instead: \\ckquestion[n], \\ckanswer[n], \\ckevidence[n] and friends, plus \\ckfindings for every answered question, with each value marked with where it came from. 'command_name' does not apply.",
+          "title": "Provenance",
+          "type": "boolean"
+        },
         "scheduler": {
           "anyOf": [
             {
@@ -5901,17 +5926,10 @@
           "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
           "default": null,
-          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
-          "title": "Wdir"
+          "description": "Not supported; the stage reads the project's calkit.yaml and evidence from the project root.",
+          "title": "Wdir",
+          "type": "null"
         }
       },
       "title": "QuestionsToLatexStage",

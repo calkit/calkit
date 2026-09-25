@@ -137,7 +137,14 @@ def test_describe_components(tmp_dir):
         ]
     )
     subprocess.check_call(
-        ["calkit", "latex", "from-questions", "-o", "paper/gq.tex"]
+        [
+            "calkit",
+            "latex",
+            "from-questions",
+            "-o",
+            "paper/gq.tex",
+            "--provenance",
+        ]
     )
     with open("paper/main.tex", "w") as f:
         f.write(

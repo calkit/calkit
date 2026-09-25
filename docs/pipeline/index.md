@@ -586,15 +586,18 @@ instead.
 
 Model class: `QuestionsToLatexStage`
 
-Inject the project's questions and answers into a LaTeX document.
+The project's questions and answers, rendered for a LaTeX document.
 
-Reads `calkit.yaml` and the results files its value evidence points
-at, and writes commands giving each question's fields with every
-placeholder rendered as a provenance-marked value.
+Its inputs are `calkit.yaml` and every file the questions cite as
+evidence, added when the pipeline is compiled, so the output reruns
+when an answer or a value it reads changes.
 
-| Kind-specific parameter | Type | Required | Default    | Description                                         |
-| ----------------------- | ---- | -------- | ---------- | --------------------------------------------------- |
-| `environment`           | str  | no       | '\_system' | Name of the environment in which to run this stage. |
+| Kind-specific parameter | Type | Required | Default     | Description                                                                                                                                                                                                                                   |
+| ----------------------- | ---- | -------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`           | str  | no       | '\_system'  | Name of the environment in which to run this stage.                                                                                                                                                                                           |
+| `wdir`                  | None | no       | null        | Not supported; the stage reads the project's calkit.yaml and evidence from the project root.                                                                                                                                                  |
+| `command_name`          | str  | no       | 'questions' | Name of the LaTeX command the document quotes questions through, e.g., 'questions' for \questions[staging.answer].                                                                                                                            |
+| `provenance`            | bool | no       | False       | Write calkit.sty's provenance-marked commands instead: \ckquestion[n], \ckanswer[n], \ckevidence[n] and friends, plus \ckfindings for every answered question, with each value marked with where it came from. 'command_name' does not apply. |
 
 ### `r-script`
 

@@ -1326,10 +1326,12 @@ def questions_tex(ck_info: dict, wdir: str | None = None) -> str:
 
     from calkit.questions import (
         TEMPLATED_FIELDS,
-        evidence_name,
+        is_conditional,
         is_value_evidence,
+        named_keys,
         read_evidence_file,
         resolve_key,
+        select_branch,
     )
 
     wdir = wdir or os.getcwd()
@@ -1347,16 +1349,25 @@ def questions_tex(ck_info: dict, wdir: str | None = None) -> str:
         fields["question"][key] = escape_tex(q.get("question", ""))
         values: dict[str, tuple[Any, str, str | None]] = {}
         for ev in q.get("evidence") or []:
-            if not is_value_evidence(ev):
+            keys = named_keys(ev)
+            if not keys:
                 continue
             data = read_evidence_file(os.path.join(wdir, ev["path"]))
-            values[evidence_name(ev) or ""] = (
-                resolve_key(data, ev["key"]),
-                ev["path"],
-                stage_for(ev["path"], ck_info),
-            )
+            stage = stage_for(ev["path"], ck_info)
+            for name, value_key in keys.items():
+                values[name] = (
+                    resolve_key(data, value_key),
+                    ev["path"],
+                    stage,
+                )
 
-        def render_tex(text: str | None) -> str:
+        def render_tex(text: str | dict | None) -> str:
+            # A conditional answer is typeset as the clause the evidence
+            # selects, as `calkit list questions` shows it
+            if is_conditional(text):
+                text = select_branch(
+                    text, {n: v[0] for n, v in values.items()}
+                )
             out = []
             for literal, name, spec, conv in formatter.parse(text or ""):
                 out.append(escape_tex(literal))

@@ -3330,14 +3330,14 @@ Options:
 
 Work with LaTeX.
 
-| Command                                                  | Description                                                  |
-| -------------------------------------------------------- | ------------------------------------------------------------ |
-| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                |
-| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as LaTeX commands. |
-| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                |
-| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.        |
-| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.           |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.   |
+| Command                                                  | Description                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                 |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                 |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3372,9 +3372,11 @@ Options:
 
 #### `calkit latex|tex from-questions`
 
-Write the project's questions and answers as LaTeX commands.
+Write the project's questions and answers as a LaTeX command.
 
-Gives `\ckquestion[n]`, `\ckanswer[n]`, `\ckevidence[n]` and friends, plus `\ckfindings` for every answered question, with each `{name}` placeholder rendered as a provenance-marked value from the results file it points at.
+Each question's text, hypothesis, answer, and notes are rendered from their evidence and exposed as, e.g., `\questions[staging.answer]`, keyed by the question's `name` or its 1-based position.
+
+With `--provenance`, writes `\ckquestion[n]`, `\ckanswer[n]`, `\ckevidence[n]` and friends instead, plus `\ckfindings` for every answered question, with each value marked with the results file it came from, for a document built with a latex stage's `provenance` option.
 
 Usage:
 
@@ -3384,9 +3386,11 @@ calkit latex|tex from-questions [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default                 | Description             |
-| ---------------- | ---- | -------- | ----------------------- | ----------------------- |
-| `--output`, `-o` | str  | no       | generated-questions.tex | Output LaTeX file path. |
+| Option           | Type    | Required | Default   | Description                                            |
+| ---------------- | ------- | -------- | --------- | ------------------------------------------------------ |
+| `--output`, `-o` | str     | yes      |           | Output LaTeX file path(s).                             |
+| `--command`      | str     | no       | questions | Command name to use in LaTeX output.                   |
+| `--provenance`   | boolean | no       | False     | Write calkit.sty's provenance-marked commands instead. |
 
 <a id="subcommand-latex-tex-build"></a>
 

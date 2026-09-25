@@ -254,6 +254,7 @@ class Stage(BaseModel):
         "marimo-html-wasm",
         "markdown",
         "procedure",
+        "questions-to-latex",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1253,48 +1254,6 @@ class LatexStage(Stage):
         return outs
 
 
-class QuestionsToLatexStage(Stage):
-    """Inject the project's questions and answers into a LaTeX document.
-
-    Reads ``calkit.yaml`` and the results files its value evidence points
-    at, and writes commands giving each question's fields with every
-    placeholder rendered as a provenance-marked value.
-    """
-
-    kind: Literal["questions-to-latex"] = "questions-to-latex"
-    environment: str = "_system"
-
-    @property
-    def dvc_cmd(self) -> str:
-        cmd = "calkit latex from-questions"
-        for out in self.outputs:
-            out_path = out if isinstance(out, str) else out.path
-            cmd += f" --output {shlex.quote(out_path)}"
-        return cmd
-
-    @property
-    def dvc_deps(self) -> list[str]:
-        # The questions live in calkit.yaml, so a change there re-renders
-        return ["calkit.yaml"] + super().dvc_deps
-
-    @property
-    def dvc_outs(self) -> list[str | dict]:
-        outs: list[str | dict] = []
-        for out in self.outputs:
-            if isinstance(out, str):
-                outs.append({out: dict(cache=False, persist=False)})
-            elif isinstance(out, PathOutput):
-                outs.append(
-                    {
-                        out.path: dict(
-                            cache=True if out.storage == "dvc" else False,
-                            persist=not out.delete_before_run,
-                        )
-                    }
-                )
-        return outs
-
-
 class QuartoStage(Stage):
     """A stage that renders a Quarto document.
 
@@ -1394,6 +1353,68 @@ class JsonToLatexStage(Stage):
                     {
                         out.path: dict(
                             cache=True if out.storage == "dvc" else False,
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+
+class QuestionsToLatexStage(Stage):
+    """The project's questions and answers, rendered for a LaTeX document.
+
+    Its inputs are ``calkit.yaml`` and every file the questions cite as
+    evidence, added when the pipeline is compiled, so the output reruns
+    when an answer or a value it reads changes.
+    """
+
+    kind: Literal["questions-to-latex"] = "questions-to-latex"
+    environment: str = "_system"
+    command_name: str = Field(
+        default="questions",
+        description=(
+            "Name of the LaTeX command the document quotes questions "
+            "through, e.g., 'questions' for \\questions[staging.answer]."
+        ),
+    )
+    wdir: None = Field(
+        default=None,
+        description="Not supported; the stage reads the project's "
+        "calkit.yaml and evidence from the project root.",
+    )
+    provenance: bool = Field(
+        default=False,
+        description=(
+            "Write calkit.sty's provenance-marked commands instead: "
+            "\\ckquestion[n], \\ckanswer[n], \\ckevidence[n] and friends, "
+            "plus \\ckfindings for every answered question, with each "
+            "value marked with where it came from. 'command_name' does not "
+            "apply."
+        ),
+    )
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = "calkit latex from-questions"
+        for out in self.outputs:
+            out_path = out if isinstance(out, str) else out.path
+            cmd += f" --output {shlex.quote(out_path)}"
+        if self.provenance:
+            return cmd + " --provenance"
+        return cmd + f" --command {shlex.quote(self.command_name)}"
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        """Stored with Git by default, like other generated LaTeX."""
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=out.storage == "dvc",
                             persist=not out.delete_before_run,
                         )
                     }

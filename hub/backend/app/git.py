@@ -370,7 +370,7 @@ def get_repo(
     Handles concurrency in case multiple API calls request the repo
     simultaneously. With a TTL of None, the remote is checked on every call
     and fetched from if it moved. A TTL of 0 forces a fetch, e.g., to pick up
-    a new branch.
+    a new branch, and raises if it fails.
 
     ``read_only`` promises the caller will only read, which lets every
     reader of a project share one warm checkout instead of cloning their
@@ -704,12 +704,12 @@ def get_repo(
                     if ref is None:
                         branch_name = repo.active_branch.name
                         # Every branch, not just the active one, so new ones
-                        # show up in the branch list
+                        # show up in the branch list and deleted ones don't
                         with _timed(
                             "fetch", repo=repo_label, branch=branch_name
                         ):
                             repo.git.fetch(
-                                ["origin"],
+                                ["origin", "--prune"],
                                 kill_after_timeout=GIT_FETCH_TIMEOUT,
                             )
                         # Only rewrite the working tree when the remote
@@ -742,7 +742,7 @@ def get_repo(
                     else:
                         with _timed("fetch-all", repo=repo_label):
                             repo.git.fetch(
-                                ["--all", "--tags"],
+                                ["--all", "--tags", "--prune"],
                                 kill_after_timeout=GIT_FETCH_TIMEOUT,
                             )
                     subprocess.call(["touch", updated_fpath])
@@ -751,6 +751,12 @@ def get_repo(
             logger.warning("Git repo lock timed out")
         except GitCommandError as e:
             logger.error(f"Failed to refresh repo: {e}")
+            # A forced refresh was asked for explicitly, so say it failed
+            # rather than serve what we had
+            if ttl == 0:
+                raise HTTPException(
+                    502, "Could not fetch the latest from the Git repo"
+                )
     if repo is None:
         repo = git.Repo(repo_dir)
     # Attach credentials to the repo's git runner so every subsequent

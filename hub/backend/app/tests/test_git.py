@@ -1004,6 +1004,18 @@ def test_a_reported_push_to_a_new_branch_shows_up_in_the_branch_list(
         seed.git.push(["origin", "other"])
         assert "other" not in branches()
         assert "other" in branches(ttl=0)
+        # A forced refresh drops a branch deleted from the remote
+        seed.git.push(["origin", "--delete", "other"])
+        assert "other" not in branches(ttl=0)
+        # And says so when it can't reach the remote, rather than serving
+        # what it had
+        shared = git.Repo(str(shared_base / "repo"))
+        shared.remotes.origin.set_url(str(tmp_path / "missing.git"))
+        with pytest.raises(HTTPException) as exc:
+            branches(ttl=0)
+        assert exc.value.status_code == 502
+        # An ordinary read still serves the stale checkout
+        assert main in branches()
 
 
 def test_push_and_expire_falls_back_when_the_shared_checkout_wont_take_it(

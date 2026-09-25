@@ -227,7 +227,7 @@ To see uncommitted changes, `calkit latex diff` runs a comparison on demand,
 and with no `--to` option specified, the comparison is the working copy:
 
 ```sh
-calkit latex diff pubs/paper-1/main.tex --from main --env tex
+calkit latex diff pubs/paper-1/main.tex --from main
 # .calkit/local/latex-diffs/main..working/pubs/paper-1/main.pdf
 ```
 
@@ -235,9 +235,9 @@ Those diffs can't be reproduced from two revisions, so they're not tracked,
 ending up in the project's `.calkit/local` directory.
 With no `--from` it compares against the merge base with the default
 branch--typically `main`.
-DVC-tracked files the document names directly are fetched for the older
-side, but a pipeline output without a `.dvc` file isn't found that way, so
-name any of those with `--input`, e.g., `--input pubs/paper-1/figs/`.
+If a `latex` stage builds the document, the diff is built the same way,
+with that stage's environment, settings, and inputs,
+so each side gets its own revision's figures.
 
 To see the .tex files sent into `latexdiff`, e.g., when the
 marked-up document fails to build, pass `--keep-tex`,

@@ -565,6 +565,42 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert "! Undefined control sequence." in result.stderr
     assert "l.3 \\oops" in result.stderr
     assert "exit code 12" in result.stderr
+    # Detection can't find another stage's uncached output at a revision
+    os.remove(stubs / "setup.txt")
+    bare = ["calkit", "latex", "diff", "paper/main.tex", "--from", "v1"]
+    bare += ["--to", "HEAD", "--force"]
+    result = subprocess.run(bare, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert not os.path.exists(stubs / "setup.txt")
+    # But a document the pipeline builds is diffed the way its stage builds
+    # it, fetching what the compiled stage depends on
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "pipeline:\n"
+            "  stages:\n"
+            "    paper:\n"
+            "      kind: latex\n"
+            "      target_path: paper/main.tex\n"
+            "      latexmkrc_path: paper/.latexmkrc\n"
+            "      latexdiff_args: [--type=CFONT]\n"
+        )
+    with open("dvc.yaml", "a") as f:
+        f.write(
+            "  paper:\n"
+            "    cmd: calkit latex build paper/main.tex\n"
+            "    deps: [paper/main.tex, paper/.latexmkrc, paper/setup.tex]\n"
+        )
+    result = subprocess.run(bare, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    with open(stubs / "setup.txt") as f:
+        assert f.read() == "present\n"
+    with open(stubs / "latexdiff-args.txt") as f:
+        assert "--type=CFONT" in f.read().split()
+    with open(stubs / "latexmk-args.txt") as f:
+        latexmk_args = f.read().split()
+    assert latexmk_args[latexmk_args.index("-r") + 1].endswith(
+        "paper/.latexmkrc"
+    )
 
 
 def test_marked_up_digest_ignores_the_header():

@@ -1,5 +1,4 @@
 import * as path from "node:path";
-import type { CalkitInfo } from "../types";
 
 // Pure helpers (no vscode imports) for diffing LaTeX documents, so they can be
 // unit-tested under plain `node --test`.
@@ -25,29 +24,4 @@ export function latexWorkingDiffPath(
     path.posix.dirname(texFile),
     `${path.posix.basename(texFile, path.posix.extname(texFile))}.pdf`,
   );
-}
-
-// `calkit latex diff` options that build a document the way its latex stage
-// does, mirroring the diff stages calkit/models/pipeline.py writes.
-export function latexStageDiffArgs(
-  config: CalkitInfo | undefined,
-  texFile: string,
-): string[] {
-  const stage = Object.values(config?.pipeline?.stages ?? {}).find(
-    (s) => s.kind === "latex" && s.target_path?.replace(/\\/g, "/") === texFile,
-  );
-  if (!stage) {
-    return [];
-  }
-  const strings = (value: unknown): string[] =>
-    Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
-  return [
-    ...(typeof stage.environment === "string" ? ["-e", stage.environment] : []),
-    ...(typeof stage.latexmkrc_path === "string"
-      ? ["-r", stage.latexmkrc_path]
-      : []),
-    ...strings(stage.latexmk_args).flatMap((a) => ["--latexmk-arg", a]),
-    ...strings(stage.latexdiff_args).flatMap((a) => ["--latexdiff-arg", a]),
-    ...(stage.keep_diff_tex === true ? ["--keep-tex"] : []),
-  ];
 }

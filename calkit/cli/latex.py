@@ -517,6 +517,53 @@ def diff(
     the comparison shows its own.
     """
 
+    def stage_path(stage: dict, path: str) -> str:
+        """A stage's path in the project's frame rather than its wdir's."""
+        return Path(
+            os.path.normpath(os.path.join(stage.get("wdir") or "", path))
+        ).as_posix()
+
+    def find_latex_stage() -> tuple[str | None, dict | None]:
+        """The pipeline stage that builds the document, if any."""
+        ck_info = calkit.load_calkit_info()
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        target = Path(os.path.normpath(tex_file)).as_posix()
+        for name, stage in stages.items():
+            if (
+                isinstance(stage, dict)
+                and stage.get("kind") == "latex"
+                and stage_path(stage, stage.get("target_path") or "") == target
+            ):
+                return name, stage
+        return None, None
+
+    def stage_inputs(name: str, stage: dict) -> list[str]:
+        """What a stage's diffs fetch at each revision.
+
+        Its dependencies in the compiled pipeline, which include other
+        stages' outputs it reads, found there since calkit.yaml only names
+        the stages they come from.
+        """
+        from calkit.models.pipeline import LatexStage
+
+        try:
+            dvc_stage = calkit.ryaml.load(Path("dvc.yaml").read_text())[
+                "stages"
+            ][name]
+            deps = [
+                dep if isinstance(dep, str) else next(iter(dep))
+                for dep in dvc_stage.get("deps") or []
+            ]
+        except Exception:
+            deps = LatexStage.model_validate(stage | {"name": name}).dvc_deps
+        skip = {tex_file, latexmk_rc_path}
+        return [
+            path
+            for dep in deps
+            if (path := stage_path(stage, dep)) not in skip
+            and not path.startswith(".calkit/")
+        ]
+
     def fetch_dvc_inputs(root: str, rev: str, paths: list[str]) -> list[str]:
         """Fetch the DVC-tracked content of ``paths`` at ``rev`` into ``root``.
 
@@ -638,7 +685,9 @@ def diff(
         Detection finds a file by its own name or pointer, but a file in a
         directory DVC tracks as a whole has only the directory's pointer,
         which can't say what's inside, so those directories beside the
-        document are included whole.
+        document are included whole. Neither finds another stage's output
+        DVC doesn't cache, so the pipeline's inputs for the document are
+        added too.
         """
         doc_dir = Path(root, os.path.dirname(tex_file))
         pointed = [
@@ -646,7 +695,8 @@ def diff(
             for p in sorted(doc_dir.rglob("*.dvc"))
             if p.is_file()
         ]
-        return calkit.latex.detect_inputs(tex_file, wdir=root) + pointed
+        detected = calkit.latex.detect_inputs(tex_file, wdir=root)
+        return detected + pointed + pipeline_inputs
 
     def point_changed_figures_at_base(base_root: str, head_root: str) -> None:
         """Make the older side's changed figures refer to its own copies.
@@ -707,6 +757,20 @@ def diff(
         from_ref = _default_base_ref(repo)
     if to_ref is None and not os.path.isfile(tex_file):
         raise_error(f"{tex_file} does not exist")
+    # A document the pipeline builds is diffed the way it's built, with its
+    # stage's environment, settings, and inputs, unless told otherwise
+    stage_name, stage = find_latex_stage()
+    pipeline_inputs: list[str] = []
+    if stage is not None:
+        if environment is None:
+            environment = stage.get("environment")
+        if latexmk_rc_path is None and stage.get("latexmkrc_path"):
+            latexmk_rc_path = stage_path(stage, stage["latexmkrc_path"])
+        latexmk_args = latexmk_args or list(stage.get("latexmk_args") or [])
+        latexdiff_args = latexdiff_args or list(
+            stage.get("latexdiff_args") or []
+        )
+        pipeline_inputs = stage_inputs(str(stage_name), stage)
     if output is None:
         output = get_diff_path(
             tex_file,

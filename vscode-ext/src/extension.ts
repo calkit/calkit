@@ -47,7 +47,7 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
-import { latexStageDiffArgs, latexWorkingDiffPath } from "./latex/core";
+import { latexWorkingDiffPath } from "./latex/core";
 import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
@@ -613,7 +613,6 @@ export function activate(context: vscode.ExtensionContext): void {
           "diff",
           texFile,
           ...(fromRef ? ["--from", fromRef] : []),
-          ...latexStageDiffArgs(currentCalkitConfig, texFile),
           "-o",
           outPath,
         ];

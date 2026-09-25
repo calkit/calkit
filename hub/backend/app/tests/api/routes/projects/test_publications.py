@@ -473,7 +473,7 @@ def test_get_project_publications_latex_diffs(
     pubs = {pub["path"]: pub for pub in resp.json()}
     paper_diffs = pubs["paper/main.pdf"]["latex_diffs"]
     assert [(d["from_ref"], d["to_ref"]) for d in paper_diffs] == [
-        ("v1", "HEAD"),
+        ("v1", None),
         ("v1", "v2"),
     ]
     assert paper_diffs[0]["path"] == ".calkit/latex-diffs/v1/paper/main.pdf"

@@ -116,24 +116,25 @@ def diff_stage_suffix(from_ref: str, to_ref: str | None = None) -> str:
     return suffix
 
 
-def get_diff_pairs(diffs: list) -> list[tuple[str, str]]:
+def get_diff_pairs(diffs: list) -> list[tuple[str, str | None]]:
     """The revisions a latex stage's ``diffs`` compare, oldest side first.
 
-    A bare revision compares it against ``HEAD``. Every comparison in a
-    pipeline is between two commits: one against the working tree can't be
-    reproduced, so it belongs to whoever is doing the work rather than to
-    the project.
+    A bare revision compares it against the working tree, so like any other
+    stage, a diff reflects local changes without committing them first.
+    That side is ``None``.
     """
-    pairs: list[tuple[str, str]] = []
+    pairs: list[tuple[str, str | None]] = []
     for entry in diffs:
         if isinstance(entry, str):
-            pairs.append((entry, "HEAD"))
+            pairs.append((entry, None))
         else:
             pairs.append((entry[0], entry[1]))
     return pairs
 
 
-def get_diff_stage_name(stage_name: str, from_ref: str, to_ref: str) -> str:
+def get_diff_stage_name(
+    stage_name: str, from_ref: str, to_ref: str | None
+) -> str:
     """The DVC stage a latex stage generates to build one of its diffs."""
     return f"{stage_name}-diff-{diff_stage_suffix(from_ref, to_ref)}"
 

@@ -6847,7 +6847,14 @@ export const PublicationLatexDiffSchema = {
       title: "From Ref",
     },
     to_ref: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "To Ref",
     },
     path: {
@@ -6901,7 +6908,7 @@ export const PublicationLatexDiffSchema = {
     },
   },
   type: "object",
-  required: ["from_ref", "to_ref", "path"],
+  required: ["from_ref", "path"],
   title: "PublicationLatexDiff",
   description:
     "A PDF marking up what changed in a publication between revisions.",

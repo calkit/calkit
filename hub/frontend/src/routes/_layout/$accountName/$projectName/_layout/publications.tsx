@@ -84,7 +84,7 @@ const pubSearchSchema = z.object({
 })
 
 const getDiffLabel = (diff: PublicationLatexDiff) =>
-  diff.to_ref === "HEAD"
+  !diff.to_ref || diff.to_ref === "HEAD"
     ? `Changes since ${diff.from_ref}`
     : `Changes from ${diff.from_ref} to ${diff.to_ref}`
 

@@ -1476,7 +1476,8 @@ class PublicationLatexDiff(BaseModel):
     """A PDF marking up what changed in a publication between revisions."""
 
     from_ref: str
-    to_ref: str
+    # None for the working tree when the diff was built
+    to_ref: str | None = None
     path: str
     # The generated DVC stage that builds it
     stage: str | None = None

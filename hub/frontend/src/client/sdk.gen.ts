@@ -4800,14 +4800,7 @@ export class ProjectsService {
   /**
    * Post Project Sync
    *
-   * Synchronize a project with its Git repo.
-   *
-   * Do we actually need this? It will give us a way to operate if GitHub is
-   * down, at least in read-only mode.
-   * Or perhaps we can bidirectionally sync, allowing users to update Calkit
-   * entities and we'll commit them back on sync.
-   * It would probably be better to use Git for that, so we can handle
-   * asynchronous edits with merges.
+   * Fetch the latest from a project's Git repo, e.g., to see a new branch.
    */
   public static postProjectSync<ThrowOnError extends boolean = true>(
     parameters: {

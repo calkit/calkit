@@ -43,7 +43,7 @@ import {
 import mixpanel from "mixpanel-browser"
 import { useEffect, useState } from "react"
 import { BsThreeDots } from "react-icons/bs"
-import { FaCodeBranch } from "react-icons/fa"
+import { FaCodeBranch, FaSync } from "react-icons/fa"
 import { FaGithub, FaQuestion, FaRegClone, FaRegFileAlt } from "react-icons/fa"
 import { FiCheckSquare } from "react-icons/fi"
 import { LuCopyPlus } from "react-icons/lu"
@@ -70,6 +70,7 @@ import NewPublication from "../../../../components/Publications/NewPublication"
 import useAuth from "../../../../hooks/useAuth"
 import useOnboardingFlags from "../../../../hooks/useOnboarding"
 import useProject from "../../../../hooks/useProject"
+import useRefreshProject from "../../../../hooks/useRefreshProject"
 import { isAuthenticationError } from "../../../../lib/auth"
 import { DISMISSED } from "../../../../lib/onboarding"
 
@@ -295,6 +296,7 @@ function ProjectMenu({
   const switchVersionModal = useDisclosure()
   const newPubTemplateModal = useDisclosure()
   const overleafImportModal = useDisclosure()
+  const refreshProject = useRefreshProject(accountName, projectName)
   // Codespaces gives a browser editor that can also run the pipeline; the
   // CLI signs in on its own there, so no token setup stands in the way.
   const codespacesUrl = project.git_repo_url
@@ -377,6 +379,15 @@ function ProjectMenu({
               </MenuItem>
             ) : null}
             <MenuDivider />
+            {user ? (
+              <MenuItem
+                icon={<FaSync fontSize={14} />}
+                onClick={() => refreshProject.mutate()}
+                isDisabled={refreshProject.isPending}
+              >
+                Refresh
+              </MenuItem>
+            ) : null}
             <MenuItem
               icon={<FaCodeBranch fontSize={16} />}
               onClick={switchVersionModal.onOpen}

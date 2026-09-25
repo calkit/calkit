@@ -40,8 +40,6 @@ import {
 } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import FileContent from "../../../../../components/Files/FileContent"
-import NotebookRunLauncher from "../../../../../components/Notebooks/NotebookRunLauncher"
-import NotebookView from "../../../../../components/Notebooks/NotebookView"
 import FileEditorModal, {
   isEditableText,
 } from "../../../../../components/Files/FileEditorModal"
@@ -49,8 +47,12 @@ import SelectedItemInfo, {
   inferKindFromPath,
 } from "../../../../../components/Files/SelectedItemInfo"
 import UploadFile from "../../../../../components/Files/UploadFile"
+import NotebookRunLauncher from "../../../../../components/Notebooks/NotebookRunLauncher"
+import NotebookView from "../../../../../components/Notebooks/NotebookView"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
+import { isLoggedIn } from "../../../../../hooks/useAuth"
 import useProject from "../../../../../hooks/useProject"
+import useRefreshProject from "../../../../../hooks/useRefreshProject"
 
 const fileSearchSchema = z.object({
   path: z.string().catch(""),
@@ -334,9 +336,15 @@ function Files() {
   if (Array.isArray(files?.dir_items)) {
     files.dir_items.sort(sortByTypeAndName)
   }
+  const refreshProject = useRefreshProject(accountName, projectName)
+  // Fetching from the repo needs a login; otherwise just reload what we have
   const refresh = () => {
-    refetch()
-    selectedItemQuery.refetch()
+    if (isLoggedIn()) {
+      refreshProject.mutate()
+    } else {
+      refetch()
+      selectedItemQuery.refetch()
+    }
   }
 
   const clearRef = () => {
@@ -434,7 +442,7 @@ function Files() {
 
   return (
     <>
-      {filesPending || isRefetching ? (
+      {filesPending || isRefetching || refreshProject.isPending ? (
         <LoadingSpinner />
       ) : (
         <Flex height={"100%"} overflowX="hidden">

@@ -228,6 +228,23 @@ def _allow_null(schema: dict[str, Any]) -> None:
     schema["anyOf"] = [inner, {"type": "null"}]
 
 
+def _unique_paths(paths: list[str]) -> list[str]:
+    """Drop repeated paths, keeping the order they were first added in.
+
+    A stage can name the same path more than once: a document's target is
+    often also one of its inputs, and one source can be copied to several
+    destinations. DVC warns about a duplicate dep on every run, so the
+    generated stage lists each path once.
+    """
+    seen: set[str] = set()
+    unique: list[str] = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            unique.append(path)
+    return unique
+
+
 class Stage(BaseModel):
     """A stage in the pipeline."""
 
@@ -694,6 +711,9 @@ class Stage(BaseModel):
             path = i if isinstance(i, str) else i.path
             if path not in deps:
                 deps.append(path)
+        # Each path appears once: a stage that names the same one twice, e.g.
+        # a target that is also an input, otherwise reaches DVC as a duplicate
+        deps = _unique_paths(deps)
         outs = self.dvc_outs
         log_out = self.scheduler_log_output
         if log_out is not None:
@@ -939,7 +959,7 @@ class MapPathsStage(Stage):
         deps = []
         for path in self.paths:
             deps.append(path.src)
-        return deps + super().dvc_deps
+        return _unique_paths(deps + super().dvc_deps)
 
     @property
     def dvc_outs(self) -> list[dict]:
@@ -1223,7 +1243,7 @@ class LatexStage(Stage):
         deps = [self.target_path] + super().dvc_deps
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
-        return deps
+        return _unique_paths(deps)
 
     @property
     def dvc_outs(self) -> list[str | dict]:

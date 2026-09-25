@@ -17,6 +17,7 @@ from calkit.models.pipeline import (
     Pipeline,
     PythonScriptStage,
     QuartoStage,
+    ShellScriptStage,
     StageIteration,
     WordToPdfStage,
 )
@@ -951,3 +952,63 @@ def test_system_env_can_wrap_a_runtime():
             bad.set_stage_scheduler_options(
                 envs | {"sched": {"kind": "slurm", "host": "hpc.edu"}}
             )
+
+
+def test_dvc_deps_are_unique_per_stage():
+    # A generated dvc.yaml lists each dependency once. A stage that names the
+    # same path twice otherwise reaches DVC as a duplicate, which it warns
+    # about on every run
+    def assert_unique(deps: list[str]) -> None:
+        assert len(deps) == len(set(deps)), f"duplicates in {deps}"
+
+    # The target is also a common input, e.g. a bib or a figure the document
+    # reads, so it arrives as both target_path and an input
+    latex = LatexStage(
+        name="paper",
+        environment="tex",
+        target_path="main.tex",
+        inputs=["main.tex", "figures/plot.png"],
+    )
+    assert_unique(latex.dvc_deps)
+
+    # One source copied to two destinations is one dependency, not two
+    mapped = MapPathsStage(
+        name="copy",
+        paths=[
+            dict(kind="file-to-file", src="paper/main.tex", dest="out/a.tex"),
+            dict(kind="file-to-file", src="paper/main.tex", dest="out/b.tex"),
+        ],
+    )
+    assert_unique(mapped.dvc_deps)
+
+    # The compiled stage is what reaches dvc.yaml
+    for stage in [latex, mapped]:
+        assert_unique(stage.to_dvc()["deps"])
+
+
+def test_to_dvc_deps_have_no_duplicates():
+    # A script named as its own input reaches the generated stage twice:
+    # once through the script_path override and once through inputs
+    for stage in [
+        PythonScriptStage(
+            name="run",
+            environment="py",
+            script_path="run.py",
+            inputs=["run.py", "data/in.csv"],
+        ),
+        ShellScriptStage(
+            name="shell",
+            kind="shell-script",
+            environment="_system",
+            script_path="run.sh",
+            inputs=["run.sh"],
+        ),
+        WordToPdfStage(
+            name="doc",
+            environment="tex",
+            word_doc_path="document.docx",
+            inputs=["document.docx"],
+        ),
+    ]:
+        deps = stage.to_dvc()["deps"]
+        assert len(deps) == len(set(deps)), f"duplicates in {deps}"

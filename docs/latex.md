@@ -235,9 +235,10 @@ Those diffs can't be reproduced from two revisions, so they're not tracked,
 ending up in the project's `.calkit/local` directory.
 With no `--from` it compares against the merge base with the default
 branch--typically `main`.
-If a `latex` stage builds the document, the diff is built the same way,
-with that stage's environment, settings, and inputs,
-so each side gets its own revision's figures.
+If a `latex` pipeline stage builds the document,
+the diff is built with the stage configuration, i.e.,
+its environment, settings, and inputs,
+so the diff uses both revisions of the figures, tables, and results.
 
 To see the .tex files sent into `latexdiff`, e.g., when the
 marked-up document fails to build, pass `--keep-tex`,

@@ -159,6 +159,12 @@
         "icon": "$(file-pdf)"
       },
       {
+        "command": "calkit-vscode.diffLatex",
+        "title": "Diff LaTeX Document Against...",
+        "category": "Calkit",
+        "icon": "$(diff)"
+      },
+      {
         "command": "calkit-vscode.goToFigureSource",
         "title": "Go to Figure Source",
         "category": "Calkit",
@@ -518,6 +524,11 @@
           "command": "calkit-vscode.openFileHistory",
           "when": "!explorerResourceIsFolder",
           "group": "calkit@4"
+        },
+        {
+          "command": "calkit-vscode.diffLatex",
+          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "group": "calkit@5"
         }
       ],
       "editor/title": [
@@ -550,6 +561,11 @@
           "command": "calkit-vscode.openStagePdf",
           "when": "resourceExtname == .qmd && calkit.activeFileHasStage && !calkit.isSettingKernel",
           "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.diffLatex",
+          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "group": "navigation"
         }
       ],
       "editor/context": [
@@ -569,6 +585,11 @@
           "command": "calkit-vscode.goToFigureSource",
           "when": "resourceExtname == .qmd || resourceExtname == .tex",
           "group": "calkit@4"
+        },
+        {
+          "command": "calkit-vscode.diffLatex",
+          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "group": "calkit@5"
         }
       ],
       "notebook/toolbar": [
@@ -715,6 +736,10 @@
         {
           "command": "calkit-vscode.goToFigureSource",
           "when": "resourceExtname == .qmd || resourceExtname == .tex"
+        },
+        {
+          "command": "calkit-vscode.diffLatex",
+          "when": "resourceExtname == .tex && calkit-vscode.hasProject"
         },
         {
           "command": "calkit-vscode.save",

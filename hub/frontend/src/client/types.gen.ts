@@ -3830,6 +3830,10 @@ export type Publication = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+  /**
+   * Latex Diffs
+   */
+  latex_diffs?: Array<PublicationLatexDiff>
 }
 
 /**
@@ -3888,6 +3892,42 @@ export type PublicationComponents = {
    * N Unknown
    */
   n_unknown: number
+}
+
+/**
+ * PublicationLatexDiff
+ *
+ * A PDF marking up what changed in a publication between revisions.
+ */
+export type PublicationLatexDiff = {
+  /**
+   * From Ref
+   */
+  from_ref: string
+  /**
+   * To Ref
+   */
+  to_ref: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Storage
+   */
+  storage?: "git" | "dvc" | "dvc-zip" | null
 }
 
 /**

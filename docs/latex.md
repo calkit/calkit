@@ -106,10 +106,21 @@ document can usually diff it too.
 
 ### For pull request reviewers
 
-A single revision compares it against `HEAD`, so `- main` means "what this
-branch has committed, against the `main` branch".
-That's the diff you'd want to see for a pull request,
-and it will be rebuilt by the pipeline whenever the PR or `main` changes.
+A single revision compares it against the working tree, so `- main` means
+"what this branch changes, against the `main` branch", including edits that
+haven't been committed yet.
+Like any other stage, you can edit the document, run the pipeline, and see
+the result without committing first.
+Commit the diff along with the edits, and it's the diff for that commit,
+which is what you'd want to see on a pull request.
+It will be rebuilt by the pipeline whenever the document or `main` changes.
+
+To compare only what's been committed, name `HEAD` explicitly:
+
+```yaml
+diffs:
+  - [main, HEAD]
+```
 
 On the default branch, `main` and `HEAD` are the same commit, so the
 comparison comes out empty and the diff will show no changes.
@@ -219,10 +230,10 @@ To run all of a document's comparisons:
 calkit run paper-1.diffs
 ```
 
-### Comparing against uncommitted work
+### Comparing on demand
 
-`calkit latex diff` runs a comparison on demand, and with no `--to` the
-newer side is the working tree:
+`calkit latex diff` runs a comparison without adding it to the pipeline,
+and with no `--to` the newer side is the working tree:
 
 ```sh
 calkit latex diff pubs/paper-1/main.tex --from main --env tex
@@ -235,6 +246,15 @@ With no `--from` it compares against the merge base with the default branch.
 DVC-tracked files the document names directly are fetched for the older
 side, but a pipeline output without a `.dvc` file isn't found that way, so
 name any of those with `--input`, e.g., `--input pubs/paper-1/figs/`.
+
+To see what `latexdiff` was given and what it produced, e.g., when the
+marked-up document fails to build, pass `--keep-tex`,
+or set `keep_diff_tex: true` on the stage.
+The old, new, and marked-up `.tex` files are kept beside the diff PDF,
+e.g., `main-old.tex`, `main-new.tex`, and `main-diff.tex`.
+
+In VS Code, the Calkit extension's "Diff LaTeX Document Against..." command
+does the same from the editor, and opens the result.
 
 ## Interoperability with Microsoft Word
 

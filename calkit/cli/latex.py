@@ -771,9 +771,9 @@ def diff(
             break_verbatim_params(root)
         point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
-            base_tex=sides["base"],
-            head_tex=sides["head"],
-            tex_file=tex_file,
+            base_tex_fpath=sides["base"],
+            head_tex_fpath=sides["head"],
+            tex_file_fpath=tex_file,
             head_root=head_root,
             output=output,
             environment=environment,
@@ -830,9 +830,9 @@ def _remove_worktree(path: str) -> None:
 
 
 def _build_diff(
-    base_tex: str,
-    head_tex: str,
-    tex_file: str,
+    base_tex_fpath: str,
+    head_tex_fpath: str,
+    tex_file_fpath: str,
     head_root: str,
     output: str,
     environment: str | None,
@@ -845,17 +845,24 @@ def _build_diff(
     force: bool,
     verbose: bool,
 ) -> None:
-    """Mark up one document against another and build the result."""
+    """Mark up one document against another and build the result.
+
+    TODO: Document parameters.
+    """
     # Built beside the newer side, so \graphicspath, \bibliography, and
     # relative \includegraphics resolve the way they do for the real thing,
     # against that revision's own files
-    tex_dir = os.path.dirname(tex_file) or "."
+    tex_dir = os.path.dirname(tex_file_fpath) or "."
     build_dir = os.path.normpath(os.path.join(head_root, tex_dir))
-    stem = Path(tex_file).stem
+    stem = Path(tex_file_fpath).stem
     diff_tex = os.path.join(build_dir, f"{stem}-diff.tex")
     # Where --keep-tex leaves it: beside the document, since a checkout is
     # removed afterwards
-    kept_tex = os.path.normpath(os.path.join(tex_dir, f"{stem}-diff.tex"))
+    kept_tex_diff_fpath = os.path.normpath(
+        os.path.join(tex_dir, f"{stem}-diff.tex")
+    )
+    kept_base_tex_fpath = ""  # TODO: fix  # noqa: F841
+    kept_compare_tex_fpath = ""  # TODO: fix  # noqa: F841
     aux_dir = os.path.join(build_dir, calkit.latex.DIFF_AUX_DIRNAME)
     try:
         # --flatten pulls \input and \include files into one document on
@@ -865,9 +872,9 @@ def _build_diff(
         # broken, so this only finds the working tree's, which can't be
         # edited. A filter breaks those instead, though latexdiff's
         # --filter-script mangles anything outside Latin-1.
-        sources = [base_tex, head_tex] + [
+        sources = [base_tex_fpath, head_tex_fpath] + [
             path
-            for side in (base_tex, head_tex)
+            for side in (base_tex_fpath, head_tex_fpath)
             for path in calkit.latex.detect_inputs(side)
             if Path(path).suffix in calkit.latex._SOURCE_EXTS
         ]
@@ -901,7 +908,7 @@ def _build_diff(
         # defaults
         latexdiff_cmd += latexdiff_args
         cmd = _tex_cmd(
-            latexdiff_cmd + [base_tex, head_tex],
+            latexdiff_cmd + [base_tex_fpath, head_tex_fpath],
             environment=environment,
             no_check=no_check,
             verbose=verbose,
@@ -1020,9 +1027,11 @@ def _build_diff(
         typer.echo(f"Wrote {output}")
     finally:
         if os.path.isfile(diff_tex):
-            in_place = os.path.abspath(diff_tex) == os.path.abspath(kept_tex)
+            in_place = os.path.abspath(diff_tex) == os.path.abspath(
+                kept_tex_diff_fpath
+            )
             if keep_tex and not in_place:
-                shutil.copy(diff_tex, kept_tex)
+                shutil.copy(diff_tex, kept_tex_diff_fpath)
             if not keep_tex or not in_place:
                 os.remove(diff_tex)
 

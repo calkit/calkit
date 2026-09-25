@@ -463,6 +463,16 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert "\\includegraphics{../../base/paper/figs/plot.png}" in marked_up
     assert "\\includegraphics{figs/plot}" in marked_up
     assert not os.path.exists("paper/figs")
+    # --keep-tex keeps what latexdiff saw alongside the marked-up document,
+    # so a --flatten or macro expansion failure can be inspected
+    with open("paper/main-old.tex", encoding="utf-8") as f:
+        old_tex = f.read()
+    with open("paper/main-new.tex", encoding="utf-8") as f:
+        new_tex = f.read()
+    assert "\\verbatiminput%\n{#1.wcsum}" in old_tex
+    assert "\\verbatiminput%\n{#1.wcsum}" in new_tex
+    assert "../../base/paper/figs/plot.png" in old_tex
+    assert "../../base/paper/figs/plot.png" not in new_tex
     # The diff is built with the document's rc file, read before the
     # directories Calkit sets so those win, and latexdiff gets its options
     with open(stubs / "latexmk-args.txt") as f:
@@ -548,7 +558,7 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert result.returncode != 0
     assert "! Undefined control sequence." in result.stderr
     assert "l.3 \\oops" in result.stderr
-    assert "exit status 12" in result.stderr
+    assert "exit code 12" in result.stderr
 
 
 def test_marked_up_digest_ignores_the_header():

@@ -847,22 +847,32 @@ def _build_diff(
 ) -> None:
     """Mark up one document against another and build the result.
 
-    TODO: Document parameters.
+    base_tex_fpath is the older revision's document, head_tex_fpath the
+    newer revision's, and tex_file_fpath the document as named on the
+    command line. head_root is where the newer side lives: a checkout,
+    or the working tree, beside which the marked-up document is built
+    so its relative inputs resolve.
     """
+
+    def _same_path(a: str, b: str) -> bool:
+        return os.path.abspath(a) == os.path.abspath(b)
+
     # Built beside the newer side, so \graphicspath, \bibliography, and
     # relative \includegraphics resolve the way they do for the real thing,
     # against that revision's own files
     tex_dir = os.path.dirname(tex_file_fpath) or "."
     build_dir = os.path.normpath(os.path.join(head_root, tex_dir))
     stem = Path(tex_file_fpath).stem
-    diff_tex = os.path.join(build_dir, f"{stem}-diff.tex")
-    # Where --keep-tex leaves it: beside the document, since a checkout is
-    # removed afterwards
-    kept_tex_diff_fpath = os.path.normpath(
+    diff_tex_fpath = os.path.join(build_dir, f"{stem}-diff.tex")
+    # Where --keep-tex leaves its copies: beside the document, since a
+    # checkout is removed afterwards. The old and new files are what
+    # latexdiff saw, after verbatim fixes and figure repointing, so a
+    # --flatten or macro expansion failure can be inspected.
+    kept_diff_fpath = os.path.normpath(
         os.path.join(tex_dir, f"{stem}-diff.tex")
     )
-    kept_base_tex_fpath = ""  # TODO: fix  # noqa: F841
-    kept_compare_tex_fpath = ""  # TODO: fix  # noqa: F841
+    kept_old_fpath = os.path.normpath(os.path.join(tex_dir, f"{stem}-old.tex"))
+    kept_new_fpath = os.path.normpath(os.path.join(tex_dir, f"{stem}-new.tex"))
     aux_dir = os.path.join(build_dir, calkit.latex.DIFF_AUX_DIRNAME)
     try:
         # --flatten pulls \input and \include files into one document on
@@ -956,8 +966,7 @@ def _build_diff(
         ):
             typer.echo(f"{output} is up to date")
             return
-        with open(diff_tex, "wb") as f:
-            f.write(marked_up)
+        Path(diff_tex_fpath).write_bytes(marked_up)
         os.makedirs(aux_dir, exist_ok=True)
         rel_aux = calkit.latex.DIFF_AUX_DIRNAME
         latexmk_cmd = ["latexmk"]
@@ -977,7 +986,7 @@ def _build_diff(
         # User pass-through args come last so they can override Calkit's
         # defaults
         latexmk_cmd += latexmk_args
-        latexmk_cmd.append(diff_tex)
+        latexmk_cmd.append(diff_tex_fpath)
         cmd = _tex_cmd(
             latexmk_cmd,
             environment=environment,
@@ -1022,18 +1031,28 @@ def _build_diff(
         if os.path.abspath(head_root) == os.path.abspath("."):
             shutil.rmtree(aux_dir, ignore_errors=True)
         os.makedirs(os.path.dirname(state_path), exist_ok=True)
-        with open(state_path, "w") as f:
-            f.write(digest)
+        Path(state_path).write_text(digest)
         typer.echo(f"Wrote {output}")
     finally:
-        if os.path.isfile(diff_tex):
-            in_place = os.path.abspath(diff_tex) == os.path.abspath(
-                kept_tex_diff_fpath
-            )
+        if keep_tex:
+            for src, kept in (
+                (base_tex_fpath, kept_old_fpath),
+                (head_tex_fpath, kept_new_fpath),
+            ):
+                # The working tree's own file is already beside the document,
+                # so only the checked-out sides need copying there
+                if os.path.isfile(src) and not _same_path(src, kept):
+                    os.makedirs(os.path.dirname(kept) or ".", exist_ok=True)
+                    shutil.copy(src, kept)
+        if os.path.isfile(diff_tex_fpath):
+            in_place = _same_path(diff_tex_fpath, kept_diff_fpath)
             if keep_tex and not in_place:
-                shutil.copy(diff_tex, kept_tex_diff_fpath)
+                os.makedirs(
+                    os.path.dirname(kept_diff_fpath) or ".", exist_ok=True
+                )
+                shutil.copy(diff_tex_fpath, kept_diff_fpath)
             if not keep_tex or not in_place:
-                os.remove(diff_tex)
+                os.remove(diff_tex_fpath)
 
 
 @latex_app.command(name="to-docx")

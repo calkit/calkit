@@ -28,6 +28,7 @@ import { MdEdit } from "react-icons/md"
 import { TiFlowMerge } from "react-icons/ti"
 
 import { ProjectsService } from "../../client"
+import { encodeBase64Utf8 } from "../../lib/strings"
 import type { QuestionEvidence, QuestionPublic } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import {
@@ -41,6 +42,8 @@ import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import Tooltip from "../Common/Tooltip"
 import FigureView from "../Figures/FigureView"
+import FileContent from "../Files/FileContent"
+import SandboxedHtml from "../Common/SandboxedHtml"
 import PublicationView from "../Publications/PublicationView"
 import TableView from "../Tables/TableView"
 
@@ -106,7 +109,9 @@ const evidencePage = (evidence: QuestionEvidence) => {
   if (evidence.kind === "table") {
     return "tables"
   }
-  if (evidence.kind === "publication") {
+  // Only a declared publication is on the publications page; a document, or
+  // a publication cited without declaring it, opens as a file
+  if (evidence.kind === "publication" && evidence.publication) {
     return "publications"
   }
   return "files"
@@ -116,8 +121,9 @@ const evidenceTitle = (evidence: QuestionEvidence) => {
   if (evidence.kind === "figure") {
     return evidence.figure?.title ?? evidence.path
   }
-  if (evidence.kind === "publication") {
-    return evidence.publication?.title ?? evidence.path
+  if (evidence.kind === "publication" || evidence.kind === "document") {
+    const title = evidence.publication?.title ?? evidence.path
+    return evidence.section ? `${title}, section ${evidence.section}` : title
   }
   return evidence.result?.title ?? evidence.path
 }
@@ -160,8 +166,10 @@ function EvidenceCard({
   const stale = isEvidenceStale(evidence)
   // A cited value is the whole artifact -- there is nothing to open that the
   // card doesn't already show -- so it links out to the file it was read
-  // from instead of expanding, and names the stage that wrote it.
-  const isValue = evidence.value != null
+  // from instead of expanding, and names the stage that wrote it. A result
+  // naming several values is the same, with the values listed together.
+  const values = evidence.values ?? []
+  const isValue = evidence.value != null || values.length > 0
   const pathLabel = `${evidence.path}${evidence.key ? `:${evidence.key}` : ""}`
   const pathLine = isValue ? (
     <Link
@@ -257,11 +265,33 @@ function EvidenceCard({
         {evidence.value}
       </Text>
     )
+  } else if (values.length > 0) {
+    preview = (
+      <Box mb={1}>
+        {values.map((v) => (
+          <Flex key={v.name} align="baseline" justify="space-between" gap={3}>
+            <Tooltip label={v.key}>
+              <Code fontSize="xs" noOfLines={1}>
+                {v.name}
+              </Code>
+            </Tooltip>
+            <Text
+              fontSize="lg"
+              fontWeight="bold"
+              noOfLines={1}
+              color={v.value == null ? missingBorderColor : undefined}
+            >
+              {v.value ?? "not found"}
+            </Text>
+          </Flex>
+        ))}
+      </Box>
+    )
   }
   let icon = null
   if (evidence.kind === "table") {
     icon = <Icon as={FiGrid} color="gray.500" flexShrink={0} />
-  } else if (evidence.kind === "publication") {
+  } else if (evidence.kind === "publication" || evidence.kind === "document") {
     icon = <Icon as={FaRegFileAlt} color="gray.500" flexShrink={0} />
   }
   const body = (
@@ -281,7 +311,12 @@ function EvidenceCard({
         // In full: the cards sit in a column of their own now, and an
         // explanation clipped at three lines had nowhere to be read.
         <Box fontSize="xs" color={subtleColor} mt={1}>
-          <Markdown foldedProse>{evidence.explanation}</Markdown>
+          <Explanation
+            evidence={evidence}
+            accountName={accountName}
+            projectName={projectName}
+            gitRef={gitRef}
+          />
         </Box>
       ) : null}
     </>
@@ -353,8 +388,45 @@ function EvidenceDetail({
     accountName,
     projectName,
     ref,
-    evidence.kind === "publication",
+    evidence.kind === "publication" && !!evidence.publication,
   )
+  // Cited by path rather than declared, so its content comes from the tree
+  const citedByPath =
+    evidence.kind === "document" ||
+    (evidence.kind === "publication" && !evidence.publication)
+  const isHtml = evidence.path.toLowerCase().endsWith(".html")
+  const documentRequest = useQuery({
+    queryKey: [
+      "projects",
+      accountName,
+      projectName,
+      "contents",
+      evidence.path,
+      ref,
+    ],
+    queryFn: async () => {
+      const item = (
+        await ProjectsService.getProjectContents({
+          owner_name: accountName,
+          project_name: projectName,
+          path: evidence.path,
+          ref,
+        })
+      ).data
+      // A large file comes back as a download URL rather than inline, which
+      // the viewer can't render as text, so read it from there
+      if (!item.content && item.url) {
+        const response = await fetch(item.url)
+        if (!response.ok) {
+          throw new Error(`Could not read ${evidence.path}`)
+        }
+        return { ...item, content: encodeBase64Utf8(await response.text()) }
+      }
+      return item
+    },
+    enabled: citedByPath && evidence.stale_reason !== "missing",
+    retry: false,
+  })
   if (evidence.kind === "figure") {
     if (!evidence.figure) {
       return <NotFound evidence={evidence} />
@@ -382,6 +454,30 @@ function EvidenceDetail({
     }
     return <TableView table={table} maxHeight="calc(92vh - 300px)" />
   }
+  if (citedByPath) {
+    if (documentRequest.isPending && evidence.stale_reason !== "missing") {
+      return <LoadingSpinner height="200px" />
+    }
+    if (documentRequest.isError) {
+      return (
+        <Text fontSize="sm" color="gray.500">
+          Couldn't load {evidence.path}. Open it from the link above.
+        </Text>
+      )
+    }
+    const item = documentRequest.data
+    if (!item?.content) {
+      return <NotFound evidence={evidence} />
+    }
+    if (isHtml) {
+      return (
+        <Box height="100%">
+          <SandboxedHtml title={evidence.path} content={item.content} />
+        </Box>
+      )
+    }
+    return <FileContent item={item} />
+  }
   if (evidence.kind === "publication") {
     if (publicationsRequest.isPending) {
       return <LoadingSpinner height="200px" />
@@ -404,6 +500,21 @@ function EvidenceDetail({
         <Text fontSize="5xl" fontWeight="bold" lineHeight="1.1">
           {evidence.value}
         </Text>
+      ) : evidence.values?.length ? (
+        // Several values from one file, each under its name
+        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+          {evidence.values.map((v) => (
+            <Box key={v.name}>
+              <Text fontSize="3xl" fontWeight="bold" lineHeight="1.1">
+                {v.value ?? "not found"}
+              </Text>
+              <Code fontSize="xs">{v.name}</Code>{" "}
+              <Text as="span" fontSize="xs" color="gray.500">
+                {v.key}
+              </Text>
+            </Box>
+          ))}
+        </SimpleGrid>
       ) : (
         <NotFound evidence={evidence} />
       )}
@@ -414,6 +525,46 @@ function EvidenceDetail({
       ) : null}
     </Box>
   )
+}
+
+/** Why this evidence answers the question.
+ *
+ * Written inline in calkit.yaml, it is markdown and is rendered. Cited as
+ * `{path: ...}`, it stays a citation: the file is linked, not pulled in
+ * and shown as though it had been written here. A document has its own
+ * page, and splicing it into a card is how a card becomes a document.
+ */
+function Explanation({
+  evidence,
+  accountName,
+  projectName,
+  gitRef,
+}: {
+  evidence: QuestionEvidence
+  accountName: string
+  projectName: string
+  gitRef?: string
+}) {
+  const path = evidence.explanation_path
+  if (path) {
+    return (
+      <Link
+        as={RouterLink}
+        to={`/${accountName}/${projectName}/files`}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        search={
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          { path, ref: evidenceRefOf(evidence, gitRef) } as any
+        }
+      >
+        {path} <Icon as={FaExternalLinkAlt} boxSize={2.5} />
+      </Link>
+    )
+  }
+  if (!evidence.explanation) {
+    return null
+  }
+  return <Markdown foldedProse>{evidence.explanation}</Markdown>
 }
 
 function NotFound({ evidence }: { evidence: QuestionEvidence }) {
@@ -637,6 +788,7 @@ function QuestionModal({
       // See EditQuestion: it opens over this one, and both have to agree on
       // the scrollbar or the page jumps as the second lock goes on and off.
       preserveScrollBarGap
+      motionPreset="none"
     >
       <ModalOverlay />
       {/* Fixed height so stepping between evidence items doesn't resize the
@@ -749,7 +901,12 @@ function QuestionModal({
             <Box height="100%">
               {openEvidence.explanation ? (
                 <Box fontSize="sm" color={subtleColor} mb={3}>
-                  <Markdown foldedProse>{openEvidence.explanation}</Markdown>
+                  <Explanation
+                    evidence={openEvidence}
+                    accountName={accountName}
+                    projectName={projectName}
+                    gitRef={gitRef}
+                  />
                 </Box>
               ) : null}
               <EvidenceDetail

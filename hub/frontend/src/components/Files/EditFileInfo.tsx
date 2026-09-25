@@ -135,6 +135,8 @@ const EditFileInfo = ({ isOpen, onClose, item }: EditFileProps) => {
         onClose={onClose}
         size={{ base: "sm", md: "md" }}
         isCentered
+        // No fade, for the same reason as EditQuestion
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>

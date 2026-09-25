@@ -434,17 +434,26 @@ def new_project(
         )
         if template_git_url is None:
             project = "/".join(template_name.split("/")[:2])
-            typer.echo(f"Fetching Git repo URL for {project} from the hub")
-            try:
-                template_git_url = calkit.hub.get(f"/projects/{project}")[
-                    "git_repo_url"
-                ]
-            except Exception as e:
-                raise_error(
-                    f"Could not fetch project {project} from the hub ({e}); "
-                    "for a repo not on the hub, pass its URL, e.g., "
-                    f"https://github.com/{template_name}"
-                )
+            # A template this package knows about carries its own repo URL,
+            # so the common case needs no hub: no request, no login, and it
+            # still works offline once the repo is reachable.
+            known = calkit.templates.find_project_template(project)
+            if known is not None:
+                if verbose:
+                    typer.echo(f"Using known template {project}")
+                template_git_url = known.git_repo_url
+            else:
+                typer.echo(f"Fetching Git repo URL for {project} from the hub")
+                try:
+                    template_git_url = calkit.hub.get(f"/projects/{project}")[
+                        "git_repo_url"
+                    ]
+                except Exception as e:
+                    raise_error(
+                        f"Could not fetch project {project} from the hub "
+                        f"({e}); for a repo not on the hub, pass its URL, "
+                        f"e.g., https://github.com/{template_name}"
+                    )
         if template_subdir is None:
             # Now clone it
             subprocess.run(["git", "clone", template_git_url, abs_path])

@@ -38,6 +38,7 @@ import {
   type ReleaseView,
   ReleasesService,
 } from "../../client"
+import SandboxedHtml from "../Common/SandboxedHtml"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { dataOrNull } from "../../lib/api"
@@ -116,22 +117,9 @@ function ArtifactView({
         </Box>
       )
   } else if (lower.endsWith(".html") || lower.endsWith(".htm")) {
-    // Prefer the hosted URL; fall back to inline content. Sandboxed (no
-    // allow-same-origin) so shared HTML runs in an opaque origin and can't
-    // reach the host page, while scripts still run to render the doc.
-    const src = item.url
-      ? item.url
-      : item.content
-        ? `data:text/html;base64,${item.content}`
-        : null
-    if (src)
+    if (item.url || item.content)
       return (
-        <iframe
-          title="release"
-          style={{ height: "100%", width: "100%", border: "none" }}
-          src={src}
-          sandbox="allow-scripts allow-popups"
-        />
+        <SandboxedHtml title={path} content={item.content} url={item.url} />
       )
   } else if (/\.(png|jpe?g|gif|webp|svg)$/.test(lower)) {
     const src = dataUri(item, "image/png")

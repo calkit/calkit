@@ -14,6 +14,8 @@ import { client } from "./client.gen"
 import type {
   AddOrgMemberErrors,
   AddOrgMemberResponses,
+  AppApiRoutesLoginOAuthCodeExchange,
+  AppApiRoutesUsersOAuthCodeExchange,
   BodyLoginLoginAccessToken,
   BodyProjectsPostProjectDatasetUpload,
   BodyProjectsPostProjectFigure,
@@ -48,6 +50,8 @@ import type {
   DeleteProjectMapPathsResponses,
   DeleteProjectNativeCollaboratorErrors,
   DeleteProjectNativeCollaboratorResponses,
+  DeleteProjectQuestionErrors,
+  DeleteProjectQuestionResponses,
   DeleteProjectReferenceItemErrors,
   DeleteProjectReferenceItemResponses,
   DeleteProjectReferencesErrors,
@@ -267,7 +271,6 @@ import type {
   MiscArtifactPost,
   NativeCollaboratorPost,
   NewPassword,
-  OAuthCodeExchange,
   OnboardingFlagPost,
   OrgMemberPost,
   OrgPost,
@@ -287,6 +290,7 @@ import type {
   PatchProjectResponses,
   PatchUserTokenErrors,
   PatchUserTokenResponses,
+  PipelinePut,
   PipelineStageEdit,
   PipelineStagePut,
   PostDiscountCodeErrors,
@@ -402,6 +406,8 @@ import type {
   PutProjectContentsResponses,
   PutProjectDevContainerErrors,
   PutProjectDevContainerResponses,
+  PutProjectPipelineErrors,
+  PutProjectPipelineResponses,
   PutProjectPipelineStageErrors,
   PutProjectPipelineStageResponses,
   PutProjectQuestionErrors,
@@ -752,7 +758,7 @@ export class LoginService {
    */
   public static loginWithGithub<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesLoginOAuthCodeExchange: AppApiRoutesLoginOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -762,7 +768,7 @@ export class LoginService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesLoginOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       LoginWithGithubResponses,
@@ -792,7 +798,7 @@ export class LoginService {
    */
   public static loginWithGoogle<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesLoginOAuthCodeExchange: AppApiRoutesLoginOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -802,7 +808,7 @@ export class LoginService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesLoginOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       LoginWithGoogleResponses,
@@ -1708,7 +1714,7 @@ export class UsersService {
    */
   public static postUserZenodoAuth<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesUsersOAuthCodeExchange: AppApiRoutesUsersOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1718,7 +1724,7 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesUsersOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       PostUserZenodoAuthResponses,
@@ -1836,7 +1842,7 @@ export class UsersService {
    */
   public static postUserGoogleAuth<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesUsersOAuthCodeExchange: AppApiRoutesUsersOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1846,7 +1852,7 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesUsersOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       PostUserGoogleAuthResponses,
@@ -1877,7 +1883,7 @@ export class UsersService {
    */
   public static postUserGithubAuth<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesUsersOAuthCodeExchange: AppApiRoutesUsersOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1887,7 +1893,7 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesUsersOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       PostUserGithubAuthResponses,
@@ -2182,7 +2188,8 @@ export class MiscService {
    * List the templates in the calkit registry, optionally of one kind.
    *
    * Read from the package rather than repeated in the frontend, so adding
-   * one there is enough.
+   * one there is enough. In registry order, which is the order they should
+   * be offered in.
    */
   public static getTemplates<ThrowOnError extends boolean = true>(
     parameters?: {
@@ -3596,6 +3603,46 @@ export class ProjectsService {
   }
 
   /**
+   * Delete Project Question
+   */
+  public static deleteProjectQuestion<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      number: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteProjectQuestionResponses,
+    DeleteProjectQuestionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "number" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteProjectQuestionResponses,
+      DeleteProjectQuestionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/questions/{number}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Put Project Question
    */
   public static putProjectQuestion<ThrowOnError extends boolean = true>(
@@ -4753,14 +4800,7 @@ export class ProjectsService {
   /**
    * Post Project Sync
    *
-   * Synchronize a project with its Git repo.
-   *
-   * Do we actually need this? It will give us a way to operate if GitHub is
-   * down, at least in read-only mode.
-   * Or perhaps we can bidirectionally sync, allowing users to update Calkit
-   * entities and we'll commit them back on sync.
-   * It would probably be better to use Git for that, so we can handle
-   * asynchronous edits with merges.
+   * Fetch the latest from a project's Git repo, e.g., to see a new branch.
    */
   public static postProjectSync<ThrowOnError extends boolean = true>(
     parameters: {
@@ -4890,6 +4930,57 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/pipeline",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Put Project Pipeline
+   *
+   * Replace the project's pipeline with the YAML the editor holds.
+   *
+   * Only the ``pipeline`` key of calkit.yaml is touched, so editing the
+   * pipeline can't disturb the datasets, figures, or publications sitting
+   * beside it in the same file.
+   */
+  public static putProjectPipeline<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      pipelinePut: PipelinePut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutProjectPipelineResponses,
+    PutProjectPipelineErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "pipelinePut", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutProjectPipelineResponses,
+      PutProjectPipelineErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

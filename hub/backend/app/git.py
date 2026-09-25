@@ -24,6 +24,7 @@ from filelock import FileLock, Timeout
 from git.exc import GitCommandError
 from ruamel.yaml import YAMLError
 from sqlmodel import Session, select
+from TexSoup import TexSoup
 
 import calkit
 from app import cache, github, users
@@ -208,8 +209,40 @@ def shared_reader_root() -> str:
     return os.path.join(settings.CLONE_ROOT, SHARED_READER_DIR)
 
 
+def _remote_head_key(project: Project, branch: str) -> str:
+    """The cache key holding what ``origin`` has for *branch*."""
+    git_plain_url = project.git_repo_url or ""
+    if git_plain_url and not git_plain_url.endswith(".git"):
+        git_plain_url += ".git"
+    return cache.make_key("remote-head", git_plain_url, branch)
+
+
+def _record_remote_head(project: Project, branch: str, head: str) -> None:
+    """Remember the commit we just pushed, so no read has to go and ask.
+
+    An ``ls-remote`` measures around 700 ms and is the single most
+    expensive thing a read does. There is nothing to ask when we are the
+    ones who put the commit there.
+    """
+    cache.set_json(
+        _remote_head_key(project, branch), head, ttl=REMOTE_HEAD_TTL
+    )
+
+
+def shared_read_clone_dir(project: Project) -> str:
+    """Where *project*'s shared read-only checkout lives.
+
+    The directory holding it, not the checkout itself: ``repo`` beside
+    ``updated.txt`` and ``updating.lock``, laid out the way ``get_repo``
+    lays out every clone.
+    """
+    return os.path.join(
+        shared_reader_root(), project.owner_github_name, project.name
+    )
+
+
 def expire_shared_read_clone(
-    project: Project, branch: str | None = None
+    project: Project, branch: str | None = None, head: str | None = None
 ) -> None:
     """Make the next read of *project* fetch, after a push through the API.
 
@@ -220,18 +253,18 @@ def expire_shared_read_clone(
     the app comes back missing, and the DB sync then deletes it.
     """
     if branch:
-        git_plain_url = project.git_repo_url or ""
-        if git_plain_url and not git_plain_url.endswith(".git"):
-            git_plain_url += ".git"
-        cache.delete(cache.make_key("remote-head", git_plain_url, branch))
+        if head:
+            # We put that commit there, so the next read still gets to skip
+            # the ls-remote. It fetches, since this won't match what the
+            # shared checkout has.
+            _record_remote_head(project, branch, head)
+        else:
+            # Someone else moved the remote and we don't know where to, so
+            # the next read has to ask.
+            cache.delete(_remote_head_key(project, branch))
     # Dated to the epoch rather than removed: its absence means "no complete
     # clone here", which 503s every read until one finishes.
-    marker = os.path.join(
-        shared_reader_root(),
-        project.owner_github_name,
-        project.name,
-        "updated.txt",
-    )
+    marker = os.path.join(shared_read_clone_dir(project), "updated.txt")
     try:
         os.utime(marker, (0, 0))
     except OSError as e:
@@ -335,7 +368,9 @@ def get_repo(
     """Ensure that the repo exists and is ready for operating upon for the user.
 
     Handles concurrency in case multiple API calls request the repo
-    simultaneously. If TTL is None, the latest version is always fetched.
+    simultaneously. With a TTL of None, the remote is checked on every call
+    and fetched from if it moved. A TTL of 0 forces a fetch, e.g., to pick up
+    a new branch, and raises if it fails.
 
     ``read_only`` promises the caller will only read, which lets every
     reader of a project share one warm checkout instead of cloning their
@@ -631,7 +666,12 @@ def get_repo(
                 # so most expiries are settled without touching the network,
                 # and when it matches ours there is nothing to fetch at all.
                 already_current = False
-                if not is_shallow and ref is None:
+                # An epoch marker means a push was reported, possibly to a
+                # branch other than the one checked below, e.g., a new one,
+                # so only a fetch can tell us what changed. Same for a
+                # caller forcing one with a TTL of 0.
+                force_fetch = ttl == 0 or last_updated == 0
+                if not is_shallow and ref is None and not force_fetch:
                     branch_name = repo.active_branch.name
                     try:
                         local_head: str | None = repo.head.commit.hexsha
@@ -662,11 +702,14 @@ def get_repo(
                 if not is_shallow and not already_current:
                     logger.info("Git fetching")
                     if ref is None:
+                        branch_name = repo.active_branch.name
+                        # Every branch, not just the active one, so new ones
+                        # show up in the branch list and deleted ones don't
                         with _timed(
                             "fetch", repo=repo_label, branch=branch_name
                         ):
                             repo.git.fetch(
-                                ["origin", branch_name],
+                                ["origin", "--prune"],
                                 kill_after_timeout=GIT_FETCH_TIMEOUT,
                             )
                         # Only rewrite the working tree when the remote
@@ -699,7 +742,7 @@ def get_repo(
                     else:
                         with _timed("fetch-all", repo=repo_label):
                             repo.git.fetch(
-                                ["--all", "--tags"],
+                                ["--all", "--tags", "--prune"],
                                 kill_after_timeout=GIT_FETCH_TIMEOUT,
                             )
                     subprocess.call(["touch", updated_fpath])
@@ -708,6 +751,12 @@ def get_repo(
             logger.warning("Git repo lock timed out")
         except GitCommandError as e:
             logger.error(f"Failed to refresh repo: {e}")
+            # A forced refresh was asked for explicitly, so say it failed
+            # rather than serve what we had
+            if ttl == 0:
+                raise HTTPException(
+                    502, "Could not fetch the latest from the Git repo"
+                )
     if repo is None:
         repo = git.Repo(repo_dir)
     # Attach credentials to the repo's git runner so every subsequent
@@ -726,6 +775,94 @@ def get_repo(
     if did_refresh:
         record_project_update(project, repo, session)
     return repo
+
+
+def push_to_shared_read_clone(
+    project: Project, repo: git.Repo, branch: str, head: str | None
+) -> bool:
+    """Put what was just pushed into the checkout everyone reads from.
+
+    Otherwise that checkout only learns about a write by fetching it back
+    out of GitHub, which the first read after every save pays for: a round
+    trip to ask, another to fetch. This sends the same objects the same
+    way, over the filesystem instead. ``receive.denyCurrentBranch`` set to
+    ``updateInstead`` moves the branch and rewrites the working tree in one
+    step, so the next read finds the checkout already current and touches
+    the network not at all.
+
+    Returns whether the shared checkout is in hand: either it now holds
+    *head*, or there is no checkout there to update. False means it is
+    behind and the caller should expire it, which is what happened before
+    any of this -- nothing here is needed for correctness, so every way it
+    can fail falls back rather than failing the write.
+    """
+    if not head:
+        return False
+    base_dir = shared_read_clone_dir(project)
+    repo_dir = os.path.join(base_dir, "repo")
+    updated_fpath = os.path.join(base_dir, "updated.txt")
+    # No completed checkout to update. Nothing to fall back from either:
+    # the first read clones, and it clones what we just pushed.
+    if not os.path.isfile(updated_fpath) or not os.path.isdir(repo_dir):
+        return True
+    label = f"{project.owner_github_name}/{project.name}"
+    try:
+        with FileLock(os.path.join(base_dir, "updating.lock"), timeout=5):
+            shared = git.Repo(repo_dir)
+            # ``updateInstead`` only applies to the branch that checkout has
+            # out, and only over a working tree that matches it. Reads never
+            # write, so both should hold; when they don't, Git refuses the
+            # push and we expire instead.
+            try:
+                if shared.active_branch.name != branch:
+                    return False
+            except TypeError:
+                # Detached head, left by an interrupted refresh.
+                return False
+            shared.git.config(["receive.denyCurrentBranch", "updateInstead"])
+            with _timed("push-to-shared", repo=label, branch=branch):
+                repo.git.push([repo_dir, f"{branch}:{branch}"])
+            if shared.head.commit.hexsha != head:
+                logger.warning(
+                    f"Shared checkout for {label} is not at {head[:7]} "
+                    "after pushing to it"
+                )
+                return False
+            # The checkout is current as of now, so say so: the next read
+            # is inside its TTL and returns without taking this lock at all.
+            subprocess.call(["touch", updated_fpath])
+            return True
+    except Timeout:
+        logger.info(f"Shared checkout for {label} was locked; expiring it")
+    except (GitCommandError, ValueError, OSError) as e:
+        logger.info(f"Could not push to the shared checkout for {label}: {e}")
+    return False
+
+
+def push_and_expire(
+    project: Project, repo: git.Repo, branch: str | None = None
+) -> None:
+    """Push to origin, and make the next read see what was pushed.
+
+    Readers share a checkout, behind a cached answer for what the remote's
+    head is, and neither knows about a push made from a writer's own clone.
+    Pushing without this leaves reads serving the project as it was for up
+    to ``REMOTE_HEAD_TTL``, so a stage saved through the app reads back as
+    though it was never saved.
+    """
+    name = branch or repo.active_branch.name
+    repo.git.push(["origin", name])
+    try:
+        head: str | None = repo.head.commit.hexsha
+    except (ValueError, GitCommandError):
+        head = None
+    if not push_to_shared_read_clone(project, repo, name, head):
+        # It has to fetch after all, but it still knows where from.
+        expire_shared_read_clone(project, name, head=head)
+    elif head:
+        # Every clone's cached answer for where the remote is should say
+        # where we just put it, not only the one we pushed into.
+        _record_remote_head(project, name, head)
 
 
 def record_project_update(
@@ -931,6 +1068,77 @@ def get_overleaf_repo(
     # Run git config so we make commits as this user (with safe fallbacks)
     _configure_committer(repo, user, session=session)
     return repo
+
+
+# Names a main document usually goes by, tried before falling back to
+# whichever file actually declares a document class.
+OVERLEAF_MAIN_TEX_NAMES = ("main.tex", "paper.tex", "manuscript.tex")
+
+
+def read_overleaf_title(
+    user: User, session: Session, overleaf_project_id: str
+) -> str | None:
+    """The ``\\title`` of an Overleaf project's main document, if it has one.
+
+    Cloned into a temporary directory rather than the usual per-project
+    checkout: this runs before the project exists, and nothing here needs to
+    outlive the read. Returns None whenever the title can't be worked out,
+    since a project can still be created without one.
+    """
+    overleaf_token = users.get_overleaf_token(session=session, user=user)
+    auth = _make_git_auth_env(overleaf_token, username="git")
+    with tempfile.TemporaryDirectory(prefix="overleaf-title-") as tmp:
+        repo_dir = os.path.join(tmp, "repo")
+        try:
+            subprocess.check_call(
+                [
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    f"https://git.overleaf.com/{overleaf_project_id}",
+                    repo_dir,
+                ],
+                env={**os.environ, **auth},
+                timeout=120,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            logger.info(f"Could not clone Overleaf project for title: {e}")
+            return None
+        tex_paths = sorted(
+            os.path.join(root, f)
+            for root, _, files in os.walk(repo_dir)
+            for f in files
+            if f.endswith(".tex")
+        )
+        # The document class is what marks the file that actually builds;
+        # the conventional names only break ties between several of them.
+        candidates = []
+        for path in tex_paths:
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            if "\\documentclass" in text:
+                candidates.append((path, text))
+        if not candidates:
+            return None
+        candidates.sort(
+            key=lambda pair: (
+                os.path.basename(pair[0]).lower()
+                not in OVERLEAF_MAIN_TEX_NAMES,
+                pair[0],
+            )
+        )
+        text = candidates[0][1]
+        try:
+            soup = TexSoup(text)
+            title = str(soup.title.string) if soup.title else None
+        except Exception as e:
+            logger.info(f"Could not parse Overleaf title: {e}")
+            return None
+        title = " ".join((title or "").split())
+        return title or None
 
 
 def get_default_branch(repo: git.Repo) -> str:
@@ -1963,6 +2171,14 @@ def _remember_missing_ref(repo: git.Repo, ref: str) -> None:
             _MISSING_REF_CACHE.popitem(last=False)
 
 
+# Where a ref fetched on demand is put. `git fetch origin <ref>` writes
+# only FETCH_HEAD, which the next fetch overwrites and concurrent readers
+# of the shared checkout race over, so the fetch is aimed at a ref of our
+# own instead. A namespace nothing else writes, so it can't collide with a
+# branch or tag the project has.
+_FETCHED_REF_NS = "refs/calkit/fetched"
+
+
 def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
     """Resolve a branch, tag, or commit hash to a Commit object.
 
@@ -1971,9 +2187,12 @@ def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
     -- a new branch, or the head commit of a pull request -- reads as
     missing until that expires, even though it exists on GitHub.
     """
+    fetched_ref = f"{_FETCHED_REF_NS}/{ref}"
 
     def resolve() -> git.Commit | None:
-        for candidate in (ref, f"origin/{ref}"):
+        # The fetched copy is tried last, so a branch that exists locally
+        # still wins over whatever an earlier on-demand fetch left behind.
+        for candidate in (ref, f"origin/{ref}", fetched_ref):
             try:
                 return repo.commit(candidate)
             except Exception:
@@ -1991,10 +2210,12 @@ def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
         try:
             # By SHA as well as by name: GitHub serves a commit that's
             # reachable from any ref, which covers a pull request head
-            # that no local branch points at
+            # that no local branch points at. The refspec is what makes a
+            # tag usable: fetching one by name alone leaves no local ref,
+            # so it stayed unresolvable however many times it was fetched.
             with _timed("fetch-ref", ref=ref):
                 repo.git.fetch(
-                    ["origin", ref],
+                    ["origin", f"+{ref}:{fetched_ref}"],
                     kill_after_timeout=GIT_FETCH_TIMEOUT,
                 )
         except GitCommandError as e:

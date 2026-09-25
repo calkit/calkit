@@ -1,6 +1,7 @@
 import {
   Box,
   Button,
+  Code,
   Flex,
   FormControl,
   FormErrorMessage,
@@ -17,6 +18,7 @@ import {
   Select,
   Text,
   Textarea,
+  useDisclosure,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi } from "@tanstack/react-router"
@@ -27,6 +29,7 @@ import { FaPlus, FaTrash } from "react-icons/fa"
 import type { AxiosError } from "axios"
 import { ProjectsService, type QuestionPublic } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import DeleteAlert from "../Common/DeleteAlert"
 import {
   useProjectFigures,
   useProjectPublications,
@@ -43,6 +46,8 @@ interface EditQuestionProps {
   // Git ref currently being browsed, so figure/result options come from the
   // same snapshot the question does.
   gitRef?: string
+  // Where to go once the question is deleted; defaults to closing
+  onDeleted?: () => void
 }
 
 interface EvidenceRow {
@@ -54,6 +59,15 @@ interface EvidenceRow {
   // and the form rewrites the whole list, so a row that carries one has to
   // hand it back or saving an unrelated edit would quietly drop it.
   gitRef?: string
+  // Carried back for the same reason: a template names its value, and a
+  // citation of a publication or document points at a section of it.
+  name?: string
+  section?: string
+  label?: string
+  // A result's named values, which the form doesn't edit but must keep,
+  // and the file they're keys into, since they mean nothing in another
+  values?: Record<string, string>
+  valuesPath?: string
 }
 
 interface EditQuestionForm {
@@ -74,8 +88,10 @@ const parseSelection = (selection: string) => {
     kind: selection.slice(0, idx) as
       | "figure"
       | "result"
+      | "value"
       | "table"
-      | "publication",
+      | "publication"
+      | "document",
     path: selection.slice(idx + 1),
   }
 }
@@ -85,7 +101,9 @@ const EditQuestion = ({
   isOpen,
   onClose,
   gitRef,
+  onDeleted,
 }: EditQuestionProps) => {
+  const deleteDisclosure = useDisclosure()
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
   const routeApi = getRouteApi("/_layout/$accountName/$projectName")
@@ -150,6 +168,13 @@ const EditQuestion = ({
         key: ev.key ?? "",
         explanation: ev.explanation ?? "",
         gitRef: ev.git_ref ?? undefined,
+        name: ev.name ?? undefined,
+        section: ev.section ?? undefined,
+        label: ev.label ?? undefined,
+        values: ev.values
+          ? Object.fromEntries(ev.values.map((v) => [v.name, v.key]))
+          : undefined,
+        valuesPath: ev.values ? ev.path : undefined,
       })),
     })
   }, [question, reset])
@@ -172,7 +197,20 @@ const EditQuestion = ({
               {
                 kind: parsed.kind,
                 path: parsed.path,
-                key: parsed.kind === "result" && row.key ? row.key : undefined,
+                key:
+                  (parsed.kind === "result" || parsed.kind === "value") &&
+                  row.key
+                    ? row.key
+                    : undefined,
+                name: row.name ? row.name : undefined,
+                values:
+                  parsed.kind === "result" &&
+                  row.values &&
+                  parsed.path === row.valuesPath
+                    ? row.values
+                    : undefined,
+                section: row.section ? row.section : undefined,
+                label: row.label ? row.label : undefined,
                 explanation: row.explanation ? row.explanation : undefined,
                 git_ref: row.gitRef ? row.gitRef : undefined,
               },
@@ -205,6 +243,12 @@ const EditQuestion = ({
       onClose={onClose}
       size={{ base: "sm", md: "lg" }}
       isCentered
+      // The evidence list grows without limit, so this form outgrows the
+      // viewport. Centered, that leaves it with nothing to scroll: the
+      // content runs off both ends and the page behind is locked. Scrolling
+      // inside keeps the header and the save button where they are and
+      // gives the body the overflow.
+      scrollBehavior="inside"
       // This opens on top of the question's own modal, which already holds
       // the page still. A second scroll lock takes the scrollbar away and
       // puts it back, shifting everything underneath for a frame -- keeping
@@ -273,6 +317,10 @@ const EditQuestion = ({
             {fields.map((field, index) => {
               const selection = watch(`evidence.${index}.selection`) || ""
               const parsed = parseSelection(selection)
+              const rowValues =
+                parsed?.path === watch(`evidence.${index}.valuesPath`)
+                  ? watch(`evidence.${index}.values`)
+                  : undefined
               const figures = figuresRequest.data ?? []
               const results = resultsRequest.data ?? []
               const publications = publicationsRequest.data ?? []
@@ -302,6 +350,18 @@ const EditQuestion = ({
                   <input
                     type="hidden"
                     {...register(`evidence.${index}.gitRef`)}
+                  />
+                  <input
+                    type="hidden"
+                    {...register(`evidence.${index}.name`)}
+                  />
+                  <input
+                    type="hidden"
+                    {...register(`evidence.${index}.section`)}
+                  />
+                  <input
+                    type="hidden"
+                    {...register(`evidence.${index}.label`)}
                   />
                   <Flex justify="flex-end" align="center" gap={2}>
                     {field.gitRef ? (
@@ -380,7 +440,20 @@ const EditQuestion = ({
                       ) : null}
                     </Select>
                   </FormControl>
-                  {parsed?.kind === "result" ? (
+                  {parsed?.kind === "result" && rowValues ? (
+                    // Kept as written in calkit.yaml, since the form has no
+                    // editor for a map of names to keys
+                    <Box mb={2} fontSize="xs">
+                      <Text mb={1} fontWeight="medium">
+                        Values
+                      </Text>
+                      {Object.entries(rowValues).map(([name, key]) => (
+                        <Text key={name} color="gray.500">
+                          <Code fontSize="xs">{name}</Code>: {key}
+                        </Text>
+                      ))}
+                    </Box>
+                  ) : parsed?.kind === "result" || parsed?.kind === "value" ? (
                     <FormControl mb={2}>
                       <FormLabel fontSize="xs" mb={1}>
                         Key (optional)
@@ -410,6 +483,19 @@ const EditQuestion = ({
           </FormControl>
         </ModalBody>
         <ModalFooter gap={3}>
+          {/* Deleting writes to the default branch, where question numbers
+              may not match those at the ref being browsed */}
+          <Button
+            variant="danger"
+            mr="auto"
+            onClick={deleteDisclosure.onOpen}
+            isDisabled={!!gitRef}
+            title={
+              gitRef ? "Switch to the default branch to delete" : undefined
+            }
+          >
+            Delete
+          </Button>
           <Button
             variant="primary"
             type="submit"
@@ -419,6 +505,15 @@ const EditQuestion = ({
           </Button>
           <Button onClick={onClose}>Cancel</Button>
         </ModalFooter>
+        <DeleteAlert
+          type="Question"
+          id={String(question?.number ?? "")}
+          isOpen={deleteDisclosure.isOpen}
+          onClose={deleteDisclosure.onClose}
+          onDeleted={onDeleted ?? onClose}
+          projectOwner={accountName}
+          projectName={projectName}
+        />
       </ModalContent>
     </Modal>
   )

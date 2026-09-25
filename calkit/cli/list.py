@@ -197,7 +197,10 @@ def _echo_question(n: int, question: str | dict) -> None:
     question = dict(question)
     text = question.pop("question", "")
     typer.echo(f"{n}. question: {text}")
+    # Rendering fills every field, so leave out the ones that aren't set
     for k, v in question.items():
+        if v is None:
+            continue
         if isinstance(v, dict):
             typer.echo(f"    {k}:")
             for k1, v1 in v.items():
@@ -206,11 +209,17 @@ def _echo_question(n: int, question: str | dict) -> None:
             typer.echo(f"    {k}:")
             for item in v:
                 if isinstance(item, dict):
+                    item = {
+                        k1: v1 for k1, v1 in item.items() if v1 is not None
+                    }
                     for n1, (k1, v1) in enumerate(item.items()):
-                        if n1 == 0:
-                            typer.echo(f"      - {k1}: {v1}")
+                        prefix = "      - " if n1 == 0 else "        "
+                        if isinstance(v1, dict):
+                            typer.echo(f"{prefix}{k1}:")
+                            for k2, v2 in v1.items():
+                                typer.echo(f"          {k2}: {v2}")
                         else:
-                            typer.echo(f"        {k1}: {v1}")
+                            typer.echo(f"{prefix}{k1}: {v1}")
                 else:
                     typer.echo(f"        - {item}")
         else:
@@ -243,7 +252,7 @@ def list_questions(
         render_question,
     )
 
-    def _texts(question: dict) -> list[str]:
+    def _texts(question: dict) -> list[str | dict]:
         evidence = question.get("evidence") or []
         return [question.get(f) or "" for f in TEMPLATED_FIELDS] + [
             ev.get("explanation") or ""
@@ -260,16 +269,18 @@ def list_questions(
         # let a fresh clone read as a project that types its braces. Any
         # placeholder left standing counts, whether it names evidence that
         # could not be read or names nothing at all: a brace meant to stay
-        # in the text is written '{{' and never reaches here.
+        # in the text is written '{{' and never reaches here. A conditional
+        # answer still in clauses is one whose conditions could not be read.
         unfilled = any(
-            placeholders(text)
+            isinstance(text, dict) or placeholders(text)
             for q in rendered
             if isinstance(q, dict)
             for text in _texts(q)
         )
         if unfilled:
             warn(
-                "Some placeholders could not be filled from the evidence. "
+                "Some placeholders or conditions could not be filled from "
+                "the evidence. "
                 "Run 'calkit check questions' to see why; 'calkit pull' if "
                 "the results files are not here yet.",
                 err=json_output,
@@ -333,21 +344,44 @@ def list_environments(
 
 @list_app.command(name="templates")
 def list_templates(
+    kind: Annotated[
+        str | None,
+        typer.Option("--kind", "-k", help="Only show templates of one kind."),
+    ] = None,
     json_output: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ):
-    """List all available Calkit templates."""
-    names = [
-        f"{kind}/{name}"
-        for kind, tpl_dict in calkit.templates.TEMPLATES.items()
-        for name in tpl_dict
-    ]
+    """List all available Calkit templates, grouped by kind.
+
+    A template is named by its kind and name, except a project template,
+    which names a project on a hub and so is ``owner/project``.
+    """
+    try:
+        templates = calkit.templates.get_templates(kind=kind)
+    except ValueError as e:
+        raise_error(str(e))
+    groups: dict[str, list[dict]] = {}
+    for template in templates:
+        groups.setdefault(template.kind, []).append(
+            {
+                "name": template.ref,
+                "title": template.title,
+                "description": template.description,
+            }
+        )
     if json_output:
-        echo_json(names)
+        echo_json(groups)
         return
-    for name in names:
-        typer.echo(name)
+    for i, (group, entries) in enumerate(groups.items()):
+        if i:
+            typer.echo()
+        typer.echo(f"{group}:")
+        for entry in entries:
+            typer.echo(f"  {entry['name']}")
+            for key in ("title", "description"):
+                if entry[key]:
+                    typer.echo(f"    {entry[key]}")
 
 
 @list_app.command(name="installers")
@@ -368,17 +402,30 @@ def list_installers(
     groups: dict[int, list[str]] = {}
     for name, entry in calkit.install.INSTALLERS.items():
         groups.setdefault(id(entry), []).append(name)
+    # What Calkit has already installed here, so the listing doubles as a
+    # record of changes it made to this machine
+    installed = {
+        rec["app"]: rec["installed_at"]
+        for rec in calkit.install.read_install_log()
+    }
     result: list[dict] = []
     for names in groups.values():
         names.sort()
         entry = calkit.install.INSTALLERS[names[0]]
         scripts = {}
-        for platform in ("unix", "windows"):
+        for platform in ("unix", "mac", "linux", "windows"):
             ins = entry.get(platform)  # type: ignore[call-overload]
             if ins is not None:
                 scripts[platform] = ins["script"]
         result.append(
-            {"name": names[0], "aliases": names[1:], "scripts": scripts}
+            {
+                "name": names[0],
+                "aliases": names[1:],
+                "scripts": scripts,
+                "installed_by_calkit": next(
+                    (installed[n] for n in names if n in installed), None
+                ),
+            }
         )
     if json_output:
         echo_json(result)
@@ -388,6 +435,10 @@ def list_installers(
         header = installer["name"] + (
             f"  (aliases: {aliases})" if aliases else ""
         )
+        if installer["installed_by_calkit"]:
+            header += (
+                f"  [installed by Calkit {installer['installed_by_calkit']}]"
+            )
         typer.echo(header)
         for platform, script in installer["scripts"].items():
             typer.echo(f"  {platform}: {script}")

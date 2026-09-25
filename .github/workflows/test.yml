@@ -17,7 +17,9 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      cli: ${{ steps.filter.outputs.cli }}
+      cli: >-
+        ${{ steps.filter.outputs.cli == 'true'
+        || steps.docs.outputs.checked == 'true' }}
       jlab: ${{ steps.filter.outputs.jlab }}
       vscode: ${{ steps.filter.outputs.vscode }}
       browser: ${{ steps.filter.outputs.browser }}
@@ -29,11 +31,18 @@ jobs:
           # quantifier, which would make this match every change
           predicate-quantifier: "every"
           filters: |
+            # Prose and docs don't affect the package; the few docs files a
+            # test does read are picked up by the step below
             cli:
               - "**"
               - "!hub/**"
               - "!vscode-ext/**"
               - "!browser-ext/**"
+              - "!docs/**"
+              - "!*.md"
+              - "!mkdocs.yml"
+              - "!CITATION.cff"
+              - "!LICENSE"
             # The JupyterLab extension depends on the core Python package,
             # so run its tests for any change outside the other subprojects
             jlab:
@@ -41,10 +50,26 @@ jobs:
               - "!hub/**"
               - "!vscode-ext/**"
               - "!browser-ext/**"
+              - "!docs/**"
+              - "!*.md"
+              - "!mkdocs.yml"
+              - "!CITATION.cff"
+              - "!LICENSE"
             vscode:
               - "vscode-ext/**"
             browser:
               - "browser-ext/**"
+      # A separate step because these are alternatives, which the 'every'
+      # quantifier above can't express. Tests check these files against
+      # the models, so a hand edit to them has to run the suite.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: docs
+        with:
+          filters: |
+            checked:
+              - "docs/schemas/calkit.json"
+              - "docs/pipeline/index.md"
+              - "docs/environments.md"
 
   main:
     needs: changes
@@ -68,13 +93,13 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
           enable-cache: true
       - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
         with:
           miniforge-version: latest
           auto-activate-base: true
@@ -84,7 +109,7 @@ jobs:
         with:
           run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@1cc1b0ecfb06c04ff09fe24cab1476106460750e # v3.1.5
+        uses: julia-actions/install-juliaup@8d13b44e0eb1620c4e2d2d0a4ceee7d98100b955 # v3.1.6
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       # Juliaup installs Julia but leaves the depot empty, and the first Pkg
@@ -117,7 +142,7 @@ jobs:
         with:
           node-version: "20"
       - name: Setup R
-        uses: r-lib/actions/setup-r@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
+        uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           r-version: latest
       - name: Run tests
@@ -146,7 +171,7 @@ jobs:
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
       - name: Setup uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run

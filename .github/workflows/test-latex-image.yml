@@ -1,0 +1,182 @@
+name: Test LaTeX image
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "images/latex/**"
+      - ".github/workflows/test-latex-image.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      # Only the runner's platform here; the multi-platform build happens
+      # on release, where the QEMU emulation time is worth paying
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: images/latex
+          load: true
+          tags: calkit/latex:pr
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test image
+        run: |
+          set -euxo pipefail
+          # Both tools have to be on PATH, not merely installed: tlmgr
+          # doesn't symlink scripts it installs after setup, which once
+          # shipped an image whose latexdiff was invisible
+          docker run --rm calkit/latex:pr sh -c '
+            set -eux
+            latexmk --version
+            latexdiff --version
+          '
+          # As a non-root user, which is how Calkit runs it so output
+          # isn't owned by root. TinyTeX under /root would be unreadable
+          # here, which is what once made the image unusable.
+          docker run --rm --user 1234:1234 calkit/latex:pr sh -c '
+            set -eux
+            latexmk --version
+            latexdiff --version
+          '
+          # A document that needs the curated set, built the way the docs
+          # say to build it: with a cache mounted at TEXMFHOME. Mounting
+          # it over the distribution instead is what used to leave the
+          # container with no TeX at all
+          work="$(mktemp -d)"
+          cache="$(mktemp -d)"
+          mkdir -p "$work/paper"
+          cat > "$work/paper/main.tex" <<'EOF'
+          \documentclass{article}
+          \usepackage{threeparttable}
+          \usepackage{multirow}
+          \usepackage{enumitem}
+          \usepackage{todonotes}
+          \begin{document}
+          Smoke test.
+          \begin{itemize}[noitemsep]
+          \item One
+          \end{itemize}
+          \end{document}
+          EOF
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "$work":/work \
+            -v "$cache":/texmf \
+            -w /work \
+            calkit/latex:pr \
+            latexmk -pdf -cd -interaction=nonstopmode paper/main.tex
+          test -f "$work/paper/main.pdf"
+          # Owned by the user who ran it, not by root
+          test -O "$work/paper/main.pdf"
+          # A package outside the curated set installs into the mounted
+          # cache and persists there, which is how a project gets what the
+          # image doesn't ship
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$cache":/texmf calkit/latex:pr sh -c '
+            set -eux
+            tlmgr --usermode install lipsum
+            kpsewhich lipsum.sty
+          '
+          test -n "$(find "$cache" -name lipsum.sty -print -quit)"
+      # Every journal class the image claims to carry has to build with
+      # nothing installed at run time. Trimming a package that only one
+      # class needs would otherwise go unnoticed until someone submitted
+      # a paper.
+      - name: Build a paper in each journal class
+        run: |
+          set -euxo pipefail
+          work="$(mktemp -d)"
+          fail=0
+          write() { mkdir -p "$work/$1"; cat > "$work/$1/main.tex"; }
+          write elsarticle <<'EOF'
+          \documentclass{elsarticle}
+          \begin{document}\begin{frontmatter}\title{T}\author{A}
+          \begin{abstract}S.\end{abstract}\end{frontmatter}
+          Hello.\end{document}
+          EOF
+          write revtex <<'EOF'
+          \documentclass[aps,prl]{revtex4-2}
+          \begin{document}\title{T}\author{A}\affiliation{S}
+          \maketitle Hello.\end{document}
+          EOF
+          write ieeetran <<'EOF'
+          \documentclass[conference]{IEEEtran}
+          \begin{document}\title{T}\author{\IEEEauthorblockN{A}}
+          \maketitle Hello.\end{document}
+          EOF
+          write acmart <<'EOF'
+          \documentclass[sigconf,nonacm]{acmart}
+          \begin{document}\title{T}\author{A}
+          \affiliation{\institution{S}\country{C}}\maketitle
+          Hello.\end{document}
+          EOF
+          write achemso <<'EOF'
+          \documentclass{achemso}
+          \author{A}\affiliation{S}\title{T}
+          \begin{document}\maketitle Hello.\end{document}
+          EOF
+          write mnras <<'EOF'
+          \documentclass{mnras}
+          \begin{document}\title{T}\author{A}\maketitle
+          Hello.\end{document}
+          EOF
+          write llncs <<'EOF'
+          \documentclass{llncs}
+          \begin{document}\title{T}\author{A}\institute{S}
+          \maketitle Hello.\end{document}
+          EOF
+          write amsart <<'EOF'
+          \documentclass{amsart}
+          \begin{document}\title{T}\author{A}\maketitle
+          Hello.\end{document}
+          EOF
+          for d in "$work"/*/; do
+            name="$(basename "$d")"
+            if docker run --rm --user "$(id -u):$(id -g)" \
+                -v "$d":/work -w /work calkit/latex:pr \
+                latexmk -pdf -interaction=nonstopmode main.tex \
+                > "$d/build.log" 2>&1; then
+              echo "$name: ok"
+            else
+              echo "$name: FAILED"
+              grep -E '^! ' "$d/main.log" | head -3 || true
+              fail=1
+            fi
+          done
+          exit "$fail"
+      # Every paper template Calkit ships has to build, since that is what
+      # someone gets before they have asked for anything. JFM also needs
+      # txfonts' metrics, which report as a font error rather than a
+      # missing file, so nothing would fetch it on demand.
+      - name: Build each paper template
+        run: |
+          set -euxo pipefail
+          work="$(mktemp -d)"
+          fail=0
+          for t in calkit/templates/latex/*/; do
+            name="$(basename "$t")"
+            mkdir -p "$work/$name"
+            cp "$t"* "$work/$name/"
+            mv "$work/$name/paper.tex" "$work/$name/main.tex"
+            if docker run --rm --user "$(id -u):$(id -g)" \
+                -v "$work/$name":/work -w /work calkit/latex:pr \
+                latexmk -pdf -interaction=nonstopmode main.tex \
+                > "$work/$name/build.log" 2>&1; then
+              echo "$name: ok"
+            else
+              echo "$name: FAILED"
+              grep -E '^! ' "$work/$name/main.log" | head -3 || true
+              fail=1
+            fi
+          done
+          exit "$fail"

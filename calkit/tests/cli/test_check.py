@@ -1182,11 +1182,24 @@ def test_check_questions(tmp_dir):
         calkit.ryaml.dump(ck_info, f)
     subprocess.check_call(["git", "add", "-A"])
     subprocess.check_call(["git", "commit", "-q", "-m", "Answer"])
+    # No stage computes the value, so it is a magic number and fails
+    proc = subprocess.run(
+        ["calkit", "check", "questions"], capture_output=True, text=True
+    )
+    assert proc.returncode != 0
+    assert "no pipeline stage computes this value" in proc.stdout
+    # Another project computed it, which is traceable
+    ck_info["datasets"] = [
+        {
+            "path": "results/findings.json",
+            "imported_from": {"project": "someone/else"},
+        }
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Import it"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "Answers backed by current evidence: 1/1" in out
-    # Nothing in the project says where the results file came from, which
-    # is advice rather than a failure: the answer may be perfectly good
-    assert "Evidence with nothing recorded behind it: 1" in out
     # Listing renders the placeholder from the results file
     out = subprocess.check_output(["calkit", "list", "questions"], text=True)
     assert "answer: 8 of eight do." in out
@@ -1252,19 +1265,6 @@ def test_check_questions(tmp_dir):
     subprocess.check_call(["git", "commit", "-q", "-am", "Review"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "changed after the answer was written" not in out
-    # Declaring where the results file came from clears the advice
-    ck_info = calkit.load_calkit_info()
-    ck_info["datasets"] = [
-        {
-            "path": "results/findings.json",
-            "created_by": {"name": "A person"},
-        }
-    ]
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    subprocess.check_call(["git", "commit", "-q", "-am", "Declare"])
-    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
-    assert "nothing recorded behind it" not in out
     # A console that cannot encode a check mark gets a '?' rather than a
     # UnicodeEncodeError, which on Windows would kill the command with no
     # output at all
@@ -1289,8 +1289,25 @@ def test_check_questions(tmp_dir):
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "placeholders could not be filled" in out
+    assert "could not be filled" in out
     assert "It is {missing} of them." in out
+    # A conditional answer is listed as the branch that holds, and one with
+    # no branch holding is listed as written, with the same warning
+    ck_info["questions"][0]["answer"] = {
+        "if n_top > 4": "Most do.",
+        "else": "{n_top} do.",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "answer: 0 do." in out
+    assert "could not be filled" not in out
+    del ck_info["questions"][0]["answer"]["else"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "could not be filled" in out
+    assert "if n_top > 4: Most do." in out
     # A project with no questions says so rather than printing nothing
     os.remove("calkit.yaml")
     with open("calkit.yaml", "w") as f:

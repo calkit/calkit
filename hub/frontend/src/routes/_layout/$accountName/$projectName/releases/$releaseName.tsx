@@ -42,7 +42,13 @@ function ReleasePage() {
     })
   }
   return (
-    <Modal isOpen onClose={close} isCentered scrollBehavior="inside">
+    <Modal
+      isOpen
+      onClose={close}
+      isCentered
+      scrollBehavior="inside"
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent
         maxW={{ base: "100vw", md: "92vw" }}

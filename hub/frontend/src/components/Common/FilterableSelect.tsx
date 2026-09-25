@@ -1,6 +1,8 @@
 import {
   Box,
   Input,
+  InputGroup,
+  InputRightElement,
   List,
   ListItem,
   Spinner,
@@ -95,39 +97,37 @@ const FilterableSelect = ({
   const listOpen = open && matches.length > 0
   return (
     <Box position="relative">
-      <Input
-        id={id}
-        role="combobox"
-        aria-expanded={listOpen}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={listOpen ? optionId(highlighted) : undefined}
-        value={query}
-        placeholder={isLoading ? "Loading…" : placeholder}
-        autoComplete="off"
-        onChange={(e) => {
-          setQuery(e.target.value)
-          setHighlighted(0)
-          setOpen(true)
-        }}
-        onFocus={() => setOpen(true)}
-        // Choosing an option keeps focus in the input (the mousedown handler
-        // prevents the default blur), so clicking back into it fires no
-        // focus event and the list would stay shut.
-        onClick={() => setOpen(true)}
-        // Deferred so a click on a suggestion lands before the list closes.
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onKeyDown={onKeyDown}
-      />
-      {isLoading ? (
-        <Spinner
-          size="sm"
-          position="absolute"
-          right={3}
-          top="50%"
-          transform="translateY(-50%)"
+      <InputGroup>
+        <Input
+          id={id}
+          role="combobox"
+          aria-expanded={listOpen}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={listOpen ? optionId(highlighted) : undefined}
+          value={query}
+          placeholder={isLoading ? "Loading…" : placeholder}
+          autoComplete="off"
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setHighlighted(0)
+            setOpen(true)
+          }}
+          onFocus={() => setOpen(true)}
+          // Choosing an option keeps focus in the input (the mousedown handler
+          // prevents the default blur), so clicking back into it fires no
+          // focus event and the list would stay shut.
+          onClick={() => setOpen(true)}
+          // Deferred so a click on a suggestion lands before the list closes.
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={onKeyDown}
         />
-      ) : null}
+        {isLoading ? (
+          <InputRightElement>
+            <Spinner size="sm" />
+          </InputRightElement>
+        ) : null}
+      </InputGroup>
       {listOpen ? (
         <List
           id={listId}

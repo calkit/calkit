@@ -10,6 +10,31 @@ import pytest
 import calkit
 
 
+def test_set_env_vars_keeps_user_home(monkeypatch, tmp_path):
+    import calkit.config
+
+    user_home = os.path.expanduser("~")
+    project_home = str(tmp_path)
+    # Registered so they're restored afterwards, since set_env_vars writes
+    # to os.environ directly
+    monkeypatch.delenv(calkit.config.USER_HOME_ENV_VAR, raising=False)
+    monkeypatch.setenv("HOME", os.environ.get("HOME", user_home))
+    monkeypatch.setenv("USERPROFILE", os.environ.get("USERPROFILE", user_home))
+    monkeypatch.setenv("CALKIT_TEST_OTHER", "0")
+    # A project pointing the home directory elsewhere doesn't move Calkit's
+    # own config with it
+    calkit.set_env_vars(
+        {"env_vars": {"HOME": project_home, "USERPROFILE": project_home}}
+    )
+    assert os.path.expanduser("~") == project_home
+    assert os.environ[calkit.config.USER_HOME_ENV_VAR] == user_home
+    assert calkit.config.get_config_yaml_fpath().startswith(user_home)
+    # Env vars that leave the home directory alone don't set it
+    monkeypatch.delenv(calkit.config.USER_HOME_ENV_VAR)
+    calkit.set_env_vars({"env_vars": {"CALKIT_TEST_OTHER": "1"}})
+    assert calkit.config.USER_HOME_ENV_VAR not in os.environ
+
+
 def test_find_project_dirs():
     # TODO: We should setup a dummy project for this test so it doesn't depend
     # on the state of the dev's machine

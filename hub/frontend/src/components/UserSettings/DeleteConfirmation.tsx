@@ -64,6 +64,7 @@ const DeleteConfirmation = ({ isOpen, onClose }: DeleteProps) => {
         leastDestructiveRef={cancelRef}
         size={{ base: "sm", md: "md" }}
         isCentered
+        motionPreset="none"
       >
         <AlertDialogOverlay>
           <AlertDialogContent as="form" onSubmit={handleSubmit(onSubmit)}>

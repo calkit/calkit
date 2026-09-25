@@ -30,6 +30,7 @@ import { refreshProjectContents } from "../../lib/api"
 import { handleError } from "../../lib/errors"
 import { decodeBase64Utf8, trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 
 // Extensions and bare filenames the built-in editor will open. Deliberately a
 // list rather than "anything that isn't a known binary": opening a file that
@@ -106,8 +107,12 @@ const FileEditorModal = ({
   const baseRef = useRef<string>("")
   const commitInputRef = useRef<HTMLInputElement>(null)
   const [dirty, setDirty] = useState(false)
-  const [commitMessage, setCommitMessage] = useState("")
+  // Pre-filled so saving is one keystroke away and the history stays
+  // readable for anyone who doesn't stop to write one.
+  const defaultMessage = `Update ${path}`
+  const [commitMessage, setCommitMessage] = useState(defaultMessage)
   const commitModal = useDisclosure()
+  const discardDialog = useDisclosure()
   const showToast = useCustomToast()
   const queryClient = useQueryClient()
 
@@ -133,6 +138,13 @@ const FileEditorModal = ({
     staleTime: 0,
   })
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the path, not the message
+  useEffect(() => {
+    if (!commitModal.isOpen) {
+      setCommitMessage(defaultMessage)
+    }
+  }, [path])
+
   useEffect(() => {
     if (initialDoc !== undefined) {
       textRef.current = initialDoc
@@ -154,15 +166,17 @@ const FileEditorModal = ({
         "content-length": file.size,
         bodyProjectsPutProjectContents: { file, message: message || null },
       }).then((response) => response.data)
+      // Part of the save rather than a follow-up, so the button keeps
+      // spinning until a read can see the commit. Closing on the write alone
+      // put the page back in view still showing the old content.
+      await refreshProjectContents(ownerName, projectName, queryClient)
     },
     onSuccess: () => {
       baseRef.current = trimForSave(textRef.current, initialDoc)
       setDirty(false)
-      setCommitMessage("")
+      setCommitMessage(defaultMessage)
       commitModal.onClose()
       showToast("Saved", "Your changes were committed.", "success")
-      // Fire-and-forget: the save already succeeded, and this never rejects.
-      void refreshProjectContents(ownerName, projectName, queryClient)
       onClose()
     },
     onError: (err: AxiosError) => {
@@ -196,7 +210,8 @@ const FileEditorModal = ({
   }, [isOpen])
 
   const handleClose = () => {
-    if (dirty && !window.confirm("Discard unsaved changes?")) {
+    if (dirty) {
+      discardDialog.onOpen()
       return
     }
     onClose()
@@ -212,6 +227,10 @@ const FileEditorModal = ({
         onClose={handleClose}
         size={{ base: "full", md: "4xl" }}
         isCentered
+        // No fade: the editor's first render lands in the frame between the
+        // overlay's animation ending and its final value being committed,
+        // which paints one undimmed frame (see EditQuestion)
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent maxH="90vh">
@@ -268,6 +287,9 @@ const FileEditorModal = ({
         size={{ base: "sm", md: "md" }}
         isCentered
         initialFocusRef={commitInputRef}
+        // Opens over the editor, which already holds the page still
+        preserveScrollBarGap
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent
@@ -285,7 +307,7 @@ const FileEditorModal = ({
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder="Ex: Add the paper's class file as a stage input"
+              placeholder={defaultMessage}
             />
           </ModalBody>
           <ModalFooter gap={3}>
@@ -300,6 +322,14 @@ const FileEditorModal = ({
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <DiscardChangesDialog
+        isOpen={discardDialog.isOpen}
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          discardDialog.onClose()
+          onClose()
+        }}
+      />
     </>
   )
 }

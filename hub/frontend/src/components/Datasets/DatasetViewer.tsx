@@ -1,5 +1,7 @@
+import { ChevronLeftIcon, ChevronRightIcon } from "@chakra-ui/icons"
 import {
   Box,
+  Table as ChakraTable,
   Code,
   Flex,
   HStack,
@@ -12,11 +14,10 @@ import {
   ModalHeader,
   ModalOverlay,
   Tab,
-  Table as ChakraTable,
-  TableContainer,
   TabList,
   TabPanel,
   TabPanels,
+  TableContainer,
   Tabs,
   Tbody,
   Td,
@@ -26,10 +27,11 @@ import {
   Tr,
   useColorModeValue,
 } from "@chakra-ui/react"
-import { ChevronLeftIcon, ChevronRightIcon } from "@chakra-ui/icons"
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { useState } from "react"
+import SyntaxHighlighter from "react-syntax-highlighter"
+import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
 import {
   type DatasetPublic,
   type Hdf5Listing,
@@ -37,13 +39,11 @@ import {
   type Table,
   type TableText,
 } from "../../client"
+import { decodeBase64Utf8 } from "../../lib/strings"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import { getLanguage } from "../Files/FileContent"
 import TableView from "../Tables/TableView"
-import SyntaxHighlighter from "react-syntax-highlighter"
-import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
-import { decodeBase64Utf8 } from "../../lib/strings"
 
 const TABLE_SUFFIXES = ["csv", "tsv", "parquet", "jsonl", "ndjson"]
 const HDF5_SUFFIXES = ["h5", "hdf5", "hdf", "he5"]
@@ -511,6 +511,7 @@ const DatasetViewer = ({
       size={isTable || isHdf5 ? "6xl" : "4xl"}
       scrollBehavior="inside"
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       {/* Big enough for a wide table, still a dialog over the page */}

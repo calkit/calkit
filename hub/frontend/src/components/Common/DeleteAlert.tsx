@@ -24,6 +24,8 @@ interface DeleteProps {
   // For a GitHub-less (native) collaborator, whose removal is keyed by user id
   // rather than a GitHub username.
   userId?: string | null
+  // Called once the deletion succeeds, e.g., to leave a page for what's gone
+  onDeleted?: () => void
 }
 
 const Delete = ({
@@ -34,6 +36,7 @@ const Delete = ({
   projectOwner,
   projectName,
   userId,
+  onDeleted,
 }: DeleteProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
@@ -70,6 +73,12 @@ const Delete = ({
       } else {
         throw new Error("No collaborator identifier")
       }
+    } else if (type === "Question" && projectOwner && projectName) {
+      await ProjectsService.deleteProjectQuestion({
+        owner_name: projectOwner,
+        project_name: projectName,
+        number: Number(id),
+      }).then((response) => response.data)
     } else {
       throw new Error(`Unexpected type: ${type}`)
     }
@@ -84,6 +93,7 @@ const Delete = ({
         "success",
       )
       onClose()
+      onDeleted?.()
     },
     onError: () => {
       showToast(
@@ -103,6 +113,11 @@ const Delete = ({
           queryKey: ["projects", projectOwner, projectName, "collaborators"],
         })
       }
+      if (type === "Question") {
+        queryClient.invalidateQueries({
+          queryKey: ["projects", projectOwner, projectName, "questions"],
+        })
+      }
     },
   })
 
@@ -118,6 +133,7 @@ const Delete = ({
         leastDestructiveRef={cancelRef}
         size={{ base: "sm", md: "md" }}
         isCentered
+        motionPreset="none"
       >
         <AlertDialogOverlay>
           <AlertDialogContent as="form" onSubmit={handleSubmit(onSubmit)}>

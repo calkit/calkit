@@ -39,12 +39,16 @@ def sync_dvc(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
 ) -> None:
     """Sync the DVC repository by pulling and then pushing."""
+    from dvc.exceptions import NotDvcRepoError
+
     from calkit.cli.main.core import pull, push
 
     try:
         calkit.dvc.get_dvc_repo()
-    except Exception:
+    except NotDvcRepoError:
         raise_error("No DVC repository found. Run 'calkit init' first.")
+    except Exception as e:
+        raise_error(f"Failed to open DVC repo: {e.__class__.__name__}: {e}")
     if not calkit.dvc.get_remotes():
         raise_error(
             "No DVC remotes configured. Add a remote with "

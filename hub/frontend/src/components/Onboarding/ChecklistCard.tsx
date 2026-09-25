@@ -2,7 +2,6 @@ import { CheckCircleIcon } from "@chakra-ui/icons"
 import {
   Box,
   Button,
-  Collapse,
   Flex,
   Heading,
   Icon,
@@ -42,39 +41,45 @@ function StepMark({
     Boolean(onMarkDone) &&
     !step.detectedOnly &&
     (!step.done || step.manuallyDone)
-  const icon = (
-    <Icon
-      as={step.done ? CheckCircleIcon : FiCircle}
-      color={step.done ? "ui.success" : "ui.dim"}
-      mt={1}
-      flexShrink={0}
-      aria-hidden
-    />
-  )
-  if (!canToggle) {
-    return icon
-  }
+  // One shape either way. Returning a bare icon when a step can't be
+  // toggled means the moment one becomes untoggleable -- which is what
+  // happens when we detect it as done -- React unmounts the button and the
+  // tooltip you are hovering, and it flashes out from under the cursor.
   return (
-    <Tooltip label={step.done ? "Not done after all?" : "Mark as done"}>
+    <Tooltip
+      label={step.done ? "Not done after all?" : "Mark as done"}
+      isDisabled={!canToggle}
+    >
       <Box
         as="button"
         type="button"
+        disabled={!canToggle}
         aria-label={
           step.done
             ? `Mark "${step.title}" as not done`
             : `Mark "${step.title}" as done`
         }
         lineHeight={0}
+        cursor={canToggle ? "pointer" : "default"}
         onClick={() => {
+          if (!canToggle) {
+            return
+          }
           mixpanel.track("Toggled onboarding step", {
             step: step.key,
             done: !step.done,
           })
           onMarkDone?.(step.key, !step.done)
         }}
-        _hover={{ opacity: 0.6 }}
+        _hover={canToggle ? { opacity: 0.6 } : undefined}
       >
-        {icon}
+        <Icon
+          as={step.done ? CheckCircleIcon : FiCircle}
+          color={step.done ? "ui.success" : "ui.dim"}
+          mt={1}
+          flexShrink={0}
+          aria-hidden
+        />
       </Box>
     </Tooltip>
   )
@@ -92,8 +97,6 @@ interface ChecklistCardProps {
   /** Whether the user has put this list away. */
   dismissed: boolean
   onDismissedChange: (dismissed: boolean) => void
-  /** Shown in place of the list once nothing required is left. */
-  doneMessage: string
   /**
    * Columns to lay the steps out in on a wide screen. Two suits a card that
    * spans the page and a list whose steps can be done in any order; one
@@ -121,7 +124,6 @@ const ChecklistCard = ({
   onMarkDone,
   dismissed,
   onDismissedChange,
-  doneMessage,
   columns = 1,
 }: ChecklistCardProps) => {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
@@ -137,7 +139,7 @@ const ChecklistCard = ({
   }
   return (
     <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-      <Flex align="center" mb={1}>
+      <Flex align="center" mb={2}>
         <Heading size="md">{title}</Heading>
         <Spacer />
         <Button
@@ -155,12 +157,10 @@ const ChecklistCard = ({
           Dismiss
         </Button>
       </Flex>
-      {complete ? (
-        <Flex align="center" gap={2} mt={2} mb={4}>
-          <Icon as={CheckCircleIcon} color="ui.success" />
-          <Text fontSize="sm">{doneMessage}</Text>
-        </Flex>
-      ) : (
+      {/* Nothing in place of the progress bar once every step is done: a
+          list that has been finished has said everything it has to say,
+          and a banner congratulating someone for it is in the way. */}
+      {complete ? null : (
         <>
           {intro ? (
             <Text fontSize="sm" color="ui.dim" mb={3}>
@@ -212,14 +212,20 @@ const ChecklistCard = ({
                     </Text>
                   ) : null}
                 </Flex>
-                <Collapse in={!step.done} animateOpacity>
+                {/* Hidden rather than collapsed. Animating a step's body
+                    shut means measuring it first, and the tallest one here
+                    (the three commands under "run the pipeline") paints at
+                    full height for a frame before the animation takes over,
+                    which is the flash. Kept mounted, since a step's action
+                    can own an open modal that ticks the step off itself. */}
+                <Box display={step.done ? "none" : "block"}>
                   <Text fontSize="sm" color="ui.dim" mt={0.5}>
                     {step.detail}
                   </Text>
                   {actions?.[step.key] ? (
                     <Box mt={2}>{actions[step.key]}</Box>
                   ) : null}
-                </Collapse>
+                </Box>
               </Box>
             </Flex>
           </Box>

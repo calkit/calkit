@@ -1181,6 +1181,20 @@ def test_run(tmp_dir):
     # Check we can run for inputs and outputs
     subprocess.check_call(["calkit", "run", "--input", "script.py"])
     subprocess.check_call(["calkit", "run", "--output", "test.txt"])
+    # A DVC repo that can't be opened is reported as such, not mistaken for
+    # a missing one that 'dvc init' would then refuse to create
+    with open("not-a-dir", "w") as f:
+        f.write("")
+    proc = subprocess.run(
+        ["calkit", "run"],
+        env=os.environ | {"DVC_SITE_CACHE_DIR": "not-a-dir/cache"},
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "Failed to open DVC repo" in proc.stdout + proc.stderr
+    assert "Initializing DVC repo" not in proc.stdout
+    os.remove("not-a-dir")
     # Make sure we can run on a detached head
     repo = git.Repo()
     repo.git.checkout("HEAD^")

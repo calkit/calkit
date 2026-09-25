@@ -1,0 +1,65 @@
+name: Publish LaTeX image
+
+# The default token needs no write access; the job elevates to push the
+# image and attach its attestation
+permissions:
+  contents: read
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Build and push 🐳
+    # Tags look like latex-image/vX.Y.Z, matching the other subprojects,
+    # so releasing one doesn't publish the other
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || startsWith(github.event.release.tag_name, 'latex-image/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      IMAGE: ghcr.io/calkit/latex
+    steps:
+      - uses: actions/checkout@v7
+      - name: Determine version
+        id: version
+        run: |
+          # latex-image/v1.2.3 -> 1.2.3
+          tag="${{ github.event.release.tag_name }}"
+          echo "version=${tag#latex-image/v}" >> "$GITHUB_OUTPUT"
+      - name: Log in to the container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: images/latex
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+      # An unforgeable statement about where and how the image was built,
+      # which increases supply chain security for anyone who consumes it
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

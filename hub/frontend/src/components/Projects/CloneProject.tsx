@@ -1,5 +1,6 @@
 import {
   Code,
+  Link,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -7,10 +8,9 @@ import {
   ModalHeader,
   ModalOverlay,
   Text,
-  Link,
 } from "@chakra-ui/react"
 
-import { type ProjectPublic } from "../../client"
+import type { ProjectPublic } from "../../client"
 
 interface CloneProjectProps {
   project: ProjectPublic
@@ -21,7 +21,13 @@ interface CloneProjectProps {
 const CloneProject = ({ project, isOpen, onClose }: CloneProjectProps) => {
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} size="xl" isCentered>
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        size="xl"
+        isCentered
+        motionPreset="none"
+      >
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>Clone project</ModalHeader>

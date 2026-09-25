@@ -9,16 +9,22 @@ import subprocess
 import pytest
 
 import calkit
+from calkit.models.core import ProjectInfo, Question
 from calkit.pipeline import frozen_tainted_stage_names
 from calkit.questions import (
     QuestionsStatus,
     check_question,
     check_questions,
+    evaluate_condition,
+    expand_questions_stages,
     format_status,
+    latex_values,
+    parse_conditional,
     placeholders,
     render,
     render_question,
     resolve_key,
+    select_branch,
 )
 
 
@@ -29,6 +35,17 @@ def test_resolve_key():
     assert resolve_key(data, "a.list.1.c") == 3
     assert resolve_key(data, "a.list.0") == 10
     assert resolve_key(data, "top") == 4
+    # Keys containing dots are found below the top level too, and a dotted
+    # key that leads nowhere falls back to shorter ones
+    nested = {
+        "sweep": {"back_off_1.50_k": {"failed": 13}, "back_off_1": {"x": 1}},
+        "v1.2": {"a": {"b": 5}},
+    }
+    assert resolve_key(nested, "sweep.back_off_1.50_k.failed") == 13
+    assert resolve_key(nested, "sweep.back_off_1.x") == 1
+    assert resolve_key(nested, "v1.2.a.b") == 5
+    with pytest.raises(KeyError):
+        resolve_key(nested, "sweep.back_off_1.50_k.missing")
     with pytest.raises(KeyError):
         resolve_key(data, "a.missing")
     with pytest.raises(KeyError):
@@ -92,6 +109,16 @@ def test_history_is_read_once_for_all_questions(tmp_dir):
     with open("results/findings.json", "w") as f:
         json.dump({f"k{i}": i for i in range(4)}, f)
     ck_info = {
+        "pipeline": {
+            "stages": {
+                "summarize": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": ["results/findings.json"],
+                }
+            }
+        },
         "questions": [
             {
                 "question": f"Q{i}?",
@@ -106,7 +133,7 @@ def test_history_is_read_once_for_all_questions(tmp_dir):
                 ],
             }
             for i in range(4)
-        ]
+        ],
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -151,6 +178,9 @@ def test_check_questions(tmp_dir):
         f.write("pdf")
     with open("figures/plot.png", "w") as f:
         f.write("png")
+    os.makedirs("docs")
+    with open("docs/notes.md", "w") as f:
+        f.write("# Method\n")
     # A DVC-tracked output known only through dvc.lock
     with open("dvc.lock", "w") as f:
         f.write(
@@ -175,6 +205,11 @@ def test_check_questions(tmp_dir):
                     "environment": "py",
                     "script_path": "s.py",
                     "outputs": [{"path": "results/findings.json"}],
+                },
+                "notes": {
+                    "kind": "markdown",
+                    "environment": "py",
+                    "target_path": "docs/notes.md",
                 },
             }
         },
@@ -211,6 +246,18 @@ def test_check_questions(tmp_dir):
                     },
                     {"kind": "figure", "path": "figures/plot.png"},
                     {"kind": "result", "path": "results/big.h5"},
+                    {
+                        "kind": "document",
+                        "path": "docs/notes.md",
+                        "section": "Method",
+                    },
+                    # Related values from one file, named in one entry
+                    {
+                        "kind": "result",
+                        "path": "results/findings.json",
+                        "values": {"top": "n_top", "r": "ratio"},
+                        "explanation": "{top} and {r:.2f}",
+                    },
                 ],
             },
         ],
@@ -235,9 +282,130 @@ def test_check_questions(tmp_dir):
     # makes it and it is not declared with an import or a person
     assert q4.evidence[4].status == "unattributed"
     assert [ev.path for ev in status.unattributed] == ["figures/plot.png"]
+    # A document is attributed to the Markdown stage that builds it
+    assert q4.evidence[6].status == "ok"
+    assert q4.evidence[6].stage == "notes"
+    assert q4.evidence[7].status == "ok"
+    assert q4.evidence[7].values == {"top": 8, "r": 5.1014}
+    assert q4.evidence[7].stage == "summarize"
+    # A result's values are checked like value entries: every key has to
+    # resolve, key and values are exclusive, and names can't repeat
+    for values, extra, expected in [
+        ({"top": "n_top", "x": "nope", "y": "nested.nope"}, {}, "'nope', "),
+        ({"top": "n_top"}, {"key": "ratio"}, "'values' or 'key'"),
+        ({}, {}, "map each name"),
+        ({"n_top": "ratio"}, {}, None),
+    ]:
+        grouped = {
+            "question": "Grouped?",
+            "answer": "{n_top}",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/findings.json",
+                    "key": "n_top",
+                },
+                {
+                    "kind": "result",
+                    "path": "results/findings.json",
+                    "values": values,
+                }
+                | extra,
+            ],
+        }
+        checked = check_question(5, grouped, ck_info, ".")
+        assert checked.status == "error", values
+        if expected is None:
+            assert "duplicate evidence name(s): n_top" in (
+                checked.message or ""
+            )
+        else:
+            assert expected in (checked.evidence[1].message or ""), values
+    # A value no stage computes is a magic number, so it fails rather than
+    # being advice; an import is traceable, a person typing it in is not
+    with open("results/typed.json", "w") as f:
+        json.dump({"n": 3}, f)
+    typed = {
+        "question": "Typed?",
+        "answer": "{n}",
+        "evidence": [
+            {"kind": "value", "path": "results/typed.json", "key": "n"}
+        ],
+    }
+    for declared, expected in [
+        (None, "error"),
+        ({"created_by": "someone"}, "error"),
+        ({"imported_from": {"project": "a/b"}}, "ok"),
+    ]:
+        info = dict(ck_info)
+        if declared:
+            info["datasets"] = [{"path": "results/typed.json"} | declared]
+        checked = check_question(5, typed, info, ".")
+        assert checked.status == expected, declared
+        if expected == "error":
+            assert "no pipeline stage computes" in (
+                checked.evidence[0].message or ""
+            )
+    os.remove("results/typed.json")
+    # Likewise a document nothing builds: whatever it says was typed in
+    with open("docs/typed.md", "w") as f:
+        f.write("It is 3.\n")
+    handwritten = {
+        "question": "Written by hand?",
+        "answer": "See the notes.",
+        "evidence": [{"kind": "document", "path": "docs/typed.md"}],
+    }
+    for declared, expected in [
+        (None, "error"),
+        ({"created_by": "someone"}, "error"),
+        ({"imported_from": {"project": "a/b"}}, "ok"),
+    ]:
+        info = dict(ck_info)
+        if declared:
+            info["publications"] = [{"path": "docs/typed.md"} | declared]
+        checked = check_question(5, handwritten, info, ".")
+        assert checked.status == expected, declared
+        if expected == "error":
+            assert "no pipeline stage builds" in (
+                checked.evidence[0].message or ""
+            )
+    os.remove("docs/typed.md")
+    # A Quarto document is evidence as rendered, not as its source
+    with open("docs/report.qmd", "w") as f:
+        f.write("It is `{python} 3`.\n")
+    with open("docs/report.html", "w") as f:
+        f.write("It is 3.\n")
+    info = dict(ck_info)
+    info["pipeline"] = {
+        "stages": ck_info["pipeline"]["stages"]
+        | {
+            "report": {
+                "kind": "quarto",
+                "environment": "py",
+                "target_path": "docs/report.qmd",
+                "outputs": ["docs/report.html"],
+            }
+        }
+    }
+    for path, expected in [
+        ("docs/report.html", "ok"),
+        ("docs/report.qmd", "error"),
+    ]:
+        quarto = {
+            "question": "Rendered?",
+            "answer": "See the report.",
+            "evidence": [{"kind": "document", "path": path}],
+        }
+        checked = check_question(5, quarto, info, ".")
+        assert checked.status == expected, path
+    assert checked.evidence[0].message == (
+        "this is the source Quarto stage 'report' renders; cite what it "
+        "renders instead, e.g., docs/report.html"
+    )
     rendered = render_question(ck_info["questions"][3], ck_info, ".")
     assert rendered["answer"] == "8 of eight do, a 5.1x gain."
     assert rendered["evidence"][2]["explanation"] == "The best is a."
+    assert rendered["evidence"][7]["explanation"] == "8 and 5.10"
     assert render_question("plain", ck_info, ".") == "plain"
     # Committed: the question dates from this commit and nothing has changed
     sha1 = _commit("Answer the question")
@@ -277,14 +445,21 @@ def test_check_questions(tmp_dir):
     assert "n_top was 8 at" in (q4.evidence[0].message or "")
     assert q4.evidence[1].status == "ok"
     assert q4.evidence[4].status == "unattributed"
+    # Each of a result's values is compared on its own
+    assert q4.evidence[7].status == "changed"
+    assert "n_top was 8 at" in (q4.evidence[7].message or "")
+    assert "ratio" not in (q4.evidence[7].message or "")
     assert status.ok
-    assert [ev.path for ev in status.changed] == ["results/findings.json"]
+    assert [ev.path for ev in status.changed] == [
+        "results/findings.json",
+        "results/findings.json",
+    ]
     report = format_status(status)
     # It still earns a block, since nothing else would say it
     assert "[ok] Do the top structures use the rectifier?" in report
     assert "editing the question" in report
     assert (
-        "Evidence that changed after the answer was written: 1 (worth a look)"
+        "Evidence that changed after the answer was written: 2 (worth a look)"
         in report
     )
     assert "Answers given without evidence: 1 (worth a look)" in report
@@ -380,6 +555,9 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     for name, value in [("fresh", 1), ("drifted", 2), ("pinned", 3)]:
         with open(f"results/{name}.json", "w") as f:
             json.dump({"v": value}, f)
+    os.makedirs("docs")
+    with open("docs/write-up.md", "w") as f:
+        f.write("# Write-up\n")
     with open("dvc.lock", "w") as f:
         calkit.ryaml.dump(
             {
@@ -417,6 +595,12 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
                     "environment": "py",
                     "script_path": "s.py",
                     "outputs": [{"path": "results/drifted.json"}],
+                },
+                # Builds the document it names as its target
+                "write-up": {
+                    "kind": "markdown",
+                    "environment": "py",
+                    "target_path": "docs/write-up.md",
                 },
             }
         },
@@ -469,6 +653,11 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
                     }
                 ],
             },
+            {
+                "question": "And a document its stage would rebuild?",
+                "answer": "The write-up says so.",
+                "evidence": [{"kind": "document", "path": "docs/write-up.md"}],
+            },
         ],
     }
     _write_yaml(ck_info)
@@ -476,7 +665,7 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     # Stand in for DVC: only 'drift' needs re-running
     status = check_questions(ck_info=ck_info, wdir=".", check_pipeline=False)
     stale, frozen = (
-        {"drift"},
+        {"drift", "write-up/analyze"},
         frozen_tainted_stage_names(ck_info=ck_info, wdir="."),
     )
     # The freeze taints itself and everything reading what it wrote
@@ -500,7 +689,9 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
         "frozen",
         "frozen",
         "missing",
+        "stale",
     ]
+    assert status.questions[4].evidence[0].stage == "write-up"
     assert "out of date" in (status.questions[0].evidence[0].message or "")
     assert "git_ref" in (status.questions[1].evidence[0].message or "")
     assert "exp/never-pushed" in (
@@ -510,7 +701,7 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert not status.ok
     report = format_status(status)
     assert "Answers citing evidence that isn't there: 1" in report
-    assert "Answers whose evidence the pipeline would rebuild: 1" in report
+    assert "Answers whose evidence the pipeline would rebuild: 2" in report
     assert "Answers resting on a frozen stage, unpinned: 2 (worth a look)" in (
         report
     )
@@ -530,3 +721,222 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert checked.status == "ok"
     assert checked.evidence[0].current == 2
     assert checked.evidence[0].git_ref == sha
+
+
+def test_conditional_answers(tmp_dir):
+    values = {"p": 0.007, "rho": 0.8373, "n": 17, "leader": "turns-max"}
+    # Comparisons, chaining, boolean operators, strings, and arithmetic
+    assert evaluate_condition("p < 0.05", values)
+    assert not evaluate_condition("p >= 0.05", values)
+    assert evaluate_condition("0.0 <= p < 0.05", values)
+    assert evaluate_condition("p < 0.05 and rho > 0.8", values)
+    assert evaluate_condition("p > 0.5 or rho > 0.8", values)
+    assert evaluate_condition("not p > 0.5", values)
+    assert evaluate_condition("leader == 'turns-max'", values)
+    assert evaluate_condition("n / 2 > 8", values)
+    # A name with no evidence is an error, not a false condition, and
+    # nothing may be called or used as a bare value
+    with pytest.raises(KeyError):
+        evaluate_condition("missing < 1", values)
+    with pytest.raises(Exception):
+        evaluate_condition("len(leader) > 1", values)
+    with pytest.raises(ValueError):
+        evaluate_condition("p", values)
+    # A true/false value can stand alone, e.g., a 'passes' flag in results
+    flags = {"ok": True, "bad": False, "p": 0.007}
+    assert evaluate_condition("ok", flags)
+    assert evaluate_condition("ok and not bad", flags)
+    assert not evaluate_condition("bad or p > 0.5", flags)
+    with pytest.raises(ValueError, match="true/false"):
+        evaluate_condition("ok and p", flags)
+    with pytest.raises(KeyError):
+        evaluate_condition("missing", flags)
+    # A comparison the values can't make is a ValueError like the rest
+    with pytest.raises(ValueError, match="cannot evaluate"):
+        evaluate_condition("leader < 0.5", values)
+    # A name that is not a valid identifier cannot be read as a variable,
+    # and says so rather than reporting a fragment of itself as missing
+    with pytest.raises(ValueError, match="valid Python identifier"):
+        evaluate_condition("paired-gain > 0.1", {"paired-gain": 0.25})
+    # Clauses are tried in the order written, with None marking the else
+    clauses = {
+        "if p < 0.05": "strong, rho {rho:.2f}",
+        "elif p < 0.1": "weak",
+        "else": "none",
+    }
+    assert [c for c, _ in parse_conditional(clauses)] == [
+        "p < 0.05",
+        "p < 0.1",
+        None,
+    ]
+    assert select_branch(clauses, {"p": 0.007}) == "strong, rho {rho:.2f}"
+    assert select_branch(clauses, {"p": 0.08}) == "weak"
+    assert select_branch(clauses, {"p": 0.9}) == "none"
+    # Malformed clause sets are errors rather than silent misreadings
+    with pytest.raises(ValueError):
+        parse_conditional({"elif p < 1": "x"})
+    with pytest.raises(ValueError):
+        parse_conditional({"else": "x"})
+    with pytest.raises(ValueError):
+        parse_conditional({"when p < 1": "x"})
+    with pytest.raises(ValueError):
+        parse_conditional({"if p < 1": "x", "else": "y", "elif p < 2": "z"})
+    with pytest.raises(ValueError):
+        parse_conditional({"if p < 1": "x", "if p < 2": "y"})
+    # Nothing holding with no else is an error rather than a blank answer
+    with pytest.raises(ValueError):
+        select_branch({"if p < 0.05": "strong"}, {"p": 0.9})
+    # Rendering picks the branch, then fills its placeholders
+    answer = {
+        "if p < 0.05": "{leader} predicts it (rho {rho:+.2f})",
+        "else": "no feature predicts it",
+    }
+    assert render(answer, values) == "turns-max predicts it (rho +0.84)"
+    assert render(answer, values | {"p": 0.2}) == "no feature predicts it"
+    # Plain strings are untouched by the conditional path
+    assert render("if and only if", values) == "if and only if"
+    # Checking reports every clause's problems, including the clauses the
+    # current values don't select, rather than crashing or passing
+    with open("r.json", "w") as f:
+        json.dump({"p": 0.2, "leader": "x"}, f)
+    evidence = [
+        {"kind": "value", "path": "r.json", "key": "p"},
+        {"kind": "value", "path": "r.json", "key": "leader"},
+    ]
+    cases = [
+        ({"if p < 0.5": "{leader}", "else": "no"}, []),
+        (
+            {"if p < 0.05": "x"},
+            ["no condition of the conditional answer holds"],
+        ),
+        ({"when p < 1": "x"}, ["conditional answer: expected 'if'"]),
+        (
+            {"if leader < 0.05": "x", "else": "y"},
+            ["cannot evaluate condition 'leader < 0.05'"],
+        ),
+        (
+            {"if p > 0.1": "yes", "elif typo < 1": "x", "else": "{rhoo:.2f}"},
+            [
+                "condition 'typo < 1' names no evidence 'typo'",
+                "placeholder {rhoo} names no evidence",
+            ],
+        ),
+    ]
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "scan": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": ["r.json"],
+                }
+            }
+        }
+    }
+    for answer, expected in cases:
+        checked = check_question(
+            1,
+            {"question": "q", "answer": answer, "evidence": evidence},
+            ck_info,
+            ".",
+        )
+        messages = checked.message or ""
+        assert (checked.status == "error") == bool(expected), answer
+        for fragment in expected:
+            assert fragment in messages, (answer, messages)
+
+
+def test_latex_values(tmp_dir):
+    with open("results.json", "w") as f:
+        json.dump({"gain": 0.2531, "p": 0.007}, f)
+    value = {"kind": "value", "path": "results.json"}
+    ck_info = {
+        "questions": [
+            {
+                "name": "staging",
+                "question": "Does staging help?",
+                "hypothesis": "Where the surrogate\n  fits poorly.",
+                "answer": {
+                    "if gain > 0": "Yes, by {gain:+.3f} (p {p:.3f}).",
+                    "else": "No.",
+                },
+                "evidence": [
+                    {**value, "key": "gain", "name": "gain"},
+                    {**value, "key": "p", "name": "p"},
+                ],
+            },
+            "Is this a bare question?",
+            {"question": "Unanswered?", "notes": "Needs a run."},
+        ]
+    }
+    values = latex_values(ck_info)
+    # Addressable by position and by name, with the conditional resolved,
+    # values templated, and folded YAML whitespace collapsed
+    assert values["1.answer"] == values["staging.answer"]
+    assert values["staging.answer"] == "Yes, by +0.253 (p 0.007)."
+    assert values["staging.hypothesis"] == "Where the surrogate fits poorly."
+    assert values["2.question"] == "Is this a bare question?"
+    # Absent fields are left out rather than exposed as empty
+    assert "3.answer" not in values and values["3.notes"] == "Needs a run."
+    # A placeholder that can't be filled is an error, not literal text
+    broken = {"questions": [{"question": "Q?", "answer": "Up {missing}."}]}
+    with pytest.raises(ValueError, match="answer"):
+        latex_values(broken)
+    unreadable = {
+        "questions": [
+            {
+                "question": "Q?",
+                "answer": "{x}",
+                "evidence": [
+                    {"kind": "value", "path": "gone.json", "key": "x"}
+                ],
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="gone.json"):
+        latex_values(unreadable)
+    duplicate = {
+        "questions": [
+            {"name": "a", "question": "One?"},
+            {"name": "a", "question": "Two?"},
+        ]
+    }
+    with pytest.raises(ValueError, match="'a'"):
+        latex_values(duplicate)
+    # A name can't be a number, which would collide with a position
+    with pytest.raises(ValueError, match="can't be a number"):
+        Question(name="2", question="Q?")
+    numeric = {"questions": [{"name": "2", "question": "Q?"}, "Other?"]}
+    with pytest.raises(ValueError, match="can't be a number"):
+        latex_values(numeric)
+    # The project model also rejects duplicate names
+    with pytest.raises(ValueError, match="must be unique"):
+        ProjectInfo.model_validate(duplicate)
+    ProjectInfo.model_validate(
+        {"questions": [{"name": "a", "question": "One?"}, "Two?"]}
+    )
+    # The stage gains calkit.yaml and the evidence, keeping declared
+    # inputs and listing nothing twice
+    ck_info["pipeline"] = {
+        "stages": {
+            "qa": {
+                "kind": "questions-to-latex",
+                "inputs": ["results.json", "extra.txt"],
+                "outputs": ["qa.tex"],
+            },
+            "other": {"kind": "shell-command", "command": "true"},
+        }
+    }
+    stages = expand_questions_stages(ck_info)["pipeline"]["stages"]
+    assert stages["qa"]["inputs"] == [
+        "results.json",
+        "extra.txt",
+        "calkit.yaml",
+    ]
+    assert "inputs" not in stages["other"]
+    assert "inputs" not in ck_info["pipeline"]["stages"]["other"]
+    assert ck_info["pipeline"]["stages"]["qa"]["inputs"] == [
+        "results.json",
+        "extra.txt",
+    ]

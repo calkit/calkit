@@ -1866,7 +1866,7 @@ List Calkit objects.
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
 | [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.                                                     |
 | [`environments\|envs`](#subcommand-list-ls-environments-envs)   | List environments in the project.                                                              |
-| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates.                                                           |
+| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates, grouped by kind.                                          |
 | [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer.                                                  |
 | [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
@@ -2065,7 +2065,9 @@ Options:
 
 #### `calkit list|ls templates`
 
-List all available Calkit templates.
+List all available Calkit templates, grouped by kind.
+
+A template is named by its kind and name, except a project template, which names a project on a hub and so is `owner/project`.
 
 Usage:
 
@@ -2075,9 +2077,10 @@ calkit list|ls templates [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description            |
-| -------- | ------- | -------- | ------- | ---------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON. |
+| Option         | Type    | Required | Default | Description                      |
+| -------------- | ------- | -------- | ------- | -------------------------------- |
+| `--kind`, `-k` | str     | no       |         | Only show templates of one kind. |
+| `--json`       | boolean | no       | False   | Output result as JSON.           |
 
 <a id="subcommand-list-ls-installers"></a>
 
@@ -3289,13 +3292,14 @@ Options:
 
 Work with LaTeX.
 
-| Command                                          | Description                                                |
-| ------------------------------------------------ | ---------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)   | Convert a JSON file to LaTeX.                              |
-| [`build`](#subcommand-latex-tex-build)           | Build a PDF of a LaTeX document with latexmk.              |
-| [`diff`](#subcommand-latex-tex-diff)             | Build a PDF showing what changed in a LaTeX document.      |
-| [`to-docx`](#subcommand-latex-tex-to-docx)       | Export a Word copy of a LaTeX document for review.         |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx) | Merge a reviewed Word document back into the LaTeX source. |
+| Command                                                  | Description                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                 |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                 |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3325,6 +3329,27 @@ Options:
 | `--command`      | str  | no       |         | Command name to use in LaTeX output.                                                                                            |
 | `--key`          | str  | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
 | `--format-json`  | str  | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
+
+<a id="subcommand-latex-tex-from-questions"></a>
+
+#### `calkit latex|tex from-questions`
+
+Write the project's questions and answers as a LaTeX command.
+
+Each question's text, hypothesis, answer, and notes are rendered from their evidence and exposed as, e.g., `\questions[staging.answer]`, keyed by the question's `name` or its 1-based position.
+
+Usage:
+
+```text
+calkit latex|tex from-questions [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default   | Description                          |
+| ---------------- | ---- | -------- | --------- | ------------------------------------ |
+| `--output`, `-o` | str  | yes      |           | Output LaTeX file path(s).           |
+| `--command`      | str  | no       | questions | Command name to use in LaTeX output. |
 
 <a id="subcommand-latex-tex-build"></a>
 

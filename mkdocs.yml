@@ -63,9 +63,7 @@ nav:
   - Local server (GUI interaction): local-server.md
   - LaTeX documents: latex.md
   - Overleaf integration: overleaf.md
-  - Browser extension:
-      - browser-ext/index.md
-      - Privacy policy: browser-ext/privacy.md
+  - Browser extension: browser-ext/index.md
   - Subprojects: subprojects.md
   - Examples: examples.md
   - Tutorials:
@@ -90,7 +88,9 @@ nav:
   - CLI reference: cli-reference.md
   - Help and support: help.md
   - Reproducibility: reproducibility.md
+  - Calkit vs. other tools: comparisons.md
   - Governance: governance.md
+  - Privacy policy: privacy.md
   - Acknowledgements: acknowledgements.md
 # Internal design notes live in docs/dev; they're for contributors, not
 # users, so they're built out of the site rather than shown unlinked.

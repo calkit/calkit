@@ -44,7 +44,6 @@ import PdfCanvas from "../../../../../components/Common/PdfCanvas"
 import FigureEditor from "../../../../../components/Figures/FigureEditor"
 import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
 import UploadFigure from "../../../../../components/Figures/UploadFigure"
-import TipBubble from "../../../../../components/Onboarding/TipBubble"
 import useProject from "../../../../../hooks/useProject"
 
 const figuresSearchSchema = z.object({
@@ -657,20 +656,12 @@ function ProjectFigures() {
               pointerEvents={isPlaceholderData ? "none" : undefined}
               aria-busy={isPlaceholderData}
             >
-              {figures!.map((figure, i) => (
-                <TipBubble
+              {figures!.map((figure) => (
+                <FigureThumbnail
                   key={figure.path}
-                  tip="edit-figure"
-                  where="page"
-                  when={i === 0 && !selectedPath}
-                  markOnClick={false}
-                  display="block"
-                >
-                  <FigureThumbnail
-                    figure={figure}
-                    onClick={() => openFigure(figure)}
-                  />
-                </TipBubble>
+                  figure={figure}
+                  onClick={() => openFigure(figure)}
+                />
               ))}
             </SimpleGrid>
             {isPlaceholderData && (

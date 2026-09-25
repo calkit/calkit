@@ -125,6 +125,18 @@ The store listing's text lives in `browser-ext/store/listing.md`, and its
 screenshots are generated from `docs/img/browser-ext` by
 `browser-ext/scripts/store-screenshots.py`.
 
+## Releasing the assistant
+
+Publishing a GitHub release tagged `assistant/vX.Y.Z` builds the Windows
+executable with PyInstaller and attaches it to the release as
+`calkit-assistant-X.Y.Z-windows.exe`.
+As with the extensions, uncheck "set as the latest release" for these.
+Pull requests that touch `assistant/` run its offscreen smoke test on all
+three platforms and a Windows build, so a broken build is caught before a
+release is cut.
+`make assistant` runs the app locally and `make test-assistant` runs the
+same smoke test.
+
 ## 💡 Other ways to contribute
 
 - **Report bugs**: Open an issue with detailed reproduction steps.

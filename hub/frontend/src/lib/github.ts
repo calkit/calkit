@@ -35,7 +35,17 @@ const GITHUB_RETURN_TO_KEY = "gh_connect_return_to"
 // Send the browser to GitHub to authorize, for either intent. Pass returnTo
 // to come back to whatever the user was doing (the callback lands on /login,
 // which would otherwise drop them at settings).
-export const startGitHubOAuth = (returnTo?: string): void => {
+//
+// `chooseAccount` asks GitHub for its account switcher. Without it GitHub
+// uses whichever account the browser is signed in as, and once that account
+// has authorized the app it returns immediately with no screen at all --- so
+// someone signed into two GitHub accounts silently connects the wrong one.
+// Only the connect flows ask for it; on sign-in it would put a chooser in
+// front of everyone who has a single account.
+export const startGitHubOAuth = (
+  returnTo?: string,
+  { chooseAccount = false }: { chooseAccount?: boolean } = {},
+): void => {
   const clientId = import.meta.env.VITE_GH_CLIENT_ID
   const state = createGitHubOAuthState()
   if (returnTo) {
@@ -43,7 +53,16 @@ export const startGitHubOAuth = (returnTo?: string): void => {
   } else {
     sessionStorage.removeItem(GITHUB_RETURN_TO_KEY)
   }
-  location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&state=${state}`
+  const params = new URLSearchParams({ client_id: String(clientId), state })
+  if (chooseAccount) {
+    params.set("prompt", "select_account")
+  }
+  location.href = `https://github.com/login/oauth/authorize?${params.toString()}`
+}
+
+/** Where to return after connecting, for redirects that aren't OAuth. */
+export const setGitHubReturnTo = (returnTo: string): void => {
+  sessionStorage.setItem(GITHUB_RETURN_TO_KEY, returnTo)
 }
 
 // Read and clear where to return after connecting. Only same-origin paths are

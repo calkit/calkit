@@ -11,7 +11,7 @@
       "settings": {
         "python.terminal.activateEnvironment": false,
         "python.terminal.activateEnvInCurrentTerminal": false,
-        "redhat.telemetry.enabled": true,
+        "redhat.telemetry.enabled": false,
         "window.menuBarVisibility": "classic",
         "workbench.colorTheme": "Atom One Dark",
         "editor.minimap.enabled": false

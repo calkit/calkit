@@ -307,8 +307,8 @@ token, declare it under a `system` environment's `requirements` instead
 and run those stages in that environment, paired with a runtime if they
 need one, e.g., `fetch:py`; see
 [environments](environments.md#requirements).
-It's then checked with that environment, and a missing file is reported
-without stopping the stages that don't use it.
+It's then checked when a stage starts in that environment, so a run in
+which that stage is up to date never asks for it.
 
 ## Setup requirements
 

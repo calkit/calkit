@@ -3839,6 +3839,23 @@ def run_in_env(
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
+        elif env.get("requirements"):
+            # A stage is about to run here, so this is when its requirements
+            # matter; a pipeline run doesn't check them up front, since it
+            # can't know which stages will run. Cheap: a file or a variable
+            # is a lookup, and setup checks are cached. Not interactive,
+            # since DVC is running this and a prompt mid-run is no place to
+            # be asked for a secret.
+            try:
+                calkit.check_requirements(
+                    requirements=env["requirements"], interactive=False
+                )
+            except ValueError as e:
+                raise_error(
+                    f"Environment '{env_name}' isn't ready to run a stage: "
+                    f"{e}. Run 'calkit check env -n {env_name}' to set it "
+                    "up, then run again."
+                )
         # The env's 'wdir' is deliberately ignored here. It says where to
         # put the project when it has to be sent to another machine; we are
         # already on that machine, in a checkout of the project, and that

@@ -471,6 +471,14 @@ def check_environment(
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
+    requirements: Annotated[
+        bool,
+        typer.Option(
+            "--requirements/--no-requirements",
+            hidden=True,
+            help="Check a local system environment's requirements.",
+        ),
+    ] = True,
 ) -> str | None:
     """Check that an environment is up-to-date."""
     from calkit.environments import (
@@ -644,9 +652,13 @@ def check_environment(
         # stages depending on the env see them change.
         if calkit.environments.env_is_local(env):
             try:
-                calkit.check_requirements(
-                    requirements=env.get("requirements", [])
-                )
+                # Skipped before a pipeline run, which can't know yet which
+                # stages will run here: 'xenv' checks them as each stage
+                # starts, so one that's up to date never asks
+                if requirements:
+                    calkit.check_requirements(
+                        requirements=env.get("requirements", [])
+                    )
                 write_system_env_lock(env_name=env_name, env=env)
             except ValueError as e:
                 # A requirement that isn't met, or a property that can't be

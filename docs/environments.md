@@ -697,9 +697,9 @@ environments:
 
 `requirements` and `lock` answer different questions,
 which is why a property can appear in both.
-A requirement is a precondition: it's checked before anything runs,
-and one that isn't met stops the run and says what was found and what
-was needed.
+A requirement is a precondition: it's checked before a stage runs in
+the environment, and one that isn't met stops the run and says what was
+found and what was needed.
 A lock is a cache input: nothing is checked, but the property's observed
 value is recorded, and a stage reruns when it changes.
 So the example above means "refuse to run on fewer than 16 CPUs,"
@@ -721,6 +721,18 @@ another machine belongs to whoever administers it---so Calkit reports
 what was missing and where.
 Checking a requirement about the machine itself, like `cpu-count`, needs
 Calkit installed on that host, since that's what reports its properties.
+
+On this machine, requirements are checked when a stage starts in the
+environment, not when `calkit run` starts.
+Which stages will run isn't known until the pipeline has worked out
+what's out of date, including what's downstream of whatever reruns first,
+so checking up front would mean either doing that work twice or asking
+for, e.g., a token that a stage whose output is already up to date will
+never use.
+The checks at stage start aren't interactive, since the pipeline is
+running them; a stage that can't start says what's missing and to run
+`calkit check env -n <name>`, which checks everything and prompts for
+what it can.
 
 The project's own top-level `requirements` describe the host you're
 driving from, which is the `_system` environment.

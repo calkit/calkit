@@ -221,10 +221,10 @@ calkit run paper-1.diffs
 
 ### Comparing on demand
 
-Diffs in the pipeline are between commits, for archiving what reviewers
-saw.
+Diffs created by the pipeline are for memorializing
+committed versions.
 To see uncommitted changes, `calkit latex diff` runs a comparison on demand,
-and with no `--to` the newer side is the working tree:
+and with no `--to` option specified, the comparison is the working copy:
 
 ```sh
 calkit latex diff pubs/paper-1/main.tex --from main --env tex
@@ -233,12 +233,13 @@ calkit latex diff pubs/paper-1/main.tex --from main --env tex
 
 Those diffs can't be reproduced from two revisions, so they're not tracked,
 ending up in the project's `.calkit/local` directory.
-With no `--from` it compares against the merge base with the default branch.
+With no `--from` it compares against the merge base with the default
+branch--typically `main`.
 DVC-tracked files the document names directly are fetched for the older
 side, but a pipeline output without a `.dvc` file isn't found that way, so
 name any of those with `--input`, e.g., `--input pubs/paper-1/figs/`.
 
-To see what `latexdiff` was given and what it produced, e.g., when the
+To see the .tex files sent into `latexdiff`, e.g., when the
 marked-up document fails to build, pass `--keep-tex`,
 or set `keep_diff_tex: true` on the stage.
 The old, new, and marked-up `.tex` files are kept beside the diff PDF,

@@ -47,6 +47,7 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
+import { latexStageDiffArgs, latexWorkingDiffPath } from "./latex/core";
 import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
@@ -91,6 +92,7 @@ const COMMAND_PREVIEW_PLOTLY_TO_SIDE =
 const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
 const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
+const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -518,6 +520,157 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         await openPdfInLatexWorkshop(context, pdfUri);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DIFF_LATEX,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const texFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        // The newer side is the working tree, so unsaved edits belong in it
+        await vscode.workspace.textDocuments
+          .find((d) => d.uri.fsPath === fileUri.fsPath && d.isDirty)
+          ?.save();
+        // Offer the default branch, then branches and tags, then commits
+        // that touched the document, and accept any typed revision
+        const defaultItem: vscode.QuickPickItem = {
+          label: "$(git-merge) Default branch",
+          description: "merge base with this branch",
+        };
+        const items: vscode.QuickPickItem[] = [defaultItem];
+        try {
+          const { stdout } = await execFileAsync(
+            "git",
+            [
+              "for-each-ref",
+              "--sort=-committerdate",
+              "--count=30",
+              "--format=%(refname:short)|%(objecttype)|%(subject)",
+              "refs/heads",
+              "refs/tags",
+              "refs/remotes",
+            ],
+            { cwd: workspaceRoot },
+          );
+          for (const line of stdout.split("\n").filter(Boolean)) {
+            const [ref, type, ...subject] = line.split("|");
+            if (ref.endsWith("/HEAD")) {
+              continue;
+            }
+            items.push({
+              label: `$(${type === "tag" ? "tag" : "git-branch"}) ${ref}`,
+              description: subject.join("|"),
+            });
+          }
+        } catch {
+          // Not a Git repo; the CLI will say so
+        }
+        for (const commit of await getGitHistory(workspaceRoot, texFile)) {
+          items.push({
+            label: `$(git-commit) ${commit.shortHash}`,
+            description: commit.subject,
+            detail: `${commit.author}, ${commit.date}`,
+          });
+        }
+        const picker = vscode.window.createQuickPick();
+        picker.title = `Diff ${path.basename(texFile)} against...`;
+        picker.placeholder = "Pick or type a Git revision";
+        picker.items = items;
+        picker.onDidChangeValue((value) => {
+          const typed = value.trim();
+          picker.items =
+            typed && !items.some((i) => i.label.endsWith(` ${typed}`))
+              ? [{ label: typed, description: "revision" }, ...items]
+              : items;
+        });
+        const picked = await new Promise<vscode.QuickPickItem | undefined>(
+          (resolve) => {
+            picker.onDidAccept(() => resolve(picker.selectedItems[0]));
+            picker.onDidHide(() => resolve(undefined));
+            picker.show();
+          },
+        );
+        picker.dispose();
+        if (!picked) {
+          return;
+        }
+        const fromRef =
+          picked === defaultItem
+            ? undefined
+            : picked.label.replace(/^\$\([^)]*\)\s*/, "");
+        const outPath = latexWorkingDiffPath(texFile, fromRef);
+        const args = [
+          "latex",
+          "diff",
+          texFile,
+          ...(fromRef ? ["--from", fromRef] : []),
+          ...latexStageDiffArgs(currentCalkitConfig, texFile),
+          "-o",
+          outPath,
+        ];
+        log(`Running: calkit ${args.join(" ")}`);
+        const ok = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Diffing ${path.basename(texFile)} against ${
+              fromRef ?? "the default branch"
+            }...`,
+            cancellable: true,
+          },
+          async (_progress, token) => {
+            const abort = new AbortController();
+            token.onCancellationRequested(() => abort.abort());
+            try {
+              const { stdout, stderr } = await execFileAsync("calkit", args, {
+                cwd: workspaceRoot,
+                maxBuffer: 16 * 1024 * 1024,
+                signal: abort.signal,
+              });
+              log([stdout, stderr].filter(Boolean).join("\n").trim());
+              return true;
+            } catch (error: unknown) {
+              if (abort.signal.aborted) {
+                return false;
+              }
+              const err = error as {
+                stdout?: string;
+                stderr?: string;
+                message?: string;
+              };
+              log([err.stdout, err.stderr].filter(Boolean).join("\n").trim());
+              const errMsg = (err.stderr || err.message || String(error))
+                .trim()
+                .split("\n")
+                .pop();
+              void vscode.window
+                .showErrorMessage(`LaTeX diff failed: ${errMsg}`, "View Output")
+                .then((choice) => {
+                  if (choice === "View Output") {
+                    outputChannel.show(true);
+                  }
+                });
+              return false;
+            }
+          },
+        );
+        if (!ok) {
+          return;
+        }
+        const pdfUri = vscode.Uri.file(path.join(workspaceRoot, outPath));
+        if (isLatexWorkshopInstalled()) {
+          await openPdfInLatexWorkshop(context, pdfUri);
+        } else {
+          await vscode.env.openExternal(pdfUri);
+        }
       },
     ),
   );

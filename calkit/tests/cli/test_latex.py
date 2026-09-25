@@ -390,7 +390,8 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         f.write("\\documentclass{article}\n")
         f.write("\\newcommand{\\wc}[1]{\\verbatiminput{#1.wcsum}}\n")
         f.write("\\begin{document}\nGreen\u2019s function\n")
-        f.write("\\includegraphics{figs/plot}\n\\end{document}\n")
+        f.write("\\includegraphics{figs/plot}\n")
+        f.write("\\singlecol{\\input{setup}}\n\\end{document}\n")
     with open("paper/.latexmkrc", "w") as f:
         f.write("$aux_dir = 'aux';\n")
     with open("paper/figs/plot.png", "w") as f:
@@ -451,7 +452,11 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     output = get_diff_path("paper/main.tex", "v1", "HEAD")
     with open(output) as f:
         assert f.read() == "old\nnew\n"
-    with open("paper/main-diff.tex", encoding="utf-8") as f:
+    # --keep-tex keeps what latexdiff saw beside the diff PDF, so a
+    # --flatten or macro expansion failure can be inspected
+    kept_stem = output.removesuffix(".pdf")
+    assert not os.path.exists("paper/main-diff.tex")
+    with open(f"{kept_stem}-diff.tex", encoding="utf-8") as f:
         marked_up = f.read()
     # A verbatim input named by a macro parameter is broken onto its own
     # line in each checkout rather than by latexdiff's --filter-script,
@@ -459,15 +464,16 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert "\\verbatiminput%\n{#1.wcsum}" in marked_up
     assert "Green\u2019s function" in marked_up
     with open(stubs / "latexdiff-args.txt") as f:
-        assert "--filter-script" not in f.read()
+        latexdiff_args = f.read()
+    assert "--filter-script" not in latexdiff_args
+    # A macro wrapping an input is marked up as text, not one token
+    assert "--append-textcmd=singlecol" in latexdiff_args
     assert "\\includegraphics{../../base/paper/figs/plot.png}" in marked_up
     assert "\\includegraphics{figs/plot}" in marked_up
     assert not os.path.exists("paper/figs")
-    # --keep-tex keeps what latexdiff saw alongside the marked-up document,
-    # so a --flatten or macro expansion failure can be inspected
-    with open("paper/main-old.tex", encoding="utf-8") as f:
+    with open(f"{kept_stem}-old.tex", encoding="utf-8") as f:
         old_tex = f.read()
-    with open("paper/main-new.tex", encoding="utf-8") as f:
+    with open(f"{kept_stem}-new.tex", encoding="utf-8") as f:
         new_tex = f.read()
     assert "\\verbatiminput%\n{#1.wcsum}" in old_tex
     assert "\\verbatiminput%\n{#1.wcsum}" in new_tex

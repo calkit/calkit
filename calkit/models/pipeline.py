@@ -994,6 +994,11 @@ class LatexStage(Stage):
     diff_pdf_storage: Literal["git", "dvc"] | None = Field(
         default="dvc", description="Where to store the resulting diff PDFs."
     )
+    keep_diff_tex: bool = Field(
+        default=False,
+        description="Keep the old, new, and marked-up .tex files beside "
+        "each diff PDF for inspection.",
+    )
     verbose: bool = Field(
         default=False, description="Show full latexmk output."
     )
@@ -1081,6 +1086,8 @@ class LatexStage(Stage):
                 cmd += f" --latexmk-arg {shlex.quote(arg)}"
             for arg in self.latexdiff_args:
                 cmd += f" --latexdiff-arg {shlex.quote(arg)}"
+            if self.keep_diff_tex:
+                cmd += " --keep-tex"
             # Each revision gets its own copies of any of these that are
             # tracked with DVC, since a checkout only has their pointers
             for input_path in inputs:

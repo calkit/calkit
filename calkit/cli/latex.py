@@ -345,6 +345,9 @@ _VERBATIM_PARAM_RE = re.compile(
     r"(\\(?:verbatiminput\*?|lstinputlisting))"
     r"(?=\s*(?:\[[^\]\n]*\])?\s*\{[^}\n]*#[0-9])"
 )
+_INPUT_WRAPPER_RE = re.compile(
+    r"\\([A-Za-z@]+)\*?\s*(?:\[[^\]]*\]\s*)*\{\s*\\(?:input|include)\s*\{"
+)
 get_diff_path = calkit.latex.get_diff_path
 _default_base_ref = calkit.latex.default_base_ref
 
@@ -476,8 +479,9 @@ def diff(
         typer.Option(
             "--keep-tex",
             help=(
-                "Keep the old, new, and diff .tex files beside the "
-                "document for inspection, e.g., paper/main-old.tex."
+                "Keep the old, new, and diff .tex files beside the diff "
+                "PDF for inspection, e.g., "
+                ".calkit/latex-diffs/v1/paper/main-old.tex."
             ),
         ),
     ] = False,
@@ -853,10 +857,6 @@ def _build_diff(
     or the working tree, beside which the marked-up document is built
     so its relative inputs resolve.
     """
-
-    def _same_path(a: str, b: str) -> bool:
-        return os.path.abspath(a) == os.path.abspath(b)
-
     # Built beside the newer side, so \graphicspath, \bibliography, and
     # relative \includegraphics resolve the way they do for the real thing,
     # against that revision's own files
@@ -864,37 +864,48 @@ def _build_diff(
     build_dir = os.path.normpath(os.path.join(head_root, tex_dir))
     stem = Path(tex_file_fpath).stem
     diff_tex_fpath = os.path.join(build_dir, f"{stem}-diff.tex")
-    # Where --keep-tex leaves its copies: beside the document, since a
+    # Where --keep-tex leaves its copies: beside the diff PDF, since a
     # checkout is removed afterwards. The old and new files are what
     # latexdiff saw, after verbatim fixes and figure repointing, so a
     # --flatten or macro expansion failure can be inspected.
-    kept_diff_fpath = os.path.normpath(
-        os.path.join(tex_dir, f"{stem}-diff.tex")
-    )
-    kept_old_fpath = os.path.normpath(os.path.join(tex_dir, f"{stem}-old.tex"))
-    kept_new_fpath = os.path.normpath(os.path.join(tex_dir, f"{stem}-new.tex"))
+    kept_stem = os.path.splitext(output)[0]
+    kept_diff_fpath = f"{kept_stem}-diff.tex"
+    kept_old_fpath = f"{kept_stem}-old.tex"
+    kept_new_fpath = f"{kept_stem}-new.tex"
+    marked_up: bytes | None = None
     aux_dir = os.path.join(build_dir, calkit.latex.DIFF_AUX_DIRNAME)
     try:
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
         latexdiff_cmd = ["latexdiff", "--flatten", "--encoding=utf8"]
-        # A checkout's verbatim inputs named by macro parameters are already
-        # broken, so this only finds the working tree's, which can't be
-        # edited. A filter breaks those instead, though latexdiff's
-        # --filter-script mangles anything outside Latin-1.
         sources = [base_tex_fpath, head_tex_fpath] + [
             path
             for side in (base_tex_fpath, head_tex_fpath)
             for path in calkit.latex.detect_inputs(side)
             if Path(path).suffix in calkit.latex._SOURCE_EXTS
         ]
-        if any(
-            os.path.isfile(path)
-            and _VERBATIM_PARAM_RE.search(
-                Path(path).read_text(encoding="utf-8", errors="replace")
-            )
+        texts = [
+            Path(path).read_text(encoding="utf-8", errors="replace")
             for path in sources
-        ):
+            if os.path.isfile(path)
+        ]
+        # A macro wrapping an \input or \include, e.g., one making an
+        # appendix single column, gets the whole flattened file as its
+        # argument, which latexdiff would otherwise mark up as one token
+        wrappers = sorted(
+            {
+                name
+                for text in texts
+                for name in _INPUT_WRAPPER_RE.findall(text)
+            }
+        )
+        if wrappers:
+            latexdiff_cmd.append("--append-textcmd=" + ";".join(wrappers))
+        # A checkout's verbatim inputs named by macro parameters are already
+        # broken, so this only finds the working tree's, which can't be
+        # edited. A filter breaks those instead, though latexdiff's
+        # --filter-script mangles anything outside Latin-1.
+        if any(_VERBATIM_PARAM_RE.search(text) for text in texts):
             filter_path = Path(DIFF_TMP_DIR, "verbatim-param-filter.pl")
             os.makedirs(filter_path.parent, exist_ok=True)
             # latexdiff appends a newline to what it sends, so drop it
@@ -926,7 +937,9 @@ def _build_diff(
         )
         typer.echo("Marking up the document with latexdiff")
         try:
-            marked_up = subprocess.check_output(cmd)
+            # No stdin, so an environment's container isn't given a TTY,
+            # which would merge latexdiff's warnings into the document
+            marked_up = subprocess.check_output(cmd, stdin=subprocess.DEVNULL)
         except FileNotFoundError:
             raise_error(
                 "latexdiff was not found; it ships with TeX Live, so a "
@@ -1034,33 +1047,25 @@ def _build_diff(
         Path(state_path).write_text(digest)
         typer.echo(f"Wrote {output}")
     finally:
-        kept: list[str] = []
         if keep_tex:
+            os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+            if marked_up is not None:
+                Path(kept_diff_fpath).write_bytes(marked_up)
             for src, kept_fpath in (
                 (base_tex_fpath, kept_old_fpath),
                 (head_tex_fpath, kept_new_fpath),
             ):
-                # The working tree's own file is already beside the document,
-                # so only the checked-out sides need copying there
-                if os.path.isfile(src) and not _same_path(src, kept_fpath):
-                    os.makedirs(
-                        os.path.dirname(kept_fpath) or ".", exist_ok=True
-                    )
+                if os.path.isfile(src):
                     shutil.copy(src, kept_fpath)
-                    kept.append(kept_fpath)
+            for kept_fpath in (
+                kept_old_fpath,
+                kept_new_fpath,
+                kept_diff_fpath,
+            ):
+                if os.path.isfile(kept_fpath):
+                    typer.echo(f"Kept {kept_fpath} for inspection")
         if os.path.isfile(diff_tex_fpath):
-            in_place = _same_path(diff_tex_fpath, kept_diff_fpath)
-            if keep_tex and not in_place:
-                os.makedirs(
-                    os.path.dirname(kept_diff_fpath) or ".", exist_ok=True
-                )
-                shutil.copy(diff_tex_fpath, kept_diff_fpath)
-            if keep_tex:
-                kept.append(kept_diff_fpath)
-            if not keep_tex or not in_place:
-                os.remove(diff_tex_fpath)
-        for kept_fpath in kept:
-            typer.echo(f"Kept {kept_fpath} for inspection")
+            os.remove(diff_tex_fpath)
 
 
 @latex_app.command(name="to-docx")

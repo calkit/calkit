@@ -1407,8 +1407,9 @@ def _ensure_latex_aux_gitignore(
     can be wiped by a clean build (``latexmk -C``). The globs are unanchored,
     so aux files are caught wherever latexmk writes them relative to the
     source -- next to it, or in an ``aux``/output subdirectory via
-    ``$aux_dir``/``$out_dir``/``output_dir``. ``*.pdf`` is never ignored so the
-    compiled output stays tracked.
+    ``$aux_dir``/``$out_dir``/``output_dir``. A stage's own ``aux_dir`` is
+    also ignored whole. ``*.pdf`` is never ignored so the compiled output
+    stays tracked.
 
     Returns True if ``.gitignore`` was modified.
     """
@@ -1434,6 +1435,20 @@ def _ensure_latex_aux_gitignore(
     base = os.path.join(wdir or ".", stage.wdir) if stage.wdir else wdir or "."
     source_dir = os.path.dirname(stage.target_path)
     gitignore_path = os.path.join(base, source_dir, ".gitignore")
+    # An aux dir is ignored whole, since packages like glossaries write
+    # files with extensions no list could anticipate. One outside the
+    # source directory can't be named from its .gitignore.
+    if stage.aux_dir is not None:
+        rel = Path(
+            os.path.relpath(stage.aux_dir, source_dir or ".")
+        ).as_posix()
+        if rel != "." and not rel.startswith("../"):
+            aux_globs.append(f"/{rel}/*")
+            same_dir = stage.output_dir is not None and os.path.normpath(
+                stage.output_dir
+            ) == os.path.normpath(stage.aux_dir)
+            if same_dir:
+                aux_globs.append(f"!/{rel}/*.pdf")
     return _write_managed_gitignore_block(
         gitignore_path, marker="calkit latex aux files", lines=aux_globs
     )

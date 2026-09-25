@@ -2647,6 +2647,25 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     # The block is not duplicated and the unrelated entry survives
     assert contents.count("# >>> calkit latex aux files") == 1
     assert "figs/*.png" in contents
+    # An aux dir is ignored whole, since packages write files with any
+    # extension, but not one outside the source directory
+    stage.output_dir = None
+    stage.aux_dir = "paper/aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        contents = f.read()
+    assert "/aux/*\n" in contents
+    assert "!/aux/*.pdf" not in contents
+    # Unless the PDF goes there too
+    stage.output_dir = "paper/aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "!/aux/*.pdf" in f.read()
+    stage.output_dir = None
+    stage.aux_dir = "build/aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "aux/*" not in f.read()
     # When the stage has a wdir, paths are relative to it, so the .gitignore
     # lands under <wdir>/<source dir>, not the project root
     os.makedirs("sub/doc")

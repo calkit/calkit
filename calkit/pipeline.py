@@ -2,6 +2,7 @@
 
 import itertools
 import os
+import posixpath
 import re
 import warnings
 from collections.abc import Callable
@@ -1413,6 +1414,10 @@ def _ensure_latex_aux_gitignore(
 
     Returns True if ``.gitignore`` was modified.
     """
+
+    def norm(path: str) -> str:
+        return posixpath.normpath(path.replace("\\", "/"))
+
     aux_globs = [
         "*.aux",
         "*.bbl",
@@ -1437,17 +1442,22 @@ def _ensure_latex_aux_gitignore(
     gitignore_path = os.path.join(base, source_dir, ".gitignore")
     # An aux dir is ignored whole, since packages like glossaries write
     # files with extensions no list could anticipate. One outside the
-    # source directory can't be named from its .gitignore.
+    # source directory can't be named from its .gitignore. Pure path
+    # arithmetic, since os.path.relpath resolves 'aux' to a device on
+    # Windows.
     if stage.aux_dir is not None:
-        rel = Path(
-            os.path.relpath(stage.aux_dir, source_dir or ".")
-        ).as_posix()
-        if rel != "." and not rel.startswith("../"):
+        aux = norm(stage.aux_dir)
+        src = norm(source_dir or ".")
+        if src == ".":
+            inside = aux != "." and not aux.startswith(("../", "/"))
+            rel = aux
+        else:
+            inside = aux.startswith(src + "/")
+            rel = aux[len(src) + 1 :]
+        if inside:
             aux_globs.append(f"/{rel}/*")
-            same_dir = stage.output_dir is not None and os.path.normpath(
-                stage.output_dir
-            ) == os.path.normpath(stage.aux_dir)
-            if same_dir:
+            # Unless the PDF goes there too
+            if stage.output_dir is not None and norm(stage.output_dir) == aux:
                 aux_globs.append(f"!/{rel}/*.pdf")
     return _write_managed_gitignore_block(
         gitignore_path, marker="calkit latex aux files", lines=aux_globs

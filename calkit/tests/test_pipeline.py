@@ -2666,6 +2666,14 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert _ensure_latex_aux_gitignore(stage)
     with open(gitignore_path) as f:
         assert "aux/*" not in f.read()
+    # Nor the source directory itself
+    stage.aux_dir = "paper"
+    assert _ensure_latex_aux_gitignore(stage) is False
+    # Windows separators name the same directory
+    stage.aux_dir = "paper\\aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "/aux/*\n" in f.read()
     # When the stage has a wdir, paths are relative to it, so the .gitignore
     # lands under <wdir>/<source dir>, not the project root
     os.makedirs("sub/doc")

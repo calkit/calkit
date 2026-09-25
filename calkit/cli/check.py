@@ -2078,6 +2078,11 @@ def check_questions(
     Evidence pinned with a git_ref is checked at that ref rather than in
     the working tree. Exits with an error if any answered question is
     missing evidence, broken, or out of date with the pipeline.
+
+    Whether the answer follows from the evidence is not checked here and
+    cannot be: that is about the sentence. Evidence that changed since the
+    answer was written is a prompt to read it again, not a finding that it
+    is wrong.
     """
     from calkit.questions import check_questions as _check_questions
     from calkit.questions import format_status

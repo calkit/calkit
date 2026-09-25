@@ -347,19 +347,32 @@ function ProjectView() {
                             label:
                               "Answered, but some of its evidence can't be found -- it may never have been pushed, or it cites a Git ref that doesn't exist.",
                           }
-                        : question.evidence.some(isEvidenceStale)
+                        : // What `calkit check questions` finds broken at
+                          // this ref: a key that doesn't resolve, or a
+                          // placeholder that names no evidence
+                          question.status === "error"
                           ? {
                               icon: FaCheck,
-                              color: "orange.300",
-                              label:
-                                "Answered, but some of its evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.",
+                              color: "red.400",
+                              label: `Answered, but a reference in it is broken${
+                                question.status_message
+                                  ? `: ${question.status_message}`
+                                  : ""
+                              }`,
                             }
-                          : {
-                              icon: FaCheck,
-                              color: "green.400",
-                              label:
-                                "Answered, and every piece of its evidence is up to date",
-                            }
+                          : question.evidence.some(isEvidenceStale)
+                            ? {
+                                icon: FaCheck,
+                                color: "orange.300",
+                                label:
+                                  "Answered, but some of its evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.",
+                              }
+                            : {
+                                icon: FaCheck,
+                                color: "green.400",
+                                label:
+                                  "Answered, and every piece of its evidence is up to date",
+                              }
                   return (
                     // The whole row opens the question, mark included, since
                     // the answer and its evidence are the point of listing it

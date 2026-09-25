@@ -51,9 +51,11 @@ from pydantic import (
 from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
+import app.components
 import app.imports
 import app.index
 import app.projects
+import app.questions
 import app.tasks
 import calkit
 import calkit.core
@@ -120,6 +122,8 @@ from app.git import (
 )
 from app.models import (
     Account,
+    ArtifactUsage,
+    ArtifactUsages,
     ContentsItem,
     Dataset,
     DatasetForImport,
@@ -212,6 +216,7 @@ from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
 from calkit.models.pipeline import Stage as CkStage
 from calkit.notebooks import get_executed_notebook_path
+from calkit.questions import QuestionsStatus
 from calkit.reproducibility import ReproCheck, check_reproducibility
 
 logging.basicConfig(level=logging.INFO)
@@ -2512,6 +2517,7 @@ def _build_question_evidence(
     for ev in evidence_ck:
         if not isinstance(ev, dict) or ev.get("kind") not in (
             "figure",
+            "value",
             "result",
             "value",
             "table",
@@ -2597,6 +2603,7 @@ def _build_questions_public(
     session: Session,
     ref: str | None,
     ck_info: dict,
+    status: QuestionsStatus | None = None,
 ) -> list[QuestionPublic]:
     """Merge synced DB questions (for id/number) with the richer calkit.yaml
     question objects, resolving any figure/result evidence.
@@ -2755,6 +2762,9 @@ def _build_questions_public(
     # ref declares. Zipping the two would silently drop the questions past
     # wherever the shorter list ended.
     db_by_number = {q.number: q for q in project.questions}
+    # The check's own 1-based index is the question's position in
+    # calkit.yaml, which is the number the DB rows carry
+    by_index = {q.index: q for q in (status.questions if status else [])}
     result_value_cache: dict[tuple[str | None, str], dict | None] = {}
     questions_public = []
     for number, q_ck in enumerate(questions_ck, start=1):
@@ -2784,6 +2794,7 @@ def _build_questions_public(
         for item in evidence:
             item.explanation = _render_template(item.explanation, values)
         q_db = db_by_number.get(number)
+        check = by_index.get(number)
         questions_public.append(
             QuestionPublic(
                 id=(
@@ -2797,6 +2808,8 @@ def _build_questions_public(
                 hypothesis=hypothesis,
                 answer=answer,
                 evidence=evidence,
+                status=check.status if check else None,
+                status_message=check.message if check else None,
             )
         )
     return questions_public
@@ -2855,6 +2868,12 @@ def get_project_questions(
         session=session,
         ref=ref,
         ck_info=ck_info,
+        status=app.questions.questions_status(
+            ck_info=ck_info,
+            tree=app.projects.get_repo_tree_for_ref(repo, ref),
+            repo=repo,
+            ref=ref or repo.head.commit.hexsha,
+        ),
     )
 
 
@@ -2949,6 +2968,10 @@ def _apply_question_update(
     evidence = []
     for ev in req.evidence:
         entry: dict = {"kind": ev.kind, "path": ev.path}
+        # A value is one number inside a results file, so its key is the
+        # whole point of the entry; without one there is nothing to read
+        if ev.kind == "value" and not ev.key:
+            raise HTTPException(422, "Value evidence needs a key")
         if ev.kind == "result" and ev.values:
             entry["values"] = dict(ev.values)
         elif ev.kind in ("result", "value") and ev.key:
@@ -5767,6 +5790,11 @@ LATEX_BUILD_EXTS = {
     ".toc",
     ".nav",
     ".snm",
+    # Calkit's own: the build log a provenance run appends to, and the
+    # record it turns into. Neither is a source of the publication, and
+    # both would otherwise sync into Overleaf with the rest of the folder.
+    ".ckprov",
+    ".provenance.json",
 }
 # Files that could be a copy of one of the project's figures
 PUBLICATION_FIGURE_EXTS = {
@@ -5795,7 +5823,11 @@ def get_project_publication_components(
     path: str,
     ref: str | None = None,
 ) -> PublicationComponents:
-    """List the files a publication is made of, each with its provenance.
+    """List what a publication is made of, each with its provenance.
+
+    Two kinds of component, in one list. A value a stage computed is as
+    much a part of the publication as the file it lands in, so both are
+    here and both name the stage to open.
 
     A component is any file in the publication's folder, i.e., the
     directory of ``path``, at ``ref``, whether tracked by Git or DVC, other
@@ -5804,7 +5836,7 @@ def get_project_publication_components(
     outside that folder, with ``from_stage_outputs`` inputs expanded and
     directories walked (``via`` is ``input``). Each is one of:
 
-    - ``produced``: an output of a pipeline stage, whether declared in its
+    - ``pipeline``: an output of a pipeline stage, whether declared in its
       ``outputs`` or as the destination of a map-paths mapping (a file, or
       anything under a directory destination). ``stage`` names it, and
       ``stage_kind`` says whether that's a copy (``map-paths``) or
@@ -5814,12 +5846,20 @@ def get_project_publication_components(
     - ``imported``: declared likewise with ``imported_from``.
     - ``authored``: a LaTeX or text source, edited in Overleaf when the
       folder is synced with one (``source``), otherwise in Git.
-    - ``unknown``: anything else. A figure-like file at or under 20 MB is
+    - ``undeclared``: anything else. A figure-like file at or under 20 MB is
       compared byte-for-byte against the project's declared figures, and
       ``matching_figure`` names one with identical content, which is what
       a copy made without a map-paths stage looks like.
 
-    ``n_unknown`` counts the ``unknown`` items.
+    The second kind is the project content the document typesets: every
+    value, figure and generated block it took from the project rather than
+    copied, with the pages it lands on and whether it is still current.
+    These come from the document's provenance record, so ``built`` is
+    false and none are listed when the document has never been built with
+    ``provenance: true``, which is not a problem to report.
+
+    ``n_undeclared`` counts the components nothing accounts for, and
+    ``n_stale`` those known to be out of date or missing.
     """
 
     def walk(tree: RepoTree, dirname: str, found: list[str]) -> None:
@@ -5994,8 +6034,9 @@ def get_project_publication_components(
         if stage is not None:
             items.append(
                 PublicationComponent(
+                    kind="file",
                     path=p,
-                    kind="produced",
+                    provenance="pipeline",
                     via=via,
                     stage=stage,
                     stage_kind=stage_kinds.get(stage),
@@ -6006,7 +6047,11 @@ def get_project_publication_components(
         if p in declared:
             items.append(
                 PublicationComponent(
-                    path=p, kind=declared[p], via=via, size=size
+                    kind="file",
+                    path=p,
+                    provenance=declared[p],
+                    via=via,
+                    size=size,
                 )
             )
             continue
@@ -6014,8 +6059,9 @@ def get_project_publication_components(
         if ext in PUBLICATION_SOURCE_EXTS:
             items.append(
                 PublicationComponent(
+                    kind="file",
                     path=p,
-                    kind="authored",
+                    provenance="authored",
                     via=via,
                     source=authored_source,
                     size=size,
@@ -6039,17 +6085,145 @@ def get_project_publication_components(
                     break
         items.append(
             PublicationComponent(
+                kind="file",
                 path=p,
-                kind="unknown",
+                provenance="undeclared",
                 via=via,
                 matching_figure=matching_figure,
                 size=size,
             )
         )
+    # The other half of what a publication is made of: the values, figures
+    # and blocks the document typesets rather than holds as files. A value
+    # a stage computed is as much a component as the file it lands in.
+    document = app.components.document_in(pub_path, ck_info)
+    stale_stage_names: set[str] | None = None
+    try:
+        dvc_yaml: dict[str, Any] = {}
+        if tree.is_file("dvc.yaml"):
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
+        dvc_lock_full: dict[str, Any] = {}
+        if tree.is_file("dvc.lock"):
+            dvc_lock_full = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+        stale_stage_names = app.components.stale_stage_base_names(
+            compute_stage_statuses(
+                dvc_yaml=dvc_yaml,
+                dvc_lock=dvc_lock_full,
+                tree=tree,
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                fs=get_object_fs(),
+                cache_token=resolve_commit_sha(repo, ref),
+            )
+        )
+    except Exception as e:
+        logger.warning(
+            f"Failed to compute pipeline status for {document}: {e}"
+        )
+
+    def read_file(file_path: str, max_bytes: int) -> bytes:
+        return app.projects.read_project_file(
+            project=project,
+            tree=tree,
+            path=file_path,
+            max_bytes=max_bytes,
+            session=session,
+            current_user=current_user,
+        )
+
+    content, built = app.components.components_for_document(
+        document=document,
+        tree=tree,
+        ck_info=ck_info,
+        dvc_outs=dvc_outs,
+        stale_stage_names=stale_stage_names,
+        read_file=read_file,
+    )
+    stages_by_name = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for component in content:
+        dumped = component.model_dump(mode="json")
+        stage_cfg = stages_by_name.get(dumped.get("stage"))
+        items.append(
+            PublicationComponent(
+                kind=dumped["kind"],
+                path=dumped["path"],
+                provenance=dumped["provenance"],
+                stage=dumped.get("stage"),
+                stage_kind=(
+                    stage_cfg.get("kind")
+                    if isinstance(stage_cfg, dict)
+                    else None
+                ),
+                stage_inputs=dumped.get("stage_inputs") or [],
+                script=dumped.get("script"),
+                key=dumped.get("key"),
+                pages=dumped.get("pages") or [],
+                build_value=dumped.get("build_value"),
+                current_value=dumped.get("current_value"),
+                build_hash=dumped.get("build_hash"),
+                current_hash=dumped.get("current_hash"),
+                status=dumped.get("status", "unknown"),
+                stale_reasons=dumped.get("stale_reasons") or [],
+            )
+        )
     return PublicationComponents(
         folder=folder,
+        document=document,
+        built=built,
         items=items,
-        n_unknown=sum(1 for item in items if item.kind == "unknown"),
+        n_undeclared=sum(
+            1 for item in items if item.provenance == "undeclared"
+        ),
+        n_stale=sum(
+            1 for item in items if item.status in ("stale", "missing")
+        ),
+    )
+
+
+@router.get("/projects/{owner_name}/{project_name}/artifacts/usages")
+def get_project_artifact_usages(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    path: str,
+    ref: str | None = None,
+) -> ArtifactUsages:
+    """Which of the project's documents show this artifact, and where.
+
+    The reverse of ``publications/components``: given a figure or
+    a results file, the papers that typeset it and the pages it lands on,
+    so a change to a result shows what it touches. Read from the documents'
+    provenance records, so a document that has never been built with
+    provenance on contributes nothing.
+    """
+    artifact_path = _normalize_artifact_file_path(path)
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    tree = get_repo_tree_for_ref(repo, ref)
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=ref, read_only=True
+    )
+    return ArtifactUsages(
+        path=artifact_path,
+        items=[
+            ArtifactUsage.model_validate(usage)
+            for usage in app.components.usages_of(
+                artifact_path=artifact_path, tree=tree, ck_info=ck_info
+            )
+        ],
     )
 
 

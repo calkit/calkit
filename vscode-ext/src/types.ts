@@ -1,6 +1,8 @@
 import type { CalkitEnvironment } from "./environments";
 
 export interface PipelineStage {
+  /** map-paths: the copies the stage makes. */
+  paths?: { kind?: string; src?: string; dest?: string }[];
   kind?: string;
   notebook_path?: string;
   script_path?: string;
@@ -36,6 +38,7 @@ export interface FigureEntry {
   path: string;
   stage?: string;
   imported_from?: unknown;
+  created_by?: unknown;
   [key: string]: unknown;
 }
 
@@ -63,6 +66,8 @@ export interface QuestionEvidence {
   kind?: string;
   path?: string;
   key?: string;
+  /** What the answer's "{name}" placeholders call this value. */
+  name?: string;
   explanation?: string;
   [key: string]: unknown;
 }

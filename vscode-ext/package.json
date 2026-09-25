@@ -107,7 +107,7 @@
       },
       {
         "command": "calkit-vscode.openStageFile",
-        "title": "Open File",
+        "title": "Go to Stage Definition",
         "category": "Calkit",
         "icon": "$(go-to-file)"
       },
@@ -153,6 +153,11 @@
         "icon": "$(play)"
       },
       {
+        "command": "calkit-vscode.runComponentStage",
+        "title": "Calkit: Run the Stage Behind This Component",
+        "icon": "$(play)"
+      },
+      {
         "command": "calkit-vscode.openStagePdf",
         "title": "Open Rendered PDF",
         "category": "Calkit",
@@ -181,6 +186,18 @@
         "title": "View Stage",
         "category": "Calkit",
         "icon": "$(layers)"
+      },
+      {
+        "command": "calkit-vscode.openPath",
+        "title": "Open Path",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.viewComponentObject",
+        "title": "View in Calkit Sidebar",
+        "category": "Calkit",
+        "icon": "$(file-media)"
       },
       {
         "command": "calkit-vscode.viewEnvironment",
@@ -346,6 +363,18 @@
         "title": "Reopen as Text",
         "category": "Calkit",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.openPdfSource",
+        "title": "Open Document Source",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.goToQuestion",
+        "title": "Go to Question Definition",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -400,6 +429,11 @@
         {
           "command": "calkit-vscode.addQuestion",
           "when": "view == calkit-sidebar && viewItem == section-questions",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.goToQuestion",
+          "when": "view == calkit-sidebar && viewItem == question",
           "group": "inline"
         },
         {
@@ -543,12 +577,17 @@
         },
         {
           "command": "calkit-vscode.runStageForFile",
-          "when": "calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "when": "(calkit.activeFileHasStage || resourceExtname == .pdf) && !calkit.isSettingKernel",
           "group": "navigation"
         },
         {
           "command": "calkit-vscode.openStagePdf",
-          "when": "resourceExtname == .qmd && calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "when": "(resourceExtname == .qmd || resourceExtname == .tex) && calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.openPdfSource",
+          "when": "resourceExtname == .pdf",
           "group": "navigation"
         }
       ],
@@ -757,6 +796,22 @@
         },
         {
           "command": "calkit-vscode.runMarkdownStage",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.runComponentStage",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.viewComponentObject",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.openPath",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.goToQuestion",
           "when": "false"
         }
       ]

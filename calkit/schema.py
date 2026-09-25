@@ -13,6 +13,7 @@ import os
 # The URL at which the schema is published, used as its ``$id`` and in the
 # modeline written into new projects' calkit.yaml files
 SCHEMA_URL = "https://docs.calkit.org/schemas/calkit.json"
+PROVENANCE_SCHEMA_URL = "https://docs.calkit.org/schemas/provenance.json"
 # Paths of the checked-in copies, relative to the repo root. The first is
 # served at SCHEMA_URL by MkDocs; the second is bundled into the VS Code
 # extension so it works offline, via its yamlValidation contribution point.
@@ -21,6 +22,31 @@ SCHEMA_REPO_PATHS = [
     "vscode-ext/schemas/calkit.json",
 ]
 MODELINE = f"# yaml-language-server: $schema={SCHEMA_URL}"
+# The provenance record a build writes beside each artifact. Published the
+# same way, so an editor validates one of those files too.
+PROVENANCE_SCHEMA_REPO_PATH = "docs/schemas/provenance.json"
+
+
+def generate_provenance() -> dict:
+    """Generate the JSON schema for a provenance record."""
+    from calkit.components import ProvenanceRecord
+
+    schema = ProvenanceRecord.model_json_schema(by_alias=True)
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": PROVENANCE_SCHEMA_URL,
+        **schema,
+        "title": "Calkit artifact provenance record",
+        "description": (
+            "What one build took from the project and put into one "
+            "artifact. See https://docs.calkit.org/provenance"
+        ),
+    }
+
+
+def generate_provenance_json() -> str:
+    """The provenance record schema as formatted JSON text."""
+    return json.dumps(generate_provenance(), indent=2, sort_keys=True) + "\n"
 
 
 def generate() -> dict:

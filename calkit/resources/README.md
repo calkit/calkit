@@ -11,6 +11,7 @@ See [`__init__.py`](__init__.py) for how to read them.
 | [`devcontainer`](devcontainer)       | `calkit update devcontainer`   |
 | [`vscode`](vscode)                   | `calkit update vscode-config`  |
 | [`github-actions`](github-actions)   | `calkit update github-actions` |
+| [`latex`](latex)                     | `calkit latex build --provenance` |
 
 Two of these are generated, so edit the source rather than the copy here,
 then run `make sync-resources` (or `make format`).

@@ -60,9 +60,11 @@ def from_json(
     """Convert a JSON file to LaTeX.
 
     This is useful for referencing calculated values in LaTeX documents.
+    Each value is wrapped in ``\\ckvalue`` with the file and pipeline stage
+    it came from, which calkit.sty can mark and log; without the package
+    the values print as plain text.
     """
     import arithmetic_eval
-    import json2latex
 
     def tokens_from_format_string(fmt: str):
         return [
@@ -79,7 +81,12 @@ def from_json(
             raise_error("Format JSON is not valid JSON")
     else:
         fmt_dict = {}
+    try:
+        ck_info = calkit.load_calkit_info()
+    except Exception:
+        ck_info = {}
     data = {}
+    source: dict[str, str] = {}
     for input_fpath in input_fpaths:
         if not os.path.isfile(input_fpath):
             raise_error(f"Input file {input_fpath} does not exist")
@@ -88,9 +95,19 @@ def from_json(
         with open(input_fpath) as f:
             try:
                 data_i = json.load(f)
-                data.update(data_i)
             except json.JSONDecodeError:
                 raise_error("Input JSON file is not valid JSON")
+        # Several files merged into one command can define the same key.
+        # Taking the last silently means a number in the paper comes from
+        # a file nobody would guess, so say so instead.
+        for k in data_i:
+            if k in source and data[k] != data_i[k]:
+                raise_error(
+                    f"Key '{k}' is defined differently in {source[k]} and "
+                    f"{input_fpath}; rename one, or drop an input"
+                )
+            source[k] = input_fpath
+        data.update(data_i)
     # Named keys are looked up wherever they are, so a nested value can
     # reach the document without exposing everything around it
     if keys:
@@ -104,12 +121,17 @@ def from_json(
                 raise_error(
                     f"Key '{key}' is not in " + ", ".join(input_fpaths)
                 )
+            # A dotted key belongs to the file its first part came from
+            source.setdefault(key, source.get(key.split(".")[0], ""))
         data = selected
     for output_fpath in output_fpaths:
         if not output_fpath.endswith(".tex"):
             raise_error("Output file must be a .tex file")
     # Format the data
-    formatted = deepcopy(data)
+    formatted: dict[str, str] = {
+        k: calkit.latex.escape_tex(calkit.latex.format_value(v))
+        for k, v in data.items()
+    }
     for tex_var_name, fmt_string in fmt_dict.items():
         fmt_string = str(fmt_string)
         data_for_formatting = deepcopy(data)
@@ -122,7 +144,37 @@ def from_json(
                 raise_error(
                     f"Error evaluating expression '{t}' for formatting"
                 )
-        formatted[tex_var_name] = fmt_string.format(**data_for_formatting)
+        try:
+            rendered = fmt_string.format(
+                **{
+                    k: calkit.latex.unwrap_singleton(v)
+                    for k, v in data_for_formatting.items()
+                }
+            )
+        except (TypeError, ValueError) as e:
+            raise_error(
+                f"Cannot format '{tex_var_name}' with '{fmt_string}': {e}"
+            )
+        formatted[tex_var_name] = calkit.latex.escape_tex(rendered)
+        # A formatted expression comes from whichever file its first
+        # token came from
+        for t in tokens:
+            for k in source:
+                if k in t:
+                    source.setdefault(tex_var_name, source[k])
+                    break
+    stages = {
+        p: calkit.latex.stage_for(p, ck_info) for p in set(source.values())
+    }
+    entries = {
+        k: calkit.latex.value_macro(
+            k,
+            v,
+            source.get(k, input_fpaths[0]),
+            stages.get(source.get(k, input_fpaths[0])),
+        )
+        for k, v in formatted.items()
+    }
     for out_path in output_fpaths:
         # If no command is provided, use the output file name without extension
         if command_name is None:
@@ -134,7 +186,8 @@ def from_json(
         if outdir:
             os.makedirs(outdir, exist_ok=True)
         with open(out_path, "w") as f:
-            json2latex.dump(cmd_name, formatted, f)
+            f.write(calkit.latex.PREAMBLE)
+            f.write(calkit.latex.keyed_command(cmd_name, entries, formatted))
 
 
 @latex_app.command(name="from-questions")
@@ -147,12 +200,24 @@ def from_questions(
         str,
         typer.Option("--command", help="Command name to use in LaTeX output."),
     ] = "questions",
+    provenance: Annotated[
+        bool,
+        typer.Option(
+            "--provenance",
+            help="Write calkit.sty's provenance-marked commands instead.",
+        ),
+    ] = False,
 ) -> None:
     """Write the project's questions and answers as a LaTeX command.
 
     Each question's text, hypothesis, answer, and notes are rendered from
     their evidence and exposed as, e.g., ``\\questions[staging.answer]``,
     keyed by the question's ``name`` or its 1-based position.
+
+    With ``--provenance``, writes ``\\ckquestion[n]``, ``\\ckanswer[n]``,
+    ``\\ckevidence[n]`` and friends instead, plus ``\\ckfindings`` for every
+    answered question, with each value marked with the results file it came
+    from, for a document built with a latex stage's ``provenance`` option.
     """
     import json2latex
 
@@ -162,6 +227,20 @@ def from_questions(
         if not out_path.endswith(".tex"):
             raise_error("Output file must be a .tex file")
     ck_info = calkit.load_calkit_info()
+    if provenance:
+        try:
+            tex = calkit.latex.questions_tex(ck_info)
+        except KeyError as e:
+            raise_error(f"Placeholder {{{e.args[0]}}} names no value evidence")
+        except (FileNotFoundError, ValueError) as e:
+            raise_error(f"Cannot render questions: {e}")
+        for out_path in output_fpaths:
+            outdir = os.path.dirname(out_path)
+            if outdir:
+                os.makedirs(outdir, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(tex)
+        return
     try:
         values = calkit.questions.latex_values(ck_info)
     except ValueError as e:
@@ -293,6 +372,17 @@ def build(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
+    provenance: Annotated[
+        bool,
+        typer.Option(
+            "--provenance",
+            help=(
+                "Install calkit.sty beside the document, generate its "
+                "artifact table, and write <document>.provenance.json "
+                "from the build's log of injected content."
+            ),
+        ),
+    ] = False,
 ):
     """Build a PDF of a LaTeX document with latexmk.
 
@@ -300,6 +390,10 @@ def build(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
+    if provenance:
+        ck_info = calkit.load_calkit_info()
+        calkit.latex.install_style(tex_file)
+        calkit.latex.write_provenance_tex(tex_file, ck_info)
     # Now formulate the command
     latexmk_cmd = ["latexmk", "-pdf", "-cd"]
     if latexmk_rc_path is not None:
@@ -335,6 +429,28 @@ def build(
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError:
         raise_error("latexmk failed")
+    if not no_synctex:
+        # A build in a container records the container's paths, which a
+        # viewer's reverse search cannot open. Worth doing whether or not
+        # provenance was asked for: jumping from the PDF to the source is
+        # the thing people already expect from a LaTeX viewer.
+        calkit.latex.localize_synctex(tex_file, os.getcwd())
+    if provenance:
+        # latexmk writes the PDF into --output-dir when one is given, so
+        # the artifact the record describes is not always beside its source
+        stem = os.path.splitext(os.path.basename(tex_file))[0]
+        artifact_path = Path(
+            os.path.join(output_dir or os.path.dirname(tex_file), stem)
+            + ".pdf"
+        ).as_posix()
+        sidecar = calkit.latex.collect_provenance(
+            tex_file, ck_info, artifact_path=artifact_path
+        )
+        n = len(sidecar["components"])
+        typer.echo(
+            f"Wrote {calkit.latex.provenance_sidecar_path(tex_file)} "
+            f"({n} component(s))"
+        )
 
 
 DIFF_TMP_DIR = calkit.latex.DIFF_TMP_DIR

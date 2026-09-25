@@ -123,6 +123,13 @@ answer: The closure cuts the error by about {improvement:.1f}x.
 from the results files, so the number always matches what the pipeline
 produced.
 Use `--raw` to see the text as written.
+The hub's project page renders them the same way, from the results file
+as it stands at the ref being browsed --- the same function does both, so
+the two cannot fill one sentence differently.
+It runs the same check there too, and marks a question whose evidence has
+moved since the answer was written.
+Read at the ref rather than at whatever the server last checked out, so a
+question reads at each commit the way it read then.
 
 Braces are Python's format syntax, so a brace meant to stay in the text
 has to be doubled, e.g., `\frac{{a}}{{b}}`.
@@ -247,6 +254,11 @@ Unlike the display in `calkit list questions`, a placeholder that can't be
 filled is an error here rather than being left in the text.
 The same output can be written without a stage with
 `calkit latex from-questions -o questions.tex`.
+
+With `provenance: true`, the stage writes calkit.sty's commands instead,
+`\ckquestion[n]`, `\ckanswer[n]`, `\ckevidence[n]` and the like, plus
+`\ckfindings` for every answered question, with every value marked with
+where it came from; see [Provenance: documents](provenance.md#documents).
 
 ## Pointing at the publication
 

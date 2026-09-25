@@ -19,6 +19,17 @@ it and, most importantly, **which figures are out of date on Overleaf**:
 - Overleaf edits that haven't come back into the project yet are counted.
 - **Sync now** runs the same bidirectional sync as `calkit overleaf sync`.
 
+Below that, **From the project** lists what the paper takes from the project
+rather than copies -- every value, figure and generated block the document
+injects -- with where each came from and whether the reader is looking at
+something the project still produces. A component is flagged when the stage
+that makes it needs a rerun, when the project has moved on since the document
+was built, or when nothing produces it and nobody has said where it came from.
+**Edit** opens the script behind it in the hub, since Overleaf can't run the
+pipeline and the change belongs in the project. This needs the paper to have
+been built with `provenance: true` on its `latex` stage; without a provenance
+record there is nothing to show and the section stays hidden.
+
 If the Overleaf project isn't linked yet, the panel can search your projects
 and either check an existing link or import the Overleaf project into one as a
 new publication.

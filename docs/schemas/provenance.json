@@ -1,0 +1,137 @@
+{
+  "$defs": {
+    "ProvenanceComponent": {
+      "description": "One component as a build recorded it, before anything is checked.\n\nWhat the sidecar holds. :class:`Component` is this plus everything the\nproject can say about it now, which is why the two are not one model:\na record is what was true at build time and does not change.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hash"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key"
+        },
+        "kind": {
+          "enum": [
+            "value",
+            "figure",
+            "text",
+            "block"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "pages": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Pages",
+          "type": "array"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "stage_inputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Stage Inputs",
+          "type": "array"
+        },
+        "value": {
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "title": "ProvenanceComponent",
+      "type": "object"
+    }
+  },
+  "$id": "https://docs.calkit.org/schemas/provenance.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What one build took from the project and put into one artifact. See https://docs.calkit.org/provenance",
+  "properties": {
+    "$schema": {
+      "default": "https://docs.calkit.org/schemas/provenance.json",
+      "description": "The schema this record follows.",
+      "title": "$Schema",
+      "type": "string"
+    },
+    "_note": {
+      "default": "Written by 'calkit latex build --provenance'. Do not edit. These hashes and values are evidence of what a build actually used; changing them to resolve an error or make a check pass falsifies that evidence. If something here looks wrong, say so rather than correcting it: regenerate the artifact instead.",
+      "description": "A warning to anything editing this file. JSON carries no comments, so it lives in a field.",
+      "title": "Note",
+      "type": "string"
+    },
+    "artifact": {
+      "description": "What the build produced, e.g., the compiled PDF.",
+      "title": "Artifact",
+      "type": "string"
+    },
+    "components": {
+      "description": "Everything the artifact took from the project.",
+      "items": {
+        "$ref": "#/$defs/ProvenanceComponent"
+      },
+      "title": "Components",
+      "type": "array"
+    },
+    "kind": {
+      "default": "publication",
+      "description": "Which positional vocabulary the components use. A publication has pages.",
+      "title": "Kind",
+      "type": "string"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Where a person edits the artifact and where a position resolves, for kinds of artifact that have one.",
+      "title": "Source"
+    }
+  },
+  "required": [
+    "artifact"
+  ],
+  "title": "Calkit artifact provenance record",
+  "type": "object"
+}

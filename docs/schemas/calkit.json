@@ -2513,6 +2513,12 @@
           "description": "Where to store the resulting PDF.",
           "title": "Pdf Storage"
         },
+        "provenance": {
+          "default": false,
+          "description": "Mark and record where injected content came from: install calkit.sty beside the document, generate its artifact table before each build, and write <document>.provenance.json afterwards listing every value, figure and text block the document took from the project, with the stage that made it.",
+          "title": "Provenance",
+          "type": "boolean"
+        },
         "scheduler": {
           "anyOf": [
             {
@@ -5871,6 +5877,12 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "provenance": {
+          "default": false,
+          "description": "Write calkit.sty's provenance-marked commands instead: \\ckquestion[n], \\ckanswer[n], \\ckevidence[n] and friends, plus \\ckfindings for every answered question, with each value marked with where it came from. 'command_name' does not apply.",
+          "title": "Provenance",
+          "type": "boolean"
         },
         "scheduler": {
           "anyOf": [

@@ -409,7 +409,9 @@ def diff(
         typer.Option(
             "--latexmk-rc",
             "-r",
-            help="Path to a latexmkrc file to build the marked-up document with.",
+            help=(
+                "Path to a latexmkrc file to build the marked-up document with."
+            ),
         ),
     ] = None,
     latexmk_args: Annotated[
@@ -473,7 +475,10 @@ def diff(
         bool,
         typer.Option(
             "--keep-tex",
-            help="Keep the old, new, and generated diff .tex files for inspection.",
+            help=(
+                "Keep the old, new, and generated diff .tex files for "
+                "inspection."
+            ),
         ),
     ] = False,
     no_check: Annotated[

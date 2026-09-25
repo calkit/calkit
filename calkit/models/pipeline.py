@@ -1023,18 +1023,14 @@ class LatexStage(Stage):
     )
 
     @property
-    def diff_pairs(self) -> list[tuple[str, str | None]]:
+    def diff_pairs(self) -> list[tuple[str, str]]:
         """The revisions to compare, oldest side first."""
         return calkit.latex.get_diff_pairs(self.diffs)
 
     @property
     def diff_paths(self) -> list[str]:
-        # A comparison against the working tree is kept where one up to
-        # HEAD would be, since it becomes that once committed
         return [
-            calkit.latex.get_diff_path(
-                self.target_path, from_ref, to_ref or "HEAD"
-            )
+            calkit.latex.get_diff_path(self.target_path, from_ref, to_ref)
             for from_ref, to_ref in self.diff_pairs
         ]
 
@@ -1073,17 +1069,14 @@ class LatexStage(Stage):
             cmd = (
                 f"calkit latex diff -e {shlex.quote(self.environment)}"
                 f" --no-check --from {shlex.quote(from_ref)}"
+                f" --to {shlex.quote(to_ref)}"
             )
-            if to_ref is not None:
-                cmd += f" --to {shlex.quote(to_ref)}"
             # Named by content rather than by commit: a merge, a rebase, or
             # a commit to anything else makes a new commit without changing
             # the document, and would otherwise rewrite this command and
             # make the stage stale
             if revision_key is not None:
-                key = revision_key(from_ref)
-                if to_ref is not None:
-                    key += f"..{revision_key(to_ref)}"
+                key = f"{revision_key(from_ref)}..{revision_key(to_ref)}"
                 cmd += f" --revision-key {shlex.quote(key)}"
             # Built the way the document itself is, so a latexmkrc that sets
             # search paths or shell escape applies to the diff too
@@ -1101,18 +1094,20 @@ class LatexStage(Stage):
                 cmd += f" --input {shlex.quote(input_path)}"
             # Named from the pair as written, so the output path is the
             # same on every branch
-            out_dir = calkit.latex.get_diff_dir(from_ref, to_ref or "HEAD")
-            cmd += f" --output-dir {shlex.quote(out_dir)}"
+            cmd += (
+                " --output-dir "
+                f"{shlex.quote(calkit.latex.get_diff_dir(from_ref, to_ref))}"
+            )
             cmd += f" {shlex.quote(self.target_path)}"
             # The keys cover what Git holds at each revision, so for two
             # fixed revisions nothing in the working tree is an input. One
-            # that can move, or the working tree itself, also reads the
-            # working tree's files, since a DVC-tracked figure's content
-            # isn't in Git and only the dependency catches a change to it.
+            # that can move also reads the working tree's files, since a
+            # DVC-tracked figure's content isn't in Git and only the
+            # dependency catches a change to it.
             moving = calkit.latex.MOVING_REFS.intersection({from_ref, to_ref})
             stage: dict = {
                 "cmd": cmd,
-                "deps": deps if moving or to_ref is None else [],
+                "deps": deps if moving else [],
                 "outs": [out],
                 "desc": (
                     f"Automatically generated from the '{self.name}' stage "

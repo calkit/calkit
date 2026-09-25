@@ -3907,7 +3907,7 @@ export type PublicationLatexDiff = {
   /**
    * To Ref
    */
-  to_ref?: string | null
+  to_ref: string
   /**
    * Path
    */

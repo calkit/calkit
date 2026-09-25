@@ -74,6 +74,7 @@ const pubSearchSchema = z.object({
   compare_open: z.boolean().optional(),
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
+  compare_view: z.enum(["side-by-side", "latex-diff"]).optional(),
   editor_open: z.boolean().optional(),
   components_open: z.boolean().optional(),
   // Which file of unknown origin is being resolved, and how
@@ -396,6 +397,7 @@ function Publications() {
     compare_open,
     base_ref,
     compare_ref,
+    compare_view,
     diff: diffPath,
   } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
@@ -414,6 +416,7 @@ function Publications() {
         compare_open: undefined,
         base_ref: undefined,
         compare_ref: undefined,
+        compare_view: undefined,
       }),
     })
   const { user } = useAuth()
@@ -751,6 +754,12 @@ function Publications() {
                   initialRef={base_ref}
                   initialRef2={compare_ref}
                   initialArtifact={selectedPub}
+                  compareView={compare_view}
+                  onCompareViewChange={(view) =>
+                    navigate({
+                      search: (prev) => ({ ...prev, compare_view: view }),
+                    })
+                  }
                   onRefsChange={(r1, r2) =>
                     navigate({
                       search: (prev) => ({

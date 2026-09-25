@@ -662,20 +662,23 @@ class RequirementAttrs(BaseModel):
     name as its key instead.
     """
 
-    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
+    kind: Literal["app", "env-var", "setup", "calkit-config", "file"] = "app"
     check_command: str | None = None
     setup_command: str | None = None
     cache_ttl: str | int | None = None
     description: str | None = None
     default: str | None = None
     version_spec: str | None = None
+    path: str | None = None
+    template: str | None = None
+    env_var: str | None = None
     notes: str | None = None
 
 
 class Requirement(BaseModel):
     """Something that must be true of a machine before the project runs.
 
-    Four kinds are supported:
+    Five kinds are supported:
 
     - ``app``: an executable that must be on ``PATH``, optionally
       satisfying a ``version_spec``.
@@ -691,6 +694,8 @@ class Requirement(BaseModel):
       re-probing slow checks.
     - ``calkit-config``: a value that must be set in the user's Calkit
       configuration.
+    - ``file``: a file that must exist and is kept out of version control,
+      e.g., a credentials or configuration file; see ``FileRequirement``.
 
     These name a thing that must be present, so each has a ``name``. The
     properties of a machine that can't be installed -- how many CPUs it
@@ -699,7 +704,7 @@ class Requirement(BaseModel):
     instead, which name a property rather than a thing.
     """
 
-    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
+    kind: Literal["app", "env-var", "setup", "calkit-config", "file"] = "app"
     name: str
     # ``setup``-kind fields; ignored for other kinds.
     check_command: str | None = None
@@ -718,6 +723,40 @@ class Requirement(BaseModel):
         "A string requirement like 'git>=2.40' is shorthand for this.",
     )
     notes: str | None = None
+
+
+class FileRequirement(Requirement):
+    """A file that must exist, typically a credential or a per-machine
+    configuration file kept out of version control.
+
+    The path is its identity, so ``name`` may be omitted. It may start with
+    ``~`` and may refer to environmental variables; a relative path is
+    relative to the project. If it's missing and a ``template`` is given,
+    the file is written from the template, with environmental variables
+    substituted (``$NAME`` or ``${NAME}``), and ignored by Git if it's
+    inside the project. An ``env_var`` names a variable whose being set
+    satisfies the requirement instead, for tools that read a credential from
+    either a file or the environment.
+    """
+
+    kind: Literal["file"] = "file"
+    # Optional here, as for a setup requirement: the path is the identity
+    name: str | None = None  # type: ignore[assignment]
+    path: str = Field(
+        description="Where the file must exist. May start with '~'; a "
+        "relative path is relative to the project."
+    )
+    template: str | None = Field(
+        default=None,
+        description="Template to write the file from when it's missing, "
+        "with environmental variables substituted, e.g., '${API_KEY}'. "
+        "Relative to the project.",
+    )
+    env_var: str | None = Field(
+        default=None,
+        description="Environmental variable that satisfies the requirement "
+        "instead of the file when it's set.",
+    )
 
 
 class SetupRequirement(Requirement):
@@ -845,6 +884,7 @@ RequirementType = (
     | SystemNumberRequirement
     | SystemValueRequirement
     | SetupRequirement
+    | FileRequirement
     | Requirement
     | dict[str, RequirementAttrs | None]
 )

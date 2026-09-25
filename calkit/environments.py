@@ -1184,7 +1184,11 @@ def check_all_in_pipeline(
                 res[env_name] = {"success": True, "cached": True}
                 continue
         try:
-            check_environment(env_name, verbose=False)
+            # Requirements wait for a stage that actually runs in the env,
+            # which 'xenv' checks as it starts: which stages will run isn't
+            # known until DVC has worked out what's stale, including what
+            # sits downstream of whatever reruns first
+            check_environment(env_name, verbose=False, requirements=False)
             res[env_name] = save_cache(
                 env_name=env_name, env=env, wdir=wdir, success=True
             )

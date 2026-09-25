@@ -1438,6 +1438,29 @@ def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
     assert any("command -v julia" in c for c in ran)
     assert any("SCRATCH" in c for c in ran)
     assert any("gh auth" in c for c in ran)
+    # A file is looked for there, with '~' left for the far shell, and its
+    # alternative variable is read from that machine's environment
+    ran.clear()
+    ws.check_requirements(
+        w,
+        [
+            {
+                "kind": "file",
+                "path": "~/.config/tool/token.txt",
+                "env_var": "TOOL_TOKEN",
+            }
+        ],
+    )
+    assert any(
+        'test -f "$HOME"/.config/tool/token.txt' in c and "TOOL_TOKEN" in c
+        for c in ran
+    )
+    failing.add("token.txt")
+    with pytest.raises(ValueError, match="file '~/.config/tool/token.txt'"):
+        ws.check_requirements(
+            w, [{"kind": "file", "path": "~/.config/tool/token.txt"}]
+        )
+    failing.clear()
     # What's missing is named, and so is the machine it's missing from
     failing.add("command -v julia")
     with pytest.raises(ValueError, match="app 'julia' was not found on host"):

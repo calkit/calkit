@@ -376,3 +376,64 @@ def test_update_readme_content():
     )
     assert calkit.update_readme_content("", "T", "D.") == "# T\n\nD.\n"
     assert calkit.update_readme_content("", "T", None) == "# T\n"
+
+
+def test_file_requirements(tmp_dir, monkeypatch):
+    subprocess.check_call(["git", "init", "-q"])
+    monkeypatch.delenv("CK_TEST_TOKEN", raising=False)
+    monkeypatch.delenv("CK_TEST_SECRET", raising=False)
+    home = os.path.abspath("home")
+    monkeypatch.setenv("HOME", home)
+    # Satisfied by the file, found under '~', with the path as its name
+    req = {"kind": "file", "path": "~/.config/tool/token.txt"}
+    assert calkit.core._normalize_requirement(req)["name"] == req["path"]
+    with pytest.raises(ValueError, match="file '~/.config/tool/token.txt'"):
+        calkit.check_requirements(requirements=[req], interactive=False)
+    os.makedirs("home/.config/tool")
+    with open("home/.config/tool/token.txt", "w") as f:
+        f.write("abc")
+    calkit.check_requirements(requirements=[req], interactive=False)
+    # Or by the env var it names as an alternative, for a tool that reads
+    # its credential from either
+    either = {
+        "kind": "file",
+        "path": "missing/token.txt",
+        "env_var": "CK_TEST_TOKEN",
+        "notes": "Put your token there, or set CK_TEST_TOKEN",
+    }
+    with pytest.raises(ValueError, match="env-var 'CK_TEST_TOKEN' is not set"):
+        calkit.check_requirements(requirements=[either], interactive=False)
+    monkeypatch.setenv("CK_TEST_TOKEN", "xyz")
+    calkit.check_requirements(requirements=[either], interactive=False)
+    # A template is filled from the environment, and a file written in
+    # the project is kept out of Git
+    with open("config.template", "w") as f:
+        f.write("secret = ${CK_TEST_SECRET}\nuser = $USER_NAME\n")
+    templated = {
+        "kind": "file",
+        "path": "conf/settings.cfg",
+        "template": "config.template",
+    }
+    monkeypatch.setenv("USER_NAME", "me")
+    # Every variable it names has to be set, not left blank
+    with pytest.raises(ValueError, match="'CK_TEST_SECRET' not set"):
+        calkit.check_requirements(requirements=[templated], interactive=False)
+    assert not os.path.exists("conf/settings.cfg")
+    monkeypatch.setenv("CK_TEST_SECRET", "s3cret")
+    calkit.check_requirements(requirements=[templated], interactive=False)
+    with open("conf/settings.cfg") as f:
+        assert f.read() == "secret = s3cret\nuser = me\n"
+    assert calkit.git.get_repo().ignored("conf/settings.cfg")
+    # Written once: a file that exists is left as it is
+    with open("conf/settings.cfg", "w") as f:
+        f.write("edited")
+    calkit.check_requirements(requirements=[templated], interactive=False)
+    with open("conf/settings.cfg") as f:
+        assert f.read() == "edited"
+    # The model accepts it with no name, and rejects it with no path
+    info = calkit.models.ProjectInfo.model_validate(
+        {"requirements": [templated, either]}
+    )
+    assert info.requirements[0].kind == "file"
+    with pytest.raises(Exception):
+        calkit.models.core.FileRequirement.model_validate({"kind": "file"})

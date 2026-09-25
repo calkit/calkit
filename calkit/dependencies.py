@@ -382,6 +382,119 @@ def resolve_env_var_deps(
     return missing
 
 
+def resolve_requirement_path(path: str, wdir: str | None = None) -> str:
+    """Where a requirement's path points: ``~`` and environmental
+    variables expanded, and a relative path taken from the project."""
+    expanded = os.path.expanduser(os.path.expandvars(path))
+    if os.path.isabs(expanded):
+        return expanded
+    return os.path.join(wdir or os.getcwd(), expanded)
+
+
+def check_file_requirement(
+    dep: dict[str, Any],
+    *,
+    interactive: bool = False,
+    wdir: str | None = None,
+) -> None:
+    """Make sure a ``file`` requirement is satisfied, or raise.
+
+    Satisfied if the file exists, or if the ``env_var`` it names as an
+    alternative is set. Otherwise a ``template`` is filled from the
+    environment and written there; failing that, on a terminal, the
+    alternative variable is asked for, as a missing ``env-var``
+    requirement would be. A file written inside the project is ignored by
+    Git, since what goes in one of these is usually a secret.
+    """
+    path = dep.get("path")
+    if not path:
+        raise ValueError(f"file requirement has no 'path': {dep}")
+    target = resolve_requirement_path(path, wdir=wdir)
+    env_var = dep.get("env_var")
+    if os.path.isfile(target):
+        return
+    if env_var and os.environ.get(env_var):
+        return
+    template = dep.get("template")
+    if template:
+        write_file_from_template(target, template, wdir=wdir)
+        return
+    if env_var and interactive:
+        print(f"Missing file '{path}' and env var '{env_var}'")
+        if prompt_and_store_env_var(env_var) is not None:
+            return
+    msg = f"file '{path}' not found"
+    if env_var:
+        msg += f", and env-var '{env_var}' is not set"
+    if dep.get("notes") or dep.get("description"):
+        msg += f": {dep.get('notes') or dep.get('description')}"
+    raise ValueError(msg)
+
+
+def write_file_from_template(
+    target: str, template: str, wdir: str | None = None
+) -> None:
+    """Write ``target`` from ``template``, filling ``$NAME`` and ``${NAME}``
+    from the environment, and keep it out of Git if it's in the project.
+
+    Every variable the template names must be set: a credentials file with
+    a blank where the secret should be would pass the existence check and
+    fail later, somewhere less obvious.
+    """
+    import string
+
+    root = wdir or os.getcwd()
+    template_path = resolve_requirement_path(template, wdir=root)
+    try:
+        with open(template_path) as f:
+            text = f.read()
+    except OSError as e:
+        raise ValueError(
+            f"Can't read template '{template}' for file '{target}': {e}"
+        ) from e
+    tpl = string.Template(text)
+    missing = sorted(
+        {
+            m.group("named") or m.group("braced")
+            for m in tpl.pattern.finditer(text)
+            if (m.group("named") or m.group("braced"))
+            and (m.group("named") or m.group("braced")) not in os.environ
+        }
+    )
+    if missing:
+        raise ValueError(
+            f"Can't write '{target}' from template '{template}': env-var(s) "
+            + ", ".join(f"'{n}'" for n in missing)
+            + " not set"
+        )
+    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+    with open(target, "w") as f:
+        f.write(tpl.substitute(os.environ))
+    rel = os.path.relpath(target, root)
+    if not rel.startswith(os.pardir) and not os.path.isabs(rel):
+        _ensure_gitignored(rel.replace(os.sep, "/"), wdir=root)
+
+
+def _ensure_gitignored(path: str, wdir: str | None = None) -> None:
+    """Append a project-relative ``path`` to the project's ``.gitignore``
+    if Git doesn't already ignore it."""
+    root = wdir or os.getcwd()
+    try:
+        import calkit.git
+
+        repo = calkit.git.get_repo(root)
+        # Absolute, since the project may be a folder inside the repo
+        if repo.ignored(os.path.join(root, path)):
+            return
+    except Exception:
+        pass
+    try:
+        with open(os.path.join(root, ".gitignore"), "a") as f:
+            f.write(f"\n{path}\n")
+    except OSError:
+        pass
+
+
 def _ensure_env_gitignored(dotenv_path: str) -> None:
     """Append ``dotenv_path`` to ``.gitignore`` if not already ignored.
 

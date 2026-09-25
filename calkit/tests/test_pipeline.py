@@ -3551,3 +3551,76 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open(".gitattributes") as f:
         assert f.read().count("/.calkit/** text eol=lf") == 1
+
+
+def test_system_env_requirements_are_checked_when_a_stage_runs(tmp_dir):
+    # A token only one stage needs shouldn't stop a pipeline whose stage
+    # is up to date, and shouldn't be warned about on every run either: a
+    # system env's requirements are checked when a stage starts in it
+    import subprocess
+
+    import calkit
+
+    subprocess.run(["calkit", "init"], check=True, capture_output=True)
+    env = {k: v for k, v in os.environ.items() if k != "CK_E2E_TOKEN"}
+    with open("token.txt", "w") as f:
+        f.write("abc")
+    ck_info = {
+        "environments": {
+            "fetch": {
+                "kind": "system",
+                "requirements": [
+                    {
+                        "kind": "file",
+                        "path": "token.txt",
+                        "env_var": "CK_E2E_TOKEN",
+                    }
+                ],
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "download": {
+                    "kind": "shell-command",
+                    "command": "python -c \"open('data.txt','w').write('1')\"",
+                    "environment": "fetch",
+                    "outputs": ["data.txt"],
+                },
+                "analyze": {
+                    "kind": "shell-command",
+                    "command": "python -c \"open('out.txt','w').write('2')\"",
+                    "environment": "_system",
+                    "inputs": ["data.txt"],
+                    "outputs": ["out.txt"],
+                },
+            }
+        },
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.run(["calkit", "run"], check=True, env=env)
+    # Without the token, a run with nothing stale for that env goes through
+    # quietly
+    os.remove("token.txt")
+    res = subprocess.run(
+        ["calkit", "run"], capture_output=True, text=True, env=env
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "Failed to check environment" not in res.stdout + res.stderr
+    # But a stage that has to run there says what's missing and how to fix it
+    ck_info["pipeline"]["stages"]["download"]["command"] = (
+        "python -c \"open('data.txt','w').write('3')\""
+    )
+    calkit.save_calkit_info(ck_info)
+    res = subprocess.run(
+        ["calkit", "run"], capture_output=True, text=True, env=env
+    )
+    assert res.returncode != 0
+    out = res.stdout + res.stderr
+    assert "file 'token.txt' not found" in out
+    assert "calkit check env -n fetch" in out
+    # The alternative variable is as good as the file
+    subprocess.run(
+        ["calkit", "run"], check=True, env=env | {"CK_E2E_TOKEN": "xyz"}
+    )
+    with open("data.txt") as f:
+        assert f.read() == "3"

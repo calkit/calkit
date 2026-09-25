@@ -25,8 +25,9 @@ they will be notified and can fix the issue before trying again,
 which is more convenient than telling them to run through a
 list of setup steps in a README.
 
-A requirement can be an app, an environmental variable, a one-time setup
-step, or a constraint on the machine itself, like how many CPUs it has.
+A requirement can be an app, an environmental variable, a file that has to
+exist, a one-time setup step, or a constraint on the machine itself, like
+how many CPUs it has.
 Environmental variables are useful for configuration of a project that
 needs to be unique on each user's machine,
 which can also be used to avoid committing secrets to the repo.
@@ -250,6 +251,65 @@ with the date and the command that was run,
 and `calkit list installers` marks those entries.
 That way there's always a record of what Calkit changed on the machine.
 
+## File requirements
+
+Some tools read a credential or a per-machine configuration from a file
+that must never be committed, e.g., an API token in the user's home
+directory.
+A `file` requirement says it has to exist:
+
+```yaml
+requirements:
+  - kind: file
+    path: ~/.config/JHTDB/auth_token.txt
+    env_var: JHTDB_TOKEN
+    notes: >
+      A JHTDB access token, from https://turbulence.idies.jhu.edu. Put it
+      in the file, or set JHTDB_TOKEN.
+```
+
+The `path` is what the requirement is, so it needs no `name`.
+It may start with `~` and may refer to environmental variables, and a
+relative path is relative to the project.
+`env_var` is optional: when it's set, the requirement is satisfied
+without the file, for tools that read a credential from either.
+On an interactive terminal, a missing file with an `env_var` alternative
+prompts for the variable and stores it in `.env`, as a missing `env-var`
+requirement does.
+
+A file can also be written from a template the project does commit,
+which is useful for configuration that is the same for everyone apart
+from a few secrets or per-machine values:
+
+```yaml
+requirements:
+  - name: DB_PASSWORD
+    kind: env-var
+  - kind: file
+    path: config/db.ini
+    template: config/db.ini.template
+```
+
+If `config/db.ini` is missing, Calkit fills in `config/db.ini.template`,
+replacing `$NAME` or `${NAME}` with the value of that environmental
+variable, and writes the result.
+Every variable the template names must be set, since a configuration file
+with a blank where the password goes would pass the check and fail later
+somewhere less obvious.
+A file written inside the project is added to `.gitignore`.
+It's written only when it's missing, so edits to it are kept; delete it
+to write it again from the template.
+
+A file requirement at the top level must be satisfied for any
+`calkit run` to start.
+When only some stages need it, e.g., a stage that downloads data with a
+token, declare it under a `system` environment's `requirements` instead
+and run those stages in that environment, paired with a runtime if they
+need one, e.g., `fetch:py`; see
+[environments](environments.md#requirements).
+It's then checked when a stage starts in that environment, so a run in
+which that stage is up to date never asks for it.
+
 ## Setup requirements
 
 Some preconditions aren't files or environment variables -- they're
@@ -327,18 +387,19 @@ calkit check reqs --no-cache
 ## Ordering and the requirement flow
 
 Within a single `calkit run` or `calkit check reqs`, Calkit processes
-requirements in four phases regardless of the order they appear in
+requirements in five phases regardless of the order they appear in
 `calkit.yaml`:
 
 1. **machine properties** -- first, because a machine too small to run
    the project at all should say so before anything is installed on it.
 2. **`env-var`** -- prompted next so installers and setup steps can
    read newly-set variables.
-3. **`app`** -- env managers like `pixi` and `uv` must exist before
+3. **`file`** -- after env vars, since a template is filled from them.
+4. **`app`** -- env managers like `pixi` and `uv` must exist before
    any setup step that runs inside one of those environments. Missing
    apps with a registered installer trigger the auto-install prompt
    here.
-4. **`setup`** -- last, since `check_command` typically wraps
+5. **`setup`** -- last, since `check_command` typically wraps
    `calkit xenv` and depends on both apps and env vars.
 
 This ordering means a single fresh-clone `calkit run` can prompt for

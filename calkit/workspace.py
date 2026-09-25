@@ -864,6 +864,26 @@ def check_requirements(
                     described_as=described_as,
                     probe_locally=False,
                 )
+        elif kind == "file":
+            # A file here is no help to a stage there, and the alternative
+            # variable is read from the shell a login gets there too. A
+            # template isn't filled in remotely: writing a secret onto
+            # someone else's machine is theirs to do.
+            path = req.get("path") or name
+            # Quoted apart from a leading '~/', which the far shell expands
+            if path.startswith("~/"):
+                quoted = '"$HOME"/' + shlex.quote(path[2:])
+            else:
+                quoted = shlex.quote(path)
+            cmd = f"test -f {quoted}"
+            env_var = req.get("env_var")
+            if env_var:
+                cmd += f' || test -n "${{{env_var}:-}}"'
+            if _remote_rc(workspace, cmd, verbose=verbose) != 0:
+                msg = f"file '{path}' not found on {described_as}"
+                if env_var:
+                    msg += f", and env-var '{env_var}' is not set there"
+                raise ValueError(msg)
         elif kind == "setup":
             check_command = req.get("check_command")
             if not check_command:

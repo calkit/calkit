@@ -26,7 +26,7 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import { FaCodeBranch, FaPlus, FaSync } from "react-icons/fa"
 import { FiBookOpen, FiFile } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
@@ -35,7 +35,7 @@ import { z } from "zod"
 import Tooltip from "../../../../../components/Common/Tooltip"
 
 import type { AxiosError } from "axios"
-import type { Publication } from "../../../../../client"
+import type { Publication, PublicationLatexDiff } from "../../../../../client"
 import { ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import CommentsPanel, {
@@ -74,12 +74,20 @@ const pubSearchSchema = z.object({
   compare_open: z.boolean().optional(),
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
+  compare_view: z.enum(["side-by-side", "latex-diff"]).optional(),
   editor_open: z.boolean().optional(),
   components_open: z.boolean().optional(),
   // Which file of unknown origin is being resolved, and how
   resolve_path: z.string().optional(),
   resolve_as: z.enum(["figure", "attest", "import"]).optional(),
+  // Path of the LaTeX diff being viewed in place of the publication
+  diff: z.string().optional(),
 })
+
+const getDiffLabel = (diff: PublicationLatexDiff) =>
+  diff.to_ref === "HEAD"
+    ? `Changes since ${diff.from_ref}`
+    : `Changes from ${diff.from_ref} to ${diff.to_ref}`
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/publications",
@@ -110,7 +118,7 @@ function PubInfo({
   const queryClient = useQueryClient()
   // Editor open state lives in the URL (editor_open) so a session is shareable
   // and restorable by link, like the compare modal.
-  const { editor_open: editorOpen } = Route.useSearch()
+  const { editor_open: editorOpen, diff: diffPath } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const closeEditor = () =>
     navigate({ search: (prev) => ({ ...prev, editor_open: undefined }) })
@@ -302,6 +310,27 @@ function PubInfo({
       </Text>
       <InputsRow label="Figures" items={figureLinks} />
       <InputsRow label="References" items={referenceLinks} />
+      {(publication.latex_diffs?.length ?? 0) > 0 && (
+        <Box fontSize="sm" mb={1}>
+          <Text as="span" fontWeight="semibold">
+            Diffs:
+          </Text>{" "}
+          {publication.latex_diffs?.map((d, i) => (
+            <Fragment key={d.path}>
+              {i > 0 && ", "}
+              <Link
+                as={RouterLink}
+                from={Route.fullPath}
+                to="."
+                search={((prev: any) => ({ ...prev, diff: d.path })) as any}
+                fontWeight={d.path === diffPath ? "semibold" : undefined}
+              >
+                {getDiffLabel(d)}
+              </Link>
+            </Fragment>
+          ))}
+        </Box>
+      )}
       <PublicationComponents
         ownerName={ownerName}
         projectName={projectName}
@@ -368,10 +397,12 @@ function Publications() {
     compare_open,
     base_ref,
     compare_ref,
+    compare_view,
+    diff: diffPath,
   } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const setSelectedPath = (p: string) =>
-    navigate({ search: (prev) => ({ ...prev, path: p }) })
+    navigate({ search: (prev) => ({ ...prev, path: p, diff: undefined }) })
 
   const openCompare = (pubPath: string) =>
     navigate({
@@ -385,6 +416,7 @@ function Publications() {
         compare_open: undefined,
         base_ref: undefined,
         compare_ref: undefined,
+        compare_view: undefined,
       }),
     })
   const { user } = useAuth()
@@ -431,6 +463,9 @@ function Publications() {
     selectedPath,
   ])
 
+  const selectedDiff = selectedPub?.latex_diffs?.find(
+    (d) => d.path === diffPath,
+  )
   const isPdf = selectedPub?.path?.endsWith(".pdf") ?? false
   const texPath = selectedPub ? getLatexSourcePath(selectedPub) : null
   const canEditLatex = userHasWriteAccess && !!texPath
@@ -625,7 +660,41 @@ function Publications() {
           <Box flex={1} minW={0} mr={6} minH={0}>
             {selectedPub ? (
               <>
-                {isPdf && selectedPub.url ? (
+                {selectedDiff ? (
+                  // Shown like the publication itself, but without comments,
+                  // which belong to the publication's own PDF
+                  <Box height="82vh" borderRadius="lg" overflow="hidden">
+                    <PublicationView
+                      publication={{
+                        ...selectedPub,
+                        path: selectedDiff.path,
+                        title: getDiffLabel(selectedDiff),
+                        stage: selectedDiff.stage,
+                        url: selectedDiff.url,
+                        content: selectedDiff.content,
+                      }}
+                      toolbarAction={
+                        <HStack spacing={2}>
+                          <Badge>{getDiffLabel(selectedDiff)}</Badge>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() =>
+                              navigate({
+                                search: (prev) => ({
+                                  ...prev,
+                                  diff: undefined,
+                                }),
+                              })
+                            }
+                          >
+                            Close diff
+                          </Button>
+                        </HStack>
+                      }
+                    />
+                  </Box>
+                ) : isPdf && selectedPub.url ? (
                   <Box height="82vh">
                     <PdfAnnotator
                       url={String(selectedPub.url)}
@@ -685,6 +754,12 @@ function Publications() {
                   initialRef={base_ref}
                   initialRef2={compare_ref}
                   initialArtifact={selectedPub}
+                  compareView={compare_view}
+                  onCompareViewChange={(view) =>
+                    navigate({
+                      search: (prev) => ({ ...prev, compare_view: view }),
+                    })
+                  }
                   onRefsChange={(r1, r2) =>
                     navigate({
                       search: (prev) => ({

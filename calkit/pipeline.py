@@ -2,6 +2,7 @@
 
 import itertools
 import os
+import posixpath
 import re
 import warnings
 from collections.abc import Callable
@@ -1521,11 +1522,16 @@ def _ensure_latex_aux_gitignore(
     can be wiped by a clean build (``latexmk -C``). The globs are unanchored,
     so aux files are caught wherever latexmk writes them relative to the
     source -- next to it, or in an ``aux``/output subdirectory via
-    ``$aux_dir``/``$out_dir``/``output_dir``. ``*.pdf`` is never ignored so the
-    compiled output stays tracked.
+    ``$aux_dir``/``$out_dir``/``output_dir``. A stage's own ``aux_dir`` is
+    also ignored whole. ``*.pdf`` is never ignored so the compiled output
+    stays tracked.
 
     Returns True if ``.gitignore`` was modified.
     """
+
+    def norm(path: str) -> str:
+        return posixpath.normpath(path.replace("\\", "/"))
+
     aux_globs = [
         "*.aux",
         "*.bbl",
@@ -1560,6 +1566,25 @@ def _ensure_latex_aux_gitignore(
     base = os.path.join(wdir or ".", stage.wdir) if stage.wdir else wdir or "."
     source_dir = os.path.dirname(stage.target_path)
     gitignore_path = os.path.join(base, source_dir, ".gitignore")
+    # An aux dir is ignored whole, since packages like glossaries write
+    # files with extensions no list could anticipate. One outside the
+    # source directory can't be named from its .gitignore. Pure path
+    # arithmetic, since os.path.relpath resolves 'aux' to a device on
+    # Windows.
+    if stage.aux_dir is not None:
+        aux = norm(stage.aux_dir)
+        src = norm(source_dir or ".")
+        if src == ".":
+            inside = aux != "." and not aux.startswith(("../", "/"))
+            rel = aux
+        else:
+            inside = aux.startswith(src + "/")
+            rel = aux[len(src) + 1 :]
+        if inside:
+            aux_globs.append(f"/{rel}/*")
+            # Unless the PDF goes there too
+            if stage.output_dir is not None and norm(stage.output_dir) == aux:
+                aux_globs.append(f"!/{rel}/*.pdf")
     return _write_managed_gitignore_block(
         gitignore_path, marker="calkit latex aux files", lines=aux_globs
     )

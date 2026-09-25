@@ -390,7 +390,8 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         f.write("\\documentclass{article}\n")
         f.write("\\newcommand{\\wc}[1]{\\verbatiminput{#1.wcsum}}\n")
         f.write("\\begin{document}\nGreen\u2019s function\n")
-        f.write("\\includegraphics{figs/plot}\n\\end{document}\n")
+        f.write("\\includegraphics{figs/plot}\n")
+        f.write("\\singlecol{\\input{setup}}\n\\end{document}\n")
     with open("paper/.latexmkrc", "w") as f:
         f.write("$aux_dir = 'aux';\n")
     with open("paper/figs/plot.png", "w") as f:
@@ -451,7 +452,11 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     output = get_diff_path("paper/main.tex", "v1", "HEAD")
     with open(output) as f:
         assert f.read() == "old\nnew\n"
-    with open("paper/main-diff.tex", encoding="utf-8") as f:
+    # --keep-tex keeps what latexdiff saw beside the diff PDF, so a
+    # --flatten or macro expansion failure can be inspected
+    kept_stem = output.removesuffix(".pdf")
+    assert not os.path.exists("paper/main-diff.tex")
+    with open(f"{kept_stem}-diff.tex", encoding="utf-8") as f:
         marked_up = f.read()
     # A verbatim input named by a macro parameter is broken onto its own
     # line in each checkout rather than by latexdiff's --filter-script,
@@ -459,10 +464,21 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert "\\verbatiminput%\n{#1.wcsum}" in marked_up
     assert "Green\u2019s function" in marked_up
     with open(stubs / "latexdiff-args.txt") as f:
-        assert "--filter-script" not in f.read()
+        latexdiff_args = f.read()
+    assert "--filter-script" not in latexdiff_args
+    # A macro wrapping an input is marked up as text, not one token
+    assert "--append-textcmd=singlecol" in latexdiff_args
     assert "\\includegraphics{../../base/paper/figs/plot.png}" in marked_up
     assert "\\includegraphics{figs/plot}" in marked_up
     assert not os.path.exists("paper/figs")
+    with open(f"{kept_stem}-old.tex", encoding="utf-8") as f:
+        old_tex = f.read()
+    with open(f"{kept_stem}-new.tex", encoding="utf-8") as f:
+        new_tex = f.read()
+    assert "\\verbatiminput%\n{#1.wcsum}" in old_tex
+    assert "\\verbatiminput%\n{#1.wcsum}" in new_tex
+    assert "../../base/paper/figs/plot.png" in old_tex
+    assert "../../base/paper/figs/plot.png" not in new_tex
     # The diff is built with the document's rc file, read before the
     # directories Calkit sets so those win, and latexdiff gets its options
     with open(stubs / "latexmk-args.txt") as f:
@@ -548,7 +564,43 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert result.returncode != 0
     assert "! Undefined control sequence." in result.stderr
     assert "l.3 \\oops" in result.stderr
-    assert "exit status 12" in result.stderr
+    assert "exit code 12" in result.stderr
+    # Detection can't find another stage's uncached output at a revision
+    os.remove(stubs / "setup.txt")
+    bare = ["calkit", "latex", "diff", "paper/main.tex", "--from", "v1"]
+    bare += ["--to", "HEAD", "--force"]
+    result = subprocess.run(bare, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert not os.path.exists(stubs / "setup.txt")
+    # But a document the pipeline builds is diffed the way its stage builds
+    # it, fetching what the compiled stage depends on
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "pipeline:\n"
+            "  stages:\n"
+            "    paper:\n"
+            "      kind: latex\n"
+            "      target_path: paper/main.tex\n"
+            "      latexmkrc_path: paper/.latexmkrc\n"
+            "      latexdiff_args: [--type=CFONT]\n"
+        )
+    with open("dvc.yaml", "a") as f:
+        f.write(
+            "  paper:\n"
+            "    cmd: calkit latex build paper/main.tex\n"
+            "    deps: [paper/main.tex, paper/.latexmkrc, paper/setup.tex]\n"
+        )
+    result = subprocess.run(bare, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    with open(stubs / "setup.txt") as f:
+        assert f.read() == "present\n"
+    with open(stubs / "latexdiff-args.txt") as f:
+        assert "--type=CFONT" in f.read().split()
+    with open(stubs / "latexmk-args.txt") as f:
+        latexmk_args = f.read().split()
+    assert latexmk_args[latexmk_args.index("-r") + 1].endswith(
+        "paper/.latexmkrc"
+    )
 
 
 def test_marked_up_digest_ignores_the_header():

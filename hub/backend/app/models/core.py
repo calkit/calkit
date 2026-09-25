@@ -1476,6 +1476,19 @@ class _DeclaredArtifact(BaseModel):
 PublicationKind = CkPublicationKind
 
 
+class PublicationLatexDiff(BaseModel):
+    """A PDF marking up what changed in a publication between revisions."""
+
+    from_ref: str
+    to_ref: str
+    path: str
+    # The generated DVC stage that builds it
+    stage: str | None = None
+    content: str | None = None
+    url: str | None = None
+    storage: Literal["git", "dvc", "dvc-zip"] | None = None
+
+
 class Publication(_DeclaredArtifact):
     """A publication declared in calkit.yaml."""
 
@@ -1495,6 +1508,8 @@ class Publication(_DeclaredArtifact):
     url: str | None = None
     overleaf: PublicationOverleaf | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # From the diffs of the LaTeX stage that builds it
+    latex_diffs: list[PublicationLatexDiff] = []
 
 
 class PublicationComponent(BaseModel):

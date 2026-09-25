@@ -8,6 +8,7 @@ import {
   Badge,
   Box,
   Button,
+  ButtonGroup,
   Code,
   Divider,
   Flex,
@@ -76,6 +77,9 @@ const IpynbRenderer = lazy(() =>
 /** "file" covers auto-detected types not explicitly declared in calkit.yaml. */
 export type ArtifactKind = "figure" | "publication" | "notebook" | "file"
 
+/** How two versions of a publication are compared. */
+export type CompareView = "side-by-side" | "latex-diff"
+
 interface CommitHistory {
   hash: string
   short_hash: string
@@ -104,6 +108,9 @@ interface ArtifactCompareModalProps {
   /** Whether the figure editor is open, when the page keeps it in the URL. */
   editOpen?: boolean
   onEditOpenChange?: (open: boolean) => void
+  /** Unset opens on the LaTeX diff when there is one, else side by side. */
+  compareView?: CompareView
+  onCompareViewChange?: (view: CompareView) => void
 }
 
 /** Render the artifact content for a given kind/data. */
@@ -575,6 +582,8 @@ export function ArtifactCompareModal({
   onNext,
   editOpen,
   onEditOpenChange,
+  compareView,
+  onCompareViewChange,
 }: ArtifactCompareModalProps) {
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const hoverBg = useColorModeValue("gray.50", "gray.700")
@@ -656,20 +665,6 @@ export function ArtifactCompareModal({
     staleTime: 5 * 60 * 1000,
   })
 
-  const refsQuery = useQuery({
-    queryKey: ["projects", ownerName, projectName, "refs"],
-    queryFn: () =>
-      ProjectsService.searchProjectRefs({
-        owner_name: ownerName,
-        project_name: projectName,
-      }).then((response) => response.data),
-    enabled: isOpen && branchesEnabled,
-    staleTime: 5 * 60 * 1000,
-  })
-  const branches = (refsQuery.data ?? []).filter(
-    (r: GitRef) => r.kind === "branch",
-  )
-
   // For publication/notebook, fetching without a ref loads ALL items just to
   // find one--skip that when we already have initialArtifact. For "file" and
   // "figure" the fetch is a direct single-item call, so it's cheap.
@@ -718,6 +713,61 @@ export function ArtifactCompareModal({
       : false
 
   const isComparing = Boolean(ref2)
+  // LaTeX diffs are kept with the publication at each version, so the two
+  // being compared are where to look for one between them
+  const pub1 = displayData1 as Publication | undefined
+  const pub2 = artifact2Query.data as Publication | undefined
+  const hasLatexDiffs =
+    kind === "publication" &&
+    isComparing &&
+    Boolean(pub1?.latex_diffs?.length || pub2?.latex_diffs?.length)
+  const refsQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "refs"],
+    queryFn: () =>
+      ProjectsService.searchProjectRefs({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    // Also needed to resolve a diff's branch or tag to a commit
+    enabled: isOpen && (branchesEnabled || hasLatexDiffs),
+    staleTime: 5 * 60 * 1000,
+  })
+  const branches = (refsQuery.data ?? []).filter(
+    (r: GitRef) => r.kind === "branch",
+  )
+  // Whether a ref as a diff declares it names the selected version, going
+  // through commits since the two are rarely written the same way.
+  // Relative refs like HEAD~1 can't be resolved here, and a branch resolves
+  // to where it is now, not where it was when the diff was built.
+  const refMatches = (spec: string, selected: string) => {
+    if (spec === selected) return true
+    const selectedHash =
+      historyQuery.data?.find((c) => c.short_hash === selected)?.hash ??
+      refsQuery.data?.find((r) => r.name === selected)?.hash
+    if (!selectedHash) return false
+    if (/^[0-9a-f]{4,40}$/i.test(spec))
+      return selectedHash.startsWith(spec.toLowerCase())
+    return refsQuery.data?.find((r) => r.name === spec)?.hash === selectedHash
+  }
+  // A diff kept at a version compares its from ref against that version
+  // unless it names a to ref
+  const findLatexDiff = (
+    pub: Publication | undefined,
+    fromRef: string,
+    atRef: string,
+  ) =>
+    pub?.latex_diffs?.find(
+      (d) =>
+        (d.url || d.content) &&
+        refMatches(d.from_ref, fromRef) &&
+        (!d.to_ref || d.to_ref === "HEAD" || refMatches(d.to_ref, atRef)),
+    )
+  // Either order, since A can be the newer version
+  const latexDiff =
+    hasLatexDiffs && ref1 && ref2
+      ? findLatexDiff(pub2, ref1, ref2) ?? findLatexDiff(pub1, ref2, ref1)
+      : undefined
+  const showLatexDiff = Boolean(latexDiff) && compareView !== "side-by-side"
 
   // Figure metadata (title/description/stage) for the info panel, sourced from
   // the figure at the displayed ref, falling back to the one we opened with.
@@ -963,13 +1013,46 @@ export function ArtifactCompareModal({
               display="flex"
               flexDirection="column"
             >
+              {isComparing && latexDiff && onCompareViewChange && (
+                <ButtonGroup
+                  size="xs"
+                  isAttached
+                  variant="outline"
+                  mb={2}
+                  flexShrink={0}
+                >
+                  <Button
+                    onClick={() => onCompareViewChange("side-by-side")}
+                    isActive={!showLatexDiff}
+                  >
+                    Side by side
+                  </Button>
+                  <Button
+                    onClick={() => onCompareViewChange("latex-diff")}
+                    isActive={showLatexDiff}
+                  >
+                    LaTeX diff
+                  </Button>
+                </ButtonGroup>
+              )}
               {isComparing ? (
                 <Box
                   flex={1}
                   minH={0}
                   overflow={kind === "figure" ? "hidden" : "auto"}
                 >
-                  {kind === "file" && displayData1 && artifact2Query.data ? (
+                  {showLatexDiff && latexDiff ? (
+                    <Box height="75vh" width="100%">
+                      <PdfDocumentViewer
+                        url={
+                          latexDiff.content
+                            ? `data:application/pdf;base64,${latexDiff.content}`
+                            : String(latexDiff.url)
+                        }
+                        source="compare"
+                      />
+                    </Box>
+                  ) : kind === "file" && displayData1 && artifact2Query.data ? (
                     (() => {
                       const decode = (
                         d: Figure | Publication | Notebook | ContentsItem,

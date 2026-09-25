@@ -5673,6 +5673,21 @@ def get_project_publications(
         wdir=repo.working_dir, ck_info=ck_info, fix_legacy=False
     )
     resp = []
+    # LaTeX stages that keep diffs, validated so their diff paths come out
+    # the same as the CLI's
+    latex_stages: dict[str, CkLatexStage] = {}
+    ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for stage_name, stage_def in ck_stages.items():
+        if (
+            not isinstance(stage_def, dict)
+            or stage_def.get("kind") != "latex"
+            or not stage_def.get("diffs")
+        ):
+            continue
+        try:
+            latex_stages[stage_name] = CkLatexStage.model_validate(stage_def)
+        except ValidationError as e:
+            logger.warning(f"Invalid LaTeX stage '{stage_name}': {e}")
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
     (
         ck_info_full,
@@ -5747,6 +5762,61 @@ def get_project_publications(
                 logger.warning(
                     f"Failed to get publication at path {pub['path']}: {e}"
                 )
+        # Diffs of the LaTeX stage that builds it, matched by name, or by
+        # its PDF for a publication that doesn't name its stage
+        latex_stage_name = next(
+            (
+                name
+                for name, stage in latex_stages.items()
+                if name == pub.get("stage")
+                or Path(
+                    os.path.normpath(
+                        os.path.join(stage.wdir or "", stage.pdf_path)
+                    )
+                ).as_posix()
+                == pub["path"]
+            ),
+            None,
+        )
+        pub["latex_diffs"] = []
+        if latex_stage_name is not None:
+            latex_stage = latex_stages[latex_stage_name]
+            for (from_ref, to_ref), diff_path in zip(
+                latex_stage.diff_pairs, latex_stage.diff_paths
+            ):
+                diff_path = Path(
+                    os.path.normpath(
+                        os.path.join(latex_stage.wdir or "", diff_path)
+                    )
+                ).as_posix()
+                diff: dict[str, Any] = dict(
+                    from_ref=from_ref,
+                    to_ref=to_ref,
+                    path=diff_path,
+                    stage=calkit.latex.get_diff_stage_name(
+                        latex_stage_name, from_ref, to_ref
+                    ),
+                )
+                # Listed even when not built, so the viewer can say how
+                try:
+                    item = app.projects.get_contents_from_tree(
+                        project=project,
+                        tree=tree,
+                        path=diff_path,
+                        ck_info=ck_info_full,
+                        dvc_lock_outs=dvc_lock_outs,
+                        zip_path_map=zip_path_map,
+                    )
+                    diff["content"] = (
+                        item.content
+                        if include_content or not item.url
+                        else None
+                    )
+                    diff["url"] = item.url
+                    diff["storage"] = item.storage
+                except HTTPException:
+                    pass
+                pub["latex_diffs"].append(diff)
         resp.append(Publication.model_validate(pub))
     return resp
 

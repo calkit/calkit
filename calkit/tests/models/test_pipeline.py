@@ -645,11 +645,12 @@ def test_latex_stage_diffs():
         latexdiff_args=["--graphics-markup=both"],
         inputs=["pubs/paper-1/figs/"],
         diffs=[["v1", "v2"]],
+        keep_diff_tex=True,
     )
     assert configured.extra_dvc_stages()["paper-1-diff-v1-v2"]["cmd"] == (
         "calkit latex diff -e tex --no-check --from v1 --to v2 "
         "-r pubs/paper-1/.latexmkrc --latexmk-arg -shell-escape "
-        "--latexdiff-arg --graphics-markup=both "
+        "--latexdiff-arg --graphics-markup=both --keep-tex "
         "--input pubs/paper-1/figs/ "
         "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
     )

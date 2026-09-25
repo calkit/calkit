@@ -513,6 +513,9 @@ _VERBATIM_PARAM_RE = re.compile(
     r"(\\(?:verbatiminput\*?|lstinputlisting))"
     r"(?=\s*(?:\[[^\]\n]*\])?\s*\{[^}\n]*#[0-9])"
 )
+_INPUT_WRAPPER_RE = re.compile(
+    r"\\([A-Za-z@]+)\*?\s*(?:\[[^\]]*\]\s*)*\{\s*\\(?:input|include)\s*\{"
+)
 get_diff_path = calkit.latex.get_diff_path
 _default_base_ref = calkit.latex.default_base_ref
 
@@ -577,7 +580,9 @@ def diff(
         typer.Option(
             "--latexmk-rc",
             "-r",
-            help="Path to a latexmkrc file to build the marked-up document with.",
+            help=(
+                "Path to a latexmkrc file to build the marked-up document with."
+            ),
         ),
     ] = None,
     latexmk_args: Annotated[
@@ -641,7 +646,11 @@ def diff(
         bool,
         typer.Option(
             "--keep-tex",
-            help="Keep the generated diff .tex file for inspection.",
+            help=(
+                "Keep the old, new, and diff .tex files beside the diff "
+                "PDF for inspection, e.g., "
+                ".calkit/latex-diffs/v1/paper/main-old.tex."
+            ),
         ),
     ] = False,
     no_check: Annotated[
@@ -675,6 +684,53 @@ def diff(
     generates, are fetched as they were at that revision, so each side of
     the comparison shows its own.
     """
+
+    def stage_path(stage: dict, path: str) -> str:
+        """A stage's path in the project's frame rather than its wdir's."""
+        return Path(
+            os.path.normpath(os.path.join(stage.get("wdir") or "", path))
+        ).as_posix()
+
+    def find_latex_stage() -> tuple[str | None, dict | None]:
+        """The pipeline stage that builds the document, if any."""
+        ck_info = calkit.load_calkit_info()
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        target = Path(os.path.normpath(tex_file)).as_posix()
+        for name, stage in stages.items():
+            if (
+                isinstance(stage, dict)
+                and stage.get("kind") == "latex"
+                and stage_path(stage, stage.get("target_path") or "") == target
+            ):
+                return name, stage
+        return None, None
+
+    def stage_inputs(name: str, stage: dict) -> list[str]:
+        """What a stage's diffs fetch at each revision.
+
+        Its dependencies in the compiled pipeline, which include other
+        stages' outputs it reads, found there since calkit.yaml only names
+        the stages they come from.
+        """
+        from calkit.models.pipeline import LatexStage
+
+        try:
+            dvc_stage = calkit.ryaml.load(Path("dvc.yaml").read_text())[
+                "stages"
+            ][name]
+            deps = [
+                dep if isinstance(dep, str) else next(iter(dep))
+                for dep in dvc_stage.get("deps") or []
+            ]
+        except Exception:
+            deps = LatexStage.model_validate(stage | {"name": name}).dvc_deps
+        skip = {tex_file, latexmk_rc_path}
+        return [
+            path
+            for dep in deps
+            if (path := stage_path(stage, dep)) not in skip
+            and not path.startswith(".calkit/")
+        ]
 
     def fetch_dvc_inputs(root: str, rev: str, paths: list[str]) -> list[str]:
         """Fetch the DVC-tracked content of ``paths`` at ``rev`` into ``root``.
@@ -797,7 +853,9 @@ def diff(
         Detection finds a file by its own name or pointer, but a file in a
         directory DVC tracks as a whole has only the directory's pointer,
         which can't say what's inside, so those directories beside the
-        document are included whole.
+        document are included whole. Neither finds another stage's output
+        DVC doesn't cache, so the pipeline's inputs for the document are
+        added too.
         """
         doc_dir = Path(root, os.path.dirname(tex_file))
         pointed = [
@@ -805,7 +863,8 @@ def diff(
             for p in sorted(doc_dir.rglob("*.dvc"))
             if p.is_file()
         ]
-        return calkit.latex.detect_inputs(tex_file, wdir=root) + pointed
+        detected = calkit.latex.detect_inputs(tex_file, wdir=root)
+        return detected + pointed + pipeline_inputs
 
     def point_changed_figures_at_base(base_root: str, head_root: str) -> None:
         """Make the older side's changed figures refer to its own copies.
@@ -866,6 +925,20 @@ def diff(
         from_ref = _default_base_ref(repo)
     if to_ref is None and not os.path.isfile(tex_file):
         raise_error(f"{tex_file} does not exist")
+    # A document the pipeline builds is diffed the way it's built, with its
+    # stage's environment, settings, and inputs, unless told otherwise
+    stage_name, stage = find_latex_stage()
+    pipeline_inputs: list[str] = []
+    if stage is not None:
+        if environment is None:
+            environment = stage.get("environment")
+        if latexmk_rc_path is None and stage.get("latexmkrc_path"):
+            latexmk_rc_path = stage_path(stage, stage["latexmkrc_path"])
+        latexmk_args = latexmk_args or list(stage.get("latexmk_args") or [])
+        latexdiff_args = latexdiff_args or list(
+            stage.get("latexdiff_args") or []
+        )
+        pipeline_inputs = stage_inputs(str(stage_name), stage)
     if output is None:
         output = get_diff_path(
             tex_file,
@@ -934,9 +1007,9 @@ def diff(
             break_verbatim_params(root)
         point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
-            base_tex=sides["base"],
-            head_tex=sides["head"],
-            tex_file=tex_file,
+            base_tex_fpath=sides["base"],
+            head_tex_fpath=sides["head"],
+            tex_file_fpath=tex_file,
             head_root=head_root,
             output=output,
             environment=environment,
@@ -993,9 +1066,9 @@ def _remove_worktree(path: str) -> None:
 
 
 def _build_diff(
-    base_tex: str,
-    head_tex: str,
-    tex_file: str,
+    base_tex_fpath: str,
+    head_tex_fpath: str,
+    tex_file_fpath: str,
     head_root: str,
     output: str,
     environment: str | None,
@@ -1008,39 +1081,63 @@ def _build_diff(
     force: bool,
     verbose: bool,
 ) -> None:
-    """Mark up one document against another and build the result."""
+    """Mark up one document against another and build the result.
+
+    base_tex_fpath is the older revision's document, head_tex_fpath the
+    newer revision's, and tex_file_fpath the document as named on the
+    command line. head_root is where the newer side lives: a checkout,
+    or the working tree, beside which the marked-up document is built
+    so its relative inputs resolve.
+    """
     # Built beside the newer side, so \graphicspath, \bibliography, and
     # relative \includegraphics resolve the way they do for the real thing,
     # against that revision's own files
-    tex_dir = os.path.dirname(tex_file) or "."
+    tex_dir = os.path.dirname(tex_file_fpath) or "."
     build_dir = os.path.normpath(os.path.join(head_root, tex_dir))
-    stem = Path(tex_file).stem
-    diff_tex = os.path.join(build_dir, f"{stem}-diff.tex")
-    # Where --keep-tex leaves it: beside the document, since a checkout is
-    # removed afterwards
-    kept_tex = os.path.normpath(os.path.join(tex_dir, f"{stem}-diff.tex"))
+    stem = Path(tex_file_fpath).stem
+    diff_tex_fpath = os.path.join(build_dir, f"{stem}-diff.tex")
+    # Where --keep-tex leaves its copies: beside the diff PDF, since a
+    # checkout is removed afterwards. The old and new files are what
+    # latexdiff saw, after verbatim fixes and figure repointing, so a
+    # --flatten or macro expansion failure can be inspected.
+    kept_stem = os.path.splitext(output)[0]
+    kept_diff_fpath = f"{kept_stem}-diff.tex"
+    kept_old_fpath = f"{kept_stem}-old.tex"
+    kept_new_fpath = f"{kept_stem}-new.tex"
+    marked_up: bytes | None = None
     aux_dir = os.path.join(build_dir, calkit.latex.DIFF_AUX_DIRNAME)
     try:
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
         latexdiff_cmd = ["latexdiff", "--flatten", "--encoding=utf8"]
+        sources = [base_tex_fpath, head_tex_fpath] + [
+            path
+            for side in (base_tex_fpath, head_tex_fpath)
+            for path in calkit.latex.detect_inputs(side)
+            if Path(path).suffix in calkit.latex._SOURCE_EXTS
+        ]
+        texts = [
+            Path(path).read_text(encoding="utf-8", errors="replace")
+            for path in sources
+            if os.path.isfile(path)
+        ]
+        # A macro wrapping an \input or \include, e.g., one making an
+        # appendix single column, gets the whole flattened file as its
+        # argument, which latexdiff would otherwise mark up as one token
+        wrappers = sorted(
+            {
+                name
+                for text in texts
+                for name in _INPUT_WRAPPER_RE.findall(text)
+            }
+        )
+        if wrappers:
+            latexdiff_cmd.append("--append-textcmd=" + ";".join(wrappers))
         # A checkout's verbatim inputs named by macro parameters are already
         # broken, so this only finds the working tree's, which can't be
         # edited. A filter breaks those instead, though latexdiff's
         # --filter-script mangles anything outside Latin-1.
-        sources = [base_tex, head_tex] + [
-            path
-            for side in (base_tex, head_tex)
-            for path in calkit.latex.detect_inputs(side)
-            if Path(path).suffix in calkit.latex._SOURCE_EXTS
-        ]
-        if any(
-            os.path.isfile(path)
-            and _VERBATIM_PARAM_RE.search(
-                Path(path).read_text(encoding="utf-8", errors="replace")
-            )
-            for path in sources
-        ):
+        if any(_VERBATIM_PARAM_RE.search(text) for text in texts):
             filter_path = Path(DIFF_TMP_DIR, "verbatim-param-filter.pl")
             os.makedirs(filter_path.parent, exist_ok=True)
             # latexdiff appends a newline to what it sends, so drop it
@@ -1064,7 +1161,7 @@ def _build_diff(
         # defaults
         latexdiff_cmd += latexdiff_args
         cmd = _tex_cmd(
-            latexdiff_cmd + [base_tex, head_tex],
+            latexdiff_cmd + [base_tex_fpath, head_tex_fpath],
             environment=environment,
             no_check=no_check,
             verbose=verbose,
@@ -1072,7 +1169,9 @@ def _build_diff(
         )
         typer.echo("Marking up the document with latexdiff")
         try:
-            marked_up = subprocess.check_output(cmd)
+            # No stdin, so an environment's container isn't given a TTY,
+            # which would merge latexdiff's warnings into the document
+            marked_up = subprocess.check_output(cmd, stdin=subprocess.DEVNULL)
         except FileNotFoundError:
             raise_error(
                 "latexdiff was not found; it ships with TeX Live, so a "
@@ -1112,8 +1211,7 @@ def _build_diff(
         ):
             typer.echo(f"{output} is up to date")
             return
-        with open(diff_tex, "wb") as f:
-            f.write(marked_up)
+        Path(diff_tex_fpath).write_bytes(marked_up)
         os.makedirs(aux_dir, exist_ok=True)
         rel_aux = calkit.latex.DIFF_AUX_DIRNAME
         latexmk_cmd = ["latexmk"]
@@ -1133,9 +1231,9 @@ def _build_diff(
         # User pass-through args come last so they can override Calkit's
         # defaults
         latexmk_cmd += latexmk_args
-        latexmk_cmd.append(diff_tex)
+        latexmk_cmd.append(diff_tex_fpath)
         tex_env_vars = _tex_env_vars(
-            calkit.latex.get_source_date_epoch(tex_file)
+            calkit.latex.get_source_date_epoch(tex_file_fpath)
         )
         cmd = _tex_cmd(
             latexmk_cmd,
@@ -1174,10 +1272,13 @@ def _build_diff(
             if excerpt:
                 typer.echo(f"From {log_path.as_posix()}:", err=True)
                 typer.echo("\n".join(excerpt), err=True)
-            raise_error(
-                "latexmk failed on the marked-up document with exit status "
-                f"{e.returncode}; rerun with --keep-tex to inspect it"
+            msg = (
+                "latexmk failed on the diff document with exit code "
+                f"{e.returncode}"
             )
+            if not keep_tex:
+                msg += "; rerun with --keep-tex to inspect"
+            raise_error(msg)
         built = os.path.join(aux_dir, f"{stem}-diff.pdf")
         if not os.path.isfile(built):
             raise_error("latexmk did not produce a PDF")
@@ -1188,16 +1289,28 @@ def _build_diff(
         if os.path.abspath(head_root) == os.path.abspath("."):
             shutil.rmtree(aux_dir, ignore_errors=True)
         os.makedirs(os.path.dirname(state_path), exist_ok=True)
-        with open(state_path, "w") as f:
-            f.write(digest)
+        Path(state_path).write_text(digest)
         typer.echo(f"Wrote {output}")
     finally:
-        if os.path.isfile(diff_tex):
-            in_place = os.path.abspath(diff_tex) == os.path.abspath(kept_tex)
-            if keep_tex and not in_place:
-                shutil.copy(diff_tex, kept_tex)
-            if not keep_tex or not in_place:
-                os.remove(diff_tex)
+        if keep_tex:
+            os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+            if marked_up is not None:
+                Path(kept_diff_fpath).write_bytes(marked_up)
+            for src, kept_fpath in (
+                (base_tex_fpath, kept_old_fpath),
+                (head_tex_fpath, kept_new_fpath),
+            ):
+                if os.path.isfile(src):
+                    shutil.copy(src, kept_fpath)
+            for kept_fpath in (
+                kept_old_fpath,
+                kept_new_fpath,
+                kept_diff_fpath,
+            ):
+                if os.path.isfile(kept_fpath):
+                    typer.echo(f"Kept {kept_fpath} for inspection")
+        if os.path.isfile(diff_tex_fpath):
+            os.remove(diff_tex_fpath)
 
 
 @latex_app.command(name="to-docx")

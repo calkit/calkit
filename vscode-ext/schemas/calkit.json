@@ -2323,7 +2323,7 @@
         },
         "diffs": {
           "default": [],
-          "description": "Comparisons to keep for this document, each a pair of revisions. A bare string is shorthand for comparing that revision against the working tree.",
+          "description": "Comparisons to keep for this document, each a pair of revisions. A bare string is shorthand for comparing that revision against HEAD.",
           "items": {
             "anyOf": [
               {
@@ -2409,6 +2409,12 @@
           "default": null,
           "description": "Arguments over which to run this stage multiple times.",
           "title": "Iterate Over"
+        },
+        "keep_diff_tex": {
+          "default": false,
+          "description": "Keep the old, new, and marked-up .tex files beside each diff PDF for inspection.",
+          "title": "Keep Diff Tex",
+          "type": "boolean"
         },
         "kind": {
           "const": "latex",

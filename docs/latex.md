@@ -249,22 +249,35 @@ To run all of a document's comparisons:
 calkit run paper-1.diffs
 ```
 
-### Comparing against uncommitted work
+### Comparing on demand
 
-`calkit latex diff` runs a comparison on demand, and with no `--to` the
-newer side is the working tree:
+Diffs created by the pipeline are for memorializing
+committed versions.
+To see uncommitted changes, `calkit latex diff` runs a comparison on demand,
+and with no `--to` option specified, the comparison is the working copy:
 
 ```sh
-calkit latex diff pubs/paper-1/main.tex --from main --env tex
+calkit latex diff pubs/paper-1/main.tex --from main
 # .calkit/local/latex-diffs/main..working/pubs/paper-1/main.pdf
 ```
 
 Those diffs can't be reproduced from two revisions, so they're not tracked,
 ending up in the project's `.calkit/local` directory.
-With no `--from` it compares against the merge base with the default branch.
-DVC-tracked files the document names directly are fetched for the older
-side, but a pipeline output without a `.dvc` file isn't found that way, so
-name any of those with `--input`, e.g., `--input pubs/paper-1/figs/`.
+With no `--from` it compares against the merge base with the default
+branch--typically `main`.
+If a `latex` pipeline stage builds the document,
+the diff is built with the stage configuration, i.e.,
+its environment, settings, and inputs,
+so the diff uses both revisions of the figures, tables, and results.
+
+To see the .tex files sent into `latexdiff`, e.g., when the
+marked-up document fails to build, pass `--keep-tex`,
+or set `keep_diff_tex: true` on the stage.
+The old, new, and marked-up `.tex` files are kept beside the diff PDF,
+e.g., `main-old.tex`, `main-new.tex`, and `main-diff.tex`.
+
+In VS Code, the Calkit extension's "Diff LaTeX Document Against..." command
+does the same from the editor, and opens the result.
 
 ## Interoperability with Microsoft Word
 

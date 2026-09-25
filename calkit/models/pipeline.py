@@ -989,7 +989,7 @@ class LatexStage(Stage):
         default=[],
         description="Comparisons to keep for this document, each a pair of "
         "revisions. A bare string is shorthand for comparing that revision "
-        "against the working tree.",
+        "against HEAD.",
     )
     diff_pdf_storage: Literal["git", "dvc"] | None = Field(
         default="dvc", description="Where to store the resulting diff PDFs."

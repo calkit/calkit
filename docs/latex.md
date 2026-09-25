@@ -106,21 +106,10 @@ document can usually diff it too.
 
 ### For pull request reviewers
 
-A single revision compares it against the working tree, so `- main` means
-"what this branch changes, against the `main` branch", including edits that
-haven't been committed yet.
-Like any other stage, you can edit the document, run the pipeline, and see
-the result without committing first.
-Commit the diff along with the edits, and it's the diff for that commit,
-which is what you'd want to see on a pull request.
-It will be rebuilt by the pipeline whenever the document or `main` changes.
-
-To compare only what's been committed, name `HEAD` explicitly:
-
-```yaml
-diffs:
-  - [main, HEAD]
-```
+A single revision compares it against `HEAD`, so `- main` means "what this
+branch has committed, against the `main` branch".
+That's the diff you'd want to see for a pull request,
+and it will be rebuilt by the pipeline whenever the PR or `main` changes.
 
 On the default branch, `main` and `HEAD` are the same commit, so the
 comparison comes out empty and the diff will show no changes.
@@ -232,7 +221,9 @@ calkit run paper-1.diffs
 
 ### Comparing on demand
 
-`calkit latex diff` runs a comparison without adding it to the pipeline,
+Diffs in the pipeline are between commits, for archiving what reviewers
+saw.
+To see uncommitted changes, `calkit latex diff` runs a comparison on demand,
 and with no `--to` the newer side is the working tree:
 
 ```sh

@@ -473,7 +473,7 @@ def diff(
         bool,
         typer.Option(
             "--keep-tex",
-            help="Keep the generated diff .tex file for inspection.",
+            help="Keep the old, new, and generated diff .tex files for inspection.",
         ),
     ] = False,
     no_check: Annotated[
@@ -993,10 +993,13 @@ def _build_diff(
             if excerpt:
                 typer.echo(f"From {log_path.as_posix()}:", err=True)
                 typer.echo("\n".join(excerpt), err=True)
-            raise_error(
-                "latexmk failed on the marked-up document with exit status "
-                f"{e.returncode}; rerun with --keep-tex to inspect it"
+            msg = (
+                "latexmk failed on the diff document with exit code "
+                f"{e.returncode}"
             )
+            if not keep_tex:
+                msg += "; rerun with --keep-tex to inspect"
+            raise_error(msg)
         built = os.path.join(aux_dir, f"{stem}-diff.pdf")
         if not os.path.isfile(built):
             raise_error("latexmk did not produce a PDF")

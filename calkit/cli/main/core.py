@@ -60,6 +60,7 @@ from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
+from calkit.cli.operator import operator_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.scheduler import scheduler_app
 from calkit.cli.sync import sync_app
@@ -96,6 +97,11 @@ app.add_typer(
 )
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
 app.add_typer(sync_app, name="sync", help="Sync with external systems.")
+app.add_typer(
+    operator_app,
+    name="operator",
+    help="Manage this machine's Operator, which lets the hub use it.",
+)
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:
@@ -4058,7 +4064,8 @@ def run_in_env(
     name="install",
     help=(
         "Install a registered native dependency (e.g., pixi, uv) via its "
-        "upstream installer for the current platform."
+        "upstream installer for the current platform, or 'operator' to let "
+        "the hub use this machine."
     ),
 )
 def install_app(
@@ -4076,9 +4083,49 @@ def install_app(
             help="Skip the confirmation prompt and install immediately.",
         ),
     ] = False,
+    at_boot: Annotated[
+        bool,
+        typer.Option(
+            "--at-boot",
+            help=(
+                "For the operator on macOS, start at boot rather than at "
+                "login, which needs sudo."
+            ),
+        ),
+    ] = False,
+    no_service: Annotated[
+        bool,
+        typer.Option(
+            "--no-service",
+            help=(
+                "For the operator, only register it, e.g., to run it with "
+                "'calkit operator start' inside tmux on a cluster."
+            ),
+        ),
+    ] = False,
 ) -> None:
     from calkit import install as _install
 
+    if name == "operator":
+        from calkit import operator
+
+        cfg = operator.load_config()
+        if cfg is None:
+            cfg = operator.register()
+            typer.echo(f"✅ Registered Operator '{cfg['name']}'")
+        else:
+            typer.echo(f"Operator '{cfg['name']}' is already registered")
+        if no_service:
+            typer.echo("Run 'calkit operator start' to connect it")
+            return
+        try:
+            notes = operator.install_service(at_boot=at_boot)
+        except NotImplementedError as e:
+            raise_error(str(e))
+        typer.echo("✅ Installed and started the Operator's service")
+        for note in notes:
+            warn(note)
+        return
     # Surface a platform-specific "use X instead" message before the
     # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
     unsupported = _install.get_unsupported_message(name)

@@ -496,7 +496,7 @@ def _request(
                 detail = resp.json()["detail"]
             except Exception:
                 raise e
-            raise HTTPError(f"{resp.status_code}: {detail}")
+            raise HTTPError(f"{resp.status_code}: {detail}", response=resp)
         break
     if as_json:
         return resp.json()

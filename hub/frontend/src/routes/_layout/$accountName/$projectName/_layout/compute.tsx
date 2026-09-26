@@ -353,7 +353,17 @@ function WorkspacePanel({
   const behind = status?.git?.commits_behind ?? 0
   const dvcToPull = (status?.dvc?.data?.not_in_cache ?? []).length > 0
   const dvcToPush = (status?.dvc?.data?.not_in_remote ?? []).length > 0
-  const canRun = editable && ws.operator_platform !== "windows"
+  // Windows has no sessions to watch a run in, so it runs without one
+  const runsInSession = ws.operator_platform !== "windows"
+  const runMutation = useMutation({
+    mutationFn: () => request("workspace.run"),
+    onSuccess: (result) =>
+      result.ok
+        ? showToast("Success!", "The pipeline ran.", "success")
+        : showToast("Error", "The pipeline failed.", "error"),
+    onError: (err: Error) => showToast("Error", err.message, "error"),
+    onSettled: refresh,
+  })
   const check = <Icon ml={1} as={FiCheck} color="green.500" />
   return (
     <Box bg={bg} borderRadius="lg" p={4} mb={6}>
@@ -490,11 +500,16 @@ function WorkspacePanel({
             ) : (
               <Badge colorScheme="green">Up to date</Badge>
             )}
-            {canRun && (
+            {editable && (
               <Button
                 size="xs"
                 variant="primary"
-                onClick={() => runInSession("calkit run")}
+                isLoading={runMutation.isPending}
+                onClick={() =>
+                  runsInSession
+                    ? runInSession("calkit run")
+                    : runMutation.mutate()
+                }
               >
                 Run
               </Button>
@@ -514,6 +529,22 @@ function WorkspacePanel({
               {stage}
             </Code>
           ))}
+          {runMutation.data?.output && (
+            <Box
+              as="pre"
+              fontSize="xs"
+              mt={2}
+              p={2}
+              maxH="240px"
+              overflowY="auto"
+              bg="black"
+              color="white"
+              borderRadius="md"
+              whiteSpace="pre-wrap"
+            >
+              {runMutation.data.output}
+            </Box>
+          )}
           {(status?.errors ?? []).map((e: any) => (
             <Text key={e.info} color="red.500" fontSize="sm" mt={2}>
               {e.info}

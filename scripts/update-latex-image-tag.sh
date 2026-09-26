@@ -2,16 +2,12 @@
 
 set -euo pipefail
 
-if [ $# -ne 1 ]; then
-  echo "usage: $0 <version>" >&2
+if [ $# -gt 1 ]; then
+  echo "usage: $0 [version]" >&2
   exit 1
 fi
 
-VERSION=${1#v}
-
-# devcontainer.json is generated from the VS Code settings, and the
-# same replacement in both leaves them in sync, which
-# calkit/tests/test_resources.py checks
+# Files where the image tag is defined
 FILES=(
   calkit/latex.py
   calkit/resources/devcontainer/devcontainer.json
@@ -20,6 +16,15 @@ FILES=(
   docs/tutorials/existing-project.md
   hub/frontend/src/lib/environments.ts
 )
+
+if [ $# -eq 0 ]; then
+  grep -Eho 'ghcr\.io/calkit/latex:[0-9]+\.[0-9]+\.[0-9]+' "${FILES[@]}" \
+    | sed 's|.*:||' \
+    | sort -u
+  exit 0
+fi
+
+VERSION=${1#v}
 
 # BSD sed takes its backup suffix as the argument to -i, GNU sed doesn't
 if sed --version >/dev/null 2>&1; then

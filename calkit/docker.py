@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -598,7 +599,9 @@ def _run_showing_output(
 
     Pushing and pulling an image are the slowest things Calkit does, and
     swallowing Docker's progress for minutes on end looks like a hang, so
-    the output goes to the terminal as it arrives. It's captured too, since
+    the output goes to the terminal as it arrives. It goes to stderr, since
+    stdout of a command run in an environment belongs to that command,
+    e.g., latexdiff's marked-up document. It's captured too, since
     what a registry says on refusal decides what happens next.
 
     ``start_timeout`` gives up when Docker says nothing at all before it
@@ -660,7 +663,7 @@ def _run_showing_output(
             if last_status.get(layer_id) == status:
                 continue
             last_status[layer_id] = status
-        print(line, end="", flush=True)
+        print(line, end="", file=sys.stderr, flush=True)
     proc.stdout.close()
     return proc.wait() == 0, "".join(lines)
 

@@ -9,6 +9,7 @@ import re
 import shutil
 import string
 import subprocess
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -513,8 +514,22 @@ _VERBATIM_PARAM_RE = re.compile(
     r"(\\(?:verbatiminput\*?|lstinputlisting))"
     r"(?=\s*(?:\[[^\]\n]*\])?\s*\{[^}\n]*#[0-9])"
 )
-_INPUT_WRAPPER_RE = re.compile(
-    r"\\([A-Za-z@]+)\*?\s*(?:\[[^\]]*\]\s*)*\{\s*\\(?:input|include)\s*\{"
+# latexdiff's figure markup makes its markers assignments, which can't
+# come before anything that has to start a table row or cell
+_ALIGN_MARKERS_RE = re.compile(
+    rb"(?:\\DIF(?:add|del)(?:begin|end)(?:FL)?(?:\s|%[^\n]*\n)*)+"
+    rb"(?=\\(?:hline|cline|multicolumn|multispan|omit|noalign|caption"
+    rb"|toprule|midrule|bottomrule|cmidrule|specialrule|addlinespace|endhead"
+    rb"|endfirsthead|endfoot|endlastfoot)(?![A-Za-z]))"
+)
+# latexdiff marking up the macro an \ifdefined tests for
+_IFDEFINED_MARKUP_RE = re.compile(
+    rb"\\ifdefined\s*\\DIF(add|del)(FL)?\{(\\[A-Za-z@]+)"
+)
+# A one-argument macro's definition, up to its body's opening brace
+_ONE_ARG_MACRO_DEF_RE = re.compile(
+    r"\\(?:(?:re|provide)?newcommand\*?\s*(?:\{\s*\\([A-Za-z@]+)\s*\}"
+    r"|\\([A-Za-z@]+))\s*\[1\]|def\s*\\([A-Za-z@]+)#1)\s*(?=\{)"
 )
 get_diff_path = calkit.latex.get_diff_path
 _default_base_ref = calkit.latex.default_base_ref
@@ -653,6 +668,38 @@ def diff(
             ),
         ),
     ] = False,
+    filter_script: Annotated[
+        str | None,
+        typer.Option(
+            "--filter-script",
+            help=(
+                "Python script to pipe the marked-up document through "
+                "before it's built, e.g., to drop changes that don't change "
+                "the rendered text. It reads the document on stdin and "
+                "writes the result to stdout."
+            ),
+        ),
+    ] = None,
+    filter_env: Annotated[
+        str | None,
+        typer.Option(
+            "--filter-env",
+            help=(
+                "Environment to run the filter script in. Defaults to "
+                "Calkit's own Python."
+            ),
+        ),
+    ] = None,
+    filter_args: Annotated[
+        list[str],
+        typer.Option(
+            "--filter-arg",
+            help=(
+                "Argument to pass to the filter script. Repeat the option "
+                "to pass more than one."
+            ),
+        ),
+    ] = [],
     no_check: Annotated[
         bool,
         typer.Option(
@@ -758,9 +805,9 @@ def diff(
         except NotDvcRepoError:
             return fetched
         found: list[str] = []
-        for path in paths:
+        for path in dict.fromkeys(p.rstrip("/") for p in paths):
             try:
-                found += list(fs.find(path.rstrip("/")))
+                found += list(fs.find(path))
             except FileNotFoundError:
                 continue
             except Exception as e:
@@ -769,7 +816,9 @@ def diff(
                 # comparison can still be built
                 warn(
                     f"Can't list {path} at {rev[:7]}, so the diff will be "
-                    f"missing it: {reason(e)}"
+                    f"missing it: {reason(e)}. Its data is in neither the "
+                    "local cache nor the DVC remote, so it was likely never "
+                    "pushed; push it from a machine that has it"
                 )
         for rpath in dict.fromkeys(found):
             dvc_info = fs.info(rpath).get("dvc_info")
@@ -846,6 +895,141 @@ def diff(
             new_text = _VERBATIM_PARAM_RE.sub("\\1%\n", text)
             if new_text != text:
                 source_path.write_text(new_text, encoding="utf-8")
+
+    def expand_wrapper_macros(root: str) -> None:
+        """Replace each use of a macro wrapping a block with its body.
+
+        latexdiff reads a command's argument as one token, or with
+        --append-textcmd as text, and neither survives an argument holding a
+        table or a whole \\include: the block shows as deleted and re-added,
+        or its table breaks. Expanded, what it wraps is compared like the
+        rest of the document. Only one-argument macros used with an argument
+        spanning lines are expanded, which inline macros rarely are.
+        """
+
+        def group_end(text: str, start: int) -> int | None:
+            """Where the brace group opening at ``start`` ends."""
+            depth = 0
+            i = start
+            while i < len(text):
+                c = text[i]
+                if c == "\\":
+                    i += 2
+                    continue
+                if c == "%":
+                    newline = text.find("\n", i)
+                    if newline == -1:
+                        return None
+                    i = newline
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return i + 1
+                i += 1
+            return None
+
+        def in_comment(text: str, pos: int) -> bool:
+            line = text[text.rfind("\n", 0, pos) + 1 : pos]
+            return re.search(r"(?<!\\)%", line) is not None
+
+        sources = [tex_file] + [
+            path
+            for path in calkit.latex.detect_inputs(tex_file, wdir=root)
+            if Path(path).suffix in calkit.latex._SOURCE_EXTS
+        ]
+        texts: dict[Path, str] = {}
+        for source in dict.fromkeys(sources):
+            try:
+                texts[Path(root, source)] = Path(root, source).read_text(
+                    encoding="utf-8"
+                )
+            except (OSError, UnicodeDecodeError):
+                continue
+        bodies: dict[str, str] = {}
+        for text in texts.values():
+            for match in _ONE_ARG_MACRO_DEF_RE.finditer(text):
+                if in_comment(text, match.start()):
+                    continue
+                end = group_end(text, match.end())
+                if end is None:
+                    continue
+                body = text[match.end() + 1 : end - 1]
+                if body.count("#1") == 1 and not re.search(r"#[2-9#]", body):
+                    bodies[
+                        match.group(1) or match.group(2) or match.group(3)
+                    ] = body
+        if not bodies:
+            return
+        use_re = re.compile(
+            r"\\("
+            + "|".join(map(re.escape, bodies))
+            + r")(?![A-Za-z@])\s*(?=\{)"
+        )
+        expanded: set[str] = set()
+        for source_path, text in texts.items():
+            new_text = text
+            # Again for a wrapper inside another's argument
+            for _ in range(5):
+                parts = []
+                pos = 0
+                for match in use_re.finditer(new_text):
+                    if match.start() < pos or in_comment(
+                        new_text, match.start()
+                    ):
+                        continue
+                    end = group_end(new_text, match.end())
+                    if end is None:
+                        continue
+                    arg = new_text[match.end() + 1 : end - 1]
+                    if "\n" not in arg:
+                        continue
+                    body = bodies[match.group(1)]
+                    # A group of its own would be one token to latexdiff
+                    if "{#1}" in body:
+                        body = body.replace(
+                            "{#1}", "\\begingroup " + arg + "\\endgroup "
+                        )
+                    else:
+                        body = body.replace("#1", arg)
+                    parts += [new_text[pos : match.start()], body]
+                    pos = end
+                    expanded.add(match.group(1))
+                if not parts:
+                    break
+                new_text = "".join(parts) + new_text[pos:]
+            if new_text != text:
+                source_path.write_text(new_text, encoding="utf-8")
+        for name in sorted(expanded - expanded_names):
+            typer.echo(
+                f"Expanding \\{name} so latexdiff can mark up what it wraps"
+            )
+        expanded_names.update(expanded)
+
+    def copy_working_sources(dest: str) -> None:
+        """Copy the working tree's sources, so they can be prepared the way
+        a checkout's are without touching the user's files."""
+        exts = calkit.latex._SOURCE_EXTS | {".tikz", ".pgf"}
+        doc_dir = Path(os.path.dirname(tex_file) or ".")
+        found = [
+            p.as_posix()
+            for p in doc_dir.rglob("*")
+            if p.suffix in exts
+            and not any(part.startswith(".") for part in p.parts)
+            and p.is_file()
+        ]
+        found += [
+            path
+            for path in calkit.latex.detect_inputs(tex_file)
+            if Path(path).suffix in calkit.latex._SOURCE_EXTS
+        ]
+        for path in dict.fromkeys([tex_file] + found):
+            if not os.path.isfile(path):
+                continue
+            target = os.path.join(dest, path)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(path, target)
 
     def default_inputs(root: str) -> list[str]:
         """What to fetch or note for a side when no inputs were given.
@@ -939,6 +1123,24 @@ def diff(
             stage.get("latexdiff_args") or []
         )
         pipeline_inputs = stage_inputs(str(stage_name), stage)
+        diff_filter = stage.get("diff_filter")
+        if filter_script is None and isinstance(diff_filter, dict):
+            filter_script = stage_path(stage, diff_filter["script_path"])
+            filter_env = diff_filter.get("environment")
+            filter_args = list(diff_filter.get("args") or [])
+    filter_cmd: list[str] | None = None
+    if filter_script is not None:
+        # Calkit's own interpreter unless told otherwise, since there may be
+        # no python on the PATH, or not one with what the script needs
+        if filter_env is None:
+            filter_cmd = [sys.executable, filter_script]
+        else:
+            filter_cmd = (
+                ["calkit", "xenv", "--name", filter_env]
+                + (["--no-check"] if no_check else [])
+                + ["--", "python", filter_script]
+            )
+        filter_cmd += filter_args
     if output is None:
         output = get_diff_path(
             tex_file,
@@ -948,6 +1150,8 @@ def diff(
         )
     checkouts: dict[str, str] = {}
     shas: dict[str, str] = {}
+    expanded_names: set[str] = set()
+    working_copy = os.path.join(DIFF_TMP_DIR, "working")
     try:
         for name, ref in [("base", from_ref), ("head", to_ref)]:
             if ref is None:
@@ -1003,8 +1207,15 @@ def diff(
                         f"{file_path.as_posix()} {stat.st_size} "
                         f"{stat.st_mtime_ns}"
                     )
-        for root in checkouts.values():
+        prepared = list(checkouts.values())
+        if "head" not in checkouts:
+            shutil.rmtree(working_copy, ignore_errors=True)
+            copy_working_sources(working_copy)
+            sides["head"] = os.path.join(working_copy, tex_file)
+            prepared.append(working_copy)
+        for root in prepared:
             break_verbatim_params(root)
+            expand_wrapper_macros(root)
         point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
             base_tex_fpath=sides["base"],
@@ -1019,12 +1230,14 @@ def diff(
             context=context,
             no_check=no_check,
             keep_tex=keep_tex,
+            filter_cmd=filter_cmd,
             force=force,
             verbose=verbose,
         )
     finally:
         for path in checkouts.values():
             _remove_worktree(path)
+        shutil.rmtree(working_copy, ignore_errors=True)
 
 
 def _marked_up_digest(marked_up: bytes, context: list[str] = []) -> str:
@@ -1080,6 +1293,7 @@ def _build_diff(
     keep_tex: bool,
     force: bool,
     verbose: bool,
+    filter_cmd: list[str] | None = None,
 ) -> None:
     """Mark up one document against another and build the result.
 
@@ -1095,7 +1309,11 @@ def _build_diff(
     tex_dir = os.path.dirname(tex_file_fpath) or "."
     build_dir = os.path.normpath(os.path.join(head_root, tex_dir))
     stem = Path(tex_file_fpath).stem
-    diff_tex_fpath = os.path.join(build_dir, f"{stem}-diff.tex")
+    # Named so as not to overwrite, then delete, a file of the user's
+    job = f"{stem}-diff"
+    if os.path.exists(os.path.join(build_dir, f"{job}.tex")):
+        job = f"{stem}-calkit-diff"
+    diff_tex_fpath = os.path.join(build_dir, f"{job}.tex")
     # Where --keep-tex leaves its copies: beside the diff PDF, since a
     # checkout is removed afterwards. The old and new files are what
     # latexdiff saw, after verbatim fixes and figure repointing, so a
@@ -1110,48 +1328,6 @@ def _build_diff(
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
         latexdiff_cmd = ["latexdiff", "--flatten", "--encoding=utf8"]
-        sources = [base_tex_fpath, head_tex_fpath] + [
-            path
-            for side in (base_tex_fpath, head_tex_fpath)
-            for path in calkit.latex.detect_inputs(side)
-            if Path(path).suffix in calkit.latex._SOURCE_EXTS
-        ]
-        texts = [
-            Path(path).read_text(encoding="utf-8", errors="replace")
-            for path in sources
-            if os.path.isfile(path)
-        ]
-        # A macro wrapping an \input or \include, e.g., one making an
-        # appendix single column, gets the whole flattened file as its
-        # argument, which latexdiff would otherwise mark up as one token
-        wrappers = sorted(
-            {
-                name
-                for text in texts
-                for name in _INPUT_WRAPPER_RE.findall(text)
-            }
-        )
-        if wrappers:
-            latexdiff_cmd.append("--append-textcmd=" + ";".join(wrappers))
-        # A checkout's verbatim inputs named by macro parameters are already
-        # broken, so this only finds the working tree's, which can't be
-        # edited. A filter breaks those instead, though latexdiff's
-        # --filter-script mangles anything outside Latin-1.
-        if any(_VERBATIM_PARAM_RE.search(text) for text in texts):
-            filter_path = Path(DIFF_TMP_DIR, "verbatim-param-filter.pl")
-            os.makedirs(filter_path.parent, exist_ok=True)
-            # latexdiff appends a newline to what it sends, so drop it
-            filter_path.write_text(
-                "local $/;\n"
-                "my $text = <STDIN>;\n"
-                "$text =~ s/\\n\\z//;\n"
-                "$text =~ s/(\\\\(?:verbatiminput\\*?|lstinputlisting))"
-                "(?=\\s*(?:\\[[^\\]\\n]*\\])?\\s*\\{[^}\\n]*#[0-9])/$1%\\n/g;\n"
-                "print $text;\n"
-            )
-            latexdiff_cmd.append(
-                f"--filter-script=perl {filter_path.as_posix()}"
-            )
         # Each side has its own revision's figures, so a changed one is
         # shown both ways rather than only as it is now, unless the user
         # chose otherwise
@@ -1179,6 +1355,26 @@ def _build_diff(
             )
         except subprocess.CalledProcessError as e:
             raise_error(f"latexdiff failed with exit status {e.returncode}")
+        # They only switch how figures are marked, so dropping them is safe
+        marked_up = _ALIGN_MARKERS_RE.sub(b"", marked_up)
+        # latexdiff takes the macro \ifdefined tests for as text, which
+        # makes the test always pass
+        marked_up = _IFDEFINED_MARKUP_RE.sub(
+            rb"\\ifdefined\3\\DIF\1\2{", marked_up
+        )
+        if filter_cmd is not None:
+            typer.echo("Filtering the marked-up document")
+            try:
+                marked_up = subprocess.run(
+                    filter_cmd,
+                    input=marked_up,
+                    stdout=subprocess.PIPE,
+                    check=True,
+                ).stdout
+            except subprocess.CalledProcessError as e:
+                raise_error(
+                    f"Diff filter failed with exit status {e.returncode}"
+                )
         # The newer side's copy, which is what the document was built with
         # at that revision
         rc_path = None
@@ -1219,9 +1415,12 @@ def _build_diff(
         # directories below override any the rc file sets
         if rc_path is not None:
             latexmk_cmd += ["-r", rc_path]
+        # Through errors, since a diff that's mostly right is more use to
+        # a reader than none, and what went wrong is reported below
         latexmk_cmd += [
             "-pdf",
             "-cd",
+            "-f",
             "-interaction=nonstopmode",
             f"-auxdir={rel_aux}",
             f"-outdir={rel_aux}",
@@ -1244,12 +1443,15 @@ def _build_diff(
             env_vars=tex_env_vars,
         )
         typer.echo("Building the marked-up document")
+        built = os.path.join(aux_dir, f"{job}.pdf")
+        if os.path.isfile(built):
+            os.remove(built)
         try:
             status = _run_latexmk(
                 cmd,
                 env=(os.environ | tex_env_vars) if tex_env_vars else None,
-                log_path=os.path.join(aux_dir, f"{stem}-diff.log"),
-                fdb_path=os.path.join(aux_dir, f"{stem}-diff.fdb_latexmk"),
+                log_path=os.path.join(aux_dir, f"{job}.log"),
+                fdb_path=os.path.join(aux_dir, f"{job}.fdb_latexmk"),
                 environment=environment,
                 verbose=verbose,
             )
@@ -1257,7 +1459,7 @@ def _build_diff(
                 raise subprocess.CalledProcessError(status, cmd)
         except subprocess.CalledProcessError as e:
             # -silent hides why, so show the errors LaTeX logged
-            log_path = Path(aux_dir, f"{stem}-diff.log")
+            log_path = Path(aux_dir, f"{job}.log")
             try:
                 log_lines = log_path.read_text(
                     encoding="utf-8", errors="replace"
@@ -1272,14 +1474,21 @@ def _build_diff(
             if excerpt:
                 typer.echo(f"From {log_path.as_posix()}:", err=True)
                 typer.echo("\n".join(excerpt), err=True)
-            msg = (
-                "latexmk failed on the diff document with exit code "
-                f"{e.returncode}"
+            inspect = "" if keep_tex else "; rerun with --keep-tex to inspect"
+            if not os.path.isfile(built):
+                raise_error(
+                    "latexmk failed on the diff document with exit code "
+                    f"{e.returncode}{inspect}"
+                )
+            # An error the document itself has when built from scratch,
+            # e.g., one a kept aux directory hides, should be fixed there
+            warn(
+                "The diff PDF was built despite the LaTeX errors above, so "
+                "parts of it may be wrong. Check whether the document "
+                "itself builds cleanly from an empty aux directory"
+                f"{inspect}",
+                err=True,
             )
-            if not keep_tex:
-                msg += "; rerun with --keep-tex to inspect"
-            raise_error(msg)
-        built = os.path.join(aux_dir, f"{stem}-diff.pdf")
         if not os.path.isfile(built):
             raise_error("latexmk did not produce a PDF")
         os.makedirs(os.path.dirname(output) or ".", exist_ok=True)

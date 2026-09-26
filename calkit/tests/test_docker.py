@@ -426,7 +426,8 @@ def test_run_showing_output_collapses_repeated_layer_status(capfd):
     # Everything Docker said is kept, since what a registry says on refusal
     # decides what happens next
     assert output.count("abc123: Waiting") == 2
-    shown = capfd.readouterr().out
+    # On stderr, so a command run in the environment keeps stdout
+    shown = capfd.readouterr().err
     # ...but a repeat of the same status isn't worth showing twice
     assert shown.count("abc123: Waiting") == 1
     assert shown.count("def456: Waiting") == 1

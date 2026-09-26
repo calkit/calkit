@@ -136,10 +136,17 @@ document can usually diff it too.
 
 ### For pull request reviewers
 
-A single revision compares it against `HEAD`, so `- main` means "what this
-branch has committed, against the `main` branch".
+A single revision is compared against the working tree,
+which is what the document itself is built from,
+so `- main` means "what this branch changes, against the `main` branch".
 That's the diff you'd want to see for a pull request,
 and it will be rebuilt by the pipeline whenever the PR or `main` changes.
+Since it reads the working tree, you can make an edit, run the pipeline to
+check both the document and its diff, and commit them together.
+
+If a local branch named in `diffs` is behind its remote-tracking branch,
+e.g., because it was updated on GitHub and fetched but never checked out,
+the remote's commit is used and Calkit prints a warning.
 
 On the default branch, `main` and `HEAD` are the same commit, so the
 comparison comes out empty and the diff will show no changes.
@@ -238,6 +245,42 @@ pipeline:
         - --type=CFONT
 ```
 
+A macro that wraps a block of the document, e.g., one that switches the
+appendix to a single column, is expanded before comparing,
+so what it wraps is marked up like the rest of the document.
+
+To post-process the marked-up document before it's built,
+set `diff_filter` to a Python script that reads it on stdin and writes the
+result to stdout, e.g., to drop changes that only replace text with the
+equivalent glossary entry:
+
+```yaml
+pipeline:
+  stages:
+    paper-1:
+      kind: latex
+      environment: tex
+      target_path: pubs/paper-1/main.tex
+      diffs:
+        - paper-1-submitted
+      diff_filter:
+        kind: python-script
+        script_path: scripts/glossary-filter.py
+```
+
+By default the script runs with Calkit's own Python,
+so it can only use the standard library and Calkit's dependencies.
+To run it in one of the project's environments instead,
+set `environment` on the filter, and pass any arguments with `args`.
+The script is a dependency of the diff stage, so changing it rebuilds the
+diff.
+
+If LaTeX reports errors building the marked-up document but still produces
+a PDF, the diff is kept and the errors are shown in a warning.
+Some of these errors come from the document itself, and can be hidden when
+building it normally, e.g., by an aux directory kept between runs,
+so check that the document builds from an empty aux directory.
+
 ### Running diffs
 
 Each comparison is its own pipeline substage, named after the document's
@@ -251,9 +294,8 @@ calkit run paper-1.diffs
 
 ### Comparing on demand
 
-Diffs created by the pipeline are for memorializing
-committed versions.
-To see uncommitted changes, `calkit latex diff` runs a comparison on demand,
+To compare against a revision that isn't in the pipeline's `diffs`,
+`calkit latex diff` runs a comparison on demand,
 and with no `--to` option specified, the comparison is the working copy:
 
 ```sh

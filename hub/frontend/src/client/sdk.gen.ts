@@ -23,6 +23,7 @@ import type {
   BodyProjectsPostProjectPublication,
   BodyProjectsPostProjectUpload,
   BodyProjectsPutProjectContents,
+  CheckIn,
   CommentReply,
   ContentPatch,
   CreateReleaseGithubReleaseErrors,
@@ -35,6 +36,8 @@ import type {
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
+  DeleteOperatorErrors,
+  DeleteOperatorResponses,
   DeleteProjectByIdErrors,
   DeleteProjectByIdResponses,
   DeleteProjectCollaboratorErrors,
@@ -103,6 +106,7 @@ import type {
   GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
+  GetOperatorsResponses,
   GetOrgsErrors,
   GetOrgsResponses,
   GetOrgStorageErrors,
@@ -207,6 +211,8 @@ import type {
   GetProjectsResponses,
   GetProjectTablesErrors,
   GetProjectTablesResponses,
+  GetProjectWorkspacesErrors,
+  GetProjectWorkspacesResponses,
   GetProjectZoteroCollectionsErrors,
   GetProjectZoteroCollectionsResponses,
   GetProjectZoteroItemPdfErrors,
@@ -272,6 +278,7 @@ import type {
   NativeCollaboratorPost,
   NewPassword,
   OnboardingFlagPost,
+  OperatorPost,
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
@@ -307,6 +314,12 @@ import type {
   PostLoginDeviceResponses,
   PostLoginDeviceTokenErrors,
   PostLoginDeviceTokenResponses,
+  PostOperatorCheckInErrors,
+  PostOperatorCheckInResponses,
+  PostOperatorErrors,
+  PostOperatorRelayTokenErrors,
+  PostOperatorRelayTokenResponses,
+  PostOperatorResponses,
   PostOrgErrors,
   PostOrgResponses,
   PostProjectCollaboratorByEmailErrors,
@@ -8948,6 +8961,190 @@ export class FeedbackService {
       security: [{ scheme: "bearer", type: "http" }],
       url: "/feature-votes",
       ...options,
+    })
+  }
+}
+
+export class OperatorsService {
+  /**
+   * Get Operators
+   */
+  public static getOperators<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetOperatorsResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetOperatorsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators",
+      ...options,
+    })
+  }
+
+  /**
+   * Post Operator
+   */
+  public static postOperator<ThrowOnError extends boolean = true>(
+    parameters: {
+      operatorPost: OperatorPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostOperatorResponses, PostOperatorErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "operatorPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorResponses,
+      PostOperatorErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete Operator
+   */
+  public static deleteOperator<ThrowOnError extends boolean = true>(
+    parameters: {
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteOperatorResponses,
+    DeleteOperatorErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "operator_id" }] }],
+    )
+    return (options?.client ?? client).delete<
+      DeleteOperatorResponses,
+      DeleteOperatorErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Operator Check In
+   */
+  public static postOperatorCheckIn<ThrowOnError extends boolean = true>(
+    parameters: {
+      checkIn: CheckIn
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorCheckInResponses,
+    PostOperatorCheckInErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "checkIn", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorCheckInResponses,
+      PostOperatorCheckInErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/check-in",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Operator Relay Token
+   */
+  public static postOperatorRelayToken<ThrowOnError extends boolean = true>(
+    parameters: {
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorRelayTokenResponses,
+    PostOperatorRelayTokenErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "operator_id" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorRelayTokenResponses,
+      PostOperatorRelayTokenErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}/relay-token",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Workspaces
+   */
+  public static getProjectWorkspaces<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectWorkspacesResponses,
+    GetProjectWorkspacesErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectWorkspacesResponses,
+      GetProjectWorkspacesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/workspaces",
+      ...options,
+      ...params,
     })
   }
 }

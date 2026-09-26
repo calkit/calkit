@@ -48,6 +48,7 @@ import { Route as LayoutAccountNameProjectNameLayoutFilesRouteImport } from './r
 import { Route as LayoutAccountNameProjectNameLayoutFiguresRouteImport } from './routes/_layout/$accountName/$projectName/_layout/figures'
 import { Route as LayoutAccountNameProjectNameLayoutEnvironmentsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/environments'
 import { Route as LayoutAccountNameProjectNameLayoutDatasetsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/datasets'
+import { Route as LayoutAccountNameProjectNameLayoutComputeRouteImport } from './routes/_layout/$accountName/$projectName/_layout/compute'
 import { Route as LayoutAccountNameProjectNameLayoutCollaboratorsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/collaborators'
 import { Route as LayoutAccountNameProjectNameLayoutAppsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/apps'
 import { Route as LayoutAccountNameProjectNameLayoutAppRouteImport } from './routes/_layout/$accountName/$projectName/_layout/app'
@@ -265,6 +266,12 @@ const LayoutAccountNameProjectNameLayoutDatasetsRoute =
     path: '/datasets',
     getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
   } as any)
+const LayoutAccountNameProjectNameLayoutComputeRoute =
+  LayoutAccountNameProjectNameLayoutComputeRouteImport.update({
+    id: '/compute',
+    path: '/compute',
+    getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
+  } as any)
 const LayoutAccountNameProjectNameLayoutCollaboratorsRoute =
   LayoutAccountNameProjectNameLayoutCollaboratorsRouteImport.update({
     id: '/collaborators',
@@ -326,6 +333,7 @@ export interface FileRoutesByFullPath {
   '/$accountName/$projectName/app': typeof LayoutAccountNameProjectNameLayoutAppRoute
   '/$accountName/$projectName/apps': typeof LayoutAccountNameProjectNameLayoutAppsRouteWithChildren
   '/$accountName/$projectName/collaborators': typeof LayoutAccountNameProjectNameLayoutCollaboratorsRoute
+  '/$accountName/$projectName/compute': typeof LayoutAccountNameProjectNameLayoutComputeRoute
   '/$accountName/$projectName/datasets': typeof LayoutAccountNameProjectNameLayoutDatasetsRoute
   '/$accountName/$projectName/environments': typeof LayoutAccountNameProjectNameLayoutEnvironmentsRoute
   '/$accountName/$projectName/figures': typeof LayoutAccountNameProjectNameLayoutFiguresRoute
@@ -369,6 +377,7 @@ export interface FileRoutesByTo {
   '/$accountName/$projectName': typeof LayoutAccountNameProjectNameLayoutIndexRoute
   '/$accountName/$projectName/app': typeof LayoutAccountNameProjectNameLayoutAppRoute
   '/$accountName/$projectName/collaborators': typeof LayoutAccountNameProjectNameLayoutCollaboratorsRoute
+  '/$accountName/$projectName/compute': typeof LayoutAccountNameProjectNameLayoutComputeRoute
   '/$accountName/$projectName/datasets': typeof LayoutAccountNameProjectNameLayoutDatasetsRoute
   '/$accountName/$projectName/environments': typeof LayoutAccountNameProjectNameLayoutEnvironmentsRoute
   '/$accountName/$projectName/figures': typeof LayoutAccountNameProjectNameLayoutFiguresRoute
@@ -415,6 +424,7 @@ export interface FileRoutesById {
   '/_layout/$accountName/$projectName/_layout/app': typeof LayoutAccountNameProjectNameLayoutAppRoute
   '/_layout/$accountName/$projectName/_layout/apps': typeof LayoutAccountNameProjectNameLayoutAppsRouteWithChildren
   '/_layout/$accountName/$projectName/_layout/collaborators': typeof LayoutAccountNameProjectNameLayoutCollaboratorsRoute
+  '/_layout/$accountName/$projectName/_layout/compute': typeof LayoutAccountNameProjectNameLayoutComputeRoute
   '/_layout/$accountName/$projectName/_layout/datasets': typeof LayoutAccountNameProjectNameLayoutDatasetsRoute
   '/_layout/$accountName/$projectName/_layout/environments': typeof LayoutAccountNameProjectNameLayoutEnvironmentsRoute
   '/_layout/$accountName/$projectName/_layout/figures': typeof LayoutAccountNameProjectNameLayoutFiguresRoute
@@ -461,6 +471,7 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/app'
     | '/$accountName/$projectName/apps'
     | '/$accountName/$projectName/collaborators'
+    | '/$accountName/$projectName/compute'
     | '/$accountName/$projectName/datasets'
     | '/$accountName/$projectName/environments'
     | '/$accountName/$projectName/figures'
@@ -504,6 +515,7 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName'
     | '/$accountName/$projectName/app'
     | '/$accountName/$projectName/collaborators'
+    | '/$accountName/$projectName/compute'
     | '/$accountName/$projectName/datasets'
     | '/$accountName/$projectName/environments'
     | '/$accountName/$projectName/figures'
@@ -549,6 +561,7 @@ export interface FileRouteTypes {
     | '/_layout/$accountName/$projectName/_layout/app'
     | '/_layout/$accountName/$projectName/_layout/apps'
     | '/_layout/$accountName/$projectName/_layout/collaborators'
+    | '/_layout/$accountName/$projectName/_layout/compute'
     | '/_layout/$accountName/$projectName/_layout/datasets'
     | '/_layout/$accountName/$projectName/_layout/environments'
     | '/_layout/$accountName/$projectName/_layout/figures'
@@ -853,6 +866,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutDatasetsRouteImport
       parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
     }
+    '/_layout/$accountName/$projectName/_layout/compute': {
+      id: '/_layout/$accountName/$projectName/_layout/compute'
+      path: '/compute'
+      fullPath: '/$accountName/$projectName/compute'
+      preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutComputeRouteImport
+      parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
+    }
     '/_layout/$accountName/$projectName/_layout/collaborators': {
       id: '/_layout/$accountName/$projectName/_layout/collaborators'
       path: '/collaborators'
@@ -920,6 +940,7 @@ interface LayoutAccountNameProjectNameLayoutRouteChildren {
   LayoutAccountNameProjectNameLayoutAppRoute: typeof LayoutAccountNameProjectNameLayoutAppRoute
   LayoutAccountNameProjectNameLayoutAppsRoute: typeof LayoutAccountNameProjectNameLayoutAppsRouteWithChildren
   LayoutAccountNameProjectNameLayoutCollaboratorsRoute: typeof LayoutAccountNameProjectNameLayoutCollaboratorsRoute
+  LayoutAccountNameProjectNameLayoutComputeRoute: typeof LayoutAccountNameProjectNameLayoutComputeRoute
   LayoutAccountNameProjectNameLayoutDatasetsRoute: typeof LayoutAccountNameProjectNameLayoutDatasetsRoute
   LayoutAccountNameProjectNameLayoutEnvironmentsRoute: typeof LayoutAccountNameProjectNameLayoutEnvironmentsRoute
   LayoutAccountNameProjectNameLayoutFiguresRoute: typeof LayoutAccountNameProjectNameLayoutFiguresRoute
@@ -946,6 +967,8 @@ const LayoutAccountNameProjectNameLayoutRouteChildren: LayoutAccountNameProjectN
       LayoutAccountNameProjectNameLayoutAppsRouteWithChildren,
     LayoutAccountNameProjectNameLayoutCollaboratorsRoute:
       LayoutAccountNameProjectNameLayoutCollaboratorsRoute,
+    LayoutAccountNameProjectNameLayoutComputeRoute:
+      LayoutAccountNameProjectNameLayoutComputeRoute,
     LayoutAccountNameProjectNameLayoutDatasetsRoute:
       LayoutAccountNameProjectNameLayoutDatasetsRoute,
     LayoutAccountNameProjectNameLayoutEnvironmentsRoute:

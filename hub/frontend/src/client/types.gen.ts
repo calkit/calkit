@@ -293,6 +293,14 @@ export type CheckIn = {
    */
   calkit_version?: string | null
   /**
+   * Mode
+   */
+  mode?: "service" | "foreground" | "cron" | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
    * Workspaces
    */
   workspaces?: Array<WorkspaceInfo>
@@ -326,6 +334,10 @@ export type CheckInResp = {
    * Check In Interval
    */
   check_in_interval?: number
+  /**
+   * Connect
+   */
+  connect?: boolean
 }
 
 /**
@@ -2565,6 +2577,18 @@ export type OperatorOut = {
    */
   last_seen?: string | null
   /**
+   * Mode
+   */
+  mode?: string | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Connect Requested At
+   */
+  connect_requested_at?: string | null
+  /**
    * Is Active
    */
   is_active?: boolean
@@ -2572,6 +2596,10 @@ export type OperatorOut = {
    * Is Online
    */
   is_online: boolean
+  /**
+   * Is Asleep
+   */
+  is_asleep: boolean
 }
 
 /**
@@ -2655,6 +2683,18 @@ export type OperatorRegistered = {
    */
   last_seen?: string | null
   /**
+   * Mode
+   */
+  mode?: string | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Connect Requested At
+   */
+  connect_requested_at?: string | null
+  /**
    * Is Active
    */
   is_active?: boolean
@@ -2662,6 +2702,10 @@ export type OperatorRegistered = {
    * Is Online
    */
   is_online: boolean
+  /**
+   * Is Asleep
+   */
+  is_asleep: boolean
   /**
    * Token
    */
@@ -4010,6 +4054,10 @@ export type ProjectWorkspace = {
    * Operator Online
    */
   operator_online: boolean
+  /**
+   * Operator Asleep
+   */
+  operator_asleep: boolean
 }
 
 /**
@@ -14672,6 +14720,38 @@ export type PostOperatorCheckInResponses = {
 
 export type PostOperatorCheckInResponse =
   PostOperatorCheckInResponses[keyof PostOperatorCheckInResponses]
+
+export type PostOperatorWakeData = {
+  body?: never
+  path: {
+    /**
+     * Operator Id
+     */
+    operator_id: string
+  }
+  query?: never
+  url: "/operators/{operator_id}/wake"
+}
+
+export type PostOperatorWakeErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostOperatorWakeError =
+  PostOperatorWakeErrors[keyof PostOperatorWakeErrors]
+
+export type PostOperatorWakeResponses = {
+  /**
+   * Successful Response
+   */
+  200: OperatorOut
+}
+
+export type PostOperatorWakeResponse =
+  PostOperatorWakeResponses[keyof PostOperatorWakeResponses]
 
 export type PostOperatorRelayTokenData = {
   body?: never

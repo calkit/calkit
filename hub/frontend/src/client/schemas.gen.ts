@@ -547,6 +547,23 @@ export const CheckInSchema = {
       ],
       title: "Calkit Version",
     },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["service", "foreground", "cron"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: true,
+    },
     workspaces: {
       items: {
         $ref: "#/components/schemas/WorkspaceInfo",
@@ -589,6 +606,11 @@ export const CheckInRespSchema = {
       type: "integer",
       title: "Check In Interval",
       default: 60,
+    },
+    connect: {
+      type: "boolean",
+      title: "Connect",
+      default: false,
     },
   },
   type: "object",
@@ -4406,6 +4428,35 @@ export const OperatorOutSchema = {
       ],
       title: "Last Seen",
     },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 16,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: false,
+    },
+    connect_requested_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connect Requested At",
+    },
     is_active: {
       type: "boolean",
       title: "Is Active",
@@ -4415,9 +4466,13 @@ export const OperatorOutSchema = {
       type: "boolean",
       title: "Is Online",
     },
+    is_asleep: {
+      type: "boolean",
+      title: "Is Asleep",
+    },
   },
   type: "object",
-  required: ["user_id", "name", "is_online"],
+  required: ["user_id", "name", "is_online", "is_asleep"],
   title: "OperatorOut",
 } as const
 
@@ -4594,6 +4649,35 @@ export const OperatorRegisteredSchema = {
       ],
       title: "Last Seen",
     },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 16,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: false,
+    },
+    connect_requested_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connect Requested At",
+    },
     is_active: {
       type: "boolean",
       title: "Is Active",
@@ -4603,13 +4687,17 @@ export const OperatorRegisteredSchema = {
       type: "boolean",
       title: "Is Online",
     },
+    is_asleep: {
+      type: "boolean",
+      title: "Is Asleep",
+    },
     token: {
       type: "string",
       title: "Token",
     },
   },
   type: "object",
-  required: ["user_id", "name", "is_online", "token"],
+  required: ["user_id", "name", "is_online", "is_asleep", "token"],
   title: "OperatorRegistered",
 } as const
 
@@ -7042,9 +7130,19 @@ export const ProjectWorkspaceSchema = {
       type: "boolean",
       title: "Operator Online",
     },
+    operator_asleep: {
+      type: "boolean",
+      title: "Operator Asleep",
+    },
   },
   type: "object",
-  required: ["path", "operator_id", "operator_name", "operator_online"],
+  required: [
+    "path",
+    "operator_id",
+    "operator_name",
+    "operator_online",
+    "operator_asleep",
+  ],
   title: "ProjectWorkspace",
 } as const
 

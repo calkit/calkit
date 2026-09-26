@@ -320,6 +320,8 @@ import type {
   PostOperatorRelayTokenErrors,
   PostOperatorRelayTokenResponses,
   PostOperatorResponses,
+  PostOperatorWakeErrors,
+  PostOperatorWakeResponses,
   PostOrgErrors,
   PostOrgResponses,
   PostProjectCollaboratorByEmailErrors,
@@ -9077,6 +9079,38 @@ export class OperatorsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Post Operator Wake
+   *
+   * Ask an Operator in cron mode to connect at its next check-in.
+   */
+  public static postOperatorWake<ThrowOnError extends boolean = true>(
+    parameters: {
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorWakeResponses,
+    PostOperatorWakeErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "operator_id" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorWakeResponses,
+      PostOperatorWakeErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}/wake",
+      ...options,
+      ...params,
     })
   }
 

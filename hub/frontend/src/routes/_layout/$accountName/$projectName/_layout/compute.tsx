@@ -272,6 +272,8 @@ function Compute() {
   const navigate = Route.useNavigate()
   const search = Route.useSearch()
   const showToast = useCustomToast()
+  // Operators in cron mode asked to connect, which do at their next check-in
+  const [waking, setWaking] = useState<Set<string>>(new Set())
   const workspacesQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "workspaces"],
     queryFn: () =>
@@ -279,7 +281,8 @@ function Compute() {
         owner_name: accountName,
         project_name: projectName,
       }).then((r) => r.data),
-    refetchInterval: 30000,
+    // Faster while waiting for a woken Operator to show up
+    refetchInterval: waking.size ? 10000 : 30000,
   })
   const workspaces = workspacesQuery.data ?? []
   const connections = useRef(new Map<string, OperatorConnection>())
@@ -371,6 +374,21 @@ function Compute() {
       showToast("Could not start a session", e.message, "error")
     }
   }
+  const wakeOperator = async (operatorId: string) => {
+    try {
+      await OperatorsService.postOperatorWake({ operator_id: operatorId })
+      setWaking((prev) => new Set(prev).add(operatorId))
+    } catch (e: any) {
+      showToast("Could not wake Operator", e.message, "error")
+    }
+  }
+  // Stop waiting on Operators once they're online
+  useEffect(() => {
+    const online = new Set(onlineOperators)
+    if ([...waking].some((id) => online.has(id))) {
+      setWaking(new Set([...waking].filter((id) => !online.has(id))))
+    }
+  }, [onlineOperators, waking])
   const closePane = (pane: Pane, end: boolean) => {
     const conn = connections.current.get(pane.operatorId)
     if (conn) {
@@ -420,9 +438,20 @@ function Compute() {
                         w={2}
                         h={2}
                         borderRadius="full"
-                        bg={ws.operator_online ? "ui.success" : "gray.400"}
+                        bg={
+                          ws.operator_online
+                            ? "ui.success"
+                            : ws.operator_asleep
+                              ? "yellow.400"
+                              : "gray.400"
+                        }
                       />
                       {ws.operator_name}
+                      {ws.operator_asleep && (
+                        <Badge fontSize="2xs">
+                          {waking.has(ws.operator_id) ? "waking" : "asleep"}
+                        </Badge>
+                      )}
                     </Flex>
                   </Td>
                   <Td>
@@ -470,7 +499,17 @@ function Compute() {
                     </Flex>
                   </Td>
                   <Td>
-                    {ws.kind === "personal" && (
+                    {ws.kind === "personal" && ws.operator_asleep && (
+                      <Button
+                        size="xs"
+                        isLoading={waking.has(ws.operator_id)}
+                        loadingText="Waking"
+                        onClick={() => wakeOperator(ws.operator_id)}
+                      >
+                        Wake
+                      </Button>
+                    )}
+                    {ws.kind === "personal" && !ws.operator_asleep && (
                       <Button
                         size="xs"
                         leftIcon={<FiPlus />}

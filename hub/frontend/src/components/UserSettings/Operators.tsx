@@ -1,4 +1,5 @@
 import {
+  Badge,
   Box,
   Button,
   Code,
@@ -78,9 +79,16 @@ function Operators() {
                         w={2}
                         h={2}
                         borderRadius="full"
-                        bg={op.is_online ? "ui.success" : "gray.400"}
+                        bg={
+                          op.is_online
+                            ? "ui.success"
+                            : op.is_asleep
+                              ? "yellow.400"
+                              : "gray.400"
+                        }
                       />
                       {op.name}
+                      {op.is_asleep && <Badge fontSize="2xs">asleep</Badge>}
                     </Flex>
                   </Td>
                   <Td>

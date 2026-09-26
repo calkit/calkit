@@ -23,6 +23,15 @@ Four issues ask for overlapping versions of this:
 | #90   | Long-running or scheduled ops, device data collection, fleet rollouts |
 | #918  | Compiling the pipeline to CI systems like Buildkite                   |
 
+The core problem is reaching a project on another machine without a VPN
+and SSH, e.g., through VS Code's remote features.
+Tools that control a coding agent remotely solve part of it, but they give
+no shell, only work with one agent, and organize everything around agents
+rather than projects.
+The Operator should instead show one project and all of its parts in one
+place: its workspaces, a shell, and sessions of whichever coding agents
+the user runs.
+
 Two concrete use cases drive the MVP:
 
 - An HPC user wants to see their jobs in the queue, read their logs, and
@@ -31,6 +40,14 @@ Two concrete use cases drive the MVP:
 - A user wants to install the Operator on an office workstation and, from
   home or anywhere else with the hub, interact with a coding agent session
   running there and with the project in a shell.
+
+A third shapes the design beyond the MVP:
+a user drives a project's pipeline from a laptop, with GPU stages running
+as SLURM jobs on a cluster, while a coding agent works in a separate
+checkout on that cluster.
+Eventually they want to work on it hub first: go to the project on the hub,
+join the agent session, open a shell, edit files, and run stages, without
+thinking about which machine does what.
 
 The hub is meant to be cheap and lightweight to run,
 which limits how much traffic it can relay.
@@ -120,9 +137,15 @@ Within those, the owner can open shells and edit files.
 The allowlist and other settings live in `~/.calkit/operator.yaml`.
 Sharing with collaborators is out of scope for the MVP.
 
-The Operator effectively gives the hub a shell on the machine, so the
-user docs must say to install it only on accounts the user alone controls,
-and that some HPC centers prohibit this kind of tunnel.
+The Operator effectively gives the hub a shell on the machine, and
+bypassing a VPN is the point, so the hub account becomes the only barrier
+in front of those machines.
+Opening sessions on an Operator therefore requires two-factor
+authentication or a passkey on the hub account.
+The user docs must say prominently to install the Operator only on
+accounts the user alone controls, and to check institutional policy
+first, since this is equivalent to a VS Code tunnel, which some
+institutions and HPC centers prohibit.
 
 ### Workspaces
 
@@ -137,6 +160,32 @@ There are two kinds:
   stages.
   They are shown in the hub but not edited there.
 
+### Multiple workspaces per project
+
+A project can have many workspaces across a user's Operators, e.g., a
+laptop checkout, a personal checkout on a cluster, and a managed workspace
+on the same cluster.
+
+Git and DVC remain the only way state moves between workspaces.
+There is no live file sync between them.
+Each pipeline run has a single workspace driving it, and its results
+reach the others through commits, pushes, pulls, and DVC.
+This is how the laptop and managed workspaces already interact, and it is
+the only model that stays predictable with an agent editing in one
+workspace while stages run from another.
+The hub makes divergence visible instead of hiding it: its compute page
+lists every workspace of the project with its commit, whether it has
+uncommitted changes, and how far ahead of or behind the hub it is, plus the
+sessions running in it.
+
+To avoid paying twice for expensive stages, the Operator points all of a
+project's workspaces on one machine at a shared DVC cache, so the run cache
+lets one workspace restore outputs another has already computed instead of
+recomputing them.
+A lock keyed on the stage and its input hashes, held while a stage runs on
+that machine, makes a second request for the same computation wait for the
+first instead of submitting its own job.
+
 ### Sessions and the workspace view
 
 The Operator owns its PTYs, so shell sessions, and any coding agent
@@ -144,9 +193,41 @@ running in one, survive browser disconnects.
 Sessions end when closed explicitly or when the Operator restarts.
 Windows uses ConPTY.
 
+Starting a session offers a list of commands, e.g., a shell, `claude`,
+`opencode`, or `codex`, configured per user with per-Operator overrides
+for what's installed where.
+To the Operator, an agent is just a process in a terminal, so any CLI
+agent works without specific support.
+Two agent-specific features are deferred:
+
+- Notifications when an agent is waiting for input, detected from the
+  terminal bell or OSC 9/777 escape sequences in its output.
+- A chat view of a session, better suited to phones than a terminal, via
+  the Agent Client Protocol (ACP), which several agents support natively
+  or through adapters.
+  Terminals remain the baseline, since they work with every agent.
+
 The hub's workspace view is built natively: xterm.js terminals over the
 relay, the pipeline stage list, and a file tree with a simple editor.
 We don't embed a full editor such as openvscode-server.
+
+The editor works on the workspace's files directly through the Operator,
+the way a remote editor does, not through Git.
+Saving writes the file in the workspace; committing and pushing are
+separate, explicit actions.
+Conflicts with an agent editing the same file are handled as a local
+editor would handle them:
+an open file with no unsaved edits reloads when it changes on disk, and
+saving over a file that changed since it was opened asks before
+overwriting.
+Git carries changes between workspaces, not between the editor and the
+workspace it's open in.
+
+Editing the hub's copy of a project, i.e., what has been pushed, commits
+directly, which workspaces then need to pull.
+When the user has a live workspace for the project, the hub opens files
+there by default, and each user can choose a default workspace per
+project, which the hub opens into when working hub first.
 
 ### Running as a service
 
@@ -185,13 +266,21 @@ supported:
 `scrontab` and similar are deferred.
 Heavy work on HPC belongs in scheduler jobs, not on the login node.
 
+In cron mode, the Operator stays running while any session is open, since
+sessions end when it exits.
+Sessions on login nodes are still subject to the site's limits, as they
+are with SSH and tmux, so long-running agents may be better placed on a
+compute node or a VM.
+
 ### Scheduler jobs
 
 The Operator exposes the existing `calkit scheduler queue`, `logs`, and
 `cancel` behavior as structured commands, and reports job states,
 including failures and timeouts, in its check-ins.
-The hub shows these per workspace and can rerun a failed stage through
-the Operator.
+The hub shows all of a project's jobs on a machine together, labeled by
+the workspace that submitted them, since `calkit scheduler queue` only
+tracks one checkout's jobs.
+It can rerun a failed stage through the Operator.
 
 ### CLI
 
@@ -214,23 +303,45 @@ The hub cannot uninstall anything from a machine that is offline.
 ### Configuration ownership
 
 Operators belong to users and machines, not projects, so they are not
-declared in `calkit.yaml`.
-When stages can run through an Operator (phase 3), a project environment
-will name one alongside or instead of `host`, e.g., `operator: my-hpc`,
-reusing the existing snapshot, DVC transfer, and locking logic with the
-relay as transport.
+declared in `calkit.yaml`, and project environments don't name them:
+Operator names are per user, so a collaborator's Operator on the same
+cluster has a different one.
+Environments keep naming a `host`, which means the same thing to everyone.
+
+Each Operator registers the hosts it serves, defaulting to its own
+hostname, with aliases allowed, e.g., a cluster's login address.
+When a stage's environment names a host (phase 3), Calkit asks the hub
+whether the user has a live Operator serving it.
+If so, the stage runs through the relay, reusing the existing snapshot,
+DVC transfer, and locking logic; if not, it falls back to SSH.
 This avoids SSH keys, port forwarding, and repeated 2FA prompts on
-clusters.
+clusters without changing the project or breaking it for collaborators
+without an Operator.
+
+### Detached remote stages
+
+Currently, the machine driving a run must stay up until a remote stage
+finishes and its outputs are collected.
+With an Operator on the remote machine, a run can instead submit a stage
+and return.
+The Operator watches the job and, when it finishes, commits and pushes the
+results from the managed workspace, and the driving workspace pulls them.
+This is the asynchronous part of #185 and changes how runs are recorded,
+so it follows the pipeline integration phase.
 
 ### Phases
 
 1. Daemon, service install, registration, Operator token, hub compute tab
-   with liveness, and the local server's features moved onto the relay.
-2. Persistent terminals, the file tree and editor, and scheduler jobs.
-3. Pipeline integration: `operator:` on environments, and LaTeX editor
-   compiles through a workspace.
-4. Sharing: collaborator workspaces and multiplayer.
-5. Later: ops and fleet rollouts (#90), parallel `group` stages (#185).
+   with liveness, the local server's features moved onto the relay, and
+   persistent terminals with the session launcher.
+2. The file tree and editor, and scheduler jobs.
+3. Pipeline integration: stages on hosts served by an Operator run through
+   the relay, shared DVC caches and stage locks per machine, and LaTeX
+   editor compiles through a workspace.
+4. Detached remote stages.
+5. Sharing: collaborator workspaces and multiplayer.
+6. Later: ops and fleet rollouts (#90), parallel `group` stages (#185),
+   agent notifications, and an ACP chat view.
 
 ## Consequences
 
@@ -269,6 +380,11 @@ clusters.
   hard to integrate with hub pages.
 - **Sessions in tmux.** Would survive Operator restarts but adds a
   dependency and excludes Windows.
+- **Live file sync between workspaces.** Would make workspaces feel like
+  one, but conflicts with agents and concurrent runs would be silent and
+  unrecoverable, where Git makes them explicit.
+- **Name an Operator in project environments.** Operator names are per
+  user, so the project would only work for its author.
 - **Declare Operators in `calkit.yaml`, as sketched in #90.** Ties a
   machine to a project; projects should name what they need and users
   should supply machines.

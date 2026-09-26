@@ -95,6 +95,7 @@ def test_operators(
     assert [w["path"] for w in workspaces] == ["/home/me/calkit/a"]
     assert workspaces[0]["operator_name"] == op["name"]
     assert workspaces[0]["operator_online"]
+    assert workspaces[0]["operator_platform"] == "linux"
     # Other users see neither the Operator nor its workspaces
     r = client.get(
         f"/projects/{owner}/{name}/workspaces", headers=superuser_token_headers

@@ -311,6 +311,8 @@ class ProjectWorkspace(WorkspaceInfo):
     operator_name: str
     operator_online: bool
     operator_asleep: bool
+    # Sessions need a POSIX terminal, so they aren't offered on Windows
+    operator_platform: str | None
 
 
 @router.get("/projects/{owner_name}/{project_name}/workspaces")
@@ -345,6 +347,7 @@ def get_project_workspaces(
                     operator_name=operator.name,
                     operator_online=online,
                     operator_asleep=asleep,
+                    operator_platform=operator.platform,
                 )
             )
     return resp

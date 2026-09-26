@@ -58,8 +58,15 @@ Anyone who can use the Operator from the Hub can open a shell on that
 machine as you,
 so it's important you only install it on a user account that only you
 control.
-Some HPC centers also prohibit tools that allow access from outside like
-this, so check your center's policies first.
+For the same reason, you'll need two-factor authentication or a passkey
+set up on your Hub account before you can open sessions on an Operator.
+
+<!-- prettier-ignore -->
+!!! warning
+    The Operator gives you access to a machine from outside without a VPN
+    or SSH, similar to a VS Code tunnel.
+    Some institutions and HPC centers prohibit tools like this,
+    so check their policies before installing it.
 
 It's also possible to install the Operator remotely via SSH with
 
@@ -96,17 +103,30 @@ The compute page replaces the project's "local machine" page,
 and the Operator replaces `calkit local-server`.
 
 On the project's compute page,
-you'll see the list of running workspaces in a table along with
-any live shell sessions in them.
+you'll see the project's workspaces on all of your Operators in a table,
+e.g., a clone on your laptop and another on a cluster,
+along with which commit each is on,
+whether it has uncommitted changes,
+how far ahead of or behind the Hub it is,
+and any live shell sessions in it.
 You can enter into a running shell session or start a new one.
+Each session starts as a shell in the workspace, with the same environment
+you'd get logging in over SSH,
+from which you can run any coding agent you like.
 For example, you may want two stacked vertically,
 with the top one running a coding agent like OpenCode
 and the bottom a normal shell session.
+Sessions are labeled by what's running in them, e.g., `opencode`.
 You'll also be able to see the current pipeline status,
 similar to the VS Code extension's stage list.
 In fact, the workspace view is similar to working in VS Code,
 except greatly simplified.
 You can open and edit files as well.
+Saving a file writes it in the workspace, just like saving in a local
+editor, and committing and pushing are separate steps.
+If a coding agent changes a file you have open,
+it will reload if you haven't edited it,
+and you'll be asked before saving over the agent's changes if you have.
 
 Shell sessions keep running when you close the browser tab.
 For example, you can install the Operator on your office workstation,
@@ -162,5 +182,10 @@ calkit operator uninstall
 - The ability to plug the Hub's LaTeX editor into an Operator for compilation
   and saving in the actual environment attached to its pipeline stage.
 - Similar as above, but for figure editing.
+- Running pipeline stages on a machine with an Operator without needing
+  SSH access to it, using the same `host` in the stage's environment.
+- Running stages on another machine without keeping your own machine on
+  until they finish, e.g., submitting a long GPU job from your laptop,
+  closing it, and pulling the results later.
 
 TODO: Add links to GitHub issues for these and recommend upvoting.

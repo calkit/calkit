@@ -124,6 +124,55 @@ def test_operators(
         f"/operators/{op['id']}/relay-token", headers=normal_user_token_headers
     )
     assert r.status_code == 409
+    # An Operator in cron mode that's between check-ins is asleep, and waking
+    # it tells it to connect at its next check-in
+    operator.mode = "cron"
+    db.add(operator)
+    db.commit()
+    r = client.get("/operators", headers=normal_user_token_headers)
+    listed = {o["id"]: o for o in r.json()}
+    assert listed[op["id"]]["is_asleep"]
+    assert not listed[op["id"]]["is_online"]
+    r = client.get(
+        f"/projects/{owner}/{name}/workspaces",
+        headers=normal_user_token_headers,
+    )
+    assert r.json()[0]["operator_asleep"]
+    r = client.post(
+        f"/operators/{op['id']}/wake", headers=superuser_token_headers
+    )
+    assert r.status_code == 404
+    # Checking in only to ask whether to connect doesn't make it online
+    r = client.post(
+        "/operators/check-in",
+        headers=op_headers,
+        json={"mode": "cron", "connected": False},
+    )
+    assert not r.json()["connect"]
+    r = client.get("/operators", headers=normal_user_token_headers)
+    listed = {o["id"]: o for o in r.json()}
+    assert listed[op["id"]]["is_asleep"]
+    assert not listed[op["id"]]["is_online"]
+    r = client.post(
+        f"/operators/{op['id']}/wake", headers=normal_user_token_headers
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(
+        "/operators/check-in",
+        headers=op_headers,
+        json={"mode": "cron", "connected": False},
+    )
+    assert r.json()["connect"]
+    # Once it has connected, the request is answered
+    r = client.post(
+        "/operators/check-in", headers=op_headers, json={"mode": "cron"}
+    )
+    r = client.post(
+        "/operators/check-in",
+        headers=op_headers,
+        json={"mode": "cron", "connected": False},
+    )
+    assert not r.json()["connect"]
     # Revoking stops its token working
     r = client.delete(
         f"/operators/{op['id']}", headers=normal_user_token_headers

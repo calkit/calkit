@@ -36,6 +36,10 @@ TOKEN_PREFIX = "cko_"
 CHECK_IN_INTERVAL_SECONDS = 60
 # Missing this many check-ins in a row means the Operator is offline
 OFFLINE_AFTER_MISSED_CHECK_INS = 3
+# Operators in cron mode check in this often, connecting only when asked
+CRON_CHECK_IN_INTERVAL_SECONDS = 300
+# How long a request to connect stands before it lapses
+CONNECT_REQUEST_SECONDS = 900
 OPERATOR_RELAY_TOKEN_MINUTES = 10
 BROWSER_RELAY_TOKEN_SECONDS = 60
 
@@ -61,10 +65,29 @@ CurrentOperator = Annotated[Operator, Depends(get_current_operator)]
 
 
 def is_online(operator: Operator) -> bool:
-    if operator.last_seen is None:
+    if operator.last_seen is None or not operator.connected:
         return False
     age = (utcnow() - operator.last_seen).total_seconds()
     return age < CHECK_IN_INTERVAL_SECONDS * OFFLINE_AFTER_MISSED_CHECK_INS
+
+
+def is_asleep(operator: Operator) -> bool:
+    """Whether it's in cron mode and still checking in, just not connected."""
+    if operator.mode != "cron" or operator.last_seen is None:
+        return False
+    if is_online(operator):
+        return False
+    age = (utcnow() - operator.last_seen).total_seconds()
+    return (
+        age < CRON_CHECK_IN_INTERVAL_SECONDS * OFFLINE_AFTER_MISSED_CHECK_INS
+    )
+
+
+def connect_requested(operator: Operator) -> bool:
+    if operator.connect_requested_at is None:
+        return False
+    age = (utcnow() - operator.connect_requested_at).total_seconds()
+    return age < CONNECT_REQUEST_SECONDS
 
 
 def require_second_factor(user: User) -> None:
@@ -78,11 +101,15 @@ def require_second_factor(user: User) -> None:
 
 class OperatorOut(OperatorPublic):
     is_online: bool
+    is_asleep: bool
 
 
 def _out(operator: Operator) -> OperatorOut:
     return OperatorOut.model_validate(
-        operator, update=dict(is_online=is_online(operator))
+        operator,
+        update=dict(
+            is_online=is_online(operator), is_asleep=is_asleep(operator)
+        ),
     )
 
 
@@ -193,6 +220,9 @@ class WorkspaceInfo(BaseModel):
 
 class CheckIn(BaseModel):
     calkit_version: str | None = Field(default=None, max_length=64)
+    mode: Literal["service", "foreground", "cron"] | None = None
+    # False when an Operator in cron mode is only asking whether to connect
+    connected: bool = True
     workspaces: list[WorkspaceInfo] = Field(default=[], max_length=1000)
 
 
@@ -203,6 +233,8 @@ class CheckInResp(BaseModel):
     relay_url: str
     relay_token: str
     check_in_interval: int = CHECK_IN_INTERVAL_SECONDS
+    # Whether an Operator in cron mode should connect
+    connect: bool = False
 
 
 @router.post("/operators/check-in")
@@ -213,6 +245,12 @@ def post_operator_check_in(
     operator.workspaces = [w.model_dump() for w in req.workspaces]
     if req.calkit_version is not None:
         operator.calkit_version = req.calkit_version
+    if req.mode is not None:
+        operator.mode = req.mode
+    operator.connected = req.connected
+    # A request to connect is answered once it has
+    if req.connected:
+        operator.connect_requested_at = None
     session.add(operator)
     session.commit()
     session.refresh(operator)
@@ -227,7 +265,21 @@ def post_operator_check_in(
             user_id=operator.user_id,
             expires_delta=timedelta(minutes=OPERATOR_RELAY_TOKEN_MINUTES),
         ),
+        connect=connect_requested(operator),
     )
+
+
+@router.post("/operators/{operator_id}/wake")
+def post_operator_wake(
+    session: SessionDep, current_user: CurrentUser, operator_id: uuid.UUID
+) -> OperatorOut:
+    """Ask an Operator in cron mode to connect at its next check-in."""
+    operator = _get_owned_operator(session, current_user, operator_id)
+    operator.connect_requested_at = utcnow()
+    session.add(operator)
+    session.commit()
+    session.refresh(operator)
+    return _out(operator)
 
 
 class RelayTokenResp(BaseModel):
@@ -258,6 +310,7 @@ class ProjectWorkspace(WorkspaceInfo):
     operator_id: uuid.UUID
     operator_name: str
     operator_online: bool
+    operator_asleep: bool
 
 
 @router.get("/projects/{owner_name}/{project_name}/workspaces")
@@ -278,6 +331,7 @@ def get_project_workspaces(
     resp = []
     for operator in operators:
         online = is_online(operator)
+        asleep = is_asleep(operator)
         for ws in operator.workspaces:
             ws_project: Any = ws.get("project")
             if not isinstance(ws_project, str):
@@ -290,6 +344,7 @@ def get_project_workspaces(
                     operator_id=operator.id,
                     operator_name=operator.name,
                     operator_online=online,
+                    operator_asleep=asleep,
                 )
             )
     return resp

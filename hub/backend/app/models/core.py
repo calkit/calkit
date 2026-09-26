@@ -568,6 +568,14 @@ class OperatorPublic(SQLModel):
     )
     created: datetime = Field(default_factory=utcnow)
     last_seen: datetime | None = Field(default=None)
+    # How it runs: "service", "foreground", or "cron", which only connects
+    # when asked
+    mode: str | None = Field(default=None, max_length=16)
+    # Whether it was connected to the relay at its latest check-in, which an
+    # Operator in cron mode that's only asking whether to connect isn't
+    connected: bool = False
+    # When the owner last asked it to connect, for Operators in cron mode
+    connect_requested_at: datetime | None = Field(default=None)
     is_active: bool = True
 
 

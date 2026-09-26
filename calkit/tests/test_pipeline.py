@@ -1,5 +1,6 @@
 """Tests for ``calkit.pipeline``."""
 
+import json
 import os
 import subprocess
 import sys
@@ -2931,6 +2932,86 @@ def test_revision_key(tmp_dir):
         assert key("HEAD") == key("main")
     finally:
         os.chdir(cwd)
+
+
+def test_to_dvc_working_tree_latex_diff_staleness(tmp_dir):
+    import calkit.pipeline
+
+    def commit(message: str) -> None:
+        subprocess.check_call(["git", "add", "-A"])
+        subprocess.check_call(
+            [
+                "git",
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-qm",
+                message,
+            ]
+        )
+
+    def status() -> dict:
+        out = subprocess.check_output(
+            ["calkit", "dvc", "status", "--json", stage], text=True
+        )
+        return json.loads(out)
+
+    subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
+    subprocess.check_call(["calkit", "dvc", "init", "-q"])
+    os.makedirs("paper/figs")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\includegraphics{figs/plot}\n")
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("old\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    commit("first")
+    subprocess.check_call(["git", "tag", "v1"])
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "inputs": ["paper/figs"],
+                    "diffs": ["v1"],
+                }
+            }
+        },
+    }
+    stage = "paper-diff-v1"
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    # Stands in for building the diff, recording what it read
+    os.makedirs(".calkit/env-locks/tex")
+    with open(".calkit/env-locks/tex/arm64.json", "w") as f:
+        f.write("{}\n")
+    out = ".calkit/latex-diffs/v1/paper/main.pdf"
+    os.makedirs(os.path.dirname(out))
+    with open(out, "w") as f:
+        f.write("diff\n")
+    subprocess.check_call(["calkit", "dvc", "commit", "-qf", stage])
+    assert status() == {}
+    # Committing what was checked changes nothing the diff reads, so it
+    # stays current rather than needing a second commit
+    commit("second")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert status() == {}
+    # A change to a DVC-tracked figure in the working tree makes it stale
+    # before anything is committed, since the figures are dependencies
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("new\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert stage in status()
+    subprocess.check_call(["calkit", "dvc", "commit", "-qf", stage])
+    assert status() == {}
+    # So does an edit to the document itself
+    with open("paper/main.tex", "a") as f:
+        f.write("More text\n")
+    assert stage in status()
 
 
 def test_to_dvc_unfilters_notebook_outputs(tmp_dir):

@@ -588,36 +588,36 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
         except Exception:
             return None
 
+    def is_ancestor(older: str, newer: str) -> bool:
+        try:
+            repo.git.merge_base("--is-ancestor", older, newer)
+        except Exception:
+            return False
+        return True
+
     def parse() -> str | None:
         local = rev_parse(f"refs/heads/{ref}")
         if local is not None:
-            # A branch updated elsewhere and fetched, but never checked out
-            # here, is behind what everyone else means by its name
+            # A local branch means what it means everywhere else here, even
+            # if its remote has moved on, but that's worth knowing, since
+            # a comparison elsewhere would see something different
             upstream = rev_parse(f"{ref}@{{upstream}}") or rev_parse(
                 f"refs/remotes/origin/{ref}"
             )
-            if upstream is None or upstream == local:
-                return local
-            try:
-                repo.git.merge_base("--is-ancestor", local, upstream)
-                behind = True
-            except Exception:
-                behind = False
-            if behind:
-                warnings.warn(
-                    f"Local branch '{ref}' is behind its remote, so "
-                    f"comparing against the remote's {upstream[:7]}; update "
-                    f"it with 'git branch -f {ref} {upstream[:12]}'"
-                )
-                return upstream
-            try:
-                repo.git.merge_base("--is-ancestor", upstream, local)
-            except Exception:
-                warnings.warn(
-                    f"Local branch '{ref}' has diverged from its remote, so "
-                    "a comparison against it here differs from one made "
-                    "elsewhere; reconcile and push it"
-                )
+            if upstream is not None and upstream != local:
+                if is_ancestor(local, upstream):
+                    warnings.warn(
+                        f"Local branch '{ref}' is behind its remote, which "
+                        f"is at {upstream[:7]}; update it with "
+                        f"'git branch -f {ref} {upstream[:12]}' to compare "
+                        "against that"
+                    )
+                elif not is_ancestor(upstream, local):
+                    warnings.warn(
+                        f"Local branch '{ref}' has diverged from its "
+                        "remote, so a comparison against it elsewhere "
+                        "would differ; reconcile and push it"
+                    )
             return local
         # A clone that fetched only one branch has the others solely as
         # remote-tracking refs, if at all

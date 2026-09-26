@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import git
@@ -461,37 +462,50 @@ def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir):
     # A revision that doesn't exist is reported as missing rather than
     # retried forever
     assert calkit.git.resolve_ref(repo, "nope-not-a-branch") is None
-    # A local branch left behind by a fetch resolves to its remote, since
-    # that's what the name means everywhere else
+    # A local branch is what its name means here, like for every other
+    # stage, even when a fetch shows its remote has moved on, but that's
+    # warned about, since a comparison elsewhere would differ
     subprocess.check_call(["git", "-C", clone, "branch", "main", main_sha])
-    subprocess.check_call(["git", "-C", origin, "checkout", "-q", "main"])
-    with open(os.path.join(origin, "f.txt"), "w") as f:
-        f.write("three\n")
     commit = ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit"]
-    subprocess.check_call(["git", "-C", origin, *commit, "-qam", "third"])
-    new_main_sha = subprocess.check_output(
-        ["git", "-C", origin, "rev-parse", "HEAD"], text=True
-    ).strip()
-    subprocess.check_call(
-        [
-            "git",
-            "-C",
-            clone,
-            "fetch",
-            "-q",
-            "origin",
-            "main:refs/remotes/origin/main",
-        ]
-    )
+
+    def commit_to(path: str, content: str) -> str:
+        with open(os.path.join(path, "f.txt"), "w") as f:
+            f.write(content)
+        subprocess.check_call(["git", "-C", path, *commit, "-qam", content])
+        return subprocess.check_output(
+            ["git", "-C", path, "rev-parse", "HEAD"], text=True
+        ).strip()
+
+    def fetch_main() -> None:
+        subprocess.check_call(
+            [
+                "git",
+                "-C",
+                clone,
+                "fetch",
+                "-q",
+                "origin",
+                "main:refs/remotes/origin/main",
+            ]
+        )
+
+    subprocess.check_call(["git", "-C", origin, "checkout", "-q", "main"])
+    remote_sha = commit_to(origin, "three")
+    fetch_main()
     with pytest.warns(UserWarning, match="behind its remote"):
-        assert calkit.git.resolve_ref(repo, "main") == new_main_sha
-    # One with commits of its own is used as is, with a warning, since it
-    # can't be said which is meant
+        assert calkit.git.resolve_ref(repo, "main") == main_sha
+    # Commits not pushed yet are used as they are, without a warning
+    subprocess.check_call(
+        ["git", "-C", clone, "branch", "-f", "main", remote_sha]
+    )
     subprocess.check_call(["git", "-C", clone, "checkout", "-q", "main"])
-    with open(os.path.join(clone, "f.txt"), "w") as f:
-        f.write("four\n")
-    subprocess.check_call(["git", "-C", clone, *commit, "-qam", "fourth"])
-    local_sha = repo.git.rev_parse("main").strip()
+    local_sha = commit_to(clone, "four")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert calkit.git.resolve_ref(repo, "main") == local_sha
+    # Once both have moved, it can't be said which is meant
+    commit_to(origin, "five")
+    fetch_main()
     with pytest.warns(UserWarning, match="diverged"):
         assert calkit.git.resolve_ref(repo, "main") == local_sha
 

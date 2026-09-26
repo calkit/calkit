@@ -38,8 +38,9 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", home)
     # The config holds a token, so only the user can read it
     operator.save_config({"name": "box", "token": "cko_x", "workspaces": []})
-    mode = stat.S_IMODE(os.stat(operator.get_config_path()).st_mode)
-    assert mode == 0o600
+    if sys.platform != "win32":
+        mode = stat.S_IMODE(os.stat(operator.get_config_path()).st_mode)
+        assert mode == 0o600
     assert operator.load_config() == {
         "name": "box",
         "token": "cko_x",
@@ -210,6 +211,7 @@ def test_service_files(tmp_path, monkeypatch):
     assert "WantedBy=default.target" in unit
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Cron and flock are POSIX")
 def test_cron_and_lock(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     # A fake crontab that keeps its table in a file

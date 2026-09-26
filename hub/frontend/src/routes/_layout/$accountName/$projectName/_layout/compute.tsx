@@ -16,7 +16,7 @@ import {
   Tr,
   useColorModeValue,
 } from "@chakra-ui/react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
@@ -25,11 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FiCheck, FiMinus, FiPlus, FiRefreshCw, FiX } from "react-icons/fi"
 import { z } from "zod"
 
-import {
-  OperatorsService,
-  type ProjectPublic,
-  type ProjectWorkspace,
-} from "../../../../../client"
+import { OperatorsService, type ProjectWorkspace } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
 import AddPath from "../../../../../components/Workspace/AddPath"
@@ -38,6 +34,7 @@ import IgnorePath from "../../../../../components/Workspace/IgnorePath"
 import NewStage from "../../../../../components/Workspace/NewStage"
 import SaveFiles from "../../../../../components/Workspace/SaveFiles"
 import useCustomToast from "../../../../../hooks/useCustomToast"
+import useProject from "../../../../../hooks/useProject"
 
 const computeSearchSchema = z.object({
   // Open terminal panes, as "<operator ID>:<session ID>", so a link reopens
@@ -585,12 +582,7 @@ function Compute() {
   const navigate = Route.useNavigate()
   const search = Route.useSearch()
   const showToast = useCustomToast()
-  const queryClient = useQueryClient()
-  const project = queryClient.getQueryData<ProjectPublic>([
-    "projects",
-    accountName,
-    projectName,
-  ])
+  const project = useProject(accountName, projectName).projectRequest.data
   // Operators in cron mode asked to connect, which do at their next check-in
   const [waking, setWaking] = useState<Set<string>>(new Set())
   const workspacesQuery = useQuery({

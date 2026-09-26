@@ -6,20 +6,15 @@
     All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
 
 Research projects exist to answer questions.
-We collect data,
-analyze it,
-make figures and compute numbers,
-and then write about what we found.
-In this quickstart we'll create a small project shaped this way,
-with a question, the data to answer it,
-a figure and a number computed from that data,
-and a paper that includes both.
-The findings don't matter here.
-What matters is that when something upstream changes,
-Calkit will tell you what's out of date downstream,
-and one command will bring everything back up to date.
+They involve collecting data,
+analyzing it,
+creating figures and calculating numbers,
+and finally writing about the answers and why they make sense.
+Here we'll see what's involved in setting that up.
 
 ## Create a project
+
+First, create a project from a template:
 
 ```sh
 calkit new project phd \
@@ -27,16 +22,13 @@ calkit new project phd \
     --template calkit/example-basic
 ```
 
-This creates a project from a template,
-so we have something to run right away.
-
 The title can be changed later, but the name is more difficult to change,
 so it's a good idea to keep the name general.
 A single project can hold multiple investigations,
 e.g., a grad student might use one project for their entire PhD,
 with a question and a paper for each study.
 
-Add the `--hub` flag to also create the project on
+Add the `--hub` flag to create the project on
 [a Calkit hub](hub/index.md) for backup and sharing.
 This requires an account,
 but can be set up later,
@@ -174,8 +166,8 @@ Questions answered: 1/1
 Answers backed by current evidence: 0/1 ❌
 ```
 
-So, editing the script made the project's answer out of date,
-and Calkit told us so without us needing to remember to check.
+So, editing the script made the project's answer stale,
+and we were able to verify this from the CLI.
 To bring everything back up to date, run the pipeline again:
 
 ```sh
@@ -211,7 +203,8 @@ Connect it now? [Y/n]
 Answering yes creates the project on a [hub](hub/index.md),
 which backs it up,
 stores data and outputs that are too big for Git,
-and makes it available to collaborators.
+and makes it available to collaborators,
+if you choose to add them.
 After that, `calkit save` will push everything to the right place,
 and a collaborator can clone the project and reproduce it with
 `calkit run`.
@@ -241,4 +234,4 @@ Simply tell the [AI agent](ai-tools.md):
 
 or
 
-> Create me a new Calkit project for investigating...
+> Create me a new Calkit project that answers the question: ...

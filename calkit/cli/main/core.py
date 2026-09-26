@@ -1962,20 +1962,6 @@ def ignore(
             repo.git.commit(["-m", f"Ignore {path}"])
 
 
-@app.command(name="local-server")
-def run_local_server() -> None:
-    """Run the local server to interact over HTTP."""
-    import uvicorn
-
-    uvicorn.run(
-        "calkit.server:app",
-        port=8866,
-        host="localhost",
-        reload=True,
-        reload_dirs=[os.path.dirname(os.path.dirname(__file__))],
-    )
-
-
 # Stage output is teed into the run log and can look exactly like a DVC log
 # record (the "%(asctime)s - %(levelname)s - %(message)s" format is a common
 # one in user scripts), so it's bracketed by these and skipped when parsing.

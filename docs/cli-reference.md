@@ -19,7 +19,6 @@
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                                                                 |
 | [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                                                                |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                                                                        |
-| [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                                                                 |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                                                                    |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                                                                      |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                                                                        |
@@ -318,18 +317,6 @@ Options:
 | Option        | Type    | Required | Default | Description                          |
 | ------------- | ------- | -------- | ------- | ------------------------------------ |
 | `--no-commit` | boolean | no       | False   | Do not commit changes to .gitignore. |
-
-<a id="top-command-local-server"></a>
-
-### `calkit local-server`
-
-Run the local server to interact over HTTP.
-
-Usage:
-
-```text
-calkit local-server
-```
 
 <a id="top-command-run"></a>
 

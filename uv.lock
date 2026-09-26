@@ -1272,7 +1272,6 @@ dependencies = [
     { name = "docx2pdf" },
     { name = "dulwich" },
     { name = "dvc", extra = ["all"] },
-    { name = "fastapi" },
     { name = "fsspec" },
     { name = "gitpython" },
     { name = "json2latex" },
@@ -1296,7 +1295,6 @@ dependencies = [
     { name = "toml" },
     { name = "tqdm" },
     { name = "typer" },
-    { name = "uvicorn" },
     { name = "websockets", version = "16.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "websockets", version = "17.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
@@ -1352,7 +1350,6 @@ requires-dist = [
     { name = "docx2pdf" },
     { name = "dulwich", specifier = ">=1.2.5" },
     { name = "dvc", extras = ["all"], specifier = "==3.67.1" },
-    { name = "fastapi" },
     { name = "fsspec", specifier = ">=2026.4.0" },
     { name = "gitpython" },
     { name = "json2latex", specifier = ">=0.0.3" },
@@ -1378,7 +1375,6 @@ requires-dist = [
     { name = "toml", specifier = ">=0.10.2" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = "==0.27.2" },
-    { name = "uvicorn" },
     { name = "websockets" },
     { name = "xet", marker = "extra == 'xet'", specifier = ">=0.0.1" },
 ]

@@ -1,89 +1,61 @@
 # Storage
 
-Calkit separates two questions about every file in a project:
+Calkit keeps the history of every file in your project.
+By default,
+small text files like code and LaTeX source go to the project's Git repo,
+and everything else,
+e.g., datasets, figures, and simulation results,
+goes to the Calkit Hub (calkit.io).
+You can also send some or all of those files somewhere else,
+e.g., your lab's Hugging Face or S3 storage:
 
-1. **How is it tracked?**
-   Git for text and other small files, e.g., code and LaTeX source,
-   and DVC for large and/or binary files, e.g.,
-   imported datasets and pipeline outputs.
-   Git LFS is also supported,
-   and git-annex is on the roadmap.
-2. **Where is it stored?**
-   By default, Git files go to GitHub
-   and everything else goes to the Calkit Hub (calkit.io),
-   but you can connect your own storage,
-   e.g., a Hugging Face bucket or an S3 bucket.
+```sh
+calkit add data/raw --to big-data
+```
 
-Both are declared in your project's `calkit.yaml`,
-so they go wherever the project goes.
-But `calkit.yaml` only ever refers to storage by name.
-The storage itself,
-along with any credentials needed to use it,
-is set up in your account on the hub,
-so credentials never need to be in your project or on every machine.
+Either way,
+you work with your files the same way,
+and Calkit takes care of getting them where they need to go.
+Under the hood, Calkit uses Git and DVC,
+so `git` and `dvc` commands still work on the project if you need them.
 
-## The hub handles storage auth
+## One login for everything
 
-The idea is that you should only need to authenticate once per machine,
-with Calkit,
-no matter where your files live.
-DVC, Git LFS, and git-annex can all talk directly to S3 and many other
-backends,
-but every one of those is another account to set up on every machine,
-and every collaborator needs access to each of them too.
-That adds up quickly,
-especially on shared machines like HPC clusters.
+You only need to log in to Calkit once on each computer,
+no matter where your files are stored.
+Calkit handles access to your storage for you,
+so there's nothing else to set up,
+even on shared computers like HPC clusters.
 
-So instead, the hub sits in front of your storage for every tracking
-mechanism:
+This also means:
 
-- **DVC:** Every Calkit project uses a DVC remote that looks like
-  `ck://{owner}/{project}`.
-- **Git LFS:** The hub acts as the project's LFS server,
-  set in the project's `.lfsconfig`.
+- Collaborators only need access to the project.
+  They don't need accounts with your storage provider,
+  and you never need to share passwords or keys with them.
+- Your files go directly between your computer and your storage.
+  They don't pass through calkit.io along the way.
 
-When a file needs to be read or written,
-Calkit asks the hub where it should go,
-and the hub responds with a short-lived URL or credential for the storage
-behind that project.
-The file is then transferred directly between your machine and the
-storage.
-It never passes through the hub.
+## Connecting your own storage
 
-This means:
-
-- Your collaborators only need access to the project on the hub.
-  They don't need accounts on your storage provider,
-  and you don't need to share any credentials with them.
-- Your storage credentials live in your hub account,
-  not in your project repo or on every machine.
-- You can change where a project's files are stored without
-  changing the project's remotes.
-
-## Storage resources
-
-Storage is set up at the account level, not the project level.
-You connect a storage resource to your account,
-e.g., a Hugging Face bucket,
-then refer to it by name from any of your projects.
-Every account starts with Calkit Cloud storage,
+Storage is connected to your account, not to a single project,
+so you can connect it once and use it for any of your projects.
+Every account starts with the Calkit Hub's built-in storage,
 which is what projects use unless you choose otherwise.
 
-To add a storage resource,
+To connect storage,
 visit the storage section of your
 [hub account settings](https://calkit.io/settings).
-Organizations can also have storage resources,
-which are available to all projects owned by that organization.
+Organizations can also connect storage,
+which is available to all projects owned by that organization.
 
-To list the storage resources available to you:
+To list the storage available to you:
 
 ```sh
 calkit hub list storage
 ```
 
-A project's DVC files are stored in the Calkit Hub's internal
-storage by default.
-To use one of your attached external storage resources instead:
+To use one of your connected storage options for a project's files
+instead of the built-in storage:
 
 ```sh
 calkit update storage --name dvc my-hf-bucket
@@ -94,6 +66,8 @@ which adds this to `calkit.yaml`:
 ```yaml
 storage:
   dvc:
+    kind: calkit # optional
+    hub: calkit.io # optional
     name: my-hf-bucket
 ```
 
@@ -101,24 +75,18 @@ This can move a lot of data,
 so read [Changing where files are stored](#changing-where-files-are-stored)
 first.
 
-Names always refer to storage resources in the project owner's account,
-on the project's hub.
-If the storage resource is on a different hub,
-add `hub: {domain}`.
-
-Each project gets its own folder inside a storage resource,
-named like `{owner}/{project}`,
-so one resource can hold many projects.
+Each project gets its own folder in your storage,
+so you can use the same storage for many projects.
 
 ## Choosing storage per path
 
 Not everything in a project needs to go to the same place.
 For example,
-you might want one big dataset in a Hugging Face bucket,
+you might want one big dataset on Hugging Face,
 while figures stay on calkit.io.
 To do this,
-add your own entry to the `storage` section of `calkit.yaml`,
-and use its name wherever you'd normally write `git` or `dvc`:
+give the storage a name in `calkit.yaml`,
+and use that name for the paths that should go there:
 
 ```yaml
 storage:
@@ -139,40 +107,29 @@ pipeline:
           storage: big-data
 ```
 
-Files with `storage: big-data` are then stored in `my-hf-bucket`.
-How they're tracked follows from the kind of storage,
-e.g., a bucket is used like any other DVC storage,
-so there's nothing else to set.
-
-`git`, `dvc`, `dvc-zip`, and `git-lfs` are the built-in storage names,
-so they're reserved.
-`dvc`, `dvc-zip`, and `git-lfs` can be configured,
-e.g., `dvc` above,
-to change where they store files.
-The project's Git remote is set on the hub.
+`git` and `dvc` are the names of the built-in storage,
+so they can't be used for your own.
+You can point `dvc` at your own storage, though, as shown above.
 
 ## Hugging Face
 
 ### Buckets
 
-Calkit can use a
-[Hugging Face (HF) Storage Bucket](https://huggingface.co/docs/hub/en/storage-buckets)
-as a storage resource for DVC and Git LFS.
-Buckets are fast, mutable object storage with chunk-level deduplication,
-which makes them a good fit,
-since Git is already handling the versioning.
+A [Hugging Face (HF) bucket](https://huggingface.co/docs/hub/en/storage-buckets)
+is a simple place to keep large files,
+with a free allowance and low-cost storage beyond that.
 Usage is billed by HF and doesn't count against your Calkit plan.
-There are two ways to set one up.
+There are two ways to connect one.
 
 #### Option 1: Connecting your HF account
 
 Visit your [hub account settings](https://calkit.io/settings)
 and click the connect button next to Hugging Face.
-Then add a Hugging Face storage resource,
-choosing your HF account or one of your HF organizations as the owner.
+Then add Hugging Face storage,
+choosing your HF account or one of your HF organizations.
 Calkit will create a private bucket named `calkit` there and manage it
 for you.
-It can stay private,
+It stays private,
 even if some of the projects stored in it are public.
 
 This is the easiest option,
@@ -181,12 +138,7 @@ organization.
 If you'd rather limit Calkit to a single bucket,
 use Option 2.
 
-#### Option 2: Using S3 credentials for one bucket
-
-HF buckets can also be accessed through their
-[S3-compatible API](https://huggingface.co/docs/hub/storage-buckets-s3),
-so they can be connected like any other
-[S3 bucket](#amazon-s3-and-s3-compatible-storage).
+#### Option 2: Connecting a single bucket
 
 1. [Create a bucket](https://huggingface.co/new-bucket) under your HF
    account or organization, e.g., `my-username/calkit`.
@@ -194,141 +146,92 @@ so they can be connected like any other
    with write access to only that bucket.
 3. In the token's dropdown menu,
    choose "Generate S3 credentials."
-4. Add an S3 storage resource in your hub account settings,
-   choosing Hugging Face as the provider,
-   and enter the bucket name and the S3 credentials.
+4. Add S3 storage in your hub account settings,
+   choose Hugging Face as the provider,
+   and enter the bucket name and the credentials from step 3.
 
-Since the token is scoped to one bucket,
-Calkit can only ever touch that bucket,
+Calkit can then only ever touch that bucket,
 and nothing else in your HF account.
 
 ### Datasets
 
-HF Datasets repos are Git repos,
-with large files stored using LFS (backed by Xet).
-Unlike a bucket,
-files in a Datasets repo are stored at their actual paths,
-so the repo can be browsed like your project,
-and gets a dataset card, a data viewer, and HF's search.
+HF Datasets are how many researchers share datasets,
+with a page describing the dataset, a preview of the data, and search.
+You can send a specific path in your project to an HF Dataset,
+e.g., a dataset you want others to find and use.
+Calkit keeps the files at the same paths they have in your project,
+so it's easy to browse,
+and keeps its history in step with your project's.
 
-With your HF account connected,
-a Datasets repo can be used as DVC storage,
-either as a project's default or for
-[specific paths](#choosing-storage-per-path),
-e.g., just the dataset you want others to find.
-When you `calkit push`,
-Calkit uploads files to the repo at the same paths they have in your
-project,
-and makes one commit on HF for each commit it's mirroring.
-The hub keeps track of which HF revision and path holds each version of
-each file,
-so DVC can still find them by their MD5 checksum.
-
-Datasets repos keep every version of every file,
-so they're better suited to finished artifacts than to everything a
+HF Datasets keep every version of every file,
+so they're better suited to finished datasets than to everything a
 project produces along the way.
-Publishing to a Datasets repo is also on the roadmap as another kind of
-[release](releases.md).
 
-## Amazon S3 and S3-compatible storage
+## S3 storage
 
-Any S3-compatible bucket can be used as a storage resource,
-e.g., on Amazon S3, Cloudflare R2, Wasabi, MinIO,
-or storage run by your institution.
-An S3 storage resource is a bucket URI,
-an endpoint (if not using AWS),
-and an access key for that bucket.
-
-We recommend creating credentials that can only access that one bucket,
-e.g., an IAM user with a policy limited to it.
-The hub provides a policy you can copy when adding the resource.
+If your lab or institution already has storage that works with Amazon S3,
+e.g., Amazon S3 itself, Cloudflare R2, Wasabi, or MinIO,
+you can connect a bucket there with its address and an access key.
 When you add it,
-the hub checks that the credentials can read and write the bucket,
-and will warn you if they have more access than they need.
-
-## Git LFS
-
-Outputs and datasets can use `storage: git-lfs`,
-which keeps a small pointer file in Git and the file itself in LFS
-storage.
-This can be convenient for files that change rarely,
-since they come along with a plain `git clone`,
-with no DVC needed.
-
-LFS files go to the same kinds of storage resources as DVC files,
-with the hub acting as the LFS server,
-so the project's Git host doesn't need to support LFS,
-and you don't pay for LFS storage there.
+the hub checks that the key works,
+and gives you instructions for creating one that can only access that
+bucket, if needed.
 
 ## Changing where files are stored
 
-Where files are stored can be changed at any time,
+You can change where files are stored at any time
 by editing the `storage` section of `calkit.yaml`,
-or the `storage` of a path,
-but since that means moving files,
+or the `storage` of a path.
+Since that means moving files,
 `calkit push` will first show you how many files and how much data will be
 moved,
 and ask you to confirm.
 Only the project owner can do this,
 since it uses their storage.
 
-The move then happens on the hub, in the background,
-similar to how Kubernetes applies a manifest,
+The move then happens on calkit.io, in the background,
 so you don't need to download and re-upload anything,
 and you can close your laptop.
 
-- New pushes go to the new storage right away.
+- New files go to the new storage right away.
 - Until the move is finished,
-  the hub will look in both places,
-  so pulls keep working the whole time.
-- Since files are addressed by their content,
-  there's no risk of getting a stale version during the move.
-- Files are not deleted from the old storage once the move is done.
-  You can delete them yourself after checking everything made it over.
+  Calkit will look in both places,
+  so you and your collaborators can keep working the whole time.
+- Nothing is deleted from the old storage when the move is done.
+  You can delete those files yourself once you've checked everything made
+  it over.
 
-Changing how a path is tracked,
-e.g., from `dvc` to `git-lfs`,
-is different,
-since it changes the project's history going forward.
-That happens on your machine the next time you commit.
+Moving a path into or out of the project's Git repo is different,
+since it changes how the project's history is kept.
+That happens on your computer the next time you commit.
 
 ## Forks
 
 In Calkit, a project has a single home,
 and collaborators work on it there,
-rather than in forks of it.
-A fork is a new project derived from another one,
+rather than in copies of it.
+A fork is a new project based on another one,
 which will go its own way.
 
 A fork's `calkit.yaml` starts out with the same storage names,
 but they now refer to the new owner's account,
-so the first `calkit push` will ask you to point them at your own
-storage resources.
-Files from before the fork can still be pulled from the original
+so the first `calkit push` will ask you to choose your own storage for
+them.
+Files from before the fork can still be downloaded from the original
 project's storage,
 as long as you have access to it.
 
-## Using your storage without the hub
+## Using your storage without Calkit
 
-Calkit is designed to avoid lock-in,
-so your files are always stored in the same layout DVC and Git LFS use
-for their own remotes.
-When a project is assigned to a storage resource,
-Calkit also adds a second, non-default remote to `.dvc/config` that points
-directly at it.
-If you ever want to go around the hub,
-you can pull with plain DVC,
-using your own credentials for that provider:
+Your files are always stored in a standard layout that DVC understands,
+so you're never locked in to Calkit.
+If you ever want to download them without Calkit,
+you can do so with DVC directly,
+using your own login for that storage:
 
 ```sh
 dvc pull -r hf
 ```
-
-For HF buckets, this uses DVC's S3 support
-through HF's [S3-compatible gateway](https://huggingface.co/docs/hub/storage-buckets-s3).
-Credentials can be set with the `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY` environmental variables,
-or with `dvc remote modify --local` so they stay out of Git.
 
 ## Public archival
 
@@ -340,21 +243,36 @@ to hydrate the DVC cache and make checking them out seamless.
 
 ## On the roadmap
 
-- git-annex, through a Calkit special remote
-- Connecting an AWS account with a role Calkit can assume,
-  so no long-lived keys are stored
+- Google Drive
 - OneDrive
 - Box
-- Google Drive
-- Releasing to HF Datasets repos
-- Git storage on GitLab, Codeberg, HF, or the hub itself,
-  with Git auth going through the hub too
+- Connecting AWS without creating access keys
+- Releasing to HF Datasets
+- Keeping the project's Git repo on GitLab, Codeberg, HF, or calkit.io
   ([#1254](https://github.com/calkit/calkit/issues/1254))
 
 ## Design notes
 
 This section is for the design phase and will be removed.
 
+- Audience: scientists who want their files' history kept,
+  not software developers or infrastructure specialists.
+  The user-facing docs above say where files go and what it costs,
+  and leave out tracking mechanisms, protocols, and hashes.
+  Those details belong here and in developer docs.
+- Moved out of the user-facing docs:
+  every project's DVC remote is `ck://{owner}/{project}`;
+  the hub hands out short-lived URLs so bytes skip the hub;
+  the hub acts as the project's Git LFS server via `.lfsconfig`;
+  `dvc-zip` and `git-lfs` are also built-in, configurable names,
+  and `git-lfs` stays an advanced, mostly undocumented option;
+  a storage entry can take `hub: {domain}` for storage on another hub;
+  the no-hub fallback remote in `.dvc/config` is S3 over HF's gateway,
+  with credentials from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+  or `dvc remote modify --local`;
+  HF Datasets mirroring uses the MD5 index described below;
+  git-annex support through a Calkit special remote;
+  and AWS role assumption.
 - The split between the repo and the hub:
   `calkit.yaml` says how each path is tracked and which storage it uses,
   by name.
@@ -403,18 +321,14 @@ This section is for the design phase and will be removed.
   ([#1252](https://github.com/calkit/calkit/issues/1252)).
   It means another login,
   so it should be rare.
-- Entries don't declare a tracking mechanism.
+- Users pick storage, not a tracking mechanism,
+  and Calkit picks the mechanism from the storage kind.
   `git`, `dvc`, `dvc-zip`, and `git-lfs` are built-in storage instances,
-  and a user-defined entry gets its mechanism from its resource:
-  object storage like a bucket, and HF Datasets through the MD5 index,
-  are DVC.
-  Open question:
-  can a user-defined entry be LFS,
-  e.g., LFS objects in an HF bucket,
-  or does LFS only ever go through the built-in `git-lfs`,
-  configured with `git-lfs: {name: ...}`?
-- Storage kinds and content types are separate axes,
-  and not every pair works:
+  and a user-defined entry gets its mechanism from its resource,
+  e.g., a bucket, or HF Datasets through the MD5 index, means DVC.
+  `calkit add --to` grows from `git`, `dvc`, and `dvc-zip` to any storage
+  name.
+  Internally, not every mechanism works with every storage kind:
 
   | Content          | Git | S3, HF bucket, Drive, OneDrive, Box | HF Datasets           |
   | ---------------- | --- | ----------------------------------- | --------------------- |
@@ -423,6 +337,10 @@ This section is for the design phase and will be removed.
   | Git LFS          | No  | Yes                                 | Yes (natively)        |
   | Issues (git-bug) | Yes | Not practically                     | Unknown (custom refs) |
 
+  Where a storage kind supports more than one,
+  e.g., a bucket can hold DVC or LFS objects,
+  Calkit picks the default (DVC),
+  and the built-in `git-lfs` is the way to get the other.
   The schema shouldn't assume every storage entry holds DVC files,
   and the hub should reject pairs that don't work.
 

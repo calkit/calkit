@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -396,11 +397,18 @@ def test_install_remote(monkeypatch):
     monkeypatch.setattr(hub, "_request", request)
     monkeypatch.setattr(hub, "get_base_url", lambda: "https://api.hub")
     runs = []
-    monkeypatch.setattr(
-        operator.subprocess,
-        "run",
-        lambda argv, **kwargs: runs.append((argv, kwargs.get("input"))),
-    )
+    remote_config = {"text": ""}
+
+    def run(argv, **kwargs):
+        runs.append((argv, kwargs.get("input")))
+        if "cat ~/.calkit/operator.yaml 2>" in argv[-1]:
+            return SimpleNamespace(stdout=remote_config["text"])
+        if fail_install and "operator install" in argv[-1]:
+            raise subprocess.CalledProcessError(1, argv)
+        return SimpleNamespace(stdout="")
+
+    fail_install = False
+    monkeypatch.setattr(operator.subprocess, "run", run)
     cfg = operator.install_remote("cluster", cron=True)
     # Registered from here with the far end's own details
     assert posted["hostname"] == "login1.cluster"
@@ -408,9 +416,32 @@ def test_install_remote(monkeypatch):
     assert posted["hosts"] == ["cluster", "login1.cluster"]
     # Its config goes over SSH, readable only by the user, then Calkit there
     # installs it in the mode asked for
-    (write_argv, config_text), (install_argv, _) = runs
+    _, (write_argv, config_text), (install_argv, _) = runs
     assert write_argv[0] == "ssh" and "cluster" in write_argv
     assert "umask 077" in write_argv[-1]
     assert yaml.safe_load(config_text) == cfg
     assert cfg["token"] == "cko_secret" and cfg["api_url"] == "https://api.hub"
     assert "calkit operator install --cron" in install_argv[-1]
+    # Reinstalling keeps the Operator already there
+    remote_config["text"] = config_text
+    posted.clear()
+    runs.clear()
+    assert operator.install_remote("cluster") == cfg
+    assert posted == {}
+    assert len(runs) == 2
+    # A registration whose install fails is revoked
+    remote_config["text"] = ""
+    fail_install = True
+    deleted = []
+    monkeypatch.setattr(
+        hub,
+        "_request",
+        lambda kind, path, **kw: (
+            deleted.append(path)
+            if kind == "delete"
+            else request(kind, path, **kw)
+        ),
+    )
+    with pytest.raises(subprocess.CalledProcessError):
+        operator.install_remote("cluster")
+    assert deleted == ["/operators/op1"]

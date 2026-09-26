@@ -165,43 +165,63 @@ def install_remote(
     target = ws.Workspace(host=host, wdir="~")
     target = ws.ensure_reachable(target, interactive=interactive)
     ws.ensure_calkit_installed(target, interactive=interactive, required=True)
-    info = ws.remote_system_info(target)
-    hostname = info.get("hostname") or host
-    resp = hub._request(
-        "post",
-        "/operators",
-        json=dict(
-            hostname=hostname,
-            machine_id=info.get("machine_id"),
-            platform=str(info.get("os", "")).lower() or None,
-            calkit_version=info.get("calkit_version"),
-            hosts=list(dict.fromkeys([host, hostname])),
-        ),
-    )
-    cfg = dict(
-        api_url=hub.get_base_url(),
-        id=resp["id"],
-        name=resp["name"],
-        user_id=resp["user_id"],
-        token=resp["token"],
-        workspaces=[],
-    )
-    # Only the user can read it there either, since it holds the token
-    subprocess.run(
-        target.login_argv(
-            "umask 077 && mkdir -p ~/.calkit && cat > ~/.calkit/operator.yaml"
-        ),
-        input=yaml.safe_dump(cfg, sort_keys=False),
+    # Reinstalling, e.g., to change mode, keeps the Operator it already has
+    # rather than leaving that one behind on the hub
+    existing = subprocess.run(
+        target.login_argv("cat ~/.calkit/operator.yaml 2>/dev/null || true"),
+        capture_output=True,
         text=True,
-        check=True,
-    )
-    args = ["calkit", "operator", "install"]
-    if cron:
-        args.append("--cron")
-    if no_service:
-        args.append("--no-service")
-    subprocess.run(target.login_argv(shlex.join(args)), check=True)
-    return cfg
+    ).stdout
+    cfg = yaml.safe_load(existing) if existing.strip() else None
+    registered = False
+    if not isinstance(cfg, dict) or cfg.get("api_url") != hub.get_base_url():
+        info = ws.remote_system_info(target)
+        hostname = info.get("hostname") or host
+        resp = hub._request(
+            "post",
+            "/operators",
+            json=dict(
+                hostname=hostname,
+                machine_id=info.get("machine_id"),
+                platform=str(info.get("os", "")).lower() or None,
+                calkit_version=info.get("calkit_version"),
+                hosts=list(dict.fromkeys([host, hostname])),
+            ),
+        )
+        cfg = dict(
+            api_url=hub.get_base_url(),
+            id=resp["id"],
+            name=resp["name"],
+            user_id=resp["user_id"],
+            token=resp["token"],
+            workspaces=[],
+        )
+        registered = True
+    try:
+        if registered:
+            # Only the user can read it there either, since it holds the
+            # token
+            subprocess.run(
+                target.login_argv(
+                    "umask 077 && mkdir -p ~/.calkit "
+                    "&& cat > ~/.calkit/operator.yaml"
+                ),
+                input=yaml.safe_dump(cfg, sort_keys=False),
+                text=True,
+                check=True,
+            )
+        args = ["calkit", "operator", "install"]
+        if cron:
+            args.append("--cron")
+        if no_service:
+            args.append("--no-service")
+        subprocess.run(target.login_argv(shlex.join(args)), check=True)
+    except Exception:
+        # A registration nothing can use would linger on the hub
+        if registered:
+            hub._request("delete", f"/operators/{cfg['id']}")
+        raise
+    return dict(cfg)
 
 
 def discover_workspaces(cfg: dict) -> list[dict]:

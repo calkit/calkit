@@ -25,6 +25,8 @@ is `calkit.yaml`, the project's metadata database.
 - `environments`—computational environments (Python venvs, Conda, Docker,
   R, Julia, MATLAB, etc.)
 - `pipeline.stages`—the reproducible pipeline
+- `questions`—research questions, hypotheses, and answers backed by
+  evidence the pipeline produces
 - `notebooks`—registered Jupyter notebooks
 - `datasets`, `figures`, `publications`—versioned project outputs
 - `procedures`, `calculations`, `references`—supporting metadata
@@ -209,6 +211,9 @@ DVC handles:
 | `calkit add <file>`             | Add a file to version control                        |
 | `calkit check env --name <env>` | Verify an environment matches its spec               |
 | `calkit new`                    | Create new project objects (notebook, dataset, etc.) |
+| `calkit new question "<text>"`  | Record a research question                           |
+| `calkit list questions`         | Show questions with answers rendered from evidence   |
+| `calkit check questions`        | Check answers against current evidence               |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 
@@ -232,6 +237,27 @@ calkit xr scripts/run.py --input data/raw.csv --output results/out.csv
 calkit xr scripts/run.py --environment main
 calkit xr scripts/run.py --dry-run    # see what would happen without running
 ```
+
+## Questions and answers
+
+Research in a Calkit project is organized around the `questions` list in
+`calkit.yaml`. Follow this workflow:
+
+1. Before starting an analysis, make sure the question it answers is
+   recorded, e.g., with `calkit new question`. If the user hasn't stated
+   one, ask them for it rather than inventing it. Add a `hypothesis` if
+   they have one.
+2. Produce evidence with pipeline stages, never by hand, so every figure,
+   table, and number traces back to data and code.
+3. Write the `answer` citing that evidence. Read numbers out of results
+   files and put them in the prose with `{name}` placeholders instead of
+   typing them in, either one per `kind: value` entry, or several from one
+   file with a `kind: result` entry's `values` mapping of names to keys.
+4. After a pipeline run changes results, run `calkit check questions`,
+   then use the `check-questions` skill to judge whether each answer's
+   wording still follows from its evidence.
+
+See the Calkit docs on questions for the full evidence schema.
 
 ## Version control conventions
 

@@ -671,6 +671,119 @@ def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     assert result.returncode == 0, result.stderr
 
 
+def test_get_source_date_epoch(tmp_dir):
+    from calkit.latex import get_source_date_epoch
+
+    # Outside a repo there's nothing to read a date from
+    os.makedirs("paper")
+    with open(os.path.join("paper", "main.tex"), "w") as f:
+        f.write("\\documentclass{article}\\begin{document}Hi\\end{document}\n")
+    assert get_source_date_epoch("paper/main.tex") is None
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "add", "paper/main.tex"])
+    subprocess.check_call(["git", "commit", "-q", "-m", "Add the paper"])
+    committed = subprocess.check_output(
+        ["git", "log", "-1", "--format=%ct"], text=True
+    ).strip()
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # A commit elsewhere doesn't restamp a document it didn't touch
+    with open("notes.txt", "w") as f:
+        f.write("sup\n")
+    subprocess.check_call(["git", "add", "notes.txt"])
+    subprocess.check_call(
+        ["git", "commit", "-q", "-m", "Add notes", "--date", "2030-01-01"]
+    )
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # Build artifacts are untracked, and say nothing about the source
+    with open(os.path.join("paper", "main.log"), "w") as f:
+        f.write("log\n")
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # An edit in the working tree can only have been made now
+    with open(os.path.join("paper", "main.tex"), "a") as f:
+        f.write("% edit\n")
+    assert get_source_date_epoch("paper/main.tex") is None
+
+
+def test_fetch_missing_packages(tmp_dir, monkeypatch):
+    from calkit.cli import latex as cli_latex
+    from calkit.latex import find_missing_tex_files
+
+    # What LaTeX says, for a style file and for a font it has no metrics for
+    log = (
+        "! LaTeX Error: File `xurl.sty' not found.\n"
+        "! Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable: Metric (TFM) "
+        "file not found.\n"
+        "! LaTeX Error: File `xurl.sty' not found.\n"
+    )
+    assert find_missing_tex_files(log) == ["xurl.sty", "pcrr7t.tfm"]
+    assert find_missing_tex_files("Output written on main.pdf") == []
+    os.makedirs("paper")
+    log_path = os.path.join("paper", "main.log")
+    fdb_path = os.path.join("paper", "main.fdb_latexmk")
+    calls: list[list[str]] = []
+    # Each build writes the log LaTeX would, missing what isn't installed
+    state = {"installed": set(), "unfetchable": set()}
+
+    def check_call(cmd, env=None):
+        calls.append(cmd)
+        missing = {"xurl.sty"} - state["installed"]
+        missing |= state["unfetchable"]
+        with open(log_path, "w") as f:
+            for name in missing:
+                f.write(f"! LaTeX Error: File `{name}' not found.\n")
+        with open(fdb_path, "w") as f:
+            f.write("fdb")
+        if missing:
+            raise subprocess.CalledProcessError(12, cmd)
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        if "search" in cmd:
+            name = cmd[-1].lstrip("/")
+            out = f"{name.split('.')[0]}:\n\ttexmf-dist/tex/latex/x/{name}\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=out)
+        assert "install" in cmd
+        state["installed"] |= {"xurl.sty"}
+        # As a font's install does, failing on the map after the files land
+        return subprocess.CompletedProcess(cmd, 1, stdout="")
+
+    monkeypatch.setattr(subprocess, "check_call", check_call)
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: False)
+    monkeypatch.setattr(
+        calkit.docker, "ensure_image_available", lambda image: None
+    )
+
+    def build():
+        return cli_latex._run_latexmk(
+            ["latexmk", "paper/main.tex"],
+            env=None,
+            log_path=log_path,
+            fdb_path=fdb_path,
+            environment=None,
+            verbose=False,
+        )
+
+    # Fetched into the project and built on the retry, the install's error
+    # notwithstanding, with latexmk made to try again
+    assert build() == 0
+    installs = [c for c in calls if "install" in c]
+    assert len(installs) == 1 and installs[0][-1] == "xurl"
+    assert "TEXMFHOME=/work/.calkit/local/texmf" in installs[0]
+    assert os.path.isdir(os.path.join(".calkit", "local", "texmf"))
+    # Something fetching doesn't fix fails rather than looping
+    state["installed"].clear()
+    state["unfetchable"] = {"nope.sty"}
+    calls.clear()
+    assert build() == 12
+    assert len([c for c in calls if c[0] == "latexmk"]) == 2
+    # A system TeX is the user's, so nothing is fetched into it
+    monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: True)
+    calls.clear()
+    assert build() == 12
+    assert not [c for c in calls if "tlmgr" in c]
+
+
 def test_from_questions(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     with open("results.json", "w") as f:

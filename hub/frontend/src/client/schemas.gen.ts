@@ -6288,6 +6288,11 @@ export const ProjectPostSchema = {
       title: "Keep Template History",
       default: false,
     },
+    empty_repo: {
+      type: "boolean",
+      title: "Empty Repo",
+      default: false,
+    },
     overleaf_project_url: {
       anyOf: [
         {

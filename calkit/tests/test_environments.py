@@ -13,6 +13,7 @@ import pytest
 
 import calkit
 import calkit.environments
+import calkit.latex
 
 
 def test_check_all_in_pipeline(tmp_dir):
@@ -892,7 +893,7 @@ def test_detect_env_for_stage(tmp_dir):
         stage_latex, environment=None, ck_info={"environments": {}}
     )
     assert res.env["kind"] == "docker"
-    assert res.env["image"] == "texlive/texlive:latest-full"
+    assert res.env["image"] == calkit.latex.DEFAULT_LATEX_IMAGE
 
 
 def test_env_from_notebook_path(tmp_dir):

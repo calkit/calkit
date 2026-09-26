@@ -12,6 +12,7 @@ import typer
 from typer.testing import CliRunner
 
 import calkit
+import calkit.latex
 import calkit.schema
 from calkit.cli.main.core import app
 from calkit.environments import get_env_lock_fpath
@@ -385,8 +386,8 @@ def test_new_publication(tmp_dir):
     print(ck_info)
     assert ck_info["environments"]["my-latex-env"] == dict(
         kind="docker",
-        image="texlive/texlive:latest-full",
-        description="TeXlive full.",
+        image=calkit.latex.DEFAULT_LATEX_IMAGE,
+        description="TeX Live via Calkit's LaTeX image.",
     )
     assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
     stage = ck_info["pipeline"]["stages"]["build-latex-article"]

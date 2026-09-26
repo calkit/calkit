@@ -49,9 +49,26 @@ calkit new publication paper --template latex/jfm --stage paper \
 
 Available templates are `latex/article` (generic), `latex/ieee-conference`
 (IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
-(chapters, for a thesis or technical report). Each uses packages that ship
-with TeX Live, so the `texlive/texlive:latest-full` Docker environment
-builds all of them.
+(chapters, for a thesis or technical report).
+The environment created uses Calkit's LaTeX Docker image,
+which can build all of them.
+
+## Packages
+
+Calkit's LaTeX image includes the packages used by common journal classes
+and most papers,
+which makes it a fraction of the size of a full TeX Live distribution.
+If a document uses a package the image doesn't include,
+`calkit latex build` will install it the first time it's needed.
+Installed packages are kept in the project in `.calkit/local/texmf`,
+which is ignored by Git,
+so they don't need to be installed again on the next build.
+
+Packages are only installed automatically when building with Calkit's
+image, either directly, i.e., with no environment specified,
+or in a Docker environment built from it.
+For other images or a LaTeX distribution installed on your machine,
+you'll need to install packages the usual way.
 
 ## Inputs
 
@@ -71,6 +88,19 @@ document.
 Undeclared inputs mean editing the class file doesn't rebuild the paper, and
 the web app's in-browser editor, which loads exactly what the stage declares,
 can't compile the document at all.
+
+## Build dates
+
+pdfTeX writes the build time into the PDF,
+so building the same document twice produces two different files,
+and each rebuild writes a new hash to `dvc.lock`,
+even if the document didn't change.
+
+To avoid this, Calkit sets the build date to that of the last commit
+that modified the document's directory.
+This way the date is still meaningful,
+and the PDF won't change until the document does.
+If there are uncommitted changes, the current time is used instead.
 
 ## Comparing revisions
 

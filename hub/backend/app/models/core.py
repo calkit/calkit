@@ -749,6 +749,10 @@ class ProjectPost(ProjectBase):
     # Whether a project made from a template keeps the template's commits.
     # Off by default: the new project's history starts with itself.
     keep_template_history: bool = False
+    # Create the Git repo with no commits, for a project that already has
+    # its own history to push, e.g., one connected with 'calkit update hub'.
+    # A scaffolded repo shares no history with it, so its push is rejected.
+    empty_repo: bool = False
     # An Overleaf project to take the title from, when none is given
     overleaf_project_url: str | None = Field(default=None, max_length=2048)
 

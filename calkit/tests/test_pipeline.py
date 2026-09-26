@@ -2629,6 +2629,7 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert "*.aux" in contents
     assert "*.fdb_latexmk" in contents
     assert "*.synctex.gz" in contents
+    assert "*.log" in contents
     # The compiled PDF must never be ignored
     assert "*.pdf" not in contents
     assert "managed by calkit" in contents
@@ -3578,3 +3579,96 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open(".gitattributes") as f:
         assert f.read().count("/.calkit/** text eol=lf") == 1
+
+
+def test_table_iteration_names(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+
+    def stage(values):
+        return {
+            "kind": "shell-command",
+            "environment": "_system",
+            "command": "echo {scenario}{sfx}-{seed} > s{scenario}-{seed}.txt",
+            "iterate_over": [
+                {"arg_name": ["scenario", "sfx"], "values": values},
+                {"arg_name": "seed", "values": [1, 2]},
+            ],
+            "outputs": ["s{scenario}-{seed}.txt"],
+        }
+
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "ev": stage([[1, ""], [3, "_mm"]]),
+                "plain": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo {n} > n{n}.txt",
+                    "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
+                    "outputs": ["n{n}.txt"],
+                },
+                "collect": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "cat s*.txt > all.txt",
+                    "inputs": [{"from_stage_outputs": "ev"}],
+                    "outputs": ["all.txt"],
+                },
+            }
+        }
+    }
+    # An existing project ran its table items under their positions
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "schema": "2.0",
+                "stages": {
+                    "ev@_arg00-1": {"cmd": "a"},
+                    "ev@_arg01-2": {"cmd": "b"},
+                    "plain@1": {"cmd": "c"},
+                },
+            },
+            f,
+        )
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    # Callers still get the matrix form
+    assert "matrix" in stages["ev"]
+    with open("dvc.yaml") as f:
+        written = calkit.ryaml.load(f)["stages"]
+    # Written, a table row is named by its values, blanks left out
+    assert list(written["ev"]["foreach"]) == [
+        "1-1",
+        "1-2",
+        "3-_mm-1",
+        "3-_mm-2",
+    ]
+    assert written["ev"]["foreach"]["3-_mm-2"] == {
+        "scenario": 3,
+        "sfx": "_mm",
+        "seed": 2,
+    }
+    assert written["ev"]["do"]["outs"] == [
+        "s${item.scenario}-${item.seed}.txt"
+    ]
+    # A stage without a table keeps DVC's own naming
+    assert "matrix" in written["plain"]
+    # What depends on the items still sees each one
+    assert written["collect"]["deps"] == [
+        "s1-1.txt",
+        "s1-2.txt",
+        "s3-1.txt",
+        "s3-2.txt",
+    ]
+    # Lock entries follow, so what ran under the old names is still current
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)["stages"]
+    assert list(lock) == ["ev@1-1", "ev@3-_mm-2", "plain@1"]
+    assert lock["ev@3-_mm-2"] == {"cmd": "b"}
+    names = subprocess.check_output(["dvc", "stage", "list", "--name-only"])
+    assert "ev@3-_mm-2" in names.decode()
+    # Rows that would share a name keep DVC's positional names
+    ck_info["pipeline"]["stages"]["ev"] = stage([["a", ""], ["", "a"]])
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open("dvc.yaml") as f:
+        assert "matrix" in calkit.ryaml.load(f)["stages"]["ev"]

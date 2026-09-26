@@ -888,6 +888,10 @@ def post_project(
         project_in.git_repo_url = (
             f"https://github.com/{current_user.account.name}/{project_in.name}"
         )
+    if project_in.empty_repo and project_in.template is not None:
+        raise HTTPException(
+            400, "A project from a template can't have an empty repo"
+        )
     # First check if template even exists, if specified
     template_project: Project | None = None
     template_git_repo_url: str | None = None
@@ -1019,7 +1023,7 @@ def post_project(
             "has_wiki": True,
         }
         # If creating from a template repo, we want it to be empty
-        if project_in.template is None:
+        if project_in.template is None and not project_in.empty_repo:
             body["gitignore_template"] = "Python"
         if is_user_org:
             post_url = f"https://api.github.com/orgs/{owner_name}/repos"
@@ -1065,6 +1069,10 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
+        # The client pushes its own history, which already has everything
+        # the scaffold below would write
+        if project_in.empty_repo:
+            return project
         try:
             # Clone the repo and set up the Calkit DVC remote
             repo = get_repo(
@@ -1108,7 +1116,9 @@ def post_project(
             # Add a calkit.yaml file
             # First existing info, which is empty unless we're using a template
             ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
-            _ = ck_info.pop("questions", None)
+            # A template's questions are kept, as 'calkit new project' keeps
+            # them: an example's question and the stages that answer it are
+            # the working example, and the new project reproduces the answer
             ck_info |= {
                 "owner": owner_name,
                 "name": project.name,
@@ -6744,19 +6754,24 @@ async def post_project_overleaf_publication(
         raise HTTPException(
             400, f"A stage named '{stage_name}' already exists; please provide"
         )
-    # Check environment spec, auto-detecting a TeXlive env to use
+    # Check environment spec, auto-detecting a TeX Live env to use, which
+    # is either a TeX Live image or Calkit's own
     envs = ck_info.get("environments", {})
     env_name = environment_name
+
+    def is_tex_image(image: str) -> bool:
+        return "texlive" in image or "calkit/latex" in image
+
     if not env_name:
         for en, e in envs.items():
-            if e.get("kind") == "docker" and "texlive" in e.get("image", ""):
+            if e.get("kind") == "docker" and is_tex_image(e.get("image", "")):
                 env_name = en
-                logger.info(f"Detected TeXlive env '{en}'")
+                logger.info(f"Detected TeX Live env '{en}'")
                 break
     elif env_name and env_name in envs:
         env = envs[env_name]
-        if env.get("kind") != "docker" and "texlive" not in env.get(
-            "image", ""
+        if env.get("kind") != "docker" and not is_tex_image(
+            env.get("image", "")
         ):
             raise HTTPException(
                 400,
@@ -6771,7 +6786,7 @@ async def post_project_overleaf_publication(
         while env_name in envs:
             env_name = f"tex-{n}"
             n += 1
-        env = {"kind": "docker", "image": "texlive/texlive:latest-full"}
+        env = dict(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
         envs[env_name] = env
         ck_info["environments"] = envs
     # Determine mode: link vs zip

@@ -681,6 +681,7 @@ def test_xr_stage_name_conflict(tmp_dir):
     assert stages["process-v3"]["script_path"] == "other/process.py"
 
 
+@pytest.mark.xdist_group("conda")
 def test_xr_jupyter_notebook_conda_env(tmp_dir):
     # First, create a conda env with matplotlib and jupyter deps
     os.makedirs("env")

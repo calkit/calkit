@@ -7,12 +7,16 @@ import os
 import shutil
 from datetime import datetime
 from importlib import resources
+from typing import TYPE_CHECKING
 
 import typer
 from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import raise_error, warn
+
+if TYPE_CHECKING:
+    import git
 
 update_app = typer.Typer(no_args_is_help=True)
 
@@ -1536,3 +1540,250 @@ def update_dataset(
             + "; ".join(str(err["msg"]) for err in e.errors())
         )
     calkit.save_calkit_info(ck_info)
+
+
+def _adopt_hub_history(repo: git.Repo) -> None:
+    """Make the first push of an existing project fast-forward.
+
+    A hub that doesn't know to leave a new repo empty scaffolds it with
+    commits of its own, which share no history with the project, so the
+    push is rejected. Everything the hub wrote the project already has in
+    its own form, so its commits are joined without taking any of their
+    content, i.e., merged with the ``ours`` strategy.
+    """
+    if "origin" not in [r.name for r in repo.remotes]:
+        return
+    try:
+        branch = repo.active_branch.name
+        repo.git.fetch(["origin", branch])
+    except Exception:
+        # Nothing there yet, or no branch of that name: nothing to join
+        return
+    remote_ref = f"origin/{branch}"
+    try:
+        repo.git.merge_base(["--is-ancestor", remote_ref, "HEAD"])
+        return
+    except Exception:
+        pass
+    typer.echo("Joining the commits the hub made when creating the repo")
+    repo.git.merge(
+        [
+            "-s",
+            "ours",
+            "--allow-unrelated-histories",
+            "-m",
+            "Join the hub's initial commits",
+            remote_ref,
+        ]
+    )
+
+
+def is_connected_to_hub() -> bool:
+    """Whether this project already has somewhere to push code and data.
+
+    Both halves have to be there: a Git remote without DVC storage leaves
+    data with nowhere to go, and storage without a Git remote leaves the
+    code behind.
+    """
+    import calkit.dvc
+
+    try:
+        repo = calkit.git.get_repo()
+        has_git_remote = "origin" in [r.name for r in repo.remotes]
+    except Exception:
+        return False
+    if not has_git_remote:
+        return False
+    try:
+        remotes = calkit.dvc.get_remotes()
+    except Exception:
+        return False
+    return any(
+        calkit.dvc.detect_calkit_remote_type(name, url) is not None
+        for name, url in remotes.items()
+    )
+
+
+@update_app.command(name="remote", help="Alias for 'hub'.")
+@update_app.command(name="hub")
+def update_hub(
+    hub: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Hub to connect this project to, e.g., 'calkit.io'. "
+                "Defaults to the one already set for the project, else the "
+                "'default_hub' config value, else calkit.io."
+            ),
+        ),
+    ] = None,
+    public: Annotated[
+        bool,
+        typer.Option("--public", help="Create the project as public."),
+    ] = False,
+    create_repo: Annotated[
+        bool,
+        typer.Option(
+            "--create-repo",
+            help=(
+                "Let the hub create a Git repository without asking, for "
+                "a project that has no remote. Asked about interactively "
+                "when not given."
+            ),
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit the changes."),
+    ] = False,
+) -> None:
+    """Connect this project to a Calkit hub.
+
+    Creates the project on the hub if it isn't there, then points DVC at
+    the hub's storage so data and outputs have somewhere to go. This is
+    what 'calkit new project --hub' does at creation time, for a project
+    that was created without it.
+
+    A project that already has a Git remote keeps it: the hub adopts that
+    repository rather than creating a second one for the same work. One
+    with no remote is offered a new repository, since otherwise there is
+    nowhere to push code.
+    """
+    import subprocess
+
+    from git.exc import InvalidGitRepositoryError
+
+    import calkit.hub
+    from calkit.dvc import configure_remote, set_remote_auth
+
+    ck_info = calkit.load_calkit_info()
+    # Connecting a project that is already connected is nothing to do, so
+    # running this a second time costs no requests and changes no files.
+    # Naming a hub is how someone asks to move, which is a real change.
+    if hub is None and is_connected_to_hub():
+        typer.echo(
+            f"Already connected to {calkit.hub.get_hub_url()}; name a hub "
+            "to connect to a different one"
+        )
+        return
+    # The project has to be named before it can be created anywhere, and
+    # the directory name is what 'calkit new project' would have used
+    name = ck_info.get("name") or os.path.basename(
+        os.path.abspath(os.getcwd())
+    )
+    # Whatever the project already pushes to, so the hub adopts that
+    # repository instead of creating a second one for the same work
+    git_repo_url = ck_info.get("git_repo_url")
+    if git_repo_url is None:
+        try:
+            url = calkit.git.get_repo().remotes.origin.url
+            # The hub identifies repos by their https URL
+            if url.startswith("git@github.com:"):
+                url = "https://github.com/" + url.split(":", 1)[1]
+            git_repo_url = url.removesuffix(".git")
+        except Exception:
+            git_repo_url = None
+    if git_repo_url is None and not create_repo:
+        from calkit.dependencies import _is_interactive
+
+        if not _is_interactive():
+            raise_error(
+                "This project has no Git repository, so there would be "
+                "nowhere to push its code. Add a remote, or pass "
+                "--create-repo to have the hub create one."
+            )
+        typer.echo(
+            "This project has no Git repository, so there is nowhere to "
+            "push its code."
+        )
+        answer = typer.prompt(
+            f"Create one on {calkit.hub.get_hub_url()}? [Y/n]",
+            default="y",
+            show_default=False,
+        )
+        if answer.strip().lower() not in ("", "y", "yes"):
+            raise_error("Nothing to connect to; add a Git remote first")
+        create_repo = True
+    if hub is not None:
+        ck_info["hub"] = hub
+    hub_url = calkit.hub.get_hub_url()
+    typer.echo(f"Connecting '{name}' to {hub_url}")
+    try:
+        user = calkit.hub.get_current_user()
+    except Exception as e:
+        raise_error(
+            f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
+        )
+    owner = ck_info.get("owner") or user.get("github_username")
+    # Creating it is the step that can already be done, so a project that
+    # exists is not an error: the point is to end up connected
+    resp = None
+    try:
+        resp = calkit.hub.post(
+            "/projects",
+            json=dict(
+                name=name,
+                title=ck_info.get("title") or name,
+                description=ck_info.get("description"),
+                git_repo_url=git_repo_url,
+                git_repo_exists=git_repo_url is not None,
+                is_public=public,
+                # This project already has its own history to push, which
+                # a repo the hub scaffolded would reject
+                empty_repo=git_repo_url is None,
+            ),
+        )
+        typer.echo("Created project on the hub")
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            typer.echo("Project already exists on the hub")
+        else:
+            raise_error(f"Failed to create the project on the hub: {e}")
+    # A repository the hub made for us is no use until the project points
+    # at it, and this is the only moment we know its URL
+    if isinstance(resp, dict) and resp.get("git_repo_url"):
+        git_repo_url = resp["git_repo_url"]
+        repo = calkit.git.get_repo()
+        if "origin" not in [r.name for r in repo.remotes]:
+            typer.echo(f"Adding Git remote: {git_repo_url}")
+            repo.git.remote(["add", "origin", git_repo_url])
+        ck_info["git_repo_url"] = git_repo_url
+    try:
+        remote_name = configure_remote()
+        set_remote_auth(remote_name=remote_name)
+    except subprocess.CalledProcessError:
+        if not os.path.isfile(".dvc/config"):
+            raise_error(
+                "DVC remote config failed; have you run 'calkit init'?"
+            )
+        raise_error("Failed to configure DVC remote; check DVC config")
+    except InvalidGitRepositoryError:
+        raise_error("Current directory is not a Git repository")
+    except (ValueError, RuntimeError) as e:
+        raise_error(f"Failed to set up DVC remote: {e}")
+    if owner is not None and ck_info.get("owner") != owner:
+        ck_info["owner"] = owner
+    if ck_info.get("name") != name:
+        ck_info["name"] = name
+    if ck_info.get("hub") is None:
+        ck_info["hub"] = hub_url
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    paths = [".dvc/config", "calkit.yaml"]
+    # The hub would have written one, and a repo it didn't scaffold has none
+    if not os.path.isfile("README.md"):
+        with open("README.md", "w") as f:
+            f.write(f"# {ck_info.get('title') or name}\n")
+            if ck_info.get("description"):
+                f.write(f"\n{ck_info['description']}\n")
+        paths.append("README.md")
+    if not no_commit:
+        repo = calkit.git.get_repo()
+        repo.git.add(paths)
+        staged = calkit.git.get_staged_files()
+        to_commit = [p for p in paths if p in staged]
+        if to_commit:
+            typer.echo("Committing changes")
+            repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
+        _adopt_hub_history(repo)
+    typer.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")

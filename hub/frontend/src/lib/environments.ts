@@ -174,10 +174,12 @@ export const PRESETS: Preset[] = [
   },
   {
     name: "latex",
-    label: "📄 LaTeX: full TeX Live in Docker",
+    label: "📄 LaTeX: TeX Live in Docker, fetching what it lacks",
     kind: "docker",
     envName: "latex",
-    image: "texlive/texlive:latest-full",
+    // Calkit's own image, pinned like the CLI's default; the publish
+    // workflow moves this tag with each release
+    image: "ghcr.io/calkit/latex:0.1.2",
   },
   {
     name: "julia",

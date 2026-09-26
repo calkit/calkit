@@ -545,7 +545,7 @@ def get_status(
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
                 raise_error(f"Failed to initialize DVC repository: {e}")
-    valid_categories = ["project", "git", "dvc", "pipeline"]
+    valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
             if category not in valid_categories:
@@ -580,6 +580,37 @@ def get_status(
                 "Failed pipeline environment checks for: "
                 + ", ".join(pipeline_status.failed_environment_checks)
             )
+    # Checking questions needs to know which stages are stale, which is the
+    # expensive part of the pipeline status computed above, so reuse that
+    # rather than asking DVC a second time
+    questions_status = None
+    if "questions" in categories and ck_info.get("questions"):
+        from calkit.pipeline import frozen_tainted_stage_names
+        from calkit.questions import check_questions
+
+        stale_stages = None
+        frozen_stages = None
+        # A pipeline status that bailed out, e.g., on a failed environment
+        # check, has no staleness in it; let the check work it out itself
+        # rather than reporting evidence as current because nothing was
+        # computed
+        if (
+            pipeline_status is not None
+            and not pipeline_status.errors
+            and not pipeline_status.failed_environment_checks
+        ):
+            stale_stages = {
+                n.split("@")[0] for n in pipeline_status.stale_stage_names
+            }
+            try:
+                frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
+            except Exception:
+                frozen_stages = set()
+        questions_status = check_questions(
+            ck_info=ck_info,
+            stale_stages=stale_stages,
+            frozen_stages=frozen_stages,
+        )
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:
@@ -593,6 +624,8 @@ def get_status(
                     "timestamp": status.timestamp.isoformat(),
                 }
             )
+        if questions_status is not None:
+            status_dict["questions"] = questions_status.model_dump(mode="json")
         if "git" in categories:
             try:
                 repo = calkit.git.get_repo()
@@ -674,6 +707,16 @@ def get_status(
             typer.echo(
                 'Project status not set. Use "calkit new status" to update.'
             )
+        typer.echo()
+    if questions_status is not None:
+        from calkit.questions import format_summary
+
+        print_sep("Questions")
+        # The summary can carry a check mark, which a Windows console
+        # can't encode
+        calkit.echo(format_summary(questions_status))
+        if not questions_status.ok:
+            typer.echo("Run 'calkit check questions' for detail.")
         typer.echo()
     if "git" in categories:
         print_sep("Git")
@@ -861,7 +904,27 @@ def add(
     """
     import dvc.repo
     from dvc.exceptions import NotDvcRepoError
-    from git.exc import InvalidGitRepositoryError
+    from git.exc import GitCommandError, InvalidGitRepositoryError
+
+    def git_add(*paths_to_add: str) -> None:
+        """Stage paths, saying why rather than stopping if Git refuses.
+
+        Git refuses for reasons that don't make the rest of what was asked
+        for wrong, e.g., a path a .gitignore excludes, and this used to
+        shell out and ignore the exit status entirely. Paths are relative
+        to the working directory, which is what someone running this from
+        a subdirectory means.
+        """
+        try:
+            # Resolved here, since GitPython runs Git from the repo's root
+            # while these paths are relative to the working directory
+            repo.git.add(*[os.path.abspath(p) for p in paths_to_add])
+        except GitCommandError as e:
+            # GitPython labels and quotes what Git wrote; what it wrote is
+            # the part worth reading
+            reason = (e.stderr or str(e)).strip()
+            reason = reason.removeprefix("stderr: ").strip("'")
+            warn(f"Failed to add {', '.join(paths_to_add)} to Git: {reason}")
 
     if dry_run:
         typer.echo("Dry run: No files will be added")
@@ -944,7 +1007,7 @@ def add(
             for path in paths:
                 typer.echo(f"Would add {path} to {to}")
         elif to == "git":
-            subprocess.call(["git", "add"] + paths)
+            git_add(*paths)
         elif to == "dvc":
             for path in paths:
                 calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
@@ -1040,6 +1103,8 @@ def add(
                 paths.append(changed_file)
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
         pipeline_output_storage = calkit.pipeline.get_output_storage_map()
+        lock_out_paths = calkit.dvc.get_lock_out_paths()
+        dvc_scm = None
         for path in paths:
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()
@@ -1061,7 +1126,7 @@ def add(
                     typer.echo(
                         f"Adding {path} to Git since it's already in the repo"
                     )
-                    subprocess.call(["git", "add", path])
+                    git_add(path)
             elif path in dvc_paths:
                 if dry_run:
                     typer.echo(
@@ -1087,7 +1152,7 @@ def add(
                         typer.echo(
                             f"Adding {path} to Git per pipeline output storage"
                         )
-                        subprocess.call(["git", "add", path])
+                        git_add(path)
                 elif pipeline_storage == "dvc-zip":
                     if dry_run:
                         typer.echo(
@@ -1111,7 +1176,38 @@ def add(
                             f"Adding dvc.lock to Git "
                             f"({path} is a DVC pipeline output)"
                         )
-                        subprocess.call(["git", "add", "dvc.lock"])
+                        git_add("dvc.lock")
+            elif (
+                locked_out := next(
+                    (
+                        out
+                        for out in lock_out_paths
+                        if posix_path == out
+                        or posix_path.startswith(out + "/")
+                    ),
+                    None,
+                )
+            ) is not None:
+                # DVC already caches this, and it's only showing up at all
+                # because its ignore entry went missing, e.g., DVC removes
+                # every entry a failed repro added, including those for the
+                # stages that succeeded. Sized up like a new file, a small
+                # one would go to Git alongside DVC's copy.
+                if dry_run:
+                    typer.echo(
+                        f"Would ignore {path} ({path} is a DVC pipeline output)"
+                    )
+                else:
+                    typer.echo(
+                        f"Ignoring {path} since it's a DVC pipeline output"
+                    )
+                    # Where and how DVC itself would have written the entry
+                    if dvc_scm is None:
+                        dvc_scm = calkit.dvc.get_dvc_repo().scm
+                    gitignore = dvc_scm.ignore(os.path.abspath(locked_out))
+                    if gitignore:
+                        repo.git.add(gitignore)
+                    repo.git.add("dvc.lock")
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 if dry_run:
                     typer.echo(f"Would add {path} to DVC (per extension)")
@@ -1145,10 +1241,17 @@ def add(
                     typer.echo(f"Would add {path} to Git")
                 else:
                     typer.echo(f"Adding {path} to Git")
-                    subprocess.call(["git", "add", path])
+                    git_add(path)
     if not dry_run:
         if commit_message is not None:
-            subprocess.call(["git", "commit", "-m", commit_message])
+            try:
+                repo.git.commit("-m", commit_message)
+            except GitCommandError as e:
+                # Nothing staged is a normal outcome here, e.g., when what
+                # was asked for was already committed
+                output = f"{e.stdout or ''}{e.stderr or ''}"
+                if "nothing to commit" not in output:
+                    warn(f"Failed to commit: {output.strip() or e}")
         if push_commit:
             push()
     else:
@@ -1390,6 +1493,10 @@ def save(
     """
     if not paths and not save_all:
         raise_error("Paths must be provided if not using --all")
+    # Asked before anything else runs: the Git and DVC commands below read
+    # from the terminal too, and would take an answer typed ahead
+    if not no_push and not _has_somewhere_to_push():
+        no_push = not _offer_to_connect()
     if paths is not None:
         add(paths, to=to)
     elif save_all:
@@ -1603,6 +1710,9 @@ def push(
         if excluded:
             selected.discard(target)
     _warn_on_hub_mismatch()
+    if selected & {"git", "dvc"} and not _has_somewhere_to_push():
+        if not _offer_to_connect():
+            return
     if "dvc" in selected:
         remotes = calkit.dvc.get_remotes()
         if not no_check_auth:
@@ -1690,6 +1800,51 @@ def push(
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
     _tell_hub_we_pushed(sorted(selected), git_args)
+
+
+def _offer_to_connect() -> bool:
+    """Offer to connect a project that has nowhere to push to a hub.
+
+    Pushing it would fail on a Git remote that isn't there, which says
+    nothing about what to do next. What it needs is a hub, so offer one
+    rather than reporting the symptom. True if it can be pushed now.
+    """
+    from calkit.cli.update import update_hub
+    from calkit.dependencies import _is_interactive
+
+    typer.echo(
+        "This project isn't connected to a hub, so there's nowhere to "
+        "push its code and data."
+    )
+    if not _is_interactive():
+        warn("Skipping push; run 'calkit update hub' to connect")
+        return False
+    answer = typer.prompt(
+        "Connect it now? [Y/n]", default="y", show_default=False
+    )
+    if answer.strip().lower() not in ("", "y", "yes"):
+        warn("Skipping push; run 'calkit update hub' when you want to")
+        return False
+    update_hub()
+    return True
+
+
+def _has_somewhere_to_push() -> bool:
+    """Whether a push has anywhere at all to go.
+
+    Any remote counts, not only a hub's. Plenty of projects push to a Git
+    remote they set up themselves and keep their data elsewhere, and a
+    push for them works exactly as it always did.
+    """
+    try:
+        if calkit.git.get_repo().remotes:
+            return True
+    except Exception:
+        pass
+    try:
+        return bool(calkit.dvc.get_remotes())
+    except Exception:
+        return False
 
 
 def _is_connected_to_a_hub() -> bool:
@@ -3117,6 +3272,10 @@ def run(
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
     if failed:
+        try:
+            calkit.dvc.restore_output_ignores()
+        except Exception as e:
+            warn(f"Failed to re-ignore pipeline outputs: {e}")
         raise_error("Pipeline failed")
     else:
         calkit.echo("Pipeline completed successfully ✅")
@@ -3270,6 +3429,18 @@ def run_in_env(
             ),
         ),
     ] = None,
+    env_var: Annotated[
+        list[str],
+        typer.Option(
+            "--env-var",
+            help=(
+                "Environmental variable to set for the command, as "
+                "KEY=VALUE. Can be given multiple times. Set in the "
+                "process the command runs in, and passed into a container "
+                "for an environment that runs in one."
+            ),
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -3316,6 +3487,15 @@ def run_in_env(
             "--setup only applies to a 'system' environment, and "
             f"'{env_name}' is of kind '{env.get('kind')}'"
         )
+    # Set here rather than per kind: a container is handed them below,
+    # and everything else runs as a child of this process
+    extra_env_vars = {}
+    for item in env_var:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise_error(f"Invalid --env-var '{item}'; write it as KEY=VALUE")
+        extra_env_vars[key] = value
+        os.environ[key] = value
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
     if wdir is not None:
@@ -3445,6 +3625,10 @@ def run_in_env(
                 if isinstance(value, str):
                     value = os.path.expandvars(value)
                 docker_cmd += ["-e", f"{key}={value}"]
+        # A container inherits nothing from here, so what --env-var asked
+        # for has to be handed to it
+        for key, value in extra_env_vars.items():
+            docker_cmd += ["-e", f"{key}={value}"]
         if (gpus := env.get("gpus")) is not None:
             docker_cmd += ["--gpus", gpus]
         if ports := env.get("ports"):

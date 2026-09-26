@@ -1439,12 +1439,15 @@ def check_questions(
     ck_info: dict | None = None,
     wdir: str | None = None,
     check_pipeline: bool = True,
+    stale_stages: set[str] | None = None,
+    frozen_stages: set[str] | None = None,
 ) -> QuestionsStatus:
     """Check every question in a project against its evidence.
 
     ``check_pipeline`` asks DVC which stages are out of date, which is the
     slowest thing here; turning it off skips that and the frozen check with
-    it, leaving the rest of the report intact.
+    it, leaving the rest of the report intact. A caller that already has
+    those stage sets, e.g., ``calkit status``, can pass them instead.
     """
     wdir = wdir or os.getcwd()
     if ck_info is None:
@@ -1457,9 +1460,10 @@ def check_questions(
     # One reading of calkit.yaml's history, and one of the pipeline, for all
     # of them
     history = CalkitYamlHistory(repo, wdir) if repo is not None else None
-    stale_stages, frozen_stages = pipeline_stage_sets(
-        ck_info, wdir, check_pipeline
-    )
+    if stale_stages is None or frozen_stages is None:
+        stale_stages, frozen_stages = pipeline_stage_sets(
+            ck_info, wdir, check_pipeline
+        )
     return QuestionsStatus(
         questions=[
             check_question(
@@ -1556,3 +1560,26 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
             f"{len(status.deprecated)} (use 'kind: value')"
         )
     return "\n".join(lines)
+
+
+def format_summary(status: QuestionsStatus) -> str:
+    """One line on the state of the project's questions."""
+    n_questions = len(status.questions)
+    if not n_questions:
+        return "No questions defined."
+    parts = [f"{n_questions} question" + ("s" if n_questions != 1 else "")]
+    counts = [
+        (n_questions - len(status.answered), "unanswered"),
+        (len(status.stale), "with stale evidence"),
+        (len(status.missing), "with missing evidence"),
+        (len(status.errors), "with broken references"),
+        (len(status.frozen), "resting on a frozen stage"),
+        (
+            sum(1 for q in status.answered if q.status == "no-evidence"),
+            "with no evidence",
+        ),
+    ]
+    parts += [f"{count} {label}" for count, label in counts if count]
+    if len(parts) == 1:
+        parts.append("all answered with current evidence ✅")
+    return ", ".join(parts)

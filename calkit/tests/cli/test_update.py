@@ -532,3 +532,76 @@ def test_update_imported_from_detects_the_kind(tmp_dir):
     )
     assert result.exit_code != 0
     assert "on its own" in result.output
+
+
+def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
+    import calkit.dvc
+    import calkit.hub
+
+    def git(*args, cwd="."):
+        return subprocess.check_output(["git", *args], cwd=cwd, text=True)
+
+    def make_remote(scaffold: bool) -> str:
+        bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
+        git("init", "-q", "--bare", "-b", "main", bare)
+        if scaffold:
+            # What a hub that scaffolds new repos pushes before the client
+            # has pushed anything
+            work = str(tmp_path_factory.mktemp("hub-clone"))
+            git("clone", "-q", bare, work)
+            with open(os.path.join(work, ".gitignore"), "w") as f:
+                f.write("env/\n")
+            with open(os.path.join(work, "README.md"), "w") as f:
+                f.write("# From the hub\n")
+            git("add", "-A", cwd=work)
+            git("commit", "-q", "-m", "Initial commit", cwd=work)
+            git("push", "-q", "origin", "main", cwd=work)
+        return bare
+
+    posted: list[dict] = []
+    remote = {"url": ""}
+
+    def post(path, json=None, **kwargs):
+        posted.append(json)
+        return {"git_repo_url": remote["url"]}
+
+    monkeypatch.setattr(calkit.hub, "post", post)
+    monkeypatch.setattr(
+        calkit.hub, "get_current_user", lambda: {"github_username": "someone"}
+    )
+    monkeypatch.setattr(calkit.hub, "get_hub_url", lambda: "https://hub.test")
+    monkeypatch.setattr(calkit.dvc, "configure_remote", lambda: "calkit")
+    monkeypatch.setattr(
+        calkit.dvc, "set_remote_auth", lambda remote_name: None
+    )
+    for scaffold in [True, False]:
+        # A project with history of its own and nowhere to push it
+        project = str(tmp_path_factory.mktemp("project"))
+        os.chdir(project)
+        git("init", "-q", "-b", "main")
+        subprocess.check_call(["dvc", "init", "-q"])
+        with open("calkit.yaml", "w") as f:
+            f.write("name: my-project\ntitle: My project\n")
+        git("add", "-A")
+        git("commit", "-q", "-m", "Start")
+        remote["url"] = make_remote(scaffold=scaffold)
+        result = runner.invoke(update_app, ["hub", "--create-repo"])
+        assert result.exit_code == 0, result.output
+        # The hub is asked not to scaffold, since there's history to push
+        assert posted[-1]["empty_repo"] is True
+        # Whatever the hub did, the first push goes through without force
+        git("push", "-q", "origin", "main")
+        assert git("rev-parse", "HEAD") == git(
+            "rev-parse", "main", cwd=remote["url"]
+        )
+        log = git("log", "--format=%s")
+        assert ("Join the hub's initial commits" in log) is scaffold
+        # None of the hub's files are taken, and the README is ours
+        assert not os.path.exists(".gitignore")
+        with open("README.md") as f:
+            assert f.read().startswith("# My project")
+        ck_info = calkit.load_calkit_info()
+        assert ck_info["hub"] == "https://hub.test"
+        assert ck_info["git_repo_url"] == remote["url"]
+        assert ck_info["owner"] == "someone"
+        assert git("status", "--porcelain") == ""

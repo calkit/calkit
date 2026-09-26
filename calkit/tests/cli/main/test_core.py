@@ -1048,6 +1048,43 @@ def test_status(tmp_dir):
     calkit.get_project_status_history()
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(["calkit", "new", "status", "very-cool"])
+    # Questions are summarized in a section of their own
+    os.makedirs("results", exist_ok=True)
+    with open("results/summary.json", "w") as f:
+        json.dump({"r2": 0.985}, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"] = [
+        {
+            "question": "Does it work?",
+            "answer": "Yes, $R^2 = {r2:.3f}$.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/summary.json",
+                    "key": "r2",
+                }
+            ],
+        },
+        {"question": "Is there more?"},
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "questions"]
+    ).decode()
+    assert "Questions" in out
+    assert "2 questions, 1 unanswered" in out
+    # The value isn't attributed to any stage, which is an error, so the
+    # summary says to go look
+    assert "calkit check questions" in out
+    # A project with no questions gets no section at all
+    ck_info.pop("questions")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "questions"]
+    ).decode()
+    assert "Questions" not in out
 
 
 def test_save(tmp_dir):
@@ -2798,6 +2835,155 @@ def test_push_reports_what_was_pushed(monkeypatch, tmp_dir):
     assert sent[-1]["targets"] == ["dvc"]
     cli_core._tell_hub_we_pushed(["dvc", "docker", "git"], [])
     assert sent[-1]["targets"] == ["dvc", "docker", "git"]
+
+
+def test_save_offers_hub_before_committing(
+    tmp_dir, tmp_path_factory, monkeypatch
+):
+    from typer.testing import CliRunner
+
+    import calkit.cli.main.core as core
+    import calkit.cli.update
+    import calkit.dependencies
+
+    subprocess.check_call(["calkit", "init"])
+    monkeypatch.setattr(calkit.dependencies, "_is_interactive", lambda: True)
+    bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
+    subprocess.check_call(["git", "init", "-q", "--bare", bare])
+    events: list[str] = []
+
+    def connect():
+        events.append("connect")
+        subprocess.check_call(["git", "remote", "add", "origin", bare])
+
+    real_add = core.add
+
+    def add(*args, **kwargs):
+        events.append("add")
+        return real_add(*args, **kwargs)
+
+    monkeypatch.setattr(calkit.cli.update, "update_hub", connect)
+    monkeypatch.setattr(core, "add", add)
+    runner = CliRunner()
+    # Asked before anything runs, since the Git and DVC commands save
+    # starts read the same terminal and would swallow an answer typed ahead
+    with open("a.txt", "w") as f:
+        f.write("a")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add a"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert events == ["connect", "add"]
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Add a"
+    assert git.Repo(bare).head.commit.hexsha == repo.head.commit.hexsha
+    # Declining still commits, and skips the push
+    subprocess.check_call(["git", "remote", "remove", "origin"])
+    events.clear()
+    with open("b.txt", "w") as f:
+        f.write("b")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add b"], input="n\n")
+    assert result.exit_code == 0, result.output
+    assert events == ["add"]
+    assert repo.head.commit.message.strip() == "Add b"
+    assert git.Repo(bare).head.commit.message.strip() == "Add a"
+
+
+def test_outputs_stay_out_of_git_after_failed_run(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "ev": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p results/s{s} && echo {n} > "
+                "results/s{s}/seed-{n}.txt",
+                "iterate_over": [
+                    {"arg_name": "s", "values": [1, 3]},
+                    {"arg_name": "n", "values": [1, 2]},
+                ],
+                "outputs": ["results/s{s}/seed-{n}.txt"],
+            },
+            "boom": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "exit 1",
+                "inputs": [{"from_stage_outputs": "ev"}],
+                "outputs": ["results/other.txt"],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    outputs = [f"results/s{s}/seed-{n}.txt" for s in [1, 3] for n in [1, 2]]
+    # DVC drops the ignore entries of stages that succeeded when a later
+    # one fails, so a failed run has to put them back
+    proc = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert proc.returncode != 0
+    repo = git.Repo()
+    assert all(repo.ignored(path) for path in outputs)
+    # And an output left unignored anyway, e.g., by an older Calkit, is
+    # still not committed to Git by save
+    for path in ["results/s1/.gitignore", "results/s3/.gitignore"]:
+        os.remove(path)
+    assert not any(repo.ignored(path) for path in outputs)
+    subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+    tracked = repo.git.ls_files("results").splitlines()
+    assert not set(outputs) & set(tracked)
+    assert all(repo.ignored(path) for path in outputs)
+    assert "dvc.lock" in repo.git.ls_files().splitlines()
+
+
+@skipif_windows_docker
+def test_xenv_env_var(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "here": {"kind": "system"},
+        "box": {"kind": "docker", "image": "alpine:3.20"},
+    }
+    calkit.save_calkit_info(ck_info)
+
+    def echo(env_name, *args):
+        return subprocess.check_output(
+            ["calkit", "xenv", "-n", env_name, "--no-check", *args]
+            + ["--", "sh", "-c", "echo [$FOO][$BAR]"],
+            text=True,
+        )
+
+    # Set in the process the command runs in, and handed to a container,
+    # which inherits nothing from here
+    for env_name in ["here", "box"]:
+        out = echo(env_name, "--env-var", "FOO=bar", "--env-var", "BAR=2")
+        assert "[bar][2]" in out, out
+        assert "[][]" in echo(env_name)
+    # Written as KEY=VALUE, and said so when it isn't
+    proc = subprocess.run(
+        ["calkit", "xenv", "-n", "here", "--env-var", "FOO", "--", "sh"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "KEY=VALUE" in proc.stderr
+
+
+def test_add_says_why_git_refused(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open(".gitignore", "w") as f:
+        f.write("secret.txt\n")
+    with open("secret.txt", "w") as f:
+        f.write("shh")
+    # What Git refuses is said rather than passed over, and doesn't stop
+    # the rest of what was asked for
+    proc = subprocess.run(
+        ["calkit", "add", "secret.txt", "-t", "git"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    said = proc.stdout + proc.stderr
+    assert "Failed to add secret.txt to Git" in said
+    assert "ignored by one of your .gitignore files" in said
+    assert not git.Repo().git.ls_files("secret.txt")
 
 
 def test_push_carries_annotated_tags(tmp_dir):

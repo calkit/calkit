@@ -119,6 +119,29 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
     chmod -R a+rX /opt/.TinyTeX && \
     chmod -R a+rwX /opt/.TinyTeX/texmf-var
 
+# What papers load rather than what classes need: every package 175
+# recent arXiv papers loaded that the core above lacks, as found by
+# scan-arxiv.py, plus what those packages turned out to load in turn when
+# compiling 48 of the papers, which the scan can't see, e.g., tcolorbox's
+# libraries and the Courier times asks for. Less a few large fonts only
+# one paper used, and cjk, whose CJK fonts are 90 MB for three papers.
+# That took the sample from 5 of 48 building to 39. A layer of its own so
+# the core stays cached when this list changes. Permissions are fixed only
+# where they're wrong: a recursive chmod copies every file into this
+# layer.
+COPY packages.txt /tmp/packages.txt
+RUN i=1; \
+    until [ "$i" -gt 3 ]; do \
+        tlmgr install $(grep -v '^#' /tmp/packages.txt) && break; \
+        echo "tlmgr failed on attempt ${i}/3, retrying in 15s..." >&2; \
+        i=$((i + 1)); \
+        sleep 15; \
+    done && \
+    [ "$i" -le 3 ] && \
+    rm /tmp/packages.txt && \
+    find /opt/.TinyTeX ! -perm -a+r -exec chmod a+rX {} + && \
+    find /opt/.TinyTeX/texmf-var ! -perm -a+rw -exec chmod a+rwX {} +
+
 # The user tree is initialized at run time, not here: a mounted cache
 # starts empty and would hide anything this layer created.
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -485,6 +485,108 @@ def stages_are_similar(stage1: dict, stage2: dict) -> bool:
     return True
 
 
+_TABLE_ITEM_RE = re.compile(r"\$\{item\._arg\d+\.([^}]+)\}")
+
+
+def _is_table_key(key: str, values: list) -> bool:
+    """Whether a matrix key holds the rows of a table-form iteration."""
+    return (
+        re.fullmatch(r"_arg\d+", key) is not None
+        and bool(values)
+        and all(isinstance(v, dict) for v in values)
+    )
+
+
+def _name_table_items(
+    dvc_stage: dict,
+) -> tuple[dict, dict[str, str]]:
+    """Name a table-form stage's items by their values.
+
+    DVC names a matrix item after each value, except that a mapping, which
+    is what a table row is, is named after its position, e.g.,
+    ``stage@_arg00-1`` for the first row and first seed. That says nothing
+    about which item is which, so a stage with a table is written as a
+    ``foreach`` over items named the way DVC names scalars, with a row
+    named by its values, e.g., ``stage@3-_mm-1``.
+
+    Returns the stage as it should be written, and a map from each item's
+    DVC matrix name to its new name, so ``dvc.lock`` entries can follow.
+    Nothing changes for a stage with no table, or where naming by value
+    would be ambiguous.
+    """
+    from dvc.parsing.interpolate import to_str
+
+    matrix = dvc_stage.get("matrix")
+    if not matrix or not any(_is_table_key(k, v) for k, v in matrix.items()):
+        return dvc_stage, {}
+    items: dict[str, dict] = {}
+    renames: dict[str, str] = {}
+    keys = list(matrix)
+    for combination in itertools.product(
+        *[list(enumerate(matrix[k])) for k in keys]
+    ):
+        item: dict = {}
+        old_fragments = []
+        new_fragments = []
+        for key, (i, value) in zip(keys, combination):
+            if _is_table_key(key, matrix[key]):
+                old_fragments.append(f"{key}{i}")
+                row = [to_str(v) for v in value.values()]
+                new_fragments.append("-".join(v for v in row if v))
+                for col, v in value.items():
+                    if col in item:
+                        return dvc_stage, {}
+                    item[col] = v
+            else:
+                old_fragments.append(to_str(value))
+                new_fragments.append(to_str(value))
+                if key in item:
+                    return dvc_stage, {}
+                item[key] = value
+        name = "-".join(new_fragments)
+        if not all(new_fragments) or name in items:
+            return dvc_stage, {}
+        items[name] = item
+        renames["-".join(old_fragments)] = name
+
+    def unnest(obj: Any) -> Any:
+        if isinstance(obj, str):
+            return _TABLE_ITEM_RE.sub(r"${item.\1}", obj)
+        if isinstance(obj, list):
+            return [unnest(o) for o in obj]
+        if isinstance(obj, dict):
+            return {unnest(k): unnest(v) for k, v in obj.items()}
+        return obj
+
+    body = {k: unnest(v) for k, v in dvc_stage.items() if k != "matrix"}
+    return {"foreach": items, "do": body}, renames
+
+
+def _rename_lock_entries(
+    renames: dict[str, str], wdir: str | None = None
+) -> bool:
+    """Rename ``dvc.lock`` entries, keeping their order and contents.
+
+    An item that was run under its old name is still up to date under its
+    new one, since what it runs, reads, and writes are unchanged.
+    """
+    lock_fpath = os.path.join(wdir, "dvc.lock") if wdir else "dvc.lock"
+    if not renames or not os.path.isfile(lock_fpath):
+        return False
+    with open(lock_fpath) as f:
+        lock = calkit.ryaml.load(f)
+    stages = (lock or {}).get("stages") or {}
+    if not any(k in stages and v not in stages for k, v in renames.items()):
+        return False
+    lock["stages"] = {
+        renames[k] if k in renames and renames[k] not in stages else k: v
+        for k, v in stages.items()
+    }
+    with open(lock_fpath, "w") as f:
+        calkit.ryaml.dump(lock, f)
+    return True
+
+
 def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
     """Restructure a dictionary with list values into a list of dictionaries,
     where each dictionary represents a permutation of the input dictionary's
@@ -607,8 +709,20 @@ def collapse_dvc_stages(
     all_outs: set[str] = set()
     all_deps: set[str] = set()
     for stage_cfg in stages.values():
-        matrix = stage_cfg.get("matrix")
-        replacements = _expand_matrix(matrix) if matrix else [{}]
+        # A stage iterating over a table is written as a foreach; see
+        # _name_table_items
+        if "foreach" in stage_cfg:
+            foreach = stage_cfg["foreach"]
+            replacements = list(
+                foreach.values() if isinstance(foreach, dict) else foreach
+            )
+            # A hand-written foreach over scalars has no named fields
+            if not all(isinstance(r, dict) for r in replacements):
+                replacements = [{}]
+            stage_cfg = stage_cfg.get("do", {})
+        else:
+            matrix = stage_cfg.get("matrix")
+            replacements = _expand_matrix(matrix) if matrix else [{}]
         for out in stage_cfg.get("outs", []):
             raw = out if isinstance(out, str) else list(out.keys())[0]
             for r in replacements:
@@ -1423,17 +1537,29 @@ def _ensure_latex_aux_gitignore(
         "*.bbl",
         "*.bcf",
         "*.blg",
+        "*.dvi",
         "*.fdb_latexmk",
         "*.fls",
+        "*.glg",
+        "*.glo",
+        "*.gls",
+        "*.idx",
+        "*.ilg",
+        "*.ind",
+        "*.ist",
         "*.lof",
+        "*.log",
         "*.lot",
         "*.nav",
         "*.out",
         "*.run.xml",
         "*.snm",
+        # Written by elsarticle, among other classes
+        "*.spl",
         "*.synctex.gz",
         "*.toc",
         "*.vrb",
+        "*.xdv",
     ]
     # Stage path fields are relative to the stage's wdir, which in turn is
     # relative to the (sub)project being compiled.
@@ -2189,13 +2315,27 @@ def to_dvc(
             # Preserve any existing stage not already in the new compilation
             # and not auto-generated (auto-generated stages are re-emitted
             # from scratch each time and must not be carried over).
-            if stage_name not in dvc_stages and not stage.get(
-                "desc", ""
-            ).startswith("Automatically generated"):
+            # A foreach stage keeps its description under 'do'
+            desc = stage.get("desc") or stage.get("do", {}).get("desc") or ""
+            if stage_name not in dvc_stages and not desc.startswith(
+                "Automatically generated"
+            ):
                 dvc_stages[stage_name] = stage
-        dvc_yaml["stages"] = dvc_stages
+        # Only what's written changes form; callers get the matrix form,
+        # which everything that reads a compiled stage expects
+        written_stages = {}
+        lock_renames: dict[str, str] = {}
+        for stage_name, stage in dvc_stages.items():
+            written, renames = _name_table_items(stage)
+            written_stages[stage_name] = written
+            lock_renames |= {
+                f"{stage_name}@{old}": f"{stage_name}@{new}"
+                for old, new in renames.items()
+            }
+        dvc_yaml["stages"] = written_stages
         dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
         _dump_yaml_if_changed(dvc_yaml, dvc_yaml_fpath, verbose=verbose)
+        _rename_lock_entries(lock_renames, wdir=wdir)
         # DVC errors out (FileIsGitIgnored) if dvc.lock is Git-ignored, so make
         # sure it isn't---this keeps both status and pipeline runs working
         calkit.dvc.ensure_dvc_lock_not_ignored(wdir)

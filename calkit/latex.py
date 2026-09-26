@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from calkit.core import LOCAL_DIR
+from calkit.core import LOCAL_DIR, ensure_local_dir
 
 if TYPE_CHECKING:
     # Only ever named in annotations here, which this module's
@@ -49,6 +49,100 @@ LOCAL_DIFF_DIR = os.path.join(LOCAL_DIR, "latex-diffs")
 # What the working tree is called when a comparison is named after its
 # ends
 WORKING_NAME = "working"
+
+# The image a LaTeX stage builds in when the project doesn't name an
+# environment of its own. Built from images/latex, and a ninth the size
+# of a full TeX Live image. Pinned to an exact tag rather than :latest so
+# a document keeps building against the same TeX until this is moved
+# deliberately; what it carries is recorded in images/latex/README.md.
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.2"
+# The environment created for a document that doesn't have one, wherever
+# that happens: a new publication, an Overleaf import, or a stage whose
+# environment is worked out from what it runs. Copied where it's used,
+# since what's written into a project is the caller's to amend.
+DEFAULT_LATEX_ENVIRONMENT = {
+    "kind": "docker",
+    "image": DEFAULT_LATEX_IMAGE,
+    "description": "TeX Live via Calkit's LaTeX image.",
+}
+
+
+def get_source_date_epoch(tex_file: str) -> str | None:
+    """When to say the PDF was built, in seconds since the epoch.
+
+    pdfTeX stamps the current time into the PDF's metadata and trailer
+    ID, so two builds of identical source differ byte for byte, and every
+    rebuild rewrites the output's hash in ``dvc.lock``. Taking the date
+    from the last commit that touched the document keeps it meaningful
+    while the bytes stay put until the document itself changes.
+    """
+    import subprocess
+
+    tex_dir = os.path.dirname(os.path.abspath(tex_file)) or os.getcwd()
+    # A commit's date describes what that commit holds, so it can only
+    # speak for a document that has been saved. With edits still in the
+    # working tree, the honest answer is now, which is what pdfTeX does
+    # left alone.
+    try:
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain", "-uno", "--", tex_dir],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    if dirty:
+        return None
+    # A document with no commits of its own, e.g., one added but not yet
+    # saved, falls back to the repository's last commit
+    for pathspec in [["--", tex_dir], []]:
+        try:
+            out = subprocess.check_output(
+                ["git", "log", "-1", "--format=%ct"] + pathspec,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        if out:
+            return out
+    return None
+
+
+# Where the project's TeX package cache is inside a container, with the
+# working directory mounted at /work, as Calkit mounts it
+CONTAINER_TEXMF_DIR = "/work/.calkit/local/texmf"
+# LaTeX's messages for a file it couldn't find, and a font whose metrics it
+# couldn't, e.g., "Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable"
+_MISSING_FILE_RE = re.compile(r"File `([^']+)' not found")
+_MISSING_TFM_RE = re.compile(
+    r"Font \S+=(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
+)
+
+
+def get_texmf_cache_dir(wdir: str | None = None) -> str:
+    """Where TeX packages fetched at run time are kept, per project.
+
+    Inside the project's gitignored ``.calkit/local``, so the working
+    directory a container mounts already covers it, whatever environment
+    the container comes from, and nothing fetched can be committed. It is
+    ``TEXMFHOME`` in the container, not the distribution's own tree, since
+    mounting over that hides TinyTeX and leaves no TeX at all.
+    """
+    return os.path.join(ensure_local_dir(wdir), "texmf")
+
+
+def find_missing_tex_files(log: str) -> list[str]:
+    """The files a LaTeX log says it couldn't find, in the order it says.
+
+    Style and class files are named as they are; a font whose metrics are
+    missing is named as its ``.tfm`` file, which is what finds the package
+    providing it.
+    """
+    found = _MISSING_FILE_RE.findall(log) + [
+        f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)
+    ]
+    return list(dict.fromkeys(found))
 
 
 def _ref_dirname(ref: str) -> str:

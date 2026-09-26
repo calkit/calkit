@@ -169,7 +169,7 @@ jobs:
         working-directory: hub/frontend
         run: |
           make client
-          if ! git diff --exit-code -- openapi.json src/client; then
+          if ! git diff --exit-code -- src/client; then
             echo "::error::The frontend client is stale; run 'make frontend-client' and commit the result"
             exit 1
           fi

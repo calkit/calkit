@@ -504,8 +504,10 @@ def new_project(
                 git_rev=git_rev,
             ),
         )
-        # Remove questions and owner if they're there
-        _ = ck_info.pop("questions", None)
+        # The template's questions are kept: an example template's question,
+        # its evidence, and the stages that produce it are the working
+        # example, and a new project reproduces the same answer from the
+        # same pipeline. They're there to be edited or deleted.
         _ = ck_info.pop("owner", None)
         # Write Calkit info
         with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
@@ -1571,12 +1573,9 @@ def new_publication(
     repo = calkit.git.get_repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
-        env = dict(
-            kind="docker",
-            image="texlive/texlive:latest-full",
-            description="TeXlive full.",
-        )
-        envs[env_name] = env
+        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+
+        envs[env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
         ck_info["environments"] = envs
     # Copy in template files if applicable. This happens before the stage is
     # built so its inputs can be detected from the document itself: a template

@@ -108,6 +108,18 @@ class Settings(BaseSettings):
         # Otherwise, use the same as server_host
         return self.server_host
 
+    # Where Operators and browsers open relay websockets
+    RELAY_URL: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def relay_url(self) -> str:
+        if self.RELAY_URL:
+            return self.RELAY_URL.rstrip("/")
+        if self.ENVIRONMENT == "local":
+            return "ws://localhost:8002"
+        return f"wss://relay.{self.DOMAIN}"
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def fernet_keys(self) -> list[str]:

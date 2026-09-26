@@ -213,6 +213,10 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    operators: list["Operator"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
     external_credentials: list[UserExternalCredential] = Relationship(
         back_populates="user",
         cascade_delete=True,
@@ -537,6 +541,46 @@ class UserToken(UserTokenPublic, table=True):
         if self.expires is None:
             return False
         return self.expires < utcnow()
+
+
+class OperatorPublic(SQLModel):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    name: str = Field(min_length=1, max_length=64)
+    hostname: str | None = Field(default=None, max_length=255)
+    machine_id: str | None = Field(default=None, max_length=255)
+    platform: str | None = Field(default=None, max_length=64)
+    calkit_version: str | None = Field(default=None, max_length=64)
+    # Hosts this Operator serves, so stages whose environment names one can
+    # run through it
+    hosts: list[str] = Field(
+        default_factory=list,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="[]"
+        ),
+    )
+    # Workspaces as of the latest check-in
+    workspaces: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="[]"
+        ),
+    )
+    created: datetime = Field(default_factory=utcnow)
+    last_seen: datetime | None = Field(default=None)
+    is_active: bool = True
+
+
+class Operator(OperatorPublic, table=True):
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "user_id", "name", name="uq_operator_user_name"
+        ),
+    )
+    selector: str = Field(index=True, unique=True, max_length=32)
+    hashed_verifier: str = Field(max_length=64)
+    # Relationships
+    user: User = Relationship(back_populates="operators")
 
 
 class DeviceAuth(SQLModel, table=True):

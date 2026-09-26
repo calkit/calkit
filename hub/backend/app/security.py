@@ -5,7 +5,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 import jwt
 from cryptography.fernet import Fernet
@@ -68,6 +68,25 @@ def create_access_token(
         to_encode, settings.SECRET_KEY, algorithm=ALGORITHM
     )
     return encoded_jwt
+
+
+def create_relay_token(
+    kind: Literal["operator", "browser"],
+    operator_id: uuid.UUID,
+    user_id: uuid.UUID,
+    expires_delta: timedelta,
+) -> str:
+    """Create a JWT for opening one relay connection.
+
+    These carry a scope, so the API's own auth rejects them.
+    """
+    payload = {
+        "exp": datetime.now(timezone.utc) + expires_delta,
+        "sub": str(operator_id),
+        "user_id": str(user_id),
+        "scope": f"relay:{kind}",
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

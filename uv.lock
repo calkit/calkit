@@ -1297,6 +1297,8 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
     { name = "uvicorn" },
+    { name = "websockets", version = "16.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "websockets", version = "17.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.optional-dependencies]
@@ -1377,6 +1379,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = "==0.27.2" },
     { name = "uvicorn" },
+    { name = "websockets" },
     { name = "xet", marker = "extra == 'xet'", specifier = ">=0.0.1" },
 ]
 provides-extras = ["data", "xet"]

@@ -533,6 +533,91 @@ export const Body_projects_put_project_contentsSchema = {
   title: "Body_projects-put_project_contents",
 } as const
 
+export const CheckInSchema = {
+  properties: {
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["service", "foreground", "cron"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: true,
+    },
+    workspaces: {
+      items: {
+        $ref: "#/components/schemas/WorkspaceInfo",
+      },
+      type: "array",
+      maxItems: 1000,
+      title: "Workspaces",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "CheckIn",
+} as const
+
+export const CheckInRespSchema = {
+  properties: {
+    operator_id: {
+      type: "string",
+      format: "uuid",
+      title: "Operator Id",
+    },
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    relay_url: {
+      type: "string",
+      title: "Relay Url",
+    },
+    relay_token: {
+      type: "string",
+      title: "Relay Token",
+    },
+    check_in_interval: {
+      type: "integer",
+      title: "Check In Interval",
+      default: 60,
+    },
+    connect: {
+      type: "boolean",
+      title: "Connect",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["operator_id", "name", "user_id", "relay_url", "relay_token"],
+  title: "CheckInResp",
+} as const
+
 export const CollaboratorSchema = {
   properties: {
     user_id: {
@@ -4245,6 +4330,377 @@ export const OperationResultSchema = {
   description: "Result for file operations like delete, move, copy.",
 } as const
 
+export const OperatorOutSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    name: {
+      type: "string",
+      maxLength: 64,
+      minLength: 1,
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Hosts",
+    },
+    workspaces: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Workspaces",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    last_seen: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Seen",
+    },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 16,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: false,
+    },
+    connect_requested_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connect Requested At",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_online: {
+      type: "boolean",
+      title: "Is Online",
+    },
+    is_asleep: {
+      type: "boolean",
+      title: "Is Asleep",
+    },
+  },
+  type: "object",
+  required: ["user_id", "name", "is_online", "is_asleep"],
+  title: "OperatorOut",
+} as const
+
+export const OperatorPostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Hosts",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "OperatorPost",
+} as const
+
+export const OperatorRegisteredSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    name: {
+      type: "string",
+      maxLength: 64,
+      minLength: 1,
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Hosts",
+    },
+    workspaces: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Workspaces",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    last_seen: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Seen",
+    },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 16,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: false,
+    },
+    connect_requested_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connect Requested At",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_online: {
+      type: "boolean",
+      title: "Is Online",
+    },
+    is_asleep: {
+      type: "boolean",
+      title: "Is Asleep",
+    },
+    token: {
+      type: "string",
+      title: "Token",
+    },
+  },
+  type: "object",
+  required: ["user_id", "name", "is_online", "is_asleep", "token"],
+  title: "OperatorRegistered",
+} as const
+
 export const OrgMemberPostSchema = {
   properties: {
     username: {
@@ -6579,6 +7035,117 @@ export const ProjectStatusPostSchema = {
   title: "ProjectStatusPost",
 } as const
 
+export const ProjectWorkspaceSchema = {
+  properties: {
+    path: {
+      type: "string",
+      maxLength: 4096,
+      title: "Path",
+    },
+    kind: {
+      type: "string",
+      enum: ["personal", "managed"],
+      title: "Kind",
+      default: "personal",
+    },
+    project: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    commit: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit",
+    },
+    dirty: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dirty",
+    },
+    ahead: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ahead",
+    },
+    behind: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Behind",
+    },
+    operator_id: {
+      type: "string",
+      format: "uuid",
+      title: "Operator Id",
+    },
+    operator_name: {
+      type: "string",
+      title: "Operator Name",
+    },
+    operator_online: {
+      type: "boolean",
+      title: "Operator Online",
+    },
+    operator_asleep: {
+      type: "boolean",
+      title: "Operator Asleep",
+    },
+  },
+  type: "object",
+  required: [
+    "path",
+    "operator_id",
+    "operator_name",
+    "operator_online",
+    "operator_asleep",
+  ],
+  title: "ProjectWorkspace",
+} as const
+
 export const ProjectsPublicSchema = {
   properties: {
     data: {
@@ -7899,6 +8466,22 @@ export const RefreshTokenRequestSchema = {
   type: "object",
   required: ["refresh_token"],
   title: "RefreshTokenRequest",
+} as const
+
+export const RelayTokenRespSchema = {
+  properties: {
+    relay_url: {
+      type: "string",
+      title: "Relay Url",
+    },
+    token: {
+      type: "string",
+      title: "Token",
+    },
+  },
+  type: "object",
+  required: ["relay_url", "token"],
+  title: "RelayTokenResp",
 } as const
 
 export const ReleaseCommentPostSchema = {
@@ -10674,6 +11257,94 @@ export const ValidationErrorSchema = {
   type: "object",
   required: ["loc", "msg", "type"],
   title: "ValidationError",
+} as const
+
+export const WorkspaceInfoSchema = {
+  properties: {
+    path: {
+      type: "string",
+      maxLength: 4096,
+      title: "Path",
+    },
+    kind: {
+      type: "string",
+      enum: ["personal", "managed"],
+      title: "Kind",
+      default: "personal",
+    },
+    project: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    commit: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit",
+    },
+    dirty: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dirty",
+    },
+    ahead: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ahead",
+    },
+    behind: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Behind",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "WorkspaceInfo",
 } as const
 
 export const ZoteroAuthFinishSchema = {

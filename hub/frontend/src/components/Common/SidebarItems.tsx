@@ -14,6 +14,7 @@ import {
   FiHome,
   FiImage,
   FiMonitor,
+  FiServer,
   FiTag,
   FiUsers,
 } from "react-icons/fi"
@@ -57,6 +58,12 @@ export const projectNavItems: ProjectNavItem[] = [
   },
   { icon: IoLibraryOutline, title: "References", path: "/references" },
   { icon: FiFolder, title: "All files", path: "/files" },
+  {
+    icon: FiServer,
+    title: "Compute",
+    path: "/compute",
+    requiresLogin: true,
+  },
   {
     icon: FaLaptop,
     title: "Local machine",

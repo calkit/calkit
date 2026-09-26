@@ -285,6 +285,62 @@ export type BodyProjectsPutProjectContents = {
 }
 
 /**
+ * CheckIn
+ */
+export type CheckIn = {
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Mode
+   */
+  mode?: "service" | "foreground" | "cron" | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Workspaces
+   */
+  workspaces?: Array<WorkspaceInfo>
+}
+
+/**
+ * CheckInResp
+ */
+export type CheckInResp = {
+  /**
+   * Operator Id
+   */
+  operator_id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * User Id
+   */
+  user_id: string
+  /**
+   * Relay Url
+   */
+  relay_url: string
+  /**
+   * Relay Token
+   */
+  relay_token: string
+  /**
+   * Check In Interval
+   */
+  check_in_interval?: number
+  /**
+   * Connect
+   */
+  connect?: boolean
+}
+
+/**
  * Collaborator
  */
 export type Collaborator = {
@@ -2471,6 +2527,192 @@ export type OperationResult = {
 }
 
 /**
+ * OperatorOut
+ */
+export type OperatorOut = {
+  /**
+   * Id
+   */
+  id?: string
+  /**
+   * User Id
+   */
+  user_id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * Machine Id
+   */
+  machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+  /**
+   * Workspaces
+   */
+  workspaces?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * Created
+   */
+  created?: string
+  /**
+   * Last Seen
+   */
+  last_seen?: string | null
+  /**
+   * Mode
+   */
+  mode?: string | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Connect Requested At
+   */
+  connect_requested_at?: string | null
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Online
+   */
+  is_online: boolean
+  /**
+   * Is Asleep
+   */
+  is_asleep: boolean
+}
+
+/**
+ * OperatorPost
+ */
+export type OperatorPost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * Machine Id
+   */
+  machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+}
+
+/**
+ * OperatorRegistered
+ */
+export type OperatorRegistered = {
+  /**
+   * Id
+   */
+  id?: string
+  /**
+   * User Id
+   */
+  user_id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * Machine Id
+   */
+  machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+  /**
+   * Workspaces
+   */
+  workspaces?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * Created
+   */
+  created?: string
+  /**
+   * Last Seen
+   */
+  last_seen?: string | null
+  /**
+   * Mode
+   */
+  mode?: string | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Connect Requested At
+   */
+  connect_requested_at?: string | null
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Online
+   */
+  is_online: boolean
+  /**
+   * Is Asleep
+   */
+  is_asleep: boolean
+  /**
+   * Token
+   */
+  token: string
+}
+
+/**
  * OrgMemberPost
  */
 export type OrgMemberPost = {
@@ -3765,6 +4007,60 @@ export type ProjectStatusPost = {
 }
 
 /**
+ * ProjectWorkspace
+ */
+export type ProjectWorkspace = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind?: "personal" | "managed"
+  /**
+   * Project
+   */
+  project?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Commit
+   */
+  commit?: string | null
+  /**
+   * Dirty
+   */
+  dirty?: boolean | null
+  /**
+   * Ahead
+   */
+  ahead?: number | null
+  /**
+   * Behind
+   */
+  behind?: number | null
+  /**
+   * Operator Id
+   */
+  operator_id: string
+  /**
+   * Operator Name
+   */
+  operator_name: string
+  /**
+   * Operator Online
+   */
+  operator_online: boolean
+  /**
+   * Operator Asleep
+   */
+  operator_asleep: boolean
+}
+
+/**
  * ProjectsPublic
  */
 export type ProjectsPublic = {
@@ -4465,6 +4761,20 @@ export type RefreshTokenRequest = {
    * Refresh Token
    */
   refresh_token: string
+}
+
+/**
+ * RelayTokenResp
+ */
+export type RelayTokenResp = {
+  /**
+   * Relay Url
+   */
+  relay_url: string
+  /**
+   * Token
+   */
+  token: string
 }
 
 /**
@@ -6066,6 +6376,44 @@ export type ValidationError = {
    * Error Type
    */
   type: string
+}
+
+/**
+ * WorkspaceInfo
+ */
+export type WorkspaceInfo = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind?: "personal" | "managed"
+  /**
+   * Project
+   */
+  project?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Commit
+   */
+  commit?: string | null
+  /**
+   * Dirty
+   */
+  dirty?: boolean | null
+  /**
+   * Ahead
+   */
+  ahead?: number | null
+  /**
+   * Behind
+   */
+  behind?: number | null
 }
 
 /**
@@ -14268,3 +14616,209 @@ export type GetFeatureVotesResponses = {
 
 export type GetFeatureVotesResponse =
   GetFeatureVotesResponses[keyof GetFeatureVotesResponses]
+
+export type GetOperatorsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/operators"
+}
+
+export type GetOperatorsResponses = {
+  /**
+   * Response Operators-Get Operators
+   *
+   * Successful Response
+   */
+  200: Array<OperatorOut>
+}
+
+export type GetOperatorsResponse =
+  GetOperatorsResponses[keyof GetOperatorsResponses]
+
+export type PostOperatorData = {
+  body: OperatorPost
+  path?: never
+  query?: never
+  url: "/operators"
+}
+
+export type PostOperatorErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostOperatorError = PostOperatorErrors[keyof PostOperatorErrors]
+
+export type PostOperatorResponses = {
+  /**
+   * Successful Response
+   */
+  200: OperatorRegistered
+}
+
+export type PostOperatorResponse =
+  PostOperatorResponses[keyof PostOperatorResponses]
+
+export type DeleteOperatorData = {
+  body?: never
+  path: {
+    /**
+     * Operator Id
+     */
+    operator_id: string
+  }
+  query?: never
+  url: "/operators/{operator_id}"
+}
+
+export type DeleteOperatorErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteOperatorError =
+  DeleteOperatorErrors[keyof DeleteOperatorErrors]
+
+export type DeleteOperatorResponses = {
+  /**
+   * Successful Response
+   */
+  200: OperatorOut
+}
+
+export type DeleteOperatorResponse =
+  DeleteOperatorResponses[keyof DeleteOperatorResponses]
+
+export type PostOperatorCheckInData = {
+  body: CheckIn
+  path?: never
+  query?: never
+  url: "/operators/check-in"
+}
+
+export type PostOperatorCheckInErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostOperatorCheckInError =
+  PostOperatorCheckInErrors[keyof PostOperatorCheckInErrors]
+
+export type PostOperatorCheckInResponses = {
+  /**
+   * Successful Response
+   */
+  200: CheckInResp
+}
+
+export type PostOperatorCheckInResponse =
+  PostOperatorCheckInResponses[keyof PostOperatorCheckInResponses]
+
+export type PostOperatorWakeData = {
+  body?: never
+  path: {
+    /**
+     * Operator Id
+     */
+    operator_id: string
+  }
+  query?: never
+  url: "/operators/{operator_id}/wake"
+}
+
+export type PostOperatorWakeErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostOperatorWakeError =
+  PostOperatorWakeErrors[keyof PostOperatorWakeErrors]
+
+export type PostOperatorWakeResponses = {
+  /**
+   * Successful Response
+   */
+  200: OperatorOut
+}
+
+export type PostOperatorWakeResponse =
+  PostOperatorWakeResponses[keyof PostOperatorWakeResponses]
+
+export type PostOperatorRelayTokenData = {
+  body?: never
+  path: {
+    /**
+     * Operator Id
+     */
+    operator_id: string
+  }
+  query?: never
+  url: "/operators/{operator_id}/relay-token"
+}
+
+export type PostOperatorRelayTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostOperatorRelayTokenError =
+  PostOperatorRelayTokenErrors[keyof PostOperatorRelayTokenErrors]
+
+export type PostOperatorRelayTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: RelayTokenResp
+}
+
+export type PostOperatorRelayTokenResponse =
+  PostOperatorRelayTokenResponses[keyof PostOperatorRelayTokenResponses]
+
+export type GetProjectWorkspacesData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/workspaces"
+}
+
+export type GetProjectWorkspacesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectWorkspacesError =
+  GetProjectWorkspacesErrors[keyof GetProjectWorkspacesErrors]
+
+export type GetProjectWorkspacesResponses = {
+  /**
+   * Response Operators-Get Project Workspaces
+   *
+   * Successful Response
+   */
+  200: Array<ProjectWorkspace>
+}
+
+export type GetProjectWorkspacesResponse =
+  GetProjectWorkspacesResponses[keyof GetProjectWorkspacesResponses]

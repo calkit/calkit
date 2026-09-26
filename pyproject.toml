@@ -53,6 +53,7 @@ dependencies = [
   "rich",
   "typer==0.27.2",
   "uvicorn",
+  "websockets",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
   "papermill>=2.6.0",

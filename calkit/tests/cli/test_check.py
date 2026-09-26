@@ -539,7 +539,9 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         # checking sends the image rather than leave the lock naming
         # nothing to pull
         digests_at_build = engine_records_build_digests()
-        out = subprocess.check_output(check_argv, text=True)
+        out = subprocess.check_output(
+            check_argv, text=True, stderr=subprocess.STDOUT
+        )
         if digests_at_build:
             assert "Pushing image" not in out
         else:

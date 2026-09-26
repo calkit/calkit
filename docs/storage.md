@@ -111,6 +111,12 @@ pipeline:
 so they can't be used for your own.
 You can point `dvc` at your own storage, though, as shown above.
 
+If you already use Git LFS on GitHub,
+`storage: git-lfs` works too,
+and stores those files with GitHub's LFS.
+If Git LFS isn't set up on your computer yet,
+Calkit will offer to set it up for you.
+
 ## Hugging Face
 
 ### Buckets
@@ -263,9 +269,7 @@ This section is for the design phase and will be removed.
 - Moved out of the user-facing docs:
   every project's DVC remote is `ck://{owner}/{project}`;
   the hub hands out short-lived URLs so bytes skip the hub;
-  the hub acts as the project's Git LFS server via `.lfsconfig`;
-  `dvc-zip` and `git-lfs` are also built-in, configurable names,
-  and `git-lfs` stays an advanced, mostly undocumented option;
+  `dvc-zip` and `git-lfs` are also built-in, configurable names;
   a storage entry can take `hub: {domain}` for storage on another hub;
   the no-hub fallback remote in `.dvc/config` is S3 over HF's gateway,
   with credentials from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
@@ -321,6 +325,44 @@ This section is for the design phase and will be removed.
   ([#1252](https://github.com/calkit/calkit/issues/1252)).
   It means another login,
   so it should be rare.
+- Built-in names work with no setup and go to their natural home:
+  `git` to the project's Git repo,
+  `dvc` to calkit.io,
+  and `git-lfs` to the Git host's LFS, e.g., GitHub's.
+  The Git host's LFS uses the same auth as the Git remote,
+  so the hub isn't involved.
+  Configuring one,
+  e.g., `git-lfs: {name: my-hf-bucket}`,
+  sends it to connected storage instead,
+  and only then does Calkit write a `.lfsconfig` pointing LFS at the hub.
+  Moving LFS files off GitHub this way is the same background move as any
+  other storage change.
+  When Git LFS is needed but not set up,
+  Calkit handles it in three parts.
+  Installing the `git-lfs` binary goes through the `calkit/install.py`
+  registry,
+  so it's prompted, opt-in, and recorded in `~/.calkit/installed.json`
+  (Homebrew on macOS, winget `GitHub.GitLFS` on Windows,
+  though Git for Windows usually bundles it;
+  Linux needs a decision).
+  `git lfs install --local` and `git lfs track <path>` only touch the
+  repo,
+  so they run automatically without a prompt,
+  leaving the user's global Git config alone.
+  Check on `calkit add --to git-lfs`,
+  when a `git-lfs` output is added to the pipeline,
+  on `calkit clone` and `calkit pull` when `.gitattributes` uses LFS,
+  and in `calkit check reqs` and the `calkit run` preflight,
+  since using LFS is an implicit `app` requirement.
+  The clone case matters most:
+  without git-lfs,
+  users silently get pointer files that look like corrupt data,
+  so Calkit should detect those and offer the fix,
+  then run `git lfs pull`.
+  GitHub LFS caveats worth documenting:
+  separate storage and bandwidth limits that clones and CI count against,
+  and deleting LFS objects has historically required deleting the repo
+  or contacting support (verify).
 - Users pick storage, not a tracking mechanism,
   and Calkit picks the mechanism from the storage kind.
   `git`, `dvc`, `dvc-zip`, and `git-lfs` are built-in storage instances,
@@ -330,12 +372,12 @@ This section is for the design phase and will be removed.
   name.
   Internally, not every mechanism works with every storage kind:
 
-  | Content          | Git | S3, HF bucket, Drive, OneDrive, Box | HF Datasets           |
-  | ---------------- | --- | ----------------------------------- | --------------------- |
-  | Git-tracked      | Yes | No                                  | Yes (whole repo)      |
-  | DVC              | No  | Yes                                 | Yes (MD5 index)       |
-  | Git LFS          | No  | Yes                                 | Yes (natively)        |
-  | Issues (git-bug) | Yes | Not practically                     | Unknown (custom refs) |
+  | Content          | Git              | S3, HF bucket, Drive, OneDrive, Box | HF Datasets           |
+  | ---------------- | ---------------- | ----------------------------------- | --------------------- |
+  | Git-tracked      | Yes              | No                                  | Yes (whole repo)      |
+  | DVC              | No               | Yes                                 | Yes (MD5 index)       |
+  | Git LFS          | Yes (host's LFS) | Yes                                 | Yes (natively)        |
+  | Issues (git-bug) | Yes              | Not practically                     | Unknown (custom refs) |
 
   Where a storage kind supports more than one,
   e.g., a bucket can hold DVC or LFS objects,

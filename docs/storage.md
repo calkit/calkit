@@ -413,6 +413,41 @@ This section is for the design phase and will be removed.
   e.g., LFS objects in an HF bucket,
   or does LFS only ever go through the built-in `git-lfs`,
   configured with `git-lfs: {name: ...}`?
+- Storage kinds and content types are separate axes,
+  and not every pair works:
+
+  | Content          | Git | S3, HF bucket, Drive, OneDrive, Box | HF Datasets           |
+  | ---------------- | --- | ----------------------------------- | --------------------- |
+  | Git-tracked      | Yes | No                                  | Yes (whole repo)      |
+  | DVC              | No  | Yes                                 | Yes (MD5 index)       |
+  | Git LFS          | No  | Yes                                 | Yes (natively)        |
+  | Issues (git-bug) | Yes | Not practically                     | Unknown (custom refs) |
+
+  The schema shouldn't assume every storage entry holds DVC files,
+  and the hub should reject pairs that don't work.
+
+- Issues are a future content type,
+  not a storage kind
+  ([#654](https://github.com/calkit/calkit/issues/654),
+  [#736](https://github.com/calkit/calkit/issues/736)).
+  git-bug stores them as Git objects under `refs/bugs/*` and
+  `refs/identities/*`,
+  outside every branch,
+  and syncs with plain Git push and pull,
+  so they need Git-kind storage,
+  though not necessarily the same remote as the code.
+  Issue trackers like GitHub Issues are mirrors, not storage,
+  kept in sync by the hub running git-bug's bridges,
+  the same way HF Datasets and Zenodo releases are published copies.
+  This depends on Git storage
+  ([#1254](https://github.com/calkit/calkit/issues/1254)),
+  since pushing issues through the hub is a Git push.
+  Other open items:
+  the hub is Python and git-bug is Go,
+  so it would call the binary or implement the spec;
+  check which Git hosts keep custom refs;
+  and git-bug has no boards,
+  so Kanban columns would be labels or a Calkit extension.
 - Commands name the segment they configure,
   i.e., `dvc-storage` and `lfs-storage`,
   and each edits the matching reserved entry in `calkit.yaml`.

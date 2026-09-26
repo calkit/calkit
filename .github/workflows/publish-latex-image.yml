@@ -80,16 +80,6 @@ jobs:
     env:
       VERSION: ${{ needs.publish.outputs.version }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # devcontainer.json is generated from the VS Code settings, and the
-      # same replacement in both leaves them in sync, which
-      # calkit/tests/test_resources.py checks
-      FILES: >-
-        calkit/latex.py
-        calkit/resources/devcontainer/devcontainer.json
-        calkit/resources/vscode/settings.json
-        docs/pipeline/index.md
-        docs/tutorials/existing-project.md
-        hub/frontend/src/lib/environments.ts
     steps:
       - uses: actions/checkout@v7
         with:
@@ -97,10 +87,8 @@ jobs:
       - name: Open a pull request pinning the new tag
         run: |
           set -euo pipefail
-          sed -i -E \
-            "s|ghcr\.io/calkit/latex:[0-9]+\.[0-9]+\.[0-9]+|ghcr.io/calkit/latex:${VERSION}|g" \
-            ${FILES}
-          if git diff --quiet -- ${FILES}; then
+          bash scripts/update-latex-image-tag.sh ${VERSION}
+          if git diff --quiet; then
             echo "Already pinned to ${VERSION}"
             exit 0
           fi

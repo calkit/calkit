@@ -1,7 +1,7 @@
 {
   "latex-workshop.bibtex-format.tab": "4 spaces",
   "latex-workshop.latex.autoBuild.run": "onSave",
-  "latex-workshop.docker.image.latex": "ghcr.io/calkit/latex:0.1.2",
+  "latex-workshop.docker.image.latex": "ghcr.io/calkit/latex:0.1.3",
   "latex-workshop.docker.enabled": true,
   "dvc.doNotShowSetupAfterInstall": true,
   "workbench.editorAssociations": {

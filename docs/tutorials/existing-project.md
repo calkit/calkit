@@ -377,7 +377,7 @@ The project also compiles some LaTeX documents.
 We can create a Docker environment called `tex` for these with:
 
 ```sh
-calkit new docker-env --name tex --image ghcr.io/calkit/latex:0.1.2
+calkit new docker-env --name tex --image ghcr.io/calkit/latex:0.1.3
 ```
 
 This environment uses Calkit's LaTeX Docker image,

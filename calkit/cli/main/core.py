@@ -4090,6 +4090,17 @@ def install_app(
             ),
         ),
     ] = False,
+    ssh: Annotated[
+        str | None,
+        typer.Option(
+            "--ssh",
+            help=(
+                "For the operator, install it on another machine over SSH, "
+                "e.g., 'user@cluster.example.edu' or a host from "
+                "~/.ssh/config, installing Calkit there if needed."
+            ),
+        ),
+    ] = None,
     no_service: Annotated[
         bool,
         typer.Option(
@@ -4105,6 +4116,21 @@ def install_app(
 
     if name == "operator":
         from calkit import operator
+
+        if ssh is not None:
+            from calkit.dependencies import _is_interactive
+
+            try:
+                cfg = operator.install_remote(
+                    ssh,
+                    cron=cron,
+                    no_service=no_service,
+                    interactive=_is_interactive(),
+                )
+            except Exception as e:
+                raise_error(f"Failed to install the operator on {ssh}: {e}")
+            typer.echo(f"✅ Installed Operator '{cfg['name']}' on {ssh}")
+            return
 
         cfg = operator.load_config()
         if cfg is None:

@@ -143,6 +143,67 @@ def _git_status(path: str) -> dict:
     return info
 
 
+def install_remote(
+    host: str,
+    cron: bool = False,
+    no_service: bool = False,
+    interactive: bool = True,
+) -> dict:
+    """Install an Operator on another machine over SSH, returning its
+    config.
+
+    It's registered from here, with this machine's hub login, since the
+    other one may never have logged in; its config is then written there
+    and Calkit there installs the service, finding itself already
+    registered.
+    """
+    import yaml
+
+    from calkit import hub
+    from calkit import workspace as ws
+
+    target = ws.Workspace(host=host, wdir="~")
+    target = ws.ensure_reachable(target, interactive=interactive)
+    ws.ensure_calkit_installed(target, interactive=interactive, required=True)
+    info = ws.remote_system_info(target)
+    hostname = info.get("hostname") or host
+    resp = hub._request(
+        "post",
+        "/operators",
+        json=dict(
+            hostname=hostname,
+            machine_id=info.get("machine_id"),
+            platform=str(info.get("os", "")).lower() or None,
+            calkit_version=info.get("calkit_version"),
+            hosts=list(dict.fromkeys([host, hostname])),
+        ),
+    )
+    cfg = dict(
+        api_url=hub.get_base_url(),
+        id=resp["id"],
+        name=resp["name"],
+        user_id=resp["user_id"],
+        token=resp["token"],
+        workspaces=[],
+    )
+    # Only the user can read it there either, since it holds the token
+    subprocess.run(
+        target.login_argv(
+            "umask 077 && mkdir -p ~/.calkit && cat > ~/.calkit/operator.yaml"
+        ),
+        input=yaml.safe_dump(cfg, sort_keys=False),
+        text=True,
+        check=True,
+    )
+    args = ["calkit", "install", "operator"]
+    if cron:
+        args.append("--cron")
+    if no_service:
+        args.append("--no-service")
+    subprocess.run(target.login_argv(shlex.join(args)), check=True)
+    return cfg
+
+
 def discover_workspaces(cfg: dict) -> list[dict]:
     """Find the workspaces this Operator gives the hub access to.
 

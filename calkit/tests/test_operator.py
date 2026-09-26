@@ -349,3 +349,52 @@ def test_workspace_actions(tmp_path, monkeypatch):
     for bad in [url.replace("other", "demo"), "https://github.com/x/..", ""]:
         with pytest.raises(ValueError):
             operator.clone_project(bad)
+
+
+def test_install_remote(monkeypatch):
+    import yaml
+
+    from calkit import hub
+    from calkit import workspace as ws
+
+    monkeypatch.setattr(ws, "ensure_reachable", lambda target, **kw: target)
+    monkeypatch.setattr(ws, "ensure_calkit_installed", lambda *a, **kw: True)
+    monkeypatch.setattr(
+        ws,
+        "remote_system_info",
+        lambda target: {
+            "hostname": "login1.cluster",
+            "machine_id": "abc",
+            "os": "Linux",
+            "calkit_version": "1.0",
+        },
+    )
+    posted = {}
+
+    def request(kind, path, json=None, **kwargs):
+        posted.update(json)
+        return {"id": "op1", "name": "login1-cluster", "user_id": "u1"} | {
+            "token": "cko_secret"
+        }
+
+    monkeypatch.setattr(hub, "_request", request)
+    monkeypatch.setattr(hub, "get_base_url", lambda: "https://api.hub")
+    runs = []
+    monkeypatch.setattr(
+        operator.subprocess,
+        "run",
+        lambda argv, **kwargs: runs.append((argv, kwargs.get("input"))),
+    )
+    cfg = operator.install_remote("cluster", cron=True)
+    # Registered from here with the far end's own details
+    assert posted["hostname"] == "login1.cluster"
+    assert posted["platform"] == "linux"
+    assert posted["hosts"] == ["cluster", "login1.cluster"]
+    # Its config goes over SSH, readable only by the user, then Calkit there
+    # installs it in the mode asked for
+    (write_argv, config_text), (install_argv, _) = runs
+    assert write_argv[0] == "ssh" and "cluster" in write_argv
+    assert "umask 077" in write_argv[-1]
+    assert yaml.safe_load(config_text) == cfg
+    assert cfg["token"] == "cko_secret" and cfg["api_url"] == "https://api.hub"
+    assert "calkit install operator --cron" in install_argv[-1]

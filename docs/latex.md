@@ -144,9 +144,11 @@ and it will be rebuilt by the pipeline whenever the PR or `main` changes.
 Since it reads the working tree, you can make an edit, run the pipeline to
 check both the document and its diff, and commit them together.
 
-If a local branch named in `diffs` is behind its remote-tracking branch,
+A branch named in `diffs` means the local branch, like it does everywhere
+else in the pipeline.
+If it's behind its remote-tracking branch,
 e.g., because it was updated on GitHub and fetched but never checked out,
-the remote's commit is used and Calkit prints a warning.
+Calkit prints a warning with the command to update it.
 
 On the default branch, `main` and `HEAD` are the same commit, so the
 comparison comes out empty and the diff will show no changes.

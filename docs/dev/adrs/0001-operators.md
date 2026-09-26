@@ -323,6 +323,48 @@ This avoids SSH keys, port forwarding, and repeated 2FA prompts on
 clusters without changing the project or breaking it for collaborators
 without an Operator.
 
+### LaTeX builds
+
+The hub's LaTeX editor compiles a preview in the browser with a WASM TeX
+engine, which lacks the stage's real environment and some packages and
+fonts, so the hub labels its output unofficial.
+The goal is official builds from the hub: saving commits the source,
+builds the PDF with the stage's own environment, pushes it to the
+project's storage, and commits the updated `dvc.lock`, leaving the stage
+up to date.
+The editor can instead build on one of the user's Operators, chosen from
+a "build on" menu that defaults to the browser.
+
+The Operator builds in a managed workspace for the project, reset for
+every build:
+it checks out the commit the editor loaded, with `--force`, writes the
+editor's unsaved files over it, and runs only the LaTeX stage, like
+`calkit run --single-item`.
+The stage's other inputs, e.g., figures, come from the DVC cache or remote
+rather than being recomputed, and nothing is committed.
+The workspace is reused rather than created per build, so its
+environment, DVC cache, and Git objects stay warm, but nothing from one
+build carries into the next.
+One build runs per workspace at a time, and a newer request replaces a
+queued one.
+
+A preview build stops there.
+A save does the same in the managed workspace, then commits the source
+and `dvc.lock`, pushes the PDF with DVC, and pushes the commit.
+If the branch moved since the editor loaded it, the Operator merges and
+rebuilds rather than overwriting, and reports conflicts back to the
+editor.
+
+The build log streams over the relay.
+The PDF does not, since it's bulk data:
+the Operator uploads it to object storage with a presigned URL from the
+API, where it expires after a day, and the editor loads it from there.
+
+To fetch the commit, the Operator uses a personal workspace of the same
+project on that machine if there is one, and otherwise the machine's own
+Git credentials, which it has because it runs as the user.
+Machines with no access to the repository are out of scope for now.
+
 ### Detached remote stages
 
 Currently, the machine driving a run must stay up until a remote stage
@@ -339,10 +381,10 @@ so it follows the pipeline integration phase.
 1. Daemon, service install, registration, Operator token, hub compute tab
    with liveness, the local server's features moved onto the relay, and
    persistent shell sessions.
-2. The file tree and editor, and scheduler jobs.
+2. The file tree and editor, scheduler jobs, and LaTeX preview and
+   official builds.
 3. Pipeline integration: stages on hosts served by an Operator run through
-   the relay, shared DVC caches and stage locks per machine, and LaTeX
-   editor compiles through a workspace.
+   the relay, and shared DVC caches and stage locks per machine.
 4. Detached remote stages.
 5. Sharing: collaborator workspaces and multiplayer.
 6. Later: ops and fleet rollouts (#90), parallel `group` stages (#185),

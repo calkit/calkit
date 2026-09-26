@@ -1165,7 +1165,10 @@ def check_docker_env(
         typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
         for alt_lock_fpath in alt_lock_fpaths_delete:
             if os.path.isfile(alt_lock_fpath):
-                typer.echo(f"Reading alternative lock file: {alt_lock_fpath}")
+                typer.echo(
+                    f"Reading alternative lock file: {alt_lock_fpath}",
+                    file=outfile,
+                )
                 lock = read_lock(alt_lock_fpath)
                 # A legacy lock was written before locks were kept per
                 # architecture, by the machine that checked the
@@ -1180,7 +1183,8 @@ def check_docker_env(
             for alt_lock_fpath in alt_lock_fpaths:
                 if os.path.isfile(alt_lock_fpath):
                     typer.echo(
-                        f"Reading alternative lock file: {alt_lock_fpath}"
+                        f"Reading alternative lock file: {alt_lock_fpath}",
+                        file=outfile,
                     )
                     lock = read_lock(alt_lock_fpath)
                     if lock is not None:
@@ -1252,7 +1256,7 @@ def check_docker_env(
             for digest_ref in ck_docker.get_lock_digest_refs(
                 lock, digest_source_ref
             ):
-                typer.echo(f"Pulling image by digest: {digest_ref}")
+                typer.echo(f"Pulling image by digest: {digest_ref}", err=True)
                 # A private image needs credentials we may be able to get,
                 # but only a registry that refused us is worth logging in to
                 if not ck_docker.pull_image_with_login(
@@ -1300,7 +1304,8 @@ def check_docker_env(
             if archived is not None:
                 release_name, image_id, entry = archived
                 typer.echo(
-                    f"Fetching image archived in release '{release_name}'"
+                    f"Fetching image archived in release '{release_name}'",
+                    err=True,
                 )
                 if calkit.releases.fetch_archived_docker_image(
                     release_name, entry
@@ -1375,7 +1380,7 @@ def check_docker_env(
                         "building it"
                     )
         elif not obtained:
-            typer.echo(f"Pulling image: {tag}")
+            typer.echo(f"Pulling image: {tag}", err=True)
             if not ck_docker.pull_image_with_login(tag, platform=platform):
                 delete_lock_on_failure()
                 raise_error(f"Failed to pull image: {tag}")
@@ -1431,7 +1436,8 @@ def check_docker_env(
         if not remote_digests and fpath is not None:
             typer.echo(
                 f"Pushing image to {remote_ref} to record its digest, since "
-                "this Docker engine only assigns one on a push"
+                "this Docker engine only assigns one on a push",
+                err=True,
             )
             if not ck_docker.tag_image(tag, remote_ref):
                 warn(f"Failed to tag image as {remote_ref}")

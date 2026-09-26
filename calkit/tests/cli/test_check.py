@@ -401,7 +401,7 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     with open(f"locks/{arch}.json", "rb") as f:
         lock_bytes = f.read()
     subprocess.check_call(["docker", "rmi", "-f", "alpine:3.18"])
-    out = subprocess.check_output(argv, text=True)
+    out = subprocess.check_output(argv, text=True, stderr=subprocess.STDOUT)
     assert "Pulling image by digest" in out
     with open(f"locks/{arch}.json", "rb") as f:
         assert f.read() == lock_bytes
@@ -581,7 +581,9 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
                 f"{registry}/proj/{image}:latest",
             ]
         )
-        out = subprocess.check_output(check_argv, text=True)
+        out = subprocess.check_output(
+            check_argv, text=True, stderr=subprocess.STDOUT
+        )
         assert "Pulling image by digest" in out
         assert "Pushing image" not in out
         # Coming back from the registry has to leave the lock exactly as it

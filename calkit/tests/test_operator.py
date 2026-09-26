@@ -2,9 +2,11 @@
 
 import asyncio
 import os
+import shlex
 import stat
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -61,7 +63,7 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     _init_project(managed)
     cfg = {"workspaces": [elsewhere, elsewhere + "/"]}
     workspaces = {
-        os.path.relpath(w["path"], os.path.realpath(home)): w
+        Path(os.path.relpath(w["path"], os.path.realpath(home))).as_posix(): w
         for w in operator.discover_workspaces(cfg)
     }
     assert set(workspaces) == {
@@ -203,10 +205,7 @@ def test_service_files(tmp_path, monkeypatch):
         "/Library/LaunchDaemons/"
     )
     unit = operator._systemd_unit()
-    assert (
-        f"ExecStart={sys.executable} -m calkit operator start --mode service"
-        in unit
-    )
+    assert f"ExecStart={shlex.join(command)}" in unit
     assert "Restart=on-failure" in unit
     assert "WantedBy=default.target" in unit
 

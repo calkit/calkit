@@ -453,11 +453,12 @@ Arguments:
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                                |
-| -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
-| `--yes`, `-y`  | boolean | no       | False   | Skip the confirmation prompt and install immediately.                                                      |
-| `--at-boot`    | boolean | no       | False   | For the operator on macOS, start at boot rather than at login, which needs sudo.                           |
-| `--no-service` | boolean | no       | False   | For the operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster. |
+| Option         | Type    | Required | Default | Description                                                                                                                  |
+| -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--yes`, `-y`  | boolean | no       | False   | Skip the confirmation prompt and install immediately.                                                                        |
+| `--at-boot`    | boolean | no       | False   | For the operator on macOS, start at boot rather than at login, which needs sudo.                                             |
+| `--cron`       | boolean | no       | False   | For the operator, have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node. |
+| `--no-service` | boolean | no       | False   | For the operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                   |
 
 <a id="top-command-xproc-runproc"></a>
 
@@ -4054,9 +4055,10 @@ calkit operator start [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description         |
-| ----------------- | ------- | -------- | ------- | ------------------- |
-| `--verbose`, `-v` | boolean | no       | False   | Log in more detail. |
+| Option            | Type    | Required | Default    | Description                                                                                                        |
+| ----------------- | ------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------ |
+| `--verbose`, `-v` | boolean | no       | False      | Log in more detail.                                                                                                |
+| `--mode`          | str     | no       | foreground | How it's being run: 'foreground', 'service', or 'cron', which only connects when the hub asks and stops when idle. |
 
 <a id="subcommand-operator-status"></a>
 

@@ -4093,6 +4093,17 @@ def install_app(
             ),
         ),
     ] = False,
+    cron: Annotated[
+        bool,
+        typer.Option(
+            "--cron",
+            help=(
+                "For the operator, have cron start it when the hub asks "
+                "rather than running it as a service, e.g., on a cluster's "
+                "login node."
+            ),
+        ),
+    ] = False,
     no_service: Annotated[
         bool,
         typer.Option(
@@ -4117,6 +4128,16 @@ def install_app(
             typer.echo(f"Operator '{cfg['name']}' is already registered")
         if no_service:
             typer.echo("Run 'calkit operator start' to connect it")
+            return
+        if cron:
+            try:
+                operator.install_cron()
+            except NotImplementedError as e:
+                raise_error(str(e))
+            typer.echo(
+                "✅ Installed the Operator in cron mode; it checks in every "
+                "5 minutes and connects when you open it from the hub"
+            )
             return
         try:
             notes = operator.install_service(at_boot=at_boot)

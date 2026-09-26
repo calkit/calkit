@@ -38,6 +38,10 @@ OUTPUT_COALESCE_SECONDS = 0.02
 # characters each, so chunks stay well under the relay's message limit
 OUTPUT_CHUNK_CHARS = 32 * 1024
 RECONNECT_MAX_DELAY_SECONDS = 60
+# In cron mode, the Operator exits after this long with no sessions or
+# browsers, and cron starts it again when the hub asks
+CRON_IDLE_EXIT_SECONDS = 900
+CRON_MARKER = "# calkit-operator"
 
 
 class OperatorRevoked(Exception):
@@ -186,7 +190,9 @@ def discover_workspaces(cfg: dict) -> list[dict]:
     return workspaces
 
 
-def check_in(cfg: dict, workspaces: list[dict]) -> dict:
+def check_in(
+    cfg: dict, workspaces: list[dict], mode: str, connected: bool = True
+) -> dict:
     from requests.exceptions import HTTPError
 
     from calkit import hub
@@ -196,7 +202,10 @@ def check_in(cfg: dict, workspaces: list[dict]) -> dict:
             "post",
             "/operators/check-in",
             json=dict(
-                calkit_version=calkit.__version__, workspaces=workspaces
+                calkit_version=calkit.__version__,
+                workspaces=workspaces,
+                mode=mode,
+                connected=connected,
             ),
             headers={"Authorization": f"Bearer {cfg['token']}"},
             auth=False,
@@ -263,8 +272,15 @@ def _chunks(text: str, size: int = OUTPUT_CHUNK_CHARS) -> list[str]:
 
 
 class Operator:
-    def __init__(self, cfg: dict) -> None:
+    def __init__(
+        self,
+        cfg: dict,
+        mode: str = "foreground",
+        idle_exit_seconds: float | None = None,
+    ) -> None:
         self.cfg = cfg
+        self.mode = mode
+        self.idle_exit_seconds = idle_exit_seconds
         self.sessions: dict[str, Session] = {}
         # Browser channels, which are all the owner's
         self.channels: set[str] = set()
@@ -501,7 +517,9 @@ class Operator:
         self.workspaces = await asyncio.to_thread(
             discover_workspaces, self.cfg
         )
-        resp = await asyncio.to_thread(check_in, self.cfg, self.workspaces)
+        resp = await asyncio.to_thread(
+            check_in, self.cfg, self.workspaces, self.mode
+        )
         self.check_in_interval = resp.get("check_in_interval", 60)
         return resp
 
@@ -536,8 +554,24 @@ class Operator:
                 for session in self.sessions.values():
                     session.channels.clear()
 
+    async def wait_until_idle(self) -> None:
+        """Return once nothing has used this Operator for its idle limit."""
+        assert self.idle_exit_seconds is not None
+        loop = asyncio.get_running_loop()
+        last_used = loop.time()
+        while True:
+            await asyncio.sleep(min(30, self.idle_exit_seconds))
+            if self.sessions or self.channels:
+                last_used = loop.time()
+            elif loop.time() - last_used >= self.idle_exit_seconds:
+                logger.info("Idle, so stopping until the hub asks again")
+                return
+
     async def run(self) -> None:
         checker: asyncio.Task | None = None
+        idle: asyncio.Task | None = None
+        if self.idle_exit_seconds is not None:
+            idle = asyncio.create_task(self.wait_until_idle())
         delay = 1.0
         try:
             while True:
@@ -547,10 +581,15 @@ class Operator:
                         checker = asyncio.create_task(self.keep_checking_in())
                     delay = 1.0
                     connection = asyncio.create_task(self.connect(resp))
+                    waiting = [connection, checker]
+                    if idle is not None:
+                        waiting.append(idle)
                     done, _ = await asyncio.wait(
-                        [connection, checker],
-                        return_when=asyncio.FIRST_COMPLETED,
+                        waiting, return_when=asyncio.FIRST_COMPLETED
                     )
+                    if idle in done:
+                        connection.cancel()
+                        return
                     if checker in done:
                         connection.cancel()
                         checker.result()
@@ -563,15 +602,72 @@ class Operator:
                     delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
                 await asyncio.sleep(delay)
         finally:
-            if checker is not None:
-                checker.cancel()
+            for task in [checker, idle]:
+                if task is not None:
+                    task.cancel()
             self.close_all()
+            # So the hub shows it offline now rather than minutes from now
+            try:
+                await asyncio.to_thread(
+                    check_in, self.cfg, self.workspaces, self.mode, False
+                )
+            except Exception:
+                pass
 
 
-def run(cfg: dict) -> None:
-    """Run the Operator until it's revoked or interrupted."""
-    operator = Operator(cfg)
-    asyncio.run(operator.run())
+def acquire_lock() -> Any:
+    """Take the lock that keeps one Operator running per machine and user,
+    returning its file, or None if another Operator holds it.
+
+    Two would each replace the other's relay connection, and in cron mode
+    cron starts one every few minutes regardless.
+    """
+    import fcntl
+
+    fpath = os.path.join(config.get_user_home(), ".calkit", "operator.lock")
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    f = open(fpath, "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
+def run(cfg: dict, mode: str = "foreground") -> bool:
+    """Run the Operator until it's revoked, interrupted, or, in cron mode,
+    idle or not asked to connect.
+
+    Returns False if another Operator is already running.
+    """
+    import signal
+
+    lock = acquire_lock()
+    if lock is None:
+        return False
+
+    # Service managers stop it with SIGTERM, which should shut down as
+    # cleanly as Ctrl+C
+    def interrupt(signum: int, frame: Any) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, interrupt)
+    try:
+        if mode == "cron":
+            workspaces = discover_workspaces(cfg)
+            resp = check_in(cfg, workspaces, mode, connected=False)
+            if not resp["connect"]:
+                return True
+            operator = Operator(
+                cfg, mode=mode, idle_exit_seconds=CRON_IDLE_EXIT_SECONDS
+            )
+        else:
+            operator = Operator(cfg, mode=mode)
+        asyncio.run(operator.run())
+    finally:
+        lock.close()
+    return True
 
 
 SERVICE_LABEL = "io.calkit.operator"
@@ -582,9 +678,53 @@ def get_log_path() -> str:
     return os.path.join(config.get_user_home(), ".calkit", "operator.log")
 
 
-def _service_command() -> list[str]:
+def _service_command(mode: str = "service") -> list[str]:
     # The interpreter Calkit runs in, so the service doesn't depend on PATH
-    return [sys.executable, "-m", "calkit", "operator", "start"]
+    return [
+        sys.executable,
+        "-m",
+        "calkit",
+        "operator",
+        "start",
+        "--mode",
+        mode,
+    ]
+
+
+def _read_crontab() -> list[str]:
+    out = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    # A user with no crontab gets an error, which means an empty one
+    return out.stdout.splitlines() if out.returncode == 0 else []
+
+
+def _write_crontab(lines: list[str]) -> None:
+    subprocess.run(
+        ["crontab", "-"], input="\n".join(lines) + "\n", text=True, check=True
+    )
+
+
+def install_cron() -> None:
+    """Have cron start the Operator every few minutes and at boot, so it
+    checks in and connects only when the hub asks.
+    """
+    if shutil.which("crontab") is None:
+        raise NotImplementedError(
+            "This machine has no crontab; install with --no-service and run "
+            "'calkit operator start' yourself, e.g., inside tmux"
+        )
+    os.makedirs(os.path.dirname(get_log_path()), exist_ok=True)
+    command = shlex.join(_service_command("cron"))
+    log = shlex.quote(get_log_path())
+    lines = [line for line in _read_crontab() if CRON_MARKER not in line]
+    for schedule in ["*/5 * * * *", "@reboot"]:
+        lines.append(f"{schedule} {command} >> {log} 2>&1 {CRON_MARKER}")
+    _write_crontab(lines)
+
+
+def _cron_installed() -> bool:
+    if shutil.which("crontab") is None:
+        return False
+    return any(CRON_MARKER in line for line in _read_crontab())
 
 
 def _launchd_plist_path(at_boot: bool) -> str:
@@ -652,6 +792,22 @@ def install_service(at_boot: bool = False) -> list[str]:
     system = platform.system()
     os.makedirs(os.path.dirname(get_log_path()), exist_ok=True)
     if system == "Linux":
+        # Clusters often have no user systemd, e.g., on login nodes
+        probe = (
+            subprocess.run(
+                ["systemctl", "--user", "show-environment"],
+                capture_output=True,
+            )
+            if shutil.which("systemctl")
+            else None
+        )
+        if probe is None or probe.returncode != 0:
+            raise NotImplementedError(
+                "This machine has no user systemd to run the Operator as a "
+                "service. Reinstall with --cron to have cron start it when "
+                "the hub asks, or with --no-service and run "
+                "'calkit operator start' yourself, e.g., inside tmux"
+            )
         fpath = _systemd_unit_path()
         os.makedirs(os.path.dirname(fpath), exist_ok=True)
         with open(fpath, "w") as f:
@@ -716,6 +872,10 @@ def install_service(at_boot: bool = False) -> list[str]:
 
 
 def uninstall_service() -> None:
+    if _cron_installed():
+        _write_crontab(
+            [line for line in _read_crontab() if CRON_MARKER not in line]
+        )
     system = platform.system()
     if system == "Linux":
         fpath = _systemd_unit_path()
@@ -748,6 +908,8 @@ def uninstall_service() -> None:
 
 def get_service_status() -> str | None:
     """Describe the service, or return None if it isn't installed."""
+    if _cron_installed():
+        return "cron, checking in every 5 minutes"
     system = platform.system()
     if system == "Linux" and os.path.isfile(_systemd_unit_path()):
         return subprocess.run(

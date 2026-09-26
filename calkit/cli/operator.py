@@ -30,6 +30,16 @@ def start(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Log in more detail.")
     ] = False,
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            help=(
+                "How it's being run: 'foreground', 'service', or 'cron', "
+                "which only connects when the hub asks and stops when idle."
+            ),
+        ),
+    ] = "foreground",
 ) -> None:
     """Run the Operator in the foreground, e.g., inside tmux."""
     import logging
@@ -41,9 +51,15 @@ def start(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    typer.echo(f"Starting Operator '{cfg['name']}' (Ctrl+C to stop)")
+    if mode not in ("foreground", "service", "cron"):
+        raise_error(f"Unknown mode '{mode}'")
+    if mode == "foreground":
+        typer.echo(f"Starting Operator '{cfg['name']}' (Ctrl+C to stop)")
     try:
-        operator.run(cfg)
+        if not operator.run(cfg, mode=mode):
+            # Cron starts one every few minutes, so this is routine there
+            if mode != "cron":
+                typer.echo("Another Operator is already running here")
     except operator.OperatorRevoked:
         # A clean exit, so a service manager doesn't restart it
         typer.echo("This Operator has been revoked on the hub; stopping")

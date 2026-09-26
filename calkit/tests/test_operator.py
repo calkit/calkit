@@ -166,13 +166,25 @@ async def test_sessions(tmp_path, monkeypatch):
     exits = [m for _, m in sent if m["type"] == "sessions.exit"]
     assert exits == [{"type": "sessions.exit", "session": sid, "code": 3}]
     assert op.sessions == {}
+    # With nothing using it, an Operator with an idle limit stops
+    op.on_relay_message({"type": "channel.close", "ch": "c"})
+    op.idle_exit_seconds = 0.1
+    await asyncio.wait_for(op.wait_until_idle(), 5)
 
 
 def test_service_files(tmp_path, monkeypatch):
     import plistlib
 
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
-    command = [sys.executable, "-m", "calkit", "operator", "start"]
+    command = [
+        sys.executable,
+        "-m",
+        "calkit",
+        "operator",
+        "start",
+        "--mode",
+        "service",
+    ]
     # launchd restarts it on failure, but not after it exits because it
     # was revoked
     agent = plistlib.loads(operator._launchd_plist(at_boot=False))
@@ -190,6 +202,47 @@ def test_service_files(tmp_path, monkeypatch):
         "/Library/LaunchDaemons/"
     )
     unit = operator._systemd_unit()
-    assert f"ExecStart={sys.executable} -m calkit operator start" in unit
+    assert (
+        f"ExecStart={sys.executable} -m calkit operator start --mode service"
+        in unit
+    )
     assert "Restart=on-failure" in unit
     assert "WantedBy=default.target" in unit
+
+
+def test_cron_and_lock(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    # A fake crontab that keeps its table in a file
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    table = tmp_path / "crontab.txt"
+    crontab = bin_dir / "crontab"
+    crontab.write_text(
+        "#!/bin/sh\n"
+        f'if [ "$1" = "-l" ]; then cat "{table}" 2>/dev/null || exit 1; '
+        f'else cat > "{table}"; fi\n'
+    )
+    crontab.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    table.write_text("0 * * * * echo mine\n")
+    # Installing twice leaves one set of entries and the user's own alone
+    operator.install_cron()
+    operator.install_cron()
+    lines = table.read_text().splitlines()
+    assert lines[0] == "0 * * * * echo mine"
+    ours = [line for line in lines if operator.CRON_MARKER in line]
+    assert [line.split()[0] for line in ours] == ["*/5", "@reboot"]
+    assert all("--mode cron" in line for line in ours)
+    assert all(operator.get_log_path() in line for line in ours)
+    assert operator.get_service_status().startswith("cron")
+    operator.uninstall_service()
+    assert table.read_text().splitlines() == ["0 * * * * echo mine"]
+    assert operator.get_service_status() is None
+    # Only one Operator runs at a time
+    lock = operator.acquire_lock()
+    assert lock is not None
+    assert operator.acquire_lock() is None
+    lock.close()
+    second = operator.acquire_lock()
+    assert second is not None
+    second.close()

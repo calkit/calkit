@@ -1,0 +1,3036 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../reproducibility/">
+      
+      
+        <link rel="next" href="../governance/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+    
+    
+      
+        <title>Calkit vs. other tools - Calkit</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-B87E6N95DH"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-B87E6N95DH",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-B87E6N95DH",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>"undefined"!=typeof __md_analytics&&__md_analytics()</script>
+  
+
+    
+    
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#calkit-vs-other-tools" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Calkit" class="md-header__button md-logo" aria-label="Calkit" data-md-component="logo">
+      
+  <img src="../img/c-to-the-k-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Calkit
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Calkit vs. other tools
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="cyan" aria-label="Switch to system preference" type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/calkit/calkit.git" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    calkit/calkit
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Calkit" class="md-nav__button md-logo" aria-label="Calkit" data-md-component="logo">
+      
+  <img src="../img/c-to-the-k-white.svg" alt="logo">
+
+    </a>
+    Calkit
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/calkit/calkit.git" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    calkit/calkit
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../hub/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharing, collaboration, and backup (Calkit hub)
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sharing, collaboration, and backup (Calkit hub)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hub/self-hosting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running your own
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ai-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use with AI tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../questions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Questions, hypotheses, answers, and evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../version-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Version control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calkit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The calkit.yaml file
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../requirements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Requirements, configuration, and secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../pipeline/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The pipeline
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_11" id="__nav_11_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    The pipeline
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline/markdown/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runnable Markdown
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline/running-and-logging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running and logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline/manual-steps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manual steps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jupyterlab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JupyterLab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    High performance computing (HPC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../provenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../references/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calculations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calculations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../apps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing/archiving projects and artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../local-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local server (GUI interaction)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../latex/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LaTeX documents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overleaf/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overleaf integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../browser-ext/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Browser extension
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../subprojects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subprojects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_27">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_27" id="__nav_27_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_27_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_27">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/first-project/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🎥 Creating your first project
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/jupyterlab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🎥 Composing a pipeline from multiple Jupyter notebooks in JupyterLab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/existing-project/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converting an existing project to a Calkit project
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/openfoam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenFOAM, Docker, and Reviewer 2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/adding-latex-pub-docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a new LaTeX-based publication with its own Docker build environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/latex-codespaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collaborating on a LaTeX document with GitHub Codespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/latex-word/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collaborating on a LaTeX document using Microsoft Word for feedback
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/notebook-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using a Jupyter Notebook as a reproducible pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/procedures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Defining and executing procedures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/conda-envs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keeping track of conda environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/office/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using Microsoft Office
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/matlab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🎥 Using MATLAB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running Calkit in GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/runnable-readme/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Making a README runnable
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/vscode-slurm-notebook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect a Jupyter Notebook to a kernel in a SLURM environment in VS Code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/ai-agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Declarative, structured prompting to make AI agents work reproducibly
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/writing-first/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing first: let the paper drive the project
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Help and support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calkit vs. other tools
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calkit vs. other tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#literate-programming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Literate programming
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow-and-pipeline-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow and pipeline tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workflow and pipeline tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#calkit-and-dvc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calkit and DVC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showyourwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        showyourwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#experiment-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Experiment tracking
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-management-and-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data management and provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#project-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project metadata
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Project metadata">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ro-crate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RO-Crate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#astra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASTRA
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#archiving-and-sharing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Archiving and sharing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#collaboration-platforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collaboration platforms
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hosted-computing-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hosted computing environments
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hosted computing environments">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#renku" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Renku
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cocalc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CoCalc
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic-research-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agentic research tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Agentic research tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#claude-science" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Science
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openresearch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenResearch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../acknowledgements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Acknowledgements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#literate-programming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Literate programming
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow-and-pipeline-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow and pipeline tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workflow and pipeline tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#calkit-and-dvc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calkit and DVC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showyourwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        showyourwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#experiment-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Experiment tracking
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-management-and-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data management and provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#project-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project metadata
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Project metadata">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ro-crate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RO-Crate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#astra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASTRA
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#archiving-and-sharing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Archiving and sharing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#collaboration-platforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collaboration platforms
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hosted-computing-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hosted computing environments
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hosted computing environments">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#renku" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Renku
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cocalc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CoCalc
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic-research-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agentic research tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Agentic research tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#claude-science" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Science
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openresearch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenResearch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="calkit-vs-other-tools">Calkit vs. other tools</h1>
+<p>There are many other tools and platforms out there for doing open,
+reproducible, AI agent-compatible research.
+This page compares them against Calkit,
+and explores how they can fit together.</p>
+<p>Calkit is an interface on top of a project's files.
+It declares how to set up and run the project
+(environments and the pipeline),
+what the project claims (questions answered with evidence),
+and whether those are up to date
+(<code>calkit status</code> and <code>calkit check questions</code>).
+Without it, that structure is usually implicit,
+or described in prose, e.g., in a README.</p>
+<p>Other tools cover parts of this:
+building a document from code, running a pipeline,
+managing environments, tracking experiments,
+versioning data and recording its provenance,
+describing a project with metadata,
+or sharing and collaborating on the results.
+Calkit is vertically integrated,
+so users don't need to learn all of these separate tools
+and assemble their own bespoke workflows.
+Environments, the pipeline, data versioning, provenance, publications,
+and the project's claims are declared in one place and work together.</p>
+<p>The project's artifacts are also front and center.
+The publication, figures, and results are what other people see and use
+first, and they're tightly coupled to the findings,
+so Calkit keeps them in the project, versioned with the code and data
+that produced them.
+Many tools keep them elsewhere,
+e.g., on a tracking server or in an app's data folder.</p>
+<h2 id="literate-programming">Literate programming</h2>
+<p><a href="https://quarto.org/">Quarto</a> builds documents,
+e.g., articles, websites, and books,
+from files that mix prose and code.
+The code runs when the document is rendered,
+through Jupyter, knitr, Julia, or Observable,
+and its outputs are embedded in the document.
+With <code>freeze: auto</code>, a document is re-rendered only when its source changes;
+changes to input data aren't tracked,
+and the docs say to re-render in full when they happen.
+Environments are left to the user.</p>
+<p>Calkit has the same integrative spirit, with more modularity.
+A figure doesn't have to be made inside the document:
+it's made by its own pipeline stage,
+and the document is built by another stage that uses it,
+so the two stay connected through the pipeline,
+and a change to the data reruns everything that depends on it.
+A Quarto document can itself be a Calkit pipeline stage.</p>
+<h2 id="workflow-and-pipeline-tools">Workflow and pipeline tools</h2>
+<p>These run a graph of steps and skip the ones that are up to date.
+Calkit's pipeline is one of these:
+it's compiled to a DVC pipeline.</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Unit of work</th>
+<th>Environments</th>
+<th>Skips unchanged work by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://doc.dvc.org/user-guide">DVC</a></td>
+<td>Stage in <code>dvc.yaml</code></td>
+<td>Not part of the tool</td>
+<td>Hashes of inputs and outputs</td>
+</tr>
+<tr>
+<td><a href="https://snakemake.readthedocs.io">Snakemake</a></td>
+<td>Rule</td>
+<td>Conda or a container per rule</td>
+<td>Rerun triggers, optional cache</td>
+</tr>
+<tr>
+<td><a href="https://docs.seqera.io/nextflow/">Nextflow</a></td>
+<td>Process</td>
+<td>A container, conda, or Spack per process</td>
+<td>A hash of each task (<code>-resume</code>)</td>
+</tr>
+<tr>
+<td><a href="https://books.ropensci.org/targets/">targets</a></td>
+<td>Target in <code>_targets.R</code></td>
+<td>Not part of the tool</td>
+<td>Hashes of code, data, and upstream targets</td>
+</tr>
+<tr>
+<td><a href="https://www.gnu.org/software/make/">Make</a></td>
+<td>Rule</td>
+<td>Not part of the tool</td>
+<td>File timestamps</td>
+</tr>
+<tr>
+<td><a href="https://airflow.apache.org/docs/">Airflow</a></td>
+<td>Task in a scheduled DAG</td>
+<td>Virtualenv, Docker, or Kubernetes operators</td>
+<td>Not its purpose</td>
+</tr>
+<tr>
+<td><a href="https://github.com/vacoa/explore">explore</a></td>
+<td>MATLAB function</td>
+<td>Not part of the tool</td>
+<td>Memoized results, rerun when code changes</td>
+</tr>
+<tr>
+<td>Calkit</td>
+<td>Stage in <code>calkit.yaml</code></td>
+<td>Many kinds per stage, e.g., uv, conda, Docker, Julia</td>
+<td>DVC, with environment locks as inputs</td>
+</tr>
+</tbody>
+</table>
+<p>Snakemake and Nextflow run on clusters and in the cloud without changes
+to the workflow, and Nextflow has a large library of community pipelines
+in <a href="https://nf-co.re/">nf-core</a>.
+targets, from rOpenSci, is for R:
+targets are R objects kept in a <code>_targets/</code> store,
+and <code>tar_quarto()</code>, from the companion tarchetypes package,
+renders Quarto documents as part of the pipeline.
+Airflow is for workflows that run on a schedule,
+rather than for reproducing a result.
+explore is a MATLAB class that saves each function's outputs and reruns
+only what changed; it hasn't been updated since 2020.
+None of these link claims in a paper to their outputs.</p>
+<h3 id="calkit-and-dvc">Calkit and DVC</h3>
+<p>Since Calkit's pipeline runs on DVC, it's worth saying what Calkit adds:</p>
+<ul>
+<li>Named environments, whose lock files are inputs to the stages that use
+  them.
+  A DVC stage is just a command.</li>
+<li>Kinds of stages, e.g., Python scripts, notebooks, and LaTeX documents,
+  and <code>calkit xr</code>, which works out a stage's kind, environment, inputs,
+  and outputs from a script.</li>
+<li>One file, <code>calkit.yaml</code>, that ties datasets, figures, publications,
+  and references to the pipeline,
+  along with the questions the project answers and the evidence for them.</li>
+<li>Answers whose numbers are read from pipeline outputs,
+  and a check that reports evidence that's stale, missing,
+  or not computed by any stage.</li>
+</ul>
+<p>Some things neither does yet.
+Neither records who ran a stage beyond the Git commit,
+or signs that record,
+and neither replays a project and reports which outputs came out
+differently, with tolerances for results that aren't reproducible bit
+for bit, e.g., from training on a GPU.
+Calkit also doesn't record who reviewed an answer;
+see <a href="https://github.com/calkit/calkit/issues/1606">issue #1606</a>.</p>
+<h3 id="showyourwork">showyourwork</h3>
+<p><a href="https://show-your.work/">showyourwork</a> is the closest to Calkit.
+It builds a LaTeX article from a Snakemake workflow on every push with
+GitHub Actions, and it uses conda for environments.
+<code>\script</code> ties a figure to the script that made it,
+<code>\variable</code> inserts a file's contents, e.g., a computed number,
+into the text as a workflow dependency,
+and the PDF gets margin icons linking figures to their scripts.
+Expensive outputs can be cached on Zenodo.
+The project layout is fixed,
+and as of September 2026 its docs note that the last release is over two
+years old.</p>
+<p>Calkit isn't limited to one article, layout, or kind of environment,
+and its questions state claims apart from any document,
+with the check reporting stale or untraceable evidence.</p>
+<h2 id="environment-management">Environment management</h2>
+<p>Tools like conda, uv, pixi, renv, Docker, and Julia's package manager
+create environments,
+and some pin them in lock files.
+<a href="https://conda.github.io/conda-lock/">conda-lock</a>, for example,
+solves an <code>environment.yml</code> for each platform and writes a lock file,
+so installing from it doesn't run the solver again.
+Calkit doesn't replace these tools; they plug in as kinds of environment.
+What Calkit adds is making sure they're used reproducibly:</p>
+<ul>
+<li>Every environment has a lock file.
+  Where the tool doesn't write one, Calkit does,
+  e.g., for conda, venv, and Docker environments.
+  A Docker environment's lock records the image's digest for each
+  architecture, and a pulled image is checked against it.</li>
+<li>Before a command runs in an environment,
+  <code>calkit xenv</code> checks that the environment matches its specification,
+  and rebuilds it if it doesn't.</li>
+<li>Julia runs with the global environment left off its load path,
+  so code can't use packages the project doesn't declare.</li>
+<li>A <code>system</code> environment can lock properties of the machine,
+  e.g., the Python version.</li>
+<li>Lock files are inputs to the stages that use them,
+  so changing an environment reruns what depends on it.</li>
+</ul>
+<h2 id="experiment-tracking">Experiment tracking</h2>
+<p><a href="https://docs.wandb.ai/">W&amp;B</a> and
+<a href="https://mlflow.org/docs/latest/ml/tracking/">MLflow</a> record runs as code
+executes:
+each run logs its configuration, metrics, and output files,
+and a web app compares runs.
+W&amp;B's Artifacts version datasets and models as the inputs and outputs of
+runs, and show the lineage between them.
+W&amp;B is hosted by W&amp;B or self-managed, and its client library is
+MIT-licensed.
+MLflow keeps runs in stores you configure, and is open source under the
+Apache 2.0 license.
+<a href="https://doc.dvc.org/user-guide/experiment-management">DVC experiments</a>
+run a DVC pipeline with changed parameters,
+keep each run as a hidden Git reference,
+and compare them with <code>dvc exp show</code>.</p>
+<p>These are built for exploring:
+runs are logged as they happen,
+and comparing them is how a result is found.
+With W&amp;B and MLflow, the logged outputs live on the tracking server
+rather than in the project;
+DVC keeps its experiments in the project's Git repository.
+Calkit's approach is more designed.
+A parameter sweep is a pipeline stage with <code>iterate_over</code>,
+its outputs are versioned like any other,
+and a question and hypothesis say up front what the runs are meant to
+show, with the answer checked against the outputs.</p>
+<h2 id="data-management-and-provenance">Data management and provenance</h2>
+<p><a href="https://www.datalad.org/">DataLad</a> manages data in Git repositories,
+using <a href="https://git-annex.branchable.com/">git-annex</a> for large files.
+A dataset can nest others as subdatasets,
+so a project can bring in someone else's data with <code>datalad clone</code>
+and fetch only the files it needs with <code>datalad get</code>.
+<code>datalad run</code> records the command that produced an output in the commit,
+and <code>datalad rerun</code> runs it again.
+The datalad-container extension runs commands in Singularity or Docker
+images, and the metalad extension extracts metadata.
+There's no declared pipeline that skips steps that are up to date.</p>
+<p>Calkit covers the same ground with DVC:
+versioned data, datasets imported from other projects with
+<code>imported_from</code>, and a record of how each output was made.
+The difference is that each output comes from a declared pipeline stage,
+with its inputs and environment, rather than from a logged command,
+so Calkit can tell when an output is out of date.</p>
+<h2 id="project-metadata">Project metadata</h2>
+<h3 id="ro-crate">RO-Crate</h3>
+<p><a href="https://www.researchobject.org/ro-crate/">RO-Crate</a> is a specification,
+at version 1.3 as of June 2026, for describing research data and what it
+came from.
+A crate is a directory with an <code>ro-crate-metadata.json</code> file,
+JSON-LD using mostly schema.org terms,
+that describes its files, the people and organizations involved,
+and licenses.
+The Workflow Run Crate profiles record a workflow's execution:
+its inputs, outputs, and code.
+RO-Crate describes and packages but doesn't run anything.
+It's widely adopted,
+e.g., by WorkflowHub, Galaxy, and Dataverse.</p>
+<p><code>calkit.yaml</code> is also project metadata,
+but it's the same file Calkit runs the project from,
+so the description can't drift from what the project does.
+Exporting a project as an RO-Crate would make it readable by the tools
+that use the format.</p>
+<h3 id="astra">ASTRA</h3>
+<p><a href="https://github.com/LightconeResearch/astra-spec">ASTRA</a>,
+by Lightcone Research, is a YAML format, <code>astra.yaml</code>,
+for describing an analysis:
+its inputs, outputs, and the decisions made along the way,
+each with the options that were considered.
+Findings are claims with evidence,
+each citing a declared output or a DOI,
+the commit that produced it,
+and optionally the quoted text that supports it.
+ASTRA doesn't run anything itself:
+each output has a recipe, a shell command for a runner of your choice.
+Its companion runner, <code>lightcone-cli</code>, stores data with git-annex and
+publishes an RO-Crate.
+As of September 2026 it's in early alpha.</p>
+<p>Calkit's questions were designed to be compatible in spirit with ASTRA's
+findings.
+Where ASTRA leaves running to other tools,
+Calkit's pipeline is part of the same file as the claims,
+so a claim can be checked against whether its evidence is current.</p>
+<h2 id="archiving-and-sharing">Archiving and sharing</h2>
+<p><a href="https://about.zenodo.org/">Zenodo</a> and
+<a href="https://info.figshare.com/about/">Figshare</a> publish research outputs,
+e.g., data, software, and papers,
+with a DOI so they can be cited.
+Zenodo is operated by CERN with OpenAIRE,
+and its code is open source, built on InvenioRDM.
+Figshare is part of Digital Science;
+its DOIs can be versioned, institutions can run branded instances of it,
+and its code isn't open source.</p>
+<p>These are for sharing artifacts once they're done.
+The Calkit hub is for collaborating on them while they're being made:
+it stores every version of a project's data, figures, and publications,
+and it's where collaborators work on them together.
+The two meet at a release:
+<code>calkit new release</code> uploads the project's files to Zenodo for a DOI,
+and releasing again makes a new version of the same record.</p>
+<h2 id="collaboration-platforms">Collaboration platforms</h2>
+<p>These are where people work together, each built for one kind of work.
+<a href="https://github.com">GitHub</a> is built for software development,
+with issues, pull requests, and CI through GitHub Actions.
+The <a href="https://huggingface.co/docs/hub/index">Hugging Face Hub</a>
+is built for machine learning:
+its repositories hold models, datasets, and Spaces,
+i.e., demo apps,
+with large files stored through Xet,
+and model and dataset cards describing what's in them.
+<a href="https://www.overleaf.com/">Overleaf</a> is built for writing:
+it's a web app for editing LaTeX documents together.</p>
+<p>The Calkit hub does the same for research.
+Its unit is a research project,
+and it shows what the project is made of,
+e.g., its figures, publications, pipeline,
+and the questions it answers,
+along with whether each is up to date.
+It integrates with GitHub rather than replacing it,
+and serves as a DVC remote,
+so a project's data and outputs are stored alongside its repository.</p>
+<p>Overleaf is only for writing, though,
+so figures and tables made by scripts elsewhere have to be uploaded by
+hand whenever they change.
+Calkit keeps writing integrated with analysis,
+since the two are tightly coupled,
+and any friction between them slows iteration and lowers quality.
+A Calkit publication can be <a href="../overleaf/">linked to an Overleaf project</a>:
+edits sync both ways,
+and figures made by the pipeline are sent up to Overleaf,
+so collaborators can keep writing there.</p>
+<h2 id="hosted-computing-environments">Hosted computing environments</h2>
+<p>These are places to do the work, with compute and collaboration built in.
+A Calkit project lives in its repository and runs anywhere,
+including in these environments' sessions and terminals.</p>
+<h3 id="renku">Renku</h3>
+<p><a href="https://renkulab.io/">Renku</a>, by the Swiss Data Science Center,
+is an open source platform that connects a project's data, code,
+and compute.
+Data connectors mount external storage, e.g., S3,
+and sessions run Jupyter, VS Code, or RStudio in a Docker image.
+It's hosted at renkulab.io or self-hosted on Kubernetes.
+The original Renku, with its <code>renku</code> CLI, workflow capture,
+and provenance graph,
+<a href="https://blog.renkulab.io/sunsetting-legacy/">was turned off</a> in October
+2025 in favor of Renku 2.0,
+whose docs don't cover workflows or provenance.</p>
+<h3 id="cocalc">CoCalc</h3>
+<p><a href="https://cocalc.ai/">CoCalc</a>, by SageMath, Inc.,
+is an online environment for real-time collaboration on Jupyter
+notebooks, LaTeX documents, and SageMath,
+with terminals and a per-file revision history.
+Its source is available under the Microsoft Reference Source License.
+As of September 2026, cocalc.com redirects to CoCalc.ai,
+a rewrite built around AI.
+Pipelines, data versioning, and provenance aren't part of either version.</p>
+<h2 id="agentic-research-tools">Agentic research tools</h2>
+<p>These run AI agents that do research.
+Calkit doesn't run agents itself;
+it gives them, and the people checking their work,
+a declared structure to work within.</p>
+<h3 id="claude-science">Claude Science</h3>
+<p><a href="https://claude.com/docs/claude-science/overview">Claude Science</a>
+is a desktop app in beta, launched in June 2026,
+that pairs Claude with an analysis environment on the user's computer,
+aimed at the life sciences first.
+Claude runs Python, R, and shell code in a sandbox,
+in conda environments it manages,
+and connects to scientific databases and compute clusters.
+It requires a paid Claude plan, and its source isn't published.</p>
+<p>Its record of the work is per
+<a href="https://claude.com/docs/claude-science/artifacts">artifact</a>,
+i.e., a saved figure, dataset, report, or notebook.
+Each version of an artifact records the conversation around it,
+a reproducible script, the log of every command that ran,
+and the environment's packages and versions.
+<a href="https://claude.com/docs/claude-science/the-reviewer">The reviewer</a>
+checks Claude's claims against that record,
+e.g., a value that contradicts the file it came from,
+but it doesn't re-run analyses.
+Artifacts live in the app's data folder, <code>~/.claude-science</code>,
+not in a repository.</p>
+<p>Checking claims against evidence is common to both tools.
+Calkit keeps that record in the project repository instead,
+as a declared pipeline that anyone who clones it can rerun,
+and <code>calkit check questions</code> also reports evidence whose stage is out of
+date.</p>
+<h3 id="openresearch">OpenResearch</h3>
+<p><a href="https://github.com/alphaXiv/OpenResearch">OpenResearch</a>, by alphaXiv,
+is a local-first workspace that turns coding agents,
+e.g., Claude Code or Codex,
+into research agents that review literature, form hypotheses,
+and run experiments.
+A project is a tree of experiments,
+each on its own Git branch,
+sharing one fixed run command.
+Each run uses a snapshot of its branch's commit,
+and the run record keeps the command, commit, and exit code.</p>
+<p>Environments are left to the project,
+with the agent told to prefer uv with committed lock files.
+There's no pipeline of stages or caching of outputs.
+Agents are told to cite runs and files after claims in their replies,
+but nothing checks the citations.
+Run logs, reports, and figures are kept in a data directory outside the
+repository.</p>
+<p>A project's run command could be <code>calkit run</code>,
+which would add declared environments, stages that are skipped when
+unchanged, and versioned outputs in the repository.
+In the other direction, OpenResearch's experiment trees and launching on
+remote compute are things Calkit doesn't do.</p>
+<h2 id="agent-evaluation">Agent evaluation</h2>
+<p><a href="https://github.com/harbor-framework/harbor">Harbor</a> is a harness for
+evaluating AI agents:
+it runs an agent on tasks in containers and scores each attempt with a
+verifier.
+<a href="https://github.com/harbor-framework/terminal-bench-science">Terminal-Bench-Science</a>
+is a benchmark of 70 research tasks built on it.
+Harbor makes the scoring of an agent's attempt reproducible,
+while Calkit makes a project's results reproducible,
+so they answer different questions.</p>
+<p>Calkit could supplement them in a few places.
+The scripts a task's author uses to generate its test data and calibrate
+its pass thresholds could be a Calkit pipeline,
+with the numbers behind the thresholds as answers to questions.
+A task could require the agent to deliver a Calkit project,
+so the verifier can check that the submission's claims come from its
+pipeline, and a person reviewing it has a way in.
+And a benchmark's own results, e.g., comparing models,
+could cite Harbor's run records as evidence.
+The <a href="https://github.com/calkit/calkit/tree/main/examples/harbor-tb-science">example</a>
+shows the first two.</p>
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer">
+        
+          
+          <a href="../reproducibility/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Reproducibility">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Reproducibility
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../governance/" class="md-footer__link md-footer__link--next" aria-label="Next: Governance">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Governance
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"></path></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "navigation.footer", "navigation.indexes", "navigation.top"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>

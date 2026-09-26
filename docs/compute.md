@@ -82,6 +82,26 @@ you can see if on the project's figures page and optionally
 save the project to push it to the hub and bring the two
 into alignment with each other.
 
+## Removal
+
+TODO: May need to rationalize this part. Is this a hub thing, or a CLI thing?
+
+You can see all Operators attached to your user account with:
+
+```sh
+calkit hub get operators
+```
+
+You can remove one by its name (selected randomly if not chosen at
+creation time):
+
+```sh
+calkit hub delete operator the-operator-name
+```
+
+This will uninstall the service from the local machine and shut the
+operator down.
+
 ## Features coming soon
 
 - The ability to share a workspace with a collaborator for "multiplayer" mode.

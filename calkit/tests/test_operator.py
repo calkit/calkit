@@ -81,6 +81,14 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     assert workspaces["src/other"]["project"] == "alice/other"
     managed_ws = workspaces[".calkit/workspaces/calkit.io/alice/demo"]
     assert managed_ws["kind"] == "managed"
+    # Managed workspaces can be read but not changed from the hub
+    op = operator.Operator(cfg)
+    op.workspaces = list(workspaces.values())
+    assert op.get_workspace(managed, personal=False) == managed_ws["path"]
+    with pytest.raises(ValueError):
+        op.get_workspace(managed)
+    with pytest.raises(ValueError):
+        op.get_workspace(home)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Sessions need a PTY")
@@ -204,6 +212,10 @@ def test_service_files(tmp_path, monkeypatch):
     assert operator._launchd_plist_path(at_boot=True).startswith(
         "/Library/LaunchDaemons/"
     )
+    # On Windows, a script in the Startup folder runs it hidden at login
+    script = operator._windows_startup_script()
+    assert "--mode" in script and "service" in script
+    assert operator.get_log_path() in script
     unit = operator._systemd_unit()
     assert f"ExecStart={shlex.join(command)}" in unit
     assert "Restart=on-failure" in unit
@@ -242,8 +254,92 @@ def test_cron_and_lock(tmp_path, monkeypatch):
     # Only one Operator runs at a time
     lock = operator.acquire_lock()
     assert lock is not None
+    with open(operator._pid_path()) as f:
+        assert f.read() == str(os.getpid())
     assert operator.acquire_lock() is None
     lock.close()
     second = operator.acquire_lock()
     assert second is not None
     second.close()
+
+
+def test_workspace_actions(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    wdir = os.path.join(tmp_path, "calkit", "demo")
+    _init_project(wdir)
+    subprocess.run(
+        [sys.executable, "-m", "dvc", "init", "-q"], cwd=wdir, check=True
+    )
+    for args in [["add", "."], ["commit", "-qm", "Init DVC"]]:
+        subprocess.run(
+            ["git", "-c", "user.email=a@b.c", "-c", "user.name=a", *args],
+            cwd=wdir,
+            check=True,
+        )
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "a")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "a@b.c")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "a")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "a@b.c")
+    with open(os.path.join(wdir, "notes.txt"), "w") as f:
+        f.write("hi")
+    with open(os.path.join(wdir, "scratch.log"), "w") as f:
+        f.write("noise")
+    status = operator.get_workspace_status(wdir, fetch=False)
+    assert set(status["git"]["untracked"]) == {"notes.txt", "scratch.log"}
+    assert status["dvc"]["pipeline"] == {}
+    # Ignoring commits the .gitignore change
+    operator.ignore_path(wdir, "scratch.log")
+    status = operator.get_workspace_status(wdir, fetch=False)
+    assert status["git"]["untracked"] == ["notes.txt"]
+    assert status["git"]["changed"] == []
+    # Saving commits only what it's given
+    operator.save_workspace(wdir, ["notes.txt"], message="Add notes", to="git")
+    status = operator.get_workspace_status(wdir, fetch=False)
+    assert status["git"]["untracked"] == []
+    log = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=wdir, capture_output=True, text=True
+    ).stdout.splitlines()
+    assert log[:2] == ["Add notes", "Ignore scratch.log"]
+    # Stages are added and committed, with an object for their output
+    operator.add_stage(
+        wdir,
+        name="plot",
+        cmd="python plot.py",
+        outs=["fig.png"],
+        calkit_type="figure",
+        calkit_object={"title": "A plot", "description": "It plots"},
+    )
+    with pytest.raises(ValueError):
+        operator.add_stage(wdir, name="plot", cmd="echo")
+    with pytest.raises(ValueError):
+        operator.add_stage(wdir, name="other", cmd="echo", outs=["fig.png"])
+    import calkit
+
+    figures = calkit.load_calkit_info(wdir=wdir)["figures"]
+    assert figures == [
+        {
+            "path": "fig.png",
+            "stage": "plot",
+            "title": "A plot",
+            "description": "It plots",
+        }
+    ]
+    # Discarding puts back what was committed
+    with open(os.path.join(wdir, "notes.txt"), "w") as f:
+        f.write("changed")
+    operator.discard_changes(wdir)
+    with open(os.path.join(wdir, "notes.txt")) as f:
+        assert f.read() == "hi"
+    # Cloning puts a project under ~/calkit, where it's a workspace, and
+    # won't clone over anything or outside it
+    calls = []
+    monkeypatch.setattr(
+        operator, "_calkit", lambda args, wdir: calls.append(args)
+    )
+    url = "https://github.com/someone/other"
+    path = operator.clone_project(url)
+    assert path == os.path.join(tmp_path, "calkit", "other")
+    assert calls == [["clone", url, path, "--no-dvc-pull"]]
+    for bad in [url.replace("other", "demo"), "https://github.com/x/..", ""]:
+        with pytest.raises(ValueError):
+            operator.clone_project(bad)

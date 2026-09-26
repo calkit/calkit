@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shlex
 import shutil
 import socket
@@ -232,6 +233,243 @@ def get_shell() -> str:
         return "/bin/sh"
 
 
+def _calkit(args: list[str], wdir: str) -> None:
+    """Run Calkit in the Operator's interpreter, raising with its output if
+    it fails.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "calkit", *args],
+        cwd=wdir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            (result.stderr or result.stdout).strip() or "Calkit failed"
+        )
+
+
+def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
+    """Git and DVC status of a workspace, as the hub shows it."""
+    import dvc.config
+    import dvc.repo.data
+    import dvc.repo.status
+    from dvc.exceptions import NotDvcRepoError
+
+    import calkit.pipeline
+    from calkit.dvc import get_dvc_repo
+
+    errors = []
+    git_repo = calkit.git.get_repo(wdir)
+    if fetch:
+        try:
+            git_repo.git.fetch()
+        except Exception as e:
+            errors.append(dict(type="fetch", info=str(e)))
+    ahead = behind = 0
+    repo_status = git_repo.git.status(porcelain="v2", branch=True)
+    # No remote or a detached HEAD means there's no ahead or behind
+    match = re.search(r"#\sbranch\.ab\s\+(\d+)\s-(\d+)", repo_status)
+    if match:
+        ahead, behind = int(match.group(1)), int(match.group(2))
+    try:
+        dvc_repo = get_dvc_repo(wdir)
+        # Frozen stages are pinned on purpose, so they aren't reported
+        frozen = calkit.pipeline.frozen_stage_base_names(wdir=wdir)
+        pipeline = {
+            k.split("dvc.yaml:")[-1]: v
+            for k, v in dvc.repo.status.status(dvc_repo).items()
+            if not k.endswith(".dvc")
+            and k.split("dvc.yaml:")[-1].split("@")[0] not in frozen
+        }
+        data = dvc.repo.data.status(
+            dvc_repo, not_in_remote=fetch, remote_refresh=fetch
+        )
+        # DVC calls a path committed when its DVC file is staged
+        data["changed"] = data.get("uncommitted", {}).get("modified", [])
+        data["staged"] = data.get("committed", {}).get("modified", [])
+        dvc_status: dict | None = dict(pipeline=pipeline, data=data)
+    except (dvc.config.ConfigError, NotDvcRepoError) as e:
+        errors.append(dict(type=type(e).__name__, info=str(e)))
+        dvc_status = None
+    return {
+        "dvc": dvc_status,
+        "git": {
+            "branch": None
+            if git_repo.head.is_detached
+            else git_repo.active_branch.name,
+            "untracked": git_repo.untracked_files,
+            "changed": [d.a_path for d in git_repo.index.diff(None)],
+            "staged": [d.a_path for d in git_repo.index.diff("HEAD")],
+            "commits_ahead": ahead,
+            "commits_behind": behind,
+        },
+        "errors": errors,
+    }
+
+
+def pull_workspace(wdir: str) -> None:
+    """Pull with Git, fast-forward only, then with DVC."""
+    calkit.git.get_repo(wdir).git.pull("--ff-only")
+    _calkit(["dvc", "pull"], wdir)
+
+
+def push_workspace(wdir: str) -> None:
+    """Push with DVC, then with Git."""
+    _calkit(["dvc", "push"], wdir)
+    git_repo = calkit.git.get_repo(wdir)
+    git_repo.git.push("origin", git_repo.active_branch.name)
+
+
+def save_workspace(
+    wdir: str,
+    paths: list[str],
+    message: str | None = None,
+    to: str | None = None,
+    push: bool = False,
+) -> None:
+    """Add and commit paths, to Git or DVC as Calkit decides unless told,
+    and optionally push.
+    """
+    if not paths:
+        raise ValueError("No paths to save")
+    # Only what was asked for goes in the commit
+    calkit.git.get_repo(wdir).git.reset()
+    args = ["add", *paths, "--commit-message"]
+    args.append(message or f"Update {', '.join(paths)}")
+    if to is not None:
+        args += ["--to", to]
+    if push:
+        args.append("--push")
+    _calkit(args, wdir)
+
+
+def ignore_path(wdir: str, path: str, commit: bool = True) -> None:
+    git_repo = calkit.git.get_repo(wdir)
+    if git_repo.ignored(path):
+        return
+    fpath = os.path.join(wdir, ".gitignore")
+    txt = ""
+    if os.path.isfile(fpath):
+        with open(fpath) as f:
+            txt = f.read()
+    if txt and not txt.endswith("\n"):
+        txt += "\n"
+    with open(fpath, "w") as f:
+        f.write(txt + path + "\n")
+    if commit:
+        git_repo.git.add(".gitignore")
+        git_repo.git.commit(["-m", f"Ignore {path}"])
+
+
+def discard_changes(wdir: str) -> None:
+    """Stash Git changes and check out DVC-tracked files that changed."""
+    import dvc.config
+    import dvc.repo.data
+
+    from calkit.dvc import get_dvc_repo
+
+    calkit.git.get_repo(wdir).git.stash()
+    try:
+        data = dvc.repo.data.status(get_dvc_repo(wdir))
+    except dvc.config.ConfigError:
+        return
+    for path in data.get("uncommitted", {}).get("modified", []):
+        _calkit(["dvc", "checkout", path, "--force"], wdir)
+
+
+def add_stage(
+    wdir: str,
+    name: str,
+    cmd: str,
+    deps: list[str] | None = None,
+    outs: list[str] | None = None,
+    calkit_type: str | None = None,
+    calkit_object: dict | None = None,
+    push: bool = False,
+) -> None:
+    """Add a stage to the DVC pipeline and commit it, along with a Calkit
+    object for its output if given one.
+    """
+    if calkit_type is not None:
+        if calkit_type not in ("figure", "dataset", "publication"):
+            raise ValueError(f"Unknown object type '{calkit_type}'")
+        if calkit_object is None or not outs or len(outs) != 1:
+            raise ValueError("An object needs its info and one output")
+    fpath = os.path.join(wdir, "dvc.yaml")
+    pipeline: dict = {}
+    if os.path.isfile(fpath):
+        with open(fpath) as f:
+            pipeline = calkit.ryaml.load(f) or {}
+    stages = pipeline.get("stages", {})
+    if name in stages:
+        raise ValueError(f"A stage named '{name}' already exists")
+    existing_outs = [
+        out for stage in stages.values() for out in stage.get("outs", [])
+    ]
+    for out in outs or []:
+        if out in existing_outs:
+            raise ValueError(f"{out} is already another stage's output")
+    stage: dict = {"cmd": cmd}
+    if deps:
+        stage["deps"] = deps
+    if outs:
+        stage["outs"] = outs
+    stages[name] = stage
+    pipeline["stages"] = stages
+    with open(fpath, "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    repo = calkit.git.get_repo(wdir)
+    repo.git.add("dvc.yaml")
+    if calkit_type is not None:
+        assert outs is not None and calkit_object is not None
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+        objs = ck_info.get(calkit_type + "s", [])
+        if outs[0] in [obj.get("path") for obj in objs]:
+            raise ValueError(f"A {calkit_type} already exists at {outs[0]}")
+        objs.append(dict(path=outs[0], stage=name) | calkit_object)
+        ck_info[calkit_type + "s"] = objs
+        with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        repo.git.add("calkit.yaml")
+    repo.git.commit(["-m", f"Add pipeline stage {name}"])
+    if push:
+        repo.git.push(["origin", repo.active_branch.name])
+
+
+def clone_project(git_repo_url: str) -> str:
+    """Clone a project into ``~/calkit``, where it becomes a workspace,
+    returning its path.
+
+    The clone uses this machine's own Git credentials.
+    """
+    parent = os.path.join(config.get_user_home(), "calkit")
+    os.makedirs(parent, exist_ok=True)
+    name = git_repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or name.startswith("."):
+        raise ValueError(f"Can't clone {git_repo_url}")
+    dest = os.path.join(parent, name)
+    if os.path.exists(dest):
+        raise ValueError(f"{dest} already exists")
+    # Pulling data can be slow or need credentials, so it's left to an
+    # explicit pull
+    _calkit(["clone", git_repo_url, dest, "--no-dvc-pull"], parent)
+    return dest
+
+
+# Browser requests that act on a workspace, run off the event loop since
+# they wait on Git, DVC, and the network
+WORKSPACE_ACTIONS: dict[str, Any] = {
+    "workspace.status": get_workspace_status,
+    "workspace.pull": pull_workspace,
+    "workspace.push": push_workspace,
+    "workspace.save": save_workspace,
+    "workspace.ignore": ignore_path,
+    "workspace.discard": discard_changes,
+    "workspace.add_stage": add_stage,
+}
+
+
 @dataclass
 class Session:
     id: str
@@ -287,6 +525,8 @@ class Operator:
         self.workspaces: list[dict] = []
         self.ws: Any = None
         self.check_in_interval = 60
+        # One Git or DVC operation at a time per workspace
+        self.workspace_locks: dict[str, asyncio.Lock] = {}
 
     async def send(self, ch: str, msg: dict) -> None:
         ws = self.ws
@@ -300,13 +540,28 @@ class Operator:
     def send_soon(self, ch: str, msg: dict) -> None:
         asyncio.get_running_loop().create_task(self.send(ch, msg))
 
-    def open_session(self, workspace: str, cols: int, rows: int) -> Session:
+    def get_workspace(self, path: str, personal: bool = True) -> str:
+        """Resolve a workspace the hub may use, refusing anything else.
+
+        Managed workspaces are checked out with ``--force`` to run stages,
+        so only their status may be read, not changed.
+        """
+        path = os.path.realpath(path)
+        for ws in self.workspaces:
+            if ws["path"] == path:
+                if personal and ws["kind"] != "personal":
+                    raise ValueError("Managed workspaces can't be changed")
+                return path
+        raise ValueError("Not a workspace this Operator allows")
+
+    def open_session(
+        self, workspace: str, cols: int, rows: int, command: str | None = None
+    ) -> Session:
+        if platform.system() == "Windows":
+            raise ValueError("Sessions aren't supported on Windows yet")
         import pty
 
-        allowed = {w["path"] for w in self.workspaces}
-        workspace = os.path.realpath(workspace)
-        if workspace not in allowed:
-            raise ValueError("Not a workspace this Operator allows")
+        workspace = self.get_workspace(workspace)
         # Everything the child needs is prepared here, since it's forked
         # from a process with threads: between fork and exec it may only
         # make system calls, not run code that could wait on a lock held
@@ -333,6 +588,10 @@ class Operator:
         self.sessions[session.id] = session
         self.resize(session, cols, rows)
         asyncio.get_running_loop().add_reader(fd, self._on_output, session)
+        # Typed ahead, so the shell runs it once it has started, and the
+        # session carries on as a shell afterwards
+        if command:
+            os.write(fd, command.encode() + b"\n")
         return session
 
     def resize(self, session: Session, cols: int, rows: int) -> None:
@@ -449,7 +708,10 @@ class Operator:
             return {"sessions": [s.info() for s in self.sessions.values()]}
         if kind == "sessions.open":
             session = self.open_session(
-                msg["workspace"], msg.get("cols", 80), msg.get("rows", 24)
+                msg["workspace"],
+                msg.get("cols", 80),
+                msg.get("rows", 24),
+                msg.get("command"),
             )
             self.attach(session, ch)
             return {"session": session.id}
@@ -497,6 +759,11 @@ class Operator:
         msg = frame.get("msg")
         if not isinstance(msg, dict):
             return
+        if msg.get("type") in WORKSPACE_ACTIONS or msg.get("type") == (
+            "workspaces.clone"
+        ):
+            asyncio.get_running_loop().create_task(self.run_action(ch, msg))
+            return
         req_id = msg.get("id")
         try:
             result = self.handle(ch, msg)
@@ -510,6 +777,47 @@ class Operator:
             return
         if req_id is not None:
             self.send_soon(
+                ch, {"type": "result", "id": req_id, "result": result}
+            )
+
+    async def run_action(self, ch: str, msg: dict) -> None:
+        """Run a request that waits on Git, DVC, or the network in a thread,
+        replying when it's done.
+        """
+        kind = msg["type"]
+        req_id = msg.get("id")
+        try:
+            if kind == "workspaces.clone":
+                path = await asyncio.to_thread(
+                    clone_project, msg["git_repo_url"]
+                )
+                # So the hub lists it right away
+                await self.check_in()
+                result: Any = {"path": path}
+            else:
+                wdir = self.get_workspace(
+                    msg.get("workspace", ""),
+                    personal=kind != "workspace.status",
+                )
+                kwargs = {
+                    k: v
+                    for k, v in msg.items()
+                    if k not in ("type", "id", "workspace")
+                }
+                lock = self.workspace_locks.setdefault(wdir, asyncio.Lock())
+                async with lock:
+                    result = await asyncio.to_thread(
+                        WORKSPACE_ACTIONS[kind], wdir, **kwargs
+                    )
+        except Exception as e:
+            logger.warning(f"{kind} failed: {e}")
+            if req_id is not None:
+                await self.send(
+                    ch, {"type": "error", "id": req_id, "error": str(e)}
+                )
+            return
+        if req_id is not None:
+            await self.send(
                 ch, {"type": "result", "id": req_id, "result": result}
             )
 
@@ -622,17 +930,46 @@ def acquire_lock() -> Any:
     Two would each replace the other's relay connection, and in cron mode
     cron starts one every few minutes regardless.
     """
-    import fcntl
-
     fpath = os.path.join(config.get_user_home(), ".calkit", "operator.lock")
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     f = open(fpath, "w")
     try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         f.close()
         return None
+    # Beside the lock, since on Windows a locked file can't be read
+    with open(_pid_path(), "w") as pid_file:
+        pid_file.write(str(os.getpid()))
     return f
+
+
+def _pid_path() -> str:
+    return os.path.join(config.get_user_home(), ".calkit", "operator.pid")
+
+
+def get_running_pid() -> int | None:
+    """The running Operator's process ID, if one is running."""
+    import psutil
+
+    try:
+        with open(_pid_path()) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    try:
+        cmdline = " ".join(psutil.Process(pid).cmdline())
+    except psutil.Error:
+        return None
+    # The ID may have been reused by something else since
+    return pid if "operator" in cmdline else None
 
 
 def run(cfg: dict, mode: str = "foreground") -> bool:
@@ -758,6 +1095,32 @@ def _launchd_plist(at_boot: bool) -> bytes:
     return plistlib.dumps(plist)
 
 
+def _windows_startup_path() -> str:
+    return os.path.join(
+        os.environ.get("APPDATA", ""),
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs",
+        "Startup",
+        "calkit-operator.vbs",
+    )
+
+
+def _windows_startup_script() -> str:
+    # pythonw has no console window, and a VBScript can start it hidden
+    exe = sys.executable
+    pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    if os.path.isfile(pythonw):
+        exe = pythonw
+    args = " ".join(f'""{a}""' for a in [exe, *_service_command()[1:]])
+    log = get_log_path()
+    return (
+        'Set shell = CreateObject("WScript.Shell")\r\n'
+        f'shell.Run "cmd /c {args} >> ""{log}"" 2>&1", 0, False\r\n'
+    )
+
+
 def _systemd_unit_path() -> str:
     return os.path.join(
         config.get_user_home(), ".config", "systemd", "user", SYSTEMD_UNIT
@@ -863,6 +1226,16 @@ def install_service(at_boot: bool = False) -> list[str]:
                 "The Operator will start when you log in. To start it at "
                 "boot instead, reinstall with --at-boot, which needs sudo."
             )
+    elif system == "Windows":
+        fpath = _windows_startup_path()
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        with open(fpath, "w") as script:
+            script.write(_windows_startup_script())
+        subprocess.Popen(["wscript", fpath])
+        notes.append(
+            "The Operator will start when you log in. Shell sessions aren't "
+            "supported on Windows yet."
+        )
     else:
         raise NotImplementedError(
             f"Installing the Operator as a service isn't supported on "
@@ -871,7 +1244,20 @@ def install_service(at_boot: bool = False) -> list[str]:
     return notes
 
 
+def _stop_windows_operator() -> None:
+    import psutil
+
+    pid = get_running_pid()
+    if pid is not None:
+        psutil.Process(pid).terminate()
+
+
 def uninstall_service() -> None:
+    if platform.system() == "Windows":
+        if os.path.isfile(_windows_startup_path()):
+            os.remove(_windows_startup_path())
+        _stop_windows_operator()
+        return
     if _cron_installed():
         _write_crontab(
             [line for line in _read_crontab() if CRON_MARKER not in line]
@@ -908,6 +1294,11 @@ def uninstall_service() -> None:
 
 def get_service_status() -> str | None:
     """Describe the service, or return None if it isn't installed."""
+    if platform.system() == "Windows":
+        if not os.path.isfile(_windows_startup_path()):
+            return None
+        running = get_running_pid() is not None
+        return f"{'running' if running else 'not running'} (at login)"
     if _cron_installed():
         return "cron, checking in every 5 minutes"
     system = platform.system()
@@ -939,6 +1330,12 @@ def get_service_status() -> str | None:
 
 def set_service_running(running: bool) -> None:
     system = platform.system()
+    if system == "Windows" and os.path.isfile(_windows_startup_path()):
+        if running:
+            subprocess.Popen(["wscript", _windows_startup_path()])
+        else:
+            _stop_windows_operator()
+        return
     if system == "Linux" and os.path.isfile(_systemd_unit_path()):
         action = "start" if running else "stop"
         subprocess.run(

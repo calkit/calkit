@@ -983,6 +983,26 @@ MapPathsStage.model_rebuild()
 
 
 class LatexStage(Stage):
+    class PythonScriptDiffFilter(BaseModel):
+        """A Python script each marked-up document is piped through."""
+
+        kind: Literal["python-script"] = Field(
+            description="Run a Python script, reading the marked-up "
+            "document on stdin and writing the result to stdout."
+        )
+        script_path: RelativeChildPathString = Field(
+            description="Path to the Python script to run."
+        )
+        environment: str | None = Field(
+            default=None,
+            description="Environment to run the script in. Defaults to "
+            "Calkit's own Python, which has only the standard library and "
+            "Calkit's dependencies.",
+        )
+        args: list[str] = Field(
+            default=[], description="Arguments passed to the script."
+        )
+
     kind: Literal["latex"] = "latex"
     target_path: str = Field(description="Path to the .tex file to compile.")
     output_dir: str | None = Field(
@@ -1036,11 +1056,11 @@ class LatexStage(Stage):
         "when building diffs, e.g., '--type=CFONT'. Changed figures are "
         "shown old and new unless '--graphics-markup' is set here.",
     )
-    diff_filter: str | None = Field(
+    diff_filter: PythonScriptDiffFilter | None = Field(
         default=None,
-        description="Shell command each marked-up document is piped through "
-        "before it's built, e.g., to drop changes that don't change the "
-        "rendered text.",
+        description="Script each marked-up document is piped through before "
+        "it's built, e.g., to drop changes that don't change the rendered "
+        "text.",
     )
 
     @property
@@ -1079,12 +1099,10 @@ class LatexStage(Stage):
             if path not in (self.target_path, self.latexmkrc_path)
             and not path.startswith(".calkit/")
         ]
-        # A script the filter runs is read too, so changing it rebuilds
-        filter_deps = [
-            token
-            for token in shlex.split(self.diff_filter or "")
-            if os.path.isfile(os.path.join(self.wdir or "", token))
-        ]
+        # Changing the filter's script rebuilds the diff
+        filter_deps = (
+            [self.diff_filter.script_path] if self.diff_filter else []
+        )
         stages = {}
         for entry, (from_ref, to_ref), path in zip(
             self.diffs, self.diff_pairs, self.diff_paths
@@ -1126,7 +1144,13 @@ class LatexStage(Stage):
             if self.keep_diff_tex:
                 cmd += " --keep-tex"
             if self.diff_filter is not None:
-                cmd += f" --filter {shlex.quote(self.diff_filter)}"
+                script = self.diff_filter.script_path
+                cmd += f" --filter-script {shlex.quote(script)}"
+                if self.diff_filter.environment is not None:
+                    env = self.diff_filter.environment
+                    cmd += f" --filter-env {shlex.quote(env)}"
+                for arg in self.diff_filter.args:
+                    cmd += f" --filter-arg {shlex.quote(arg)}"
             # Each revision gets its own copies of any of these that are
             # tracked with DVC, since a checkout only has their pointers
             for input_path in inputs:

@@ -2307,15 +2307,14 @@
         "diff_filter": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/PythonScriptDiffFilter"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Shell command each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text.",
-          "title": "Diff Filter"
+          "description": "Script each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text."
         },
         "diff_pdf_storage": {
           "anyOf": [
@@ -5227,6 +5226,50 @@
         "path"
       ],
       "title": "PublicationEvidence",
+      "type": "object"
+    },
+    "PythonScriptDiffFilter": {
+      "description": "A Python script each marked-up document is piped through.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "Arguments passed to the script.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Environment to run the script in. Defaults to Calkit's own Python, which has only the standard library and Calkit's dependencies.",
+          "title": "Environment"
+        },
+        "kind": {
+          "const": "python-script",
+          "description": "Run a Python script, reading the marked-up document on stdin and writing the result to stdout.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "script_path": {
+          "description": "Path to the Python script to run.",
+          "title": "Script Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "script_path"
+      ],
+      "title": "PythonScriptDiffFilter",
       "type": "object"
     },
     "PythonScriptStage": {

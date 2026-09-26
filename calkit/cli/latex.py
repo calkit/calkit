@@ -9,6 +9,7 @@ import re
 import shutil
 import string
 import subprocess
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -667,17 +668,38 @@ def diff(
             ),
         ),
     ] = False,
-    filter_cmd: Annotated[
+    filter_script: Annotated[
         str | None,
         typer.Option(
-            "--filter",
+            "--filter-script",
             help=(
-                "Shell command to pipe the marked-up document through "
+                "Python script to pipe the marked-up document through "
                 "before it's built, e.g., to drop changes that don't change "
-                "the rendered text. Runs from the project directory."
+                "the rendered text. It reads the document on stdin and "
+                "writes the result to stdout."
             ),
         ),
     ] = None,
+    filter_env: Annotated[
+        str | None,
+        typer.Option(
+            "--filter-env",
+            help=(
+                "Environment to run the filter script in. Defaults to "
+                "Calkit's own Python."
+            ),
+        ),
+    ] = None,
+    filter_args: Annotated[
+        list[str],
+        typer.Option(
+            "--filter-arg",
+            help=(
+                "Argument to pass to the filter script. Repeat the option "
+                "to pass more than one."
+            ),
+        ),
+    ] = [],
     no_check: Annotated[
         bool,
         typer.Option(
@@ -1091,7 +1113,6 @@ def diff(
     # stage's environment, settings, and inputs, unless told otherwise
     stage_name, stage = find_latex_stage()
     pipeline_inputs: list[str] = []
-    filter_cwd: str | None = None
     if stage is not None:
         if environment is None:
             environment = stage.get("environment")
@@ -1102,10 +1123,24 @@ def diff(
             stage.get("latexdiff_args") or []
         )
         pipeline_inputs = stage_inputs(str(stage_name), stage)
-        # A stage's filter is written relative to its directory
-        if filter_cmd is None and stage.get("diff_filter"):
-            filter_cmd = stage["diff_filter"]
-            filter_cwd = stage.get("wdir")
+        diff_filter = stage.get("diff_filter")
+        if filter_script is None and isinstance(diff_filter, dict):
+            filter_script = stage_path(stage, diff_filter["script_path"])
+            filter_env = diff_filter.get("environment")
+            filter_args = list(diff_filter.get("args") or [])
+    filter_cmd: list[str] | None = None
+    if filter_script is not None:
+        # Calkit's own interpreter unless told otherwise, since there may be
+        # no python on the PATH, or not one with what the script needs
+        if filter_env is None:
+            filter_cmd = [sys.executable, filter_script]
+        else:
+            filter_cmd = (
+                ["calkit", "xenv", "--name", filter_env]
+                + (["--no-check"] if no_check else [])
+                + ["--", "python", filter_script]
+            )
+        filter_cmd += filter_args
     if output is None:
         output = get_diff_path(
             tex_file,
@@ -1196,7 +1231,6 @@ def diff(
             no_check=no_check,
             keep_tex=keep_tex,
             filter_cmd=filter_cmd,
-            filter_cwd=filter_cwd,
             force=force,
             verbose=verbose,
         )
@@ -1259,8 +1293,7 @@ def _build_diff(
     keep_tex: bool,
     force: bool,
     verbose: bool,
-    filter_cmd: str | None = None,
-    filter_cwd: str | None = None,
+    filter_cmd: list[str] | None = None,
 ) -> None:
     """Mark up one document against another and build the result.
 
@@ -1330,14 +1363,12 @@ def _build_diff(
             rb"\\ifdefined\3\\DIF\1\2{", marked_up
         )
         if filter_cmd is not None:
-            typer.echo(f"Filtering the marked-up document with {filter_cmd}")
+            typer.echo("Filtering the marked-up document")
             try:
                 marked_up = subprocess.run(
                     filter_cmd,
-                    shell=True,
                     input=marked_up,
                     stdout=subprocess.PIPE,
-                    cwd=filter_cwd,
                     check=True,
                 ).stdout
             except subprocess.CalledProcessError as e:

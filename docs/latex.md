@@ -250,7 +250,7 @@ appendix to a single column, is expanded before comparing,
 so what it wraps is marked up like the rest of the document.
 
 To post-process the marked-up document before it's built,
-set `diff_filter` to a shell command that reads it on stdin and writes the
+set `diff_filter` to a Python script that reads it on stdin and writes the
 result to stdout, e.g., to drop changes that only replace text with the
 equivalent glossary entry:
 
@@ -263,12 +263,17 @@ pipeline:
       target_path: pubs/paper-1/main.tex
       diffs:
         - paper-1-submitted
-      diff_filter: python3 scripts/glossary-filter.py
+      diff_filter:
+        kind: python-script
+        script_path: scripts/glossary-filter.py
 ```
 
-The filter runs outside the stage's environment, from the stage's directory.
-A script named in the command is a dependency of the diff stage,
-so changing it rebuilds the diff.
+By default the script runs with Calkit's own Python,
+so it can only use the standard library and Calkit's dependencies.
+To run it in one of the project's environments instead,
+set `environment` on the filter, and pass any arguments with `args`.
+The script is a dependency of the diff stage, so changing it rebuilds the
+diff.
 
 If LaTeX reports errors building the marked-up document but still produces
 a PDF, the diff is kept and the errors are shown in a warning.

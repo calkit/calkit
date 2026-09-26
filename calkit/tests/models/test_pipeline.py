@@ -1,7 +1,5 @@
 """Tests for ``calkit.models.pipeline``."""
 
-import os
-
 import pytest
 from pydantic import ValidationError
 
@@ -567,7 +565,7 @@ def test_to_ck_dict() -> None:
     assert PythonScriptStage.model_validate(d2) == s2
 
 
-def test_latex_stage_diffs(tmp_dir):
+def test_latex_stage_diffs():
     stage = LatexStage(
         name="paper-1",
         kind="latex",
@@ -669,23 +667,39 @@ def test_latex_stage_diffs(tmp_dir):
     assert "--input figures/fig2.png" in main_diff["cmd"]
     assert "figures/fig2.png" in main_diff["deps"]
     assert with_outputs["paper-1-diff-v1-v2"]["deps"] == []
-    # A filter is passed along, and a script it runs is depended on
-    os.makedirs("scripts", exist_ok=True)
-    with open("scripts/filter.py", "w") as f:
-        f.write("")
+    # A filter's script is passed along and depended on, and runs in an
+    # environment only if one is named
     filtered = LatexStage(
         name="paper-1",
         kind="latex",
         environment="tex",
         target_path="pubs/paper-1/main.tex",
         diffs=[["v1", "v2"]],
-        diff_filter="python scripts/filter.py --quiet",
+        diff_filter={
+            "kind": "python-script",
+            "script_path": "scripts/filter.py",
+            "args": ["--quiet"],
+        },
     )
     filtered_diff = filtered.extra_dvc_stages()["paper-1-diff-v1-v2"]
     assert (
-        "--filter 'python scripts/filter.py --quiet'" in filtered_diff["cmd"]
+        "--filter-script scripts/filter.py --filter-arg --quiet"
+        in filtered_diff["cmd"]
     )
+    assert "--filter-env" not in filtered_diff["cmd"]
     assert filtered_diff["deps"] == ["scripts/filter.py"]
+    assert filtered.diff_filter is not None
+    filtered.diff_filter.environment = "py"
+    filtered_diff = filtered.extra_dvc_stages()["paper-1-diff-v1-v2"]
+    assert "--filter-env py" in filtered_diff["cmd"]
+    with pytest.raises(ValidationError):
+        LatexStage(
+            name="paper-1",
+            kind="latex",
+            environment="tex",
+            target_path="pubs/paper-1/main.tex",
+            diff_filter="python3 scripts/filter.py",
+        )
     for bad in [[["v1"]], [["v1", "v2", "v3"]], [["v1", ""]], [["v1", "v1"]]]:
         with pytest.raises(ValidationError):
             LatexStage(

@@ -573,8 +573,16 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert os.path.exists(stubs / "latexmk-args.txt")
     # A filter rewrites the marked-up document before it's built, and the
     # working tree's sources are prepared like a checkout's, in a copy
+    with open("filter.py", "w") as f:
+        f.write(
+            "import sys\n"
+            "text = sys.stdin.read()\n"
+            "sys.stdout.write(text.replace(sys.argv[1], sys.argv[2]))\n"
+        )
+    filter_args = ["--filter-script", "filter.py"]
+    filter_args += ["--filter-arg", "Green", "--filter-arg", "Blue"]
     result = subprocess.run(
-        diff + ["--filter", "sed s/Green/Blue/", "--keep-tex"],
+        diff + filter_args + ["--keep-tex"],
         capture_output=True,
         text=True,
         env=env,

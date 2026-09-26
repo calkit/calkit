@@ -41,9 +41,6 @@ mechanism:
   `ck://{owner}/{project}`.
 - **Git LFS:** The hub acts as the project's LFS server,
   set in the project's `.lfsconfig`.
-- **Git:** Calkit acts as a Git credential helper,
-  getting short-lived credentials for the project's Git remote from the
-  hub.
 
 When a file needs to be read or written,
 Calkit asks the hub where it should go,
@@ -148,27 +145,11 @@ e.g., a bucket is used like any other DVC storage,
 so there's nothing else to set.
 
 `git`, `dvc`, `dvc-zip`, and `git-lfs` are the built-in storage names,
-so they're reserved,
-but they can be configured,
+so they're reserved.
+`dvc`, `dvc-zip`, and `git-lfs` can be configured,
 e.g., `dvc` above,
 to change where they store files.
-
-## Git storage
-
-A project's Git remote can also be declared in `calkit.yaml`:
-
-```yaml
-storage:
-  git:
-    url: https://github.com/my-org/my-project
-```
-
-Calkit keeps the project's `origin` remote in sync with this,
-so it goes with the project,
-and anyone who clones it pushes to the same place.
-Authentication still goes through the hub,
-so collaborators don't need to set up GitHub credentials on each
-machine.
+The project's Git remote is set on the hub.
 
 ## Hugging Face
 
@@ -242,11 +223,6 @@ and makes one commit on HF for each commit it's mirroring.
 The hub keeps track of which HF revision and path holds each version of
 each file,
 so DVC can still find them by their MD5 checksum.
-
-A Datasets repo can also be used as a project's Git storage,
-so the whole project,
-large files included,
-lives on HF.
 
 Datasets repos keep every version of every file,
 so they're better suited to finished artifacts than to everything a
@@ -327,8 +303,7 @@ which will go its own way.
 A fork's `calkit.yaml` starts out with the same storage names,
 but they now refer to the new owner's account,
 so the first `calkit push` will ask you to point them at your own
-storage resources,
-and set a new Git remote.
+storage resources.
 Files from before the fork can still be pulled from the original
 project's storage,
 as long as you have access to it.
@@ -372,7 +347,9 @@ to hydrate the DVC cache and make checking them out seamless.
 - Box
 - Google Drive
 - Releasing to HF Datasets repos
-- Git storage on GitLab, Codeberg, HF, or the hub itself
+- Git storage on GitLab, Codeberg, HF, or the hub itself,
+  with Git auth going through the hub too
+  ([#1254](https://github.com/calkit/calkit/issues/1254))
 
 ## Design notes
 
@@ -390,8 +367,7 @@ This section is for the design phase and will be removed.
   never a silent fallback that starts a move.
 - A project has a single home,
   and forks diverge rather than converge.
-  That's what makes it fine for storage names and the Git URL to travel
-  with the repo:
+  That's what makes it fine for storage names to travel with the repo:
   collaborators share the owner's resources through the hub,
   and a fork is a deliberate break where remapping is expected.
   Fork reads fall back to the parent project's storage.
@@ -431,15 +407,14 @@ This section is for the design phase and will be removed.
   `git`, `dvc`, `dvc-zip`, and `git-lfs` are built-in storage instances,
   and a user-defined entry gets its mechanism from its resource:
   object storage like a bucket, and HF Datasets through the MD5 index,
-  are DVC,
-  and a Git URL is Git.
+  are DVC.
   Open question:
   can a user-defined entry be LFS,
   e.g., LFS objects in an HF bucket,
   or does LFS only ever go through the built-in `git-lfs`,
   configured with `git-lfs: {name: ...}`?
 - Commands name the segment they configure,
-  i.e., `dvc-storage`, `lfs-storage`, and `git-storage`,
+  i.e., `dvc-storage` and `lfs-storage`,
   and each edits the matching reserved entry in `calkit.yaml`.
 - The hub writes DVC objects under `{owner}/{project}/files/md5/...`
   and LFS objects under `{owner}/{project}/lfs/objects/...`,
@@ -526,17 +501,22 @@ This section is for the design phase and will be removed.
   bucket with the user's OAuth token,
   which would need the Xet access kind above.
   Check which OAuth scopes are needed to create buckets.
-- To verify:
-  routing Git auth through the hub needs short-lived credentials scoped to
-  one repo.
-  GitHub App installation tokens can be scoped to a single repo and set of
-  permissions, so GitHub works.
-  For HF Datasets repos,
-  it's not clear the hub can mint anything narrower than the user's OAuth
-  token,
-  which must never be handed to collaborators.
-  If not, HF Git storage may need the hub to proxy Git traffic,
-  or only work for the owner.
+- Git storage is out of scope for this PR,
+  and stays as `git_repo_url` on the hub.
+  The Git URL shouldn't go in `calkit.yaml`:
+  a commit changing it is pushed to the old remote,
+  other clones keep the old `origin`,
+  the history has to be mirrored with credentials for both hosts,
+  and anyone with push access could repoint the project the hub acts on.
+  Changing it should be an owner-only action on the hub.
+  Later, Git hosts could be storage resources with `kind: git`,
+  under [#1254](https://github.com/calkit/calkit/issues/1254),
+  which brings its own auth layer:
+  per-host tokens, pushes from collaborators,
+  and maybe the hub proxying Git traffic for hosts that can't issue
+  tokens scoped to one repo.
+  GitHub App installation tokens can be;
+  it's not clear HF can do better than the user's whole OAuth token.
 - Later, AWS role assumption as a second auth method for `s3`,
   ideally with the hub acting as an OIDC identity provider so it doesn't
   need its own AWS account.

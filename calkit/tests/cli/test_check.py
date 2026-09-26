@@ -412,6 +412,15 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
 def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
+    def get_layers() -> list[str]:
+        layers: list[str] = json.loads(
+            subprocess.check_output(
+                ["docker", "image", "inspect", "-f", "{{json .RootFS.Layers}}"]
+                + [image]
+            )
+        )
+        return layers
+
     image = "calkit-legacy-lock-test"
     subprocess.check_call(["calkit", "init"])
     with open("Dockerfile", "w") as f:
@@ -445,11 +454,16 @@ def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
         subprocess.check_call(
             ["docker", "build", "-t", image, "-f", "Other.dockerfile", "."]
         )
+        other_layers = get_layers()
         subprocess.check_call(check_argv)
         assert not os.path.isfile(legacy_lock_fpath)
         with open(lock_fpath) as f:
             migrated = json.load(f)
-        assert migrated["RootFS"]["Layers"] == built_lock["RootFS"]["Layers"]
+        # The rebuild can't be compared with the first build's layers, since
+        # a test running alongside this one may delete the base image and
+        # with it the build cache
+        assert migrated["RootFS"]["Layers"] != other_layers
+        assert migrated["RootFS"]["Layers"] == get_layers()
         assert migrated["DockerfileMD5"] == built_lock["DockerfileMD5"]
     finally:
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)

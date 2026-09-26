@@ -55,7 +55,7 @@ WORKING_NAME = "working"
 # of a full TeX Live image. Pinned to an exact tag rather than :latest so
 # a document keeps building against the same TeX until this is moved
 # deliberately; what it carries is recorded in images/latex/README.md.
-DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.2"
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.3"
 # The environment created for a document that doesn't have one, wherever
 # that happens: a new publication, an Overleaf import, or a stage whose
 # environment is worked out from what it runs. Copied where it's used,

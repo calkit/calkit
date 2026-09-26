@@ -109,27 +109,31 @@ Creating the project on calkit.io.
 ///
 
 Next, we'll do the only command line thing in this whole process
-and spin up a local Calkit server.
+and install the Calkit Operator on our computer.
 This will allow us connect to the web app and enable us to modify the project
 on our local machine.
-To start the server, open up a terminal or Miniforge command prompt and run:
+To install it, open up a terminal or Miniforge command prompt and run:
 
 ```sh
-calkit local-server
+calkit install operator
 ```
 
+The Operator starts whenever we log in,
+so we won't need to do this again.
 If we navigate to our project page on [calkit.io](https://calkit.io),
-then go to the local machine page, we see that the repo has never been
-cloned to our computer, so let's click the "Clone" button.
+then go to the compute page, we see that the repo has never been
+cloned to our computer, so let's click the button with our computer's name
+to clone it there.
 
-![The project's local machine page showing we haven't cloned the repo yet.](img/office/needs-clone.png)
+![The project's compute page showing we haven't cloned the repo yet.](img/office/needs-clone.png)
 /// caption
-The project's local machine page showing we haven't cloned the repo yet.
+The project's compute page showing we haven't cloned the repo yet.
 ///
 
-By default, it will be cloned somewhere
+It will be cloned somewhere
 like `C:/Users/your-name/calkit/the-project-name`,
-which you can see in the status.
+and show up in the table of workspaces.
+Clicking "Details" shows its status.
 We can also see that our repo is "clean,"
 i.e., there are no untracked or modified files in there,
 and that our local copy is synced with both the Git and DVC remotes,
@@ -145,7 +149,7 @@ and saving it in our project repo as `data.xlsx`.
 Creating our dataset in Excel.
 ///
 
-Back on the Calkit local machine page,
+Back on the Calkit compute page,
 if we refresh the status
 we see that the `data.xlsx` spreadsheet is showing up as an untracked
 file in the project repo.
@@ -163,7 +167,7 @@ and again we'll see that our repo is clean and in sync.
 
 Now let's use Excel to create a figure.
 If we go in and create a chart inside and save the spreadsheet,
-we see up on the local machine page that we have a changed file.
+we see up on the compute page that we have a changed file.
 Let's commit that change by clicking the "Commit" button
 and let's use a commit message like
 "Add chart to spreadsheet".

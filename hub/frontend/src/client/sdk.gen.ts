@@ -72,6 +72,8 @@ import type {
   DeleteUserResponses,
   DeleteUserTokenErrors,
   DeleteUserTokenResponses,
+  DeleteUserTotpErrors,
+  DeleteUserTotpResponses,
   DetectProjectPipelineStageInputsErrors,
   DetectProjectPipelineStageInputsResponses,
   DeviceAuthorizeRequest,
@@ -249,6 +251,7 @@ import type {
   GetUserStorageResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
+  GetUserTotpResponses,
   GetUserZenodoTokenResponses,
   GitHubReleasePost,
   GlobalSearchErrors,
@@ -399,6 +402,11 @@ import type {
   PostUserGoogleAuthResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
+  PostUserTotpConfirmErrors,
+  PostUserTotpConfirmResponses,
+  PostUserTotpResponses,
+  PostUserTotpVerifyErrors,
+  PostUserTotpVerifyResponses,
   PostUserZenodoAuthErrors,
   PostUserZenodoAuthResponses,
   PostUserZoteroAuthErrors,
@@ -478,6 +486,7 @@ import type {
   TokenPatch,
   TokenPost,
   TokenPut,
+  TotpCode,
   UpdateCurrentUserErrors,
   UpdateCurrentUserPasswordErrors,
   UpdateCurrentUserPasswordResponses,
@@ -2134,6 +2143,154 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/onboarding-flags",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete User Totp
+   *
+   * Turn off two-factor authentication, which takes a current code.
+   */
+  public static deleteUserTotp<ThrowOnError extends boolean = true>(
+    parameters: {
+      totpCode: TotpCode
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteUserTotpResponses,
+    DeleteUserTotpErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "totpCode", map: "body" }] }],
+    )
+    return (options?.client ?? client).delete<
+      DeleteUserTotpResponses,
+      DeleteUserTotpErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Totp
+   */
+  public static getUserTotp<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserTotpResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserTotpResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp",
+      ...options,
+    })
+  }
+
+  /**
+   * Post User Totp
+   *
+   * Start setting up an authenticator app, which is confirmed by entering
+   * a code from it.
+   */
+  public static postUserTotp<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostUserTotpResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).post<
+      PostUserTotpResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp",
+      ...options,
+    })
+  }
+
+  /**
+   * Post User Totp Confirm
+   */
+  public static postUserTotpConfirm<ThrowOnError extends boolean = true>(
+    parameters: {
+      totpCode: TotpCode
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserTotpConfirmResponses,
+    PostUserTotpConfirmErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "totpCode", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserTotpConfirmResponses,
+      PostUserTotpConfirmErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp/confirm",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post User Totp Verify
+   *
+   * Enter a code to allow sensitive actions for a while.
+   */
+  public static postUserTotpVerify<ThrowOnError extends boolean = true>(
+    parameters: {
+      totpCode: TotpCode
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserTotpVerifyResponses,
+    PostUserTotpVerifyErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "totpCode", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserTotpVerifyResponses,
+      PostUserTotpVerifyErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp/verify",
       ...options,
       ...params,
       headers: {

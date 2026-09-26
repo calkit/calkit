@@ -5799,6 +5799,44 @@ export type SubscriptionUpdate = {
 }
 
 /**
+ * TOTPCode
+ */
+export type TotpCode = {
+  /**
+   * Code
+   */
+  code: string
+}
+
+/**
+ * TOTPSetup
+ */
+export type TotpSetup = {
+  /**
+   * Secret
+   */
+  secret: string
+  /**
+   * Otpauth Uri
+   */
+  otpauth_uri: string
+}
+
+/**
+ * TOTPStatus
+ */
+export type TotpStatus = {
+  /**
+   * Enabled
+   */
+  enabled: boolean
+  /**
+   * Verified
+   */
+  verified: boolean
+}
+
+/**
  * Table
  *
  * Tabular data the project publishes, resolved for display.
@@ -8390,6 +8428,121 @@ export type PutUserOnboardingFlagResponses = {
 
 export type PutUserOnboardingFlagResponse =
   PutUserOnboardingFlagResponses[keyof PutUserOnboardingFlagResponses]
+
+export type DeleteUserTotpData = {
+  body: TotpCode
+  path?: never
+  query?: never
+  url: "/user/totp"
+}
+
+export type DeleteUserTotpErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteUserTotpError =
+  DeleteUserTotpErrors[keyof DeleteUserTotpErrors]
+
+export type DeleteUserTotpResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpStatus
+}
+
+export type DeleteUserTotpResponse =
+  DeleteUserTotpResponses[keyof DeleteUserTotpResponses]
+
+export type GetUserTotpData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/totp"
+}
+
+export type GetUserTotpResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpStatus
+}
+
+export type GetUserTotpResponse =
+  GetUserTotpResponses[keyof GetUserTotpResponses]
+
+export type PostUserTotpData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/totp"
+}
+
+export type PostUserTotpResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpSetup
+}
+
+export type PostUserTotpResponse =
+  PostUserTotpResponses[keyof PostUserTotpResponses]
+
+export type PostUserTotpConfirmData = {
+  body: TotpCode
+  path?: never
+  query?: never
+  url: "/user/totp/confirm"
+}
+
+export type PostUserTotpConfirmErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserTotpConfirmError =
+  PostUserTotpConfirmErrors[keyof PostUserTotpConfirmErrors]
+
+export type PostUserTotpConfirmResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpStatus
+}
+
+export type PostUserTotpConfirmResponse =
+  PostUserTotpConfirmResponses[keyof PostUserTotpConfirmResponses]
+
+export type PostUserTotpVerifyData = {
+  body: TotpCode
+  path?: never
+  query?: never
+  url: "/user/totp/verify"
+}
+
+export type PostUserTotpVerifyErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserTotpVerifyError =
+  PostUserTotpVerifyErrors[keyof PostUserTotpVerifyErrors]
+
+export type PostUserTotpVerifyResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpStatus
+}
+
+export type PostUserTotpVerifyResponse =
+  PostUserTotpVerifyResponses[keyof PostUserTotpVerifyResponses]
 
 export type GetHubVersionData = {
   body?: never

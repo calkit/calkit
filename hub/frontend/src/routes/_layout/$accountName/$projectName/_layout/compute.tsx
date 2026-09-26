@@ -7,6 +7,7 @@ import {
   Heading,
   Icon,
   IconButton,
+  Input,
   Table,
   Tbody,
   Td,
@@ -17,7 +18,7 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { Link as RouterLink, createFileRoute } from "@tanstack/react-router"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
@@ -25,7 +26,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FiCheck, FiMinus, FiPlus, FiRefreshCw, FiX } from "react-icons/fi"
 import { z } from "zod"
 
-import { OperatorsService, type ProjectWorkspace } from "../../../../../client"
+import {
+  OperatorsService,
+  type ProjectWorkspace,
+  UsersService,
+} from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
 import AddPath from "../../../../../components/Workspace/AddPath"
@@ -62,6 +67,10 @@ interface SessionInfo {
 
 type Listener = (msg: any) => void
 
+// Why the hub refused a relay token, from app/users.py
+const SECOND_FACTOR_SETUP_REQUIRED = "Two-factor authentication setup required"
+const SECOND_FACTOR_REQUIRED = "Two-factor authentication code required"
+
 // One browser connection to an Operator through the relay. See
 // docs/dev/operator-protocol.md for the messages.
 class OperatorConnection {
@@ -76,6 +85,8 @@ class OperatorConnection {
   statusListeners = new Set<() => void>()
   connected = false
   closed = false
+  // Why connecting failed, if the user has to do something about it
+  error: string | null = null
   retryDelay = 1000
 
   constructor(operatorId: string) {
@@ -91,10 +102,21 @@ class OperatorConnection {
       })
       const { relay_url, token } = resp.data
       ws = new WebSocket(`${relay_url}/browser?token=${token}`)
-    } catch {
+    } catch (e: any) {
+      const detail = e.response?.data?.detail
+      // Retrying won't help until the user enters a code
+      if (
+        detail === SECOND_FACTOR_REQUIRED ||
+        detail === SECOND_FACTOR_SETUP_REQUIRED
+      ) {
+        this.error = detail
+        this.notify()
+        return
+      }
       this.scheduleReconnect()
       return
     }
+    this.error = null
     this.ws = ws
     ws.onopen = () => {
       this.connected = true
@@ -164,6 +186,12 @@ class OperatorConnection {
     }
     listeners.add(listener)
     return () => listeners.delete(listener)
+  }
+
+  retryNow() {
+    this.error = null
+    this.retryDelay = 1000
+    this.connect()
   }
 
   async waitUntilConnected(timeoutMs = 10000) {
@@ -752,12 +780,64 @@ function Compute() {
     setPanes(panes.filter((p) => p.session !== pane.session))
     refreshSessions()
   }
+  const [code, setCode] = useState("")
+  const secondFactorError = [...connections.current.values()].find(
+    (c) => c.error,
+  )?.error
+  const verifyMutation = useMutation({
+    mutationFn: () => UsersService.postUserTotpVerify({ totpCode: { code } }),
+    onSuccess: () => {
+      setCode("")
+      for (const conn of connections.current.values()) {
+        if (conn.error) conn.retryNow()
+      }
+    },
+    onError: (e: any) =>
+      showToast("Error", e.response?.data?.detail ?? e.message, "error"),
+  })
   if (workspacesQuery.isPending) return <LoadingSpinner />
   return (
     <Box p={4} maxH="100%" overflowY="auto" w="100%">
       <Heading size="md" mb={3}>
         Workspaces
       </Heading>
+      {secondFactorError === SECOND_FACTOR_SETUP_REQUIRED && (
+        <Text mb={4}>
+          Opening sessions takes two-factor authentication.{" "}
+          <RouterLink to="/settings" search={{ tab: "operators" }}>
+            <Text as="span" color="ui.main" textDecoration="underline">
+              Set it up
+            </Text>
+          </RouterLink>{" "}
+          to connect to your Operators.
+        </Text>
+      )}
+      {secondFactorError === SECOND_FACTOR_REQUIRED && (
+        <Flex align="center" gap={2} mb={4} wrap="wrap">
+          <Text>Enter a code from your authenticator app to connect.</Text>
+          <Input
+            size="sm"
+            maxW="140px"
+            placeholder="123456"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && code.length >= 6) verifyMutation.mutate()
+            }}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            isDisabled={code.length < 6}
+            isLoading={verifyMutation.isPending}
+            onClick={() => verifyMutation.mutate()}
+          >
+            Verify
+          </Button>
+        </Flex>
+      )}
       {workspaces.length === 0 ? (
         <Text mb={4}>
           None of your Operators has a workspace for this project. Install one

@@ -6,6 +6,7 @@ import {
   Container,
   Flex,
   Heading,
+  Input,
   SkeletonText,
   Table,
   TableContainer,
@@ -17,10 +18,125 @@ import {
   Tr,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { QRCodeSVG } from "qrcode.react"
 import { useState } from "react"
 
-import { OperatorsService } from "../../client"
+import { OperatorsService, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+
+// Opening sessions on an Operator takes an authenticator code, since it
+// gives shell access to the machine
+function TwoFactor() {
+  const queryClient = useQueryClient()
+  const showToast = useCustomToast()
+  const [setup, setSetup] = useState<{
+    secret: string
+    otpauth_uri: string
+  } | null>(null)
+  const [code, setCode] = useState("")
+  const statusQuery = useQuery({
+    queryKey: ["user", "totp"],
+    queryFn: () => UsersService.getUserTotp().then((r) => r.data),
+  })
+  const onSettled = () => {
+    setCode("")
+    queryClient.invalidateQueries({ queryKey: ["user", "totp"] })
+  }
+  const onError = (e: any) =>
+    showToast("Error", e.response?.data?.detail ?? e.message, "error")
+  const startMutation = useMutation({
+    mutationFn: () => UsersService.postUserTotp().then((r) => r.data),
+    onSuccess: setSetup,
+    onError,
+  })
+  const confirmMutation = useMutation({
+    mutationFn: () => UsersService.postUserTotpConfirm({ totpCode: { code } }),
+    onSuccess: () => {
+      setSetup(null)
+      showToast("Success!", "Two-factor authentication is on.", "success")
+    },
+    onError,
+    onSettled,
+  })
+  const disableMutation = useMutation({
+    mutationFn: () => UsersService.deleteUserTotp({ totpCode: { code } }),
+    onSuccess: () =>
+      showToast("Success!", "Two-factor authentication is off.", "success"),
+    onError,
+    onSettled,
+  })
+  const codeInput = (
+    <Input
+      size="sm"
+      maxW="140px"
+      placeholder="123456"
+      value={code}
+      onChange={(e) => setCode(e.target.value)}
+      inputMode="numeric"
+      autoComplete="one-time-code"
+    />
+  )
+  if (statusQuery.isPending) return null
+  return (
+    <Box mb={6}>
+      <Heading size="sm" mb={2}>
+        Two-factor authentication
+      </Heading>
+      {statusQuery.data?.enabled ? (
+        <Flex align="center" gap={2}>
+          <Badge colorScheme="green">On</Badge>
+          {codeInput}
+          <Button
+            size="sm"
+            variant="outline"
+            colorScheme="red"
+            isDisabled={code.length < 6}
+            isLoading={disableMutation.isPending}
+            onClick={() => disableMutation.mutate()}
+          >
+            Turn off
+          </Button>
+        </Flex>
+      ) : setup ? (
+        <>
+          <Text mb={2}>
+            Scan this with an authenticator app, then enter the code it shows.
+          </Text>
+          <Box bg="white" p={2} display="inline-block" mb={2}>
+            <QRCodeSVG value={setup.otpauth_uri} size={160} />
+          </Box>
+          <Text fontSize="sm" mb={2}>
+            Or enter this key: <Code>{setup.secret}</Code>
+          </Text>
+          <Flex gap={2}>
+            {codeInput}
+            <Button
+              size="sm"
+              variant="primary"
+              isDisabled={code.length < 6}
+              isLoading={confirmMutation.isPending}
+              onClick={() => confirmMutation.mutate()}
+            >
+              Confirm
+            </Button>
+          </Flex>
+        </>
+      ) : (
+        <Flex align="center" gap={2}>
+          <Text>Required to open sessions on your Operators.</Text>
+          <Button
+            size="sm"
+            variant="primary"
+            isLoading={startMutation.isPending}
+            onClick={() => startMutation.mutate()}
+          >
+            Set up
+          </Button>
+        </Flex>
+      )}
+    </Box>
+  )
+}
 
 function Operators() {
   const queryClient = useQueryClient()
@@ -46,6 +162,7 @@ function Operators() {
       <Heading size="md" py={4}>
         Operators
       </Heading>
+      <TwoFactor />
       <Text mb={4}>
         Install one with <Code>calkit install operator</Code>.
       </Text>

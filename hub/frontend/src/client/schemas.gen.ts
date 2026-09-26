@@ -10245,6 +10245,52 @@ export const SubscriptionUpdateSchema = {
   title: "SubscriptionUpdate",
 } as const
 
+export const TOTPCodeSchema = {
+  properties: {
+    code: {
+      type: "string",
+      maxLength: 8,
+      minLength: 6,
+      title: "Code",
+    },
+  },
+  type: "object",
+  required: ["code"],
+  title: "TOTPCode",
+} as const
+
+export const TOTPSetupSchema = {
+  properties: {
+    secret: {
+      type: "string",
+      title: "Secret",
+    },
+    otpauth_uri: {
+      type: "string",
+      title: "Otpauth Uri",
+    },
+  },
+  type: "object",
+  required: ["secret", "otpauth_uri"],
+  title: "TOTPSetup",
+} as const
+
+export const TOTPStatusSchema = {
+  properties: {
+    enabled: {
+      type: "boolean",
+      title: "Enabled",
+    },
+    verified: {
+      type: "boolean",
+      title: "Verified",
+    },
+  },
+  type: "object",
+  required: ["enabled", "verified"],
+  title: "TOTPStatus",
+} as const
+
 export const TableSchema = {
   properties: {
     path: {

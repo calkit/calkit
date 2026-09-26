@@ -116,6 +116,10 @@ If you already use Git LFS on GitHub,
 and stores those files with GitHub's LFS.
 If Git LFS isn't set up on your computer yet,
 Calkit will offer to set it up for you.
+Keep in mind that GitHub limits how much LFS storage and download
+bandwidth you get,
+and removing LFS files from GitHub later means deleting the repo or
+contacting GitHub support.
 
 ## Hugging Face
 
@@ -158,6 +162,11 @@ use Option 2.
 
 Calkit can then only ever touch that bucket,
 and nothing else in your HF account.
+The trade-off is speed:
+with Option 1,
+changing part of a large file only uploads the part that changed,
+while with Option 2,
+the whole file is uploaded again.
 
 ### Datasets
 
@@ -278,15 +287,14 @@ This section is for the design phase and will be removed.
   git-annex support through a Calkit special remote;
   and AWS role assumption.
 - The split between the repo and the hub:
-  `calkit.yaml` says how each path is tracked and which storage it uses,
-  by name.
+  `calkit.yaml` says which storage each path uses, by name.
   The hub resolves each name to a resource in the project owner's
   account,
   holds its credentials,
   and runs moves.
   No magic matching:
-  a name that doesn't resolve is an error on push,
-  never a silent fallback that starts a move.
+  names map to resources only by explicit,
+  owner-approved choices.
 - A project has a single home,
   and forks diverge rather than converge.
   That's what makes it fine for storage names to travel with the repo:
@@ -308,15 +316,34 @@ This section is for the design phase and will be removed.
   `.dvc` files for datasets get the same.
   This is plain DVC,
   so even a plain `dvc push` sends files to the right place.
-- On the hub, the `storage` query parameter is looked up in the pushed
-  `calkit.yaml` to find the resource.
-  The hub keeps a record of every resource a project has used,
+- The hub keeps its own copy of each project's name-to-resource mapping,
+  rather than reading it out of whatever `calkit.yaml` was last pushed.
+  Two reasons.
+  Timing: DVC usually pushes before Git,
+  so the hub may not have seen a new name yet.
+  Security: only the owner should change where files go,
+  but anyone with push access can commit a `calkit.yaml` change,
+  and the hub can't reliably tell who made a commit.
+- So `calkit push` sends the local `storage` section to the hub before
+  pushing anything.
+  If it differs from the hub's mapping and the pusher is the owner,
+  `calkit push` shows the move and asks to confirm,
+  and the hub applies it.
+  If the pusher isn't the owner,
+  the hub records it as a pending change for the owner to approve on the
+  project's settings page,
+  and `calkit push` says so.
+  Until then, the old mapping stays in effect,
+  and names the hub doesn't know yet go to the default storage.
+- A name that can't resolve,
+  e.g., it refers to a resource the owner doesn't have,
+  is an error from `calkit push`.
+  A plain `dvc push` with an unknown name doesn't fail;
+  its files go to the default storage and get moved later.
+- The hub keeps a record of every resource a project has used,
   and reads fall back across all of them,
   which is what makes moving files lazily safe.
-- `calkit push` is where storage changes are confirmed,
-  since it can compare the local `calkit.yaml` with what the hub last
-  saw.
-  The hub's reconcile loop runs after the Git push,
+  The reconcile loop runs when the mapping changes and after Git pushes,
   triggered by `calkit push` notifying the hub,
   or by a webhook from the Git host.
   Nothing needs to move before the next push works,
@@ -343,8 +370,22 @@ This section is for the design phase and will be removed.
   registry,
   so it's prompted, opt-in, and recorded in `~/.calkit/installed.json`
   (Homebrew on macOS, winget `GitHub.GitLFS` on Windows,
-  though Git for Windows usually bundles it;
-  Linux needs a decision).
+  though Git for Windows usually bundles it).
+  On Linux, offer a choice among the package managers that are present:
+  registry entries grow from one command per platform to a list of
+  options,
+  each gated on a package manager found with `shutil.which`.
+  One found means prompt as today,
+  several means let the user pick,
+  and none means fall back to an upstream script or a manual link.
+  For git-lfs:
+  `pixi global install git-lfs`, `conda`/`mamba` (conda-forge),
+  and Linuxbrew first,
+  since they don't need `sudo`,
+  which matters on HPC clusters;
+  then `apt`, `dnf`, `pacman`, and `zypper`,
+  with the prompt making clear when a command uses `sudo`.
+  This generalizes to the rest of the registry.
   `git lfs install --local` and `git lfs track <path>` only touch the
   repo,
   so they run automatically without a prompt,
@@ -361,8 +402,9 @@ This section is for the design phase and will be removed.
   then run `git lfs pull`.
   GitHub LFS caveats worth documenting:
   separate storage and bandwidth limits that clones and CI count against,
-  and deleting LFS objects has historically required deleting the repo
-  or contacting support (verify).
+  and deleting LFS objects requires deleting and recreating the repo or
+  contacting support
+  ([GitHub docs](https://docs.github.com/en/repositories/working-with-files/managing-large-files/removing-files-from-git-large-file-storage)).
 - Users pick storage, not a tracking mechanism,
   and Calkit picks the mechanism from the storage kind.
   `git`, `dvc`, `dvc-zip`, and `git-lfs` are built-in storage instances,
@@ -408,9 +450,12 @@ This section is for the design phase and will be removed.
   check which Git hosts keep custom refs;
   and git-bug has no boards,
   so Kanban columns would be labels or a Calkit extension.
-- Commands name the segment they configure,
-  i.e., `dvc-storage` and `lfs-storage`,
-  and each edits the matching reserved entry in `calkit.yaml`.
+- CLI: `calkit hub list storage` lists the account's resources,
+  and `calkit update storage --name {entry} {resource}` sets an entry in
+  `calkit.yaml`,
+  e.g., `--name dvc` for the default,
+  or `--name big-data` for a new one.
+  `calkit add --to {entry}` assigns a path.
 - The hub writes DVC objects under `{owner}/{project}/files/md5/...`
   and LFS objects under `{owner}/{project}/lfs/objects/...`,
   i.e., the layouts DVC and LFS use themselves,
@@ -441,19 +486,34 @@ This section is for the design phase and will be removed.
 - Directory outputs are `.dir` manifests in DVC.
   The hub can synthesize those from the index,
   or store them in the HF repo under a hidden path.
-- The index should be possible to rebuild from HF alone,
-  to avoid lock-in:
-  commit the project's `dvc.lock` and `.dvc` files into the HF repo too,
-  and put the project commit SHA in each HF commit message.
-  Then any HF revision says which MD5 lives at which path.
+- Where the index lives:
+  the HF repo is the source of truth,
+  and the hub's index is a cache built from it.
+  The project's `dvc.lock` and `.dvc` files are committed into the HF repo
+  alongside the data,
+  with the project commit SHAs in each HF commit message,
+  so any HF revision says which MD5 lives at which path,
+  and the index can be rebuilt from HF alone
+  (no lock-in, and nothing critical to back up on the hub).
+- Tampering: an index in the HF repo can be edited by anyone with write
+  access to it,
+  including through HF's web editor,
+  while the hub's database is harder to reach but is more state to manage.
+  Checking on download makes this mostly moot:
+  DVC requests every object by MD5,
+  so the `ck` client hashes what it downloads and rejects a mismatch.
+  The hub can also check index entries against the SHA-256 HF stores for
+  every LFS file.
 - History rewrites on the HF side,
   e.g., squashing to reclaim space,
   break the index.
   The hub should detect that (the revision disappears) and re-upload or
   mark the objects missing.
-- Check HF's rate limits on commits,
-  since this is one commit per mirrored project commit,
-  or batch them per push.
+- HF allows 128 repo commits per hour
+  ([rate limits](https://huggingface.co/docs/hub/rate-limits)),
+  so mirroring must batch one HF commit per push,
+  not one per project commit.
+  The HF commit message lists every project commit SHA it covers.
 - The hub as an LFS server is a small surface:
   the LFS batch API already returns an `href` and headers for each
   object,
@@ -472,30 +532,93 @@ This section is for the design phase and will be removed.
   and manages the bucket.
   Other managed kinds, e.g., OneDrive and Box,
   would follow the `hf-bucket` pattern.
-- The trade-off between the two is convenience vs. scope.
-  An HF OAuth token spans the whole namespace,
-  while S3 credentials can be limited to one bucket.
+- The trade-off between the two is convenience vs. scope,
+  but HF's `contribute-repos` OAuth scope may remove it:
+  "Create repositories and access those created by this app.
+  Cannot access any other repositories unless additional permissions are
+  granted."
+  HF calls buckets a repo type,
+  so with that scope the hub could create the `calkit` bucket and HF
+  Datasets repos,
+  and touch nothing else.
+  Users pick which orgs to grant during authorization,
+  or the hub can request one with `orgIds`.
+  To verify: does `contribute-repos` cover buckets,
+  and can a repo the user created by hand be granted later?
+  If it works,
+  the Option 1 warning in the user docs goes away,
+  and Option 2 becomes a fallback.
 - One resource per account rather than one bucket per project,
   so the credentials never need to create buckets on the fly.
 - For `s3`, the hub signs URLs itself with the stored credentials.
   Signing is local, so there's no HF API call per file,
   and the client's existing `presigned-url` and `presigned-multipart`
   access kinds may work unchanged.
-- To verify:
-  does `s3.hf.co` accept presigned query-string URLs,
-  including for multipart parts?
-  If not, the fallback is a new access kind using short-lived Xet tokens
-  and the `hf_xet` client,
-  which would also get us chunk-level transfer deduplication
-  (see [#675](https://github.com/calkit/calkit/issues/675)).
-- To verify:
-  how does `hf-bucket` move bytes?
-  S3 credentials appear to only be created in the HF UI,
-  so an OAuth token probably can't be used with the S3 gateway.
-  The likely path is the hub requesting short-lived Xet tokens for the
-  bucket with the user's OAuth token,
-  which would need the Xet access kind above.
-  Check which OAuth scopes are needed to create buckets.
+- Xet is how HF storage gets efficient,
+  and it only helps transfers if the client does the chunking.
+  Xet splits files into ~64 KB content-defined chunks,
+  and a Xet-aware client checks which chunks already exist
+  (in the session, a local cache, and a global query)
+  before uploading,
+  so a new version of a large file only uploads what changed.
+  New chunks are compressed into 64 MB xorbs.
+  This is exactly the DVC pain point in
+  [#675](https://github.com/calkit/calkit/issues/675):
+  DVC sees a changed file and re-uploads all of it.
+  Uploads through the S3 gateway or plain HTTP don't get the transfer
+  savings.
+- So HF storage should use a new `hf-xet` access kind in `fs/ops`,
+  for both buckets and Datasets,
+  rather than presigned S3 URLs.
+  The hub requests a short-lived Xet token with the owner's HF credential
+  from `GET /api/buckets/{ns}/{name}/xet-write-token`
+  (Datasets: `/api/datasets/{ns}/{name}/xet-write-token/{revision}`),
+  and returns `casUrl`, `accessToken`, and `exp`.
+  Xet tokens are scoped to one repo (and ref),
+  so a collaborator's token can't reach anything else,
+  and the owner's HF credential never leaves the hub.
+- Upload flow:
+  the client runs `hf_xet.upload_files()` with that token,
+  which returns each file's Xet hash and size,
+  then reports `{md5: (xet_hash, size)}` back to the hub.
+  The hub registers the paths with the owner's credential:
+  `POST /api/buckets/{id}/batch` with `addFile` entries
+  (path `{owner}/{project}/files/md5/...`) for buckets,
+  or a commit with Xet file entries at the real paths for Datasets,
+  batched per push.
+  A Xet write token can upload chunks but can't register paths,
+  so what ends up in the owner's bucket or repo always goes through the
+  hub.
+- Download flow:
+  the hub returns a read token and the file's Xet hash,
+  and the client runs `hf_xet.download_files()`.
+  With hf_xet's chunk cache,
+  pulling a new version of a large file only downloads the changed
+  chunks.
+  To verify: the chunk cache's default size and location,
+  since it's separate from the DVC cache and uses more disk.
+  Downloads are also checked against the MD5 by the `ck` client.
+- Verified 2026-09-26 against an HF bucket with `hf-xet` 1.4.3
+  (script playing both hub and client roles):
+  the owner's token mints a bucket Xet write token (15 minute lifetime);
+  a 32 MiB upload transferred 32 MiB;
+  re-uploading it with 1 MiB changed in the middle transferred 1.1 MiB;
+  registering a path with only the Xet token was rejected (401),
+  while the owner's token worked (200);
+  a download with a read token matched the MD5;
+  and `deleteFile` cleaned up.
+  So the brokered flow works as designed,
+  and collaborators holding Xet tokens can't write paths.
+- Client dependency: `hf-xet`,
+  a standalone Rust wheel (`huggingface_hub` isn't needed),
+  with wheels for macOS, Linux, and Windows.
+  Make it a regular dependency so there's nothing for users to install.
+  DVC transfers one object per `put_file` call,
+  which gives up hf_xet's within-session batching;
+  batching in the `ck` filesystem can come later.
+- With Xet, connecting an HF account with OAuth (Option 1) is enough,
+  since the hub mints Xet tokens with the OAuth token,
+  so S3 credentials (Option 2) are only needed for other S3 providers.
 - Git storage is out of scope for this PR,
   and stays as `git_repo_url` on the hub.
   The Git URL shouldn't go in `calkit.yaml`:
@@ -518,6 +641,104 @@ This section is for the design phase and will be removed.
   The same approach would work for GCP and Azure.
 - Public projects in private buckets are fine,
   since the hub signs read URLs for anyone who can see the project.
+- First PR (MVP): swap a project's DVC storage from the hub's internal
+  bucket to an HF bucket, configured entirely on the hub.
+  No `calkit.yaml` changes.
+  The client gets the `hf-xet` access kind and the `hf-xet` dependency,
+  so transfers get Xet's savings from the start,
+  and HF Datasets in the next PR reuse the same transfer path.
+- MVP, connecting HF:
+  an HF OAuth connect flow alongside the existing Google and Zenodo ones
+  (`hub/frontend/src/components/UserSettings/ConnectedAccounts.tsx`,
+  a code-exchange route in `hub/backend/app/api/routes/users.py`,
+  and a getter with refresh like `users.get_google_token`),
+  storing the token in the encrypted `UserExternalCredential` table
+  (`hub/backend/app/models/core.py:153`).
+  Request `contribute-repos` if it covers buckets,
+  otherwise `manage-repos`.
+- MVP, storage resources:
+  a new `StorageResource` table owned by a user or org account
+  (kind `hf-bucket`, namespace, bucket, credential reference).
+  Adding one creates the `calkit` bucket if needed,
+  and checks the credential by requesting a Xet write token.
+- MVP, project binding:
+  a nullable `Project.dvc_storage_id`
+  (null means the internal bucket),
+  plus a record of every resource the project has ever used,
+  for read fallback.
+  Only the owner can change it.
+  One Alembic migration,
+  per `hub/docs/dev/database-migrations.md`.
+- MVP, `fs/ops`:
+  resolve the project's resource where the TODO is
+  (`hub/backend/app/api/routes/projects/fs.py:198`).
+  For HF buckets,
+  `exists`, `info`, `list`, and `find` use the bucket's metadata
+  (`HfFileSystem` with `hf://buckets/` paths, or the Hub API),
+  `put` returns `hf-xet` write access,
+  `get` returns `hf-xet` read access,
+  and a new `register` operation takes the Xet hashes after an upload.
+  `backend: "hf"` is already in the `FsOpResponse` literal.
+- MVP, read fallback:
+  `exists`, `info`, and `get` check the current resource first,
+  then previous ones, including the internal bucket,
+  so switching needs no data move.
+  `list` and `find` merge results across them.
+- MVP, the other callers:
+  about 60 call sites outside `storage.py` assume the internal bucket,
+  e.g., the file, figure, and pipeline views in
+  `hub/backend/app/api/routes/projects/core.py`,
+  `projects.py`, `dvc.py`, and `pipeline.py`.
+  They need a per-project way to read a file or get a browser URL,
+  or HF-backed projects will show missing files in the UI.
+  For HF, the hub can read with the owner's credential,
+  and give browsers the CDN URL HF redirects to.
+  The legacy HTTP DVC remote (`api/routes/projects/dvc.py`)
+  can refuse HF-backed projects,
+  since it streams bytes through the hub.
+- MVP, usage and quota:
+  usage is `du` on the owner's prefix in the internal bucket
+  (`storage.py:383`),
+  so HF-stored files already don't count against the Calkit plan.
+  Existing gap, not this PR's:
+  `fs/ops` puts don't check the quota at all;
+  only the legacy remote does.
+- MVP, frontend:
+  there's no project settings page today.
+  Add `routes/_layout/$accountName/$projectName/_layout/settings.tsx`
+  with an entry in `components/Common/SidebarItems.tsx`,
+  shown only to the owner,
+  with a DVC storage picker listing the account's resources
+  (HF Datasets shown as coming soon).
+- Deleting and garbage collection:
+  `fs/ops` intentionally has no `delete`,
+  so no client can ever remove data,
+  even though the client's `rm_file` sends one (`calkit/fs.py:946`).
+  Keep it that way.
+  Users still need to clean up hub storage to stay under their plan's
+  limits,
+  so garbage collection should be an explicit,
+  owner-only action run by the hub,
+  which can see every branch, tag, and release,
+  unlike `dvc gc` on a clone.
+  An object is kept if any of these reference it:
+  `dvc.lock` or `.dvc` files at any ref,
+  releases,
+  other projects that import from this one,
+  and forks that fall back to this project's storage.
+  Archived objects,
+  e.g., on Zenodo ([#1161](https://github.com/calkit/calkit/issues/1161)),
+  can be removed from hub storage,
+  since they can be restored from the archive.
+  Always show a dry run with the size to be freed and ask to confirm,
+  then move objects to a trash prefix that's emptied after a grace
+  period,
+  e.g., 30 days,
+  rather than deleting them right away.
+  For HF-backed projects,
+  the same applies through the bucket `batch` API's `deleteFile`,
+  but that storage doesn't count against Calkit limits,
+  so it's lower priority.
 - Related issues:
   [#791](https://github.com/calkit/calkit/issues/791),
   [#1253](https://github.com/calkit/calkit/issues/1253),

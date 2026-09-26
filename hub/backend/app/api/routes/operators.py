@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
+from app import users
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
@@ -88,15 +89,6 @@ def connect_requested(operator: Operator) -> bool:
         return False
     age = (utcnow() - operator.connect_requested_at).total_seconds()
     return age < CONNECT_REQUEST_SECONDS
-
-
-def require_second_factor(user: User) -> None:
-    """Refuse to open sessions for users without a second factor.
-
-    The hub has no two-factor authentication yet, so this passes; once it
-    does, this is the one place that enforces it for Operators.
-    """
-    return
 
 
 class OperatorOut(OperatorPublic):
@@ -292,7 +284,7 @@ def post_operator_relay_token(
     session: SessionDep, current_user: CurrentUser, operator_id: uuid.UUID
 ) -> RelayTokenResp:
     operator = _get_owned_operator(session, current_user, operator_id)
-    require_second_factor(current_user)
+    users.require_second_factor(current_user)
     if not is_online(operator):
         raise HTTPException(409, "Operator is offline")
     return RelayTokenResp(

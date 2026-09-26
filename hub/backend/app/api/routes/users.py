@@ -55,10 +55,13 @@ from app.models import (
     UserSubscription,
     UserToken,
     UserTokenPublic,
+    UserTOTP,
     UserUpdate,
     UserUpdateMe,
 )
 from app.security import (
+    encrypt_secret,
+    generate_totp_secret,
     get_password_hash,
     verify_password,
 )
@@ -1238,3 +1241,108 @@ def delete_user_onboarding_flag(
             done=False,
         )
     return Message(message="Success")
+
+
+class TOTPStatus(BaseModel):
+    enabled: bool
+    # Whether a code was entered recently enough for sensitive actions
+    verified: bool
+
+
+def _totp_status(user: User) -> TOTPStatus:
+    totp = user.totp
+    enabled = totp is not None and totp.confirmed_at is not None
+    try:
+        users.require_second_factor(user)
+        verified = True
+    except HTTPException:
+        verified = False
+    return TOTPStatus(enabled=enabled, verified=verified)
+
+
+@router.get("/user/totp")
+def get_user_totp(current_user: CurrentUser) -> TOTPStatus:
+    return _totp_status(current_user)
+
+
+class TOTPSetup(BaseModel):
+    secret: str
+    otpauth_uri: str
+
+
+@router.post("/user/totp")
+def post_user_totp(
+    session: SessionDep, current_user: CurrentUser
+) -> TOTPSetup:
+    """Start setting up an authenticator app, which is confirmed by entering
+    a code from it.
+    """
+    from urllib.parse import quote
+
+    totp = current_user.totp
+    if totp is not None and totp.confirmed_at is not None:
+        raise HTTPException(409, "Two-factor authentication is already set up")
+    secret = generate_totp_secret()
+    if totp is None:
+        totp = UserTOTP(user_id=current_user.id, secret=encrypt_secret(secret))
+    else:
+        totp.secret = encrypt_secret(secret)
+        totp.created = utcnow()
+    session.add(totp)
+    session.commit()
+    label = quote(f"Calkit:{current_user.email}")
+    return TOTPSetup(
+        secret=secret,
+        otpauth_uri=f"otpauth://totp/{label}?secret={secret}&issuer=Calkit",
+    )
+
+
+class TOTPCode(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+@router.post("/user/totp/confirm")
+def post_user_totp_confirm(
+    session: SessionDep, current_user: CurrentUser, req: TOTPCode
+) -> TOTPStatus:
+    totp = current_user.totp
+    if totp is None:
+        raise HTTPException(
+            404, "Two-factor authentication isn't being set up"
+        )
+    if totp.confirmed_at is not None:
+        raise HTTPException(409, "Two-factor authentication is already set up")
+    users.check_totp_code(session, totp, req.code)
+    totp.confirmed_at = utcnow()
+    session.add(totp)
+    session.commit()
+    session.refresh(current_user)
+    return _totp_status(current_user)
+
+
+@router.post("/user/totp/verify")
+def post_user_totp_verify(
+    session: SessionDep, current_user: CurrentUser, req: TOTPCode
+) -> TOTPStatus:
+    """Enter a code to allow sensitive actions for a while."""
+    totp = current_user.totp
+    if totp is None or totp.confirmed_at is None:
+        raise HTTPException(404, "Two-factor authentication isn't set up")
+    users.check_totp_code(session, totp, req.code)
+    session.refresh(current_user)
+    return _totp_status(current_user)
+
+
+@router.delete("/user/totp")
+def delete_user_totp(
+    session: SessionDep, current_user: CurrentUser, req: TOTPCode
+) -> TOTPStatus:
+    """Turn off two-factor authentication, which takes a current code."""
+    totp = current_user.totp
+    if totp is None or totp.confirmed_at is None:
+        raise HTTPException(404, "Two-factor authentication isn't set up")
+    users.check_totp_code(session, totp, req.code)
+    session.delete(totp)
+    session.commit()
+    session.refresh(current_user)
+    return _totp_status(current_user)

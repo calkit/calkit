@@ -32,6 +32,7 @@ from app.models import (
     UserExternalCredential,
     UserGitHubToken,
     UserSubscription,
+    UserTOTP,
     UserUpdate,
 )
 from app.security import (
@@ -39,6 +40,7 @@ from app.security import (
     encrypt_secret,
     generate_email_verification_token,
     get_password_hash,
+    match_totp_step,
     verify_email_verification_token,
     verify_password,
 )
@@ -985,3 +987,56 @@ def check_user_subscription_active(session: Session, user: User) -> bool:
     )
     session.commit()
     return True
+
+
+# How long entering an authenticator code covers sensitive actions for
+SECOND_FACTOR_HOURS = 12
+TOTP_MAX_FAILED_ATTEMPTS = 5
+TOTP_LOCKOUT_MINUTES = 5
+# Error details the frontend recognizes, to prompt for a code or set one up
+SECOND_FACTOR_SETUP_REQUIRED = "Two-factor authentication setup required"
+SECOND_FACTOR_REQUIRED = "Two-factor authentication code required"
+
+
+def check_totp_code(session: Session, totp: UserTOTP, code: str) -> None:
+    """Check an authenticator code, recording it as used if it's valid.
+
+    Codes are six digits, so wrong guesses lock the user out for a while,
+    and a code can't be used twice, so one seen over a shoulder or in a log
+    is worthless.
+    """
+    now = utcnow()
+    if totp.locked_until is not None and totp.locked_until > now:
+        raise HTTPException(
+            429, "Too many attempts; try again in a few minutes"
+        )
+    step = match_totp_step(decrypt_secret(totp.secret), code)
+    if step is None or (
+        totp.last_used_step is not None and step <= totp.last_used_step
+    ):
+        totp.failed_attempts += 1
+        if totp.failed_attempts >= TOTP_MAX_FAILED_ATTEMPTS:
+            totp.failed_attempts = 0
+            totp.locked_until = now + timedelta(minutes=TOTP_LOCKOUT_MINUTES)
+        session.add(totp)
+        session.commit()
+        raise HTTPException(400, "Invalid code")
+    totp.last_used_step = step
+    totp.failed_attempts = 0
+    totp.locked_until = None
+    totp.last_verified_at = now
+    session.add(totp)
+    session.commit()
+
+
+def require_second_factor(user: User) -> None:
+    """Refuse sensitive actions unless the user has entered an
+    authenticator code recently.
+    """
+    totp = user.totp
+    if totp is None or totp.confirmed_at is None:
+        raise HTTPException(403, SECOND_FACTOR_SETUP_REQUIRED)
+    if totp.last_verified_at is None or utcnow() - totp.last_verified_at > (
+        timedelta(hours=SECOND_FACTOR_HOURS)
+    ):
+        raise HTTPException(403, SECOND_FACTOR_REQUIRED)

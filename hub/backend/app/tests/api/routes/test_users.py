@@ -1216,3 +1216,90 @@ def test_create_user_derived_account_name_gets_suffix(db: Session) -> None:
             ),
         )
     assert excinfo.value.status_code == 422
+
+
+def test_totp(
+    client: TestClient, db: Session, normal_user_token_headers: dict[str, str]
+) -> None:
+    import time
+    from datetime import timedelta
+
+    from app.core import utcnow
+    from app.models import UserTOTP
+    from app.security import (
+        TOTP_PERIOD_SECONDS,
+        get_totp_code,
+        match_totp_step,
+    )
+
+    # RFC 6238's SHA-1 test vector, whose 8-digit code is 94287082
+    rfc_secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    assert get_totp_code(rfc_secret, 59 // TOTP_PERIOD_SECONDS) == "287082"
+    assert match_totp_step(rfc_secret, "287 082", now=59) == 1
+    assert match_totp_step(rfc_secret, "287082", now=59 + 90) is None
+    h = normal_user_token_headers
+    user = db.get(User, uuid.UUID(client.get("/user", headers=h).json()["id"]))
+    assert user is not None
+    existing = db.get(UserTOTP, user.id)
+    if existing is not None:
+        db.delete(existing)
+        db.commit()
+    assert client.get("/user/totp", headers=h).json() == {
+        "enabled": False,
+        "verified": False,
+    }
+    r = client.post("/user/totp", headers=h)
+    assert r.status_code == 200, r.text
+    secret = r.json()["secret"]
+    assert r.json()["otpauth_uri"].startswith("otpauth://totp/Calkit")
+    step = int(time.time() // TOTP_PERIOD_SECONDS)
+    # Setting up takes a code from the app
+    r = client.post("/user/totp/confirm", headers=h, json={"code": "000000"})
+    assert r.status_code == 400
+    code = get_totp_code(secret, step)
+    r = client.post("/user/totp/confirm", headers=h, json={"code": code})
+    assert r.json() == {"enabled": True, "verified": True}
+    assert client.post("/user/totp", headers=h).status_code == 409
+    # A code can't be used twice
+    r = client.post("/user/totp/verify", headers=h, json={"code": code})
+    assert r.status_code == 400
+    # Verification lapses, and entering a fresh code renews it
+    totp = db.get(UserTOTP, user.id)
+    db.refresh(totp)
+    totp.last_verified_at = utcnow() - timedelta(hours=13)
+    db.add(totp)
+    db.commit()
+    assert not client.get("/user/totp", headers=h).json()["verified"]
+    r = client.post(
+        "/user/totp/verify",
+        headers=h,
+        json={"code": get_totp_code(secret, step + 1)},
+    )
+    assert r.json() == {"enabled": True, "verified": True}
+    # Repeated wrong codes lock it for a while, even for right ones
+    for _ in range(5):
+        r = client.post(
+            "/user/totp/verify", headers=h, json={"code": "000000"}
+        )
+    r = client.post("/user/totp/verify", headers=h, json={"code": "000000"})
+    assert r.status_code == 429
+    db.refresh(totp)
+    totp.locked_until = None
+    db.add(totp)
+    db.commit()
+    # Turning it off takes a current code too
+    r = client.request(
+        "DELETE", "/user/totp", headers=h, json={"code": "000000"}
+    )
+    assert r.status_code == 400
+    totp.last_used_step = None
+    totp.failed_attempts = 0
+    db.add(totp)
+    db.commit()
+    r = client.request(
+        "DELETE",
+        "/user/totp",
+        headers=h,
+        json={"code": get_totp_code(secret, step)},
+    )
+    assert r.json() == {"enabled": False, "verified": False}

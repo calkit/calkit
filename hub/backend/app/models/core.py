@@ -217,6 +217,7 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    totp: Union["UserTOTP", None] = Relationship(cascade_delete=True)
     external_credentials: list[UserExternalCredential] = Relationship(
         back_populates="user",
         cascade_delete=True,
@@ -541,6 +542,26 @@ class UserToken(UserTokenPublic, table=True):
         if self.expires is None:
             return False
         return self.expires < utcnow()
+
+
+class UserTOTP(SQLModel, table=True):
+    """An authenticator app, used as a second factor before sensitive
+    actions, e.g., opening sessions on an Operator.
+    """
+
+    user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True)
+    # Encrypted with the app's Fernet keys
+    secret: str = Field(max_length=512)
+    created: datetime = Field(default_factory=utcnow)
+    # Null until the user proves the app works by entering a code from it
+    confirmed_at: datetime | None = Field(default=None)
+    last_verified_at: datetime | None = Field(default=None)
+    # So a code can't be used twice
+    last_used_step: int | None = Field(
+        default=None, sa_type=sqlalchemy.BigInteger
+    )
+    failed_attempts: int = 0
+    locked_until: datetime | None = Field(default=None)
 
 
 class OperatorPublic(SQLModel):

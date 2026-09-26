@@ -1,7 +1,10 @@
 """Authentication."""
 
+import base64
 import hashlib
+import hmac
 import secrets
+import struct
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -177,3 +180,39 @@ def generate_refresh_token() -> str:
 def hash_refresh_token(token: str) -> str:
     """Return the hex-encoded SHA-256 digest of a refresh token."""
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+TOTP_PERIOD_SECONDS = 30
+TOTP_DIGITS = 6
+
+
+def generate_totp_secret() -> str:
+    """A random base32 secret for an authenticator app (RFC 6238)."""
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def get_totp_code(secret: str, step: int) -> str:
+    """The code for a time step, per RFC 6238 with SHA-1, as authenticator
+    apps compute it.
+    """
+    key = base64.b32decode(secret + "=" * (-len(secret) % 8), casefold=True)
+    digest = hmac.new(key, struct.pack(">Q", step), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = int.from_bytes(digest[offset : offset + 4], "big") & 0x7FFFFFFF
+    return str(value % 10**TOTP_DIGITS).zfill(TOTP_DIGITS)
+
+
+def match_totp_step(
+    secret: str, code: str, now: float | None = None, window: int = 1
+) -> int | None:
+    """The time step a code is valid for, allowing a step of clock drift
+    either way, or None if it isn't valid.
+    """
+    code = code.strip().replace(" ", "")
+    if now is None:
+        now = datetime.now(timezone.utc).timestamp()
+    current = int(now // TOTP_PERIOD_SECONDS)
+    for step in range(current - window, current + window + 1):
+        if hmac.compare_digest(get_totp_code(secret, step), code):
+            return step
+    return None

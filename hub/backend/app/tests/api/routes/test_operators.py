@@ -9,7 +9,9 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.config import settings
 from app.core import utcnow
-from app.models import Operator
+from app.models import Operator, User, UserTOTP
+from app.security import encrypt_secret, generate_totp_secret
+from app.users import SECOND_FACTOR_REQUIRED, SECOND_FACTOR_SETUP_REQUIRED
 
 
 def test_operators(
@@ -105,6 +107,33 @@ def test_operators(
         f"/operators/{op['id']}/relay-token", headers=superuser_token_headers
     )
     assert r.status_code == 404
+    # Opening sessions takes two-factor authentication, set up and recent
+    user = db.get(User, uuid.UUID(check_in["user_id"]))
+    existing = db.get(UserTOTP, user.id)
+    if existing is not None:
+        db.delete(existing)
+        db.commit()
+    r = client.post(
+        f"/operators/{op['id']}/relay-token", headers=normal_user_token_headers
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"] == SECOND_FACTOR_SETUP_REQUIRED
+    totp = UserTOTP(
+        user_id=user.id,
+        secret=encrypt_secret(generate_totp_secret()),
+        confirmed_at=utcnow(),
+        last_verified_at=utcnow() - timedelta(hours=13),
+    )
+    db.add(totp)
+    db.commit()
+    r = client.post(
+        f"/operators/{op['id']}/relay-token", headers=normal_user_token_headers
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"] == SECOND_FACTOR_REQUIRED
+    totp.last_verified_at = utcnow()
+    db.add(totp)
+    db.commit()
     # Browsers get a short-lived relay token for an online Operator
     r = client.post(
         f"/operators/{op['id']}/relay-token", headers=normal_user_token_headers

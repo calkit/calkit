@@ -569,6 +569,9 @@ def ensure_path_is_not_filtered(
     return True
 
 
+_warned_refs: set[str] = set()
+
+
 def resolve_ref(repo: git.Repo, ref: str) -> str | None:
     """Return the commit a revision points at, fetching if it isn't here.
 
@@ -588,6 +591,14 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
         except Exception:
             return None
 
+    def warn_once(message: str) -> None:
+        # A ref is resolved several times as a pipeline compiles
+        from calkit.cli import warn
+
+        if message not in _warned_refs:
+            _warned_refs.add(message)
+            warn(message, err=True)
+
     def is_ancestor(older: str, newer: str) -> bool:
         try:
             repo.git.merge_base("--is-ancestor", older, newer)
@@ -606,14 +617,14 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
             )
             if upstream is not None and upstream != local:
                 if is_ancestor(local, upstream):
-                    warnings.warn(
+                    warn_once(
                         f"Local branch '{ref}' is behind its remote, which "
                         f"is at {upstream[:7]}; update it with "
                         f"'git branch -f {ref} {upstream[:12]}' to compare "
                         "against that"
                     )
                 elif not is_ancestor(upstream, local):
-                    warnings.warn(
+                    warn_once(
                         f"Local branch '{ref}' has diverged from its "
                         "remote, so a comparison against it elsewhere "
                         "would differ; reconcile and push it"

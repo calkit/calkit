@@ -324,6 +324,12 @@ def test_workspace_actions(tmp_path, monkeypatch):
             "description": "It plots",
         }
     ]
+    # Running without a terminal reports how it went; this stage's script
+    # doesn't exist, so it fails
+    result = operator.run_pipeline(wdir)
+    assert result["ok"] is False
+    assert result["output"]
+    subprocess.run(["git", "checkout", "--", "."], cwd=wdir, check=True)
     # Discarding puts back what was committed
     with open(os.path.join(wdir, "notes.txt"), "w") as f:
         f.write("changed")

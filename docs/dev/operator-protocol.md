@@ -142,6 +142,7 @@ managed workspaces, which are checked out with `--force` to run stages.
 | `workspace.push`      |                                                                       |
 | `workspace.save`      | `paths`, `message`, `to` (`git` or `dvc`), `push`                     |
 | `workspace.ignore`    | `path`, `commit`                                                      |
+| `workspace.run`       |                                                                       |
 | `workspace.discard`   |                                                                       |
 | `workspace.add_stage` | `name`, `cmd`, `deps`, `outs`, `calkit_type`, `calkit_object`, `push` |
 

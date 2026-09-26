@@ -445,6 +445,24 @@ def add_stage(
         repo.git.push(["origin", repo.active_branch.name])
 
 
+def run_pipeline(wdir: str) -> dict:
+    """Run the pipeline without a terminal, returning whether it succeeded
+    and the end of its output.
+
+    This is for Operators that can't run sessions, i.e., on Windows; others
+    run the pipeline in a session so its output can be watched.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "calkit", "run"],
+        cwd=wdir,
+        capture_output=True,
+        text=True,
+    )
+    output = result.stdout + result.stderr
+    # Kept well under the relay's message limit
+    return {"ok": result.returncode == 0, "output": output[-50_000:]}
+
+
 def clone_project(git_repo_url: str) -> str:
     """Clone a project into ``~/calkit``, where it becomes a workspace,
     returning its path.
@@ -475,6 +493,7 @@ WORKSPACE_ACTIONS: dict[str, Any] = {
     "workspace.ignore": ignore_path,
     "workspace.discard": discard_changes,
     "workspace.add_stage": add_stage,
+    "workspace.run": run_pipeline,
 }
 
 
@@ -681,7 +700,8 @@ class Operator:
         # output that reached the browser before the replay did
         text = bytes(session.scrollback).decode("utf-8", errors="replace")
         for i, chunk in enumerate(_chunks(text)):
-            msg = {"type": "sessions.output", "session": session.id}
+            msg: dict[str, Any] = {"type": "sessions.output"}
+            msg["session"] = session.id
             msg["data"] = chunk
             if i == 0:
                 msg["reset"] = True

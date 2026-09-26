@@ -5,6 +5,7 @@ import {
   Code,
   Flex,
   Heading,
+  Icon,
   IconButton,
   Table,
   Tbody,
@@ -15,24 +16,37 @@ import {
   Tr,
   useColorModeValue,
 } from "@chakra-ui/react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { FiMinus, FiPlus, FiX } from "react-icons/fi"
+import { FiCheck, FiMinus, FiPlus, FiRefreshCw, FiX } from "react-icons/fi"
 import { z } from "zod"
 
-import { OperatorsService, type ProjectWorkspace } from "../../../../../client"
+import {
+  OperatorsService,
+  type ProjectPublic,
+  type ProjectWorkspace,
+} from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
+import AddPath from "../../../../../components/Workspace/AddPath"
+import DiscardChanges from "../../../../../components/Workspace/DiscardChanges"
+import IgnorePath from "../../../../../components/Workspace/IgnorePath"
+import NewStage from "../../../../../components/Workspace/NewStage"
+import SaveFiles from "../../../../../components/Workspace/SaveFiles"
 import useCustomToast from "../../../../../hooks/useCustomToast"
 
 const computeSearchSchema = z.object({
   // Open terminal panes, as "<operator ID>:<session ID>", so a link reopens
   // them
   panes: z.array(z.string()).optional(),
+  // The workspace whose details are shown, as "<operator ID>:<path>"
+  workspace: z.string().optional(),
+  // An open modal for acting on that workspace
+  modal: z.enum(["save", "discard", "new_stage"]).optional(),
 })
 
 export const Route = createFileRoute(
@@ -155,6 +169,16 @@ class OperatorConnection {
     return () => listeners.delete(listener)
   }
 
+  async waitUntilConnected(timeoutMs = 10000) {
+    const start = Date.now()
+    while (!this.connected) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error("Could not connect to Operator")
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 200))
+    }
+  }
+
   close() {
     this.closed = true
     this.ws?.close()
@@ -207,7 +231,12 @@ function TerminalPane({
       conn.send({ type: "sessions.resize", session: pane.session, cols, rows }),
     )
     const unsubscribe = conn.onSession(pane.session, (msg) => {
-      if (msg.type === "sessions.output") term.write(msg.data)
+      if (msg.type === "sessions.output") {
+        // Replays start by clearing the screen they redraw. It's written as
+        // a reset sequence rather than calling reset(), which would take
+        // effect before earlier writes that are still queued
+        term.write(msg.reset ? `\x1bc${msg.data}` : msg.data)
+      }
       if (msg.type === "sessions.exit") setExited(msg.code)
     })
     const observer = new ResizeObserver(() => fit.fit())
@@ -221,11 +250,10 @@ function TerminalPane({
     }
   }, [conn, pane.session])
   // Attach whenever the connection is (re)established; the Operator replays
-  // recent output, so start from a clean screen
+  // recent output onto a cleared screen
   useEffect(() => {
     const term = termRef.current
     if (!connected || !term) return
-    term.reset()
     conn
       .request("sessions.attach", {
         session: pane.session,
@@ -267,11 +295,271 @@ function TerminalPane({
   )
 }
 
+type Modal = "save" | "discard" | "new_stage"
+
+function WorkspacePanel({
+  ws,
+  conn,
+  connected,
+  modal,
+  setModal,
+  runInSession,
+  onChanged,
+}: {
+  ws: ProjectWorkspace
+  conn: OperatorConnection
+  connected: boolean
+  modal: Modal | undefined
+  setModal: (modal: Modal | undefined) => void
+  runInSession: (command: string) => void
+  onChanged: () => void
+}) {
+  const showToast = useCustomToast()
+  const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
+  const editable = ws.kind === "personal"
+  const request = useCallback(
+    (type: string, fields: object = {}) =>
+      conn.request(type, { workspace: ws.path, ...fields }),
+    [conn, ws.path],
+  )
+  const statusQuery = useQuery({
+    queryKey: ["workspace-status", ws.operator_id, ws.path],
+    queryFn: () => request("workspace.status", { fetch: true }),
+    enabled: connected,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+  const refresh = () => {
+    statusQuery.refetch()
+    onChanged()
+  }
+  const syncMutation = useMutation({
+    mutationFn: (kind: "pull" | "push") => request(`workspace.${kind}`),
+    onSuccess: (_, kind) =>
+      showToast("Success!", kind === "pull" ? "Pulled." : "Pushed.", "success"),
+    onError: (err: Error) => showToast("Error", err.message, "error"),
+    onSettled: refresh,
+  })
+  const status = statusQuery.data
+  const untracked: string[] = status?.git?.untracked ?? []
+  const changed: string[] = (status?.git?.changed ?? []).concat(
+    status?.dvc?.data?.changed ?? [],
+  )
+  const staged: string[] = (status?.git?.staged ?? []).concat(
+    status?.dvc?.data?.staged ?? [],
+  )
+  const staleStages = Object.keys(status?.dvc?.pipeline ?? {})
+  const ahead = status?.git?.commits_ahead ?? 0
+  const behind = status?.git?.commits_behind ?? 0
+  const dvcToPull = (status?.dvc?.data?.not_in_cache ?? []).length > 0
+  const dvcToPush = (status?.dvc?.data?.not_in_remote ?? []).length > 0
+  const canRun = editable && ws.operator_platform !== "windows"
+  const check = <Icon ml={1} as={FiCheck} color="green.500" />
+  return (
+    <Box bg={bg} borderRadius="lg" p={4} mb={6}>
+      <Flex align="center" gap={2} mb={3}>
+        <Heading size="sm">
+          {ws.operator_name}: <Code fontSize="sm">{ws.path}</Code>
+        </Heading>
+        <IconButton
+          aria-label="Refresh status"
+          icon={<FiRefreshCw />}
+          size="xs"
+          onClick={refresh}
+          isLoading={statusQuery.isFetching}
+          isDisabled={!connected}
+        />
+      </Flex>
+      {!connected ? (
+        <Text>Waiting for the Operator to connect.</Text>
+      ) : statusQuery.isPending ? (
+        <LoadingSpinner />
+      ) : statusQuery.error ? (
+        <Text color="red.500">{statusQuery.error.message}</Text>
+      ) : (
+        <>
+          <Heading size="xs" mb={1}>
+            Sync
+          </Heading>
+          <Flex align="center" gap={2} mb={3} wrap="wrap">
+            {ahead || behind || dvcToPull || dvcToPush ? (
+              <Text color="yellow.500">
+                {[
+                  ahead ? `${ahead} commits to push` : "",
+                  behind ? `${behind} commits to pull` : "",
+                  dvcToPull ? "data to pull" : "",
+                  dvcToPush ? "data to push" : "",
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+              </Text>
+            ) : (
+              <Text>
+                In sync with the remotes
+                {check}
+              </Text>
+            )}
+            {editable && (
+              <>
+                <Button
+                  size="xs"
+                  onClick={() => syncMutation.mutate("pull")}
+                  isLoading={
+                    syncMutation.isPending && syncMutation.variables === "pull"
+                  }
+                >
+                  Pull
+                </Button>
+                <Button
+                  size="xs"
+                  onClick={() => syncMutation.mutate("push")}
+                  isLoading={
+                    syncMutation.isPending && syncMutation.variables === "push"
+                  }
+                >
+                  Push
+                </Button>
+              </>
+            )}
+          </Flex>
+          {untracked.length > 0 && (
+            <>
+              <Heading size="xs" mb={1}>
+                Untracked files
+              </Heading>
+              {untracked.map((path) => (
+                <Flex key={path} align="center" mb={1}>
+                  <Text color="red.500" mr={1}>
+                    {path}
+                  </Text>
+                  {editable && (
+                    <>
+                      <AddPath path={path} request={request} onDone={refresh} />
+                      <IgnorePath
+                        path={path}
+                        request={request}
+                        onDone={refresh}
+                      />
+                    </>
+                  )}
+                </Flex>
+              ))}
+            </>
+          )}
+          <Flex align="center" gap={2} mt={3} mb={1}>
+            <Heading size="xs">Uncommitted changes</Heading>
+            {editable && (changed.length > 0 || staged.length > 0) && (
+              <>
+                <Button
+                  size="xs"
+                  variant="primary"
+                  onClick={() => setModal("save")}
+                >
+                  Commit
+                </Button>
+                <Button
+                  size="xs"
+                  variant="danger"
+                  onClick={() => setModal("discard")}
+                >
+                  Discard
+                </Button>
+              </>
+            )}
+          </Flex>
+          {staged.map((path) => (
+            <Text key={path} color="green.500">
+              {path}
+            </Text>
+          ))}
+          {changed.map((path) => (
+            <Text key={path} color="red.500">
+              {path}
+            </Text>
+          ))}
+          {changed.length === 0 && staged.length === 0 && (
+            <Text>
+              None
+              {check}
+            </Text>
+          )}
+          <Flex align="center" gap={2} mt={3} mb={1}>
+            <Heading size="xs">Pipeline</Heading>
+            {staleStages.length ? (
+              <Badge colorScheme="yellow">Out of date</Badge>
+            ) : (
+              <Badge colorScheme="green">Up to date</Badge>
+            )}
+            {canRun && (
+              <Button
+                size="xs"
+                variant="primary"
+                onClick={() => runInSession("calkit run")}
+              >
+                Run
+              </Button>
+            )}
+            {editable && (
+              <Button
+                size="xs"
+                leftIcon={<FiPlus />}
+                onClick={() => setModal("new_stage")}
+              >
+                New stage
+              </Button>
+            )}
+          </Flex>
+          {staleStages.map((stage) => (
+            <Code key={stage} fontSize="xs" mr={1} color="yellow.500">
+              {stage}
+            </Code>
+          ))}
+          {(status?.errors ?? []).map((e: any) => (
+            <Text key={e.info} color="red.500" fontSize="sm" mt={2}>
+              {e.info}
+            </Text>
+          ))}
+        </>
+      )}
+      {editable && (
+        <>
+          <SaveFiles
+            isOpen={modal === "save"}
+            onClose={() => setModal(undefined)}
+            changedFiles={changed}
+            stagedFiles={staged}
+            request={request}
+            onDone={refresh}
+          />
+          <DiscardChanges
+            isOpen={modal === "discard"}
+            onClose={() => setModal(undefined)}
+            request={request}
+            onDone={refresh}
+          />
+          <NewStage
+            isOpen={modal === "new_stage"}
+            onClose={() => setModal(undefined)}
+            request={request}
+            onDone={refresh}
+          />
+        </>
+      )}
+    </Box>
+  )
+}
+
 function Compute() {
   const { accountName, projectName } = Route.useParams()
   const navigate = Route.useNavigate()
   const search = Route.useSearch()
   const showToast = useCustomToast()
+  const queryClient = useQueryClient()
+  const project = queryClient.getQueryData<ProjectPublic>([
+    "projects",
+    accountName,
+    projectName,
+  ])
   // Operators in cron mode asked to connect, which do at their next check-in
   const [waking, setWaking] = useState<Set<string>>(new Set())
   const workspacesQuery = useQuery({
@@ -360,13 +648,14 @@ function Compute() {
   const getLabel = (pane: Pane) =>
     sessions[pane.operatorId]?.find((s) => s.id === pane.session)?.label ??
     "shell"
-  const newSession = async (ws: ProjectWorkspace) => {
+  const newSession = async (ws: ProjectWorkspace, command?: string) => {
     const conn = getConnection(ws.operator_id)
     try {
       const { session } = await conn.request("sessions.open", {
         workspace: ws.path,
         cols: 80,
         rows: 24,
+        command,
       })
       openPane(ws.operator_id, session)
       refreshSessions()
@@ -389,6 +678,46 @@ function Compute() {
       setWaking(new Set([...waking].filter((id) => !online.has(id))))
     }
   }, [onlineOperators, waking])
+  const workspaceKey = (ws: ProjectWorkspace) => `${ws.operator_id}:${ws.path}`
+  const selected = workspaces.find(
+    (ws) => workspaceKey(ws) === search.workspace,
+  )
+  const selectWorkspace = (ws: ProjectWorkspace) =>
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        workspace:
+          prev.workspace === workspaceKey(ws) ? undefined : workspaceKey(ws),
+        modal: undefined,
+      }),
+    })
+  const setModal = (modal: Modal | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, modal }) })
+  // Online Operators without this project, which it could be cloned onto
+  const operatorsQuery = useQuery({
+    queryKey: ["user", "operators"],
+    queryFn: () => OperatorsService.getOperators().then((r) => r.data),
+  })
+  const cloneTargets = (operatorsQuery.data ?? []).filter(
+    (op) =>
+      op.is_online &&
+      !workspaces.some(
+        (ws) => ws.operator_id === op.id && ws.kind === "personal",
+      ),
+  )
+  const cloneMutation = useMutation({
+    mutationFn: async (operatorId: string) => {
+      const conn = getConnection(operatorId)
+      await conn.waitUntilConnected()
+      return conn.request("workspaces.clone", {
+        git_repo_url: project?.git_repo_url,
+      })
+    },
+    onSuccess: (result) =>
+      showToast("Cloned", `The project is now in ${result.path}.`, "success"),
+    onError: (err: Error) => showToast("Could not clone", err.message, "error"),
+    onSettled: () => workspacesQuery.refetch(),
+  })
   const closePane = (pane: Pane, end: boolean) => {
     const conn = connections.current.get(pane.operatorId)
     if (conn) {
@@ -509,22 +838,68 @@ function Compute() {
                         Wake
                       </Button>
                     )}
-                    {ws.kind === "personal" && !ws.operator_asleep && (
-                      <Button
-                        size="xs"
-                        leftIcon={<FiPlus />}
-                        isDisabled={!conn?.connected}
-                        onClick={() => newSession(ws)}
-                      >
-                        Session
-                      </Button>
-                    )}
+                    <Flex gap={1}>
+                      {ws.kind === "personal" &&
+                        !ws.operator_asleep &&
+                        ws.operator_platform !== "windows" && (
+                          <Button
+                            size="xs"
+                            leftIcon={<FiPlus />}
+                            isDisabled={!conn?.connected}
+                            onClick={() => newSession(ws)}
+                          >
+                            Session
+                          </Button>
+                        )}
+                      {ws.operator_online && (
+                        <Button
+                          size="xs"
+                          variant={
+                            search.workspace === workspaceKey(ws)
+                              ? "solid"
+                              : "outline"
+                          }
+                          onClick={() => selectWorkspace(ws)}
+                        >
+                          Details
+                        </Button>
+                      )}
+                    </Flex>
                   </Td>
                 </Tr>
               )
             })}
           </Tbody>
         </Table>
+      )}
+      {selected && (
+        <WorkspacePanel
+          key={workspaceKey(selected)}
+          ws={selected}
+          conn={getConnection(selected.operator_id)}
+          connected={getConnection(selected.operator_id).connected}
+          modal={search.modal}
+          setModal={setModal}
+          runInSession={(command) => newSession(selected, command)}
+          onChanged={() => workspacesQuery.refetch()}
+        />
+      )}
+      {project?.git_repo_url && cloneTargets.length > 0 && (
+        <Flex align="center" gap={2} mb={6} wrap="wrap">
+          <Text>Clone this project onto</Text>
+          {cloneTargets.map((op) => (
+            <Button
+              key={op.id}
+              size="xs"
+              isLoading={
+                cloneMutation.isPending && cloneMutation.variables === op.id
+              }
+              onClick={() => cloneMutation.mutate(String(op.id))}
+            >
+              {op.name}
+            </Button>
+          ))}
+        </Flex>
       )}
       {panes.map((pane) => {
         const conn = getConnection(pane.operatorId)

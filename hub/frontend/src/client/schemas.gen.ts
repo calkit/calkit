@@ -7134,6 +7134,17 @@ export const ProjectWorkspaceSchema = {
       type: "boolean",
       title: "Operator Asleep",
     },
+    operator_platform: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Operator Platform",
+    },
   },
   type: "object",
   required: [
@@ -7142,6 +7153,7 @@ export const ProjectWorkspaceSchema = {
     "operator_name",
     "operator_online",
     "operator_asleep",
+    "operator_platform",
   ],
   title: "ProjectWorkspace",
 } as const

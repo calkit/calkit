@@ -2,7 +2,6 @@ import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import type { IconType } from "react-icons"
-import { FaLaptop } from "react-icons/fa"
 import { FaCubes } from "react-icons/fa"
 import {
   FiBookOpen,
@@ -22,9 +21,8 @@ import { IoLibraryOutline } from "react-icons/io5"
 import { MdOutlineDashboard } from "react-icons/md"
 import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
-import { ProjectsService } from "../../client"
+import { OperatorsService, ProjectsService } from "../../client"
 import useAuth from "../../hooks/useAuth"
-import { useLocalServer } from "../../hooks/useOnboarding"
 import Tooltip from "./Tooltip"
 
 export interface ProjectNavItem {
@@ -64,12 +62,6 @@ export const projectNavItems: ProjectNavItem[] = [
     path: "/compute",
     requiresLogin: true,
   },
-  {
-    icon: FaLaptop,
-    title: "Local machine",
-    path: "/local",
-    requiresLogin: true,
-  },
 ]
 
 interface SidebarItemsProps {
@@ -90,10 +82,23 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     strict: false,
   }) as any
   const currentRef: string | undefined = layoutSearch?.ref
-  // Only controls the "running locally" icon color; the hook shares its
-  // query with the onboarding checklist so the page asks localhost once.
-  const { projectConnected } = useLocalServer(accountName, projectName)
-  const localMachineColor = projectConnected ? "ui.success" : "gray"
+  // Only controls the compute icon color: green when one of the user's
+  // Operators is online with a workspace for this project. Same key as the
+  // compute page, so they share one request.
+  const workspacesQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "workspaces"],
+    queryFn: () =>
+      OperatorsService.getProjectWorkspaces({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(user),
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+  const computeColor = workspacesQuery.data?.some((ws) => ws.operator_online)
+    ? "ui.success"
+    : "default"
   // A pipeline that has run but no longer matches the code. The checklist
   // stops at "has it run at all", so this is where a project says its
   // results have drifted -- visible from any page, without reopening a
@@ -143,7 +148,7 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
       >
         <Icon
           as={icon}
-          color={title === "Local machine" ? localMachineColor : "default"}
+          color={title === "Compute" ? computeColor : "default"}
           alignSelf="center"
         />
         <Text ml={2}>{title}</Text>

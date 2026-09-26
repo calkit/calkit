@@ -4058,6 +4058,10 @@ export type ProjectWorkspace = {
    * Operator Asleep
    */
   operator_asleep: boolean
+  /**
+   * Operator Platform
+   */
+  operator_platform: string | null
 }
 
 /**

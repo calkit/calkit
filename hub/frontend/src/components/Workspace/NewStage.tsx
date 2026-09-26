@@ -14,18 +14,16 @@ import {
   Select,
   Textarea,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
-import axios from "axios"
+import { useMutation } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
 import { useEffect } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import type { AxiosError } from "axios"
 import useCustomToast from "../../hooks/useCustomToast"
-import { handleError } from "../../lib/errors"
 
 interface NewStageProps {
+  request: (type: string, fields?: object) => Promise<any>
+  onDone: () => void
   isOpen: boolean
   onClose: () => void
 }
@@ -48,11 +46,8 @@ type Stage = {
   scriptPath: string | null
 }
 
-const NewStage = ({ isOpen, onClose }: NewStageProps) => {
-  const queryClient = useQueryClient()
+const NewStage = ({ isOpen, onClose, request, onDone }: NewStageProps) => {
   const showToast = useCustomToast()
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
   const {
     register,
     unregister,
@@ -74,8 +69,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
   })
   const mutation = useMutation({
     mutationFn: (data: Stage) => {
-      mixpanel.track("Clicked save new stage on local machine page")
-      const url = `http://localhost:8866/projects/${accountName}/${projectName}/pipeline/stages`
+      mixpanel.track("Clicked save new stage on compute page")
       let deps = null
       if (data.deps) {
         deps = data.deps.split(",")
@@ -92,24 +86,17 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
         calkit_type: calkitType,
         calkit_object: data.outputObject,
       }
-      return axios.post(url, postData)
+      return request("workspace.add_stage", postData)
     },
     onSuccess: () => {
       showToast("Success!", "Stage added.", "success")
       reset()
       onClose()
     },
-    onError: (err: AxiosError) => {
-      handleError(err, showToast)
+    onError: (err: Error) => {
+      showToast("Error", err.message, "error")
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "status"],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "pipeline"],
-      })
-    },
+    onSettled: onDone,
   })
   const onSubmit: SubmitHandler<Stage> = (data) => {
     mutation.mutate(data)

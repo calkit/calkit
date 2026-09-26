@@ -193,18 +193,23 @@ running in one, survive browser disconnects.
 Sessions end when closed explicitly or when the Operator restarts.
 Windows uses ConPTY.
 
-Starting a session offers a list of commands, e.g., a shell, `claude`,
-`opencode`, or `codex`, configured per user with per-Operator overrides
-for what's installed where.
-To the Operator, an agent is just a process in a terminal, so any CLI
-agent works without specific support.
-Two agent-specific features are deferred:
+Every session is a login shell in the workspace, so it has the user's
+full environment, e.g., `PATH` additions and modules, as with SSH.
+Users run whichever coding agent they like from it, and get the shell back
+when the agent exits.
+The hub labels each session by its terminal's foreground process, e.g.,
+`claude` or `bash`, falling back to "shell" on Windows.
+Agent-specific features are deferred:
+
+- An optional command to run when a session starts.
 
 - Notifications when an agent is waiting for input, detected from the
   terminal bell or OSC 9/777 escape sequences in its output.
 - A chat view of a session, better suited to phones than a terminal, via
   the Agent Client Protocol (ACP), which several agents support natively
   or through adapters.
+  This is the one feature that needs the Operator to launch the agent
+  itself, in ACP mode rather than as a TUI.
   Terminals remain the baseline, since they work with every agent.
 
 The hub's workspace view is built natively: xterm.js terminals over the
@@ -333,7 +338,7 @@ so it follows the pipeline integration phase.
 
 1. Daemon, service install, registration, Operator token, hub compute tab
    with liveness, the local server's features moved onto the relay, and
-   persistent terminals with the session launcher.
+   persistent shell sessions.
 2. The file tree and editor, and scheduler jobs.
 3. Pipeline integration: stages on hosts served by an Operator run through
    the relay, shared DVC caches and stage locks per machine, and LaTeX
@@ -341,7 +346,8 @@ so it follows the pipeline integration phase.
 4. Detached remote stages.
 5. Sharing: collaborator workspaces and multiplayer.
 6. Later: ops and fleet rollouts (#90), parallel `group` stages (#185),
-   agent notifications, and an ACP chat view.
+   a startup command for sessions, agent notifications, and an ACP chat
+   view.
 
 ## Consequences
 
@@ -378,6 +384,9 @@ so it follows the pipeline integration phase.
   friction the owner-only allowlist mostly removes.
 - **Embed openvscode-server.** Full-featured immediately, but heavy and
   hard to integrate with hub pages.
+- **Launching agents directly as sessions.** Saves typing a command, but
+  skips the user's shell startup files, so agents may not be found, and
+  the session ends when the agent exits.
 - **Sessions in tmux.** Would survive Operator restarts but adds a
   dependency and excludes Windows.
 - **Live file sync between workspaces.** Would make workspaces feel like

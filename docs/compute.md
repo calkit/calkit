@@ -7,8 +7,12 @@ However, this will typically require SSHing into the cluster,
 which can feel fragmented if some work is happening there versus
 your laptop, for example.
 
-TODO: Can Calkit currently run some stages on remote system or cluster envs
-via SSH?
+Calkit can also run individual stages on another machine over SSH,
+by giving a `system`, `slurm`, or `pbs` environment a `host`
+(see [environments](environments.md)).
+This works well for sending heavy stages somewhere else,
+but it needs SSH access from wherever you run the pipeline,
+and it doesn't give you a way to look in on that machine from the web.
 
 Another approach is to install what's called a Calkit Operator
 on each machine on which you want to work on at least some part of a Calkit
@@ -26,14 +30,31 @@ then call:
 calkit install operator
 ```
 
-If you're running on an HPC, you will probably need to install it in
-cron mode with the `--cron` option,
-which means it will periodically reach out to the Calkit Hub
-to see if it should open up a websocket connection for accepting commands.
+On a laptop or workstation,
+this installs the Operator as a service that starts when you log in.
 
-The Operator will authenticate as you with the Hub,
+If you're running on an HPC, where long-running processes on login nodes
+are typically killed, you have two options.
+The first is to install it in cron mode with the `--cron` option,
+which means it will periodically check in with the Calkit Hub,
+reporting the status of any scheduler jobs,
+and open up a websocket connection for accepting commands only when
+there's something to do.
+The second is to run it in the foreground, e.g., inside tmux, with:
+
+```sh
+calkit operator start
+```
+
+When installed, the Operator registers itself with the Hub and receives
+its own token,
+which can be revoked without affecting any of your other tokens.
+Anyone who can use the Operator from the Hub can open a shell on that
+machine as you,
 so it's important you only install it on a user account that only you
 control.
+Some HPC centers also prohibit tools that allow access from outside like
+this, so check your center's policies first.
 
 It's also possible to install the Operator remotely via SSH with
 
@@ -49,16 +70,25 @@ then the Operator, then authenticate with the Hub.
 
 On the Hub, if you go to your settings, you'll see a "compute"
 tab that lists your installed Operators and their status.
-You can disconnect them from there if desired.
+You can revoke them from there if desired.
 
 By default, the Operator will detect long-lived personal workspaces
 in your `~/calkit` folder.
+Projects cloned elsewhere can be added with:
+
+```sh
+calkit operator add-workspace path/to/project
+```
+
+The Operator will only give the Hub access to these workspaces,
+plus the ones Calkit creates for running stages on that machine,
+and only to you.
 When viewing a project on the Hub,
 if there is a workspace connected to a live Operator, you'll see
 a green dot next to the compute link in the sidebar.
 
-TODO: compute replaces the "local machine" link. Operator replaces that
-functionality in both the CLI and the hub.
+The compute page replaces the project's "local machine" page,
+and the Operator replaces `calkit local-server`.
 
 On the project's compute page,
 you'll see the list of running workspaces in a table along with
@@ -73,18 +103,32 @@ In fact, the workspace view is similar to working in VS Code,
 except greatly simplified.
 You can open and edit files as well.
 
+Shell sessions keep running when you close the browser tab.
+For example, you can install the Operator on your office workstation,
+leave a coding agent running in a workspace there,
+then check in on it and interact with it from home, or from anywhere
+you can reach the Hub.
+
 When in a workspace view,
 you can toggle between that and the Hub for the current project state.
 For example,
 if you've added a new figure in a workspace and that is currently
 activated,
-you can see if on the project's figures page and optionally
+you can see it on the project's figures page and optionally
 save the project to push it to the hub and bring the two
 into alignment with each other.
 
-## Removal
+## Monitoring cluster jobs
 
-TODO: May need to rationalize this part. Is this a hub thing, or a CLI thing?
+If an Operator is running on a cluster, a workspace's compute page shows
+its scheduler jobs, the same ones listed by
+[`calkit scheduler queue`](hpc.md#monitoring),
+along with their logs.
+If a stage's job fails or times out, you'll see it there,
+and you can rerun the stage from the Hub without logging in to the
+cluster.
+
+## Removal
 
 You can see all Operators attached to your user account with:
 
@@ -92,15 +136,16 @@ You can see all Operators attached to your user account with:
 calkit hub get operators
 ```
 
-You can remove one by its name (selected randomly if not chosen at
-creation time):
+Operators can be revoked from the compute tab in your Hub settings.
+This revokes the Operator's token and,
+if it's connected, shuts it down.
+
+To uninstall the Operator from a machine, run the following on that
+machine:
 
 ```sh
-calkit hub delete operator the-operator-name
+calkit operator uninstall
 ```
-
-This will uninstall the service from the local machine and shut the
-operator down.
 
 ## Features coming soon
 

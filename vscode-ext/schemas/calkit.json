@@ -2304,6 +2304,19 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "diff_filter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Shell command each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text.",
+          "title": "Diff Filter"
+        },
         "diff_pdf_storage": {
           "anyOf": [
             {
@@ -2323,7 +2336,7 @@
         },
         "diffs": {
           "default": [],
-          "description": "Comparisons to keep for this document, each a pair of revisions. A bare string is shorthand for comparing that revision against HEAD.",
+          "description": "Comparisons to keep for this document, each a pair of revisions. A bare string compares that revision against the working tree, like the document itself is built from.",
           "items": {
             "anyOf": [
               {

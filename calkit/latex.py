@@ -213,10 +213,8 @@ def diff_stage_suffix(from_ref: str, to_ref: str | None = None) -> str:
 def get_diff_pairs(diffs: list) -> list[tuple[str, str]]:
     """The revisions a latex stage's ``diffs`` compare, oldest side first.
 
-    A bare revision compares it against ``HEAD``. Every comparison in a
-    pipeline is between two commits: one against the working tree can't be
-    reproduced, so it belongs to whoever is doing the work rather than to
-    the project.
+    A bare revision is paired with ``HEAD``, which is what the working tree
+    it's compared with becomes once committed.
     """
     pairs: list[tuple[str, str]] = []
     for entry in diffs:

@@ -370,6 +370,7 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
             'if [ -n "$FAIL" ]; then\n'
             '  printf "junk\\n! Undefined control sequence.\\nl.3 \\\\oops\\n"'
             ' > "$out/$stem.log"\n'
+            '  [ -n "$PARTIAL" ] && : > "$out/$stem.pdf"\n'
             "  exit 12\n"
             "fi\n"
             ': > "$out/$stem.pdf"\n'
@@ -389,9 +390,12 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     with open("paper/main.tex", "w", encoding="utf-8") as f:
         f.write("\\documentclass{article}\n")
         f.write("\\newcommand{\\wc}[1]{\\verbatiminput{#1.wcsum}}\n")
+        f.write("\\newcommand{\\singlecol}[1]{\\onecolumn{#1}\\twocolumn}\n")
         f.write("\\begin{document}\nGreen\u2019s function\n")
         f.write("\\includegraphics{figs/plot}\n")
-        f.write("\\singlecol{\\input{setup}}\n\\end{document}\n")
+        # What latexdiff's figure markup leaves in a table it marked up
+        f.write("\\DIFaddendFL \\hline \\DIFaddbeginFL \\label{x}\n")
+        f.write("\\singlecol{\n\\input{setup}\n}\n\\end{document}\n")
     with open("paper/.latexmkrc", "w") as f:
         f.write("$aux_dir = 'aux';\n")
     with open("paper/figs/plot.png", "w") as f:
@@ -463,11 +467,19 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     # which mangles non-ASCII text
     assert "\\verbatiminput%\n{#1.wcsum}" in marked_up
     assert "Green\u2019s function" in marked_up
+    # A figure marker can't come before anything starting a table row
+    assert "\\DIFaddendFL \\hline" not in marked_up
+    assert "\\hline \\DIFaddbeginFL \\label{x}" in marked_up
     with open(stubs / "latexdiff-args.txt") as f:
         latexdiff_args = f.read()
     assert "--filter-script" not in latexdiff_args
-    # A macro wrapping an input is marked up as text, not one token
-    assert "--append-textcmd=singlecol" in latexdiff_args
+    # A macro wrapping a block is expanded, so latexdiff compares what it
+    # wraps rather than one token or a table marked up as text
+    assert "--append-textcmd" not in latexdiff_args
+    assert (
+        "\\onecolumn\\begingroup \n\\input{setup}\n\\endgroup \\twocolumn"
+        in (marked_up)
+    )
     assert "\\includegraphics{../../base/paper/figs/plot.png}" in marked_up
     assert "\\includegraphics{figs/plot}" in marked_up
     assert not os.path.exists("paper/figs")
@@ -536,6 +548,9 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     # diff even though the marked-up source is the same
     working_output = get_diff_path("paper/main.tex", "v1")
     os.makedirs("paper/figs")
+    # A file of the user's with the marked-up document's name is left alone
+    with open("paper/main-diff.tex", "w") as f:
+        f.write("mine\n")
     for content in ["newer\n", "newest\n"]:
         with open("paper/figs/plot.png", "w") as f:
             f.write(content)
@@ -545,6 +560,8 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
             assert f.read() == "old\n" + content
     # Building beside the working tree's document leaves nothing behind
     assert not os.path.exists("paper/calkit-latex-diff-aux")
+    with open("paper/main-diff.tex") as f:
+        assert f.read() == "mine\n"
     os.remove(stubs / "latexmk-args.txt")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
     assert "is up to date" in result.stdout
@@ -554,6 +571,22 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
     assert result.returncode == 0, result.stderr
     assert os.path.exists(stubs / "latexmk-args.txt")
+    # A filter rewrites the marked-up document before it's built, and the
+    # working tree's sources are prepared like a checkout's, in a copy
+    result = subprocess.run(
+        diff + ["--filter", "sed s/Green/Blue/", "--keep-tex"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    working_stem = working_output.removesuffix(".pdf")
+    with open(f"{working_stem}-diff.tex", encoding="utf-8") as f:
+        assert "Green" not in f.read()
+    with open(f"{working_stem}-new.tex", encoding="utf-8") as f:
+        assert "\\onecolumn\\begingroup" in f.read()
+    with open("paper/main.tex", encoding="utf-8") as f:
+        assert "\\singlecol{" in f.read()
     # -silent hides why latexmk failed, so the errors LaTeX logged are shown
     result = subprocess.run(
         cmd + ["--force"],
@@ -565,6 +598,19 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert "! Undefined control sequence." in result.stderr
     assert "l.3 \\oops" in result.stderr
     assert "exit code 12" in result.stderr
+    # A PDF latexmk built despite errors is kept, with a warning, since a
+    # diff that's mostly right is more use than none
+    result = subprocess.run(
+        cmd + ["--force"],
+        capture_output=True,
+        text=True,
+        env=env | {"FAIL": "1", "PARTIAL": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "! Undefined control sequence." in result.stderr
+    assert "built despite the LaTeX errors" in result.stderr
+    with open(stubs / "latexmk-args.txt") as f:
+        assert "-f" in f.read().split()
     # Detection can't find another stage's uncached output at a revision
     os.remove(stubs / "setup.txt")
     bare = ["calkit", "latex", "diff", "paper/main.tex", "--from", "v1"]

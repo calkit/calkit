@@ -1,5 +1,7 @@
 """Tests for ``calkit.models.pipeline``."""
 
+import os
+
 import pytest
 from pydantic import ValidationError
 
@@ -565,7 +567,7 @@ def test_to_ck_dict() -> None:
     assert PythonScriptStage.model_validate(d2) == s2
 
 
-def test_latex_stage_diffs():
+def test_latex_stage_diffs(tmp_dir):
     stage = LatexStage(
         name="paper-1",
         kind="latex",
@@ -574,9 +576,8 @@ def test_latex_stage_diffs():
         inputs=["figures/fig1.png"],
         diffs=[["v1", "v2"], "main"],
     )
-    # A bare revision compares it against HEAD. Every comparison in a
-    # pipeline is between two commits; one against the working tree can't
-    # be reproduced, so it isn't the project's to keep.
+    # A bare revision is named for HEAD, which is what the working tree it's
+    # compared with becomes once committed
     assert stage.diff_pairs == [("v1", "v2"), ("main", "HEAD")]
     # Building the document and comparing revisions of it have different
     # inputs, so they are separate DVC stages: adding a comparison
@@ -600,6 +601,13 @@ def test_latex_stage_diffs():
         "calkit latex diff -e tex --no-check --from v1 --to v2 "
         "--revision-key aaa1111..bbb2222 --input figures/fig1.png "
         "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
+    )
+    # A bare revision is compared with the working tree, like any other
+    # stage reads it, so there's no --to and only its own key
+    assert extra["paper-1-diff-main"]["cmd"] == (
+        "calkit latex diff -e tex --no-check --from main "
+        "--revision-key ccc3333 --input figures/fig1.png "
+        "--output-dir .calkit/latex-diffs/main pubs/paper-1/main.tex"
     )
     # HEAD is what a comparison runs up to unless it says otherwise, so
     # naming it would only add noise
@@ -661,6 +669,23 @@ def test_latex_stage_diffs():
     assert "--input figures/fig2.png" in main_diff["cmd"]
     assert "figures/fig2.png" in main_diff["deps"]
     assert with_outputs["paper-1-diff-v1-v2"]["deps"] == []
+    # A filter is passed along, and a script it runs is depended on
+    os.makedirs("scripts", exist_ok=True)
+    with open("scripts/filter.py", "w") as f:
+        f.write("")
+    filtered = LatexStage(
+        name="paper-1",
+        kind="latex",
+        environment="tex",
+        target_path="pubs/paper-1/main.tex",
+        diffs=[["v1", "v2"]],
+        diff_filter="python scripts/filter.py --quiet",
+    )
+    filtered_diff = filtered.extra_dvc_stages()["paper-1-diff-v1-v2"]
+    assert (
+        "--filter 'python scripts/filter.py --quiet'" in filtered_diff["cmd"]
+    )
+    assert filtered_diff["deps"] == ["scripts/filter.py"]
     for bad in [[["v1"]], [["v1", "v2", "v3"]], [["v1", ""]], [["v1", "v1"]]]:
         with pytest.raises(ValidationError):
             LatexStage(

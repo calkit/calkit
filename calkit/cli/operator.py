@@ -19,10 +19,100 @@ def _require_config() -> dict:
     if cfg is None:
         raise_error(
             "No Operator is installed on this machine; "
-            "run 'calkit install operator' first"
+            "run 'calkit operator install' first"
         )
     assert cfg is not None
     return cfg
+
+
+@operator_app.command(name="install")
+def install(
+    at_boot: Annotated[
+        bool,
+        typer.Option(
+            "--at-boot",
+            help="On macOS, start at boot rather than at login (needs sudo).",
+        ),
+    ] = False,
+    cron: Annotated[
+        bool,
+        typer.Option(
+            "--cron",
+            help=(
+                "Have cron start it when the hub asks rather than running it "
+                "as a service, e.g., on a cluster's login node."
+            ),
+        ),
+    ] = False,
+    ssh: Annotated[
+        str | None,
+        typer.Option(
+            "--ssh",
+            help=(
+                "Install it on another machine over SSH, e.g., "
+                "'user@cluster.example.edu' or a host from ~/.ssh/config, "
+                "installing Calkit there if needed."
+            ),
+        ),
+    ] = None,
+    no_service: Annotated[
+        bool,
+        typer.Option(
+            "--no-service",
+            help=(
+                "Only register it, e.g., to run it with 'calkit operator "
+                "start' inside tmux on a cluster."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Register this machine as an Operator and run it as a service.
+
+    Also available as 'calkit install operator'.
+    """
+    from calkit import operator
+    from calkit.cli import warn
+
+    if ssh is not None:
+        from calkit.dependencies import _is_interactive
+
+        try:
+            remote = operator.install_remote(
+                ssh,
+                cron=cron,
+                no_service=no_service,
+                interactive=_is_interactive(),
+            )
+        except Exception as e:
+            raise_error(f"Failed to install the operator on {ssh}: {e}")
+        typer.echo(f"✅ Installed Operator '{remote['name']}' on {ssh}")
+        return
+    cfg = operator.load_config()
+    if cfg is None:
+        cfg = operator.register()
+        typer.echo(f"✅ Registered Operator '{cfg['name']}'")
+    else:
+        typer.echo(f"Operator '{cfg['name']}' is already registered")
+    if no_service:
+        typer.echo("Run 'calkit operator start' to connect it")
+        return
+    if cron:
+        try:
+            operator.install_cron()
+        except NotImplementedError as e:
+            raise_error(str(e))
+        typer.echo(
+            "✅ Installed the Operator in cron mode; it checks in every "
+            "5 minutes and connects when you open it from the hub"
+        )
+        return
+    try:
+        notes = operator.install_service(at_boot=at_boot)
+    except NotImplementedError as e:
+        raise_error(str(e))
+    typer.echo("✅ Installed and started the Operator's service")
+    for note in notes:
+        warn(note)
 
 
 @operator_app.command(name="start")

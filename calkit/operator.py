@@ -195,7 +195,7 @@ def install_remote(
         text=True,
         check=True,
     )
-    args = ["calkit", "install", "operator"]
+    args = ["calkit", "operator", "install"]
     if cron:
         args.append("--cron")
     if no_service:

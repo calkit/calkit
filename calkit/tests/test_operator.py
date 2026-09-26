@@ -413,4 +413,4 @@ def test_install_remote(monkeypatch):
     assert "umask 077" in write_argv[-1]
     assert yaml.safe_load(config_text) == cfg
     assert cfg["token"] == "cko_secret" and cfg["api_url"] == "https://api.hub"
-    assert "calkit install operator --cron" in install_argv[-1]
+    assert "calkit operator install --cron" in install_argv[-1]

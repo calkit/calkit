@@ -4115,49 +4115,11 @@ def install_app(
     from calkit import install as _install
 
     if name == "operator":
-        from calkit import operator
+        from calkit.cli.operator import install as install_operator
 
-        if ssh is not None:
-            from calkit.dependencies import _is_interactive
-
-            try:
-                cfg = operator.install_remote(
-                    ssh,
-                    cron=cron,
-                    no_service=no_service,
-                    interactive=_is_interactive(),
-                )
-            except Exception as e:
-                raise_error(f"Failed to install the operator on {ssh}: {e}")
-            typer.echo(f"✅ Installed Operator '{cfg['name']}' on {ssh}")
-            return
-
-        cfg = operator.load_config()
-        if cfg is None:
-            cfg = operator.register()
-            typer.echo(f"✅ Registered Operator '{cfg['name']}'")
-        else:
-            typer.echo(f"Operator '{cfg['name']}' is already registered")
-        if no_service:
-            typer.echo("Run 'calkit operator start' to connect it")
-            return
-        if cron:
-            try:
-                operator.install_cron()
-            except NotImplementedError as e:
-                raise_error(str(e))
-            typer.echo(
-                "✅ Installed the Operator in cron mode; it checks in every "
-                "5 minutes and connects when you open it from the hub"
-            )
-            return
-        try:
-            notes = operator.install_service(at_boot=at_boot)
-        except NotImplementedError as e:
-            raise_error(str(e))
-        typer.echo("✅ Installed and started the Operator's service")
-        for note in notes:
-            warn(note)
+        install_operator(
+            at_boot=at_boot, cron=cron, ssh=ssh, no_service=no_service
+        )
         return
     # Surface a platform-specific "use X instead" message before the
     # generic "no installer" error -- e.g., Nix on Windows needs WSL2.

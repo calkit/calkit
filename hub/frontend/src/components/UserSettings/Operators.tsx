@@ -164,7 +164,7 @@ function Operators() {
       </Heading>
       <TwoFactor />
       <Text mb={4}>
-        Install one with <Code>calkit install operator</Code>.
+        Install one with <Code>calkit operator install</Code>.
       </Text>
       <TableContainer>
         <Table size={{ base: "sm", md: "md" }}>

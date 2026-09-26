@@ -115,7 +115,7 @@ on our local machine.
 To install it, open up a terminal or Miniforge command prompt and run:
 
 ```sh
-calkit install operator
+calkit operator install
 ```
 
 The Operator starts whenever we log in,

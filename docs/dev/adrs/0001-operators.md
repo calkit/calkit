@@ -124,7 +124,7 @@ made.
 
 ### Authentication and permissions
 
-`calkit install operator` registers the Operator with the hub using the
+`calkit operator install` registers the Operator with the hub using the
 user's existing token and receives a dedicated Operator token, stored
 locally.
 That token can only connect as that Operator, so revoking it does not
@@ -242,7 +242,7 @@ project, which the hub opens into when working hub first.
 
 ### Running as a service
 
-`calkit install operator` installs a service that runs as the user and,
+`calkit operator install` installs a service that runs as the user and,
 where allowed, starts at boot rather than at login.
 This covers machines nobody logs in to, e.g., a cloud VM that is stopped
 when not in use: when it starts again, so does the Operator.
@@ -271,7 +271,7 @@ On HPC, where login nodes kill long-lived processes, two modes are
 supported:
 
 - `calkit operator start` in the foreground, e.g., inside tmux.
-- `calkit install operator --cron`, which checks in with the hub on a
+- `calkit operator install --cron`, which checks in with the hub on a
   schedule, reporting scheduler job states, and opens the websocket only
   when there is work to do, e.g., the user has opened a shell.
   Its crontab includes an `@reboot` entry so it checks in at boot.
@@ -297,12 +297,12 @@ It can rerun a failed stage through the Operator.
 
 ### CLI
 
-- `calkit install operator [--ssh HOST] [--cron]` installs Calkit on the
+- `calkit operator install [--ssh HOST] [--cron]` installs Calkit on the
   target if needed, then the Operator, then registers it.
-  This widens `calkit install` from native dependencies to Calkit's own
-  components.
-- `calkit operator start|stop|status|logs|uninstall|add-workspace` manage
-  the local Operator.
+  `calkit install operator` does the same, since the Operator is also
+  something Calkit installs on a machine, like its native dependencies.
+- `calkit operator start|stop|restart|status|logs|uninstall|add-workspace`
+  manage the local Operator.
 - `calkit hub get operators` lists a user's Operators from the hub.
 
 ### Removal

@@ -841,7 +841,7 @@ function Compute() {
       {workspaces.length === 0 ? (
         <Text mb={4}>
           None of your Operators has a workspace for this project. Install one
-          with <Code>calkit install operator</Code> on a machine with this
+          with <Code>calkit operator install</Code> on a machine with this
           project in <Code>~/calkit</Code>, or add it with{" "}
           <Code>calkit operator add-workspace</Code>.
         </Text>

@@ -4021,6 +4021,7 @@ Manage this machine's Operator, which lets the hub use it.
 
 | Command                                               | Description                                                   |
 | ----------------------------------------------------- | ------------------------------------------------------------- |
+| [`install`](#subcommand-operator-install)             | Register this machine as an Operator and run it as a service. |
 | [`start`](#subcommand-operator-start)                 | Run the Operator in the foreground, e.g., inside tmux.        |
 | [`status`](#subcommand-operator-status)               | Show this machine's Operator and the workspaces it allows.    |
 | [`stop`](#subcommand-operator-stop)                   | Stop the Operator's service until it's restarted.             |
@@ -4028,6 +4029,29 @@ Manage this machine's Operator, which lets the hub use it.
 | [`logs`](#subcommand-operator-logs)                   | Show the Operator service's logs.                             |
 | [`add-workspace`](#subcommand-operator-add-workspace) | Let the hub use a project outside ~/calkit as a workspace.    |
 | [`uninstall`](#subcommand-operator-uninstall)         | Revoke this machine's Operator on the hub and remove it here. |
+
+<a id="subcommand-operator-install"></a>
+
+#### `calkit operator install`
+
+Register this machine as an Operator and run it as a service.
+
+Also available as 'calkit install operator'.
+
+Usage:
+
+```text
+calkit operator install [OPTIONS]
+```
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                                                               |
+| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `--at-boot`    | boolean | no       | False   | On macOS, start at boot rather than at login (needs sudo).                                                                                |
+| `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
+| `--ssh`        | str     | no       |         | Install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
+| `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
 
 <a id="subcommand-operator-start"></a>
 

@@ -27,8 +27,10 @@ To install the Operator on a given machine, first
 then call:
 
 ```sh
-calkit install operator
+calkit operator install
 ```
+
+(`calkit install operator` works too.)
 
 This installs the Operator as a service that starts when the machine
 boots, so it's running even if you're not logged in.
@@ -75,7 +77,7 @@ It's also possible to install the Operator on another machine via SSH,
 e.g.:
 
 ```sh
-calkit install operator --ssh user@cluster.example.edu
+calkit operator install --ssh user@cluster.example.edu
 ```
 
 The host can be anything you'd pass to `ssh`, including a host from your

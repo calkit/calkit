@@ -968,6 +968,8 @@ class Operator:
         last_used = loop.time()
         while True:
             await asyncio.sleep(min(30, self.idle_exit_seconds))
+            # Anything running or watching keeps it up, e.g., loops
+            # once Operators run them (see the ADR)
             if self.sessions or self.channels:
                 last_used = loop.time()
             elif loop.time() - last_used >= self.idle_exit_seconds:

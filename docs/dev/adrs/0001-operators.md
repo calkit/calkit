@@ -373,6 +373,38 @@ project on that machine if there is one, and otherwise the machine's own
 Git credentials, which it has because it runs as the user.
 Machines with no access to the repository are out of scope for now.
 
+### Loops (future)
+
+Projects will be able to declare loops in `calkit.yaml` under `loops`:
+long-running processes that live alongside the pipeline, which runs to
+completion, e.g., data collection that appends to one of the project's
+datasets on the hub.
+The ops sketched in #90 and `calkit/ops.py` are the starting point.
+An Operator runs the loops assigned to it in a managed workspace checked
+out at the project's default branch, restarting them if they exit and
+updating them when the branch moves, so merging to it deploys loops to a
+fleet of devices.
+
+Assignment follows the same rule as environments: a project says what a
+loop needs, not whose Operator runs it.
+Operators will carry labels, e.g., `daq` or `raspberry-pi`, set when
+they're installed, and a loop will name the labels it requires, e.g.,
+`runs_on: [daq]`.
+
+Nothing in the current design blocks this, as long as these stay open:
+
+- Operator records gain labels next to the hosts they serve.
+- The Operator already owns child processes, its sessions, so a loop
+  supervisor is another owner beside them.
+- Cron mode's idle exit counts sessions and browsers, and will have to
+  count running loops too, or loops will require service mode.
+- Loops that push data need to write to a project's storage from the
+  machine, but Operator tokens only identify the Operator today.
+  They'll need scopes granting write access to the datasets of the
+  projects whose loops they run, rather than the user's own login.
+- Check-ins will report loop states, which is an additive change to the
+  check-in body.
+
 ### Detached remote stages
 
 Currently, the machine driving a run must stay up until a remote stage
@@ -396,7 +428,7 @@ so it follows the pipeline integration phase.
    the relay, and shared DVC caches and stage locks per machine.
 4. Detached remote stages.
 5. Sharing: collaborator workspaces and multiplayer.
-6. Later: ops and fleet rollouts (#90), parallel `group` stages (#185),
+6. Later: loops and fleet rollouts (#90), parallel `group` stages (#185),
    a startup command for sessions, agent notifications, and an ACP chat
    view.
 

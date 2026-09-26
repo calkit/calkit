@@ -582,18 +582,53 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
     doesn't exist rather than isn't here yet.
     """
 
+    def rev_parse(name: str) -> str | None:
+        try:
+            return str(repo.git.rev_parse("--verify", "--quiet", name)).strip()
+        except Exception:
+            return None
+
     def parse() -> str | None:
+        local = rev_parse(f"refs/heads/{ref}")
+        if local is not None:
+            # A branch updated elsewhere and fetched, but never checked out
+            # here, is behind what everyone else means by its name
+            upstream = rev_parse(f"{ref}@{{upstream}}") or rev_parse(
+                f"refs/remotes/origin/{ref}"
+            )
+            if upstream is None or upstream == local:
+                return local
+            try:
+                repo.git.merge_base("--is-ancestor", local, upstream)
+                behind = True
+            except Exception:
+                behind = False
+            if behind:
+                warnings.warn(
+                    f"Local branch '{ref}' is behind its remote, so "
+                    f"comparing against the remote's {upstream[:7]}; update "
+                    f"it with 'git branch -f {ref} {upstream[:12]}'"
+                )
+                return upstream
+            try:
+                repo.git.merge_base("--is-ancestor", upstream, local)
+            except Exception:
+                warnings.warn(
+                    f"Local branch '{ref}' has diverged from its remote, so "
+                    "a comparison against it here differs from one made "
+                    "elsewhere; reconcile and push it"
+                )
+            return local
         # A clone that fetched only one branch has the others solely as
         # remote-tracking refs, if at all
-        for name in (ref, f"origin/{ref}"):
-            try:
-                sha = str(repo.git.rev_parse(name)).strip()
-            except Exception:
-                continue
+        for name in [ref] + [f"{remote.name}/{ref}" for remote in remotes]:
+            sha = rev_parse(name)
             if sha:
                 return sha
         return None
 
+    # Origin first, since that's where a clone came from
+    remotes = sorted(repo.remotes, key=lambda remote: remote.name != "origin")
     sha = parse()
     if sha is not None:
         return sha

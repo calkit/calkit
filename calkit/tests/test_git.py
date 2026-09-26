@@ -461,6 +461,39 @@ def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir):
     # A revision that doesn't exist is reported as missing rather than
     # retried forever
     assert calkit.git.resolve_ref(repo, "nope-not-a-branch") is None
+    # A local branch left behind by a fetch resolves to its remote, since
+    # that's what the name means everywhere else
+    subprocess.check_call(["git", "-C", clone, "branch", "main", main_sha])
+    subprocess.check_call(["git", "-C", origin, "checkout", "-q", "main"])
+    with open(os.path.join(origin, "f.txt"), "w") as f:
+        f.write("three\n")
+    commit = ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit"]
+    subprocess.check_call(["git", "-C", origin, *commit, "-qam", "third"])
+    new_main_sha = subprocess.check_output(
+        ["git", "-C", origin, "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.check_call(
+        [
+            "git",
+            "-C",
+            clone,
+            "fetch",
+            "-q",
+            "origin",
+            "main:refs/remotes/origin/main",
+        ]
+    )
+    with pytest.warns(UserWarning, match="behind its remote"):
+        assert calkit.git.resolve_ref(repo, "main") == new_main_sha
+    # One with commits of its own is used as is, with a warning, since it
+    # can't be said which is meant
+    subprocess.check_call(["git", "-C", clone, "checkout", "-q", "main"])
+    with open(os.path.join(clone, "f.txt"), "w") as f:
+        f.write("four\n")
+    subprocess.check_call(["git", "-C", clone, *commit, "-qam", "fourth"])
+    local_sha = repo.git.rev_parse("main").strip()
+    with pytest.warns(UserWarning, match="diverged"):
+        assert calkit.git.resolve_ref(repo, "main") == local_sha
 
 
 def test_check_branch_is_current(tmp_dir):

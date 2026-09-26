@@ -144,6 +144,28 @@ services:
       - --reload
       - "app/main.py"
 
+  relay:
+    restart: "no"
+    ports:
+      - "8002:8002"
+    volumes:
+      - ../:/app
+      - /app/.venv
+    build:
+      context: ..
+      dockerfile: hub/backend/Dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+    environment:
+      SECRET_KEY: ${SECRET_KEY?Variable not set}
+    command:
+      - fastapi
+      - run
+      - --reload
+      - --port
+      - "8002"
+      - relay.py
+
   mailcatcher:
     image: schickling/mailcatcher
     ports:

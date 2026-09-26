@@ -389,6 +389,31 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.tls=true
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.tls.certresolver=le
 
+  # Pairs browsers with Operators over websockets. One process, so both ends
+  # of a pairing meet in memory; see docs/dev/operator-protocol.md.
+  relay:
+    image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
+    restart: always
+    pull_policy: never # We build locally on deploy
+    networks:
+      - traefik-public
+      - default
+    environment:
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+    command: ["fastapi", "run", "--workers", "1", "--port", "8002", "relay.py"]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.${STACK_NAME?Variable not set}-relay.loadbalancer.server.port=8002
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-http.rule=Host(`relay.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.rule=Host(`relay.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.tls.certresolver=le
+
   texmf-proxy:
     image: '${DOCKER_IMAGE_TEXMF_PROXY-texmf-proxy}:${TAG-latest}'
     restart: always

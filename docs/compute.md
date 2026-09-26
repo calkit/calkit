@@ -58,8 +58,11 @@ Anyone who can use the Operator from the Hub can open a shell on that
 machine as you,
 so it's important you only install it on a user account that only you
 control.
-For the same reason, you'll need two-factor authentication or a passkey
-set up on your Hub account before you can open sessions on an Operator.
+For the same reason, you'll need two-factor authentication set up on your
+Hub account before you can open sessions on an Operator,
+which you can do with an authenticator app under the Operators tab in
+your Hub settings.
+You'll be asked for a code from the app every 12 hours.
 
 <!-- prettier-ignore -->
 !!! warning
@@ -68,21 +71,35 @@ set up on your Hub account before you can open sessions on an Operator.
     Some institutions and HPC centers prohibit tools like this,
     so check their policies before installing it.
 
-It's also possible to install the Operator remotely via SSH with
+It's also possible to install the Operator on another machine via SSH,
+e.g.:
 
 ```sh
-calkit install operator --ssh
+calkit install operator --ssh user@cluster.example.edu
 ```
 
-The `--ssh` flag accepts a host address, but if this is not provided,
-you will be prompted for which of your current machine's known hosts
-you'd like to use.
+The host can be anything you'd pass to `ssh`, including a host from your
+`~/.ssh/config`.
 This command will install Calkit on that machine if necessary,
-then the Operator, then authenticate with the Hub.
+then the Operator, registering it with the Hub from your current machine,
+so the other one doesn't need to be logged in.
+It can be combined with `--cron` or `--no-service`.
 
-On the Hub, if you go to your settings, you'll see a "compute"
+The service can be managed with:
+
+```sh
+calkit operator status
+calkit operator stop
+calkit operator restart
+calkit operator logs
+```
+
+On the Hub, if you go to your settings, you'll see an "Operators"
 tab that lists your installed Operators and their status.
 You can revoke them from there if desired.
+
+On Windows, the Operator starts at login and can do everything except
+open shell sessions, which aren't supported there yet.
 
 By default, the Operator will detect long-lived personal workspaces
 in your `~/calkit` folder.
@@ -161,7 +178,7 @@ You can see all Operators attached to your user account with:
 calkit hub get operators
 ```
 
-Operators can be revoked from the compute tab in your Hub settings.
+Operators can be revoked from the Operators tab in your Hub settings.
 This revokes the Operator's token and,
 if it's connected, shuts it down.
 

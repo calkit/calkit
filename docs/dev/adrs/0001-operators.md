@@ -141,7 +141,13 @@ The Operator effectively gives the hub a shell on the machine, and
 bypassing a VPN is the point, so the hub account becomes the only barrier
 in front of those machines.
 Opening sessions on an Operator therefore requires two-factor
-authentication or a passkey on the hub account.
+authentication on the hub account.
+The hub had none, so it's a step-up check rather than part of logging in:
+the user sets up an authenticator app (TOTP), and getting a browser relay
+token takes a code from it entered within the last 12 hours.
+Codes can't be reused, and repeated wrong ones lock verification for a
+few minutes.
+Passkeys can be added later as another way to satisfy the same check.
 The user docs must say prominently to install the Operator only on
 accounts the user alone controls, and to check institutional policy
 first, since this is equivalent to a VS Code tunnel, which some
@@ -252,10 +258,12 @@ was last seen.
 - macOS: a LaunchDaemon with `UserName` set to the user when they have
   admin rights, otherwise a LaunchAgent that starts at login, with a
   warning.
-- Windows: a scheduled task triggered at startup that runs whether or not
-  the user is logged on, using S4U logon so no password is stored, when
-  the user has admin rights, otherwise one triggered at login, with a
-  warning.
+- Windows: a script in the user's Startup folder that starts it hidden at
+  login, which needs no admin rights.
+  Starting at boot, e.g., with a scheduled task, is deferred.
+  Sessions need a POSIX terminal, so Windows Operators don't offer them
+  yet; they do everything else, and run the pipeline without a terminal,
+  returning its output.
 
 Starting cloud VMs from the hub is out of scope.
 
@@ -380,7 +388,8 @@ so it follows the pipeline integration phase.
 
 1. Daemon, service install, registration, Operator token, hub compute tab
    with liveness, the local server's features moved onto the relay, and
-   persistent shell sessions.
+   persistent shell sessions. Done, along with cron mode, `--ssh`
+   install, and two-factor authentication.
 2. The file tree and editor, scheduler jobs, and LaTeX preview and
    official builds.
 3. Pipeline integration: stages on hosts served by an Operator run through

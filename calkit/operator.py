@@ -344,7 +344,13 @@ def save_workspace(
     _calkit(args, wdir)
 
 
-def ignore_path(wdir: str, path: str, commit: bool = True) -> None:
+def ignore_path(
+    wdir: str,
+    path: str,
+    commit: bool = True,
+    message: str | None = None,
+    push: bool = False,
+) -> None:
     git_repo = calkit.git.get_repo(wdir)
     if git_repo.ignored(path):
         return
@@ -359,7 +365,9 @@ def ignore_path(wdir: str, path: str, commit: bool = True) -> None:
         f.write(txt + path + "\n")
     if commit:
         git_repo.git.add(".gitignore")
-        git_repo.git.commit(["-m", f"Ignore {path}"])
+        git_repo.git.commit(["-m", message or f"Ignore {path}"])
+        if push:
+            git_repo.git.push("origin", git_repo.active_branch.name)
 
 
 def discard_changes(wdir: str) -> None:
@@ -668,18 +676,16 @@ class Operator:
 
     def attach(self, session: Session, ch: str) -> None:
         session.channels.add(ch)
-        # Replay recent output so a reattaching browser sees the screen
+        # Replay recent output so a reattaching browser sees the screen. The
+        # first chunk says to clear it first, which also drops any live
+        # output that reached the browser before the replay did
         text = bytes(session.scrollback).decode("utf-8", errors="replace")
-        if text:
-            for chunk in _chunks(text):
-                self.send_soon(
-                    ch,
-                    {
-                        "type": "sessions.output",
-                        "session": session.id,
-                        "data": chunk,
-                    },
-                )
+        for i, chunk in enumerate(_chunks(text)):
+            msg = {"type": "sessions.output", "session": session.id}
+            msg["data"] = chunk
+            if i == 0:
+                msg["reset"] = True
+            self.send_soon(ch, msg)
 
     def close_session(self, session: Session) -> None:
         import signal

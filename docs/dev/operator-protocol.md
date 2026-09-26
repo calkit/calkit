@@ -119,6 +119,8 @@ An optional `command` is typed into the shell once it starts, e.g.,
 Sessions aren't supported on Windows yet.
 Attaching sends the session's recent output first, so a reattaching
 browser sees the screen.
+The first message of that replay has `reset: true`, telling the browser to
+clear the terminal before writing it.
 
 The Operator sends `{"type": "sessions.output", "session": ..., "data":
 ...}` to attached channels, coalescing output over 20 milliseconds, and

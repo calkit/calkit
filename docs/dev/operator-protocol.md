@@ -38,14 +38,37 @@ rejects its token and the Operator shuts down.
 - `GET /operators` lists the user's Operators.
 - `DELETE /operators/{operator_id}` revokes one.
 - `POST /operators/check-in`, with the Operator token, records that the
-  Operator is alive and what workspaces it has, and returns the relay URL
-  and an Operator relay token.
-  Operators check in every 60 seconds while running.
+  Operator is alive, how it runs (`mode`: `service`, `foreground`, or
+  `cron`), whether it's `connected` to the relay, and what workspaces it
+  has.
+  It returns the relay URL, an Operator relay token, and `connect`, which
+  tells an Operator in cron mode whether to connect.
+  Operators check in every 60 seconds while connected.
+- `POST /operators/{operator_id}/wake`, with the user's token, asks an
+  Operator in cron mode to connect at its next check-in.
+  The request lapses after 15 minutes and is cleared once the Operator
+  checks in connected.
 - `POST /operators/{operator_id}/relay-token`, with the user's token,
   returns the relay URL and a browser relay token for that Operator.
   This is where two-factor authentication will be required.
 - `GET /projects/{owner}/{name}/workspaces` lists the project's workspaces
   across the user's Operators, from their latest check-ins.
+
+An Operator is online if its latest check-in was connected and within the
+last three minutes, and asleep if it's in cron mode, not online, and has
+checked in within the last 15 minutes.
+Operators check in with `connected` false as they shut down, so they show
+as offline or asleep right away.
+
+## Cron mode
+
+On machines where long-running processes aren't allowed, e.g., a
+cluster's login node, cron runs `calkit operator start --mode cron` every
+5 minutes and at boot.
+It checks in with `connected` false and exits unless `connect` is true.
+If it is, it runs as usual until it has had no sessions and no browsers
+for 15 minutes.
+A lock file keeps one Operator running per machine and user.
 
 ## Relay
 

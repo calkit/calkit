@@ -310,15 +310,31 @@ def _calkit(args: list[str], wdir: str) -> None:
         )
 
 
+def _dvc_json(args: list[str], wdir: str) -> dict:
+    """Run a DVC command with JSON output in a workspace.
+
+    It's a subprocess rather than DVC's Python API, which resolves paths
+    against the process's working directory: that isn't the workspace, may
+    be on another drive on Windows, and can't be changed safely while other
+    actions run in threads.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "dvc", *args, "--json"],
+        cwd=wdir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            (result.stderr or result.stdout).strip() or "DVC failed"
+        )
+    out: dict = json.loads(result.stdout or "{}")
+    return out
+
+
 def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     """Git and DVC status of a workspace, as the hub shows it."""
-    import dvc.config
-    import dvc.repo.data
-    import dvc.repo.status
-    from dvc.exceptions import NotDvcRepoError
-
     import calkit.pipeline
-    from calkit.dvc import get_dvc_repo
 
     errors = []
     git_repo = calkit.git.get_repo(wdir)
@@ -333,26 +349,28 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     match = re.search(r"#\sbranch\.ab\s\+(\d+)\s-(\d+)", repo_status)
     if match:
         ahead, behind = int(match.group(1)), int(match.group(2))
-    try:
-        dvc_repo = get_dvc_repo(wdir)
-        # Frozen stages are pinned on purpose, so they aren't reported
-        frozen = calkit.pipeline.frozen_stage_base_names(wdir=wdir)
-        pipeline = {
-            k.split("dvc.yaml:")[-1]: v
-            for k, v in dvc.repo.status.status(dvc_repo).items()
-            if not k.endswith(".dvc")
-            and k.split("dvc.yaml:")[-1].split("@")[0] not in frozen
-        }
-        data = dvc.repo.data.status(
-            dvc_repo, not_in_remote=fetch, remote_refresh=fetch
-        )
-        # DVC calls a path committed when its DVC file is staged
-        data["changed"] = data.get("uncommitted", {}).get("modified", [])
-        data["staged"] = data.get("committed", {}).get("modified", [])
-        dvc_status: dict | None = dict(pipeline=pipeline, data=data)
-    except (dvc.config.ConfigError, NotDvcRepoError) as e:
-        errors.append(dict(type=type(e).__name__, info=str(e)))
-        dvc_status = None
+    dvc_status: dict | None = None
+    if not os.path.isdir(os.path.join(wdir, ".dvc")):
+        errors.append(dict(type="dvc", info="Not a DVC repository"))
+    else:
+        try:
+            # Frozen stages are pinned on purpose, so they aren't reported
+            frozen = calkit.pipeline.frozen_stage_base_names(wdir=wdir)
+            pipeline = {
+                k.split("dvc.yaml:")[-1]: v
+                for k, v in _dvc_json(["status"], wdir).items()
+                if not k.endswith(".dvc")
+                and k.split("dvc.yaml:")[-1].split("@")[0] not in frozen
+            }
+            args = ["data", "status"]
+            args += ["--not-in-remote"] if fetch else ["--no-remote-refresh"]
+            data = _dvc_json(args, wdir)
+            # DVC calls a path committed when its DVC file is staged
+            data["changed"] = data.get("uncommitted", {}).get("modified", [])
+            data["staged"] = data.get("committed", {}).get("modified", [])
+            dvc_status = dict(pipeline=pipeline, data=data)
+        except RuntimeError as e:
+            errors.append(dict(type="dvc", info=str(e)))
     return {
         "dvc": dvc_status,
         "git": {
@@ -433,16 +451,10 @@ def ignore_path(
 
 def discard_changes(wdir: str) -> None:
     """Stash Git changes and check out DVC-tracked files that changed."""
-    import dvc.config
-    import dvc.repo.data
-
-    from calkit.dvc import get_dvc_repo
-
     calkit.git.get_repo(wdir).git.stash()
-    try:
-        data = dvc.repo.data.status(get_dvc_repo(wdir))
-    except dvc.config.ConfigError:
+    if not os.path.isdir(os.path.join(wdir, ".dvc")):
         return
+    data = _dvc_json(["data", "status", "--no-remote-refresh"], wdir)
     for path in data.get("uncommitted", {}).get("modified", []):
         _calkit(["dvc", "checkout", path, "--force"], wdir)
 

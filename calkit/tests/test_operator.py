@@ -330,12 +330,28 @@ def test_workspace_actions(tmp_path, monkeypatch):
     assert result["ok"] is False
     assert result["output"]
     subprocess.run(["git", "checkout", "--", "."], cwd=wdir, check=True)
-    # Discarding puts back what was committed
+    # Changes to DVC-tracked files show up too, and discarding puts back
+    # what was committed with either
+    with open(os.path.join(wdir, "big.csv"), "w") as f:
+        f.write("1,2\n")
+    subprocess.run(
+        [sys.executable, "-m", "dvc", "add", "-q", "big.csv"],
+        cwd=wdir,
+        check=True,
+    )
+    operator.save_workspace(wdir, ["big.csv.dvc", ".gitignore"], to="git")
+    with open(os.path.join(wdir, "big.csv"), "w") as f:
+        f.write("3,4\n")
     with open(os.path.join(wdir, "notes.txt"), "w") as f:
         f.write("changed")
+    status = operator.get_workspace_status(wdir, fetch=False)
+    assert status["dvc"]["data"]["changed"] == ["big.csv"]
+    assert status["git"]["changed"] == ["notes.txt"]
     operator.discard_changes(wdir)
     with open(os.path.join(wdir, "notes.txt")) as f:
         assert f.read() == "hi"
+    with open(os.path.join(wdir, "big.csv")) as f:
+        assert f.read() == "1,2\n"
     # Cloning puts a project under ~/calkit, where it's a workspace, and
     # won't clone over anything or outside it
     calls = []

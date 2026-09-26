@@ -114,6 +114,9 @@ Requests carry an `id`, answered by `{"type": "result", "id": ...,
 
 `sessions.open` starts a login shell in a workspace the Operator allows
 and attaches the channel to it.
+An optional `command` is typed into the shell once it starts, e.g.,
+`calkit run`, and the session carries on as a shell afterwards.
+Sessions aren't supported on Windows yet.
 Attaching sends the session's recent output first, so a reattaching
 browser sees the screen.
 
@@ -121,6 +124,28 @@ The Operator sends `{"type": "sessions.output", "session": ..., "data":
 ...}` to attached channels, coalescing output over 20 milliseconds, and
 `{"type": "sessions.exit", "session": ..., "code": ...}` when a session's
 shell exits.
+
+## Workspace actions
+
+These act on a workspace with Git, DVC, and the network, so the Operator
+runs them in a thread, one at a time per workspace, and replies when
+they're done.
+Each takes `id` and `workspace`, and only `workspace.status` works on
+managed workspaces, which are checked out with `--force` to run stages.
+
+| Browser sends         | Other fields                                                          |
+| --------------------- | --------------------------------------------------------------------- |
+| `workspace.status`    | `fetch`                                                               |
+| `workspace.pull`      |                                                                       |
+| `workspace.push`      |                                                                       |
+| `workspace.save`      | `paths`, `message`, `to` (`git` or `dvc`), `push`                     |
+| `workspace.ignore`    | `path`, `commit`                                                      |
+| `workspace.discard`   |                                                                       |
+| `workspace.add_stage` | `name`, `cmd`, `deps`, `outs`, `calkit_type`, `calkit_object`, `push` |
+
+`workspaces.clone`, with `id` and `git_repo_url`, clones a project into
+`~/calkit` with the machine's own Git credentials, where it becomes a
+workspace, and returns its `path`.
 
 ## LaTeX builds
 

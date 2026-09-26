@@ -150,9 +150,29 @@ We don't embed a full editor such as openvscode-server.
 
 ### Running as a service
 
-`calkit install operator` installs a user-level service:
-launchd on macOS, `systemd --user` on Linux, and a per-user scheduled task
-on Windows.
+`calkit install operator` installs a service that runs as the user and,
+where allowed, starts at boot rather than at login.
+This covers machines nobody logs in to, e.g., a cloud VM that is stopped
+when not in use: when it starts again, so does the Operator.
+Because the Operator only connects outbound, and its token and the
+machine ID live on disk, a new IP address after a restart doesn't matter.
+While a machine is off, the hub shows its Operator as offline with when it
+was last seen.
+
+- Linux: a `systemd --user` service with lingering enabled, so the user's
+  services start at boot and survive logout.
+  Installing enables lingering when permitted; otherwise it warns and
+  prints the `sudo loginctl enable-linger` command.
+- macOS: a LaunchDaemon with `UserName` set to the user when they have
+  admin rights, otherwise a LaunchAgent that starts at login, with a
+  warning.
+- Windows: a scheduled task triggered at startup that runs whether or not
+  the user is logged on, using S4U logon so no password is stored, when
+  the user has admin rights, otherwise one triggered at login, with a
+  warning.
+
+Starting cloud VMs from the hub is out of scope.
+
 On HPC, where login nodes kill long-lived processes, two modes are
 supported:
 
@@ -160,6 +180,7 @@ supported:
 - `calkit install operator --cron`, which checks in with the hub on a
   schedule, reporting scheduler job states, and opens the websocket only
   when there is work to do, e.g., the user has opened a shell.
+  Its crontab includes an `@reboot` entry so it checks in at boot.
 
 `scrontab` and similar are deferred.
 Heavy work on HPC belongs in scheduler jobs, not on the login node.

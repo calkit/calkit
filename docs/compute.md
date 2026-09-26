@@ -30,8 +30,13 @@ then call:
 calkit install operator
 ```
 
-On a laptop or workstation,
-this installs the Operator as a service that starts when you log in.
+This installs the Operator as a service that starts when the machine
+boots, so it's running even if you're not logged in.
+For example, if you install it on a cloud VM that you stop when you're not
+using it, the Operator will be back up as soon as you start the VM again.
+Starting at boot may require admin rights;
+if you don't have them, the Operator will start when you log in instead,
+and the install command will tell you what to run to change that.
 
 If you're running on an HPC, where long-running processes on login nodes
 are typically killed, you have two options.

@@ -147,11 +147,24 @@ the user sets up an authenticator app (TOTP), and getting a browser relay
 token takes a code from it entered within the last 12 hours.
 Codes can't be reused, and repeated wrong ones lock verification for a
 few minutes.
-Passkeys can be added later as another way to satisfy the same check.
-The user docs must say prominently to install the Operator only on
-accounts the user alone controls, and to check institutional policy
-first, since this is equivalent to a VS Code tunnel, which some
-institutions and HPC centers prohibit.
+
+A security review found that a check on the account alone doesn't stop
+a leaked credential, e.g., a personal access token in a CI secret or a
+DVC token sent to a remote a repo controls, so it's tightened three ways:
+
+- Proof of entering a code belongs to the session that entered it: a
+  short-lived token it sends with requests, not a record on the account.
+- Getting a relay token or managing two-factor authentication takes a
+  signed-in session, and personal access tokens are refused, as are
+  scoped ones anywhere outside their scope.
+- Setting up an authenticator app takes a code emailed to the user as
+  well as one from the app, so a leaked credential can't add an
+  attacker's.
+  Passkeys can be added later as another way to satisfy the same check.
+  The user docs must say prominently to install the Operator only on
+  accounts the user alone controls, and to check institutional policy
+  first, since this is equivalent to a VS Code tunnel, which some
+  institutions and HPC centers prohibit.
 
 Shell sessions aren't confined to workspaces.
 Only an Operator's owner can open them, and the owner already has a shell

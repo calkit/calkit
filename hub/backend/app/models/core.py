@@ -563,6 +563,11 @@ class UserTOTP(SQLModel, table=True):
     )
     failed_attempts: int = 0
     locked_until: datetime | None = Field(default=None)
+    # A code emailed when setting it up, so a leaked token alone can't add an
+    # attacker's app; stored as an HMAC like email verification codes
+    email_code_hash: str | None = Field(default=None, max_length=64)
+    email_code_expires: datetime | None = Field(default=None)
+    email_code_attempts: int = 0
 
 
 class OperatorPublic(SQLModel):

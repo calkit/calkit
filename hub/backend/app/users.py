@@ -4,7 +4,7 @@ import hmac
 import json
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
@@ -23,7 +23,11 @@ from app.core import (
     sanitize_account_name,
 )
 from app.github import token_resp_text_to_dict
-from app.messaging import EMAIL_VERIFICATION_CODE_MINUTES
+from app.messaging import (
+    EMAIL_VERIFICATION_CODE_MINUTES,
+    generate_confirm_two_factor_email,
+    send_email,
+)
 from app.models import (
     Account,
     User,
@@ -36,9 +40,14 @@ from app.models import (
     UserUpdate,
 )
 from app.security import (
+    create_second_factor_token as security_create_second_factor_token,
+)
+from app.security import (
+    decode_second_factor_token,
     decrypt_secret,
     encrypt_secret,
     generate_email_verification_token,
+    generate_totp_secret,
     get_password_hash,
     match_totp_step,
     verify_email_verification_token,
@@ -989,13 +998,78 @@ def check_user_subscription_active(session: Session, user: User) -> bool:
     return True
 
 
-# How long entering an authenticator code covers sensitive actions for
+# How long a second factor entered in a session covers sensitive actions
 SECOND_FACTOR_HOURS = 12
 TOTP_MAX_FAILED_ATTEMPTS = 5
 TOTP_LOCKOUT_MINUTES = 5
 # Error details the frontend recognizes, to prompt for a code or set one up
 SECOND_FACTOR_SETUP_REQUIRED = "Two-factor authentication setup required"
 SECOND_FACTOR_REQUIRED = "Two-factor authentication code required"
+
+
+def start_totp_setup(session: Session, user: User) -> str:
+    """Start setting up an authenticator app, returning its secret.
+
+    A code is also emailed, which confirming takes along with one from the
+    app, so someone holding a leaked credential for the account can't add
+    their own app without the user's email too.
+    """
+    totp = user.totp
+    if totp is not None and totp.confirmed_at is not None:
+        raise HTTPException(409, "Two-factor authentication is already set up")
+    now = utcnow()
+    if (
+        totp is not None
+        and (now - totp.created).total_seconds()
+        < EMAIL_VERIFICATION_RESEND_SECONDS
+    ):
+        raise HTTPException(
+            429, "A code was just sent. Wait a minute before asking again."
+        )
+    secret = generate_totp_secret()
+    email_code = f"{secrets.randbelow(10**6):06d}"
+    if totp is None:
+        totp = UserTOTP(user_id=user.id, secret=encrypt_secret(secret))
+    totp.secret = encrypt_secret(secret)
+    totp.created = now
+    totp.email_code_hash = hash_email_verification_code(email_code)
+    totp.email_code_expires = now + timedelta(
+        minutes=EMAIL_VERIFICATION_CODE_MINUTES
+    )
+    totp.email_code_attempts = 0
+    session.add(totp)
+    session.commit()
+    email_data = generate_confirm_two_factor_email(
+        email_to=user.email, code=email_code
+    )
+    send_email(
+        email_to=user.email,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
+    return secret
+
+
+def check_totp_setup_email_code(
+    session: Session, totp: UserTOTP, code: str
+) -> None:
+    """Check the code emailed when setting up an authenticator app."""
+    if totp.email_code_hash is None or totp.email_code_expires is None:
+        raise HTTPException(400, "No setup code has been sent")
+    if totp.email_code_expires < utcnow():
+        raise HTTPException(400, "That code has expired; start setup again")
+    if not hmac.compare_digest(
+        totp.email_code_hash, hash_email_verification_code(code.strip())
+    ):
+        totp.email_code_attempts += 1
+        if totp.email_code_attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            totp.email_code_hash = None
+            session.add(totp)
+            session.commit()
+            raise HTTPException(400, "Too many wrong codes; start setup again")
+        session.add(totp)
+        session.commit()
+        raise HTTPException(400, "The emailed code isn't right")
 
 
 def check_totp_code(session: Session, totp: UserTOTP, code: str) -> None:
@@ -1029,14 +1103,30 @@ def check_totp_code(session: Session, totp: UserTOTP, code: str) -> None:
     session.commit()
 
 
-def require_second_factor(user: User) -> None:
-    """Refuse sensitive actions unless the user has entered an
-    authenticator code recently.
+def create_second_factor_token(user: User) -> str:
+    """A token for the session that just entered a second factor."""
+    return security_create_second_factor_token(
+        user.id, timedelta(hours=SECOND_FACTOR_HOURS)
+    )
+
+
+def require_second_factor(user: User, token: str | None) -> None:
+    """Refuse sensitive actions unless this session entered a second
+    factor recently.
+
+    What proves it is the token the session got when it entered a code,
+    not a record on the account, so entering a code in one browser doesn't
+    also vouch for every other credential the user has.
     """
     totp = user.totp
     if totp is None or totp.confirmed_at is None:
         raise HTTPException(403, SECOND_FACTOR_SETUP_REQUIRED)
-    if totp.last_verified_at is None or utcnow() - totp.last_verified_at > (
-        timedelta(hours=SECOND_FACTOR_HOURS)
-    ):
+    payload = decode_second_factor_token(token) if token else None
+    if payload is None or payload.get("sub") != str(user.id):
+        raise HTTPException(403, SECOND_FACTOR_REQUIRED)
+    # Tokens from before it was last set up don't count
+    issued = datetime.fromtimestamp(payload.get("iat", 0), tz=UTC).replace(
+        tzinfo=None
+    )
+    if issued < totp.confirmed_at.replace(microsecond=0):
         raise HTTPException(403, SECOND_FACTOR_REQUIRED)

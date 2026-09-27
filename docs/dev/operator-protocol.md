@@ -50,11 +50,14 @@ rejects its token and the Operator shuts down.
   checks in connected.
 - `POST /operators/{operator_id}/relay-token`, with the user's token,
   returns the relay URL and a browser relay token for that Operator.
-  It requires two-factor authentication: an authenticator app set up
-  under `/user/totp`, and a code from it entered within the last 12 hours
-  with `POST /user/totp/verify`.
+  It requires a signed-in session, not a personal access token, and proof
+  that the session entered a two-factor code within the last 12 hours:
+  the `second_factor_token` returned by `POST /user/totp/verify` (or
+  `/confirm`), sent in an `X-Second-Factor` header.
   Otherwise it answers 403 with a detail the browser recognizes, to prompt
   for setup or a code.
+  Setting up two-factor authentication (`POST /user/totp`) emails a code,
+  which confirming takes along with one from the authenticator app.
 - `GET /projects/{owner}/{name}/workspaces` lists the project's workspaces
   across the user's Operators, from their latest check-ins.
 

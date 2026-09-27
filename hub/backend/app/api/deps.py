@@ -118,6 +118,10 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                 raise HTTPException(403, "Invalid token")
             if not verify_pat(session, token_in_db, verifier):
                 raise HTTPException(403, "Invalid token")
+            # A scoped token, e.g., one for DVC that's written into a
+            # project's DVC config, only works where its scope is asked for
+            if token_in_db.scope is not None:
+                raise HTTPException(403, "Invalid token scope")
             touch_token(session, token_in_db)
             user = token_in_db.user
     else:
@@ -279,6 +283,31 @@ def get_current_user_optional(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_current_session_user(session: SessionDep, token: TokenDep) -> User:
+    """Authenticate a signed-in session, refusing tokens made for scripts.
+
+    Some actions, e.g., opening a shell on a user's machine or managing
+    their second factor, shouldn't be possible with a credential that can
+    end up in a CI secret or a config file, so personal access tokens and
+    the JWTs derived from them are refused.
+    """
+    refused = HTTPException(403, "This requires signing in, not a token")
+    if token.startswith("ckp_"):
+        raise refused
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
+        )
+    except InvalidTokenError:
+        payload = {}
+    if "token_id" in payload:
+        raise refused
+    return get_current_user(session, token)
+
+
+SessionUser = Annotated[User, Depends(get_current_session_user)]
 CurrentUserDvcScope = Annotated[
     User, Depends(partial(get_current_user_with_token_scope, scope="dvc"))
 ]

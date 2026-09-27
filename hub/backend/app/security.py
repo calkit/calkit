@@ -238,3 +238,39 @@ def verify_token_verifier(verifier: str, hashed: str) -> bool:
     if hashed.startswith("$2"):
         return verify_password(verifier, hashed)
     return hmac.compare_digest(hash_token_verifier(verifier), hashed)
+
+
+SECOND_FACTOR_SCOPE = "second-factor"
+
+
+def create_second_factor_token(
+    user_id: uuid.UUID, expires_delta: timedelta
+) -> str:
+    """Create a token proving a second factor was entered in one session.
+
+    The session keeps it and sends it along with sensitive requests, so a
+    code entered in one browser doesn't also vouch for every other
+    credential the user has. It carries a scope, so the API's own auth
+    rejects it as a login.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "exp": now + expires_delta,
+        "iat": now,
+        "sub": str(user_id),
+        "scope": SECOND_FACTOR_SCOPE,
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_second_factor_token(token: str) -> dict | None:
+    """Decode a second factor token, or return None if it isn't valid."""
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[ALGORITHM]
+        )
+    except InvalidTokenError:
+        return None
+    if payload.get("scope") != SECOND_FACTOR_SCOPE:
+        return None
+    return payload

@@ -7,10 +7,15 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 from starlette.websockets import WebSocketDisconnect
 
+from app import users
 from app.config import settings
 from app.core import utcnow
 from app.models import Operator, User, UserTOTP
-from app.security import encrypt_secret, generate_totp_secret
+from app.security import (
+    create_second_factor_token,
+    encrypt_secret,
+    generate_totp_secret,
+)
 from app.users import SECOND_FACTOR_REQUIRED, SECOND_FACTOR_SETUP_REQUIRED
 
 
@@ -155,11 +160,13 @@ def test_operators(
     )
     assert r.status_code == 403
     assert r.json()["detail"] == SECOND_FACTOR_SETUP_REQUIRED
+    # Once set up, a session needs its own proof of entering a code: the
+    # account having entered one recently isn't enough
     totp = UserTOTP(
         user_id=user.id,
         secret=encrypt_secret(generate_totp_secret()),
-        confirmed_at=utcnow(),
-        last_verified_at=utcnow() - timedelta(hours=13),
+        confirmed_at=utcnow() - timedelta(minutes=1),
+        last_verified_at=utcnow(),
     )
     db.add(totp)
     db.commit()
@@ -168,12 +175,32 @@ def test_operators(
     )
     assert r.status_code == 403
     assert r.json()["detail"] == SECOND_FACTOR_REQUIRED
-    totp.last_verified_at = utcnow()
-    db.add(totp)
-    db.commit()
+    second_factor = users.create_second_factor_token(user)
+    with_second_factor = normal_user_token_headers | {
+        "X-Second-Factor": second_factor
+    }
+    # Another user's proof doesn't count
+    other = create_second_factor_token(uuid.uuid4(), timedelta(hours=1))
+    r = client.post(
+        f"/operators/{op['id']}/relay-token",
+        headers=normal_user_token_headers | {"X-Second-Factor": other},
+    )
+    assert r.status_code == 403
+    # Nor do tokens made for scripts, even with the proof
+    r = client.post(
+        "/user/tokens",
+        headers=normal_user_token_headers,
+        json={"expires_days": 1, "scope": None},
+    )
+    pat_headers = {
+        "Authorization": f"Bearer {r.json()['access_token']}",
+        "X-Second-Factor": second_factor,
+    }
+    r = client.post(f"/operators/{op['id']}/relay-token", headers=pat_headers)
+    assert r.status_code == 403
     # Browsers get a short-lived relay token for an online Operator
     r = client.post(
-        f"/operators/{op['id']}/relay-token", headers=normal_user_token_headers
+        f"/operators/{op['id']}/relay-token", headers=with_second_factor
     )
     assert r.status_code == 200, r.text
     payload = jwt.decode(
@@ -188,7 +215,7 @@ def test_operators(
     db.add(operator)
     db.commit()
     r = client.post(
-        f"/operators/{op['id']}/relay-token", headers=normal_user_token_headers
+        f"/operators/{op['id']}/relay-token", headers=with_second_factor
     )
     assert r.status_code == 409
     # An Operator in cron mode that's between check-ins is asleep, and waking

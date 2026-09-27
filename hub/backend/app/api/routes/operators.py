@@ -9,7 +9,7 @@ import uuid
 from datetime import timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import col, select
 
@@ -20,6 +20,7 @@ from app.api.deps import (
     PAT_VERIFIER_LENGTH_BYTES,
     CurrentUser,
     SessionDep,
+    SessionUser,
     TokenDep,
 )
 from app.config import settings
@@ -337,11 +338,18 @@ class RelayTokenResp(BaseModel):
 
 @router.post("/operators/{operator_id}/relay-token")
 def post_operator_relay_token(
-    session: SessionDep, current_user: CurrentUser, operator_id: uuid.UUID
+    session: SessionDep,
+    current_user: SessionUser,
+    operator_id: uuid.UUID,
+    x_second_factor: Annotated[str | None, Header()] = None,
 ) -> RelayTokenResp:
-    """Let the user's browser connect to one of their online Operators."""
+    """Let the user's browser connect to one of their online Operators.
+
+    This opens a shell on their machine, so it takes a signed-in session,
+    not a token, that entered a second factor recently.
+    """
     operator = _get_owned_operator(session, current_user, operator_id)
-    users.require_second_factor(current_user)
+    users.require_second_factor(current_user, x_second_factor)
     if not is_online(operator):
         raise HTTPException(409, "Operator is offline")
     return RelayTokenResp(

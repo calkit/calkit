@@ -71,6 +71,9 @@ def upgrade():
     sa.Column('last_used_step', sa.BigInteger(), nullable=True),
     sa.Column('failed_attempts', sa.Integer(), nullable=False),
     sa.Column('locked_until', sa.DateTime(), nullable=True),
+    sa.Column('email_code_hash', sqlmodel.sql.sqltypes.AutoString(length=64), nullable=True),
+    sa.Column('email_code_expires', sa.DateTime(), nullable=True),
+    sa.Column('email_code_attempts', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
     sa.PrimaryKeyConstraint('user_id')
     )

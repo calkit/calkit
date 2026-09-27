@@ -627,8 +627,16 @@ class Project(ProjectBase, table=True):
     parent_project_id: uuid.UUID | None = Field(
         foreign_key="project.id", default=None
     )
+    # Where DVC objects go; null means the hub's own object storage
+    dvc_storage_id: uuid.UUID | None = Field(
+        foreign_key="storageresource.id", default=None
+    )
     # Relationships
     owner_account: Account = Relationship(back_populates="owned_projects")
+    dvc_storage: Union["StorageResource", None] = Relationship()
+    storage_history: list["ProjectStorageHistory"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
     user_access_records: list["UserProjectAccess"] = Relationship(
         back_populates="project", cascade_delete=True
     )
@@ -896,6 +904,52 @@ class ProjectDvcPush(SQLModel, table=True):
     # Relationships
     project: "Project" = Relationship(back_populates="dvc_pushes")
     user: User = Relationship(back_populates="dvc_pushes")
+
+
+class StorageResource(SQLModel, table=True):
+    """External storage connected to an account, e.g., an HF bucket.
+
+    Projects owned by the account can use it for their DVC objects, each
+    under its own ``{owner}/{project}`` folder. The credential used to reach
+    it is the external credential of the user who connected it.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "owner_account_id",
+            "name",
+            name="uq_storageresource_owner_account_name",
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    owner_account_id: uuid.UUID = Field(foreign_key="account.id", index=True)
+    name: str = Field(min_length=2, max_length=64)
+    # Only "hf-bucket" for now
+    kind: str = Field(max_length=32)
+    # For HF buckets, the bucket ID, i.e., ``{namespace}/{bucket_name}``
+    bucket: str = Field(max_length=255)
+    credential_user_id: uuid.UUID = Field(foreign_key="user.id")
+    created: datetime = Field(default_factory=utcnow)
+    # Relationships
+    owner_account: Account = Relationship()
+    credential_user: User = Relationship()
+
+
+class ProjectStorageHistory(SQLModel, table=True):
+    """Every storage resource a project has used for DVC objects.
+
+    Objects aren't moved when a project switches storage, so reads fall
+    back through these (and the hub's own storage) to find older objects.
+    """
+
+    project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
+    storage_resource_id: uuid.UUID = Field(
+        foreign_key="storageresource.id", primary_key=True
+    )
+    first_used: datetime = Field(default_factory=utcnow)
+    # Relationships
+    project: "Project" = Relationship(back_populates="storage_history")
+    storage_resource: StorageResource = Relationship()
 
 
 class OnboardingFlags(SQLModel):

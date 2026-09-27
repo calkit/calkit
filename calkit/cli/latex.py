@@ -265,6 +265,7 @@ def _run_latexmk(
     fdb_path: str,
     environment: str | None,
     verbose: bool,
+    quiet: bool = False,
 ) -> int:
     """Run latexmk, fetching the TeX packages it's missing and retrying.
 
@@ -272,6 +273,9 @@ def _run_latexmk(
     LaTeX image, run directly or as a Docker environment built on it. A
     system TeX is the user's to manage, and anything installed in another
     container is gone when it exits. Returns latexmk's exit status.
+
+    ``quiet`` hides latexmk's output, for a caller that reports what went
+    wrong from the log itself.
     """
     import shlex
 
@@ -302,7 +306,7 @@ def _run_latexmk(
     fetchable = None
     while True:
         try:
-            subprocess.check_call(cmd, env=env)
+            subprocess.run(cmd, env=env, check=True, capture_output=quiet)
             return 0
         except subprocess.CalledProcessError as e:
             status = e.returncode
@@ -1151,7 +1155,10 @@ def diff(
     checkouts: dict[str, str] = {}
     shas: dict[str, str] = {}
     expanded_names: set[str] = set()
-    working_copy = os.path.join(DIFF_TMP_DIR, "working")
+    # Per run, so diffs run at the same time, e.g., from the editor while
+    # the pipeline runs, don't check out over each other
+    run_dir = os.path.join(DIFF_TMP_DIR, str(os.getpid()))
+    working_copy = os.path.join(run_dir, "working")
     try:
         for name, ref in [("base", from_ref), ("head", to_ref)]:
             if ref is None:
@@ -1162,7 +1169,7 @@ def diff(
             shas[name] = sha
             # A worktree, not a temp directory: a document is rarely one
             # file, and \input needs the rest of them as they were then
-            path = os.path.join(DIFF_TMP_DIR, name)
+            path = os.path.join(run_dir, name)
             _remove_worktree(path)
             # Writes the .gitignore that keeps everything below it out of
             # version control
@@ -1237,7 +1244,7 @@ def diff(
     finally:
         for path in checkouts.values():
             _remove_worktree(path)
-        shutil.rmtree(working_copy, ignore_errors=True)
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 def _marked_up_digest(marked_up: bytes, context: list[str] = []) -> str:
@@ -1309,10 +1316,14 @@ def _build_diff(
     tex_dir = os.path.dirname(tex_file_fpath) or "."
     build_dir = os.path.normpath(os.path.join(head_root, tex_dir))
     stem = Path(tex_file_fpath).stem
-    # Named so as not to overwrite, then delete, a file of the user's
     job = f"{stem}-diff"
-    if os.path.exists(os.path.join(build_dir, f"{job}.tex")):
-        job = f"{stem}-calkit-diff"
+    aux_name = calkit.latex.DIFF_AUX_DIRNAME
+    # Beside the working tree's document, named for this run, so neither a
+    # file of the user's nor another diff built there at the same time is
+    # overwritten
+    if os.path.abspath(head_root) == os.path.abspath("."):
+        job += f"-{os.getpid()}"
+        aux_name += f"-{os.getpid()}"
     diff_tex_fpath = os.path.join(build_dir, f"{job}.tex")
     # Where --keep-tex leaves its copies: beside the diff PDF, since a
     # checkout is removed afterwards. The old and new files are what
@@ -1323,7 +1334,7 @@ def _build_diff(
     kept_old_fpath = f"{kept_stem}-old.tex"
     kept_new_fpath = f"{kept_stem}-new.tex"
     marked_up: bytes | None = None
-    aux_dir = os.path.join(build_dir, calkit.latex.DIFF_AUX_DIRNAME)
+    aux_dir = os.path.join(build_dir, aux_name)
     try:
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
@@ -1347,13 +1358,21 @@ def _build_diff(
         try:
             # No stdin, so an environment's container isn't given a TTY,
             # which would merge latexdiff's warnings into the document
-            marked_up = subprocess.check_output(cmd, stdin=subprocess.DEVNULL)
+            # Its warnings are mostly about markup it chose not to make, so
+            # they're only shown when asked for or when it fails
+            marked_up = subprocess.check_output(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stderr=None if verbose else subprocess.PIPE,
+            )
         except FileNotFoundError:
             raise_error(
                 "latexdiff was not found; it ships with TeX Live, so a "
                 "minimal install may not have it"
             )
         except subprocess.CalledProcessError as e:
+            if e.stderr:
+                typer.echo(e.stderr.decode(errors="replace"), err=True)
             raise_error(f"latexdiff failed with exit status {e.returncode}")
         # They only switch how figures are marked, so dropping them is safe
         marked_up = _ALIGN_MARKERS_RE.sub(b"", marked_up)
@@ -1393,11 +1412,18 @@ def _build_diff(
         # because the common case produces nothing at all: on the default
         # branch the merge base is usually HEAD, so the comparison is empty,
         # and latexmk is the expensive half of this.
+        # Paths into this run's checkouts name the run, which says nothing
+        # about the PDF
+        run_prefix = Path(DIFF_TMP_DIR, str(os.getpid())).as_posix()
+        stable_prefix = Path(DIFF_TMP_DIR, "run").as_posix()
         digest = _marked_up_digest(
-            marked_up,
-            context=context
-            + [f"latexmkrc {rc_path} {rc_hash}"]
-            + latexmk_args,
+            marked_up.replace(run_prefix.encode(), stable_prefix.encode()),
+            context=[
+                item.replace(run_prefix, stable_prefix)
+                for item in context
+                + [f"latexmkrc {rc_path} {rc_hash}"]
+                + latexmk_args
+            ],
         )
         state_path = calkit.latex.diff_state_path(output)
         if (
@@ -1408,8 +1434,12 @@ def _build_diff(
             typer.echo(f"{output} is up to date")
             return
         Path(diff_tex_fpath).write_bytes(marked_up)
-        os.makedirs(aux_dir, exist_ok=True)
-        rel_aux = calkit.latex.DIFF_AUX_DIRNAME
+        # From scratch, since one a failed build left beside the working
+        # tree's document can be corrupt, and every build is of a new
+        # document anyway
+        shutil.rmtree(aux_dir, ignore_errors=True)
+        os.makedirs(aux_dir)
+        rel_aux = aux_name
         latexmk_cmd = ["latexmk"]
         # First, since latexmk reads an rc file where it appears, so the
         # directories below override any the rc file sets
@@ -1444,8 +1474,6 @@ def _build_diff(
         )
         typer.echo("Building the marked-up document")
         built = os.path.join(aux_dir, f"{job}.pdf")
-        if os.path.isfile(built):
-            os.remove(built)
         try:
             status = _run_latexmk(
                 cmd,
@@ -1454,6 +1482,9 @@ def _build_diff(
                 fdb_path=os.path.join(aux_dir, f"{job}.fdb_latexmk"),
                 environment=environment,
                 verbose=verbose,
+                # The log's errors are shown if it fails, and a document
+                # with glossaries and a bibliography says a lot otherwise
+                quiet=not verbose,
             )
             if status:
                 raise subprocess.CalledProcessError(status, cmd)

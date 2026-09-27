@@ -316,7 +316,7 @@ def test_latex_diff_setup(tmp_dir):
     )
     assert result.returncode != 0
     assert "does not exist at" in result.stderr
-    assert not os.path.isdir(os.path.join(DIFF_TMP_DIR, "base"))
+    assert not os.listdir(DIFF_TMP_DIR)
     assert DIFF_TMP_DIR not in subprocess.check_output(
         ["git", "worktree", "list"], text=True
     )
@@ -365,6 +365,7 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
             'for a in "$@"; do tex="$a"; case "$a" in '
             '-outdir=*) out="${a#-outdir=}";; esac; done\n'
             'cd "$(dirname "$tex")"\n'
+            '[ -n "$SLOW" ] && sleep 1\n'
             '[ -f setup.tex ] && echo present > "$RECORD_DIR/setup.txt"\n'
             'stem=$(basename "$tex" .tex)\n'
             'if [ -n "$FAIL" ]; then\n'
@@ -496,7 +497,7 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     with open(stubs / "latexmk-args.txt") as f:
         latexmk_args = f.read().split()
     rc = latexmk_args[latexmk_args.index("-r") + 1]
-    assert rc.endswith("latex-diff-build/head/paper/.latexmkrc")
+    assert rc.endswith("/head/paper/.latexmkrc")
     auxdir = next(a for a in latexmk_args if a.startswith("-auxdir="))
     assert latexmk_args.index("-r") < latexmk_args.index(auxdir)
     # Inside the directory the document is built in, since TeX refuses to
@@ -559,9 +560,26 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         with open(working_output) as f:
             assert f.read() == "old\n" + content
     # Building beside the working tree's document leaves nothing behind
-    assert not os.path.exists("paper/calkit-latex-diff-aux")
+    assert not [p for p in os.listdir("paper") if "calkit-latex-diff" in p]
     with open("paper/main-diff.tex") as f:
         assert f.read() == "mine\n"
+    # Two at once, e.g., from the editor while the pipeline runs, don't
+    # build over each other
+    procs = [
+        subprocess.Popen(
+            diff + ["--force", "-o", f"at-once-{n}.pdf"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env | {"SLOW": "1"},
+        )
+        for n in range(2)
+    ]
+    for n, proc in enumerate(procs):
+        _, stderr = proc.communicate()
+        assert proc.returncode == 0, stderr
+        with open(f"at-once-{n}.pdf") as f:
+            assert f.read() == "old\nnewest\n"
     os.remove(stubs / "latexmk-args.txt")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
     assert "is up to date" in result.stdout
@@ -778,8 +796,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     # Each build writes the log LaTeX would, missing what isn't installed
     state = {"installed": set(), "unfetchable": set()}
 
-    def check_call(cmd, env=None):
-        calls.append(cmd)
+    def latexmk(cmd):
         missing = {"xurl.sty"} - state["installed"]
         missing |= state["unfetchable"]
         with open(log_path, "w") as f:
@@ -789,9 +806,13 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
             f.write("fdb")
         if missing:
             raise subprocess.CalledProcessError(12, cmd)
+        return subprocess.CompletedProcess(cmd, 0)
 
     def run(cmd, **kwargs):
         calls.append(cmd)
+        if cmd[0] == "latexmk":
+            captured.append(kwargs.get("capture_output"))
+            return latexmk(cmd)
         if "search" in cmd:
             name = cmd[-1].lstrip("/")
             out = f"{name.split('.')[0]}:\n\ttexmf-dist/tex/latex/x/{name}\n"
@@ -801,14 +822,14 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
         # As a font's install does, failing on the map after the files land
         return subprocess.CompletedProcess(cmd, 1, stdout="")
 
-    monkeypatch.setattr(subprocess, "check_call", check_call)
+    captured: list[bool] = []
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: False)
     monkeypatch.setattr(
         calkit.docker, "ensure_image_available", lambda image: None
     )
 
-    def build():
+    def build(quiet: bool = False):
         return cli_latex._run_latexmk(
             ["latexmk", "paper/main.tex"],
             env=None,
@@ -816,6 +837,7 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
             fdb_path=fdb_path,
             environment=None,
             verbose=False,
+            quiet=quiet,
         )
 
     # Fetched into the project and built on the retry, the install's error
@@ -836,6 +858,11 @@ def test_fetch_missing_packages(tmp_dir, monkeypatch):
     calls.clear()
     assert build() == 12
     assert not [c for c in calls if "tlmgr" in c]
+    # Quiet keeps latexmk's output out of the way, for a caller that reports
+    # what went wrong from the log
+    captured.clear()
+    build(quiet=True)
+    assert captured == [True]
 
 
 def test_from_questions(tmp_dir):

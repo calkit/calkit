@@ -165,6 +165,18 @@
         "icon": "$(diff)"
       },
       {
+        "command": "calkit-vscode.showLatexPdf",
+        "title": "Show PDF",
+        "category": "Calkit",
+        "icon": "$(file-pdf)"
+      },
+      {
+        "command": "calkit-vscode.showLatexSource",
+        "title": "Show LaTeX Source",
+        "category": "Calkit",
+        "icon": "$(file-code)"
+      },
+      {
         "command": "calkit-vscode.goToFigureSource",
         "title": "Go to Figure Source",
         "category": "Calkit",
@@ -454,6 +466,11 @@
           "group": "inline"
         },
         {
+          "command": "calkit-vscode.runStage",
+          "when": "view == calkit-sidebar && viewItem =~ /^latex-diff/",
+          "group": "inline"
+        },
+        {
           "command": "calkit-vscode.editEnvironment",
           "when": "view == calkit-sidebar && viewItem == stage-env-prop",
           "group": "inline"
@@ -527,11 +544,21 @@
         },
         {
           "command": "calkit-vscode.diffLatex",
-          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf)",
           "group": "calkit@5"
         }
       ],
       "editor/title": [
+        {
+          "command": "calkit-vscode.showLatexPdf",
+          "when": "resourceExtname == .tex && calkit.activeFileHasStage",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.showLatexSource",
+          "when": "resourceExtname == .pdf && calkit-vscode.hasProject",
+          "group": "navigation"
+        },
         {
           "command": "calkit-vscode.previewPlotlyFigure",
           "when": "calkit.activeFileIsPlotly",
@@ -564,7 +591,7 @@
         },
         {
           "command": "calkit-vscode.diffLatex",
-          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)",
           "group": "navigation"
         }
       ],
@@ -588,7 +615,7 @@
         },
         {
           "command": "calkit-vscode.diffLatex",
-          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)",
           "group": "calkit@5"
         }
       ],
@@ -739,7 +766,7 @@
         },
         {
           "command": "calkit-vscode.diffLatex",
-          "when": "resourceExtname == .tex && calkit-vscode.hasProject"
+          "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)"
         },
         {
           "command": "calkit-vscode.save",

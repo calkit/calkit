@@ -39,6 +39,7 @@
 | [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                      |
 | [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
 | [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
+| [`show`](#command-group-show)                    | Show Calkit objects.                                                                                         |
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
@@ -1874,6 +1875,7 @@ List Calkit objects.
 | [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
 | [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                                                                          |
+| [`latex-diffs`](#subcommand-list-ls-latex-diffs)                | List the LaTeX diffs the pipeline keeps and whether each is current.                           |
 | [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                                                                      |
 | [`imports`](#subcommand-list-ls-imports)                        | List everything in the project that was imported from elsewhere.                               |
 
@@ -2161,6 +2163,24 @@ Options:
 | `--stale`      | boolean | no       | False   | Show only stale stages. |
 | `--json`       | boolean | no       | False   | Output result as JSON.  |
 
+<a id="subcommand-list-ls-latex-diffs"></a>
+
+#### `calkit list|ls latex-diffs`
+
+List the LaTeX diffs the pipeline keeps and whether each is current.
+
+Usage:
+
+```text
+calkit list|ls latex-diffs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
 <a id="subcommand-list-ls-remotes"></a>
 
 #### `calkit list|ls remotes`
@@ -2200,6 +2220,42 @@ Options:
 | Option   | Type    | Required | Default | Description            |
 | -------- | ------- | -------- | ------- | ---------------------- |
 | `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="command-group-show"></a>
+
+### `calkit show`
+
+Show Calkit objects.
+
+| Command                                     | Description                           |
+| ------------------------------------------- | ------------------------------------- |
+| [`latex-diff`](#subcommand-show-latex-diff) | Open a LaTeX diff the pipeline keeps. |
+
+<a id="subcommand-show-latex-diff"></a>
+
+#### `calkit show latex-diff`
+
+Open a LaTeX diff the pipeline keeps.
+
+From VS Code's terminal it opens in the editor, otherwise in the system's PDF viewer.
+
+Usage:
+
+```text
+calkit show latex-diff [OPTIONS] [TARGET]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                                                                |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target` | str  | no       |         | Which diff: its stage or PDF, the document or its PDF, the latex stage, or the revision it compares against. Can be omitted if the project keeps only one. |
+
+Options:
+
+| Option  | Type    | Required | Default | Description                                      |
+| ------- | ------- | -------- | ------- | ------------------------------------------------ |
+| `--run` | boolean | no       | False   | Build the diff first if it's stale or not built. |
 
 <a id="command-group-describe-desc"></a>
 
@@ -3460,6 +3516,9 @@ Options:
 | `--input`            | str     | no       |         | File or directory the document reads. Anything in it tracked with DVC is fetched as it was at each revision. Defaults to the inputs detected in the document. Repeat the option to pass more than one.                |
 | `--force`, `-f`      | boolean | no       | False   | Rebuild even if nothing the diff depends on has changed since it was last built.                                                                                                                                      |
 | `--keep-tex`         | boolean | no       | False   | Keep the old, new, and diff .tex files beside the diff PDF for inspection, e.g., .calkit/latex-diffs/v1/paper/main-old.tex.                                                                                           |
+| `--filter-script`    | str     | no       |         | Python script to pipe the marked-up document through before it's built, e.g., to drop changes that don't change the rendered text. It reads the document on stdin and writes the result to stdout.                    |
+| `--filter-env`       | str     | no       |         | Environment to run the filter script in. Defaults to Calkit's own Python.                                                                                                                                             |
+| `--filter-arg`       | str     | no       |         | Argument to pass to the filter script. Repeat the option to pass more than one.                                                                                                                                       |
 | `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                                                  |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                 |
 

@@ -547,6 +547,36 @@ def list_stages(
         typer.echo(name)
 
 
+@list_app.command(name="latex-diffs")
+def list_latex_diffs(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """List the LaTeX diffs the pipeline keeps and whether each is current."""
+    import calkit.latex
+
+    ck_info = calkit.load_calkit_info()
+    try:
+        diffs = calkit.latex.get_pipeline_diffs(ck_info, status=True)
+    except RuntimeError as e:
+        raise_error(f"Failed to determine diff status: {e}")
+    if json_output:
+        echo_json(diffs)
+        return
+    for diff in diffs:
+        _echo_object(
+            {
+                "path": diff["path"],
+                "document": diff["document"],
+                "from": diff["from_ref"],
+                "to": diff["to_ref"] or "working tree",
+                "stage": diff["stage"],
+                "status": diff["status"],
+            }
+        )
+
+
 @list_app.command(name="remotes")
 def list_remotes(
     json_output: Annotated[

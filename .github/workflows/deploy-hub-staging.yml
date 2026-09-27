@@ -80,6 +80,8 @@ jobs:
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       ZOTERO_CLIENT_KEY: ${{ secrets.ZOTERO_CLIENT_KEY }}
       ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
+      HF_CLIENT_ID: ${{ secrets.HF_CLIENT_ID }}
+      HF_CLIENT_SECRET: ${{ secrets.HF_CLIENT_SECRET }}
       GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
     steps:
       - name: Checkout

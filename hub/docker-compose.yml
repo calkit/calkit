@@ -118,6 +118,8 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
       - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+      - HF_CLIENT_ID=${HF_CLIENT_ID:-}
+      - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
 
   backend:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
@@ -178,6 +180,8 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
       - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+      - HF_CLIENT_ID=${HF_CLIENT_ID:-}
+      - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # Wipe stale per-worker metric files from a previous run so restarts
@@ -309,6 +313,8 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
       - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+      - HF_CLIENT_ID=${HF_CLIENT_ID:-}
+      - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     command: ["rq", "worker", "--url", "${REDIS_URL:-redis://cache:6379/0}", "warm"]
@@ -370,6 +376,8 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
       - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
       - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+      - HF_CLIENT_ID=${HF_CLIENT_ID:-}
+      - HF_CLIENT_SECRET=${HF_CLIENT_SECRET:-}
       - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # Wipe stale per-worker metric files from a previous run so restarts

@@ -852,6 +852,114 @@ def save_google_token(
     )
 
 
+HF_TOKEN_URL = "https://huggingface.co/oauth/token"
+
+
+def save_huggingface_token(
+    session: Session, user: User, hf_resp: dict[str, Any]
+) -> None:
+    """Save a Hugging Face OAuth token response, keeping the existing refresh
+    token and account details when the response doesn't include them.
+    """
+    existing = get_external_credential(
+        session=session, user=user, provider="huggingface"
+    )
+    refresh_token = hf_resp.get("refresh_token")
+    if not refresh_token and existing is not None:
+        refresh_token = json.loads(
+            decrypt_secret(existing.secret_payload)
+        ).get("refresh_token")
+    # The username and orgs are what storage can be created under
+    headers = {"Authorization": f"Bearer {hf_resp['access_token']}"}
+    resp = requests.get(
+        "https://huggingface.co/oauth/userinfo", headers=headers, timeout=15
+    )
+    if resp.ok:
+        info = resp.json()
+        username = info.get("preferred_username")
+        orgs = [
+            org.get("preferred_username")
+            for org in info.get("orgs", [])
+            if org.get("preferred_username")
+        ]
+        metadata = {"orgs": orgs}
+    elif existing is not None:
+        username = existing.provider_account_id
+        metadata = existing.metadata_json or {}
+    else:
+        raise HTTPException(502, "Failed to get Hugging Face account info")
+    expires_in = hf_resp.get("expires_in")
+    save_external_credential(
+        session=session,
+        user=user,
+        provider="huggingface",
+        secret_payload=json.dumps(
+            {
+                "access_token": hf_resp["access_token"],
+                "refresh_token": refresh_token,
+            }
+        ),
+        credential_type="oauth2",
+        scopes=hf_resp.get("scope"),
+        provider_account_id=username,
+        metadata_json=metadata,
+        expires=(
+            utcnow() + timedelta(seconds=int(expires_in))
+            if expires_in
+            else None
+        ),
+    )
+
+
+def get_huggingface_token(session: Session, user: User) -> str:
+    """Get a user's Hugging Face access token, refreshing it if needed."""
+    credential = get_external_credential(
+        session=session, user=user, provider="huggingface"
+    )
+    if credential is None:
+        raise HTTPException(
+            401, "User needs to authenticate with Hugging Face"
+        )
+    tokens = json.loads(decrypt_secret(credential.secret_payload))
+    needs_refresh = (
+        credential.expires is not None
+        and (utcnow() + timedelta(minutes=5)) >= credential.expires
+    )
+    if not needs_refresh:
+        return str(tokens["access_token"])
+    if not tokens.get("refresh_token"):
+        raise HTTPException(
+            401,
+            "Hugging Face token expired. Please reconnect your account.",
+        )
+    logger.info(f"Refreshing Hugging Face token for {user.email}")
+    resp = requests.post(
+        HF_TOKEN_URL,
+        data=dict(
+            grant_type="refresh_token",
+            refresh_token=tokens["refresh_token"],
+        ),
+        auth=(settings.HF_CLIENT_ID or "", settings.HF_CLIENT_SECRET or ""),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        logger.error(
+            f"Failed to refresh Hugging Face token for {user.email}: "
+            f"{resp.status_code} {resp.text[:200]}"
+        )
+        if resp.status_code in (400, 401):
+            session.delete(credential)
+            session.commit()
+        raise HTTPException(
+            401,
+            "Hugging Face token refresh failed. "
+            "Please reconnect your account.",
+        )
+    hf_resp = resp.json()
+    save_huggingface_token(session=session, user=user, hf_resp=hf_resp)
+    return str(hf_resp["access_token"])
+
+
 def save_zotero_request_token(
     session: Session, user: User, request_token: dict[str, str]
 ) -> None:

@@ -812,6 +812,15 @@ def set_remote_auth(
             f"Remote {remote_name} uses ck:// scheme; skipping HTTP auth setup"
         )
         return
+    # The token is the user's own, and a repo can point a remote named like
+    # the hub's anywhere, so it only goes to the hub it came from
+    base_url = calkit.hub.get_base_url().rstrip("/")
+    if remote_url != base_url and not remote_url.startswith(base_url + "/"):
+        logger.warning(
+            f"Not setting up authentication for DVC remote {remote_name}, "
+            f"since its URL ({remote_url}) isn't on the hub ({base_url})"
+        )
+        return
     settings = calkit.config.read()
     if settings.dvc_token is None or always_auth:
         logger.info("Creating token for DVC scope")

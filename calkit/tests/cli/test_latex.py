@@ -563,6 +563,10 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert not [p for p in os.listdir("paper") if "calkit-latex-diff" in p]
     with open("paper/main-diff.tex") as f:
         assert f.read() == "mine\n"
+    # A run that was killed leaves its checkout behind, which the next
+    # one clears away
+    dead_run = os.path.join(DIFF_TMP_DIR, "999999999")
+    os.makedirs(os.path.join(dead_run, "base"))
     # Two at once, e.g., from the editor while the pipeline runs, don't
     # build over each other
     procs = [
@@ -580,6 +584,7 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         assert proc.returncode == 0, stderr
         with open(f"at-once-{n}.pdf") as f:
             assert f.read() == "old\nnewest\n"
+    assert not os.path.exists(dead_run)
     os.remove(stubs / "latexmk-args.txt")
     os.remove(stubs / "latexdiff-args.txt")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)

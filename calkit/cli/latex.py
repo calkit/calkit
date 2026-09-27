@@ -1216,6 +1216,22 @@ def diff(
     # Per run, so diffs run at the same time, e.g., from the editor while
     # the pipeline runs, don't check out over each other
     run_dir = os.path.join(DIFF_TMP_DIR, str(os.getpid()))
+    # A run that was killed leaves its checkouts behind
+    import psutil
+
+    if os.path.isdir(DIFF_TMP_DIR):
+        for name in os.listdir(DIFF_TMP_DIR):
+            if name.isdigit() and not psutil.pid_exists(int(name)):
+                for side in ("base", "head"):
+                    _remove_worktree(os.path.join(DIFF_TMP_DIR, name, side))
+                shutil.rmtree(
+                    os.path.join(DIFF_TMP_DIR, name), ignore_errors=True
+                )
+        subprocess.call(
+            ["git", "worktree", "prune"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     working_copy = os.path.join(run_dir, "working")
     try:
         for name, ref in [("base", from_ref), ("head", to_ref)]:

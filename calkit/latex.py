@@ -245,6 +245,68 @@ def get_diff_stage_names(stage_name: str, stage: dict) -> list[str]:
     ]
 
 
+def get_pipeline_diffs(ck_info: dict, status: bool = False) -> list[dict]:
+    """Every diff the project's latex stages keep, with where each is.
+
+    ``to_ref`` is None for a bare revision, which is compared with the
+    working tree. Paths are in the project's frame rather than a stage's
+    ``wdir``.
+
+    With ``status``, each also says whether it's ``up to date``, ``stale``,
+    or ``not built``, which means compiling the pipeline and asking DVC.
+    """
+    diffs = []
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage in stages.items():
+        if not isinstance(stage, dict) or stage.get("kind") != "latex":
+            continue
+        wdir = stage.get("wdir") or ""
+        target = stage.get("target_path") or ""
+        for entry, (from_ref, to_ref) in zip(
+            stage.get("diffs") or [], get_diff_pairs(stage.get("diffs") or [])
+        ):
+            diffs.append(
+                {
+                    "path": Path(
+                        os.path.normpath(
+                            os.path.join(
+                                wdir, get_diff_path(target, from_ref, to_ref)
+                            )
+                        )
+                    ).as_posix(),
+                    "document": Path(
+                        os.path.normpath(os.path.join(wdir, target))
+                    ).as_posix(),
+                    "latex_stage": name,
+                    "stage": get_diff_stage_name(name, from_ref, to_ref),
+                    "from_ref": from_ref,
+                    "to_ref": None if isinstance(entry, str) else to_ref,
+                }
+            )
+    if status and diffs:
+        import calkit.pipeline
+
+        # Environments and notebooks don't decide whether a diff is stale,
+        # and checking them is the slow part
+        result = calkit.pipeline.get_status(
+            ck_info=ck_info,
+            targets=[diff["stage"] for diff in diffs],
+            check_environments=False,
+            clean_notebooks=False,
+        )
+        if result.errors:
+            raise RuntimeError("; ".join(result.errors))
+        stale = set(result.stale_stage_names)
+        for diff in diffs:
+            if not os.path.isfile(diff["path"]):
+                diff["status"] = "not built"
+            elif diff["stage"] in stale:
+                diff["status"] = "stale"
+            else:
+                diff["status"] = "up to date"
+    return diffs
+
+
 def diff_state_path(output: str) -> str:
     """Where the hash of a diff's marked-up source is remembered."""
     flat = Path(output).as_posix().replace("/", "-")

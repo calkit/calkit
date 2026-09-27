@@ -356,7 +356,7 @@ class PresignedUrlRequest(BaseModel):
 def post_presigned_url(
     current_user: CurrentUser, session: SessionDep, req: PresignedUrlRequest
 ):
-    from app.api.routes.projects import get_object_url
+    from app.storage import get_object_url
 
     if not current_user.is_superuser:
         raise HTTPException(403)

@@ -23,16 +23,16 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Literal
+from typing import Any, Literal
 
 import ruamel.yaml
 from pydantic import BaseModel, Field, ValidationError
 
 import calkit.notebooks
 from app import cache
-from app.dvc import get_data_fpath_for_md5
+from app.dvc import find_md5_object
 from app.git import RepoTree
-from app.storage import get_data_prefix_for_owner
+from app.storage import ProjectStorage
 
 logger = logging.getLogger(__name__)
 
@@ -128,17 +128,20 @@ def _hash_tree_file(tree: RepoTree, path: str) -> str | None:
 
 
 def _md5_in_object_storage(
-    md5: str | None, owner_name: str, project_name: str, fs
+    md5: str | None,
+    owner_name: str,
+    project_name: str,
+    storages: list[ProjectStorage],
 ) -> bool:
     if not md5:
         return False
     try:
         return (
-            get_data_fpath_for_md5(
+            find_md5_object(
                 owner_name=owner_name,
                 project_name=project_name,
                 md5=md5,
-                fs=fs,
+                storages=storages,
             )
             is not None
         )
@@ -148,7 +151,7 @@ def _md5_in_object_storage(
 
 
 def _list_stored_md5s(
-    owner_name: str, project_name: str, fs
+    owner_name: str, project_name: str, storages: list[ProjectStorage]
 ) -> set[str] | None:
     """Every md5 stored for a project, gathered by listing rather than probing.
 
@@ -160,48 +163,57 @@ def _list_stored_md5s(
 
     Returns None if a listing fails, so the caller can fall back to probing.
     """
-    # Mirrors the two layouts `make_data_fpath` writes: the current
-    # `<owner>/<project>/files/md5/<idx>/<rest>` and the legacy
-    # `<owner>/<project>/<idx>/<rest>`.
-    markers = [
-        (
-            f"{get_data_prefix_for_owner(owner_name)}/"
-            f"{project_name.lower()}/files/md5",
-            f"/{project_name.lower()}/files/md5/",
-        ),
-        (
-            f"{get_data_prefix_for_owner(owner_name, lowercase=False)}/"
-            f"{project_name}",
-            f"/{project_name}/",
-        ),
-    ]
     md5s: set[str] = set()
-    for prefix, marker in markers:
-        try:
-            keys = fs.find(prefix)
-        except FileNotFoundError:
-            # A project that has never pushed under this layout.
-            continue
-        except Exception as e:
-            logger.warning(f"Failed to list object storage at {prefix}: {e}")
-            return None
-        for key in keys:
-            # Split on the marker rather than the prefix: `fs.find` returns
-            # keys without the scheme the prefix carries.
-            _, sep, rel = key.partition(marker)
-            if not sep:
+    for storage in storages:
+        # Mirrors `app.dvc.make_md5_fpaths`: the current
+        # `<owner>/<project>/files/md5/<idx>/<rest>` and, in the hub's own
+        # storage, the legacy `<owner>/<project>/<idx>/<rest>`
+        markers = [
+            (
+                storage.make_project_path(
+                    owner_name, project_name, "files/md5"
+                ),
+                f"/{project_name.lower()}/files/md5/",
+            )
+        ]
+        if storage.resource is None:
+            markers.append(
+                (
+                    f"{storage.data_prefix}/{owner_name}/{project_name}",
+                    f"/{project_name}/",
+                )
+            )
+        for prefix, marker in markers:
+            try:
+                keys = storage.fs.find(prefix)
+            except FileNotFoundError:
+                # A project that has never pushed under this layout.
                 continue
-            parts = rel.strip("/").split("/")
-            # Exactly <idx>/<rest>. Anything deeper is the current layout
-            # showing up underneath the legacy prefix, which the first marker
-            # already covered.
-            if len(parts) == 2:
-                md5s.add(parts[0] + parts[1])
+            except Exception as e:
+                logger.warning(
+                    f"Failed to list object storage at {prefix}: {e}"
+                )
+                return None
+            for key in keys:
+                # Split on the marker rather than the prefix: `fs.find`
+                # returns keys without the scheme the prefix carries.
+                _, sep, rel = key.partition(marker)
+                if not sep:
+                    continue
+                parts = rel.strip("/").split("/")
+                # Exactly <idx>/<rest>. Anything deeper is the current layout
+                # showing up underneath the legacy prefix, which the first
+                # marker already covered.
+                if len(parts) == 2:
+                    md5s.add(parts[0] + parts[1])
     return md5s
 
 
 def _precompute_storage_presence(
-    dvc_lock: dict, owner_name: str, project_name: str, fs
+    dvc_lock: dict[str, Any],
+    owner_name: str,
+    project_name: str,
+    storages: list[ProjectStorage],
 ) -> dict[str, bool]:
     """Existence in object storage for every dep/out md5.
 
@@ -216,7 +228,7 @@ def _precompute_storage_presence(
                 md5s.add(m)
     if not md5s:
         return {}
-    stored = _list_stored_md5s(owner_name, project_name, fs)
+    stored = _list_stored_md5s(owner_name, project_name, storages)
     if stored is not None:
         return {m: m in stored for m in md5s}
     # Listing failed; fall back to probing each md5 concurrently.
@@ -226,7 +238,7 @@ def _precompute_storage_presence(
         results = ex.map(
             lambda m: (
                 m,
-                _md5_in_object_storage(m, owner_name, project_name, fs),
+                _md5_in_object_storage(m, owner_name, project_name, storages),
             ),
             md5s,
         )
@@ -493,7 +505,7 @@ def compute_stage_statuses(
     tree: RepoTree,
     owner_name: str,
     project_name: str,
-    fs=None,
+    storages: list[ProjectStorage] | None = None,
     cache_token: str | None = None,
 ) -> dict[str, StageStatus]:
     """Compute per-stage status for a pipeline.
@@ -510,8 +522,8 @@ def compute_stage_statuses(
     the ``dvc.lock`` bytes alone do NOT (a dep can change while the lock stays
     the same, which is exactly what staleness detects).
 
-    ``fs`` is the object-storage filesystem used to check output presence;
-    when omitted it defaults to ``get_object_fs()``.
+    ``storages`` are where to check output presence, in order; when omitted
+    it's just the hub's own storage.
     """
     cache_key = _build_stage_status_cache_key(
         owner_name, project_name, cache_token
@@ -520,10 +532,10 @@ def compute_stage_statuses(
         hit = _stage_status_cache_get(cache_key)
         if hit is not None:
             return hit
-    if fs is None:
-        from app.storage import get_object_fs
+    if storages is None:
+        from app.storage import get_internal_storage
 
-        fs = get_object_fs()
+        storages = [get_internal_storage()]
     lock_stages = dvc_lock.get("stages") or {}
     yaml_stages = dvc_yaml.get("stages") or {}
     current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
@@ -532,7 +544,7 @@ def compute_stage_statuses(
     )
     outs_index = _build_outs_index(live_lock_stages)
     presence = _precompute_storage_presence(
-        {"stages": live_lock_stages}, owner_name, project_name, fs
+        {"stages": live_lock_stages}, owner_name, project_name, storages
     )
     # DVC outputs that calkit stores as a zip live under .calkit/zip/, not at
     # the standard files/md5 object path, so the md5 presence check above can't

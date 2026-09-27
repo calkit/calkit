@@ -55,6 +55,8 @@ dependencies = [
   # with no system packages behind it.
   "pillow>=11.0.0",
   "pypdfium2>=4.30.0",
+  # Hugging Face storage for project DVC objects; buckets need 1.5+
+  "huggingface-hub>=1.5.0",
 ]
 
 [dependency-groups]

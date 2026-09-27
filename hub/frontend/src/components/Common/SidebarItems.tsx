@@ -14,6 +14,7 @@ import {
   FiHome,
   FiImage,
   FiMonitor,
+  FiSettings,
   FiTag,
   FiUsers,
 } from "react-icons/fi"
@@ -61,6 +62,12 @@ export const projectNavItems: ProjectNavItem[] = [
     icon: FaLaptop,
     title: "Local machine",
     path: "/local",
+    requiresLogin: true,
+  },
+  {
+    icon: FiSettings,
+    title: "Settings",
+    path: "/settings",
     requiresLogin: true,
   },
 ]

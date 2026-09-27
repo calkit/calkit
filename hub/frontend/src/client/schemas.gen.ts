@@ -655,6 +655,11 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Zotero",
     },
+    huggingface: {
+      type: "boolean",
+      title: "Huggingface",
+      default: false,
+    },
     cli: {
       type: "boolean",
       title: "Cli",
@@ -2786,7 +2791,7 @@ export const FsOpRequestSchema = {
   properties: {
     operation: {
       type: "string",
-      enum: ["get", "put", "exists", "list", "find", "info"],
+      enum: ["get", "put", "exists", "list", "find", "info", "register"],
       title: "Operation",
     },
     path: {
@@ -2820,6 +2825,18 @@ export const FsOpRequestSchema = {
       title: "Detail",
       default: false,
     },
+    xet_hash: {
+      anyOf: [
+        {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Xet Hash",
+    },
   },
   type: "object",
   required: ["operation", "path"],
@@ -2852,10 +2869,14 @@ export const FsOpResponseSchema = {
             {
               $ref: "#/components/schemas/SftpAccess",
             },
+            {
+              $ref: "#/components/schemas/XetAccess",
+            },
           ],
           discriminator: {
             propertyName: "kind",
             mapping: {
+              "hf-xet": "#/components/schemas/XetAccess",
               "http-request": "#/components/schemas/HttpRequestAccess",
               "presigned-chunked":
                 "#/components/schemas/PresignedChunkedAccess",
@@ -3429,6 +3450,60 @@ export const HubVersionSchema = {
   type: "object",
   required: ["version"],
   title: "HubVersion",
+} as const
+
+export const HuggingFaceAccountSchema = {
+  properties: {
+    username: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Username",
+    },
+    orgs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Orgs",
+    },
+  },
+  type: "object",
+  required: ["username", "orgs"],
+  title: "HuggingFaceAccount",
+} as const
+
+export const HuggingFaceAuthStartSchema = {
+  properties: {
+    authorize_url: {
+      type: "string",
+      title: "Authorize Url",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+  },
+  type: "object",
+  required: ["authorize_url", "redirect_uri"],
+  title: "HuggingFaceAuthStart",
+} as const
+
+export const HuggingFaceAuthStartRequestSchema = {
+  properties: {
+    state: {
+      type: "string",
+      title: "State",
+    },
+  },
+  type: "object",
+  required: ["state"],
+  title: "HuggingFaceAuthStartRequest",
 } as const
 
 export const ImportInfoSchema = {
@@ -6579,6 +6654,50 @@ export const ProjectStatusPostSchema = {
   title: "ProjectStatusPost",
 } as const
 
+export const ProjectStoragePutSchema = {
+  properties: {
+    dvc_storage_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dvc Storage Name",
+    },
+  },
+  type: "object",
+  required: ["dvc_storage_name"],
+  title: "ProjectStoragePut",
+} as const
+
+export const ProjectStorageSettingsSchema = {
+  properties: {
+    dvc: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StorageResourcePublic",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    previous: {
+      items: {
+        $ref: "#/components/schemas/StorageResourcePublic",
+      },
+      type: "array",
+      title: "Previous",
+    },
+  },
+  type: "object",
+  required: ["dvc", "previous"],
+  title: "ProjectStorageSettings",
+} as const
+
 export const ProjectsPublicSchema = {
   properties: {
     data: {
@@ -9565,6 +9684,59 @@ export const StageStatusSchema = {
   title: "StageStatus",
 } as const
 
+export const StorageResourcePostSchema = {
+  properties: {
+    name: {
+      type: "string",
+      maxLength: 64,
+      minLength: 2,
+      pattern: "^[a-z0-9][a-z0-9-]*$",
+      title: "Name",
+    },
+    kind: {
+      type: "string",
+      pattern: "^hf-bucket$",
+      title: "Kind",
+    },
+    bucket: {
+      type: "string",
+      title: "Bucket",
+    },
+  },
+  type: "object",
+  required: ["name", "kind", "bucket"],
+  title: "StorageResourcePost",
+} as const
+
+export const StorageResourcePublicSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    bucket: {
+      type: "string",
+      title: "Bucket",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    connected_by: {
+      type: "string",
+      title: "Connected By",
+    },
+  },
+  type: "object",
+  required: ["name", "kind", "bucket", "created", "connected_by"],
+  title: "StorageResourcePublic",
+} as const
+
 export const StorageUsageSchema = {
   properties: {
     limit_gb: {
@@ -10674,6 +10846,61 @@ export const ValidationErrorSchema = {
   type: "object",
   required: ["loc", "msg", "type"],
   title: "ValidationError",
+} as const
+
+export const XetAccessSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      const: "hf-xet",
+      title: "Kind",
+      default: "hf-xet",
+    },
+    operation: {
+      type: "string",
+      enum: ["upload", "download"],
+      title: "Operation",
+    },
+    cas_url: {
+      type: "string",
+      title: "Cas Url",
+    },
+    access_token: {
+      type: "string",
+      title: "Access Token",
+    },
+    expires_at_unix: {
+      type: "integer",
+      title: "Expires At Unix",
+    },
+    xet_hash: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Xet Hash",
+    },
+    size: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Size",
+    },
+  },
+  type: "object",
+  required: ["operation", "cas_url", "access_token", "expires_at_unix"],
+  title: "XetAccess",
+  description:
+    "Access to Hugging Face storage through the Xet protocol.\n\nThe client uploads or downloads content with ``hf_xet`` using this\nshort-lived token. After an upload, the client sends a ``register``\noperation with the returned Xet hash so the hub can add the path to the\nbucket, which the token alone can't do.",
 } as const
 
 export const ZoteroAuthFinishSchema = {

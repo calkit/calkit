@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+import urllib.parse
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Literal, Sequence
@@ -732,6 +733,7 @@ class ConnectedAccounts(BaseModel):
     overleaf: bool
     google: bool
     zotero: bool
+    huggingface: bool = False
     # Whether a Calkit CLI has ever authenticated as this user, which is the
     # only reliable way to know the CLI is installed: the local server it
     # would otherwise be detected by is usually not running.
@@ -794,12 +796,19 @@ def get_user_connected_accounts(
         ).one()
         > 0
     )
+    huggingface_connected = False
+    try:
+        users.get_huggingface_token(session=session, user=current_user)
+        huggingface_connected = True
+    except HTTPException:
+        pass
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
         overleaf=overleaf_connected,
         google=google_connected,
         zotero=zotero_cred is not None,
+        huggingface=huggingface_connected,
         cli=cli_connected,
     )
 
@@ -875,6 +884,98 @@ class TokenPut(BaseModel):
 class OAuthCodeExchange(BaseModel):
     code: str
     redirect_uri: str
+
+
+class HuggingFaceAuthStartRequest(BaseModel):
+    # Generated and checked by the browser, for CSRF protection
+    state: str
+
+
+class HuggingFaceAuthStart(BaseModel):
+    authorize_url: str
+    redirect_uri: str
+
+
+# Enough to create and write to the bucket Calkit uses. To verify:
+# ``contribute-repos`` would limit this to repos Calkit creates, if it
+# covers buckets.
+HF_OAUTH_SCOPES = "openid profile manage-repos"
+
+
+@router.post("/user/huggingface-auth/start")
+def post_user_huggingface_auth_start(
+    current_user: CurrentUser, req: HuggingFaceAuthStartRequest
+) -> HuggingFaceAuthStart:
+    """Get the URL to send the user to for connecting Hugging Face.
+
+    It's built here since the client ID is only configured on the backend.
+    """
+    if not settings.HF_CLIENT_ID:
+        raise HTTPException(501, "Hugging Face isn't configured on this hub")
+    redirect_uri = f"{settings.frontend_host.rstrip('/')}/auth/huggingface"
+    params = urllib.parse.urlencode(
+        dict(
+            client_id=settings.HF_CLIENT_ID,
+            redirect_uri=redirect_uri,
+            scope=HF_OAUTH_SCOPES,
+            state=req.state,
+            response_type="code",
+        )
+    )
+    return HuggingFaceAuthStart(
+        authorize_url=f"https://huggingface.co/oauth/authorize?{params}",
+        redirect_uri=redirect_uri,
+    )
+
+
+@router.post("/user/huggingface-auth")
+def post_user_huggingface_auth(
+    session: SessionDep,
+    current_user: CurrentUser,
+    req: OAuthCodeExchange,
+) -> Message:
+    """Connect Hugging Face using an authorization code."""
+    if not settings.HF_CLIENT_ID or not settings.HF_CLIENT_SECRET:
+        raise HTTPException(501, "Hugging Face isn't configured on this hub")
+    resp = requests.post(
+        users.HF_TOKEN_URL,
+        data=dict(
+            grant_type="authorization_code",
+            code=req.code,
+            redirect_uri=req.redirect_uri,
+        ),
+        auth=(settings.HF_CLIENT_ID, settings.HF_CLIENT_SECRET),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        logger.error(
+            f"Hugging Face auth failed: {resp.status_code} {resp.text[:200]}"
+        )
+        raise HTTPException(400, "Failed to authenticate with Hugging Face")
+    users.save_huggingface_token(
+        session=session, user=current_user, hf_resp=resp.json()
+    )
+    return Message(message="success")
+
+
+class HuggingFaceAccount(BaseModel):
+    username: str | None
+    # Namespaces the user granted access to, where storage can be created
+    orgs: list[str]
+
+
+@router.get("/user/huggingface-account")
+def get_user_huggingface_account(
+    session: SessionDep, current_user: CurrentUser
+) -> HuggingFaceAccount:
+    # Validates, and refreshes if needed
+    users.get_huggingface_token(session=session, user=current_user)
+    credential = current_user.get_external_credential(provider="huggingface")
+    assert credential is not None
+    return HuggingFaceAccount(
+        username=credential.provider_account_id,
+        orgs=(credential.metadata_json or {}).get("orgs", []),
+    )
 
 
 @router.put("/user/overleaf-token")

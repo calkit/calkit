@@ -1,8 +1,10 @@
 """Functionality for managing object storage."""
 
 import json
+import logging
 import os
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
 
 import boto3
 import cachetools
@@ -13,6 +15,13 @@ from google.cloud import storage as gcs
 from google.oauth2 import service_account as gcs_service_account
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from sqlmodel import Session
+
+    from app.models import Project, StorageResource
 
 # Multipart/chunked upload configuration
 MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024  # 64 MB
@@ -305,6 +314,213 @@ def get_object_url(
     if signed_url is None:
         raise RuntimeError("Failed to generate presigned URL")
     return _replace_local_object_host(signed_url)
+
+
+HF_ENDPOINT = "https://huggingface.co"
+
+
+@dataclass
+class ProjectStorage:
+    """Where a project's DVC objects live in one storage backend.
+
+    A project's objects are under ``{data_prefix}/{owner}/{project}`` in
+    ``fs``.
+    """
+
+    backend: Literal["s3", "gcs", "hf"]
+    fs: Any
+    data_prefix: str
+    resource: "StorageResource | None" = None
+    # Owner's credential for the backend, when the hub holds one
+    token: str | None = None
+
+    def make_project_path(
+        self, owner_name: str, project_name: str, path: str = ""
+    ) -> str:
+        base = (
+            f"{self.data_prefix}/{owner_name.lower()}/{project_name.lower()}"
+        )
+        return f"{base}/{path}" if path else base
+
+
+def get_internal_storage() -> ProjectStorage:
+    """Get the hub's own object storage."""
+    return ProjectStorage(
+        backend=get_backend(),
+        fs=get_object_fs(),
+        data_prefix=get_data_prefix(),
+    )
+
+
+def get_resource_storage(
+    session: "Session", resource: "StorageResource"
+) -> ProjectStorage:
+    """Get the storage for an external storage resource."""
+    from huggingface_hub import HfFileSystem
+
+    import app.users
+
+    if resource.kind != "hf-bucket":
+        raise ValueError(f"Unsupported storage kind: {resource.kind}")
+    token = app.users.get_huggingface_token(
+        session=session, user=resource.credential_user
+    )
+    # Skip fsspec's instance cache so listings aren't stale across requests
+    fs = HfFileSystem(token=token, skip_instance_cache=True)
+    return ProjectStorage(
+        backend="hf",
+        fs=fs,
+        data_prefix=f"buckets/{resource.bucket}",
+        resource=resource,
+        token=token,
+    )
+
+
+def get_project_storages(
+    session: "Session", project: "Project"
+) -> list[ProjectStorage]:
+    """Get every storage a project's DVC objects may be in, for reading.
+
+    Objects aren't moved when a project switches storage, so reads should
+    fall back through these in order: the current storage, the project's
+    previous storage resources, newest first, then the hub's own storage.
+    Storage that can't be reached right now, e.g., because the account that
+    connected it disconnected Hugging Face, is skipped so everything else
+    stays readable. New objects go to ``get_project_storage``.
+    """
+    from fastapi import HTTPException
+
+    resources = []
+    if project.dvc_storage is not None:
+        resources.append(project.dvc_storage)
+    for record in sorted(
+        project.storage_history, key=lambda r: r.first_used, reverse=True
+    ):
+        if record.storage_resource_id != project.dvc_storage_id:
+            resources.append(record.storage_resource)
+    storages = []
+    for resource in resources:
+        try:
+            storages.append(get_resource_storage(session, resource))
+        except HTTPException as e:
+            logger.warning(
+                f"Skipping unavailable storage {resource.name} "
+                f"({resource.bucket}): {e.detail}"
+            )
+    internal = get_internal_storage()
+    if project.dvc_storage is None:
+        return [internal] + storages
+    return storages + [internal]
+
+
+def get_project_storage(
+    session: "Session", project: "Project"
+) -> ProjectStorage:
+    """Get the storage new DVC objects for a project should go to.
+
+    Unlike reads, this fails if that storage can't be reached, rather than
+    putting objects somewhere else.
+    """
+    if project.dvc_storage is None:
+        return get_internal_storage()
+    return get_resource_storage(session, project.dvc_storage)
+
+
+def find_project_object(
+    session: "Session",
+    project: "Project",
+    path: str,
+    storages: list[ProjectStorage] | None = None,
+) -> tuple[ProjectStorage, str] | None:
+    """Find which of a project's storages holds an object.
+
+    Returns the storage and the object's full path in it, or ``None`` if no
+    storage has it.
+    """
+    if storages is None:
+        storages = get_project_storages(session, project)
+    owner_name = project.owner_account_name
+    for storage in storages:
+        fpath = storage.make_project_path(owner_name, project.name, path)
+        if storage.fs.exists(fpath):
+            return storage, fpath
+    return None
+
+
+def get_xet_token(
+    storage: ProjectStorage, token_type: Literal["read", "write"]
+) -> dict[str, Any]:
+    """Get a short-lived Xet token for an HF bucket.
+
+    It's scoped to the one bucket, so it can be handed to any client with
+    access to the project. It can upload and download content, but only the
+    owner's credential can add paths to the bucket.
+    """
+    import requests
+
+    assert storage.resource is not None
+    resp = requests.get(
+        f"{HF_ENDPOINT}/api/buckets/{storage.resource.bucket}"
+        f"/xet-{token_type}-token",
+        headers={"Authorization": f"Bearer {storage.token}"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    token: dict[str, Any] = resp.json()
+    return token
+
+
+def post_hf_bucket_batch(
+    storage: ProjectStorage, ops: list[dict[str, Any]]
+) -> None:
+    """Add or delete files in an HF bucket with the owner's credential."""
+    import requests
+
+    assert storage.resource is not None
+    data = b"".join(json.dumps(op).encode() + b"\n" for op in ops)
+    resp = requests.post(
+        f"{HF_ENDPOINT}/api/buckets/{storage.resource.bucket}/batch",
+        headers={
+            "Authorization": f"Bearer {storage.token}",
+            "Content-Type": "application/x-ndjson",
+        },
+        data=data,
+        timeout=60,
+    )
+    resp.raise_for_status()
+
+
+def get_hf_object_url(storage: ProjectStorage, fpath: str) -> str:
+    """Get a short-lived URL a browser can download an HF bucket object from.
+
+    HF redirects authenticated requests to a signed CDN URL, which is what
+    gets returned, so the owner's credential never leaves the hub.
+    """
+    import requests
+
+    assert storage.resource is not None
+    path_in_bucket = fpath.removeprefix(f"{storage.data_prefix}/")
+    resp = requests.get(
+        f"{HF_ENDPOINT}/buckets/{storage.resource.bucket}"
+        f"/resolve/{path_in_bucket}",
+        headers={"Authorization": f"Bearer {storage.token}"},
+        allow_redirects=False,
+        timeout=15,
+    )
+    if resp.status_code not in (301, 302, 303, 307, 308):
+        raise RuntimeError(
+            f"Failed to get URL for {fpath}: {resp.status_code}"
+        )
+    return str(resp.headers["Location"])
+
+
+def get_project_object_url(
+    storage: ProjectStorage, fpath: str, fname: str | None = None
+) -> str:
+    """Get a URL a browser can download a project object from."""
+    if storage.backend == "hf":
+        return get_hf_object_url(storage, fpath)
+    return get_object_url(fpath, fname=fname, fs=storage.fs)
 
 
 def get_multipart_upload_info(

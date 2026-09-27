@@ -8,15 +8,16 @@ import os
 import subprocess
 import sys
 import tempfile
-from functools import lru_cache
+import threading
 from typing import Any
 
+import cachetools
 import ruamel.yaml
 from dvc.commands import dag
 from dvc.repo import Repo
 
 import calkit.dvc
-from app.storage import get_object_fs, make_data_fpath
+from app.storage import ProjectStorage, get_internal_storage
 
 logging.basicConfig(level=logging.INFO)
 
@@ -47,27 +48,34 @@ def run_dvc_command(args: list[str], wdir: str, check: bool = False) -> int:
     return subprocess.call(cmd, cwd=wdir)
 
 
-@lru_cache(maxsize=512)
-def _read_dvc_dir(dvc_dir_path: str) -> Any:
-    """Read a DVC .dir object, raising FileNotFoundError if it isn't there.
+# .dir contents by full object path, which differs per storage. Only the
+# contents are kept, never a filesystem, whose credentials may expire.
+_dvc_dir_cache: cachetools.LRUCache[str, list[dict[str, Any]]] = (
+    cachetools.LRUCache[str, list[dict[str, Any]]](maxsize=512)
+)
+_dvc_dir_cache_lock = threading.Lock()
 
-    Raises rather than returning None so the miss isn't cached, since
-    lru_cache doesn't memoize exceptions and the object may yet be pushed.
+
+def read_dvc_dir_cached(
+    fs: Any, dvc_dir_path: str
+) -> list[dict[str, Any]] | None:
+    """Read a DVC .dir object, caching its contents by path.
+
+    Returns None if it doesn't exist, which isn't cached since the object
+    may yet be pushed.
     """
-    fs = get_object_fs()
-    with fs.open(dvc_dir_path) as f:
-        return json.load(f)
-
-
-def read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
-    """Cache DVC .dir file contents by path.
-
-    Returns None if file doesn't exist.
-    """
+    with _dvc_dir_cache_lock:
+        contents = _dvc_dir_cache.get(dvc_dir_path)
+    if contents is not None:
+        return contents
     try:
-        return _read_dvc_dir(dvc_dir_path)
+        with fs.open(dvc_dir_path) as f:
+            loaded: list[dict[str, Any]] = json.load(f)
     except FileNotFoundError:
         return None
+    with _dvc_dir_cache_lock:
+        _dvc_dir_cache[dvc_dir_path] = loaded
+    return loaded
 
 
 def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
@@ -128,15 +136,36 @@ def output_from_pipeline(
         return outs[0]
 
 
-def get_data_fpath_for_md5(
+def make_md5_fpaths(
+    storage: ProjectStorage, owner_name: str, project_name: str, md5: str
+) -> list[str]:
+    """Paths a DVC object may be at in one storage, current layout first.
+
+    Only the hub's own storage has objects in the legacy layout, without
+    ``files/md5``.
+    """
+    idx, rest = md5[:2], md5[2:]
+    fpaths = [
+        storage.make_project_path(
+            owner_name, project_name, f"files/md5/{idx}/{rest}"
+        )
+    ]
+    if storage.resource is None:
+        fpaths.append(
+            f"{storage.data_prefix}/{owner_name}/{project_name}/{idx}/{rest}"
+        )
+    return fpaths
+
+
+def find_md5_object(
     owner_name: str,
     project_name: str,
     md5: str,
-    fs=None,
-) -> str | None:
-    """Return the first existing object-storage path for a DVC MD5.
+    storages: list[ProjectStorage] | None = None,
+) -> tuple[ProjectStorage, str] | None:
+    """Find the first storage holding a DVC object, and its path there.
 
-    Supports both the current `files/md5` layout and the legacy layout.
+    Storages are tried in order, defaulting to just the hub's own.
 
     Deliberately uncached: the result feeds pipeline staleness checks, where
     an object that has gone away must be observed as missing. Callers that
@@ -144,31 +173,15 @@ def get_data_fpath_for_md5(
     """
     if not md5 or len(md5) < 3:
         return None
-    if fs is None:
-        fs = get_object_fs()
-    idx = md5[:2]
-    candidates = [
-        make_data_fpath(
-            owner_name=owner_name,
-            project_name=project_name,
-            idx=idx,
-            md5=md5[2:],
-            legacy=False,
-        ),
-        make_data_fpath(
-            owner_name=owner_name,
-            project_name=project_name,
-            idx=idx,
-            md5=md5[2:],
-            legacy=True,
-        ),
-    ]
-    for candidate in candidates:
-        try:
-            if fs.exists(candidate):
-                return candidate
-        except Exception as e:
-            logger.warning(f"Failed existence check for {candidate}: {e}")
+    if storages is None:
+        storages = [get_internal_storage()]
+    for storage in storages:
+        for fpath in make_md5_fpaths(storage, owner_name, project_name, md5):
+            try:
+                if storage.fs.exists(fpath):
+                    return storage, fpath
+            except Exception as e:
+                logger.warning(f"Failed existence check for {fpath}: {e}")
     return None
 
 
@@ -187,12 +200,13 @@ def expand_dvc_lock_outs(
     owner_name: str,
     project_name: str,
     get_sizes: bool = False,
-    fs=None,
+    storages: list[ProjectStorage] | None = None,
 ) -> dict:
     """Expand all outs in a DVC lock file.
 
     Will only pick up those in object storage, i.e., not ones that are
-    committed to Git.
+    committed to Git. Objects are looked up in ``storages`` in order,
+    defaulting to just the hub's own.
 
     Output dictionary structure will look like:
 
@@ -224,83 +238,68 @@ def expand_dvc_lock_outs(
         }
 
     """
-    if fs is None:
-        fs = get_object_fs()
+    if storages is None:
+        storages = [get_internal_storage()]
     stages = dvc_lock.get("stages", {})
     dvc_lock_outs = {}
-    # Collect all unique .dir md5s upfront, along with the "modern" (non-
-    # legacy) object-storage path candidate for each. We read these in
-    # parallel; a separate parallel pass falls back to legacy paths only
-    # for md5s whose modern path is missing, so we never pay the serial
-    # 2x-fs.exists cost per directory that `get_data_fpath_for_md5` used to.
+    # Collect all unique .dir md5s upfront, along with every path each may
+    # be at: each storage's current layout, then its legacy one
     dir_md5s: set[str] = set()
     for stage_name, stage in stages.items():
         for out in stage.get("outs", []):
             md5 = out.get("md5", "")
             if md5 and md5.endswith(".dir"):
                 dir_md5s.add(md5)
-    md5_to_candidate: dict[str, str] = {
-        md5: make_data_fpath(
-            owner_name=owner_name,
-            project_name=project_name,
-            idx=md5[:2],
-            md5=md5[2:],
-            legacy=False,
-        )
-        for md5 in dir_md5s
-    }
-    md5_to_legacy: dict[str, str] = {
-        md5: make_data_fpath(
-            owner_name=owner_name,
-            project_name=project_name,
-            idx=md5[:2],
-            md5=md5[2:],
-            legacy=True,
-        )
+    md5_to_candidates: dict[str, list[tuple[Any, str]]] = {
+        md5: [
+            (storage.fs, fpath)
+            for storage in storages
+            for fpath in make_md5_fpaths(
+                storage, owner_name, project_name, md5
+            )
+        ]
         for md5 in dir_md5s
     }
 
-    def _try_read(path: str) -> list[dict] | None:
+    def _try_read(candidate: tuple[Any, str]) -> list[dict[str, Any]] | None:
+        fs, path = candidate
         try:
-            return read_dvc_dir_cached(path)
+            return read_dvc_dir_cached(fs, path)
         except Exception as e:
             logger.warning(f"Failed to read {path}: {e}")
             return None
 
-    md5_to_contents: dict[str, list[dict]] = {}
-    if dir_md5s:
+    # Read candidates in rounds, in parallel within each, so a later
+    # candidate is only tried for md5s every earlier one missed, and we never
+    # pay a serial existence check per candidate per directory
+    md5_to_contents: dict[str, list[dict[str, Any]]] = {}
+    missing = sorted(dir_md5s)
+    n_candidates = max((len(c) for c in md5_to_candidates.values()), default=0)
+    for i in range(n_candidates):
+        if not missing:
+            break
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            results = list(executor.map(_try_read, md5_to_candidate.values()))
-        for md5, contents in zip(md5_to_candidate.keys(), results):
+            results = list(
+                executor.map(
+                    _try_read, (md5_to_candidates[md5][i] for md5 in missing)
+                )
+            )
+        for md5, contents in zip(missing, results):
             if contents is not None:
                 md5_to_contents[md5] = contents
-        missing = [md5 for md5 in dir_md5s if md5 not in md5_to_contents]
-        if missing:
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=10
-            ) as executor:
-                legacy_results = list(
-                    executor.map(
-                        _try_read, (md5_to_legacy[md5] for md5 in missing)
-                    )
-                )
-            for md5, contents in zip(missing, legacy_results):
-                if contents is not None:
-                    md5_to_contents[md5] = contents
+        missing = [md5 for md5 in missing if md5 not in md5_to_contents]
     dvc_md5_sizes: dict[str, int | None] = {}
-    md5_to_data_fpath: dict[str, str | None] = {}
+    md5_to_object: dict[str, tuple[ProjectStorage, str] | None] = {}
 
-    def _resolve_data_fpath(md5: str) -> str | None:
-        if md5 in md5_to_data_fpath:
-            return md5_to_data_fpath[md5]
-        resolved = get_data_fpath_for_md5(
-            owner_name=owner_name,
-            project_name=project_name,
-            md5=md5,
-            fs=fs,
-        )
-        md5_to_data_fpath[md5] = resolved
-        return resolved
+    def _find_object(md5: str) -> tuple[ProjectStorage, str] | None:
+        if md5 not in md5_to_object:
+            md5_to_object[md5] = find_md5_object(
+                owner_name=owner_name,
+                project_name=project_name,
+                md5=md5,
+                storages=storages,
+            )
+        return md5_to_object[md5]
 
     for stage_name, stage in stages.items():
         for out in stage.get("outs", []):
@@ -329,12 +328,13 @@ def expand_dvc_lock_outs(
                         subdir = os.path.dirname(relpath)
                         md5 = dvc_obj.get("md5")
                         if get_sizes and md5 not in dvc_md5_sizes:
-                            fpath_i = _resolve_data_fpath(md5)
-                            if fpath_i is None:
+                            found = _find_object(md5) if md5 else None
+                            if found is None:
                                 dvc_md5_sizes[md5] = None
                                 continue
+                            storage_i, fpath_i = found
                             try:
-                                size = fs.size(fpath_i)
+                                size = storage_i.fs.size(fpath_i)
                             except Exception as e:
                                 logger.warning(
                                     f"Failed to get size for {fpath_i}: {e}"
@@ -417,31 +417,3 @@ def drop_stale_lock_stages(
     if len(kept) == len(stages):
         return dvc_lock
     return {**dvc_lock, "stages": kept}
-
-
-def object_fpath_for_out(
-    owner_name: str,
-    project_name: str,
-    dvc_out: dict[str, Any],
-    fs: Any,
-) -> str | None:
-    """Where a DVC output's bytes sit in storage, or None if not pushed.
-
-    An output imported from another Calkit project is a pointer whose
-    ``remote`` names that project (``calkit:owner/project``) and is
-    ``push: false``, so its bytes only ever live in the source project's
-    storage. That is where such a lookup goes; anything else is looked up
-    in this project's storage.
-    """
-    md5 = dvc_out.get("md5")
-    if not md5:
-        return None
-    remote = str(dvc_out.get("remote") or "")
-    if remote.startswith("calkit:") and "/" in remote:
-        owner_name, project_name = remote[len("calkit:") :].split("/", 1)
-    return get_data_fpath_for_md5(
-        owner_name=owner_name,
-        project_name=project_name,
-        md5=md5,
-        fs=fs,
-    )

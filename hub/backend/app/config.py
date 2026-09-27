@@ -341,6 +341,9 @@ class Settings(BaseSettings):
     # Zotero, which uses OAuth 1.0a, hence key/secret instead of ID/secret
     ZOTERO_CLIENT_KEY: str
     ZOTERO_CLIENT_SECRET: str
+    # Hugging Face, for connecting HF storage; unset disables it
+    HF_CLIENT_ID: str | None = None
+    HF_CLIENT_SECRET: str | None = None
 
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":

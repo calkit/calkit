@@ -3,6 +3,7 @@
 import os
 import subprocess
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -399,3 +400,108 @@ def test_calkitfilesystem_dvc_staging(monkeypatch, tmp_dir):
     subprocess.run(["calkit", "dvc", "add", "data.txt"], check=True)
     subprocess.run(["calkit", "dvc", "push"], check=True)
     subprocess.run(["calkit", "dvc", "pull"], check=True)
+
+
+def test_xet_transfers(tmp_path: Path) -> None:
+    import hashlib
+    from types import SimpleNamespace
+    from typing import Any
+
+    content = b"some DVC object content"
+    md5 = hashlib.md5(content).hexdigest()
+    obj_path = f"files/md5/{md5[:2]}/{md5[2:]}"
+    stored: dict[str, bytes] = {}
+
+    def upload_files(paths: list[str], *a: Any, **k: Any) -> list[Any]:
+        with open(paths[0], "rb") as f:
+            stored["xethash"] = f.read()
+        return [SimpleNamespace(hash="xethash", filesize=len(content))]
+
+    def upload_bytes(datas: list[bytes], *a: Any, **k: Any) -> list[Any]:
+        stored["xethash"] = datas[0]
+        return [SimpleNamespace(hash="xethash", filesize=len(datas[0]))]
+
+    def download_files(infos: list[Any], *a: Any) -> None:
+        for info in infos:
+            with open(info.destination_path, "wb") as f:
+                f.write(stored[info.hash])
+
+    fake_xet = SimpleNamespace(
+        upload_files=upload_files,
+        upload_bytes=upload_bytes,
+        download_files=download_files,
+        PyXetDownloadInfo=lambda **kw: SimpleNamespace(**kw),
+    )
+    access = {
+        "kind": "hf-xet",
+        "cas_url": "https://cas.example.com",
+        "access_token": "xet_token",
+        "expires_at_unix": 2_000_000_000,
+    }
+    fs = ckfs.CalkitFileSystem(
+        endpoint_url="https://api.example.com", skip_instance_cache=True
+    )
+    local = tmp_path / "upload.bin"
+    local.write_bytes(content)
+    # Uploading a file registers its Xet hash at the same path
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value={"access": access | {"operation": "upload"}},
+        ),
+        patch.object(ckfs.calkit.hub, "post") as post,
+    ):
+        fs.put_file(str(local), f"ck://owner/project/{obj_path}")
+    post.assert_called_once()
+    assert post.call_args.kwargs["json"] == {
+        "operation": "register",
+        "path": obj_path,
+        "xet_hash": "xethash",
+    }
+    assert stored["xethash"] == content
+    # Writing through a file object uploads its bytes the same way
+    stored.clear()
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(
+            fs,
+            "_get_fs_op_info",
+            return_value={"access": access | {"operation": "upload"}},
+        ),
+        patch.object(ckfs.calkit.hub, "post") as post,
+    ):
+        with fs.open("ck://owner/project/other.txt", "wb") as f:
+            f.write(content)
+    assert stored["xethash"] == content
+    assert post.call_args.kwargs["json"]["path"] == "other.txt"
+    # Downloading checks the content against the MD5 in the path
+    download = access | {
+        "operation": "download",
+        "xet_hash": "xethash",
+        "size": len(content),
+    }
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(fs, "_get_fs_op_info", return_value={"access": download}),
+    ):
+        out = tmp_path / "out.bin"
+        fs.get_file(f"ck://owner/project/{obj_path}", str(out))
+        assert out.read_bytes() == content
+        assert fs.cat_file(f"ck://owner/project/{obj_path}", 5, 8) == b"DVC"
+        # Content that doesn't match its MD5 is an error, and not left behind
+        stored["xethash"] = b"tampered"
+        bad = tmp_path / "bad.bin"
+        with pytest.raises(OSError, match="doesn't match its MD5"):
+            fs.get_file(f"ck://owner/project/{obj_path}", str(bad))
+        assert not bad.exists()
+    # Empty files don't need a download
+    empty = access | {"operation": "download", "xet_hash": "x", "size": 0}
+    with (
+        patch.object(ckfs, "_import_hf_xet", return_value=fake_xet),
+        patch.object(fs, "_get_fs_op_info", return_value={"access": empty}),
+    ):
+        out = tmp_path / "empty.bin"
+        fs.get_file("ck://owner/project/empty.txt", str(out))
+        assert out.read_bytes() == b""

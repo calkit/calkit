@@ -10,7 +10,8 @@ from sqlmodel import Session, select
 
 import app.dvc
 import app.projects
-from app.models import Account, Project
+from app.models import Account, Project, StorageResource
+from app.storage import ProjectStorage
 
 
 def _make_project() -> Project:
@@ -445,9 +446,7 @@ def test_declared_paths_with_leading_dot_slash(
             }
         },
     )
-    monkeypatch.setattr(
-        app.projects, "get_data_fpath_for_md5", lambda **kwargs: None
-    )
+    monkeypatch.setattr(app.projects, "find_md5_object", lambda **kwargs: None)
     project = _make_project()
     repo_dir = tmp_path / "repo"
     repo = git.Repo.init(repo_dir)
@@ -575,9 +574,7 @@ def test_read_app_file(
     monkeypatch.setattr(
         app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
     )
-    monkeypatch.setattr(
-        app.projects, "get_data_fpath_for_md5", lambda **kwargs: None
-    )
+    monkeypatch.setattr(app.projects, "find_md5_object", lambda **kwargs: None)
     project = _make_project()
     repo_dir = tmp_path / "repo"
     repo = git.Repo.init(repo_dir)
@@ -859,37 +856,212 @@ def test_drop_stale_lock_stages() -> None:
     assert drop_stale_lock_stages({}, dvc_yaml) == {}
 
 
-def test_object_fpath_for_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[str, str, str]] = []
+def test_find_out_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, str, list[ProjectStorage]]] = []
+    storage = ProjectStorage(backend="s3", fs=None, data_prefix="s3://b/data")
 
-    def fake_lookup(owner_name: str, project_name: str, md5: str, fs) -> str:
-        calls.append((owner_name, project_name, md5))
-        return f"/{owner_name}/{project_name}/{md5}"
+    def fake_lookup(
+        owner_name: str,
+        project_name: str,
+        md5: str,
+        storages: list[ProjectStorage],
+    ) -> tuple[ProjectStorage, str]:
+        calls.append((owner_name, project_name, md5, storages))
+        return storage, f"/{owner_name}/{project_name}/{md5}"
 
-    monkeypatch.setattr(app.dvc, "get_data_fpath_for_md5", fake_lookup)
-    # A plain output is looked up in the project's own storage
+    monkeypatch.setattr(app.projects, "find_md5_object", fake_lookup)
+    project = _make_project()
+    owner = project.owner_account_name
+    # A plain output is looked up in the project's own storages
     out = {"md5": "abc", "size": 3}
-    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
-        "/me/proj/abc"
+    assert app.projects.find_out_object(project, out, [storage]) == (
+        storage,
+        f"/{owner}/project-name/abc",
     )
+    assert calls[-1][3] == [storage]
     # An import from another Calkit project is a pointer whose bytes only
-    # live in the source project's storage
+    # live in the source project's storage, which is the hub's own when the
+    # source isn't found
     out = {"md5": "def", "remote": "calkit:them/source", "push": False}
-    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
-        "/them/source/def"
+    assert app.projects.find_out_object(project, out, [storage]) == (
+        storage,
+        "/them/source/def",
     )
+    assert [s.resource for s in calls[-1][3]] == [None]
+    assert calls[-1][3] != [storage]
     # Other remotes (a plain DVC remote name) stay local, and no md5 means
     # nothing to look up
     out = {"md5": "ghi", "remote": "s3"}
-    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
-        "/me/proj/ghi"
+    assert app.projects.find_out_object(project, out, [storage]) == (
+        storage,
+        f"/{owner}/project-name/ghi",
     )
-    assert app.dvc.object_fpath_for_out("me", "proj", {}, fs=None) is None
+    assert app.projects.find_out_object(project, {}, [storage]) is None
     assert [c[:2] for c in calls] == [
-        ("me", "proj"),
+        (owner, "project-name"),
         ("them", "source"),
-        ("me", "proj"),
+        (owner, "project-name"),
     ]
+
+
+def test_dvc_objects_fall_back_through_storages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import json as json_mod
+
+    import app.storage
+    from app.dvc import expand_dvc_lock_outs, find_md5_object
+    from app.git import get_repo_tree_for_ref
+
+    class _DictFs:
+        def __init__(self) -> None:
+            self.objects: dict[str, bytes] = {}
+
+        def exists(self, path: str) -> bool:
+            return path in self.objects
+
+        def open(self, path: str, mode: str = "rb") -> io.BytesIO:
+            if path not in self.objects:
+                raise FileNotFoundError(path)
+            return io.BytesIO(self.objects[path])
+
+        def size(self, path: str) -> int:
+            return len(self.objects[path])
+
+    project = _make_project()
+    owner, name = project.owner_account_name, project.name
+    # A project switched to HF storage, with older objects still in the
+    # hub's own storage
+    hf = ProjectStorage(
+        backend="hf",
+        fs=_DictFs(),
+        data_prefix="buckets/ns/b",
+        resource=StorageResource(
+            name="hf",
+            kind="hf-bucket",
+            bucket="ns/b",
+            owner_account_id=uuid.uuid4(),
+            credential_user_id=uuid.uuid4(),
+        ),
+    )
+    internal = ProjectStorage(
+        backend="s3", fs=_DictFs(), data_prefix="s3://b/data"
+    )
+    storages = [hf, internal]
+    current = "files/md5/{}/{}"
+    dir_md5 = "d0b6bbbdd9a3dcd765978cda2c754fe7.dir"
+    in_dir_md5 = "c3dddc7bf94809e09559b0ae327037f7"
+    old_md5 = "0ac9de94eb7bc991d60df6d4d8a7553c"
+    new_md5 = "604e8206a831104ebcbafc886d81337f"
+    both_md5 = "cc7dd8ec500456353f3888c15721c1d4"
+    # The .dir object was pushed before the switch, in the legacy layout,
+    # and the file in it after
+    internal.fs.objects[f"s3://b/data/{owner}/{name}/d0/{dir_md5[2:]}"] = (
+        json_mod.dumps([{"relpath": "index.html", "md5": in_dir_md5}])
+    ).encode()
+    hf.fs.objects[
+        hf.make_project_path(
+            owner, name, current.format(in_dir_md5[:2], in_dir_md5[2:])
+        )
+    ] = b"<h1>app</h1>"
+    internal.fs.objects[
+        internal.make_project_path(
+            owner, name, current.format(old_md5[:2], old_md5[2:])
+        )
+    ] = b"a,b\n"
+    hf.fs.objects[
+        hf.make_project_path(
+            owner, name, current.format(new_md5[:2], new_md5[2:])
+        )
+    ] = b"png!"
+    for st in storages:
+        st.fs.objects[
+            st.make_project_path(
+                owner, name, current.format(both_md5[:2], both_md5[2:])
+            )
+        ] = b"both"
+    # HF buckets have no legacy layout to fall back to
+    hf.fs.objects[f"buckets/ns/b/{owner}/{name}/0a/{old_md5[2:]}"] = b"x"
+    monkeypatch.setattr(
+        app.storage,
+        "get_object_url",
+        lambda fpath, fname=None, fs=None: f"signed:{fpath}",
+    )
+    monkeypatch.setattr(
+        app.storage, "get_hf_object_url", lambda storage, fpath: f"hf:{fpath}"
+    )
+    app.dvc._dvc_dir_cache.clear()
+    app.projects._ck_dvc_cache.clear()
+    # Lookups go through the storages in order
+    found = find_md5_object(owner, name, both_md5, storages)
+    assert found is not None and found[0] is hf
+    found = find_md5_object(owner, name, old_md5, storages)
+    assert found is not None and found[0] is internal
+    assert find_md5_object(owner, name, old_md5, [hf]) is None
+    # A directory output expands from the old .dir object, with sizes from
+    # wherever each file is
+    outs = expand_dvc_lock_outs(
+        {"stages": {"build": {"outs": [{"path": "app", "md5": dir_md5}]}}},
+        owner_name=owner,
+        project_name=name,
+        get_sizes=True,
+        storages=storages,
+    )
+    assert outs["app"]["type"] == "dir"
+    assert outs["app/index.html"]["md5"] == in_dir_md5
+    assert outs["app/index.html"]["size"] == len(b"<h1>app</h1>")
+    # Files and URLs come from whichever storage has them, with the
+    # project's storages looked up when not given
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    for path, md5 in [
+        ("data.csv", old_md5),
+        ("fig.png", new_md5),
+        ("app", dir_md5),
+    ]:
+        (repo_dir / f"{path}.dvc").write_text(
+            f"outs:\n- md5: {md5}\n  size: 4\n  path: {path}\n"
+        )
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Track with DVC"])
+    tree = get_repo_tree_for_ref(repo, None)
+    monkeypatch.setattr(
+        app.projects, "get_storages_for_project", lambda project: storages
+    )
+    old_item = app.projects.get_contents_from_tree(
+        project=project,
+        tree=tree,
+        path="data.csv",
+        ck_info={},
+        dvc_lock_outs={},
+        zip_path_map={},
+    )
+    assert old_item.content is not None
+    assert base64.b64decode(old_item.content) == b"a,b\n"
+    assert old_item.url is not None and old_item.url.startswith("signed:s3://")
+    new_item = app.projects.get_contents_from_tree(
+        project=project,
+        tree=tree,
+        path="fig.png",
+        ck_info={},
+        dvc_lock_outs={},
+        zip_path_map={},
+        storages=storages,
+    )
+    assert new_item.content is not None
+    assert base64.b64decode(new_item.content) == b"png!"
+    assert new_item.url == "hf:" + hf.make_project_path(
+        owner, name, current.format(new_md5[:2], new_md5[2:])
+    )
+    assert (
+        app.projects.read_app_file(
+            project=project, repo=repo, dir_path="app", rel_path="index.html"
+        )
+        == b"<h1>app</h1>"
+    )
 
 
 def test_dvc_dir_out_resolves_after_being_pushed(
@@ -900,7 +1072,6 @@ def test_dvc_dir_out_resolves_after_being_pushed(
 
     import app.cache
     from app.git import get_repo_tree_for_ref
-    from app.storage import make_data_fpath
 
     class _FakeFs:
         def __init__(self) -> None:
@@ -930,9 +1101,9 @@ def test_dvc_dir_out_resolves_after_being_pushed(
     store = _Store()
     monkeypatch.setattr(app.cache, "_client", store)
     monkeypatch.setattr(app.cache, "_client_ready", True)
-    monkeypatch.setattr(app.dvc, "get_object_fs", lambda: fs)
-    monkeypatch.setattr(app.projects, "get_object_fs", lambda: fs)
-    app.dvc._read_dvc_dir.cache_clear()
+    internal = ProjectStorage(backend="s3", fs=fs, data_prefix="s3://b/data")
+    monkeypatch.setattr(app.projects, "get_internal_storage", lambda: internal)
+    app.dvc._dvc_dir_cache.clear()
     app.projects._ck_dvc_cache.clear()
     repo_dir = tmp_path / "repo"
     repo = git.Repo.init(repo_dir)
@@ -966,11 +1137,10 @@ def test_dvc_dir_out_resolves_after_being_pushed(
     assert "app/index.html" not in res.dvc_lock_outs
     assert not [k for k in store.data if "ck-dvc" in k]
     # Once pushed, the same tree resolves it: no sticky miss, no stale entry
-    dir_fpath = make_data_fpath(
-        owner_name=project.owner_account_name,
-        project_name=project.name,
-        idx=dir_md5[:2],
-        md5=dir_md5[2:],
+    dir_fpath = internal.make_project_path(
+        project.owner_account_name,
+        project.name,
+        f"files/md5/{dir_md5[:2]}/{dir_md5[2:]}",
     )
     fs.objects[dir_fpath] = json_mod.dumps(
         [{"relpath": "index.html", "md5": file_md5}]

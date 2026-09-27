@@ -139,6 +139,9 @@ class PipelineStatus(BaseModel):
 
     has_pipeline: bool
     environment_checks: dict[str, dict] = Field(default_factory=dict)
+    # When environments aren't checked, what the record of their last checks
+    # says instead: when, whether it passed, and whether they've changed since
+    environment_states: dict[str, dict] = Field(default_factory=dict)
     cleaned_notebooks: list[str] = Field(default_factory=list)
     stale_stages: dict[str, "StaleStage"] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
@@ -911,6 +914,18 @@ def get_status(
             ]
             if failed_env_checks:
                 return PipelineStatus.model_validate(result)
+        else:
+            try:
+                result["environment_states"] = (
+                    calkit.environments.get_cached_env_states(
+                        ck_info=ck_info, targets=targets
+                    )
+                )
+            except Exception as e:
+                result["errors"].append(
+                    "Failed to read environment check records: "
+                    f"{e.__class__.__name__}: {e}"
+                )
         if compile_to_dvc and (
             ck_info.get("pipeline", {}).get("stages", {})
             or ck_info.get("subprojects")

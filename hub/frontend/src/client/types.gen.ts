@@ -5759,6 +5759,20 @@ export type TotpCode = {
 }
 
 /**
+ * TOTPConfirm
+ */
+export type TotpConfirm = {
+  /**
+   * Code
+   */
+  code: string
+  /**
+   * Email Code
+   */
+  email_code: string
+}
+
+/**
  * TOTPSetup
  */
 export type TotpSetup = {
@@ -5784,6 +5798,10 @@ export type TotpStatus = {
    * Verified
    */
   verified: boolean
+  /**
+   * Second Factor Token
+   */
+  second_factor_token?: string | null
 }
 
 /**
@@ -8482,10 +8500,25 @@ export type DeleteUserTotpResponse =
 
 export type GetUserTotpData = {
   body?: never
+  headers?: {
+    /**
+     * X-Second-Factor
+     */
+    "x-second-factor"?: string | null
+  }
   path?: never
   query?: never
   url: "/user/totp"
 }
+
+export type GetUserTotpErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserTotpError = GetUserTotpErrors[keyof GetUserTotpErrors]
 
 export type GetUserTotpResponses = {
   /**
@@ -8515,7 +8548,7 @@ export type PostUserTotpResponse =
   PostUserTotpResponses[keyof PostUserTotpResponses]
 
 export type PostUserTotpConfirmData = {
-  body: TotpCode
+  body: TotpConfirm
   path?: never
   query?: never
   url: "/user/totp/confirm"
@@ -14936,6 +14969,12 @@ export type PostOperatorWakeResponse =
 
 export type PostOperatorRelayTokenData = {
   body?: never
+  headers?: {
+    /**
+     * X-Second-Factor
+     */
+    "x-second-factor"?: string | null
+  }
   path: {
     /**
      * Operator Id

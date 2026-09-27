@@ -39,6 +39,10 @@ import IgnorePath from "../../../../../components/Workspace/IgnorePath"
 import NewStage from "../../../../../components/Workspace/NewStage"
 import SaveFiles from "../../../../../components/Workspace/SaveFiles"
 import useCustomToast from "../../../../../hooks/useCustomToast"
+import {
+  getSecondFactorToken,
+  storeSecondFactorToken,
+} from "../../../../../lib/auth"
 import useProject from "../../../../../hooks/useProject"
 
 const computeSearchSchema = z.object({
@@ -99,6 +103,7 @@ class OperatorConnection {
     try {
       const resp = await OperatorsService.postOperatorRelayToken({
         operator_id: this.operatorId,
+        "x-second-factor": getSecondFactorToken(),
       })
       const { relay_url, token } = resp.data
       ws = new WebSocket(`${relay_url}/browser?token=${token}`)
@@ -388,6 +393,10 @@ function WorkspacePanel({
   const staleStages: string[] = status?.pipeline?.stale_stage_names ?? []
   const staleDetail: Record<string, any> = status?.pipeline?.stale_stages ?? {}
   const runningStages: string[] = status?.pipeline?.running_stages ?? []
+  // Environments aren't checked here, since that can build them; this is
+  // what the record of their last checks says
+  const envStates: Record<string, any> =
+    status?.pipeline?.environment_states ?? {}
   const running = Boolean(status?.pipeline?.running) || ws.running
   const ahead = statusQuery.data?.commits_ahead ?? 0
   const behind = statusQuery.data?.commits_behind ?? 0
@@ -607,6 +616,34 @@ function WorkspacePanel({
                 </Code>
               </Tooltip>
             ))}
+          {Object.keys(envStates).length > 0 && (
+            <>
+              <Heading size="xs" mt={3} mb={1}>
+                Environments
+              </Heading>
+              {Object.entries(envStates).map(([name, state]) => (
+                <Flex key={name} align="center" gap={2}>
+                  <Code fontSize="xs">{name}</Code>
+                  {state.checked_at === null ? (
+                    <Badge fontSize="2xs">never checked</Badge>
+                  ) : !state.success ? (
+                    <Badge colorScheme="red" fontSize="2xs">
+                      last check failed
+                    </Badge>
+                  ) : state.changed ? (
+                    <Badge colorScheme="yellow" fontSize="2xs">
+                      changed since last check
+                    </Badge>
+                  ) : (
+                    <Text fontSize="xs">
+                      checked{" "}
+                      {new Date(`${state.checked_at}Z`).toLocaleString()}
+                    </Text>
+                  )}
+                </Flex>
+              ))}
+            </>
+          )}
           {runMutation.data?.output && (
             <Box
               as="pre"
@@ -838,8 +875,12 @@ function Compute() {
     (c) => c.error,
   )?.error
   const verifyMutation = useMutation({
-    mutationFn: () => UsersService.postUserTotpVerify({ totpCode: { code } }),
-    onSuccess: () => {
+    mutationFn: () =>
+      UsersService.postUserTotpVerify({ totpCode: { code } }).then(
+        (r) => r.data,
+      ),
+    onSuccess: (data) => {
+      storeSecondFactorToken(data.second_factor_token)
       setCode("")
       for (const conn of connections.current.values()) {
         if (conn.error) conn.retryNow()

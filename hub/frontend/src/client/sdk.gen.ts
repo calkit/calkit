@@ -251,6 +251,7 @@ import type {
   GetUserStorageResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
+  GetUserTotpErrors,
   GetUserTotpResponses,
   GetUserZenodoTokenResponses,
   GetWorkspacesResponses,
@@ -488,6 +489,7 @@ import type {
   TokenPost,
   TokenPut,
   TotpCode,
+  TotpConfirm,
   UpdateCurrentUserErrors,
   UpdateCurrentUserPasswordErrors,
   UpdateCurrentUserPasswordResponses,
@@ -2193,27 +2195,38 @@ export class UsersService {
 
   /**
    * Get User Totp
+   *
+   * Whether two-factor authentication is set up, and whether this session
+   * has entered a code recently.
    */
   public static getUserTotp<ThrowOnError extends boolean = true>(
+    parameters?: {
+      "x-second-factor"?: string | null
+    },
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<GetUserTotpResponses, unknown, ThrowOnError> {
+  ): RequestResult<GetUserTotpResponses, GetUserTotpErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "headers", key: "x-second-factor" }] }],
+    )
     return (options?.client ?? client).get<
       GetUserTotpResponses,
-      unknown,
+      GetUserTotpErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/totp",
       ...options,
+      ...params,
     })
   }
 
   /**
    * Post User Totp
    *
-   * Start setting up an authenticator app, which is confirmed by entering
-   * a code from it.
+   * Start setting up an authenticator app, emailing a code that
+   * confirming takes along with one from the app.
    */
   public static postUserTotp<ThrowOnError extends boolean = true>(
     options?: Options<never, ThrowOnError>,
@@ -2232,10 +2245,13 @@ export class UsersService {
 
   /**
    * Post User Totp Confirm
+   *
+   * Finish setting up an authenticator app with a code from it and the
+   * one emailed.
    */
   public static postUserTotpConfirm<ThrowOnError extends boolean = true>(
     parameters: {
-      totpCode: TotpCode
+      totpConfirm: TotpConfirm
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -2245,7 +2261,7 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "totpCode", map: "body" }] }],
+      [{ args: [{ key: "totpConfirm", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       PostUserTotpConfirmResponses,
@@ -2268,7 +2284,8 @@ export class UsersService {
   /**
    * Post User Totp Verify
    *
-   * Enter a code to allow sensitive actions for a while.
+   * Enter a code, getting a token that lets this session take sensitive
+   * actions for a while.
    */
   public static postUserTotpVerify<ThrowOnError extends boolean = true>(
     parameters: {
@@ -9285,9 +9302,13 @@ export class OperatorsService {
    * Post Operator Relay Token
    *
    * Let the user's browser connect to one of their online Operators.
+   *
+   * This opens a shell on their machine, so it takes a signed-in session,
+   * not a token, that entered a second factor recently.
    */
   public static postOperatorRelayToken<ThrowOnError extends boolean = true>(
     parameters: {
+      "x-second-factor"?: string | null
       operator_id: string
     },
     options?: Options<never, ThrowOnError>,
@@ -9298,7 +9319,14 @@ export class OperatorsService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "operator_id" }] }],
+      [
+        {
+          args: [
+            { in: "headers", key: "x-second-factor" },
+            { in: "path", key: "operator_id" },
+          ],
+        },
+      ],
     )
     return (options?.client ?? client).post<
       PostOperatorRelayTokenResponses,

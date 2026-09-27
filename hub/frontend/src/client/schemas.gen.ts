@@ -10144,6 +10144,26 @@ export const TOTPCodeSchema = {
   title: "TOTPCode",
 } as const
 
+export const TOTPConfirmSchema = {
+  properties: {
+    code: {
+      type: "string",
+      maxLength: 8,
+      minLength: 6,
+      title: "Code",
+    },
+    email_code: {
+      type: "string",
+      maxLength: 8,
+      minLength: 6,
+      title: "Email Code",
+    },
+  },
+  type: "object",
+  required: ["code", "email_code"],
+  title: "TOTPConfirm",
+} as const
+
 export const TOTPSetupSchema = {
   properties: {
     secret: {
@@ -10169,6 +10189,17 @@ export const TOTPStatusSchema = {
     verified: {
       type: "boolean",
       title: "Verified",
+    },
+    second_factor_token: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Second Factor Token",
     },
   },
   type: "object",

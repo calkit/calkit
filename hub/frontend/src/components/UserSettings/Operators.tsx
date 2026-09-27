@@ -23,6 +23,7 @@ import { useState } from "react"
 
 import { OperatorsService, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import { storeSecondFactorToken } from "../../lib/auth"
 
 // Opening sessions on an Operator takes an authenticator code, since it
 // gives shell access to the machine
@@ -34,6 +35,7 @@ function TwoFactor() {
     otpauth_uri: string
   } | null>(null)
   const [code, setCode] = useState("")
+  const [emailCode, setEmailCode] = useState("")
   const statusQuery = useQuery({
     queryKey: ["user", "totp"],
     queryFn: () => UsersService.getUserTotp().then((r) => r.data),
@@ -50,8 +52,13 @@ function TwoFactor() {
     onError,
   })
   const confirmMutation = useMutation({
-    mutationFn: () => UsersService.postUserTotpConfirm({ totpCode: { code } }),
-    onSuccess: () => {
+    mutationFn: () =>
+      UsersService.postUserTotpConfirm({
+        totpConfirm: { code, email_code: emailCode },
+      }).then((r) => r.data),
+    onSuccess: (data) => {
+      storeSecondFactorToken(data.second_factor_token)
+      setEmailCode("")
       setSetup(null)
       showToast("Success!", "Two-factor authentication is on.", "success")
     },
@@ -108,12 +115,24 @@ function TwoFactor() {
           <Text fontSize="sm" mb={2}>
             Or enter this key: <Code>{setup.secret}</Code>
           </Text>
+          <Text fontSize="sm" mb={2}>
+            We also emailed you a code, to make sure it's you.
+          </Text>
           <Flex gap={2}>
             {codeInput}
+            <Input
+              size="sm"
+              maxW="160px"
+              placeholder="Emailed code"
+              value={emailCode}
+              onChange={(e) => setEmailCode(e.target.value)}
+              inputMode="numeric"
+              autoComplete="off"
+            />
             <Button
               size="sm"
               variant="primary"
-              isDisabled={code.length < 6}
+              isDisabled={code.length < 6 || emailCode.length < 6}
               isLoading={confirmMutation.isPending}
               onClick={() => confirmMutation.mutate()}
             >

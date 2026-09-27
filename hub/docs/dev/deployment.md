@@ -178,8 +178,7 @@ The stack includes a `texmf-proxy` service that backs the in-browser LaTeX
 preview. The browser compiler ships only a subset of TeX Live and can't generate
 bitmap fonts, so on a missing file it fetches it from this service, which
 resolves it against a full TeX Live install (see `texmf-proxy/`). It's served at
-`texmf.$DOMAIN`, challenge-free (like the API, since the engine's synchronous XHR
-can't clear the bot wall), with CORS restricted to the site origin.
+`texmf.$DOMAIN`, with CORS restricted to the site origin.
 
 A few deployment notes:
 
@@ -209,8 +208,6 @@ repo root). It's served at `relay.$DOMAIN`.
   relay tokens the backend signs.
 - The backend tells Operators and browsers where it is with `RELAY_URL`, which
   defaults to `wss://relay.$DOMAIN`.
-- Operators aren't browsers, so the relay and API must stay free of any bot
-  challenge in front of them.
 
 ## Continuous Deployment (CD)
 

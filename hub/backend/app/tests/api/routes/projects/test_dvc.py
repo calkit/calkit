@@ -15,12 +15,14 @@ MD5 = "cdef1234567890abcdef1234567890ab"
 GET_URL = f"/projects/{OWNER}/{PROJECT}/dvc/files/md5/{IDX}/{MD5}"
 
 
-def _fake_project() -> SimpleNamespace:
+def _fake_project(dvc_storage_id: uuid.UUID | None = None) -> SimpleNamespace:
     sub = SimpleNamespace(storage_limit=10.0)
     owner = SimpleNamespace(subscription=sub)
     # No such project row, so recording the push for the activity feed
     # fails quietly rather than being tested here
-    return SimpleNamespace(owner=owner, id=uuid.uuid4())
+    return SimpleNamespace(
+        owner=owner, id=uuid.uuid4(), dvc_storage_id=dvc_storage_id
+    )
 
 
 def _dvc_scope_headers(
@@ -246,3 +248,30 @@ def test_post_dvc_file_md5_mismatch_cleans_pending_file(
         response = client.post(post_url, headers=headers, content=body)
     assert response.status_code == 400
     fake_fs.rm.assert_called_once()
+
+
+def test_dvc_file_refused_for_external_storage(
+    client: TestClient, normal_user_token_headers: dict[str, str]
+) -> None:
+    headers = _dvc_scope_headers(client, normal_user_token_headers)
+    fake_fs = MagicMock()
+    with (
+        patch(
+            "app.api.routes.projects.dvc.app.projects.get_project",
+            return_value=_fake_project(dvc_storage_id=uuid.uuid4()),
+        ),
+        patch("app.api.routes.projects.dvc.mixpanel.user_dvc_pulled"),
+        patch("app.api.routes.projects.dvc.mixpanel.user_dvc_pushed"),
+        patch(
+            "app.api.routes.projects.dvc.get_object_fs",
+            return_value=fake_fs,
+        ),
+    ):
+        get_resp = client.get(GET_URL, headers=headers)
+        post_resp = client.post(GET_URL, headers=headers, content=b"x")
+    # Neither streams through the hub's own storage
+    for resp in (get_resp, post_resp):
+        assert resp.status_code == 400
+        assert "ck://" in resp.json()["detail"]
+    fake_fs.open.assert_not_called()
+    fake_fs.exists.assert_not_called()

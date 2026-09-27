@@ -153,6 +153,18 @@ accounts the user alone controls, and to check institutional policy
 first, since this is equivalent to a VS Code tunnel, which some
 institutions and HPC centers prohibit.
 
+Shell sessions aren't confined to workspaces.
+Only an Operator's owner can open them, and the owner already has a shell
+on their own machine, so hiding the rest of it would cost usability,
+e.g., toolchains, Git credentials, and agent configs in the home
+directory, without protecting anything from them.
+Confinement is planned for when others can open sessions on someone's
+machine, i.e., organization Operators and shared workspaces: each user
+isolated as a separate OS account or in a container, with filesystem
+restrictions on top, i.e., Landlock on Linux and `sandbox-exec` on macOS,
+allowing system paths, the workspace, and a configurable list of home
+paths, and refusing sessions where they can't be enforced.
+
 ### Workspaces
 
 There are two kinds:

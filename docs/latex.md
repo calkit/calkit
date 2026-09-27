@@ -294,6 +294,31 @@ To run all of a document's comparisons:
 calkit run paper-1.diffs
 ```
 
+To see which diffs the pipeline keeps, and whether each is up to date,
+stale, or not built yet:
+
+```sh
+calkit list latex-diffs
+```
+
+To open one, name it by its stage, the document, or the revision it compares
+against:
+
+```sh
+calkit show latex-diff paper-1-submitted
+```
+
+From a VS Code terminal it opens in the editor, and otherwise in the system's
+PDF viewer.
+Pass `--run` to build it first if it's stale or hasn't been built.
+
+In VS Code, the Calkit sidebar lists each diff under its stage and its
+publication, marked as up to date, stale, or not built,
+with a button to build it.
+Clicking a built diff opens it.
+The diff button in the editor toolbar, shown for a `.tex` file or a PDF a
+`latex` stage builds, lists the pipeline's diffs for that document too.
+
 ### Comparing on demand
 
 To compare against a revision that isn't in the pipeline's `diffs`,

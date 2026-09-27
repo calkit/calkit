@@ -31,6 +31,8 @@ calkit operator install
 ```
 
 (`calkit install operator` works too.)
+Calkit's [install script](installation.md) can also install the Operator
+along with Calkit, with its `--operator` option.
 
 This installs the Operator as a service that starts when the machine
 boots, so it's running even if you're not logged in.

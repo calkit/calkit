@@ -112,11 +112,20 @@ Next, we'll do the only command line thing in this whole process
 and install the Calkit Operator.
 This will allow us connect to the web app and enable us to modify the project
 on our local machine.
-To install it, open up a terminal or Miniforge command prompt and run:
+To install Calkit along with the Operator,
+open up a command prompt and run:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1.calkit.org))) --operator"
+```
+
+Or on macOS or Linux:
 
 ```sh
-calkit operator install
+curl -LsSf install.calkit.org | sh -s -- --operator
 ```
+
+If Calkit is already installed, run `calkit operator install` instead.
 
 The Operator starts whenever we log in,
 so we won't need to do this again.

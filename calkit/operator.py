@@ -379,7 +379,10 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     if match:
         ahead, behind = int(match.group(1)), int(match.group(2))
     result = subprocess.run(
-        [sys.executable, "-m", "calkit", "status", "--json"],
+        # Checking environments can build them, running whatever a repo's
+        # specs say, which viewing status shouldn't do; the record of their
+        # last checks is reported instead
+        [sys.executable, "-m", "calkit", "status", "--json", "--no-env-check"],
         cwd=wdir,
         capture_output=True,
         text=True,

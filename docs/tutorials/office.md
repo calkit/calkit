@@ -109,7 +109,7 @@ Creating the project on calkit.io.
 ///
 
 Next, we'll do the only command line thing in this whole process
-and install the Calkit Operator on our computer.
+and install the Calkit Operator.
 This will allow us connect to the web app and enable us to modify the project
 on our local machine.
 To install it, open up a terminal or Miniforge command prompt and run:

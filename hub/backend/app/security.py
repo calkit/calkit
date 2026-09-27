@@ -216,3 +216,25 @@ def match_totp_step(
         if hmac.compare_digest(get_totp_code(secret, step), code):
             return step
     return None
+
+
+def hash_token_verifier(verifier: str) -> str:
+    """Hash the secret half of a token for storage.
+
+    Tokens are generated with at least 192 random bits, far beyond what
+    could be guessed, so a fast hash is as good as a slow one here, unlike
+    for passwords. Being fast matters because it runs on every request a
+    token makes.
+    """
+    return hashlib.sha256(verifier.encode()).hexdigest()
+
+
+def verify_token_verifier(verifier: str, hashed: str) -> bool:
+    """Check a token's secret half against its stored hash.
+
+    Tokens made before hashing switched to SHA-256 have bcrypt hashes,
+    which start with "$2", and still verify.
+    """
+    if hashed.startswith("$2"):
+        return verify_password(verifier, hashed)
+    return hmac.compare_digest(hash_token_verifier(verifier), hashed)

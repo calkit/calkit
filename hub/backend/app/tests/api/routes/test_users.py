@@ -1303,3 +1303,49 @@ def test_totp(
         json={"code": get_totp_code(secret, step)},
     )
     assert r.json() == {"enabled": False, "verified": False}
+
+
+def test_pat_hashing(
+    client: TestClient, db: Session, normal_user_token_headers: dict[str, str]
+) -> None:
+    import secrets
+    from datetime import timedelta
+
+    from app.core import utcnow
+    from app.models import UserToken
+    from app.security import get_password_hash
+
+    h = normal_user_token_headers
+    user_id = uuid.UUID(client.get("/user", headers=h).json()["id"])
+    # New tokens are stored with a fast hash and work
+    r = client.post(
+        "/user/tokens",
+        headers=h,
+        json={"expires_days": 1, "scope": None, "description": "new"},
+    )
+    assert r.status_code == 200, r.text
+    new_token = r.json()["access_token"]
+    stored = db.get(UserToken, uuid.UUID(r.json()["id"]))
+    assert stored is not None and len(stored.hashed_verifier or "") == 64
+    auth = {"Authorization": f"Bearer {new_token}"}
+    assert client.get("/user", headers=auth).status_code == 200
+    # Tokens from before still work, and are rehashed on first use
+    selector = secrets.token_hex(8)
+    verifier = secrets.token_hex(24)
+    old = UserToken(
+        user_id=user_id,
+        expires=utcnow() + timedelta(days=1),
+        is_active=True,
+        selector=selector,
+        hashed_verifier=get_password_hash(verifier),
+    )
+    db.add(old)
+    db.commit()
+    auth = {"Authorization": f"Bearer ckp_{selector}{verifier}"}
+    assert client.get("/user", headers=auth).status_code == 200
+    db.refresh(old)
+    assert len(old.hashed_verifier or "") == 64
+    assert client.get("/user", headers=auth).status_code == 200
+    # A wrong secret doesn't
+    bad = {"Authorization": f"Bearer ckp_{selector}{secrets.token_hex(24)}"}
+    assert client.get("/user", headers=bad).status_code == 403

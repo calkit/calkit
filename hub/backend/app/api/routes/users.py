@@ -63,6 +63,7 @@ from app.security import (
     encrypt_secret,
     generate_totp_secret,
     get_password_hash,
+    hash_token_verifier,
     verify_password,
 )
 from app.storage import get_storage_usage
@@ -648,7 +649,7 @@ def post_user_token(
     selector = secrets.token_hex(PAT_SELECTOR_LENGTH_BYTES)
     verifier = secrets.token_hex(PAT_VERIFIER_LENGTH_BYTES)
     token_str = f"ckp_{selector}{verifier}"
-    hashed_verifier = get_password_hash(verifier)
+    hashed_verifier = hash_token_verifier(verifier)
     token = UserToken(
         user_id=current_user.id,
         expires=utcnow() + timedelta(days=req.expires_days),

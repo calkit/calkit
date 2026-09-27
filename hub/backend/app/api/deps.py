@@ -19,7 +19,10 @@ from app.config import settings
 from app.core import utcnow
 from app.db import engine
 from app.models import TokenPayload, User, UserToken
-from app.security import verify_password
+from app.security import (
+    hash_token_verifier,
+    verify_token_verifier,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,6 +69,22 @@ def touch_token(session: Session, token: UserToken) -> None:
         session.expire_on_commit = expire
 
 
+def verify_pat(session: Session, token: UserToken, verifier: str) -> bool:
+    """Check a personal access token's secret half.
+
+    Tokens from before hashing switched to SHA-256 have bcrypt hashes, so
+    they're rehashed on first use, and only that request pays for bcrypt.
+    """
+    hashed = token.hashed_verifier
+    if hashed is None or not verify_token_verifier(verifier, hashed):
+        return False
+    if hashed.startswith("$2"):
+        token.hashed_verifier = hash_token_verifier(verifier)
+        session.add(token)
+        session.commit()
+    return True
+
+
 def get_db() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
@@ -97,7 +116,7 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             # Check verifier
             if token_in_db.hashed_verifier is None:
                 raise HTTPException(403, "Invalid token")
-            if not verify_password(verifier, token_in_db.hashed_verifier):
+            if not verify_pat(session, token_in_db, verifier):
                 raise HTTPException(403, "Invalid token")
             touch_token(session, token_in_db)
             user = token_in_db.user
@@ -204,7 +223,7 @@ def get_current_user_with_token_scope(
             # Check scope
             if token_in_db.scope is not None and token_in_db.scope != scope:
                 raise HTTPException(403, "Invalid token scope")
-            if not verify_password(verifier, token_in_db.hashed_verifier):
+            if not verify_pat(session, token_in_db, verifier):
                 raise HTTPException(403, "Invalid token")
             touch_token(session, token_in_db)
             user = token_in_db.user

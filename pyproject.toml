@@ -62,6 +62,9 @@ dependencies = [
   "toml>=0.10.2",
   "texsoup>=0.3.3",
   "fsspec>=2026.4.0",
+  # Transfers for projects whose DVC storage is on Hugging Face; wheels
+  # only exist for these architectures, same as huggingface-hub's marker
+  "hf-xet>=1.4.0,<2; platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]
@@ -71,7 +74,6 @@ requires-python = ">=3.10"
 
 [project.optional-dependencies]
 data = ["pandas>=2.2.3", "polars>=1.18.0"]
-xet = ["xet>=0.0.1"]  # For fast large file transfers with XeT protocol
 
 [dependency-groups]
 dev = [
@@ -198,6 +200,7 @@ module = [
     "dvc.*",
     "requests",
     "pypdfium2",
+    "hf_xet",
 ]
 ignore_missing_imports = true
 

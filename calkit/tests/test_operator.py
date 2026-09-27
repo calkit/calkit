@@ -248,7 +248,7 @@ def test_cron_and_lock(tmp_path, monkeypatch):
     assert [line.split()[0] for line in ours] == ["*/5", "@reboot"]
     assert all("--mode cron" in line for line in ours)
     assert all(operator.get_log_path() in line for line in ours)
-    assert operator.get_service_status().startswith("cron")
+    assert "cron" in operator.get_service_status()
     operator.uninstall_service()
     assert table.read_text().splitlines() == ["0 * * * * echo mine"]
     assert operator.get_service_status() is None
@@ -286,17 +286,30 @@ def test_workspace_actions(tmp_path, monkeypatch):
     with open(os.path.join(wdir, "scratch.log"), "w") as f:
         f.write("noise")
     status = operator.get_workspace_status(wdir, fetch=False)
-    assert set(status["git"]["untracked"]) == {"notes.txt", "scratch.log"}
-    assert status["dvc"]["pipeline"] == {}
+    assert status["errors"] == []
+    git = status["status"]["git"]
+    assert set(git["untracked_files"]) == {"notes.txt", "scratch.log"}
+    assert status["status"]["pipeline"]["stale_stage_names"] == []
+    assert status["commits_ahead"] == 0
+    # A run in progress is flagged cheaply from DVC's lock
+    assert not operator.is_pipeline_running(wdir)
+    lock = os.path.join(wdir, ".dvc", "tmp", "rwlock")
+    os.makedirs(os.path.dirname(lock), exist_ok=True)
+    with open(lock, "w") as f:
+        f.write('{"read": {}, "write": {"out.txt": {"pid": 1}}}')
+    assert operator.is_pipeline_running(wdir)
+    with open(lock, "w") as f:
+        f.write('{"read": {}, "write": {}}')
+    assert not operator.is_pipeline_running(wdir)
     # Ignoring commits the .gitignore change
     operator.ignore_path(wdir, "scratch.log")
     status = operator.get_workspace_status(wdir, fetch=False)
-    assert status["git"]["untracked"] == ["notes.txt"]
-    assert status["git"]["changed"] == []
+    assert status["status"]["git"]["untracked_files"] == ["notes.txt"]
+    assert status["status"]["git"]["changed_files"] == []
     # Saving commits only what it's given
     operator.save_workspace(wdir, ["notes.txt"], message="Add notes", to="git")
     status = operator.get_workspace_status(wdir, fetch=False)
-    assert status["git"]["untracked"] == []
+    assert status["status"]["git"]["untracked_files"] == []
     log = subprocess.run(
         ["git", "log", "--format=%s"], cwd=wdir, capture_output=True, text=True
     ).stdout.splitlines()
@@ -346,8 +359,8 @@ def test_workspace_actions(tmp_path, monkeypatch):
     with open(os.path.join(wdir, "notes.txt"), "w") as f:
         f.write("changed")
     status = operator.get_workspace_status(wdir, fetch=False)
-    assert status["dvc"]["data"]["changed"] == ["big.csv"]
-    assert status["git"]["changed"] == ["notes.txt"]
+    assert status["status"]["dvc"]["uncommitted"]["modified"] == ["big.csv"]
+    assert status["status"]["git"]["changed_files"] == ["notes.txt"]
     operator.discard_changes(wdir)
     with open(os.path.join(wdir, "notes.txt")) as f:
         assert f.read() == "hi"

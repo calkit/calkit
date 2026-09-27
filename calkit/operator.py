@@ -267,7 +267,13 @@ def discover_workspaces(cfg: dict) -> list[dict]:
         except Exception:
             project = None
         workspaces.append(
-            dict(path=path, kind=kind, project=project) | _git_status(path)
+            dict(
+                path=path,
+                kind=kind,
+                project=project,
+                running=is_pipeline_running(path),
+            )
+            | _git_status(path)
         )
     return workspaces
 
@@ -353,9 +359,12 @@ def _dvc_json(args: list[str], wdir: str) -> dict:
 
 
 def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
-    """Git and DVC status of a workspace, as the hub shows it."""
-    import calkit.pipeline
+    """A workspace's status as ``calkit status --json`` reports it, the same
+    as the VS Code extension shows, plus how far it is from its remote.
 
+    This is too expensive to run at every check-in, so the hub asks for it
+    when someone is looking at the workspace.
+    """
     errors = []
     git_repo = calkit.git.get_repo(wdir)
     if fetch:
@@ -369,42 +378,43 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     match = re.search(r"#\sbranch\.ab\s\+(\d+)\s-(\d+)", repo_status)
     if match:
         ahead, behind = int(match.group(1)), int(match.group(2))
-    dvc_status: dict | None = None
-    if not os.path.isdir(os.path.join(wdir, ".dvc")):
-        errors.append(dict(type="dvc", info="Not a DVC repository"))
-    else:
-        try:
-            # Frozen stages are pinned on purpose, so they aren't reported
-            frozen = calkit.pipeline.frozen_stage_base_names(wdir=wdir)
-            pipeline = {
-                k.split("dvc.yaml:")[-1]: v
-                for k, v in _dvc_json(["status"], wdir).items()
-                if not k.endswith(".dvc")
-                and k.split("dvc.yaml:")[-1].split("@")[0] not in frozen
-            }
-            args = ["data", "status"]
-            args += ["--not-in-remote"] if fetch else ["--no-remote-refresh"]
-            data = _dvc_json(args, wdir)
-            # DVC calls a path committed when its DVC file is staged
-            data["changed"] = data.get("uncommitted", {}).get("modified", [])
-            data["staged"] = data.get("committed", {}).get("modified", [])
-            dvc_status = dict(pipeline=pipeline, data=data)
-        except RuntimeError as e:
-            errors.append(dict(type="dvc", info=str(e)))
+    result = subprocess.run(
+        [sys.executable, "-m", "calkit", "status", "--json"],
+        cwd=wdir,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        status = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        status = None
+        errors.append(
+            dict(
+                type="status",
+                info=(result.stderr or result.stdout).strip()
+                or "Failed to get status",
+            )
+        )
     return {
-        "dvc": dvc_status,
-        "git": {
-            "branch": None
-            if git_repo.head.is_detached
-            else git_repo.active_branch.name,
-            "untracked": git_repo.untracked_files,
-            "changed": [d.a_path for d in git_repo.index.diff(None)],
-            "staged": [d.a_path for d in git_repo.index.diff("HEAD")],
-            "commits_ahead": ahead,
-            "commits_behind": behind,
-        },
+        "status": status,
+        "commits_ahead": ahead,
+        "commits_behind": behind,
         "errors": errors,
     }
+
+
+def is_pipeline_running(wdir: str) -> bool:
+    """Whether a pipeline run holds DVC's lock, which is cheap to check.
+
+    DVC records what a run is reading and writing in its lock file for as
+    long as it runs, which is also what the VS Code extension watches.
+    """
+    try:
+        with open(os.path.join(wdir, ".dvc", "tmp", "rwlock")) as f:
+            lock = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(lock, dict) and any(lock.get(k) for k in lock)
 
 
 def pull_workspace(wdir: str) -> None:
@@ -612,7 +622,7 @@ class Session:
         import psutil
 
         try:
-            return psutil.Process(os.tcgetpgrp(self.fd)).name()
+            return str(psutil.Process(os.tcgetpgrp(self.fd)).name())
         except (OSError, psutil.Error):
             return "shell"
 
@@ -1345,7 +1355,7 @@ def install_service(at_boot: bool = False) -> list[str]:
         if not at_boot:
             notes.append(
                 "The Operator will start when you log in. To start it at "
-                "boot instead, reinstall with --at-boot, which needs sudo."
+                "boot instead, reinstall with --boot, which needs sudo."
             )
     elif system == "Windows":
         fpath = _windows_startup_path()
@@ -1418,17 +1428,29 @@ def get_service_status() -> str | None:
     if platform.system() == "Windows":
         if not os.path.isfile(_windows_startup_path()):
             return None
-        running = get_running_pid() is not None
-        return f"{'running' if running else 'not running'} (at login)"
+        return "a Startup folder script, started at login"
     if _cron_installed():
-        return "cron, checking in every 5 minutes"
+        return "a cron job, checking in every 5 minutes"
     system = platform.system()
     if system == "Linux" and os.path.isfile(_systemd_unit_path()):
-        return subprocess.run(
+        state = subprocess.run(
             ["systemctl", "--user", "is-active", SYSTEMD_UNIT],
             capture_output=True,
             text=True,
         ).stdout.strip()
+        linger = subprocess.run(
+            [
+                "loginctl",
+                "show-user",
+                os.environ.get("USER") or "",
+                "--property=Linger",
+                "--value",
+            ],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        when = "started at boot" if linger == "yes" else "started at login"
+        return f"a systemd user service, {when} ({state})"
     if system == "Darwin":
         for at_boot in [False, True]:
             if not os.path.isfile(_launchd_plist_path(at_boot)):
@@ -1445,7 +1467,12 @@ def get_service_status() -> str | None:
                 if line.strip().startswith("state = "):
                     state = line.split("=", 1)[1].strip()
                     break
-            return f"{state} ({'at boot' if at_boot else 'at login'})"
+            kind = (
+                "a launchd daemon, started at boot"
+                if at_boot
+                else ("a launchd agent, started at login")
+            )
+            return f"{kind} ({state})"
     return None
 
 

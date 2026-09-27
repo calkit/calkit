@@ -443,7 +443,7 @@ Options:
 | Option         | Type    | Required | Default | Description                                                                                                                                                 |
 | -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--yes`, `-y`  | boolean | no       | False   | Skip the confirmation prompt and install immediately.                                                                                                       |
-| `--at-boot`    | boolean | no       | False   | For the operator on macOS, start at boot rather than at login, which needs sudo.                                                                            |
+| `--boot`       | boolean | no       | False   | For the operator on macOS, start at boot rather than at login, which needs sudo.                                                                            |
 | `--cron`       | boolean | no       | False   | For the operator, have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
 | `--ssh`        | str     | no       |         | For the operator, install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
 | `--no-service` | boolean | no       | False   | For the operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
@@ -4048,7 +4048,7 @@ Options:
 
 | Option         | Type    | Required | Default | Description                                                                                                                               |
 | -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `--at-boot`    | boolean | no       | False   | On macOS, start at boot rather than at login (needs sudo).                                                                                |
+| `--boot`       | boolean | no       | False   | On macOS, start at boot rather than at login (needs sudo).                                                                                |
 | `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
 | `--ssh`        | str     | no       |         | Install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
 | `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
@@ -4067,10 +4067,9 @@ calkit operator start [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default    | Description                                                                                                        |
-| ----------------- | ------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------ |
-| `--verbose`, `-v` | boolean | no       | False      | Log in more detail.                                                                                                |
-| `--mode`          | str     | no       | foreground | How it's being run: 'foreground', 'service', or 'cron', which only connects when the hub asks and stops when idle. |
+| Option            | Type    | Required | Default | Description         |
+| ----------------- | ------- | -------- | ------- | ------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Log in more detail. |
 
 <a id="subcommand-operator-status"></a>
 

@@ -30,7 +30,7 @@ def install(
     at_boot: Annotated[
         bool,
         typer.Option(
-            "--at-boot",
+            "--boot",
             help="On macOS, start at boot rather than at login (needs sudo).",
         ),
     ] = False,
@@ -93,6 +93,9 @@ def install(
         typer.echo(f"✅ Registered Operator '{cfg['name']}'")
     else:
         typer.echo(f"Operator '{cfg['name']}' is already registered")
+    # Whatever ran it before is replaced, e.g., a service when switching to
+    # cron mode, so the two don't both run it
+    operator.uninstall_service()
     if no_service:
         typer.echo("Run 'calkit operator start' to connect it")
         return
@@ -120,16 +123,9 @@ def start(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Log in more detail.")
     ] = False,
-    mode: Annotated[
-        str,
-        typer.Option(
-            "--mode",
-            help=(
-                "How it's being run: 'foreground', 'service', or 'cron', "
-                "which only connects when the hub asks and stops when idle."
-            ),
-        ),
-    ] = "foreground",
+    # How it's being run, which the service and crontab entries set: in
+    # cron mode it only connects when the hub asks and stops when idle
+    mode: Annotated[str, typer.Option("--mode", hidden=True)] = "foreground",
 ) -> None:
     """Run the Operator in the foreground, e.g., inside tmux."""
     import logging
@@ -166,7 +162,9 @@ def status() -> None:
     typer.echo(f"Name: {cfg['name']}")
     typer.echo(f"Hub API: {cfg['api_url']}")
     service = operator.get_service_status()
-    typer.echo(f"Service: {service or 'not installed'}")
+    typer.echo(f"Installed as: {service or 'nothing; run it with start'}")
+    pid = operator.get_running_pid()
+    typer.echo(f"Running: {f'yes (PID {pid})' if pid else 'no'}")
     typer.echo("Workspaces:")
     for ws in operator.discover_workspaces(cfg):
         project = ws.get("project") or "unknown project"

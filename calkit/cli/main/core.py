@@ -4072,7 +4072,7 @@ def install_app(
     at_boot: Annotated[
         bool,
         typer.Option(
-            "--at-boot",
+            "--boot",
             help=(
                 "For the operator on macOS, start at boot rather than at "
                 "login, which needs sudo."

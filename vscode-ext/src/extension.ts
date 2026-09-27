@@ -48,6 +48,8 @@ import {
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import {
+  latexStagePdf,
+  latexStageSource,
   latexWorkingDiffPath,
   pipelineLatexDiffs,
   type PipelineLatexDiff,
@@ -97,6 +99,8 @@ const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
 const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
+const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
+const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -427,6 +431,101 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  // A LaTeX document and the PDF its stage builds take each other's place,
+  // like a Plotly figure and its preview. The other file opens in the same
+  // group first, since closing the last tab first can close the group too.
+  const swapActiveTab = async (
+    from: vscode.Uri,
+    open: () => Promise<unknown>,
+  ): Promise<void> => {
+    await open();
+    const group = vscode.window.tabGroups.activeTabGroup;
+    const previous = group.tabs.find(
+      (tab) =>
+        !tab.isActive && tabResourceUri(tab)?.toString() === from.toString(),
+    );
+    if (previous) {
+      await vscode.window.tabGroups.close(previous);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_SHOW_LATEX_PDF,
+      async (uri?: vscode.Uri) => {
+        const fileUri = activeTabUri(uri);
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const texFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const pdfFile = latexStagePdf(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          texFile,
+        );
+        if (!pdfFile) {
+          void vscode.window.showInformationMessage(
+            "No LaTeX stage in the pipeline builds this document.",
+          );
+          return;
+        }
+        const pdfUri = vscode.Uri.file(path.join(workspaceRoot, pdfFile));
+        try {
+          await vscode.workspace.fs.stat(pdfUri);
+        } catch {
+          void vscode.window.showInformationMessage(
+            `${pdfFile} hasn't been built yet. Run the stage to build it first.`,
+          );
+          return;
+        }
+        if (!isLatexWorkshopInstalled()) {
+          await vscode.env.openExternal(pdfUri);
+          return;
+        }
+        await swapActiveTab(fileUri, () =>
+          openPdfInLatexWorkshop(context, pdfUri),
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_SHOW_LATEX_SOURCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = activeTabUri(uri);
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const pdfFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const texFile = latexStageSource(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          pdfFile,
+        );
+        if (!texFile) {
+          void vscode.window.showInformationMessage(
+            "No LaTeX stage in the pipeline builds this PDF.",
+          );
+          return;
+        }
+        const texUri = vscode.Uri.file(path.join(workspaceRoot, texFile));
+        await swapActiveTab(fileUri, () =>
+          Promise.resolve(
+            vscode.window.showTextDocument(texUri, {
+              viewColumn: vscode.ViewColumn.Active,
+              preview: false,
+            }),
+          ),
+        );
+      },
+    ),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_RUN_STAGE,
@@ -602,31 +701,14 @@ export function activate(context: vscode.ExtensionContext): void {
         // A PDF a latex stage builds is diffed as the document it's built
         // from
         if (texFile.toLowerCase().endsWith(".pdf")) {
-          const source = Object.values(stages)
-            .map(
-              (stage) =>
-                stage as {
-                  kind?: string;
-                  wdir?: string;
-                  target_path?: string;
-                },
-            )
-            .find(
-              (stage) =>
-                stage.kind === "latex" &&
-                typeof stage.target_path === "string" &&
-                path.posix.join(
-                  stage.wdir ?? "",
-                  stage.target_path.replace(/\.tex$/, ".pdf"),
-                ) === texFile,
-            );
-          if (!source?.target_path) {
+          const source = latexStageSource(stages, texFile);
+          if (!source) {
             void vscode.window.showInformationMessage(
               "No LaTeX stage in the pipeline builds this PDF.",
             );
             return;
           }
-          texFile = path.posix.join(source.wdir ?? "", source.target_path);
+          texFile = source;
         }
         // The newer side is the working tree, so unsaved edits belong in it
         await vscode.workspace.textDocuments
@@ -745,17 +827,22 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const pipelineDiff = pipelineItems.get(picked);
         if (pipelineDiff) {
-          if (!picked.description?.endsWith("up to date")) {
+          // What's there opens straight away; a stale one is rebuilt after,
+          // and the viewer reloads it when the new one lands
+          const status = picked.description ?? "";
+          if (!status.endsWith("not built")) {
+            await openPdf(pipelineDiff.path);
+          }
+          if (!status.endsWith("up to date")) {
             const ok = await runCalkit(
               ["run", pipelineDiff.stage],
               `Building ${pipelineDiff.stage}...`,
             );
             ensureRunStatusPolling(context);
-            if (!ok) {
-              return;
+            if (ok && status.endsWith("not built")) {
+              await openPdf(pipelineDiff.path);
             }
           }
-          await openPdf(pipelineDiff.path);
           return;
         }
         const fromRef =
@@ -771,13 +858,24 @@ export function activate(context: vscode.ExtensionContext): void {
           "-o",
           outPath,
         ];
+        // A previous comparison against the same revision opens straight
+        // away while it's brought up to date
+        let existed = true;
+        try {
+          await vscode.workspace.fs.stat(
+            vscode.Uri.file(path.join(workspaceRoot, outPath)),
+          );
+          await openPdf(outPath);
+        } catch {
+          existed = false;
+        }
         const ok = await runCalkit(
           args,
-          `Diffing ${path.basename(texFile)} against ${
-            fromRef ?? "the default branch"
-          }...`,
+          `${existed ? "Updating the diff" : "Diffing"} ${path.basename(
+            texFile,
+          )} against ${fromRef ?? "the default branch"}...`,
         );
-        if (ok) {
+        if (ok && !existed) {
           await openPdf(outPath);
         }
       },

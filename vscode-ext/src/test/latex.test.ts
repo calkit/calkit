@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { latexWorkingDiffPath, pipelineLatexDiffs } from "../latex/core";
+import {
+  latexStagePdf,
+  latexStageSource,
+  latexWorkingDiffPath,
+  pipelineLatexDiffs,
+} from "../latex/core";
 
 test("latexWorkingDiffPath mirrors the CLI's working tree diff path", () => {
   // No revision means the CLI's default-branch merge base.
@@ -46,4 +51,22 @@ test("pipelineLatexDiffs mirrors the CLI's pipeline diff names and paths", () =>
       toRef: "origin/paper_v2",
     },
   ]);
+});
+
+test("latexStagePdf and latexStageSource map a latex stage's document and PDF", () => {
+  const stages = {
+    paper: { kind: "latex", target_path: "main.tex", wdir: "pubs/paper" },
+    report: { kind: "quarto", target_path: "report.qmd" },
+  };
+  assert.equal(
+    latexStagePdf(stages, "pubs/paper/main.tex"),
+    "pubs/paper/main.pdf",
+  );
+  assert.equal(
+    latexStageSource(stages, "pubs/paper/main.pdf"),
+    "pubs/paper/main.tex",
+  );
+  // Only latex stages count, and only their own document
+  assert.equal(latexStagePdf(stages, "report.qmd"), undefined);
+  assert.equal(latexStageSource(stages, "other.pdf"), undefined);
 });

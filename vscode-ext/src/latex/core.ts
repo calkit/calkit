@@ -81,3 +81,45 @@ export function pipelineLatexDiffs(
   }
   return diffs;
 }
+
+interface LatexStageFields {
+  kind?: string;
+  wdir?: string;
+  target_path?: string;
+}
+
+// The PDF a latex stage builds from `texFile`, if one does.
+export function latexStagePdf(
+  stages: Record<string, unknown>,
+  texFile: string,
+): string | undefined {
+  for (const raw of Object.values(stages)) {
+    const stage = raw as LatexStageFields;
+    if (stage?.kind !== "latex" || typeof stage.target_path !== "string") {
+      continue;
+    }
+    const target = path.posix.join(stage.wdir ?? "", stage.target_path);
+    if (target === texFile) {
+      return target.replace(/\.tex$/, ".pdf");
+    }
+  }
+  return undefined;
+}
+
+// The document a latex stage builds `pdfFile` from, if one does.
+export function latexStageSource(
+  stages: Record<string, unknown>,
+  pdfFile: string,
+): string | undefined {
+  for (const raw of Object.values(stages)) {
+    const stage = raw as LatexStageFields;
+    if (stage?.kind !== "latex" || typeof stage.target_path !== "string") {
+      continue;
+    }
+    const target = path.posix.join(stage.wdir ?? "", stage.target_path);
+    if (target.replace(/\.tex$/, ".pdf") === pdfFile) {
+      return target;
+    }
+  }
+  return undefined;
+}

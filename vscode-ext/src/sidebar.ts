@@ -12,6 +12,7 @@ import type {
   StaleStageDetail,
 } from "./types";
 import { getExecutedNotebookHtmlPath } from "./notebooks";
+import { pipelineLatexDiffs } from "./latex/core";
 import {
   classifyStaleStage,
   dvcStageOutputPaths,
@@ -1079,6 +1080,9 @@ export class CalkitSidebarProvider
       };
       items.push(openItem);
     }
+    if (nodeKind === "publication" && typeof entry.stage === "string") {
+      items.push(...this.latexDiffItems(entry.stage));
+    }
     return items;
   }
 
@@ -1396,7 +1400,68 @@ export class CalkitSidebarProvider
       prop("Log", logPath, "output", logPath);
     }
 
+    items.push(...this.latexDiffItems(stageName));
     return items;
+  }
+
+  // One row per diff a latex stage keeps, showing whether it's built and
+  // current. Clicking opens it once built; the inline action (re)builds it.
+  private latexDiffItems(latexStageName: string): SidebarItem[] {
+    const stages = this.calkitConfig?.pipeline?.stages ?? {};
+    return pipelineLatexDiffs(stages)
+      .filter((diff) => diff.latexStage === latexStageName)
+      .map((diff) => {
+        const label = diff.toRef
+          ? `Diff ${diff.fromRef}..${diff.toRef}`
+          : `Diff vs ${diff.fromRef}`;
+        const absPath = this.workspaceRoot
+          ? path.join(this.workspaceRoot, diff.path)
+          : undefined;
+        const built = !!absPath && fs.existsSync(absPath);
+        const running = this.runningStageNames.has(diff.stage);
+        const stale = this.staleStageNames.has(diff.stage);
+        const item = new SidebarItem(
+          label,
+          vscode.TreeItemCollapsibleState.None,
+          "latex-diff",
+          diff.stage,
+        );
+        const against = diff.toRef ?? "the working tree";
+        if (running) {
+          item.description = "running";
+          item.iconPath = new vscode.ThemeIcon("loading~spin");
+        } else if (!built) {
+          item.description = "not built";
+          item.iconPath = new vscode.ThemeIcon("circle-outline");
+        } else if (stale) {
+          item.description = "stale";
+          item.iconPath = new vscode.ThemeIcon(
+            "warning",
+            new vscode.ThemeColor("list.warningForeground"),
+          );
+        } else {
+          item.iconPath = new vscode.ThemeIcon(
+            "diff",
+            new vscode.ThemeColor("testing.iconPassed"),
+          );
+        }
+        item.contextValue = !built
+          ? "latex-diff-missing"
+          : stale
+          ? "latex-diff-stale"
+          : "latex-diff";
+        item.tooltip =
+          `${diff.document}: ${diff.fromRef} against ${against}\n` +
+          `Stage: ${diff.stage}\n${diff.path}`;
+        if (built && absPath) {
+          item.command = {
+            command: "vscode.open",
+            title: "Open",
+            arguments: [vscode.Uri.file(absPath)],
+          };
+        }
+        return item;
+      });
   }
 
   // Repo-relative path of the scheduler log for a stage, or undefined if the

@@ -983,6 +983,26 @@ MapPathsStage.model_rebuild()
 
 
 class LatexStage(Stage):
+    class PythonScriptDiffFilter(BaseModel):
+        """A Python script each marked-up document is piped through."""
+
+        kind: Literal["python-script"] = Field(
+            description="Run a Python script, reading the marked-up "
+            "document on stdin and writing the result to stdout."
+        )
+        script_path: RelativeChildPathString = Field(
+            description="Path to the Python script to run."
+        )
+        environment: str | None = Field(
+            default=None,
+            description="Environment to run the script in. Defaults to "
+            "Calkit's own Python, which has only the standard library and "
+            "Calkit's dependencies.",
+        )
+        args: list[str] = Field(
+            default=[], description="Arguments passed to the script."
+        )
+
     kind: Literal["latex"] = "latex"
     target_path: str = Field(description="Path to the .tex file to compile.")
     output_dir: str | None = Field(
@@ -1003,8 +1023,8 @@ class LatexStage(Stage):
     diffs: list[str | list[str]] = Field(
         default=[],
         description="Comparisons to keep for this document, each a pair of "
-        "revisions. A bare string is shorthand for comparing that revision "
-        "against HEAD.",
+        "revisions. A bare string compares that revision against the "
+        "working tree, like the document itself is built from.",
     )
     diff_pdf_storage: Literal["git", "dvc"] | None = Field(
         default="dvc", description="Where to store the resulting diff PDFs."
@@ -1035,6 +1055,12 @@ class LatexStage(Stage):
         description="Extra arguments passed straight through to latexdiff "
         "when building diffs, e.g., '--type=CFONT'. Changed figures are "
         "shown old and new unless '--graphics-markup' is set here.",
+    )
+    diff_filter: PythonScriptDiffFilter | None = Field(
+        default=None,
+        description="Script each marked-up document is piped through before "
+        "it's built, e.g., to drop changes that don't change the rendered "
+        "text.",
     )
 
     @property
@@ -1073,25 +1099,39 @@ class LatexStage(Stage):
             if path not in (self.target_path, self.latexmkrc_path)
             and not path.startswith(".calkit/")
         ]
+        # Changing the filter's script rebuilds the diff
+        filter_deps = (
+            [self.diff_filter.script_path] if self.diff_filter else []
+        )
         stages = {}
-        for (from_ref, to_ref), path in zip(self.diff_pairs, self.diff_paths):
+        for entry, (from_ref, to_ref), path in zip(
+            self.diffs, self.diff_pairs, self.diff_paths
+        ):
             name = calkit.latex.get_diff_stage_name(
                 str(self.name), from_ref, to_ref
             )
+            # A bare revision is compared with the working tree, like every
+            # other stage reads it, so a change can be checked before it's
+            # committed. Named for HEAD still, which is what it is once
+            # committed.
+            working = isinstance(entry, str)
             out: str | dict = path
             if self.diff_pdf_storage != "dvc":
                 out = {path: {"cache": False}}
             cmd = (
                 f"calkit latex diff -e {shlex.quote(self.environment)}"
                 f" --no-check --from {shlex.quote(from_ref)}"
-                f" --to {shlex.quote(to_ref)}"
             )
+            if not working:
+                cmd += f" --to {shlex.quote(to_ref)}"
             # Named by content rather than by commit: a merge, a rebase, or
             # a commit to anything else makes a new commit without changing
             # the document, and would otherwise rewrite this command and
             # make the stage stale
             if revision_key is not None:
-                key = f"{revision_key(from_ref)}..{revision_key(to_ref)}"
+                key = revision_key(from_ref)
+                if not working:
+                    key += f"..{revision_key(to_ref)}"
                 cmd += f" --revision-key {shlex.quote(key)}"
             # Built the way the document itself is, so a latexmkrc that sets
             # search paths or shell escape applies to the diff too
@@ -1103,6 +1143,14 @@ class LatexStage(Stage):
                 cmd += f" --latexdiff-arg {shlex.quote(arg)}"
             if self.keep_diff_tex:
                 cmd += " --keep-tex"
+            if self.diff_filter is not None:
+                script = self.diff_filter.script_path
+                cmd += f" --filter-script {shlex.quote(script)}"
+                if self.diff_filter.environment is not None:
+                    env = self.diff_filter.environment
+                    cmd += f" --filter-env {shlex.quote(env)}"
+                for arg in self.diff_filter.args:
+                    cmd += f" --filter-arg {shlex.quote(arg)}"
             # Each revision gets its own copies of any of these that are
             # tracked with DVC, since a checkout only has their pointers
             for input_path in inputs:
@@ -1119,10 +1167,12 @@ class LatexStage(Stage):
             # that can move also reads the working tree's files, since a
             # DVC-tracked figure's content isn't in Git and only the
             # dependency catches a change to it.
-            moving = calkit.latex.MOVING_REFS.intersection({from_ref, to_ref})
+            moving = working or calkit.latex.MOVING_REFS.intersection(
+                {from_ref, to_ref}
+            )
             stage: dict = {
                 "cmd": cmd,
-                "deps": deps if moving else [],
+                "deps": (deps if moving else []) + filter_deps,
                 "outs": [out],
                 "desc": (
                     f"Automatically generated from the '{self.name}' stage "

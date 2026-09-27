@@ -63,6 +63,7 @@ from calkit.cli.office import office_app
 from calkit.cli.operator import operator_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.scheduler import scheduler_app
+from calkit.cli.show import show_app
 from calkit.cli.sync import sync_app
 from calkit.cli.update import update_app
 
@@ -82,6 +83,7 @@ app.add_typer(
     help="Work with computational notebooks.",
 )
 app.add_typer(list_app, name="list|ls", help="List Calkit objects.")
+app.add_typer(show_app, name="show", help="Show Calkit objects.")
 app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")

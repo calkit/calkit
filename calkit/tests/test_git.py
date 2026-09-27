@@ -402,7 +402,7 @@ def test_ensure_path_is_ignored_stale_negation_after_direct_rule(tmp_dir):
     assert "results/output.json" in lines
 
 
-def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir):
+def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir, capsys):
     # A CI checkout is usually shallow and often has only the branch being
     # built, so a comparison against another branch fails on a repo that
     # looks fine otherwise
@@ -461,6 +461,51 @@ def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir):
     # A revision that doesn't exist is reported as missing rather than
     # retried forever
     assert calkit.git.resolve_ref(repo, "nope-not-a-branch") is None
+    # A local branch is what its name means here, like for every other
+    # stage, even when a fetch shows its remote has moved on, but that's
+    # warned about, since a comparison elsewhere would differ
+    subprocess.check_call(["git", "-C", clone, "branch", "main", main_sha])
+    commit = ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit"]
+
+    def commit_to(path: str, content: str) -> str:
+        with open(os.path.join(path, "f.txt"), "w") as f:
+            f.write(content)
+        subprocess.check_call(["git", "-C", path, *commit, "-qam", content])
+        return subprocess.check_output(
+            ["git", "-C", path, "rev-parse", "HEAD"], text=True
+        ).strip()
+
+    def fetch_main() -> None:
+        subprocess.check_call(
+            [
+                "git",
+                "-C",
+                clone,
+                "fetch",
+                "-q",
+                "origin",
+                "main:refs/remotes/origin/main",
+            ]
+        )
+
+    subprocess.check_call(["git", "-C", origin, "checkout", "-q", "main"])
+    remote_sha = commit_to(origin, "three")
+    fetch_main()
+    assert calkit.git.resolve_ref(repo, "main") == main_sha
+    assert "behind its remote" in capsys.readouterr().err
+    # Commits not pushed yet are used as they are, without a warning
+    subprocess.check_call(
+        ["git", "-C", clone, "branch", "-f", "main", remote_sha]
+    )
+    subprocess.check_call(["git", "-C", clone, "checkout", "-q", "main"])
+    local_sha = commit_to(clone, "four")
+    assert calkit.git.resolve_ref(repo, "main") == local_sha
+    assert capsys.readouterr().err == ""
+    # Once both have moved, it can't be said which is meant
+    commit_to(origin, "five")
+    fetch_main()
+    assert calkit.git.resolve_ref(repo, "main") == local_sha
+    assert "diverged" in capsys.readouterr().err
 
 
 def test_check_branch_is_current(tmp_dir):

@@ -29,6 +29,10 @@ import {
   getGoogleRedirectUri,
 } from "../../lib/google"
 import {
+  createHuggingFaceOAuthState,
+  saveHuggingFaceRedirectUri,
+} from "../../lib/huggingface"
+import {
   getZenodoAuthUrl,
   getZenodoRedirectUri,
   zenodoAuthStateParam,
@@ -62,6 +66,21 @@ function ConnectedAccounts() {
       UsersService.postUserZoteroAuthStart().then((response) => response.data),
     onSuccess: (data) => {
       mixpanel.track("Clicked connect Zotero")
+      location.href = data.authorize_url
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+  })
+  // The backend holds the client ID, so it builds the authorization URL
+  const connectHuggingFaceMutation = useMutation({
+    mutationFn: () =>
+      UsersService.postUserHuggingfaceAuthStart({
+        huggingFaceAuthStartRequest: { state: createHuggingFaceOAuthState() },
+      }).then((response) => response.data),
+    onSuccess: (data) => {
+      mixpanel.track("Clicked connect Hugging Face")
+      saveHuggingFaceRedirectUri(data.redirect_uri)
       location.href = data.authorize_url
     },
     onError: (err: AxiosError) => {
@@ -334,6 +353,34 @@ function ConnectedAccounts() {
                 size="xs"
                 onClick={() => connectZoteroMutation.mutate()}
                 isLoading={connectZoteroMutation.isPending}
+              >
+                Connect
+              </Button>
+            )}
+          </HStack>
+          <HStack mt={4}>
+            <Text>Hugging Face:</Text>
+            {connectedAccountsQuery.data?.huggingface ? (
+              <>
+                <Icon as={FaCheck} color="green.500" />
+                <IconButton
+                  aria-label="Disconnect Hugging Face"
+                  icon={<FaTrash />}
+                  size="xs"
+                  variant="ghost"
+                  colorScheme="red"
+                  onClick={() =>
+                    disconnectAccountMutation.mutate("huggingface")
+                  }
+                  isLoading={disconnectAccountMutation.isPending}
+                />
+              </>
+            ) : (
+              <Button
+                variant="primary"
+                size="xs"
+                onClick={() => connectHuggingFaceMutation.mutate()}
+                isLoading={connectHuggingFaceMutation.isPending}
               >
                 Connect
               </Button>

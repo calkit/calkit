@@ -47,7 +47,11 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
-import { latexWorkingDiffPath } from "./latex/core";
+import {
+  latexWorkingDiffPath,
+  pipelineLatexDiffs,
+  type PipelineLatexDiff,
+} from "./latex/core";
 import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
@@ -533,9 +537,97 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!fileUri || !workspaceRoot) {
           return;
         }
-        const texFile = path
+        // Run calkit with a cancellable progress notification, reporting a
+        // failure with a way to see the output
+        const runCalkit = (args: string[], title: string) => {
+          log(`Running: calkit ${args.join(" ")}`);
+          return vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title,
+              cancellable: true,
+            },
+            async (_progress, token) => {
+              const abort = new AbortController();
+              token.onCancellationRequested(() => abort.abort());
+              try {
+                const { stdout, stderr } = await execFileAsync("calkit", args, {
+                  cwd: workspaceRoot,
+                  maxBuffer: 16 * 1024 * 1024,
+                  signal: abort.signal,
+                });
+                log([stdout, stderr].filter(Boolean).join("\n").trim());
+                return true;
+              } catch (error: unknown) {
+                if (abort.signal.aborted) {
+                  return false;
+                }
+                const err = error as {
+                  stdout?: string;
+                  stderr?: string;
+                  message?: string;
+                };
+                log([err.stdout, err.stderr].filter(Boolean).join("\n").trim());
+                const errMsg = (err.stderr || err.message || String(error))
+                  .trim()
+                  .split("\n")
+                  .pop();
+                void vscode.window
+                  .showErrorMessage(
+                    `LaTeX diff failed: ${errMsg}`,
+                    "View Output",
+                  )
+                  .then((choice) => {
+                    if (choice === "View Output") {
+                      outputChannel.show(true);
+                    }
+                  });
+                return false;
+              }
+            },
+          );
+        };
+        const openPdf = async (relPath: string) => {
+          const pdfUri = vscode.Uri.file(path.join(workspaceRoot, relPath));
+          if (isLatexWorkshopInstalled()) {
+            await openPdfInLatexWorkshop(context, pdfUri);
+          } else {
+            await vscode.env.openExternal(pdfUri);
+          }
+        };
+        let texFile = path
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
+        const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+        // A PDF a latex stage builds is diffed as the document it's built
+        // from
+        if (texFile.toLowerCase().endsWith(".pdf")) {
+          const source = Object.values(stages)
+            .map(
+              (stage) =>
+                stage as {
+                  kind?: string;
+                  wdir?: string;
+                  target_path?: string;
+                },
+            )
+            .find(
+              (stage) =>
+                stage.kind === "latex" &&
+                typeof stage.target_path === "string" &&
+                path.posix.join(
+                  stage.wdir ?? "",
+                  stage.target_path.replace(/\.tex$/, ".pdf"),
+                ) === texFile,
+            );
+          if (!source?.target_path) {
+            void vscode.window.showInformationMessage(
+              "No LaTeX stage in the pipeline builds this PDF.",
+            );
+            return;
+          }
+          texFile = path.posix.join(source.wdir ?? "", source.target_path);
+        }
         // The newer side is the working tree, so unsaved edits belong in it
         await vscode.workspace.textDocuments
           .find((d) => d.uri.fsPath === fileUri.fsPath && d.isDirty)
@@ -546,7 +638,55 @@ export function activate(context: vscode.ExtensionContext): void {
           label: "$(git-merge) Default branch",
           description: "merge base with this branch",
         };
-        const items: vscode.QuickPickItem[] = [defaultItem];
+        // The pipeline's own diffs of this document come first, marked with
+        // whether they're current
+        const pipelineItems = new Map<
+          vscode.QuickPickItem,
+          PipelineLatexDiff
+        >();
+        for (const diff of pipelineLatexDiffs(stages)) {
+          if (diff.document !== texFile) {
+            continue;
+          }
+          let built = true;
+          try {
+            await vscode.workspace.fs.stat(
+              vscode.Uri.file(path.join(workspaceRoot, diff.path)),
+            );
+          } catch {
+            built = false;
+          }
+          const status = !built
+            ? "not built"
+            : staleStageNames.has(diff.stage)
+            ? "stale"
+            : "up to date";
+          pipelineItems.set(
+            {
+              label: `$(diff) ${diff.fromRef} against ${
+                diff.toRef ?? "the working tree"
+              }`,
+              description: `pipeline, ${status}`,
+              detail: status === "up to date" ? undefined : "Builds it first",
+            },
+            diff,
+          );
+        }
+        const items: vscode.QuickPickItem[] = [];
+        if (pipelineItems.size) {
+          items.push(
+            {
+              label: "Kept by the pipeline",
+              kind: vscode.QuickPickItemKind.Separator,
+            },
+            ...pipelineItems.keys(),
+            {
+              label: "Compare against",
+              kind: vscode.QuickPickItemKind.Separator,
+            },
+          );
+        }
+        items.push(defaultItem);
         try {
           const { stdout } = await execFileAsync(
             "git",
@@ -603,6 +743,21 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!picked) {
           return;
         }
+        const pipelineDiff = pipelineItems.get(picked);
+        if (pipelineDiff) {
+          if (!picked.description?.endsWith("up to date")) {
+            const ok = await runCalkit(
+              ["run", pipelineDiff.stage],
+              `Building ${pipelineDiff.stage}...`,
+            );
+            ensureRunStatusPolling(context);
+            if (!ok) {
+              return;
+            }
+          }
+          await openPdf(pipelineDiff.path);
+          return;
+        }
         const fromRef =
           picked === defaultItem
             ? undefined
@@ -616,59 +771,14 @@ export function activate(context: vscode.ExtensionContext): void {
           "-o",
           outPath,
         ];
-        log(`Running: calkit ${args.join(" ")}`);
-        const ok = await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: `Diffing ${path.basename(texFile)} against ${
-              fromRef ?? "the default branch"
-            }...`,
-            cancellable: true,
-          },
-          async (_progress, token) => {
-            const abort = new AbortController();
-            token.onCancellationRequested(() => abort.abort());
-            try {
-              const { stdout, stderr } = await execFileAsync("calkit", args, {
-                cwd: workspaceRoot,
-                maxBuffer: 16 * 1024 * 1024,
-                signal: abort.signal,
-              });
-              log([stdout, stderr].filter(Boolean).join("\n").trim());
-              return true;
-            } catch (error: unknown) {
-              if (abort.signal.aborted) {
-                return false;
-              }
-              const err = error as {
-                stdout?: string;
-                stderr?: string;
-                message?: string;
-              };
-              log([err.stdout, err.stderr].filter(Boolean).join("\n").trim());
-              const errMsg = (err.stderr || err.message || String(error))
-                .trim()
-                .split("\n")
-                .pop();
-              void vscode.window
-                .showErrorMessage(`LaTeX diff failed: ${errMsg}`, "View Output")
-                .then((choice) => {
-                  if (choice === "View Output") {
-                    outputChannel.show(true);
-                  }
-                });
-              return false;
-            }
-          },
+        const ok = await runCalkit(
+          args,
+          `Diffing ${path.basename(texFile)} against ${
+            fromRef ?? "the default branch"
+          }...`,
         );
-        if (!ok) {
-          return;
-        }
-        const pdfUri = vscode.Uri.file(path.join(workspaceRoot, outPath));
-        if (isLatexWorkshopInstalled()) {
-          await openPdfInLatexWorkshop(context, pdfUri);
-        } else {
-          await vscode.env.openExternal(pdfUri);
+        if (ok) {
+          await openPdf(outPath);
         }
       },
     ),

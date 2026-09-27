@@ -25,3 +25,59 @@ export function latexWorkingDiffPath(
     `${path.posix.basename(texFile, path.posix.extname(texFile))}.pdf`,
   );
 }
+
+// A diff a latex stage keeps, mirroring `get_pipeline_diffs` in
+// calkit/latex.py. `toRef` is undefined for a bare revision, which is
+// compared with the working tree.
+export interface PipelineLatexDiff {
+  path: string;
+  document: string;
+  latexStage: string;
+  stage: string;
+  fromRef: string;
+  toRef?: string;
+}
+
+export function pipelineLatexDiffs(
+  stages: Record<string, unknown>,
+): PipelineLatexDiff[] {
+  const diffs: PipelineLatexDiff[] = [];
+  for (const [name, raw] of Object.entries(stages)) {
+    const stage = raw as {
+      kind?: string;
+      wdir?: string;
+      target_path?: string;
+      diffs?: (string | string[])[];
+    };
+    if (stage?.kind !== "latex" || !stage.target_path) {
+      continue;
+    }
+    const wdir = stage.wdir ?? "";
+    const target = stage.target_path;
+    for (const entry of stage.diffs ?? []) {
+      const [fromRef, toRef] =
+        typeof entry === "string" ? [entry, "HEAD"] : [entry[0], entry[1]];
+      let dir = refDirname(fromRef);
+      let suffix = refDirname(fromRef);
+      if (toRef !== "HEAD") {
+        dir += `..${refDirname(toRef)}`;
+        suffix += `-${refDirname(toRef)}`;
+      }
+      diffs.push({
+        path: path.posix.join(
+          wdir,
+          ".calkit/latex-diffs",
+          dir,
+          path.posix.dirname(target),
+          `${path.posix.basename(target, path.posix.extname(target))}.pdf`,
+        ),
+        document: path.posix.join(wdir, target),
+        latexStage: name,
+        stage: `${name}-diff-${suffix}`,
+        fromRef,
+        toRef: typeof entry === "string" ? undefined : toRef,
+      });
+    }
+  }
+  return diffs;
+}

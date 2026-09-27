@@ -454,6 +454,11 @@
           "group": "inline"
         },
         {
+          "command": "calkit-vscode.runStage",
+          "when": "view == calkit-sidebar && viewItem =~ /^latex-diff/",
+          "group": "inline"
+        },
+        {
           "command": "calkit-vscode.editEnvironment",
           "when": "view == calkit-sidebar && viewItem == stage-env-prop",
           "group": "inline"
@@ -527,7 +532,7 @@
         },
         {
           "command": "calkit-vscode.diffLatex",
-          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf)",
           "group": "calkit@5"
         }
       ],
@@ -564,7 +569,7 @@
         },
         {
           "command": "calkit-vscode.diffLatex",
-          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)",
           "group": "navigation"
         }
       ],
@@ -588,7 +593,7 @@
         },
         {
           "command": "calkit-vscode.diffLatex",
-          "when": "resourceExtname == .tex && calkit-vscode.hasProject",
+          "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)",
           "group": "calkit@5"
         }
       ],
@@ -739,7 +744,7 @@
         },
         {
           "command": "calkit-vscode.diffLatex",
-          "when": "resourceExtname == .tex && calkit-vscode.hasProject"
+          "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)"
         },
         {
           "command": "calkit-vscode.save",

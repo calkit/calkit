@@ -581,9 +581,12 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         with open(f"at-once-{n}.pdf") as f:
             assert f.read() == "old\nnewest\n"
     os.remove(stubs / "latexmk-args.txt")
+    os.remove(stubs / "latexdiff-args.txt")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
     assert "is up to date" in result.stdout
     assert not os.path.exists(stubs / "latexmk-args.txt")
+    # Known from what it's made of, so latexdiff doesn't run either
+    assert not os.path.exists(stubs / "latexdiff-args.txt")
     with open("paper/.latexmkrc", "a") as f:
         f.write("$max_repeat = 5;\n")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
@@ -673,6 +676,21 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert latexmk_args[latexmk_args.index("-r") + 1].endswith(
         "paper/.latexmkrc"
     )
+    # A revision's data comes from a remote through the project's cache, so
+    # the next comparison against it needn't download anything
+    import hashlib
+
+    remote = tmp_path_factory.mktemp("remote") / "store"
+    subprocess.check_call(
+        ["calkit", "dvc", "remote", "add", "-d", "r", remote]
+    )
+    # A local remote is laid out like the cache, and DVC won't push data for
+    # a revision from before the remote existed
+    shutil.move(".dvc/cache", remote)
+    result = subprocess.run(bare, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    old_md5 = hashlib.md5(b"old\n").hexdigest()
+    assert os.path.isfile(f".dvc/cache/files/md5/{old_md5[:2]}/{old_md5[2:]}")
 
 
 def test_marked_up_digest_ignores_the_header():

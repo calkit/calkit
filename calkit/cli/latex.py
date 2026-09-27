@@ -786,9 +786,15 @@ def diff(
     def fetch_dvc_inputs(root: str, rev: str, paths: list[str]) -> list[str]:
         """Fetch the DVC-tracked content of ``paths`` at ``rev`` into ``root``.
 
+        Through the project's cache, so only the first comparison against a
+        revision downloads anything: reading a revision's files straight
+        from a remote leaves nothing behind for the next one.
+
         Returns each fetched path with its hash, since that content changes
         the PDF without changing the marked-up source.
         """
+        from concurrent.futures import ThreadPoolExecutor
+
         from dvc.exceptions import NotDvcRepoError
         from dvc.fs import DVCFileSystem
 
@@ -802,33 +808,85 @@ def diff(
             return str(e)
 
         fetched: list[str] = []
+        targets = list(dict.fromkeys(p.rstrip("/") for p in paths))
         try:
-            # A project using Calkit's own remote needs its scheme known
-            calkit.dvc.register_ck_scheme()
-            fs = DVCFileSystem(url=".", rev=rev)
+            dvc_repo = calkit.dvc.get_dvc_repo()
         except NotDvcRepoError:
             return fetched
+        # The remotes configured now rather than then, since one added or
+        # moved since a revision is where its data is
+        default_remote = dvc_repo.config["core"].get("remote")
+        remotes = (
+            {
+                "core": {"remote": default_remote},
+                "remote": dict(dvc_repo.config.get("remote", {})),
+            }
+            if default_remote
+            else None
+        )
+        fs = DVCFileSystem(url=".", rev=rev, config=remotes)
         found: list[str] = []
-        for path in dict.fromkeys(p.rstrip("/") for p in paths):
+        failed: list[tuple[str, Exception]] = []
+        for path in targets:
             try:
                 found += list(fs.find(path))
             except FileNotFoundError:
                 continue
             except Exception as e:
-                # A directory whose listing is in neither the cache nor a
-                # reachable remote can't be expanded, but the rest of the
-                # comparison can still be built
-                warn(
-                    f"Can't list {path} at {rev[:7]}, so the diff will be "
-                    f"missing it: {reason(e)}. Its data is in neither the "
-                    "local cache nor the DVC remote, so it was likely never "
-                    "pushed; push it from a machine that has it"
-                )
+                failed.append((path, e))
+        files = []
         for rpath in dict.fromkeys(found):
-            dvc_info = fs.info(rpath).get("dvc_info")
-            if not dvc_info:
-                continue
-            fetched.append(f"{rpath} {dvc_info.get('md5')}")
+            md5 = (fs.info(rpath).get("dvc_info") or {}).get("md5")
+            if md5:
+                files.append((rpath, md5))
+        # Into the project's cache, all at once, then copied from there. Via
+        # a temporary directory, so an interrupted download can't leave a
+        # truncated file in the cache under the name of its content.
+        cache = dvc_repo.cache.local
+        missing = [
+            (rpath, md5)
+            for rpath, md5 in files
+            if not os.path.exists(cache.oid_to_path(md5))
+        ]
+        if missing:
+            download_dir = os.path.join(os.path.dirname(root), "download")
+            downloads = [
+                os.path.join(download_dir, str(n)) for n in range(len(missing))
+            ]
+            os.makedirs(download_dir, exist_ok=True)
+
+            def fetch_one(rpath: str, dest: str) -> None:
+                # What fails here is fetched, or reported, one by one below
+                try:
+                    fs.get_file(rpath, dest)
+                except Exception:
+                    pass
+
+            # A remote serves a file at a time, often slowly, so many at once
+            with ThreadPoolExecutor(16) as pool:
+                list(
+                    pool.map(
+                        fetch_one, [rpath for rpath, _ in missing], downloads
+                    )
+                )
+            for (_, md5), download in zip(missing, downloads):
+                if os.path.isfile(download):
+                    cache_path = cache.oid_to_path(md5)
+                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                    os.replace(download, cache_path)
+            shutil.rmtree(download_dir, ignore_errors=True)
+        for path, error in failed:
+            # A directory whose listing is in neither the cache nor a
+            # reachable remote can't be expanded, but the rest of the
+            # comparison can still be built
+            warn(
+                f"Can't list {path} at {rev[:7]}, so the diff will be "
+                f"missing it: {reason(error)}. Its data is in neither the "
+                "local cache nor the DVC remote, so it was likely never "
+                "pushed; push it from a machine that has it"
+            )
+        for rpath, md5 in files:
+            fetched.append(f"{rpath} {md5}")
             dest = os.path.join(root, rpath)
             if os.path.exists(dest):
                 continue
@@ -1336,6 +1394,65 @@ def _build_diff(
     marked_up: bytes | None = None
     aux_dir = os.path.join(build_dir, aux_name)
     try:
+        # The newer side's copy, which is what the document was built with
+        # at that revision
+        rc_path = None
+        rc_hash = None
+        if latexmk_rc_path is not None:
+            rc_path = os.path.join(head_root, latexmk_rc_path)
+            if not os.path.isfile(rc_path):
+                rc_path = latexmk_rc_path
+            rc_path = Path(os.path.normpath(rc_path)).as_posix()
+            if os.path.isfile(rc_path):
+                rc_hash = hashlib.sha256(
+                    Path(rc_path).read_bytes()
+                ).hexdigest()
+        # Paths into this run's checkouts name the run, which says nothing
+        # about the PDF
+        run_prefix = Path(DIFF_TMP_DIR, str(os.getpid())).as_posix()
+        stable_prefix = Path(DIFF_TMP_DIR, "run").as_posix()
+        build_context = [
+            item.replace(run_prefix, stable_prefix)
+            for item in context
+            + [f"latexmkrc {rc_path} {rc_hash}"]
+            + latexmk_args
+        ]
+        # Everything the diff is made from, checked before latexdiff, which
+        # takes a minute or more on a long document, so asking for one
+        # that's already built returns straight away
+        inputs = hashlib.sha256(calkit.__version__.encode())
+        for item in build_context + latexdiff_args + (filter_cmd or []):
+            inputs.update(f"{item}\n".encode())
+            if item != sys.executable and os.path.isfile(item):
+                inputs.update(Path(item).read_bytes())
+        for n, side in enumerate((base_tex_fpath, head_tex_fpath)):
+            side_root = side[: -len(tex_file_fpath)] or "."
+            sources = [tex_file_fpath] + [
+                path
+                for path in calkit.latex.detect_inputs(
+                    tex_file_fpath, wdir=side_root
+                )
+                if Path(path).suffix in calkit.latex._SOURCE_EXTS
+            ]
+            for source in sources:
+                try:
+                    text = Path(side_root, source).read_bytes()
+                except OSError:
+                    continue
+                text = text.replace(
+                    run_prefix.encode(), stable_prefix.encode()
+                )
+                inputs.update(f"{n} {source}\n".encode() + text)
+        inputs_digest = inputs.hexdigest()
+        state_path = calkit.latex.diff_state_path(output)
+        inputs_state_path = f"{state_path}.inputs"
+        if (
+            not force
+            and os.path.isfile(output)
+            and _read(inputs_state_path) == inputs_digest
+        ):
+            typer.echo(f"{output} is up to date")
+            return
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
         latexdiff_cmd = ["latexdiff", "--flatten", "--encoding=utf8"]
@@ -1394,43 +1511,21 @@ def _build_diff(
                 raise_error(
                     f"Diff filter failed with exit status {e.returncode}"
                 )
-        # The newer side's copy, which is what the document was built with
-        # at that revision
-        rc_path = None
-        rc_hash = None
-        if latexmk_rc_path is not None:
-            rc_path = os.path.join(head_root, latexmk_rc_path)
-            if not os.path.isfile(rc_path):
-                rc_path = latexmk_rc_path
-            rc_path = Path(os.path.normpath(rc_path)).as_posix()
-            if os.path.isfile(rc_path):
-                rc_hash = hashlib.sha256(
-                    Path(rc_path).read_bytes()
-                ).hexdigest()
         # The PDF is a function of this marked-up source and how it's built,
         # so if neither has changed there's nothing to build. Worth checking
         # because the common case produces nothing at all: on the default
         # branch the merge base is usually HEAD, so the comparison is empty,
         # and latexmk is the expensive half of this.
-        # Paths into this run's checkouts name the run, which says nothing
-        # about the PDF
-        run_prefix = Path(DIFF_TMP_DIR, str(os.getpid())).as_posix()
-        stable_prefix = Path(DIFF_TMP_DIR, "run").as_posix()
         digest = _marked_up_digest(
             marked_up.replace(run_prefix.encode(), stable_prefix.encode()),
-            context=[
-                item.replace(run_prefix, stable_prefix)
-                for item in context
-                + [f"latexmkrc {rc_path} {rc_hash}"]
-                + latexmk_args
-            ],
+            context=build_context,
         )
-        state_path = calkit.latex.diff_state_path(output)
         if (
             not force
             and os.path.isfile(output)
             and _read(state_path) == digest
         ):
+            Path(inputs_state_path).write_text(inputs_digest)
             typer.echo(f"{output} is up to date")
             return
         Path(diff_tex_fpath).write_bytes(marked_up)
@@ -1530,6 +1625,7 @@ def _build_diff(
             shutil.rmtree(aux_dir, ignore_errors=True)
         os.makedirs(os.path.dirname(state_path), exist_ok=True)
         Path(state_path).write_text(digest)
+        Path(inputs_state_path).write_text(inputs_digest)
         typer.echo(f"Wrote {output}")
     finally:
         if keep_tex:

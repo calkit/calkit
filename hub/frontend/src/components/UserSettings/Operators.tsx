@@ -221,7 +221,7 @@ function Operators() {
                       ? new Date(`${op.last_seen}Z`).toLocaleString()
                       : "Never"}
                   </Td>
-                  <Td>{op.workspaces?.length ?? 0}</Td>
+                  <Td>{op.workspace_count}</Td>
                   <Td>
                     <Button
                       size="xs"

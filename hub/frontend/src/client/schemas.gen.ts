@@ -576,6 +576,7 @@ export const CheckInSchema = {
   },
   type: "object",
   title: "CheckIn",
+  description: "What an Operator reports each time it checks in.",
 } as const
 
 export const CheckInRespSchema = {
@@ -616,6 +617,7 @@ export const CheckInRespSchema = {
   type: "object",
   required: ["operator_id", "name", "user_id", "relay_url", "relay_token"],
   title: "CheckInResp",
+  description: "Where and how an Operator connects to the relay.",
 } as const
 
 export const CollaboratorSchema = {
@@ -4403,14 +4405,6 @@ export const OperatorOutSchema = {
       type: "array",
       title: "Hosts",
     },
-    workspaces: {
-      items: {
-        additionalProperties: true,
-        type: "object",
-      },
-      type: "array",
-      title: "Workspaces",
-    },
     created: {
       type: "string",
       format: "date-time",
@@ -4470,10 +4464,16 @@ export const OperatorOutSchema = {
       type: "boolean",
       title: "Is Asleep",
     },
+    workspace_count: {
+      type: "integer",
+      title: "Workspace Count",
+    },
   },
   type: "object",
-  required: ["user_id", "name", "is_online", "is_asleep"],
+  required: ["user_id", "name", "is_online", "is_asleep", "workspace_count"],
   title: "OperatorOut",
+  description:
+    "An Operator as the API returns it: its record plus its current state.",
 } as const
 
 export const OperatorPostSchema = {
@@ -4549,6 +4549,7 @@ export const OperatorPostSchema = {
   },
   type: "object",
   title: "OperatorPost",
+  description: "What a machine reports about itself when registering.",
 } as const
 
 export const OperatorRegisteredSchema = {
@@ -4624,14 +4625,6 @@ export const OperatorRegisteredSchema = {
       type: "array",
       title: "Hosts",
     },
-    workspaces: {
-      items: {
-        additionalProperties: true,
-        type: "object",
-      },
-      type: "array",
-      title: "Workspaces",
-    },
     created: {
       type: "string",
       format: "date-time",
@@ -4691,14 +4684,27 @@ export const OperatorRegisteredSchema = {
       type: "boolean",
       title: "Is Asleep",
     },
+    workspace_count: {
+      type: "integer",
+      title: "Workspace Count",
+    },
     token: {
       type: "string",
       title: "Token",
     },
   },
   type: "object",
-  required: ["user_id", "name", "is_online", "is_asleep", "token"],
+  required: [
+    "user_id",
+    "name",
+    "is_online",
+    "is_asleep",
+    "workspace_count",
+    "token",
+  ],
   title: "OperatorRegistered",
+  description:
+    "A newly registered Operator, with the token only returned here.",
 } as const
 
 export const OrgMemberPostSchema = {
@@ -7035,129 +7041,6 @@ export const ProjectStatusPostSchema = {
   title: "ProjectStatusPost",
 } as const
 
-export const ProjectWorkspaceSchema = {
-  properties: {
-    path: {
-      type: "string",
-      maxLength: 4096,
-      title: "Path",
-    },
-    kind: {
-      type: "string",
-      enum: ["personal", "managed"],
-      title: "Kind",
-      default: "personal",
-    },
-    project: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 256,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Project",
-    },
-    branch: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 256,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Branch",
-    },
-    commit: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 64,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Commit",
-    },
-    dirty: {
-      anyOf: [
-        {
-          type: "boolean",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Dirty",
-    },
-    ahead: {
-      anyOf: [
-        {
-          type: "integer",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Ahead",
-    },
-    behind: {
-      anyOf: [
-        {
-          type: "integer",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Behind",
-    },
-    operator_id: {
-      type: "string",
-      format: "uuid",
-      title: "Operator Id",
-    },
-    operator_name: {
-      type: "string",
-      title: "Operator Name",
-    },
-    operator_online: {
-      type: "boolean",
-      title: "Operator Online",
-    },
-    operator_asleep: {
-      type: "boolean",
-      title: "Operator Asleep",
-    },
-    operator_platform: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Operator Platform",
-    },
-  },
-  type: "object",
-  required: [
-    "path",
-    "operator_id",
-    "operator_name",
-    "operator_online",
-    "operator_asleep",
-    "operator_platform",
-  ],
-  title: "ProjectWorkspace",
-} as const
-
 export const ProjectsPublicSchema = {
   properties: {
     data: {
@@ -8494,6 +8377,8 @@ export const RelayTokenRespSchema = {
   type: "object",
   required: ["relay_url", "token"],
   title: "RelayTokenResp",
+  description:
+    "Where and how a browser connects to an Operator through the relay.",
 } as const
 
 export const ReleaseCommentPostSchema = {
@@ -11317,6 +11202,140 @@ export const ValidationErrorSchema = {
   title: "ValidationError",
 } as const
 
+export const WorkspaceSchema = {
+  properties: {
+    path: {
+      type: "string",
+      maxLength: 4096,
+      title: "Path",
+    },
+    kind: {
+      type: "string",
+      enum: ["personal", "managed"],
+      title: "Kind",
+      default: "personal",
+    },
+    project: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    commit: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit",
+    },
+    dirty: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dirty",
+    },
+    ahead: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ahead",
+    },
+    behind: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Behind",
+    },
+    running: {
+      type: "boolean",
+      title: "Running",
+      default: false,
+    },
+    operator_id: {
+      type: "string",
+      format: "uuid",
+      title: "Operator Id",
+    },
+    operator_name: {
+      type: "string",
+      title: "Operator Name",
+    },
+    operator_online: {
+      type: "boolean",
+      title: "Operator Online",
+    },
+    operator_asleep: {
+      type: "boolean",
+      title: "Operator Asleep",
+    },
+    operator_platform: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Operator Platform",
+    },
+    updated: {
+      type: "string",
+      title: "Updated",
+    },
+  },
+  type: "object",
+  required: [
+    "path",
+    "operator_id",
+    "operator_name",
+    "operator_online",
+    "operator_asleep",
+    "operator_platform",
+    "updated",
+  ],
+  title: "Workspace",
+  description: "A workspace along with the Operator it's on.",
+} as const
+
 export const WorkspaceInfoSchema = {
   properties: {
     path: {
@@ -11399,10 +11418,16 @@ export const WorkspaceInfoSchema = {
       ],
       title: "Behind",
     },
+    running: {
+      type: "boolean",
+      title: "Running",
+      default: false,
+    },
   },
   type: "object",
   required: ["path"],
   title: "WorkspaceInfo",
+  description: "A workspace as an Operator reports it at check-in.",
 } as const
 
 export const ZoteroAuthFinishSchema = {

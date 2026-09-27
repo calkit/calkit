@@ -28,7 +28,7 @@ import { z } from "zod"
 
 import {
   OperatorsService,
-  type ProjectWorkspace,
+  type Workspace,
   UsersService,
 } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
@@ -331,7 +331,7 @@ function WorkspacePanel({
   runInSession,
   onChanged,
 }: {
-  ws: ProjectWorkspace
+  ws: Workspace
   conn: OperatorConnection
   connected: boolean
   modal: Modal | undefined
@@ -347,12 +347,22 @@ function WorkspacePanel({
       conn.request(type, { workspace: ws.path, ...fields }),
     [conn, ws.path],
   )
+  // When a run was started from here, which may take a moment to show up
+  const [runStartedAt, setRunStartedAt] = useState(0)
   const statusQuery = useQuery({
     queryKey: ["workspace-status", ws.operator_id, ws.path],
     queryFn: () => request("workspace.status", { fetch: true }),
     enabled: connected,
     retry: false,
     refetchOnWindowFocus: false,
+    // Followed while a run is in progress, like VS Code's sidebar, or
+    // may be, having just been started or reported at check-in
+    refetchInterval: (query) =>
+      query.state.data?.status?.pipeline?.running ||
+      ws.running ||
+      Date.now() - runStartedAt < 60000
+        ? 5000
+        : false,
   })
   const refresh = () => {
     statusQuery.refetch()
@@ -365,19 +375,48 @@ function WorkspacePanel({
     onError: (err: Error) => showToast("Error", err.message, "error"),
     onSettled: refresh,
   })
-  const status = statusQuery.data
-  const untracked: string[] = status?.git?.untracked ?? []
-  const changed: string[] = (status?.git?.changed ?? []).concat(
-    status?.dvc?.data?.changed ?? [],
+  // What `calkit status --json` reports, the same as VS Code shows
+  const status = statusQuery.data?.status
+  const untracked: string[] = status?.git?.untracked_files ?? []
+  // DVC calls a path committed when its DVC file is staged
+  const changed: string[] = (status?.git?.changed_files ?? []).concat(
+    status?.dvc?.uncommitted?.modified ?? [],
   )
-  const staged: string[] = (status?.git?.staged ?? []).concat(
-    status?.dvc?.data?.staged ?? [],
+  const staged: string[] = (status?.git?.staged_files ?? []).concat(
+    status?.dvc?.committed?.modified ?? [],
   )
-  const staleStages = Object.keys(status?.dvc?.pipeline ?? {})
-  const ahead = status?.git?.commits_ahead ?? 0
-  const behind = status?.git?.commits_behind ?? 0
-  const dvcToPull = (status?.dvc?.data?.not_in_cache ?? []).length > 0
-  const dvcToPush = (status?.dvc?.data?.not_in_remote ?? []).length > 0
+  const staleStages: string[] = status?.pipeline?.stale_stage_names ?? []
+  const staleDetail: Record<string, any> = status?.pipeline?.stale_stages ?? {}
+  const runningStages: string[] = status?.pipeline?.running_stages ?? []
+  const running = Boolean(status?.pipeline?.running) || ws.running
+  const ahead = statusQuery.data?.commits_ahead ?? 0
+  const behind = statusQuery.data?.commits_behind ?? 0
+  const dvcToPull = (status?.dvc?.not_in_cache ?? []).length > 0
+  const dvcToPush = (status?.dvc?.not_in_remote ?? []).length > 0
+  const errors: string[] = [
+    ...(statusQuery.data?.errors ?? []).map((e: any) => e.info),
+    ...(status?.pipeline?.errors ?? []).map((e: any) =>
+      typeof e === "string" ? e : JSON.stringify(e),
+    ),
+  ]
+  // Say why a stage is stale, as VS Code's sidebar does
+  const describeStale = (stage: string) => {
+    const d = staleDetail[stage] ?? {}
+    const reasons = [
+      d.modified_command ? "command changed" : "",
+      d.modified_inputs?.length
+        ? `inputs changed: ${d.modified_inputs.join(", ")}`
+        : "",
+      d.modified_outputs?.length
+        ? `outputs changed: ${d.modified_outputs.join(", ")}`
+        : "",
+      d.stale_outputs?.length
+        ? `outputs missing or out of date: ${d.stale_outputs.join(", ")}`
+        : "",
+      d.always_run ? "always runs" : "",
+    ].filter(Boolean)
+    return reasons.join("; ") || "out of date"
+  }
   // Windows has no sessions to watch a run in, so it runs without one
   const runsInSession = ws.operator_platform !== "windows"
   const runMutation = useMutation({
@@ -520,7 +559,9 @@ function WorkspacePanel({
           )}
           <Flex align="center" gap={2} mt={3} mb={1}>
             <Heading size="xs">Pipeline</Heading>
-            {staleStages.length ? (
+            {running ? (
+              <Badge colorScheme="blue">Running</Badge>
+            ) : staleStages.length ? (
               <Badge colorScheme="yellow">Out of date</Badge>
             ) : (
               <Badge colorScheme="green">Up to date</Badge>
@@ -530,11 +571,14 @@ function WorkspacePanel({
                 size="xs"
                 variant="primary"
                 isLoading={runMutation.isPending}
-                onClick={() =>
-                  runsInSession
-                    ? runInSession("calkit run")
-                    : runMutation.mutate()
-                }
+                onClick={() => {
+                  if (runsInSession) {
+                    setRunStartedAt(Date.now())
+                    runInSession("calkit run")
+                  } else {
+                    runMutation.mutate()
+                  }
+                }}
               >
                 Run
               </Button>
@@ -549,11 +593,20 @@ function WorkspacePanel({
               </Button>
             )}
           </Flex>
-          {staleStages.map((stage) => (
-            <Code key={stage} fontSize="xs" mr={1} color="yellow.500">
+          {runningStages.map((stage) => (
+            <Code key={stage} fontSize="xs" mr={1} color="blue.400">
               {stage}
             </Code>
           ))}
+          {staleStages
+            .filter((stage) => !runningStages.includes(stage))
+            .map((stage) => (
+              <Tooltip key={stage} label={describeStale(stage)}>
+                <Code fontSize="xs" mr={1} color="yellow.500">
+                  {stage}
+                </Code>
+              </Tooltip>
+            ))}
           {runMutation.data?.output && (
             <Box
               as="pre"
@@ -570,9 +623,9 @@ function WorkspacePanel({
               {runMutation.data.output}
             </Box>
           )}
-          {(status?.errors ?? []).map((e: any) => (
-            <Text key={e.info} color="red.500" fontSize="sm" mt={2}>
-              {e.info}
+          {errors.map((e) => (
+            <Text key={e} color="red.500" fontSize="sm" mt={2}>
+              {e}
             </Text>
           ))}
         </>
@@ -699,7 +752,7 @@ function Compute() {
   const getLabel = (pane: Pane) =>
     sessions[pane.operatorId]?.find((s) => s.id === pane.session)?.label ??
     "shell"
-  const newSession = async (ws: ProjectWorkspace, command?: string) => {
+  const newSession = async (ws: Workspace, command?: string) => {
     const conn = getConnection(ws.operator_id)
     try {
       const { session } = await conn.request("sessions.open", {
@@ -729,11 +782,11 @@ function Compute() {
       setWaking(new Set([...waking].filter((id) => !online.has(id))))
     }
   }, [onlineOperators, waking])
-  const workspaceKey = (ws: ProjectWorkspace) => `${ws.operator_id}:${ws.path}`
+  const workspaceKey = (ws: Workspace) => `${ws.operator_id}:${ws.path}`
   const selected = workspaces.find(
     (ws) => workspaceKey(ws) === search.workspace,
   )
-  const selectWorkspace = (ws: ProjectWorkspace) =>
+  const selectWorkspace = (ws: Workspace) =>
     navigate({
       search: (prev) => ({
         ...prev,
@@ -900,6 +953,11 @@ function Compute() {
                   </Td>
                   <Td fontSize="xs">
                     {ws.branch ?? "detached"}@{ws.commit?.slice(0, 7) ?? "?"}
+                    {ws.running && (
+                      <Badge ml={2} colorScheme="blue" fontSize="2xs">
+                        running
+                      </Badge>
+                    )}
                     {ws.dirty && (
                       <Badge ml={2} colorScheme="yellow" fontSize="2xs">
                         uncommitted

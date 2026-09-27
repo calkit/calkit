@@ -253,6 +253,7 @@ import type {
   GetUserTokensResponses,
   GetUserTotpResponses,
   GetUserZenodoTokenResponses,
+  GetWorkspacesResponses,
   GitHubReleasePost,
   GlobalSearchErrors,
   GlobalSearchResponses,
@@ -9127,6 +9128,8 @@ export class FeedbackService {
 export class OperatorsService {
   /**
    * Get Operators
+   *
+   * List the user's Operators that haven't been revoked.
    */
   public static getOperators<ThrowOnError extends boolean = true>(
     options?: Options<never, ThrowOnError>,
@@ -9145,6 +9148,8 @@ export class OperatorsService {
 
   /**
    * Post Operator
+   *
+   * Register a machine as one of the user's Operators.
    */
   public static postOperator<ThrowOnError extends boolean = true>(
     parameters: {
@@ -9176,6 +9181,8 @@ export class OperatorsService {
 
   /**
    * Delete Operator
+   *
+   * Revoke an Operator, which stops at its next check-in.
    */
   public static deleteOperator<ThrowOnError extends boolean = true>(
     parameters: {
@@ -9206,6 +9213,9 @@ export class OperatorsService {
 
   /**
    * Post Operator Check In
+   *
+   * Record that an Operator is alive and what it has, and tell it how
+   * to connect.
    */
   public static postOperatorCheckIn<ThrowOnError extends boolean = true>(
     parameters: {
@@ -9273,6 +9283,8 @@ export class OperatorsService {
 
   /**
    * Post Operator Relay Token
+   *
+   * Let the user's browser connect to one of their online Operators.
    */
   public static postOperatorRelayToken<ThrowOnError extends boolean = true>(
     parameters: {
@@ -9302,7 +9314,29 @@ export class OperatorsService {
   }
 
   /**
+   * Get Workspaces
+   *
+   * List the workspaces on all of the user's Operators.
+   */
+  public static getWorkspaces<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetWorkspacesResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetWorkspacesResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/workspaces",
+      ...options,
+    })
+  }
+
+  /**
    * Get Project Workspaces
+   *
+   * List a project's workspaces on the user's Operators.
    */
   public static getProjectWorkspaces<ThrowOnError extends boolean = true>(
     parameters: {

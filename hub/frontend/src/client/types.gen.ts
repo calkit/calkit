@@ -286,6 +286,8 @@ export type BodyProjectsPutProjectContents = {
 
 /**
  * CheckIn
+ *
+ * What an Operator reports each time it checks in.
  */
 export type CheckIn = {
   /**
@@ -308,6 +310,8 @@ export type CheckIn = {
 
 /**
  * CheckInResp
+ *
+ * Where and how an Operator connects to the relay.
  */
 export type CheckInResp = {
   /**
@@ -2528,6 +2532,8 @@ export type OperationResult = {
 
 /**
  * OperatorOut
+ *
+ * An Operator as the API returns it: its record plus its current state.
  */
 export type OperatorOut = {
   /**
@@ -2563,12 +2569,6 @@ export type OperatorOut = {
    */
   hosts?: Array<string>
   /**
-   * Workspaces
-   */
-  workspaces?: Array<{
-    [key: string]: unknown
-  }>
-  /**
    * Created
    */
   created?: string
@@ -2600,10 +2600,16 @@ export type OperatorOut = {
    * Is Asleep
    */
   is_asleep: boolean
+  /**
+   * Workspace Count
+   */
+  workspace_count: number
 }
 
 /**
  * OperatorPost
+ *
+ * What a machine reports about itself when registering.
  */
 export type OperatorPost = {
   /**
@@ -2634,6 +2640,8 @@ export type OperatorPost = {
 
 /**
  * OperatorRegistered
+ *
+ * A newly registered Operator, with the token only returned here.
  */
 export type OperatorRegistered = {
   /**
@@ -2669,12 +2677,6 @@ export type OperatorRegistered = {
    */
   hosts?: Array<string>
   /**
-   * Workspaces
-   */
-  workspaces?: Array<{
-    [key: string]: unknown
-  }>
-  /**
    * Created
    */
   created?: string
@@ -2706,6 +2708,10 @@ export type OperatorRegistered = {
    * Is Asleep
    */
   is_asleep: boolean
+  /**
+   * Workspace Count
+   */
+  workspace_count: number
   /**
    * Token
    */
@@ -4007,64 +4013,6 @@ export type ProjectStatusPost = {
 }
 
 /**
- * ProjectWorkspace
- */
-export type ProjectWorkspace = {
-  /**
-   * Path
-   */
-  path: string
-  /**
-   * Kind
-   */
-  kind?: "personal" | "managed"
-  /**
-   * Project
-   */
-  project?: string | null
-  /**
-   * Branch
-   */
-  branch?: string | null
-  /**
-   * Commit
-   */
-  commit?: string | null
-  /**
-   * Dirty
-   */
-  dirty?: boolean | null
-  /**
-   * Ahead
-   */
-  ahead?: number | null
-  /**
-   * Behind
-   */
-  behind?: number | null
-  /**
-   * Operator Id
-   */
-  operator_id: string
-  /**
-   * Operator Name
-   */
-  operator_name: string
-  /**
-   * Operator Online
-   */
-  operator_online: boolean
-  /**
-   * Operator Asleep
-   */
-  operator_asleep: boolean
-  /**
-   * Operator Platform
-   */
-  operator_platform: string | null
-}
-
-/**
  * ProjectsPublic
  */
 export type ProjectsPublic = {
@@ -4769,6 +4717,8 @@ export type RefreshTokenRequest = {
 
 /**
  * RelayTokenResp
+ *
+ * Where and how a browser connects to an Operator through the relay.
  */
 export type RelayTokenResp = {
   /**
@@ -6421,7 +6371,77 @@ export type ValidationError = {
 }
 
 /**
+ * Workspace
+ *
+ * A workspace along with the Operator it's on.
+ */
+export type Workspace = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind?: "personal" | "managed"
+  /**
+   * Project
+   */
+  project?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Commit
+   */
+  commit?: string | null
+  /**
+   * Dirty
+   */
+  dirty?: boolean | null
+  /**
+   * Ahead
+   */
+  ahead?: number | null
+  /**
+   * Behind
+   */
+  behind?: number | null
+  /**
+   * Running
+   */
+  running?: boolean
+  /**
+   * Operator Id
+   */
+  operator_id: string
+  /**
+   * Operator Name
+   */
+  operator_name: string
+  /**
+   * Operator Online
+   */
+  operator_online: boolean
+  /**
+   * Operator Asleep
+   */
+  operator_asleep: boolean
+  /**
+   * Operator Platform
+   */
+  operator_platform: string | null
+  /**
+   * Updated
+   */
+  updated: string
+}
+
+/**
  * WorkspaceInfo
+ *
+ * A workspace as an Operator reports it at check-in.
  */
 export type WorkspaceInfo = {
   /**
@@ -6456,6 +6476,10 @@ export type WorkspaceInfo = {
    * Behind
    */
   behind?: number | null
+  /**
+   * Running
+   */
+  running?: boolean
 }
 
 /**
@@ -14942,6 +14966,25 @@ export type PostOperatorRelayTokenResponses = {
 export type PostOperatorRelayTokenResponse =
   PostOperatorRelayTokenResponses[keyof PostOperatorRelayTokenResponses]
 
+export type GetWorkspacesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/workspaces"
+}
+
+export type GetWorkspacesResponses = {
+  /**
+   * Response Operators-Get Workspaces
+   *
+   * Successful Response
+   */
+  200: Array<Workspace>
+}
+
+export type GetWorkspacesResponse =
+  GetWorkspacesResponses[keyof GetWorkspacesResponses]
+
 export type GetProjectWorkspacesData = {
   body?: never
   path: {
@@ -14974,7 +15017,7 @@ export type GetProjectWorkspacesResponses = {
    *
    * Successful Response
    */
-  200: Array<ProjectWorkspace>
+  200: Array<Workspace>
 }
 
 export type GetProjectWorkspacesResponse =

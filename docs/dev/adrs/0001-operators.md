@@ -166,6 +166,18 @@ There are two kinds:
   stages.
   They are shown in the hub but not edited there.
 
+### Workspace status
+
+Check-ins carry only what's cheap to get for every workspace every minute:
+branch, commit, whether there are uncommitted changes, how far it is from
+its remote, and whether a pipeline run holds DVC's lock.
+The full status, i.e., stale stages and why, running stages, and changed
+files and data, comes from `calkit status --json`, the same source as the
+VS Code extension's sidebar.
+It's too expensive to compute continuously, so the Operator runs it when
+someone opens the workspace in the hub, which then follows it while a run
+is in progress.
+
 ### Multiple workspaces per project
 
 A project can have many workspaces across a user's Operators, e.g., a
@@ -428,7 +440,10 @@ so it follows the pipeline integration phase.
    the relay, and shared DVC caches and stage locks per machine.
 4. Detached remote stages.
 5. Sharing: collaborator workspaces and multiplayer.
-6. Later: loops and fleet rollouts (#90), parallel `group` stages (#185),
+6. Later: Operators owned by organizations, e.g., for a shared lab machine
+   that members can have workspaces on (the schema leaves room for an
+   organization owner), upgrading Calkit and restarting an Operator from
+   the hub, loops and fleet rollouts (#90), parallel `group` stages (#185),
    a startup command for sessions, agent notifications, and an ACP chat
    view.
 

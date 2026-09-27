@@ -7,11 +7,11 @@ import re
 import secrets
 import uuid
 from datetime import timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app import users
 from app.api.deps import (
@@ -24,11 +24,11 @@ from app.api.deps import (
 )
 from app.config import settings
 from app.core import utcnow
-from app.models import Operator, OperatorPublic, User
+from app.models import Operator, OperatorPublic, OperatorWorkspace, User
 from app.security import (
     create_relay_token,
-    get_password_hash,
-    verify_password,
+    hash_token_verifier,
+    verify_token_verifier,
 )
 
 router = APIRouter()
@@ -46,6 +46,7 @@ BROWSER_RELAY_TOKEN_SECONDS = 60
 
 
 def get_current_operator(session: SessionDep, token: TokenDep) -> Operator:
+    """Authenticate a request made with an Operator token."""
     if not token.startswith(TOKEN_PREFIX):
         raise HTTPException(403, "Not an Operator token")
     selector = token[len(TOKEN_PREFIX) : PAT_SELECTOR_END_CHAR_IDX]
@@ -53,7 +54,7 @@ def get_current_operator(session: SessionDep, token: TokenDep) -> Operator:
     operator = session.exec(
         select(Operator).where(Operator.selector == selector)
     ).first()
-    if operator is None or not verify_password(
+    if operator is None or not verify_token_verifier(
         verifier, operator.hashed_verifier
     ):
         raise HTTPException(403, "Invalid token")
@@ -66,6 +67,7 @@ CurrentOperator = Annotated[Operator, Depends(get_current_operator)]
 
 
 def is_online(operator: Operator) -> bool:
+    """Whether it's connected to the relay, as of a recent check-in."""
     if operator.last_seen is None or not operator.connected:
         return False
     age = (utcnow() - operator.last_seen).total_seconds()
@@ -85,6 +87,7 @@ def is_asleep(operator: Operator) -> bool:
 
 
 def connect_requested(operator: Operator) -> bool:
+    """Whether its owner asked it to connect recently enough to still do so."""
     if operator.connect_requested_at is None:
         return False
     age = (utcnow() - operator.connect_requested_at).total_seconds()
@@ -92,20 +95,27 @@ def connect_requested(operator: Operator) -> bool:
 
 
 class OperatorOut(OperatorPublic):
+    """An Operator as the API returns it: its record plus its current state."""
+
     is_online: bool
     is_asleep: bool
+    workspace_count: int
 
 
 def _out(operator: Operator) -> OperatorOut:
     return OperatorOut.model_validate(
         operator,
         update=dict(
-            is_online=is_online(operator), is_asleep=is_asleep(operator)
+            is_online=is_online(operator),
+            is_asleep=is_asleep(operator),
+            workspace_count=len(operator.workspaces),
         ),
     )
 
 
 class OperatorPost(BaseModel):
+    """What a machine reports about itself when registering."""
+
     name: str | None = Field(default=None, max_length=64)
     hostname: str | None = Field(default=None, max_length=255)
     machine_id: str | None = Field(default=None, max_length=255)
@@ -115,6 +125,8 @@ class OperatorPost(BaseModel):
 
 
 class OperatorRegistered(OperatorOut):
+    """A newly registered Operator, with the token only returned here."""
+
     token: str
 
 
@@ -122,6 +134,7 @@ class OperatorRegistered(OperatorOut):
 def post_operator(
     session: SessionDep, current_user: CurrentUser, req: OperatorPost
 ) -> OperatorRegistered:
+    """Register a machine as one of the user's Operators."""
     # Names default to the hostname, suffixed until unique for the user
     base = req.name or re.sub(
         r"[^a-z0-9-]+", "-", (req.hostname or "operator").lower()
@@ -150,7 +163,7 @@ def post_operator(
         calkit_version=req.calkit_version,
         hosts=req.hosts or ([req.hostname] if req.hostname else []),
         selector=selector,
-        hashed_verifier=get_password_hash(verifier),
+        hashed_verifier=hash_token_verifier(verifier),
     )
     session.add(operator)
     session.commit()
@@ -165,6 +178,7 @@ def post_operator(
 def get_operators(
     session: SessionDep, current_user: CurrentUser
 ) -> list[OperatorOut]:
+    """List the user's Operators that haven't been revoked."""
     operators = session.exec(
         select(Operator)
         .where(Operator.user_id == current_user.id)
@@ -189,6 +203,7 @@ def _get_owned_operator(
 def delete_operator(
     session: SessionDep, current_user: CurrentUser, operator_id: uuid.UUID
 ) -> OperatorOut:
+    """Revoke an Operator, which stops at its next check-in."""
     operator = _get_owned_operator(session, current_user, operator_id)
     # Kept rather than deleted so a revoked token can say it was revoked
     operator.is_active = False
@@ -199,6 +214,8 @@ def delete_operator(
 
 
 class WorkspaceInfo(BaseModel):
+    """A workspace as an Operator reports it at check-in."""
+
     path: str = Field(max_length=4096)
     kind: Literal["personal", "managed"] = "personal"
     # The project as "owner/name", if known
@@ -208,9 +225,13 @@ class WorkspaceInfo(BaseModel):
     dirty: bool | None = None
     ahead: int | None = None
     behind: int | None = None
+    # Whether a pipeline run is in progress there
+    running: bool = False
 
 
 class CheckIn(BaseModel):
+    """What an Operator reports each time it checks in."""
+
     calkit_version: str | None = Field(default=None, max_length=64)
     mode: Literal["service", "foreground", "cron"] | None = None
     # False when an Operator in cron mode is only asking whether to connect
@@ -219,6 +240,8 @@ class CheckIn(BaseModel):
 
 
 class CheckInResp(BaseModel):
+    """Where and how an Operator connects to the relay."""
+
     operator_id: uuid.UUID
     name: str
     user_id: uuid.UUID
@@ -229,12 +252,43 @@ class CheckInResp(BaseModel):
     connect: bool = False
 
 
+def _update_workspaces(
+    session: SessionDep, operator: Operator, reported: list[WorkspaceInfo]
+) -> None:
+    """Make the Operator's stored workspaces match what it reported."""
+    existing = {ws.path: ws for ws in operator.workspaces}
+    now = utcnow()
+    for info in reported:
+        ws = existing.pop(info.path, None)
+        if ws is None:
+            ws = OperatorWorkspace(operator_id=operator.id, path=info.path)
+        owner = name = None
+        if info.project and "/" in info.project:
+            owner, name = info.project.lower().split("/", 1)
+        ws.kind = info.kind
+        ws.owner_name = owner
+        ws.project_name = name
+        ws.branch = info.branch
+        ws.commit = info.commit
+        ws.dirty = info.dirty
+        ws.ahead = info.ahead
+        ws.behind = info.behind
+        ws.running = info.running
+        ws.updated = now
+        session.add(ws)
+    for ws in existing.values():
+        session.delete(ws)
+
+
 @router.post("/operators/check-in")
 def post_operator_check_in(
     session: SessionDep, operator: CurrentOperator, req: CheckIn
 ) -> CheckInResp:
+    """Record that an Operator is alive and what it has, and tell it how
+    to connect.
+    """
     operator.last_seen = utcnow()
-    operator.workspaces = [w.model_dump() for w in req.workspaces]
+    _update_workspaces(session, operator, req.workspaces)
     if req.calkit_version is not None:
         operator.calkit_version = req.calkit_version
     if req.mode is not None:
@@ -275,6 +329,8 @@ def post_operator_wake(
 
 
 class RelayTokenResp(BaseModel):
+    """Where and how a browser connects to an Operator through the relay."""
+
     relay_url: str
     token: str
 
@@ -283,6 +339,7 @@ class RelayTokenResp(BaseModel):
 def post_operator_relay_token(
     session: SessionDep, current_user: CurrentUser, operator_id: uuid.UUID
 ) -> RelayTokenResp:
+    """Let the user's browser connect to one of their online Operators."""
     operator = _get_owned_operator(session, current_user, operator_id)
     users.require_second_factor(current_user)
     if not is_online(operator):
@@ -298,13 +355,70 @@ def post_operator_relay_token(
     )
 
 
-class ProjectWorkspace(WorkspaceInfo):
+class Workspace(WorkspaceInfo):
+    """A workspace along with the Operator it's on."""
+
     operator_id: uuid.UUID
     operator_name: str
     operator_online: bool
     operator_asleep: bool
     # Sessions need a POSIX terminal, so they aren't offered on Windows
     operator_platform: str | None
+    updated: str
+
+
+def _list_workspaces(
+    session: SessionDep,
+    user: User,
+    owner_name: str | None = None,
+    project_name: str | None = None,
+) -> list[Workspace]:
+    # Only the user's own Operators, so this reveals nothing about a
+    # project beyond what the user's machines reported
+    query = (
+        select(OperatorWorkspace, Operator)
+        .join(Operator)
+        .where(Operator.user_id == user.id)
+        .where(Operator.is_active)
+        .order_by(col(Operator.name), col(OperatorWorkspace.path))
+    )
+    if owner_name is not None and project_name is not None:
+        query = query.where(
+            OperatorWorkspace.owner_name == owner_name.lower()
+        ).where(OperatorWorkspace.project_name == project_name.lower())
+    resp = []
+    for ws, operator in session.exec(query).all():
+        project = None
+        if ws.owner_name and ws.project_name:
+            project = f"{ws.owner_name}/{ws.project_name}"
+        resp.append(
+            Workspace(
+                path=ws.path,
+                kind="managed" if ws.kind == "managed" else "personal",
+                project=project,
+                branch=ws.branch,
+                commit=ws.commit,
+                dirty=ws.dirty,
+                ahead=ws.ahead,
+                behind=ws.behind,
+                running=ws.running,
+                updated=ws.updated.isoformat(),
+                operator_id=operator.id,
+                operator_name=operator.name,
+                operator_online=is_online(operator),
+                operator_asleep=is_asleep(operator),
+                operator_platform=operator.platform,
+            )
+        )
+    return resp
+
+
+@router.get("/workspaces")
+def get_workspaces(
+    session: SessionDep, current_user: CurrentUser
+) -> list[Workspace]:
+    """List the workspaces on all of the user's Operators."""
+    return _list_workspaces(session, current_user)
 
 
 @router.get("/projects/{owner_name}/{project_name}/workspaces")
@@ -313,33 +427,6 @@ def get_project_workspaces(
     project_name: str,
     session: SessionDep,
     current_user: CurrentUser,
-) -> list[ProjectWorkspace]:
-    # Only the user's own Operators, so this reveals nothing about the
-    # project beyond what the user's machines reported
-    project = f"{owner_name}/{project_name}".lower()
-    operators = session.exec(
-        select(Operator)
-        .where(Operator.user_id == current_user.id)
-        .where(Operator.is_active)
-    ).all()
-    resp = []
-    for operator in operators:
-        online = is_online(operator)
-        asleep = is_asleep(operator)
-        for ws in operator.workspaces:
-            ws_project: Any = ws.get("project")
-            if not isinstance(ws_project, str):
-                continue
-            if ws_project.lower() != project:
-                continue
-            resp.append(
-                ProjectWorkspace(
-                    **ws,
-                    operator_id=operator.id,
-                    operator_name=operator.name,
-                    operator_online=online,
-                    operator_asleep=asleep,
-                    operator_platform=operator.platform,
-                )
-            )
-    return resp
+) -> list[Workspace]:
+    """List a project's workspaces on the user's Operators."""
+    return _list_workspaces(session, current_user, owner_name, project_name)

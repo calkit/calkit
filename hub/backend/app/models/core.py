@@ -545,8 +545,9 @@ class UserToken(UserTokenPublic, table=True):
 
 
 class UserTOTP(SQLModel, table=True):
-    """An authenticator app, used as a second factor before sensitive
-    actions, e.g., opening sessions on an Operator.
+    """An authenticator app generating time-based one-time passwords
+    (TOTP), used as a second factor before sensitive actions, e.g.,
+    opening sessions on an Operator.
     """
 
     user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True)
@@ -580,13 +581,6 @@ class OperatorPublic(SQLModel):
             sqlalchemy.JSON, nullable=False, server_default="[]"
         ),
     )
-    # Workspaces as of the latest check-in
-    workspaces: list[dict[str, Any]] = Field(
-        default_factory=list,
-        sa_column=sqlalchemy.Column(
-            sqlalchemy.JSON, nullable=False, server_default="[]"
-        ),
-    )
     created: datetime = Field(default_factory=utcnow)
     last_seen: datetime | None = Field(default=None)
     # How it runs: "service", "foreground", or "cron", which only connects
@@ -610,6 +604,44 @@ class Operator(OperatorPublic, table=True):
     hashed_verifier: str = Field(max_length=64)
     # Relationships
     user: User = Relationship(back_populates="operators")
+    workspaces: list["OperatorWorkspace"] = Relationship(
+        back_populates="operator", cascade_delete=True
+    )
+
+
+class OperatorWorkspace(SQLModel, table=True):
+    """A project checkout on an Operator's machine, as of its latest
+    check-in.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "operator_id", "path", name="uq_operatorworkspace_operator_path"
+        ),
+        sqlalchemy.Index(
+            "ix_operatorworkspace_project", "owner_name", "project_name"
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operator_id: uuid.UUID = Field(
+        foreign_key="operator.id", index=True, ondelete="CASCADE"
+    )
+    path: str = Field(max_length=4096)
+    # "personal" checkouts, or "managed" ones Calkit uses to run stages
+    kind: str = Field(max_length=16)
+    # The project, lowercased for matching, if the Operator could tell
+    owner_name: str | None = Field(default=None, max_length=255)
+    project_name: str | None = Field(default=None, max_length=255)
+    branch: str | None = Field(default=None, max_length=256)
+    commit: str | None = Field(default=None, max_length=64)
+    dirty: bool | None = None
+    ahead: int | None = None
+    behind: int | None = None
+    # Whether a pipeline run held DVC's lock at the check-in
+    running: bool = False
+    updated: datetime = Field(default_factory=utcnow)
+    # Relationships
+    operator: Operator = Relationship(back_populates="workspaces")
 
 
 class DeviceAuth(SQLModel, table=True):

@@ -61,8 +61,9 @@ def test_operators(
         json={
             "calkit_version": "1.2.3",
             "workspaces": [
-                {"path": "/home/me/calkit/a", "project": project},
+                {"path": "/home/me/calkit/a", "project": project.upper()},
                 {"path": "/home/me/calkit/b", "project": "someone/other"},
+                {"path": "/home/me/calkit/c", "project": project},
                 {"path": "/home/me/misc"},
             ],
         },
@@ -85,7 +86,39 @@ def test_operators(
     listed = {o["id"]: o for o in r.json()}
     assert listed[op["id"]]["is_online"]
     assert listed[op["id"]]["calkit_version"] == "1.2.3"
+    assert listed[op["id"]]["workspace_count"] == 4
     assert "token" not in listed[op["id"]]
+    # Its token is stored as a fast hash, since it's checked every minute
+    operator = db.get(Operator, uuid.UUID(op["id"]))
+    assert operator is not None
+    assert len(operator.hashed_verifier) == 64
+    # Checking in again updates workspaces in place, drops ones that are gone,
+    # and reports runs in progress
+    r = client.post(
+        "/operators/check-in",
+        headers=op_headers,
+        json={
+            "workspaces": [
+                {
+                    "path": "/home/me/calkit/a",
+                    "project": project,
+                    "running": True,
+                },
+                {"path": "/home/me/calkit/b", "project": "someone/other"},
+                {"path": "/home/me/misc"},
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    # All of the user's workspaces are listed across Operators
+    r = client.get("/workspaces", headers=normal_user_token_headers)
+    mine = [w for w in r.json() if w["operator_id"] == op["id"]]
+    assert [w["path"] for w in mine] == [
+        "/home/me/calkit/a",
+        "/home/me/calkit/b",
+        "/home/me/misc",
+    ]
+    assert mine[2]["project"] is None
     # Workspaces are listed per project, matched case-insensitively
     owner, name = project.split("/")
     r = client.get(
@@ -95,6 +128,8 @@ def test_operators(
     assert r.status_code == 200, r.text
     workspaces = r.json()
     assert [w["path"] for w in workspaces] == ["/home/me/calkit/a"]
+    assert workspaces[0]["project"] == project
+    assert workspaces[0]["running"]
     assert workspaces[0]["operator_name"] == op["name"]
     assert workspaces[0]["operator_online"]
     assert workspaces[0]["operator_platform"] == "linux"
@@ -103,6 +138,8 @@ def test_operators(
         f"/projects/{owner}/{name}/workspaces", headers=superuser_token_headers
     )
     assert r.json() == []
+    r = client.get("/workspaces", headers=superuser_token_headers)
+    assert op["id"] not in [w["operator_id"] for w in r.json()]
     r = client.post(
         f"/operators/{op['id']}/relay-token", headers=superuser_token_headers
     )

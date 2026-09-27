@@ -14,6 +14,21 @@ Or with Windows Command Prompt or PowerShell:
 powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 ```
 
+Both install shell completion for `calkit` and `ck`.
+To also install the [Calkit Operator](compute.md),
+which lets the Calkit Hub use your machine,
+pass `--operator`:
+
+```sh
+curl -LsSf install.calkit.org | sh -s -- --operator
+```
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1.calkit.org))) --operator"
+```
+
+Pass `--no-shell-completion` to skip installing shell completion.
+
 If you already have uv installed, install Calkit with:
 
 ```sh

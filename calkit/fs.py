@@ -72,6 +72,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import re
 import time
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -101,6 +102,46 @@ def register_filesystem():
 
 # Register the filesystem when the module is imported
 register_filesystem()
+
+# DVC object paths are named by their content's MD5
+_DVC_MD5_PATH_RE = re.compile(
+    r"(?:^|/)files/md5/([0-9a-f]{2})/([0-9a-f]{30})$"
+)
+
+
+def _check_dvc_md5(file_path: str, local_path: str) -> None:
+    """Check a downloaded DVC object against the MD5 in its path.
+
+    Storage the hub routes to may be editable outside of Calkit, so this
+    turns a wrong object into an error rather than bad data.
+    """
+    import hashlib
+
+    match = _DVC_MD5_PATH_RE.search(file_path)
+    if match is None:
+        return
+    expected = match.group(1) + match.group(2)
+    md5 = hashlib.md5()
+    with open(local_path, "rb") as f:
+        for block in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            md5.update(block)
+    if md5.hexdigest() != expected:
+        os.remove(local_path)
+        raise OSError(
+            f"Downloaded content for {file_path} doesn't match its MD5 "
+            f"(got {md5.hexdigest()})"
+        )
+
+
+def _import_hf_xet() -> Any:
+    try:
+        import hf_xet
+    except ImportError as e:
+        raise RuntimeError(
+            "This project's storage is on Hugging Face, which needs the "
+            "hf-xet package, and it isn't available on this platform"
+        ) from e
+    return hf_xet
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:
@@ -668,8 +709,115 @@ class CalkitFileSystem(AbstractFileSystem):
         elif kind == "sftp":
             # SFTP access
             raise NotImplementedError("SFTP access not yet implemented")
+        elif kind == "hf-xet":
+            raise ValueError(
+                "hf-xet access is handled by the transfer methods, "
+                "not as an HTTP request"
+            )
         else:
             raise ValueError(f"Unsupported access kind: {kind}")
+
+    def _xet_upload(
+        self,
+        owner: str,
+        project: str,
+        file_path: str,
+        access: dict[str, Any],
+        lpath: str | None = None,
+        data: bytes | None = None,
+        callback: Any = DEFAULT_CALLBACK,
+    ) -> None:
+        """Upload content with Xet, then have the hub add it at its path.
+
+        The Xet token can only upload content, so the path is added by the
+        hub with the storage owner's credential.
+        """
+        hf_xet = _import_hf_xet()
+
+        def refresh_token() -> tuple[str, int]:
+            info = self._get_fs_op_info(owner, project, file_path, "put")
+            return (
+                info["access"]["access_token"],
+                info["access"]["expires_at_unix"],
+            )
+
+        def update_progress(total_update: Any, item_updates: Any) -> None:
+            callback.relative_update(
+                total_update.total_bytes_completion_increment
+            )
+
+        args = (
+            access["cas_url"],
+            (access["access_token"], access["expires_at_unix"]),
+            refresh_token,
+            update_progress,
+            "bucket",
+        )
+        if lpath is not None:
+            infos = hf_xet.upload_files([lpath], *args, skip_sha256=True)
+        else:
+            infos = hf_xet.upload_bytes([data], *args, skip_sha256=True)
+        calkit.hub.post(
+            f"/projects/{owner}/{project}/fs/ops",
+            json={
+                "operation": "register",
+                "path": file_path,
+                "xet_hash": infos[0].hash,
+            },
+            base_url=self.base_url,
+        )
+
+    def _xet_download(
+        self,
+        owner: str,
+        project: str,
+        file_path: str,
+        access: dict[str, Any],
+        lpath: str,
+        callback: Any = DEFAULT_CALLBACK,
+    ) -> None:
+        """Download content with Xet and check it against its MD5."""
+        hf_xet = _import_hf_xet()
+        size = access["size"]
+        callback.set_size(size)
+        lpath = os.path.abspath(lpath)
+        if size == 0:
+            open(lpath, "wb").close()
+        else:
+
+            def refresh_token() -> tuple[str, int]:
+                info = self._get_fs_op_info(owner, project, file_path, "get")
+                return (
+                    info["access"]["access_token"],
+                    info["access"]["expires_at_unix"],
+                )
+
+            hf_xet.download_files(
+                [
+                    hf_xet.PyXetDownloadInfo(
+                        destination_path=lpath,
+                        hash=access["xet_hash"],
+                        file_size=size,
+                    )
+                ],
+                access["cas_url"],
+                (access["access_token"], access["expires_at_unix"]),
+                refresh_token,
+                [callback.relative_update],
+            )
+        _check_dvc_md5(file_path, lpath)
+
+    def _xet_read(
+        self, owner: str, project: str, file_path: str, access: dict[str, Any]
+    ) -> bytes:
+        """Read a whole file with Xet, which has no range reads."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lpath = os.path.join(tmp, "content")
+            self._xet_download(owner, project, file_path, access, lpath)
+            with open(lpath, "rb") as f:
+                return f.read()
 
     def _open(
         self,
@@ -930,6 +1078,9 @@ class CalkitFileSystem(AbstractFileSystem):
         operation_info = self._get_fs_op_info(
             owner, project, file_path, operation="get"
         )
+        access = operation_info.get("access") or {}
+        if access.get("kind") == "hf-xet":
+            return self._xet_read(owner, project, file_path, access)[start:end]
         # Add Range header if reading a specific byte range
         headers = {}
         if start is not None and end is not None:
@@ -1009,6 +1160,17 @@ class CalkitFileSystem(AbstractFileSystem):
             "put",
             content_length=size,
         )
+        access = operation_info.get("access") or {}
+        if access.get("kind") == "hf-xet":
+            self._xet_upload(
+                owner,
+                project,
+                file_path,
+                access,
+                lpath=lpath,
+                callback=callback,
+            )
+            return None
         # Stream the file from disk rather than loading it into memory. This
         # keeps RAM bounded when DVC pushes many (or very large) files in
         # parallel via its worker pool.
@@ -1021,6 +1183,44 @@ class CalkitFileSystem(AbstractFileSystem):
                 callback=callback,
             )
         resp.raise_for_status()
+
+    def get_file(
+        self,
+        rpath: str,
+        lpath: Any,
+        callback: Any = DEFAULT_CALLBACK,
+        outfile: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        """Download a file, with Xet when the project's storage uses it."""
+        if outfile is not None or not isinstance(lpath, (str, os.PathLike)):
+            super().get_file(
+                rpath, lpath, callback=callback, outfile=outfile, **kwargs
+            )
+            return None
+        owner, project, file_path = _parse_path(rpath)
+        try:
+            operation_info = self._get_fs_op_info(
+                owner, project, file_path, "get"
+            )
+        except Exception:
+            # e.g., a directory, which the default implementation handles
+            super().get_file(rpath, lpath, callback=callback, **kwargs)
+            return None
+        access = operation_info.get("access") or {}
+        if access.get("kind") == "hf-xet":
+            self._xet_download(
+                owner, project, file_path, access, str(lpath), callback
+            )
+            return None
+        # Reuse the operation info so the file doesn't fetch it again
+        with self.open(rpath, "rb", **kwargs) as f1:
+            f1.operation_info = operation_info
+            callback.set_size(getattr(f1, "size", None))
+            with open(lpath, "wb") as f2:
+                while data := f1.read(self.blocksize):
+                    callback.relative_update(f2.write(data))
+        return None
 
 
 class CalkitFile(AbstractBufferedFile):
@@ -1059,8 +1259,10 @@ class CalkitFile(AbstractBufferedFile):
         self.owner = owner
         self.project = project
         self.file_path = file_path
-        self.operation_info = None  # Cached operation info from API
+        # Cached operation info from API
+        self.operation_info: dict[str, Any] | None = None
         self.uploaded_bytes = 0  # Track total bytes uploaded
+        self._xet_content: bytes | None = None
         # fsspec expects block_size to be an integer, not None
         if block_size is None:
             block_size = 5 * 1024 * 1024  # Default 5MB
@@ -1091,6 +1293,14 @@ class CalkitFile(AbstractBufferedFile):
             self.operation_info = self.fs._get_fs_op_info(
                 self.owner, self.project, self.file_path, "get"
             )
+        access = self.operation_info.get("access") or {}
+        if access.get("kind") == "hf-xet":
+            # No range reads with Xet, so read it all once
+            if self._xet_content is None:
+                self._xet_content = self.fs._xet_read(
+                    self.owner, self.project, self.file_path, access
+                )
+            return self._xet_content[start:end]
         # Add Range header for partial content
         # For backends where range is unsupported, the Calkit hub API can
         # choose to ignore this header or return a backend-specific request
@@ -1126,13 +1336,18 @@ class CalkitFile(AbstractBufferedFile):
             "put",
             content_length=ndata,
         )
-        # Execute the put operation
-        resp = self.fs._execute_operation(
-            self.operation_info,
-            "put",
-            data=data,
-        )
-        resp.raise_for_status()
+        access = self.operation_info.get("access") or {}
+        if access.get("kind") == "hf-xet":
+            self.fs._xet_upload(
+                self.owner, self.project, self.file_path, access, data=data
+            )
+        else:
+            resp = self.fs._execute_operation(
+                self.operation_info,
+                "put",
+                data=data,
+            )
+            resp.raise_for_status()
         self.uploaded_bytes += ndata
         # Clear the buffer after successful upload
         self.buffer = io.BytesIO()

@@ -318,6 +318,13 @@ with a button to build it.
 Clicking a built diff opens it.
 The diff button in the editor toolbar, shown for a `.tex` file or a PDF a
 `latex` stage builds, lists the pipeline's diffs for that document too.
+A diff that's already built opens straight away,
+and one that's stale is rebuilt after it opens, with the viewer reloading when
+it's done.
+
+The toolbar also has a button to switch between a `.tex` file and the PDF its
+stage builds in the same tab, as well as LaTeX Workshop's button that opens
+the PDF beside it.
 
 ### Comparing on demand
 

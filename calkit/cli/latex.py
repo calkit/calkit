@@ -1958,6 +1958,7 @@ def to_docx(
             for p in doc.paragraphs
             if p.bookmark and p.bookmark in original
         }
+    doc.even_margins()
     # Existing comment blocks in the source go out as Word comments
     threads, anchors, highlights, resolved = [], [], [], []
     for path in sorted({ln.path for ln in lines}):
@@ -2184,8 +2185,8 @@ def merge_docx(
                 continue
             parts = name.split("_")
             path, lineno = path_for_hash.get(parts[1], ""), int(parts[2])
-            blk = calkit.latex.find_block(blks, path, lineno, "")
-            if blk is None or not blk.display:
+            blk = calkit.latex.find_display(blks, path, lineno, sent_eq)
+            if blk is None:
                 warn(f"Can't place an equation edit from {path}:{lineno}")
                 changes.append(
                     LatexDocxMergeChange(
@@ -2215,6 +2216,17 @@ def merge_docx(
                 continue
             # Rows of one display are edited in turn on the same lines
             current = working.get(id(blk), blk)
+            if calkit.latex.math_similarity(
+                current, eq_tex
+            ) > calkit.latex.math_similarity(current, sent_eq):
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=blk.path,
+                        lineno=blk.lineno,
+                        status="already-applied",
+                    )
+                )
+                continue
             new_lines = calkit.latex.apply_math_edit(current, sent_eq, eq_tex)
             if new_lines is None:
                 warn(f"Equation edit at {loc} goes in as a comment")

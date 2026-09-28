@@ -743,6 +743,33 @@ def find_block(
     return best[2] if best and best[0] >= 0.6 else None
 
 
+def math_similarity(block: Block, math: str) -> float:
+    """How much a display block's source reads like ``math``, as a
+    converter spells it, ignoring grouping and wrappers."""
+    want = [t for t in math_tokens(math) if t not in _MATH_NOISE]
+    have = _MATH_TOKEN_RE.findall("\n".join(ln.text for ln in block.lines))
+    have = [t for t in have if t not in _MATH_NOISE]
+    return difflib.SequenceMatcher(a=want, b=have, autojunk=False).ratio()
+
+
+def find_display(
+    blks: list[Block], path: str, lineno: int, math: str
+) -> Block | None:
+    """The display block a bookmark points at, by line first, else the one
+    in the file whose math reads most like ``math``, as a converter spells
+    it, e.g., after edits above it moved it."""
+    same_file = [b for b in blks if b.path == path and b.display]
+    for b in same_file:
+        if b.lineno == lineno:
+            return b
+    scored = [
+        (math_similarity(b, math), -abs(b.lineno - lineno), b)
+        for b in same_file
+    ]
+    best = max(scored, key=lambda s: s[:2], default=None)
+    return best[2] if best and best[0] >= 0.6 else None
+
+
 def _tokens(text: str) -> set[str]:
     """Words and numbers, so a change to a value counts as a change."""
     return set(re.findall(r"[A-Za-z0-9][\w.]*", text))

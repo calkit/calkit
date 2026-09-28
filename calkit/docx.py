@@ -483,18 +483,141 @@ class Document:
             cm.done = top.done
         return out
 
-    @property
-    def text_width(self) -> int:
-        """The body's text width in twentieths of a point."""
-        sect = self.doc.find(f".//{_tag(W, 'body')}/{_tag(W, 'sectPr')}")
+    def even_margins(self) -> None:
+        """Give sections that share a page the same side margins, moving a
+        narrower section's extra margin into its paragraphs' indents.
+
+        Word's PDF import sets off a title block with wide margins and a
+        continuous break, which Word can show but LibreOffice can't: it
+        takes one page's margins for everything on it.
+        """
+        wp = (
+            "{http://schemas.openxmlformats.org/drawingml/2006/"
+            "wordprocessingDrawing}"
+        )
+        body = self.doc.find(_tag(W, "body"))
+        if body is None:
+            return
+        # Body elements by the section they end up in
+        sections: list[tuple[ET.Element, list[ET.Element]]] = []
+        members: list[ET.Element] = []
+        for child in list(body):
+            if child.tag == _tag(W, "sectPr"):
+                sections.append((child, members))
+                continue
+            members.append(child)
+            sect = child.find(f"{_tag(W, 'pPr')}/{_tag(W, 'sectPr')}")
+            if sect is not None:
+                sections.append((sect, members))
+                members = []
+        # Runs of sections that continue on the same page
+        runs: list[list[tuple[ET.Element, list[ET.Element]]]] = []
+        for sect, els in sections:
+            kind = sect.find(_tag(W, "type"))
+            if (
+                runs
+                and kind is not None
+                and kind.get(_tag(W, "val")) == ("continuous")
+            ):
+                runs[-1].append((sect, els))
+            else:
+                runs.append([(sect, els)])
+
+        def margin(sect: ET.Element, side: str) -> int:
+            mar = sect.find(_tag(W, "pgMar"))
+            return (
+                int(mar.get(_tag(W, side), "1440"))
+                if mar is not None
+                else 1440
+            )
+
+        for run in runs:
+            if len(run) < 2:
+                continue
+            target = {
+                side: min(margin(s, side) for s, _ in run)
+                for side in ("left", "right")
+            }
+            for sect, els in run:
+                delta = {
+                    side: margin(sect, side) - target[side] for side in target
+                }
+                if not any(delta.values()):
+                    continue
+                mar = sect.find(_tag(W, "pgMar"))
+                if mar is not None:
+                    for side, value in target.items():
+                        mar.set(_tag(W, side), str(value))
+                for el in els:
+                    for p in el.iter(_tag(W, "p")):
+                        ppr = p.find(_tag(W, "pPr"))
+                        if ppr is None:
+                            ppr = ET.Element(_tag(W, "pPr"))
+                            p.insert(0, ppr)
+                        ind = ppr.find(_tag(W, "ind"))
+                        if ind is None:
+                            ind = ET.SubElement(ppr, _tag(W, "ind"))
+                        for side, alt in (("left", "start"), ("right", "end")):
+                            key = (
+                                _tag(W, alt)
+                                if ind.get(_tag(W, alt))
+                                else (_tag(W, side))
+                            )
+                            ind.set(
+                                key, str(int(ind.get(key, "0")) + delta[side])
+                            )
+                    for tpr in el.iter(_tag(W, "tblPr")):
+                        tind = tpr.find(_tag(W, "tblInd"))
+                        if tind is None:
+                            tind = ET.SubElement(
+                                tpr,
+                                _tag(W, "tblInd"),
+                                {_tag(W, "type"): "dxa"},
+                            )
+                        tind.set(
+                            _tag(W, "w"),
+                            str(
+                                int(tind.get(_tag(W, "w"), "0"))
+                                + delta["left"]
+                            ),
+                        )
+                    # Floating pictures placed from the margin stay put
+                    for pos in el.iter(f"{wp}positionH"):
+                        off = pos.find(f"{wp}posOffset")
+                        if off is not None and pos.get("relativeFrom") in (
+                            "margin",
+                            "column",
+                        ):
+                            off.text = str(
+                                int(off.text or "0") + 635 * delta["left"]
+                            )
+
+    def column_width(self, el: ET.Element) -> int:
+        """The width of a text column where a body element sits, in
+        twentieths of a point, from the section it's in: a section ends at
+        a paragraph carrying its properties, the last at the body's."""
+        body = self._parents[el]
+        sect = None
+        for child in list(body)[list(body).index(el) :]:
+            sect = child.find(f"{_tag(W, 'pPr')}/{_tag(W, 'sectPr')}")
+            if child.tag == _tag(W, "sectPr"):
+                sect = child
+            if sect is not None:
+                break
         if sect is None:
             return 9360
         size, mar = sect.find(_tag(W, "pgSz")), sect.find(_tag(W, "pgMar"))
         if size is None or mar is None:
             return 9360
-        return int(size.get(_tag(W, "w"), "12240")) - sum(
+        width = int(size.get(_tag(W, "w"), "12240")) - sum(
             int(mar.get(_tag(W, side), "1440")) for side in ("left", "right")
         )
+        cols = sect.find(_tag(W, "cols"))
+        num = int(cols.get(_tag(W, "num"), "1")) if cols is not None else 1
+        space = (
+            int(cols.get(_tag(W, "space"), "720")) if cols is not None else 0
+        )
+        return (width - space * (num - 1)) // num
 
     def insert_equations(
         self,
@@ -506,7 +629,7 @@ class Document:
         table of (math, number, bookmark name) rows, which Word and
         LibreOffice both lay out like LaTeX: centered, numbered at right.
         """
-        width = self.text_width
+        width = self.column_width(before)
         side = width // 8
         cols = [side, width - 2 * side, side]
         tbl = ET.Element(_tag(W, "tbl"))

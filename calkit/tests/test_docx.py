@@ -5,8 +5,8 @@ Word's own import of the compiled paper, ``export.docx`` is ``to-docx``'s
 output, ``returned.docx`` has a reviewer's tracked edits and a comment,
 ``accepted.docx`` is that after accepting every change in Word, and
 ``resolved.docx`` additionally has the exported thread resolved.
-``libreoffice-accepted.docx`` is an export edited, commented on, and
-accepted in LibreOffice.
+The ``libreoffice-*.docx`` fixtures are made by
+``make-libreoffice-fixtures.py``; see the README there.
 """
 
 import json
@@ -491,18 +491,6 @@ def test_docx_round_trip(
     )
     assert res.returncode != 0
     assert "not exported by Calkit" in res.stderr + res.stdout
-    # A review done in LibreOffice merges like one done in Word
-    shutil.copy(FIXTURES / "libreoffice-accepted.docx", "reviews/lo.docx")
-    subprocess.run(
-        ["calkit", "latex", "merge-docx", "reviews/lo.docx"], check=True
-    )
-    main = Path("paper/main.tex").read_text(encoding="utf-8")
-    assert "Wakes really matter" in main
-    assert (
-        '% COMMENT highlight={text: "reasonably well"}\n'
-        "%   Libre Reviewer:\n"
-        "%     Quantify this.\n"
-    ) in main
     # An equation edited in Word merges into the source, though Word moves
     # a bookmark at the start of a table cell out to the row
     doc = calkit.docx.Document("paper/main-for-review.docx")
@@ -530,3 +518,37 @@ def test_docx_round_trip(
     )
     methods = Path("paper/methods.tex").read_text(encoding="utf-8")
     assert "\\frac{C_T}{4 (1 + k x/D)^2}" in methods
+    # A review done in LibreOffice merges like one done in Word, though
+    # LibreOffice rewrites every equation's markup on saving and doesn't
+    # track changes inside one. The source has moved on since the export.
+    for name in ["returned", "accepted"]:
+        shutil.copy(
+            FIXTURES / f"libreoffice-{name}.docx", f"reviews/lo-{name}.docx"
+        )
+    res = subprocess.run(
+        ["calkit", "latex", "merge-docx", "reviews/lo-returned.docx"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "not yet accepted" in res.stderr + res.stdout
+    assert "Wakes really matter" not in Path("paper/main.tex").read_text(
+        encoding="utf-8"
+    )
+    assert "\\frac{C_P}{" in Path("paper/methods.tex").read_text(
+        encoding="utf-8"
+    )
+    subprocess.run(
+        ["calkit", "latex", "merge-docx", "reviews/lo-accepted.docx"],
+        check=True,
+    )
+    main = Path("paper/main.tex").read_text(encoding="utf-8")
+    methods = Path("paper/methods.tex").read_text(encoding="utf-8")
+    assert "Wakes really matter" in main
+    assert (
+        '% COMMENT highlight={text: "reasonably well"}\n'
+        "%   Libre Reviewer:\n"
+        "%     Quantify this.\n"
+    ) in main
+    assert "\\frac{C_P}{4 (1 + k x/D)^2}" in methods
+    assert "Edited this equation" not in methods

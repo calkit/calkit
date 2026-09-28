@@ -27,57 +27,103 @@ What it doesn't give them is structure or connections:
 
 Calkit's aim is to connect those stages in one project, with Git as the
 record, and the hub as where they come together.
-JupyterHub is a common place for the analysis stage to happen, so Calkit
-should work well inside it.
+JupyterHub is a common place for the analysis stage to happen, so a user
+should be able to add their JupyterHub account as an Operator on the
+Calkit hub, then open a project there, with a shell and agent sessions,
+like any other machine.
 
-ADR 0001 also left open how a shared machine should give each person their
-own access.
-An Operator running as root to create per-user accounts would be a large
-risk.
-JupyterHub has already solved this: it authenticates users and starts each
-one's server as that user.
+This has to work without much from the JupyterHub's admins, who users often
+don't control, e.g., at an HPC center.
+It also helps with a question ADR 0001 left open, how a shared machine
+gives each person their own access: JupyterHub already authenticates users
+and starts each one's server as that user, so no Operator needs root.
 
 ## Decision
 
-### An Operator inside each user's server
+### Adding a JupyterHub as an Operator
 
-A user's Jupyter server runs an Operator as that user, alongside the
-server, started by the Jupyter server extension that `calkit-python`
-already ships.
-It uses the same protocol, relay, owner-only access, and two-factor
-requirements as any other Operator.
+On the Calkit hub, adding an Operator offers a JupyterHub kind, which takes
+the JupyterHub's URL and connects in one of two ways.
 
-- The first time, the JupyterLab extension offers to connect the server
-  to Calkit, using the device login flow, and registers an Operator.
-  Its config goes in the user's home directory, which persists across
-  spawns, so later servers connect on their own, even on a different pod
-  or node.
-- It runs in a new `jupyter` mode: started when the server starts and
-  stopped when it stops, with no service, cron job, or lock file across
-  servers to manage.
-  While the server is down, the hub shows the Operator as asleep.
+**Automatic**, with a JupyterHub API token the user creates for their own
+account, with scopes limited to starting and accessing their own servers
+and an expiry.
+The Calkit hub stores it encrypted and uses it only server side, to:
+
+1. Start the user's server through the JupyterHub REST API, if it isn't
+   running.
+2. Open a terminal in it through the Jupyter Server API and run Calkit's
+   install script with a registration code (see below), which installs
+   Calkit in the user's home directory and the startup hook that runs the
+   Operator whenever the server starts.
+
+From then on it's an ordinary Operator: it connects to the relay itself,
+with owner-only access and two-factor authentication as in ADR 0001.
+The token is used again only to start a stopped server when the user opens
+a project on it, so the Operator is never merely asleep.
+
+**Manual**, for JupyterHubs the Calkit hub can't reach, e.g., behind a VPN,
+or for users who'd rather not store a token: the screen shows a command to
+paste into a terminal on the JupyterHub, with a registration code, which
+does the same installation.
+Nothing is stored on the Calkit hub, and servers are started on the
+JupyterHub as usual.
+
+Neither needs anything from the JupyterHub's admins beyond what users can
+normally do: create tokens for themselves, start their own servers, open
+terminals, install software in their home directory, and configure their
+own Jupyter server.
+Installing Calkit needs outbound internet access from the server.
+
+### Registration codes
+
+Registering an Operator currently needs the user's Calkit login on that
+machine, which an automated setup can't provide, and which shouldn't be
+left on a shared server anyway.
+Instead, the Calkit hub can mint a registration code, from a signed-in
+session that has entered a second factor recently, which is single use and
+expires within minutes.
+`calkit operator install --code <code>` exchanges it for an Operator token
+without the user's login ever reaching the machine.
+This applies to Operators installed any way, e.g., over SSH, not just on
+JupyterHub.
+
+### The Operator's lifecycle in a server
+
+The Operator runs in a new `jupyter` mode, started by a hook in the user's
+own `~/.jupyter/jupyter_server_config.py`, which Jupyter runs when the
+server starts, and exiting when the server does.
+It needs no service, cron job, or change to the server's environment, so
+Calkit can be installed as a standalone tool, e.g., with uv.
+
+- Its config is in the user's home directory, which persists across
+  spawns, so each new server reconnects as the same Operator, even on a
+  different pod or node.
 - Idle culling judges activity by Jupyter's own traffic, so the Operator
-  reports open sessions to the server as activity, within whatever limits
+  reports open sessions to its server as activity, within whatever limits
   the hub sets, rather than letting a running agent session be culled.
-- Waking a stopped server from the Calkit hub would need a JupyterHub API
-  token, stored encrypted like other external credentials.
-  This is optional; without it, the user starts their server as usual.
+- Batchspawner servers end with their job's walltime, which the Calkit hub
+  shows alongside the Operator.
 
-Hub users get their own servers as themselves, so this is also how a
-shared machine running JupyterHub gives each person access, without an
-Operator running as root.
-Machines without JupyterHub use one Operator per user account, as in
-ADR 0001.
+### One server per project
 
-### Projects, not a bare home directory
+Where the JupyterHub allows named servers, each project gets its own
+server, named after it, with its own Operator, identified by
+`JUPYTERHUB_SERVER_NAME` and scoped to that project's workspace, which it
+clones when it first starts.
+Opening a shell in a project from the Calkit hub starts or reuses that
+project's server.
+Without named servers, a user's one server has one Operator covering their
+projects in `~/calkit`, as on any other machine.
 
-The JupyterLab extension shows the user's Calkit projects under `~/calkit`
-as the starting point, rather than only a file tree.
-A notebook opened in a project runs with an environment the project
-declares, so each project keeps its own environments instead of sharing
-the server's.
-Work is committed and pushed like on any other machine, so the server is
-one workspace among the user's others, not the only copy.
+Two limits apply without help from admins:
+
+- Calkit can't set a server's root directory, so JupyterLab's file browser
+  still shows the whole home directory, while Calkit's sessions and actions
+  are scoped to the project.
+- Named servers usually share the user's home volume, so one server per
+  project gives structure and a scope for each Operator, not isolation
+  between projects.
 
 ### Connections through the Calkit hub
 
@@ -99,15 +145,22 @@ This is the same extension ADR 0001 anticipates for loops, which need to
 push data from machines, and it keeps the user's own login off the
 server.
 
-### Distribution
+### What admins can add
 
-- An image for Kubernetes and Docker based hubs, e.g., Zero to
-  JupyterHub, built from `images/jupyter` alongside `images/latex`.
-  It includes Calkit with both extensions, uv, pixi, and conda, and a TeX
-  installation, so LaTeX builds work without a container runtime.
-- For hubs where the admin controls the environment, e.g., on HPC, or
-  where users install into their own, the plugin is `calkit-python`
-  itself, whose server extension does the rest.
+None of these are required, but each makes Calkit work better on a hub:
+
+- Enabling named servers, for one server per project.
+- An image with Calkit preinstalled, built from `images/jupyter` alongside
+  `images/latex`, with both of its Jupyter extensions, uv, pixi, conda, and
+  a TeX installation, so servers start faster and LaTeX builds work without
+  a container runtime.
+  With Calkit in the server's own environment, the JupyterLab extension
+  can also show projects rather than a bare home directory, and default
+  each notebook to an environment its project declares.
+- A spawner hook, e.g., a `calkit-jupyterhub` package, that enforces one
+  server per project by refusing spawns that don't name one, sets each
+  server's root directory to its project, and picks its image or
+  environment from the project's specs.
 
 ### Container runtimes
 
@@ -130,26 +183,35 @@ Instead:
 
 ## Consequences
 
-- Calkit becomes a project layer that research computing groups can add to
-  a JupyterHub by changing the server image or installing a package.
-- The Calkit hub holds more responsibility for credentials, handing out
-  short-lived, scoped tokens to Operators, which makes the security of
+- Users can bring their JupyterHub accounts into Calkit themselves, without
+  waiting on admins, and admins who want a better experience can add an
+  image or a spawner hook.
+- With automatic setup, the Calkit hub holds a JupyterHub token for the
+  user's account, which ADR 0001 otherwise avoids for machines.
+  It's limited by the token's scopes and expiry, stored encrypted, and
+  used only when a signed-in session with a recent second factor asks.
+  Manual setup remains for those who don't want that.
+- The Calkit hub hands out more short-lived, scoped credentials, to
+  Operators for Git, data, and other services, which makes the security of
   Operator tokens and the hub matter more.
-- The `jupyter` mode's lifecycle differs from service and cron modes, e.g.,
-  batchspawner servers end with their job's walltime, which the hub should
-  show.
+- Registration codes replace putting the user's login on machines when
+  installing Operators, anywhere.
 - Running containers inside servers stays up to each hub's admins.
 
 ## Alternatives considered
 
-- **The Calkit hub talking to JupyterHub directly, with nothing installed**
-  in the server, bridging its terminals and files through the relay.
-  This needs no install, but the Calkit hub would hold a long-lived
-  credential for the user's account, many institutional hubs aren't
-  reachable from outside, and pipelines and status still need Calkit in the
-  server anyway.
+- **The Calkit hub driving JupyterHub directly with nothing installed**,
+  bridging its terminals and files through the relay for good.
+  The automatic setup uses the JupyterHub API only to start servers and
+  install Calkit, because pipelines, status, and workspace actions need
+  Calkit in the server anyway, and a permanent bridge would route all
+  traffic through the Calkit hub with a stored token.
+- **Registering the Calkit hub as a JupyterHub OAuth service**, which is
+  cleaner than users creating tokens but needs each hub's admins to
+  configure it.
+- **Requiring an admin-installed image or spawner hook**, which would leave
+  users on hubs whose admins won't change them without Calkit.
 - **An Operator running as root on shared machines**, creating accounts for
   users, which puts a root process behind commands from the internet.
-  JupyterHub's spawning already gives each user their own account.
 - **Requiring Docker in Docker**, which needs privileged pods most hubs
   won't allow.

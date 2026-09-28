@@ -3,13 +3,17 @@
 Based on
 [carteakey/tinytex-docker](https://github.com/carteakey/tinytex-docker),
 the purpose of this image is to provide most of the packages scientific
-articles need without the 9 GB of `texlive/texlive:latest-full`.
-Instead, this one is about 1 GB,
+articles need without the 6 GB of `texlive/texlive:latest-full`,
+a 2.7 GB download.
+Instead, this one is about 700 MB unpacked and under 400 MB to download,
 which speeds up downloads.
 When run through `calkit latex build`,
 missing packages are installed into the project's `.calkit/local/texmf`
 directory the first time they're needed.
-It also includes `latexmk`, `latexdiff`, and other useful utilities.
+It also includes `latexmk`, `latexdiff`, and other useful utilities,
+plus TeX4ht's `make4ht` with Ghostscript and zip, which
+`calkit latex to-docx --engine libreoffice` uses to convert a document
+without Word.
 
 This image is used by default for `calkit latex` commands,
 new LaTeX environments,

@@ -45,7 +45,12 @@ RUN fmtutil-sys --all
 # is what someone starting a project gets before they have asked for
 # anything.
 # latexdiff is here because `calkit latex diff` needs it; perl above is
-# what makes that possible.
+# what makes that possible. tex4ht and make4ht are for `calkit latex
+# to-docx --engine libreoffice`, which converts the source to ODT with
+# them, and luaxml, which make4ht's ODT output needs but doesn't depend
+# on. tex4ht brings compiled tools, so it can't be fetched on demand. About
+# 50 MB unpacked, mostly small font tables that compress well; what else
+# the conversion needs is installed further down.
 # cm-super supplies Type 1 versions of the EC fonts that elsarticle and
 # mnras ask for. Without it TeX generates bitmaps at run time, which
 # needs a writable texmf-var and produces worse PDFs; texmf-var is made
@@ -59,6 +64,9 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
         tlmgr install biber \
             latexmk \
             latexdiff \
+            tex4ht \
+            make4ht \
+            luaxml \
             latexindent \
             chktex \
             texliveonfly \
@@ -141,6 +149,15 @@ RUN i=1; \
     rm /tmp/packages.txt && \
     find /opt/.TinyTeX ! -perm -a+r -exec chmod a+rX {} + && \
     find /opt/.TinyTeX/texmf-var ! -perm -a+rw -exec chmod a+rwX {} +
+
+# What TeX4ht needs beyond TeX to convert a document for `calkit latex
+# to-docx --engine libreoffice`: Ghostscript to turn PDF figures into
+# images and zip to write the ODT. About 70 MB. Its Java post-processing is
+# left out; without it the ODT only loses a few text styles.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ghostscript zip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # The user tree is initialized at run time, not here: a mounted cache
 # starts empty and would hide anything this layer created.

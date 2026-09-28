@@ -104,7 +104,7 @@ dev = [
   "ruff",
   "mkdocs-glightbox>=0.5.2",
   "scipy>=1.15.3",
-  "pypandoc-binary>=1.17",
+  "pypandoc-binary>=1.13",
 ]
 
 [project.urls]

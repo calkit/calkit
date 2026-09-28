@@ -902,10 +902,24 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     os.replace(tmp_path, docx_path)
 
 
-def _pandoc(args: list[str], data: bytes) -> bytes:
+def find_pandoc() -> str | None:
+    """Pandoc from the pypandoc-binary package, if it's installed, else one
+    on ``PATH``."""
+    import importlib.util
     import shutil
 
-    pandoc = shutil.which("pandoc")
+    # Found by path, since importing pypandoc is slow
+    spec = importlib.util.find_spec("pypandoc")
+    if spec is not None and spec.origin is not None:
+        name = "pandoc.exe" if sys.platform == "win32" else "pandoc"
+        bundled = os.path.join(os.path.dirname(spec.origin), "files", name)
+        if os.path.isfile(bundled):
+            return bundled
+    return shutil.which("pandoc")
+
+
+def _pandoc(args: list[str], data: bytes) -> bytes:
+    pandoc = find_pandoc()
     if pandoc is None:
         raise RuntimeError("Pandoc is required to convert equations")
     res = subprocess.run([pandoc, *args], input=data, capture_output=True)

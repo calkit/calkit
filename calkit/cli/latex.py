@@ -1775,14 +1775,14 @@ def to_docx(
     equations: dict[str, str] = {}
     left_as_imported = 0
     has_display = any(b.display for b in blks)
-    if has_display and shutil.which("pandoc") is None:
+    if has_display and calkit.docx.find_pandoc() is None:
         import calkit.install
 
         typer.echo("Pandoc converts equations from the source to Word's")
         calkit.install.prompt_and_install(
             "pandoc", interactive=sys.stdin.isatty()
         )
-    if has_display and shutil.which("pandoc") is None:
+    if has_display and calkit.docx.find_pandoc() is None:
         warn(
             "Pandoc isn't installed, so equations are as Word imported "
             "them from the PDF; run 'calkit install pandoc' to fix that"
@@ -2163,7 +2163,7 @@ def merge_docx(
     # be placed that way goes in as a comment on the equation
     eq_comments: list[tuple[calkit.latex.Block, calkit.latex.TexComment]] = []
     found = doc.equations(list(original.equations))
-    if found and shutil.which("pandoc") is None:
+    if found and calkit.docx.find_pandoc() is None:
         warn(
             "Pandoc isn't installed, so edits to equations aren't merged; "
             "run 'calkit install pandoc'"

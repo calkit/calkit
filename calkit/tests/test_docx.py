@@ -269,16 +269,6 @@ def test_docx_round_trip(
         "      target_path: paper/main.tex\n      environment: tex\n",
         encoding="utf-8",
     )
-    # Equations are converted with Pandoc, from the Python package if
-    # it's not installed
-    if shutil.which("pandoc") is None:
-        pypandoc = pytest.importorskip("pypandoc")
-        monkeypatch.setenv(
-            "PATH",
-            os.path.dirname(pypandoc.get_pandoc_path())
-            + os.pathsep
-            + os.environ["PATH"],
-        )
     runs: list[list[str]] = []
     run = subprocess.run
     with pytest.MonkeyPatch.context() as mp:

@@ -29,6 +29,28 @@ jobs:
           tags: calkit/latex:pr
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # Compactness is the point of this image rather than texlive-full,
+      # so every change shows what it costs. The download size is the
+      # compressed layers, which is what a registry serves, next to the
+      # published image's.
+      - name: Report image size
+        run: |
+          set -euo pipefail
+          unpacked="$(docker image inspect calkit/latex:pr --format '{{.Size}}')"
+          download="$(docker save calkit/latex:pr | gzip -c | wc -c)"
+          published="$(docker buildx imagetools inspect --raw \
+            "$(docker buildx imagetools inspect ghcr.io/calkit/latex:latest \
+              --format '{{range .Manifest.Manifests}}{{if eq .Platform.Architecture "amd64"}}ghcr.io/calkit/latex@{{.Digest}}{{end}}{{end}}')" \
+            | jq '[.layers[].size] | add')"
+          mb() { echo "$(( $1 / 1000000 )) MB"; }
+          {
+            echo "### LaTeX image size"
+            echo
+            echo "| | This change | Published latest |"
+            echo "|---|---|---|"
+            echo "| Download | $(mb "$download") | $(mb "$published") |"
+            echo "| Unpacked | $(mb "$unpacked") | |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Smoke test image
         run: |
           set -euxo pipefail

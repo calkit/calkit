@@ -156,7 +156,9 @@ jobs:
       # luaxml, Ghostscript and zip besides TeX4ht itself, as the user.
       # Each equation becomes an object in the ODT, and the figure an
       # image; a figure that failed to convert leaves an ODT LibreOffice
-      # can't open.
+      # can't open. make4ht warns that xtpipes and then tidy failed, once
+      # per file, which is expected: that post-processing needs Java, which
+      # the image leaves out, and the ODT only loses a few text styles.
       - name: Convert a paper with TeX4ht
         run: |
           set -euxo pipefail

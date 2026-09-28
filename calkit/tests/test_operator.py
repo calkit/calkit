@@ -39,11 +39,45 @@ def _init_project(path, owner="alice", name="demo"):
 def test_config_and_workspaces(tmp_path, monkeypatch):
     home = str(tmp_path)
     monkeypatch.setenv("CALKIT_USER_HOME", home)
-    # The config holds a token, so only the user can read it
+    # The config holds a token, so only the user can read it, even if it
+    # was readable before
     operator.save_config({"name": "box", "token": "cko_x", "workspaces": []})
     if sys.platform != "win32":
+        os.chmod(operator.get_config_path(), 0o644)
+        operator.save_config(
+            {"name": "box", "token": "cko_x", "workspaces": []}
+        )
         mode = stat.S_IMODE(os.stat(operator.get_config_path()).st_mode)
         assert mode == 0o600
+    # Only encrypted connections are made, except locally
+    for url in [
+        "https://api.calkit.io",
+        "wss://relay.calkit.io",
+        "http://api.localhost",
+        "ws://localhost:8002",
+    ]:
+        operator.check_secure_url(url)
+    for url in ["http://api.calkit.io", "ws://relay.calkit.io", "ftp://x"]:
+        with pytest.raises(ValueError):
+            operator.check_secure_url(url)
+    # Registering uses the user's own hub, never one named by a project in
+    # the working directory, which could be anyone's
+    from calkit import config
+
+    project = tmp_path / "cloned"
+    project.mkdir()
+    (project / "calkit.yaml").write_text("hub: https://evil.example\n")
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("CALKIT_ENV", "")
+    monkeypatch.setenv("CALKIT_HUB", "")
+    monkeypatch.delenv("CALKIT_HUB")
+    monkeypatch.setattr(config, "_get_default_hub", lambda: None)
+    assert operator.use_own_hub() == "https://api.calkit.io"
+    monkeypatch.setenv("CALKIT_HUB", "http://hub.example")
+    with pytest.raises(ValueError):
+        operator.use_own_hub()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CALKIT_ENV", "test")
     assert operator.load_config() == {
         "name": "box",
         "token": "cko_x",
@@ -301,6 +335,28 @@ def test_workspace_actions(tmp_path, monkeypatch):
     with open(lock, "w") as f:
         f.write('{"read": {}, "write": {}}')
     assert not operator.is_pipeline_running(wdir)
+    # Paths from the hub have to be plain ones inside the workspace, so they
+    # can't be taken as options or reach anything else on the machine
+    outside = os.path.join(str(tmp_path), "secret")
+    for bad in [
+        "--push",
+        "-f",
+        outside,
+        "../secret",
+        "a/../../secret",
+        "x\n!important",
+    ]:
+        with pytest.raises(ValueError):
+            operator.save_workspace(wdir, [bad])
+        with pytest.raises(ValueError):
+            operator.ignore_path(wdir, bad)
+        with pytest.raises(ValueError):
+            operator.add_stage(wdir, name="bad", cmd="echo", deps=[bad])
+    if sys.platform != "win32":
+        os.symlink(str(tmp_path), os.path.join(wdir, "link"))
+        with pytest.raises(ValueError):
+            operator.save_workspace(wdir, ["link/secret"])
+        os.remove(os.path.join(wdir, "link"))
     # Ignoring commits the .gitignore change
     operator.ignore_path(wdir, "scratch.log")
     status = operator.get_workspace_status(wdir, fetch=False)
@@ -376,7 +432,15 @@ def test_workspace_actions(tmp_path, monkeypatch):
     path = operator.clone_project(url)
     assert path == os.path.join(tmp_path, "calkit", "other")
     assert calls == [["clone", url, path, "--no-dvc-pull"]]
-    for bad in [url.replace("other", "demo"), "https://github.com/x/..", ""]:
+    for bad in [
+        url.replace("other", "demo"),
+        "https://github.com/x/..",
+        "",
+        "--upload-pack=touch /tmp/x",
+        "ext::sh -c touch% /tmp/x",
+        "file:///etc/other",
+        "/etc/other",
+    ]:
         with pytest.raises(ValueError):
             operator.clone_project(bad)
 

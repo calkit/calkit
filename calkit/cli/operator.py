@@ -73,6 +73,13 @@ def install(
     from calkit import operator
     from calkit.cli import warn
 
+    # Sessions would be root shells, and it asks for sudo when it needs it
+    if os.name == "posix" and os.geteuid() == 0 and os.getenv("SUDO_USER"):
+        raise_error("Run this without sudo")
+    try:
+        hub_url = operator.use_own_hub()
+    except ValueError as e:
+        raise_error(str(e))
     if ssh is not None:
         from calkit.dependencies import _is_interactive
 
@@ -89,6 +96,7 @@ def install(
         return
     cfg = operator.load_config()
     if cfg is None:
+        typer.echo(f"Registering this machine with {hub_url}")
         cfg = operator.register()
         typer.echo(f"✅ Registered Operator '{cfg['name']}'")
     else:

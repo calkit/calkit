@@ -39,6 +39,8 @@ OUTPUT_COALESCE_SECONDS = 0.02
 # characters each, so chunks stay well under the relay's message limit
 OUTPUT_CHUNK_CHARS = 32 * 1024
 RECONNECT_MAX_DELAY_SECONDS = 60
+# Messages from the relay are at most 256 KiB, plus its wrapping
+MAX_FRAME_BYTES = 1024 * 1024
 # In cron mode, the Operator exits after this long with no sessions or
 # browsers, and cron starts it again when the hub asks
 CRON_IDLE_EXIT_SECONDS = 900
@@ -78,8 +80,44 @@ def save_config(cfg: dict) -> None:
     fpath = get_config_path()
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     fd = os.open(fpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # A file that already existed keeps its mode otherwise
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
+
+
+def check_secure_url(url: str) -> None:
+    """Refuse a hub or relay URL that isn't encrypted, unless it's local,
+    since whoever can tamper with the connection could run commands here.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    local = host in ("localhost", "127.0.0.1", "::1") or host.endswith(
+        ".localhost"
+    )
+    if parsed.scheme not in ("https", "wss") and not local:
+        raise ValueError(f"Refusing to connect to {url} without TLS")
+
+
+def use_own_hub() -> str:
+    """Point hub requests at the user's own hub, returning its API URL.
+
+    Hub requests otherwise go to the hub named by the project in the
+    working directory, if any, and a cloned project mustn't be able to
+    decide which hub gets to run commands on this machine.
+    """
+    from calkit import hub
+
+    if not os.getenv("CALKIT_HUB") and os.getenv("CALKIT_ENV") != "test":
+        os.environ["CALKIT_HUB"] = (
+            config._get_default_hub() or hub.DEFAULT_HUB_URL
+        )
+    url = hub.get_base_url()
+    check_secure_url(url)
+    return url
 
 
 def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
@@ -88,6 +126,7 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
     """
     from calkit import hub
 
+    use_own_hub()
     hostname = socket.gethostname()
     resp = hub._request(
         "post",
@@ -162,6 +201,10 @@ def install_remote(
     from calkit import hub
     from calkit import workspace as ws
 
+    use_own_hub()
+    # Otherwise ssh would take it as an option
+    if host.startswith("-"):
+        raise ValueError(f"Invalid host '{host}'")
     target = ws.Workspace(host=host, wdir="~")
     target = ws.ensure_reachable(target, interactive=interactive)
     ws.ensure_calkit_installed(target, interactive=interactive, required=True)
@@ -433,6 +476,25 @@ def push_workspace(wdir: str) -> None:
     git_repo.git.push("origin", git_repo.active_branch.name)
 
 
+def check_workspace_path(wdir: str, path: str) -> str:
+    """Refuse a path from the hub that isn't a plain one inside the
+    workspace, e.g., one Git or Calkit would take as an option.
+    """
+    if (
+        not isinstance(path, str)
+        or not path
+        or path.startswith("-")
+        or any(c in path for c in "\n\r\0")
+        or os.path.isabs(path)
+    ):
+        raise ValueError(f"Invalid path '{path}'")
+    root = os.path.realpath(wdir)
+    full = os.path.realpath(os.path.join(root, path))
+    if full != root and not full.startswith(root + os.sep):
+        raise ValueError(f"{path} is outside the workspace")
+    return path
+
+
 def save_workspace(
     wdir: str,
     paths: list[str],
@@ -445,6 +507,8 @@ def save_workspace(
     """
     if not paths:
         raise ValueError("No paths to save")
+    for path in paths:
+        check_workspace_path(wdir, path)
     # Only what was asked for goes in the commit
     calkit.git.get_repo(wdir).git.reset()
     args = ["add", *paths, "--commit-message"]
@@ -463,6 +527,7 @@ def ignore_path(
     message: str | None = None,
     push: bool = False,
 ) -> None:
+    check_workspace_path(wdir, path)
     git_repo = calkit.git.get_repo(wdir)
     if git_repo.ignored(path):
         return
@@ -505,6 +570,8 @@ def add_stage(
     """Add a stage to the DVC pipeline and commit it, along with a Calkit
     object for its output if given one.
     """
+    for path in [*(deps or []), *(outs or [])]:
+        check_workspace_path(wdir, path)
     if calkit_type is not None:
         if calkit_type not in ("figure", "dataset", "publication"):
             raise ValueError(f"Unknown object type '{calkit_type}'")
@@ -575,6 +642,10 @@ def clone_project(git_repo_url: str) -> str:
 
     The clone uses this machine's own Git credentials.
     """
+    # Only the kinds of URL projects have, so nothing else Git can fetch
+    # from, e.g., local paths or other transports, can be named
+    if not re.match(r"(https://|git@)[A-Za-z0-9]", git_repo_url):
+        raise ValueError(f"Can't clone {git_repo_url}")
     parent = os.path.join(config.get_user_home(), "calkit")
     os.makedirs(parent, exist_ok=True)
     name = git_repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
@@ -976,8 +1047,13 @@ class Operator:
     async def connect(self, resp: dict) -> None:
         from websockets.asyncio.client import connect
 
-        url = f"{resp['relay_url']}/operator?token={resp['relay_token']}"
-        async with connect(url, max_size=None) as ws:
+        url = f"{resp['relay_url']}/operator"
+        check_secure_url(url)
+        async with connect(url, max_size=MAX_FRAME_BYTES) as ws:
+            # Sent in a message rather than the URL to stay out of logs
+            await ws.send(
+                json.dumps({"type": "auth", "token": resp["relay_token"]})
+            )
             self.ws = ws
             logger.info(f"Connected to relay as {self.cfg['name']}")
             try:
@@ -1210,8 +1286,8 @@ def _launchd_plist_path(at_boot: bool) -> str:
 
 
 def _launchd_plist(at_boot: bool) -> bytes:
-    import getpass
     import plistlib
+    import pwd
 
     plist: dict[str, Any] = {
         "Label": SERVICE_LABEL,
@@ -1225,7 +1301,9 @@ def _launchd_plist(at_boot: bool) -> bytes:
         "EnvironmentVariables": {"HOME": config.get_user_home()},
     }
     if at_boot:
-        plist["UserName"] = getpass.getuser()
+        # From the OS rather than the environment, which says root under
+        # sudo, and this must never run as root
+        plist["UserName"] = pwd.getpwuid(os.getuid()).pw_name
     return plistlib.dumps(plist)
 
 

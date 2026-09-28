@@ -129,6 +129,7 @@ You can set several variables, like:
 - `STACK_NAME`: The name of the stack used for Docker Compose labels and project name, this should be different for `staging`, `production`, etc. You could use the same domain replacing dots with dashes, e.g. `fastapi-project-example-com` and `staging-fastapi-project-example-com`.
 - `BACKEND_CORS_ORIGINS`: A list of allowed CORS origins separated by commas.
 - `SECRET_KEY`: The secret key for the FastAPI project, used to sign tokens.
+- `RELAY_SECRET_KEY`: The key for signing relay tokens, kept apart from `SECRET_KEY` since the relay holds it.
 - `FIRST_SUPERUSER`: The email of the first superuser, this superuser will be the one that can create new users.
 - `FIRST_SUPERUSER_PASSWORD`: The password of the first superuser.
 - `SMTP_HOST`: The SMTP server host to send emails, this would come from your email provider (E.g. Mailgun, Sparkpost, Sendgrid, etc).
@@ -204,8 +205,9 @@ repo root). It's served at `relay.$DOMAIN`.
   Traefik issues its certificate automatically.
 - It runs as a single process on purpose, so both ends of a connection meet in
   memory; don't scale it to multiple replicas or workers.
-- It only needs `SECRET_KEY`, which must match the backend's, since it verifies
-  relay tokens the backend signs.
+- It only needs `RELAY_SECRET_KEY`, which must match the backend's, since it
+  verifies relay tokens the backend signs.
+  It doesn't get `SECRET_KEY`, so it can't sign logins.
 - The backend tells Operators and browsers where it is with `RELAY_URL`, which
   defaults to `wss://relay.$DOMAIN`.
 
@@ -298,6 +300,7 @@ The current Github Actions workflows expect these secrets:
 - `FIRST_SUPERUSER_PASSWORD`
 - `POSTGRES_PASSWORD`
 - `SECRET_KEY`
+- `RELAY_SECRET_KEY`
 - `LATEST_CHANGES`
 - `SMOKESHOW_AUTH_KEY`
 

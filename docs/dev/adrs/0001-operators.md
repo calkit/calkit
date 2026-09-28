@@ -160,6 +160,36 @@ DVC token sent to a remote a repo controls, so it's tightened three ways:
 - Setting up an authenticator app takes a code emailed to the user as
   well as one from the app, so a leaked credential can't add an
   attacker's.
+
+A second review looked for any way around those and tightened them
+further:
+
+- A signed-in session means a person signing in to the web app, recorded
+  on the refresh tokens of that sign-in, rather than any token that isn't
+  a personal access token.
+  CLI, CI, and GitHub token logins, and tokens from emailed links, don't
+  count, and authorizing a CLI login takes a signed-in session, so a
+  personal access token can't be traded for one.
+  The proof of a second factor names the session, and changing or
+  resetting the password ends every other session.
+- Changing a verified email takes a code sent to it, and setting up an
+  authenticator app or registering an Operator takes a verified email,
+  so a stolen session can't move the account to an attacker's inbox and
+  set up their app.
+  A Google sign-in that claims an account whose email was never verified
+  resets whatever someone else could have set up on it.
+- Code checks lock their row, so parallel guesses can't get past the
+  limit.
+- The relay signs with a key of its own, since it's exposed to the
+  internet, and takes tokens in a message rather than the URL, once each.
+- The Operator registers with the user's own hub, never one named by a
+  project in the working directory, and refuses to connect without TLS
+  except locally or to run as root.
+  Paths and clone URLs from the hub have to be plain ones, so they can't
+  be taken as options or reach outside the workspace.
+- Links built from project data only allow web and email URLs, since a
+  `javascript:` URL in a project's `calkit.yaml` would otherwise run in
+  the owner's browser, where it could reach their Operators.
   Passkeys can be added later as another way to satisfy the same check.
   The user docs must say prominently to install the Operator only on
   accounts the user alone controls, and to check institutional policy

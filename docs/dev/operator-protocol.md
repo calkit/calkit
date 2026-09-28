@@ -50,14 +50,20 @@ rejects its token and the Operator shuts down.
   checks in connected.
 - `POST /operators/{operator_id}/relay-token`, with the user's token,
   returns the relay URL and a browser relay token for that Operator.
-  It requires a signed-in session, not a personal access token, and proof
-  that the session entered a two-factor code within the last 12 hours:
+  It requires an access token from a person signing in to the web app,
+  whose sign-in session is still live, not a personal access token or a
+  CLI, CI, or GitHub token login, and proof that the session entered a
+  two-factor code within the last 12 hours:
   the `second_factor_token` returned by `POST /user/totp/verify` (or
   `/confirm`), sent in an `X-Second-Factor` header.
+  That token names the session, so it's worthless to any other, and
+  changing the password ends every other session.
   Otherwise it answers 403 with a detail the browser recognizes, to prompt
   for setup or a code.
   Setting up two-factor authentication (`POST /user/totp`) emails a code,
   which confirming takes along with one from the authenticator app.
+  It, and registering an Operator, require a verified email, and changing
+  a verified email takes a code sent to it.
 - `GET /projects/{owner}/{name}/workspaces` lists the project's workspaces
   across the user's Operators, from their latest check-ins.
 
@@ -79,8 +85,13 @@ A lock file keeps one Operator running per machine and user.
 
 ## Relay
 
-The relay serves two websocket endpoints, each taking its token as a
-`token` query parameter, since browsers can't set headers on websockets:
+The relay serves two websocket endpoints.
+Each connection sends its token in its first message,
+`{"type": "auth", "token": ...}`, rather than the URL, so tokens stay out
+of access logs, and is closed with code 4401 if it doesn't within 10
+seconds or the token is invalid.
+Tokens are signed with `RELAY_SECRET_KEY`, which can't sign logins, and
+each opens only one connection.
 
 - `/operator`, one connection per Operator.
   A new connection replaces an existing one for the same Operator.

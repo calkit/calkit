@@ -31,6 +31,9 @@ class LatexDocxExport(BaseModel):
         default=0, description="Paragraphs with no source location."
     )
     comments_exported: int = 0
+    equations: int = Field(
+        default=0, description="Display equations converted from the source."
+    )
     files: dict[str, str] = Field(
         default={},
         description=(

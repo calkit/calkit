@@ -23,6 +23,8 @@ W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 DC = "http://purl.org/dc/elements/1.1/"
+# Office Math, Word's equation markup
+M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 # Namespace of the custom XML part in which Calkit records where a
 # document came from
 CALKIT_NS = "https://calkit.org/latex-export"
@@ -46,6 +48,9 @@ for _p, _u in [
     ("w15", W15),
     ("r", REL),
     ("dc", DC),
+    ("m", M),
+    ("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
+    ("pic", "http://schemas.openxmlformats.org/drawingml/2006/picture"),
     (
         "cp",
         "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
@@ -62,6 +67,7 @@ def _tag(ns: str, name: str) -> str:
 
 
 _XMLNS_RE = re.compile(r'xmlns:(\w+)="([^"]*)"')
+_XMLNS_DEFAULT_RE = re.compile(r'\sxmlns="([^"]*)"')
 
 
 def _parse(data: bytes) -> ET.Element:
@@ -76,11 +82,27 @@ def _dump(root: ET.Element, original: bytes | None) -> bytes:
     """Serialize a part, restoring declarations ElementTree drops.
 
     Word lists prefixes in ``mc:Ignorable`` and refuses a part that doesn't
-    declare them, even when nothing uses them.
+    declare them, even when nothing uses them. A part written with a default
+    namespace keeps it, since LibreOffice won't read prefixed relationships.
     """
     out: str = ET.tostring(
         root, xml_declaration=True, encoding="UTF-8"
     ).decode()
+    default = (
+        _XMLNS_DEFAULT_RE.search(original.decode()[:4000])
+        if original is not None
+        else None
+    )
+    if default is not None:
+        # ElementTree's default_namespace option rejects unprefixed
+        # attributes, so drop the prefix it gave the namespace instead
+        prefix = re.search(
+            rf'xmlns:(\w+)="{re.escape(default.group(1))}"', out
+        )
+        if prefix is not None:
+            p = prefix.group(1)
+            out = re.sub(rf"<(/?){p}:", r"<\1", out)
+            out = out.replace(f"xmlns:{p}=", "xmlns=", 1)
     if original is not None:
         start = out.index("<", out.index("?>"))
         end = out.index(">", start)
@@ -127,6 +149,8 @@ class Original:
     source: str
     paragraphs: dict[str, str]
     media: dict[str, str] = field(default_factory=dict)
+    # Each equation's LaTeX as the converter reads it back, by bookmark
+    equations: dict[str, str] = field(default_factory=dict)
 
 
 def normalize(text: str) -> str:
@@ -217,6 +241,10 @@ class Document:
             m = ET.SubElement(root, _tag(CALKIT_NS, "media"))
             m.set("name", name)
             m.set("sha1", digest)
+        for name, tex in original.equations.items():
+            eq = ET.SubElement(root, _tag(CALKIT_NS, "eq"))
+            eq.set("id", name)
+            eq.text = tex
         self.parts["customXml/item1.xml"] = ET.tostring(
             root, xml_declaration=True, encoding="UTF-8"
         )
@@ -254,6 +282,10 @@ class Document:
             media={
                 m.get("name", ""): m.get("sha1", "")
                 for m in root.iter(_tag(CALKIT_NS, "media"))
+            },
+            equations={
+                eq.get("id", ""): eq.text or ""
+                for eq in root.iter(_tag(CALKIT_NS, "eq"))
             },
         )
 
@@ -450,6 +482,184 @@ class Document:
                 top = by_id[top.parent_id]
             cm.done = top.done
         return out
+
+    @property
+    def text_width(self) -> int:
+        """The body's text width in twentieths of a point."""
+        sect = self.doc.find(f".//{_tag(W, 'body')}/{_tag(W, 'sectPr')}")
+        if sect is None:
+            return 9360
+        size, mar = sect.find(_tag(W, "pgSz")), sect.find(_tag(W, "pgMar"))
+        if size is None or mar is None:
+            return 9360
+        return int(size.get(_tag(W, "w"), "12240")) - sum(
+            int(mar.get(_tag(W, side), "1440")) for side in ("left", "right")
+        )
+
+    def insert_equations(
+        self,
+        before: ET.Element,
+        rows: list[tuple[ET.Element, str | None, str]],
+        first_bid: int,
+    ) -> None:
+        """Insert display equations before a body element as a borderless
+        table of (math, number, bookmark name) rows, which Word and
+        LibreOffice both lay out like LaTeX: centered, numbered at right.
+        """
+        width = self.text_width
+        side = width // 8
+        cols = [side, width - 2 * side, side]
+        tbl = ET.Element(_tag(W, "tbl"))
+        pr = ET.SubElement(tbl, _tag(W, "tblPr"))
+        ET.SubElement(pr, _tag(W, "tblW"), {_tag(W, "w"): str(width)}).set(
+            _tag(W, "type"), "dxa"
+        )
+        borders = ET.SubElement(pr, _tag(W, "tblBorders"))
+        for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            ET.SubElement(borders, _tag(W, edge), {_tag(W, "val"): "nil"})
+        ET.SubElement(pr, _tag(W, "tblLayout"), {_tag(W, "type"): "fixed"})
+        grid = ET.SubElement(tbl, _tag(W, "tblGrid"))
+        for w in cols:
+            ET.SubElement(grid, _tag(W, "gridCol"), {_tag(W, "w"): str(w)})
+        for i, (math, number, name) in enumerate(rows):
+            tr = ET.SubElement(tbl, _tag(W, "tr"))
+            for j, w in enumerate(cols):
+                tc = ET.SubElement(tr, _tag(W, "tc"))
+                tcpr = ET.SubElement(tc, _tag(W, "tcPr"))
+                ET.SubElement(
+                    tcpr, _tag(W, "tcW"), {_tag(W, "w"): str(w)}
+                ).set(_tag(W, "type"), "dxa")
+                ET.SubElement(
+                    tcpr, _tag(W, "vAlign"), {_tag(W, "val"): "center"}
+                )
+                p = ET.SubElement(tc, _tag(W, "p"))
+                ppr = ET.SubElement(p, _tag(W, "pPr"))
+                ET.SubElement(
+                    ppr,
+                    _tag(W, "spacing"),
+                    {_tag(W, "before"): "60", _tag(W, "after"): "60"},
+                )
+                if j == 1:
+                    ET.SubElement(
+                        ppr, _tag(W, "jc"), {_tag(W, "val"): "center"}
+                    )
+                    # The bookmark spans the equation, since Word drops an
+                    # empty one beside it
+                    bid = str(first_bid + i)
+                    ET.SubElement(
+                        p,
+                        _tag(W, "bookmarkStart"),
+                        {_tag(W, "id"): bid, _tag(W, "name"): name},
+                    )
+                    ET.SubElement(p, _tag(M, "oMathPara")).append(math)
+                    ET.SubElement(
+                        p, _tag(W, "bookmarkEnd"), {_tag(W, "id"): bid}
+                    )
+                elif j == 2 and number:
+                    ET.SubElement(
+                        ppr, _tag(W, "jc"), {_tag(W, "val"): "right"}
+                    )
+                    r = ET.SubElement(p, _tag(W, "r"))
+                    ET.SubElement(r, _tag(W, "t")).text = f"({number})"
+        body = self._parents[before]
+        body.insert(list(body).index(before), tbl)
+        self._parents = {c: p for p in self.doc.iter() for c in p}
+
+    def equations(
+        self, names: list[str]
+    ) -> dict[str, tuple[ET.Element | None, list[str] | None]]:
+        """The equation after each named bookmark, and who has tracked
+        changes pending in its paragraph, or None if none are. Word moves
+        a bookmark at the start of a table cell out of the paragraph, so
+        this goes by document order rather than paragraph."""
+        out: dict[str, tuple[ET.Element | None, list[str] | None]] = {
+            n: (None, None) for n in names
+        }
+        waiting: list[str] = []
+        for el in self.doc.iter():
+            if el.tag == _tag(W, "bookmarkStart"):
+                name = el.get(_tag(W, "name"), "")
+                if name in out:
+                    waiting.append(name)
+            elif el.tag == _tag(M, "oMath") and waiting:
+                para = el
+                while para.tag != _tag(W, "p") and para in self._parents:
+                    para = self._parents[para]
+                marks = [
+                    e
+                    for e in para.iter()
+                    if e.tag in (_tag(W, "ins"), _tag(W, "del"))
+                ]
+                authors = (
+                    list(
+                        dict.fromkeys(
+                            e.get(_tag(W, "author"), "") for e in marks
+                        )
+                    )
+                    if marks
+                    else None
+                )
+                for name in waiting:
+                    out[name] = (el, authors)
+                waiting = []
+        return out
+
+    def prune_media(self) -> None:
+        """Drop images the document body no longer shows, as Word would on
+        saving, so they don't read as figures changed in review."""
+        name = "word/_rels/document.xml.rels"
+        rels = _parse(self.parts[name])
+        used = {
+            v
+            for el in self.doc.iter()
+            for k, v in el.attrib.items()
+            if k.startswith(f"{{{REL}}}")
+        }
+        others = b"".join(
+            data
+            for n, data in self.parts.items()
+            if n.endswith(".rels") and n != name
+        )
+        for rel in list(rels):
+            target = rel.get("Target", "")
+            if (
+                rel.get("Type") != f"{REL}/image"
+                or rel.get("Id") in used
+                or rel.get("TargetMode") == "External"
+            ):
+                continue
+            rels.remove(rel)
+            part = "word/" + target.removeprefix("/word/").removeprefix("/")
+            if target.encode() not in others:
+                self.parts.pop(part, None)
+        self.parts[name] = _dump(rels, self.parts[name])
+
+    def move_out(self, el: ET.Element, unit: ET.Element, after: bool) -> None:
+        """Move an element out of a body element, e.g., a table, to just
+        before or after it."""
+        self._parents[el].remove(el)
+        body = self._parents[unit]
+        body.insert(list(body).index(unit) + after, el)
+        self._parents = {c: p for p in self.doc.iter() for c in p}
+
+    def remove(self, el: ET.Element) -> None:
+        """Remove a body element, keeping a section break it carries."""
+        parent = self._parents[el]
+        sect = el.find(f"{_tag(W, 'pPr')}/{_tag(W, 'sectPr')}")
+        if sect is not None:
+            for child in list(el):
+                if child.tag != _tag(W, "pPr"):
+                    el.remove(child)
+            return
+        parent.remove(el)
+
+    def trim_start(self, para: ET.Element, count: int) -> None:
+        """Drop the first ``count`` characters of a paragraph's text."""
+        for t in para.iter(_tag(W, "t")):
+            if count <= 0:
+                break
+            text = t.text or ""
+            t.text, count = text[count:], count - len(text)
 
     def _split_run(self, para: ET.Element, offset: int) -> int:
         """Split the run containing text offset ``offset`` so a marker can
@@ -690,3 +900,103 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
             "Converting PDF to Word requires Word on macOS or Windows"
         )
     os.replace(tmp_path, docx_path)
+
+
+def _pandoc(args: list[str], data: bytes) -> bytes:
+    import shutil
+
+    pandoc = shutil.which("pandoc")
+    if pandoc is None:
+        raise RuntimeError("Pandoc is required to convert equations")
+    res = subprocess.run([pandoc, *args], input=data, capture_output=True)
+    if res.returncode != 0:
+        raise RuntimeError(
+            "Pandoc could not convert equations: " + res.stderr.decode()
+        )
+    return res.stdout
+
+
+def latex_to_omml(
+    equations: list[str], preamble: str = ""
+) -> list[ET.Element | None]:
+    """Convert display math to Word equations, one ``m:oMath`` each.
+
+    Every equation goes through one Pandoc run, each after a marker
+    paragraph so its output can be picked out; ``preamble`` carries the
+    document's macro definitions.
+    """
+    src = (
+        preamble
+        + "\n\n"
+        + "".join(f"CKEQ{i}\n\n{eq}\n\n" for i, eq in enumerate(equations))
+    )
+    out = _pandoc(["-f", "latex", "-t", "docx", "-o", "-"], src.encode())
+    import io
+
+    with zipfile.ZipFile(io.BytesIO(out)) as z:
+        body = ET.fromstring(z.read("word/document.xml"))
+    maths: list[ET.Element | None] = [None] * len(equations)
+    current = None
+    for p in body.iter(_tag(W, "p")):
+        text = "".join(t.text or "" for t in p.iter(_tag(W, "t")))
+        m = re.fullmatch(r"CKEQ(\d+)", text.strip())
+        if m is not None:
+            current = int(m.group(1))
+            continue
+        math = p.find(f".//{_tag(M, 'oMath')}")
+        if current is not None and math is not None and maths[current] is None:
+            maths[current] = math
+    return maths
+
+
+def omml_to_latex(maths: list[ET.Element]) -> list[str | None]:
+    """Read Word equations back as LaTeX, as Pandoc spells it."""
+    import io
+    import json
+
+    body = "".join(
+        f"<w:p><w:r><w:t>CKEQ{i}</w:t></w:r></w:p><w:p><m:oMathPara>"
+        + ET.tostring(m, encoding="unicode")
+        + "</m:oMathPara></w:p>"
+        for i, m in enumerate(maths)
+    )
+    # ElementTree declares the math namespace on each equation; the
+    # markers need the main one declared
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{W}" xmlns:m="{M}"><w:body>{body}'
+        "</w:body></w:document>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://'
+            'schemas.openxmlformats.org/package/2006/content-types"><Default'
+            ' Extension="rels" ContentType="application/vnd.openxmlformats-'
+            'package.relationships+xml"/><Default Extension="xml" Content'
+            'Type="application/xml"/><Override PartName="/word/document.xml"'
+            ' ContentType="application/vnd.openxmlformats-officedocument.'
+            'wordprocessingml.document.main+xml"/></Types>',
+        )
+        z.writestr(
+            "_rels/.rels",
+            f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns='
+            f'"{PKG_REL}"><Relationship Id="rId1" Type="{REL}/officeDocument"'
+            ' Target="word/document.xml"/></Relationships>',
+        )
+        z.writestr("word/document.xml", document)
+    ast = json.loads(_pandoc(["-f", "docx", "-t", "json"], buf.getvalue()))
+    out: list[str | None] = [None] * len(maths)
+    current = None
+    for block in ast["blocks"]:
+        inlines = block.get("c") if block.get("t") in ("Para", "Plain") else []
+        for el in inlines or []:
+            if el.get("t") == "Str":
+                m = re.fullmatch(r"CKEQ(\d+)", el["c"])
+                if m is not None:
+                    current = int(m.group(1))
+            elif el.get("t") == "Math" and current is not None:
+                if out[current] is None:
+                    out[current] = el["c"][1].strip()
+    return out

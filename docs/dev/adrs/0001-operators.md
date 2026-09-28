@@ -182,6 +182,14 @@ further:
   limit.
 - The relay signs with a key of its own, since it's exposed to the
   internet, and takes tokens in a message rather than the URL, once each.
+- The Operator doesn't take the relay's word for who opened a channel.
+  The API signs a grant for each browser connection, naming the Operator
+  and its owner, with an Ed25519 key only it holds, and the Operator
+  checks it against the public key it pinned when it registered, using
+  each grant once.
+  So the relay alone can't open channels, for shells or anything else,
+  and what's left to trust is the API itself, as with any web terminal
+  its pages serve.
 - The Operator registers with the user's own hub, never one named by a
   project in the working directory, and refuses to connect without TLS
   except locally or to run as root.
@@ -398,6 +406,16 @@ This avoids SSH keys, port forwarding, and repeated 2FA prompts on
 clusters without changing the project or breaking it for collaborators
 without an Operator.
 
+Operators are the first kind of compute users plug into the hub, and not
+the last.
+Job services, e.g., Hugging Face Jobs (#1748), have no machine of the
+user's to run an Operator on, so they're environment kinds, and the hub
+can broker them the way it brokers storage: the user adds and names
+compute there and enables projects to use it, and a hub environment
+names it, optionally locking its properties so a change on the hub
+shows up in the project (#1749).
+The compute page can list Operators and brokered compute together.
+
 ### LaTeX builds
 
 The hub's LaTeX editor compiles a preview in the browser with a WASM TeX
@@ -472,6 +490,20 @@ Nothing in the current design blocks this, as long as these stay open:
 - Check-ins will report loop states, which is an additive change to the
   check-in body.
 
+The motivating case is a lab device, e.g., one that actuates experiments
+and collects their data.
+While it serves one project, its control logic is that project's loop.
+Several projects' loops can also run on one Operator, each in its own
+managed workspace, e.g., different experiments on the same device, since
+an Operator is one per machine and account, not per project.
+They'd need exclusive access to hardware they share, like stage locks
+per machine.
+Once lab infrastructure serves many projects, though, its own setup,
+e.g., calibration and scheduling, belongs to none of them, and it would
+be a concept of its own that projects reference.
+Whether that's in scope for Calkit is undecided, and nothing here
+depends on it.
+
 ### Detached remote stages
 
 Currently, the machine driving a run must stay up until a remote stage
@@ -501,7 +533,16 @@ so it follows the pipeline integration phase.
    A shared machine gives each user their own Operator, through
    JupyterHub where it has one (#1744), rather
    than one Operator running as root.
-6. Later: upgrading Calkit and restarting an Operator from the hub,
+6. Later: native SSH through the relay, e.g., with
+   `calkit operator proxy` as an SSH `ProxyCommand`, with the relay
+   carrying encrypted bytes to the machine's `sshd` or one built into the
+   Operator.
+   It would authenticate with the user's own keys, so neither the hub nor
+   the relay could get in that way, and it would let VS Code Remote-SSH
+   reach the machine without a VPN.
+   A setting could then turn off web sessions, leaving an Operator
+   reachable only that way and for things like LaTeX builds.
+   Upgrading Calkit and restarting an Operator from the hub,
    loops and fleet rollouts (#90), parallel `group` stages (#185),
    a startup command for sessions, agent notifications, and an ACP chat
    view.
@@ -546,6 +587,17 @@ so it follows the pipeline integration phase.
   the session ends when the agent exits.
 - **Sessions in tmux.** Would survive Operator restarts but adds a
   dependency and excludes Windows.
+- **SSH for web sessions, with keys the hub puts on the machine**, as
+  Google Cloud does for its VMs. The hub would still hold or serve
+  everything needed to get in, so it's the same trust as the relay
+  protocol, and it needs an SSH server, which is off by default on macOS
+  and Windows, and loses sessions that outlive their connection.
+- **An SSH client in the browser**, e.g., compiled to WebAssembly, with
+  keys that never leave it. It would keep the relay out of sessions, which
+  signed grants already do more cheaply and for workspace actions too,
+  while the hub would still serve the code that uses the keys.
+  SSH-over-websocket tools, e.g., wetty and webssh2, end the SSH
+  connection on a server, which would then see everything typed.
 - **Live file sync between workspaces.** Would make workspaces feel like
   one, but conflicts with agents and concurrent runs would be silent and
   unrecoverable, where Git makes them explicit.

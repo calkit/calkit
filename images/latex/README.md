@@ -3,8 +3,9 @@
 Based on
 [carteakey/tinytex-docker](https://github.com/carteakey/tinytex-docker),
 the purpose of this image is to provide most of the packages scientific
-articles need without the 9 GB of `texlive/texlive:latest-full`.
-Instead, this one is about 1 GB,
+articles need without the 6 GB of `texlive/texlive:latest-full`,
+a 2.7 GB download.
+Instead, this one is about 700 MB unpacked and under 400 MB to download,
 which speeds up downloads.
 When run through `calkit latex build`,
 missing packages are installed into the project's `.calkit/local/texmf`

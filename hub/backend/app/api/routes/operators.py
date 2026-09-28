@@ -27,7 +27,9 @@ from app.config import settings
 from app.core import utcnow
 from app.models import Operator, OperatorPublic, OperatorWorkspace, User
 from app.security import (
+    create_operator_grant,
     create_relay_token,
+    get_operator_grant_public_key,
     hash_token_verifier,
     verify_token_verifier,
 )
@@ -129,6 +131,8 @@ class OperatorRegistered(OperatorOut):
     """A newly registered Operator, with the token only returned here."""
 
     token: str
+    # Pinned by the Operator to check the grants browsers connect with
+    grant_public_key: str
 
 
 @router.post("/operators")
@@ -175,7 +179,10 @@ def post_operator(
     session.refresh(operator)
     return OperatorRegistered.model_validate(
         _out(operator),
-        update=dict(token=f"{TOKEN_PREFIX}{selector}{verifier}"),
+        update=dict(
+            token=f"{TOKEN_PREFIX}{selector}{verifier}",
+            grant_public_key=get_operator_grant_public_key(),
+        ),
     )
 
 
@@ -253,6 +260,8 @@ class CheckInResp(BaseModel):
     relay_url: str
     relay_token: str
     check_in_interval: int = CHECK_IN_INTERVAL_SECONDS
+    # For Operators registered before grants were signed to pin
+    grant_public_key: str
     # Whether an Operator in cron mode should connect
     connect: bool = False
 
@@ -317,6 +326,7 @@ def post_operator_check_in(
             expires_delta=timedelta(minutes=OPERATOR_RELAY_TOKEN_MINUTES),
         ),
         connect=connect_requested(operator),
+        grant_public_key=get_operator_grant_public_key(),
     )
 
 
@@ -366,6 +376,11 @@ def post_operator_relay_token(
             operator_id=operator.id,
             user_id=current_user.id,
             expires_delta=timedelta(seconds=BROWSER_RELAY_TOKEN_SECONDS),
+            grant=create_operator_grant(
+                operator.id,
+                current_user.id,
+                timedelta(seconds=BROWSER_RELAY_TOKEN_SECONDS),
+            ),
         ),
     )
 

@@ -200,7 +200,14 @@ async def browser_ws(ws: WebSocket) -> None:
     operator.channels[ch] = ws
     meter[operator_id][0] += await _send(
         operator.ws,
-        {"type": "channel.open", "ch": ch, "user_id": payload["user_id"]},
+        {
+            "type": "channel.open",
+            "ch": ch,
+            "user_id": payload["user_id"],
+            # Signed by the API for the Operator to check, since it doesn't
+            # take the relay's word for who opened the channel
+            "grant": payload.get("grant"),
+        },
     )
     try:
         while True:

@@ -88,6 +88,18 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     os.makedirs(os.path.join(home, "calkit", "not-a-project"))
     with open(os.path.join(home, "calkit", "demo", "notes.txt"), "w") as f:
         f.write("uncommitted")
+    # The hub's grant key is pinned at the first check-in of an Operator
+    # registered before grants were signed, and never replaced after
+    from calkit import hub
+
+    keys = iter(["key1", "key2"])
+    monkeypatch.setattr(
+        hub, "_request", lambda *a, **kw: {"grant_public_key": next(keys)}
+    )
+    cfg = {"token": "cko_x", "api_url": "https://api.hub", "workspaces": []}
+    operator.check_in(cfg, [], "service")
+    operator.check_in(cfg, [], "service")
+    assert operator.load_config()["grant_public_key"] == "key1"
     # Registered projects elsewhere are found, but only once
     elsewhere = os.path.join(home, "src", "other")
     _init_project(elsewhere, name="other")
@@ -132,8 +144,44 @@ async def test_sessions(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     monkeypatch.setenv("SHELL", "/bin/sh")
     _init_project(os.path.join(tmp_path, "calkit", "demo"))
-    op = operator.Operator({"user_id": "owner", "workspaces": []})
+    import base64
+    import time
+
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+    )
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding,
+        PublicFormat,
+    )
+
+    hub_key = Ed25519PrivateKey.generate()
+    public_key = base64.b64encode(
+        hub_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    ).decode()
+    op = operator.Operator(
+        {
+            "id": "op1",
+            "user_id": "owner",
+            "grant_public_key": public_key,
+            "workspaces": [],
+        }
+    )
     op.workspaces = operator.discover_workspaces(op.cfg)
+
+    def grant(sub="owner", aud="op1", expires_in=60, key=hub_key, jti=None):
+        return jwt.encode(
+            {
+                "exp": time.time() + expires_in,
+                "aud": aud,
+                "sub": sub,
+                "jti": jti or os.urandom(8).hex(),
+            },
+            key,
+            algorithm="EdDSA",
+        )
+
     workspace = op.workspaces[0]["path"]
     sent: list[tuple[str, dict]] = []
 
@@ -162,14 +210,32 @@ async def test_sessions(tmp_path, monkeypatch):
     def message(ch, msg):
         op.on_relay_message({"type": "channel.message", "ch": ch, "msg": msg})
 
-    # Channels for anyone but the owner are refused
-    op.on_relay_message({"type": "channel.open", "ch": "x", "user_id": "eve"})
-    message("x", {"type": "sessions.list", "id": 1})
+    # Channels are refused unless the hub signed a grant for the owner to use
+    # this Operator, whatever the relay says, and each grant works once
+    used = grant(jti="used")
+    op.on_relay_message({"type": "channel.open", "ch": "u", "grant": used})
+    op.on_relay_message({"type": "channel.close", "ch": "u"})
+    for bad in [
+        None,
+        "nope",
+        grant(sub="eve"),
+        grant(aud="op2"),
+        grant(expires_in=-120),
+        grant(key=Ed25519PrivateKey.generate()),
+        used,
+    ]:
+        op.on_relay_message(
+            {
+                "type": "channel.open",
+                "ch": "x",
+                "user_id": "owner",
+                "grant": bad,
+            }
+        )
+        message("x", {"type": "sessions.list", "id": 1})
     await asyncio.sleep(0.1)
     assert sent == []
-    op.on_relay_message(
-        {"type": "channel.open", "ch": "a", "user_id": "owner"}
-    )
+    op.on_relay_message({"type": "channel.open", "ch": "a", "grant": grant()})
     # Only allowed workspaces can have sessions
     message("a", {"type": "sessions.open", "id": 2, "workspace": "/"})
     await wait_for(lambda: reply(2))
@@ -187,18 +253,14 @@ async def test_sessions(tmp_path, monkeypatch):
     )
     await wait_for(lambda: "HI-42" in output("a"))
     # A second channel attaching gets the scrollback replayed
-    op.on_relay_message(
-        {"type": "channel.open", "ch": "b", "user_id": "owner"}
-    )
+    op.on_relay_message({"type": "channel.open", "ch": "b", "grant": grant()})
     message("b", {"type": "sessions.attach", "id": 4, "session": sid})
     await wait_for(lambda: "HI-42" in output("b"))
     # Sessions outlive the channels attached to them
     op.on_relay_message({"type": "channel.close", "ch": "a"})
     op.on_relay_message({"type": "channel.close", "ch": "b"})
     assert op.sessions[sid].channels == set()
-    op.on_relay_message(
-        {"type": "channel.open", "ch": "c", "user_id": "owner"}
-    )
+    op.on_relay_message({"type": "channel.open", "ch": "c", "grant": grant()})
     message("c", {"type": "sessions.list", "id": 5})
     await wait_for(lambda: reply(5))
     assert [s["id"] for s in reply(5)["result"]["sessions"]] == [sid]
@@ -468,7 +530,8 @@ def test_install_remote(monkeypatch):
     def request(kind, path, json=None, **kwargs):
         posted.update(json)
         return {"id": "op1", "name": "login1-cluster", "user_id": "u1"} | {
-            "token": "cko_secret"
+            "token": "cko_secret",
+            "grant_public_key": "key",
         }
 
     monkeypatch.setattr(hub, "_request", request)

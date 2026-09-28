@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 import jwt
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 
@@ -73,11 +75,51 @@ def create_access_token(
     return encoded_jwt
 
 
+@lru_cache
+def _operator_grant_key() -> Ed25519PrivateKey:
+    """The key that signs grants to use an Operator, derived from
+    SECRET_KEY, so Operators that pinned its public key stop trusting the
+    hub if that's rotated, and have to be registered again.
+    """
+    seed = hmac.new(
+        settings.SECRET_KEY.encode(), b"operator-grant", "sha256"
+    ).digest()
+    return Ed25519PrivateKey.from_private_bytes(seed)
+
+
+def get_operator_grant_public_key() -> str:
+    """The public key Operators pin to check grants, base64-encoded."""
+    raw = (
+        _operator_grant_key()
+        .public_key()
+        .public_bytes(Encoding.Raw, PublicFormat.Raw)
+    )
+    return base64.b64encode(raw).decode()
+
+
+def create_operator_grant(
+    operator_id: uuid.UUID, user_id: uuid.UUID, expires_delta: timedelta
+) -> str:
+    """Create a grant for a user to open one channel to an Operator.
+
+    It's signed with a key only the API holds, and the Operator checks it,
+    so the relay, which carries it, can't open channels of its own.
+    """
+    payload = {
+        "exp": datetime.now(timezone.utc) + expires_delta,
+        "aud": str(operator_id),
+        "sub": str(user_id),
+        "jti": secrets.token_hex(16),
+    }
+    return jwt.encode(payload, _operator_grant_key(), algorithm="EdDSA")
+
+
 def create_relay_token(
     kind: Literal["operator", "browser"],
     operator_id: uuid.UUID,
     user_id: uuid.UUID,
     expires_delta: timedelta,
+    grant: str | None = None,
 ) -> str:
     """Create a JWT for opening one relay connection.
 
@@ -92,6 +134,8 @@ def create_relay_token(
         "scope": f"relay:{kind}",
         "jti": secrets.token_hex(16),
     }
+    if grant is not None:
+        payload["grant"] = grant
     return jwt.encode(payload, settings.RELAY_SECRET_KEY, algorithm=ALGORITHM)
 
 

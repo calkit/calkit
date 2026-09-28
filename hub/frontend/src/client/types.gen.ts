@@ -339,6 +339,10 @@ export type CheckInResp = {
    */
   check_in_interval?: number
   /**
+   * Grant Public Key
+   */
+  grant_public_key: string
+  /**
    * Connect
    */
   connect?: boolean
@@ -2726,6 +2730,10 @@ export type OperatorRegistered = {
    * Token
    */
   token: string
+  /**
+   * Grant Public Key
+   */
+  grant_public_key: string
 }
 
 /**

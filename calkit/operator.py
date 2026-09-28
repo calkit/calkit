@@ -146,6 +146,7 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
         name=resp["name"],
         user_id=resp["user_id"],
         token=resp["token"],
+        grant_public_key=resp["grant_public_key"],
         workspaces=[],
     )
     save_config(cfg)
@@ -237,6 +238,7 @@ def install_remote(
             name=resp["name"],
             user_id=resp["user_id"],
             token=resp["token"],
+            grant_public_key=resp["grant_public_key"],
             workspaces=[],
         )
         registered = True
@@ -348,7 +350,59 @@ def check_in(
         if e.response is not None and e.response.status_code == 403:
             raise OperatorRevoked(str(e))
         raise
+    # Operators registered before grants were signed pin the key now; one
+    # that's already pinned is never replaced
+    key = resp.get("grant_public_key")
+    if key and not cfg.get("grant_public_key"):
+        cfg["grant_public_key"] = key
+        save_config(cfg)
+    elif key and key != cfg.get("grant_public_key"):
+        logger.warning(
+            "The hub's grant key changed, so browsers can't connect; "
+            "run 'calkit operator install' again if that's expected"
+        )
     return resp
+
+
+def check_grant(cfg: dict, grant: Any, used: dict[str, float]) -> bool:
+    """Whether a channel's grant is one the hub signed for this Operator's
+    owner, and hasn't been used or expired.
+
+    This, rather than the relay's word, is what decides who opened a
+    channel, so the relay alone can't run anything here.
+    """
+    import base64
+    import time
+
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PublicKey,
+    )
+
+    key = cfg.get("grant_public_key")
+    if not isinstance(grant, str) or not key:
+        return False
+    try:
+        payload = jwt.decode(
+            grant,
+            Ed25519PublicKey.from_public_bytes(base64.b64decode(key)),
+            algorithms=["EdDSA"],
+            audience=str(cfg["id"]),
+            options={"require": ["exp", "aud", "sub", "jti"]},
+            # For clocks that disagree with the hub's
+            leeway=60,
+        )
+    except (jwt.InvalidTokenError, ValueError):
+        return False
+    now = time.time()
+    for jti, exp in list(used.items()):
+        if exp + 60 < now:
+            del used[jti]
+    jti = payload["jti"]
+    if payload["sub"] != str(cfg["user_id"]) or jti in used:
+        return False
+    used[jti] = float(payload["exp"])
+    return True
 
 
 def get_shell() -> str:
@@ -726,6 +780,8 @@ class Operator:
         self.sessions: dict[str, Session] = {}
         # Browser channels, which are all the owner's
         self.channels: set[str] = set()
+        # IDs of grants channels were opened with, and when they expire
+        self.used_grants: dict[str, float] = {}
         self.workspaces: list[dict] = []
         self.ws: Any = None
         self.check_in_interval = 60
@@ -946,11 +1002,12 @@ class Operator:
         if not isinstance(ch, str):
             return
         if kind == "channel.open":
-            # Only the owner may use this Operator, whatever the relay says
-            if frame.get("user_id") == self.cfg["user_id"]:
+            # Only the owner may use this Operator, as the hub vouches with
+            # a grant it signed, whatever the relay says
+            if check_grant(self.cfg, frame.get("grant"), self.used_grants):
                 self.channels.add(ch)
             else:
-                logger.warning(f"Refused channel for {frame.get('user_id')}")
+                logger.warning(f"Refused channel {ch} without a valid grant")
             return
         if kind == "channel.close":
             self.channels.discard(ch)

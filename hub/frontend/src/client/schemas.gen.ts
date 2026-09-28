@@ -608,6 +608,10 @@ export const CheckInRespSchema = {
       title: "Check In Interval",
       default: 60,
     },
+    grant_public_key: {
+      type: "string",
+      title: "Grant Public Key",
+    },
     connect: {
       type: "boolean",
       title: "Connect",
@@ -615,7 +619,14 @@ export const CheckInRespSchema = {
     },
   },
   type: "object",
-  required: ["operator_id", "name", "user_id", "relay_url", "relay_token"],
+  required: [
+    "operator_id",
+    "name",
+    "user_id",
+    "relay_url",
+    "relay_token",
+    "grant_public_key",
+  ],
   title: "CheckInResp",
   description: "Where and how an Operator connects to the relay.",
 } as const
@@ -4705,6 +4716,10 @@ export const OperatorRegisteredSchema = {
       type: "string",
       title: "Token",
     },
+    grant_public_key: {
+      type: "string",
+      title: "Grant Public Key",
+    },
   },
   type: "object",
   required: [
@@ -4714,6 +4729,7 @@ export const OperatorRegisteredSchema = {
     "is_asleep",
     "workspace_count",
     "token",
+    "grant_public_key",
   ],
   title: "OperatorRegistered",
   description:

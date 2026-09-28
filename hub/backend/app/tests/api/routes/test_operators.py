@@ -1,9 +1,11 @@
+import base64
 import uuid
 from contextlib import contextmanager
 from datetime import timedelta
 
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 from starlette.websockets import WebSocketDisconnect
@@ -273,6 +275,16 @@ def test_operators(
     )
     assert payload["scope"] == "relay:browser"
     assert payload["sub"] == op["id"]
+    # It carries a grant the API signed, which the Operator checks against
+    # the key it pinned when it registered, so the relay can't forge one
+    public_key = Ed25519PublicKey.from_public_bytes(
+        base64.b64decode(op["grant_public_key"])
+    )
+    grant = jwt.decode(
+        payload["grant"], public_key, algorithms=["EdDSA"], audience=op["id"]
+    )
+    assert grant["sub"] == str(user.id)
+    assert check_in["grant_public_key"] == op["grant_public_key"]
     # An Operator that stopped checking in is offline
     operator = db.get(Operator, uuid.UUID(op["id"]))
     assert operator is not None
@@ -353,12 +365,13 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
     operator_id = uuid.uuid4()
     user_id = uuid.uuid4()
 
-    def token(kind):
+    def token(kind, grant=None):
         return create_relay_token(
             kind,
             operator_id=operator_id,
             user_id=user_id,
             expires_delta=timedelta(minutes=1),
+            grant=grant,
         )
 
     @contextmanager
@@ -390,10 +403,14 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
                 ws.receive_text()
         assert e.value.code == relay.CLOSE_OPERATOR_OFFLINE
         with connect(client, "/operator", token("operator")) as op_ws:
-            with connect(client, "/browser", token("browser")) as browser_ws:
+            with connect(
+                client, "/browser", token("browser", grant="signed")
+            ) as browser_ws:
                 opened = op_ws.receive_json()
                 assert opened["type"] == "channel.open"
                 assert opened["user_id"] == str(user_id)
+                # The grant is passed along for the Operator to check
+                assert opened["grant"] == "signed"
                 ch = opened["ch"]
                 # Messages are wrapped on the way to the Operator...
                 browser_ws.send_json({"type": "sessions.list", "id": 1})

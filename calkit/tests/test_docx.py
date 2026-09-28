@@ -279,7 +279,7 @@ def test_docx_round_trip(
                 runs.append(cmd) if "calkit" in cmd else run(cmd, **kw)
             ),
         )
-        calkit.cli.latex.to_docx("paper/main.pdf")
+        calkit.cli.latex.to_docx("paper/main.pdf", engine="word")
     assert runs and runs[0][-3:] == ["calkit", "run", "build-paper"]
     Path("calkit.yaml").write_text("", encoding="utf-8")
     doc = calkit.docx.Document("paper/main-for-review.docx")
@@ -461,7 +461,7 @@ def test_docx_round_trip(
     parsed = calkit.latex.parse_comments(methods.split("\n"))
     assert [c.resolved for c in parsed] == [True]
     os.remove("paper/main-for-review.docx")
-    calkit.cli.latex.to_docx("paper/main.pdf")
+    calkit.cli.latex.to_docx("paper/main.pdf", engine="word")
     exported = calkit.docx.Document("paper/main-for-review.docx").comments
     assert [c.done for c in exported if c.author == "T. Author"] == [True]
     assert Path("paper/main.tex").read_text(encoding="utf-8") == main
@@ -552,3 +552,44 @@ def test_docx_round_trip(
     ) in main
     assert "\\frac{C_P}{4 (1 + k x/D)^2}" in methods
     assert "Edited this equation" not in methods
+    # Without Word, TeX4ht and LibreOffice make the copy from the source,
+    # leaving nothing beside it, and it anchors and merges the same way
+    if shutil.which("make4ht") and calkit.docx.find_soffice():
+        # A figure for TeX4ht to convert: a blank one-page PDF
+        objs = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>",
+        ]
+        pdf, offsets = b"%PDF-1.4\n", []
+        for i, obj in enumerate(objs, 1):
+            offsets.append(len(pdf))
+            pdf += b"%d 0 obj\n%s\nendobj\n" % (i, obj)
+        xref = len(pdf)
+        pdf += b"xref\n0 4\n0000000000 65535 f \n"
+        pdf += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+        pdf += b"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n%d\n" % xref
+        Path("paper/fig1.pdf").write_bytes(pdf + b"%%EOF\n")
+        beside = sorted(os.listdir("paper"))
+        calkit.cli.latex.to_docx(
+            "paper/main.pdf",
+            output="reviews/lo-export.docx",
+            engine="libreoffice",
+        )
+        assert sorted(os.listdir("paper")) == beside
+        lo = calkit.docx.Document("reviews/lo-export.docx")
+        lo_sent = lo.read_original()
+        assert lo_sent is not None and len(lo_sent.equations) == 1
+        assert len(lo_sent.paragraphs) >= 15
+        assert any(p.text == "(1)" for p in lo.paragraphs)
+        main = Path("paper/main.tex").read_text(encoding="utf-8")
+        methods = Path("paper/methods.tex").read_text(encoding="utf-8")
+        res = subprocess.run(
+            ["calkit", "latex", "merge-docx", "reviews/lo-export.docx"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "Applied 0 edits" in res.stdout
+        assert Path("paper/main.tex").read_text(encoding="utf-8") == main
+        assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods

@@ -1694,12 +1694,25 @@ def to_docx(
         bool,
         typer.Option("--force", "-f", help="Overwrite an existing export."),
     ] = False,
+    engine: Annotated[
+        str | None,
+        typer.Option(
+            "--engine",
+            help=(
+                "What makes the Word copy: 'word', which imports the "
+                "compiled PDF so the copy looks like it, or 'libreoffice', "
+                "which converts the source with TeX4ht's make4ht and then "
+                "LibreOffice. Defaults to Word where it's installed."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Export a Word copy of a LaTeX document for review.
 
-    Uses Word's own PDF import, so the copy looks like the PDF, then records
-    inside the file which source line each paragraph came from and the text
-    as sent, so ``merge-docx`` can bring edits and comments back.
+    Uses Word's own PDF import where Word is installed, so the copy looks
+    like the PDF, else TeX4ht and LibreOffice. Then records inside the file
+    which source line each paragraph came from and the text as sent, so
+    ``merge-docx`` can bring edits and comments back.
     """
     import datetime
     import sys
@@ -1745,11 +1758,105 @@ def to_docx(
         )
     if os.path.exists(output) and not force:
         raise_error(f"{output} already exists; use --force to overwrite it")
-    typer.echo("Converting the PDF with Word")
-    try:
-        calkit.docx.pdf_to_docx(pdf_path, output)
-    except RuntimeError as e:
-        raise_error(str(e))
+    if engine is None:
+        engine = "word" if calkit.docx.word_installed() else "libreoffice"
+    if engine == "word":
+        typer.echo("Converting the PDF with Word")
+        try:
+            calkit.docx.pdf_to_docx(pdf_path, output)
+        except RuntimeError as e:
+            raise_error(str(e))
+    elif engine == "libreoffice":
+        import shlex
+
+        if calkit.docx.find_soffice() is None:
+            raise_error(
+                "Converting without Word requires LibreOffice; install it "
+                "from https://www.libreoffice.org"
+            )
+        typer.echo("Converting the source with TeX4ht and LibreOffice")
+        # TeX4ht runs beside the source, since its ODT misses equations
+        # when built elsewhere, under a job name of its own so it leaves
+        # the PDF build's files alone. What it adds there is cleared up.
+        # The result goes in the project, where a containerized TeX can
+        # write it.
+        src_dir = os.path.dirname(source) or "."
+        job = Path(source).stem + "-calkit-docx"
+        build = os.path.join(calkit.latex.DOCX_BUILD_DIR, Path(source).stem)
+        shutil.rmtree(build, ignore_errors=True)
+        os.makedirs(build)
+        # The PDF build's bibliography, since TeX4ht doesn't run BibTeX
+        bbl = Path(source).with_suffix(".bbl")
+        if bbl.is_file():
+            shutil.copy(bbl, os.path.join(src_dir, job + ".bbl"))
+        m4h = [
+            "make4ht",
+            "--format",
+            "odt",
+            "--jobname",
+            job,
+            "--output-dir",
+            os.path.relpath(build, src_dir),
+            os.path.basename(source),
+            "mathml",
+        ]
+        environment = (
+            stages[stage_name].get("environment") if stage_name else None
+        )
+        existing = set(os.listdir(src_dir)) - {job + ".bbl"}
+        try:
+            if environment is None and calkit.check_dep_exists("make4ht"):
+                res = subprocess.run(m4h, cwd=src_dir, capture_output=True)
+            else:
+                cd = f"cd {shlex.quote(src_dir)} && {shlex.join(m4h)}"
+                res = subprocess.run(
+                    _tex_cmd(
+                        ["sh", "-c", cd],
+                        environment=environment,
+                        no_check=True,
+                        verbose=False,
+                        dep="make4ht",
+                    ),
+                    capture_output=True,
+                )
+            Path(build, "make4ht.log").write_bytes(res.stdout + res.stderr)
+        finally:
+            # TeX's log is kept with the build, for when something's wrong
+            tex_log = os.path.join(src_dir, job + ".log")
+            if os.path.isfile(tex_log):
+                shutil.move(tex_log, build)
+            # It also writes figures converted to images beside the source,
+            # named after them
+            for leftover in set(os.listdir(src_dir)) - existing:
+                if not (
+                    leftover.startswith(job)
+                    or re.search(r"-\.(png|svg|jpe?g)(\.4og)?$", leftover)
+                ):
+                    continue
+                path = os.path.join(src_dir, leftover)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+        odt = os.path.join(build, job + ".odt")
+        has_text = False
+        if os.path.isfile(odt):
+            import zipfile
+
+            with zipfile.ZipFile(odt) as z:
+                content = z.read("content.xml")
+                has_text = b"<text:p" in content or b"<text:h" in content
+        if not has_text:
+            raise_error(
+                "TeX4ht could not convert the source; see the logs in "
+                f"{build}. Its make4ht comes with TeX Live's tex4ht package."
+            )
+        try:
+            calkit.docx.odt_to_docx(odt, output)
+        except RuntimeError as e:
+            raise_error(f"{e}\nTeX4ht's logs are in {build}")
+    else:
+        raise_error("--engine must be 'word' or 'libreoffice'")
     doc = calkit.docx.Document(output)
     lines = calkit.latex.flatten(source)
     blks = calkit.latex.blocks(lines)
@@ -1771,7 +1878,7 @@ def to_docx(
         original[name] = para.text
         para_for_block.setdefault(id(blk), para.element)
     # Display math goes in as Word equations converted from the source,
-    # replacing the fragments and pictures Word's PDF import makes of it
+    # replacing what Word's PDF import or TeX4ht made of it
     equations: dict[str, str] = {}
     left_as_imported = 0
     has_display = any(b.display for b in blks)
@@ -1784,8 +1891,8 @@ def to_docx(
         )
     if has_display and calkit.docx.find_pandoc() is None:
         warn(
-            "Pandoc isn't installed, so equations are as Word imported "
-            "them from the PDF; run 'calkit install pandoc' to fix that"
+            "Pandoc isn't installed, so equations are as converted "
+            "with the document; run 'calkit install pandoc' to fix that"
         )
     elif has_display:
         from xml.etree import ElementTree as ET
@@ -1815,7 +1922,6 @@ def to_docx(
                 jb is None
                 or ja is None
                 or not all(b.display for b in blks[jb + 1 : ja])
-                or first[id(blks[ja])] <= last[id(blks[jb])] + 1
             ):
                 left_as_imported += 1
                 continue
@@ -1829,6 +1935,7 @@ def to_docx(
         w_body = doc.doc.find(calkit.docx._tag(calkit.docx.W, "body"))
         assert w_body is not None
         w_p = calkit.docx._tag(calkit.docx.W, "p")
+        w_tbl = calkit.docx._tag(calkit.docx.W, "tbl")
 
         def text_of(el: Any) -> str:
             return "".join(
@@ -1853,28 +1960,38 @@ def to_docx(
 
         # Paragraphs in text boxes aren't listed, e.g., a drawn fraction bar
         listed = {p.element for p in paras}
+        claimed: set[Any] = set()
         plans = []
         for (before, after), group in groups.items():
             ends = {paras[before].element, paras[after].element}
-            inside = {
-                p.element
-                for p in paras[before + 1 : after]
-                if p.element is not None and fragment(p.element)
-            }
+            # Everything in the body from the one anchor to the other,
+            # since a paragraph of only math or a picture isn't listed
+            children = list(w_body)
+            lo = children.index(unit_of(paras[before].element))
+            hi = children.index(unit_of(paras[after].element))
             gap: list[Any] = []
-            for el in inside:
-                unit = unit_of(el)
-                if unit in gap:
+            for unit in children[lo : hi + 1]:
+                if (
+                    unit in ends
+                    or unit in claimed
+                    or unit.tag
+                    not in (
+                        w_p,
+                        w_tbl,
+                    )
+                ):
                     continue
                 held = [
-                    q for q in unit.iter(w_p) if q in listed and q not in ends
+                    q
+                    for q in unit.iter(w_p)
+                    if q not in ends and (q in listed or unit.tag == w_p)
                 ]
-                if all(q in inside for q in held):
+                if held and all(fragment(q) for q in held):
                     gap.append(unit)
+            claimed.update(gap)
             if not gap:
                 left_as_imported += len(group)
                 continue
-            gap.sort(key=list(w_body).index)
             numbers = re.findall(
                 eq_num,
                 " ".join(
@@ -1909,6 +2026,7 @@ def to_docx(
         maths = calkit.docx.latex_to_omml([p[2] for p in pieces], preamble)
         converted = dict(zip([(id(p[0]), p[1]) for p in pieces], maths))
         bid = 100000
+        last_number: str | None = None
         for group, gap, numbers, lead, before_para, after_para in plans:
             if any(
                 converted.get((id(blk), k)) is None
@@ -1922,6 +2040,12 @@ def to_docx(
                 name = calkit.latex.make_bookmark_name(blk.path, blk.lineno)
                 for k, (tex, numbered) in enumerate(blk.rows):
                     number = numbers.pop(0) if numbered and numbers else None
+                    # TeX4ht doesn't write every number out as text, so a
+                    # missing one follows on from the one before
+                    prev = re.fullmatch(r"(.*?)(\d+)", last_number or "")
+                    if numbered and number is None and prev is not None:
+                        number = prev.group(1) + str(int(prev.group(2)) + 1)
+                    last_number = number or last_number
                     rows.append(
                         (
                             converted[(id(blk), k)],
@@ -2009,6 +2133,7 @@ def to_docx(
         docx=Path(output).as_posix(),
         rev=rev,
         dirty=dirty,
+        engine=engine,
         permission="comment" if comment_only else "suggest",
         paragraphs=len(original),
         unanchored=sum(
@@ -2040,7 +2165,7 @@ def to_docx(
     if left_as_imported:
         warn(
             f"{left_as_imported} displayed equations couldn't be placed and "
-            "are as Word imported them"
+            "are as converted with the document"
         )
 
 

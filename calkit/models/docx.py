@@ -23,6 +23,10 @@ class LatexDocxExport(BaseModel):
     dirty: bool = Field(
         default=False, description="Whether the source had uncommitted edits."
     )
+    engine: str = Field(
+        default="word",
+        description="What made the Word copy: 'word' or 'libreoffice'.",
+    )
     permission: str = Field(
         default="suggest", description="'suggest' or 'comment'."
     )

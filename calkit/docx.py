@@ -961,6 +961,85 @@ class Document:
         self._save_content_types(root)
 
 
+def word_installed() -> bool:
+    """Whether Microsoft Word is installed, which only it can tell on
+    Windows, through the path it registers."""
+    if sys.platform == "darwin":
+        return any(
+            os.path.isdir(os.path.expanduser(p))
+            for p in (
+                "/Applications/Microsoft Word.app",
+                "~/Applications/Microsoft Word.app",
+            )
+        )
+    if sys.platform == "win32":
+        import winreg
+
+        try:
+            winreg.CloseKey(
+                winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths"
+                    "\\Winword.exe",
+                )
+            )
+        except OSError:
+            return False
+        return True
+    return False
+
+
+def find_soffice() -> str | None:
+    """LibreOffice's command, from ``PATH`` or where it installs itself."""
+    import shutil
+
+    found = shutil.which("soffice") or shutil.which("libreoffice")
+    if found is not None:
+        return found
+    candidates = [
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        os.path.expandvars(
+            "%ProgramFiles%\\LibreOffice\\program\\soffice.exe"
+        ),
+    ]
+    return next((c for c in candidates if os.path.isfile(c)), None)
+
+
+def odt_to_docx(odt_path: str, docx_path: str) -> None:
+    """Convert an OpenDocument text to .docx with LibreOffice."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    soffice = find_soffice()
+    if soffice is None:
+        raise RuntimeError("Converting to Word requires LibreOffice")
+    with tempfile.TemporaryDirectory() as tmp:
+        # A profile of its own, since a LibreOffice already open would take
+        # the job and exit without doing it
+        res = subprocess.run(
+            [
+                soffice,
+                f"-env:UserInstallation={Path(tmp, 'profile').as_uri()}",
+                "--headless",
+                "--convert-to",
+                "docx:MS Word 2007 XML",
+                "--outdir",
+                tmp,
+                os.path.abspath(odt_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        out = os.path.join(tmp, Path(odt_path).stem + ".docx")
+        if not os.path.isfile(out):
+            raise RuntimeError(
+                "LibreOffice could not convert the document: "
+                + (res.stderr or res.stdout).strip()
+            )
+        shutil.move(out, docx_path)
+
+
 def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     """Convert a PDF to .docx with Word's own importer."""
     pdf_path, docx_path = os.path.abspath(pdf_path), os.path.abspath(docx_path)

@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory() as tmp:
     calkit.docx.pdf_to_docx = lambda _, out: shutil.copy(
         HERE / "word-import.docx", out
     )
-    calkit.cli.latex.to_docx("paper/main.pdf")
+    calkit.cli.latex.to_docx("paper/main.pdf", engine="word")
     # A first start sets up the profile the macro goes into
     lo = [SOFFICE, f"-env:UserInstallation={profile.as_uri()}", "--headless"]
     subprocess.run([*lo, "--terminate_after_init"], check=True, timeout=120)

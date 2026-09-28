@@ -461,6 +461,8 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
 
 DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")
 DOCX_MERGES_DIR = os.path.join(".calkit", "latex", "docx-merges")
+# Where TeX4ht builds a Word export's source; machine-local, like the diffs
+DOCX_BUILD_DIR = os.path.join(LOCAL_DIR, "latex-docx-build")
 # Word bookmark names: 40 chars max, letters/digits/underscores
 _INCLUDE_RE = re.compile(
     r"^\s*\\(input|include|subfile|import)\{([^}]*)\}(?:\{([^}]*)\})?"

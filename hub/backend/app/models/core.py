@@ -100,6 +100,9 @@ class UserUpdateMe(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     github_username: str | None = Field(default=None, max_length=255)
     analytics_consent: bool | None = None
+    # The code emailed to the current address, which changing a verified
+    # one takes
+    email_code: str | None = Field(default=None, max_length=8)
 
 
 class UpdatePassword(SQLModel):
@@ -692,6 +695,14 @@ class RefreshToken(SQLModel, table=True):
     expires: datetime
     is_active: bool = True
     description: str | None = Field(default=None, max_length=256)
+    # Shared by every token rotated from the same sign-in, so it names that
+    # sign-in for as long as it lasts
+    session_id: uuid.UUID | None = Field(default=None, index=True)
+    # Whether a person signed in through the web app, rather than a script
+    # or the CLI, which some actions, e.g., opening a shell, require
+    interactive: bool = Field(
+        default=False, sa_column_kwargs=dict(server_default=sqlalchemy.false())
+    )
     # Relationships
     user: "User" = Relationship(back_populates="refresh_tokens")
 

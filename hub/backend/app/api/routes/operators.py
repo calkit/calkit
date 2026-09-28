@@ -18,9 +18,9 @@ from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
     PAT_VERIFIER_LENGTH_BYTES,
+    CurrentSession,
     CurrentUser,
     SessionDep,
-    SessionUser,
     TokenDep,
 )
 from app.config import settings
@@ -136,6 +136,10 @@ def post_operator(
     session: SessionDep, current_user: CurrentUser, req: OperatorPost
 ) -> OperatorRegistered:
     """Register a machine as one of the user's Operators."""
+    # Setting up the second factor that opening sessions takes proves
+    # itself by email, so that address has to be the user's
+    if not current_user.email_verified:
+        raise HTTPException(403, "Verify your email first")
     # Names default to the hostname, suffixed until unique for the user
     base = req.name or re.sub(
         r"[^a-z0-9-]+", "-", (req.hostname or "operator").lower()
@@ -339,7 +343,7 @@ class RelayTokenResp(BaseModel):
 @router.post("/operators/{operator_id}/relay-token")
 def post_operator_relay_token(
     session: SessionDep,
-    current_user: SessionUser,
+    signed_in: CurrentSession,
     operator_id: uuid.UUID,
     x_second_factor: Annotated[str | None, Header()] = None,
 ) -> RelayTokenResp:
@@ -348,8 +352,11 @@ def post_operator_relay_token(
     This opens a shell on their machine, so it takes a signed-in session,
     not a token, that entered a second factor recently.
     """
+    current_user = signed_in.user
     operator = _get_owned_operator(session, current_user, operator_id)
-    users.require_second_factor(current_user, x_second_factor)
+    users.require_second_factor(
+        current_user, signed_in.session_id, x_second_factor
+    )
     if not is_online(operator):
         raise HTTPException(409, "Operator is offline")
     return RelayTokenResp(

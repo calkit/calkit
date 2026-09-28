@@ -170,24 +170,58 @@ def test_retrieve_users(
 def test_update_user_me(
     client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
+    import re
+
+    from app.core import utcnow
+
+    h = normal_user_token_headers
+    user_db = db.get(
+        User, uuid.UUID(client.get("/user", headers=h).json()["id"])
+    )
+    assert user_db
+    user_db.email_verified_at = None
+    db.add(user_db)
+    db.commit()
+    # An unverified email can be changed as is
     full_name = "Updated Name"
     email = random_email()
     data = {"full_name": full_name, "email": email}
-    r = client.patch(
-        "/user",
-        headers=normal_user_token_headers,
-        json=data,
-    )
+    r = client.patch("/user", headers=h, json=data)
     assert r.status_code == 200
     updated_user = r.json()
     assert updated_user["email"] == email
     assert updated_user["full_name"] == full_name
-
-    user_query = select(User).where(User.email == email)
-    user_db = db.exec(user_query).first()
-    assert user_db
+    db.refresh(user_db)
     assert user_db.email == email
     assert user_db.full_name == full_name
+    # A verified one takes a code sent to it, so a stolen session can't move
+    # the account to an attacker's inbox, and the new one isn't verified
+    user_db.email_verified_at = utcnow()
+    db.add(user_db)
+    db.commit()
+    new_email = random_email()
+    r = client.patch("/user", headers=h, json={"email": new_email})
+    assert r.status_code == 403
+    with patch("app.users.send_email") as send:
+        r = client.post(
+            "/user/email-change-code", headers=h, json={"email": new_email}
+        )
+    assert r.status_code == 200, r.text
+    assert send.call_args.kwargs["email_to"] == email
+    code = re.search(r"(\d{6})$", send.call_args.kwargs["subject"])
+    assert code is not None
+    r = client.patch(
+        "/user", headers=h, json={"email": new_email, "email_code": "000000"}
+    )
+    assert r.status_code == 400
+    r = client.patch(
+        "/user",
+        headers=h,
+        json={"email": new_email, "email_code": code.group(1)},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["email"] == new_email
+    assert not r.json()["email_verified"]
 
 
 def test_update_user_me_analytics_consent(
@@ -213,6 +247,17 @@ def test_update_user_me_analytics_consent(
 def test_update_password_me(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
+    # Changing it signs out every other session
+    r = client.post(
+        "/login/access-token",
+        data={
+            "username": settings.FIRST_SUPERUSER,
+            "password": settings.FIRST_SUPERUSER_PASSWORD,
+        },
+    )
+    other = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    other_refresh = r.json()["refresh_token"]
+    assert client.get("/user/totp", headers=other).status_code == 200
     new_password = random_lower_string()
     data = {
         "current_password": settings.FIRST_SUPERUSER_PASSWORD,
@@ -226,6 +271,11 @@ def test_update_password_me(
     assert r.status_code == 200
     updated_user = r.json()
     assert updated_user["message"] == "Password updated successfully"
+    assert client.get("/user/totp", headers=other).status_code == 403
+    r = client.post("/login/refresh", json={"refresh_token": other_refresh})
+    assert r.status_code == 401
+    r = client.get("/user/totp", headers=superuser_token_headers)
+    assert r.status_code == 200
     user_query = select(User).where(User.email == settings.FIRST_SUPERUSER)
     user_db = db.exec(user_query).first()
     assert user_db
@@ -1225,6 +1275,8 @@ def test_totp(
     import time
     from datetime import timedelta
 
+    import jwt
+
     from app.core import utcnow
     from app.models import UserTOTP
     from app.security import (
@@ -1245,6 +1297,15 @@ def test_totp(
     if existing is not None:
         db.delete(existing)
         db.commit()
+    # The setup code is emailed, so the address has to be the user's
+    user.email_verified_at = None
+    db.add(user)
+    db.commit()
+    with patch("app.users.send_email"):
+        assert client.post("/user/totp", headers=h).status_code == 403
+    user.email_verified_at = utcnow()
+    db.add(user)
+    db.commit()
     assert client.get("/user/totp", headers=h).json() == {
         "enabled": False,
         "verified": False,
@@ -1313,8 +1374,15 @@ def test_totp(
     r = client.post("/user/totp/verify", headers=h, json={"code": code})
     assert r.status_code == 400
     # Proof expires, and entering a fresh code gives a new one
+    session_id = uuid.UUID(
+        jwt.decode(
+            h["Authorization"].split()[1],
+            settings.SECRET_KEY,
+            algorithms=["HS256"],
+        )["sid"]
+    )
     expired = users.security_create_second_factor_token(
-        user.id, timedelta(seconds=-1)
+        user.id, session_id, timedelta(seconds=-1)
     )
     r = client.get("/user/totp", headers=h | {"X-Second-Factor": expired})
     assert not r.json()["verified"]

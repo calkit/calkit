@@ -1,7 +1,9 @@
 """Dependencies to use in API routes."""
 
 import logging
+import uuid
 from collections.abc import Generator
+from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from typing import Annotated
@@ -18,7 +20,7 @@ from app import security
 from app.config import settings
 from app.core import utcnow
 from app.db import engine
-from app.models import TokenPayload, User, UserToken
+from app.models import RefreshToken, TokenPayload, User, UserToken
 from app.security import (
     hash_token_verifier,
     verify_token_verifier,
@@ -134,6 +136,10 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             token_scope = payload.get("scope")
             if token_scope is not None:
                 raise HTTPException(403, "Invalid token scope")
+            # Tokens for emailed links, e.g., to verify an address, aren't
+            # logins
+            if "purpose" in payload:
+                raise HTTPException(403, "Invalid token")
             if "token_id" in payload:
                 token_id = payload["token_id"]
                 token_in_db = session.get(UserToken, token_id)
@@ -285,13 +291,24 @@ def get_current_user_optional(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def get_current_session_user(session: SessionDep, token: TokenDep) -> User:
-    """Authenticate a signed-in session, refusing tokens made for scripts.
+@dataclass
+class SignedIn:
+    """A person signed in through the web app, and which sign-in it is."""
+
+    user: User
+    session_id: uuid.UUID
+
+
+def get_current_session(session: SessionDep, token: TokenDep) -> SignedIn:
+    """Authenticate a person signed in through the web app.
 
     Some actions, e.g., opening a shell on a user's machine or managing
     their second factor, shouldn't be possible with a credential that can
-    end up in a CI secret or a config file, so personal access tokens and
-    the JWTs derived from them are refused.
+    end up in a CI secret, a config file, or a third party's hands, so only
+    access tokens from an interactive sign-in whose session is still live
+    count. Personal access tokens, CLI and CI logins, and link tokens are
+    all refused, and ending the session, e.g., by changing the password,
+    ends this too.
     """
     refused = HTTPException(403, "This requires signing in, not a token")
     if token.startswith("ckp_"):
@@ -300,11 +317,30 @@ def get_current_session_user(session: SessionDep, token: TokenDep) -> User:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
         )
-    except InvalidTokenError:
-        payload = {}
+        session_id = uuid.UUID(payload["sid"])
+    except (InvalidTokenError, KeyError, TypeError, ValueError):
+        raise refused
     if "token_id" in payload:
         raise refused
-    return get_current_user(session, token)
+    user = get_current_user(session, token)
+    live = session.exec(
+        select(RefreshToken)
+        .where(RefreshToken.session_id == session_id)
+        .where(RefreshToken.user_id == user.id)
+        .where(RefreshToken.interactive)
+        .where(RefreshToken.is_active)
+        .where(RefreshToken.expires > utcnow())
+    ).first()
+    if live is None:
+        raise refused
+    return SignedIn(user=user, session_id=session_id)
+
+
+CurrentSession = Annotated[SignedIn, Depends(get_current_session)]
+
+
+def get_current_session_user(signed_in: CurrentSession) -> User:
+    return signed_in.user
 
 
 SessionUser = Annotated[User, Depends(get_current_session_user)]

@@ -157,7 +157,7 @@ services:
       args:
         INSTALL_DEV: ${INSTALL_DEV-true}
     environment:
-      SECRET_KEY: ${SECRET_KEY?Variable not set}
+      RELAY_SECRET_KEY: ${RELAY_SECRET_KEY?Variable not set}
     command:
       - fastapi
       - run

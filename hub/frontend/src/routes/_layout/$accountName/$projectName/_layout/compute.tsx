@@ -106,7 +106,11 @@ class OperatorConnection {
         "x-second-factor": getSecondFactorToken(),
       })
       const { relay_url, token } = resp.data
-      ws = new WebSocket(`${relay_url}/browser?token=${token}`)
+      ws = new WebSocket(`${relay_url}/browser`)
+      // Sent in a message rather than the URL to stay out of logs
+      ws.addEventListener("open", () =>
+        ws.send(JSON.stringify({ type: "auth", token })),
+      )
     } catch (e: any) {
       const detail = e.response?.data?.detail
       // Retrying won't help until the user enters a code

@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, Sequence
 import requests
 import sqlalchemy
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import Field, col, func, or_, select
@@ -20,9 +20,11 @@ from app import mixpanel, users, zotero
 from app.api.deps import (
     PAT_SELECTOR_LENGTH_BYTES,
     PAT_VERIFIER_LENGTH_BYTES,
+    CurrentSession,
     CurrentUser,
     SessionDep,
     SessionUser,
+    SignedIn,
     get_current_active_superuser,
 )
 from app.api.routes.login import CLI_LOGIN_DESCRIPTION
@@ -171,7 +173,7 @@ def update_current_user(
     *, session: SessionDep, user_in: UserUpdateMe, current_user: CurrentUser
 ) -> UserPublic:
     """Update own user."""
-    if user_in.email:
+    if user_in.email and user_in.email.lower() != current_user.email.lower():
         existing_user = users.get_user_by_email(
             session=session, email=user_in.email
         )
@@ -179,7 +181,15 @@ def update_current_user(
             raise HTTPException(
                 status_code=409, detail="User with this email already exists"
             )
-    user_data = user_in.model_dump(exclude_unset=True)
+        users.change_email(
+            session=session,
+            user=current_user,
+            new_email=user_in.email,
+            code=user_in.email_code,
+        )
+    user_data = user_in.model_dump(
+        exclude_unset=True, exclude={"email", "email_code"}
+    )
     current_user.sqlmodel_update(user_data)
     session.add(current_user)
     session.commit()
@@ -187,11 +197,29 @@ def update_current_user(
     return current_user
 
 
+class EmailChangeCode(BaseModel):
+    email: EmailStr
+
+
+@router.post("/user/email-change-code")
+def post_user_email_change_code(
+    req: EmailChangeCode, current_user: CurrentUser, session: SessionDep
+) -> Message:
+    """Email the current address a code for changing it to another."""
+    if not settings.emails_enabled:
+        raise HTTPException(503, "Email isn't configured on this server")
+    users.send_email_change_code(
+        session=session, user=current_user, new_email=req.email
+    )
+    return Message(message="Code sent")
+
+
 @router.patch("/user/password")
 def update_current_user_password(
-    *, session: SessionDep, body: UpdatePassword, current_user: CurrentUser
+    *, session: SessionDep, body: UpdatePassword, signed_in: CurrentSession
 ) -> Message:
-    """Update own password."""
+    """Update own password, signing out everywhere else."""
+    current_user = signed_in.user
     if not verify_password(
         body.current_password, current_user.hashed_password
     ):
@@ -204,6 +232,9 @@ def update_current_user_password(
     hashed_password = get_password_hash(body.new_password)
     current_user.hashed_password = hashed_password
     session.add(current_user)
+    users.end_sign_in_sessions(
+        session=session, user=current_user, keep=signed_in.session_id
+    )
     session.commit()
     return Message(message="Password updated successfully")
 
@@ -1253,34 +1284,38 @@ class TOTPStatus(BaseModel):
 
 
 def _totp_status(
-    user: User, second_factor_token: str | None = None
+    signed_in: SignedIn, second_factor_token: str | None = None
 ) -> TOTPStatus:
-    totp = user.totp
+    totp = signed_in.user.totp
     enabled = totp is not None and totp.confirmed_at is not None
     try:
-        users.require_second_factor(user, second_factor_token)
+        users.require_second_factor(
+            signed_in.user, signed_in.session_id, second_factor_token
+        )
         verified = True
     except HTTPException:
         verified = False
     return TOTPStatus(enabled=enabled, verified=verified)
 
 
-def _totp_status_with_token(user: User) -> TOTPStatus:
-    token = users.create_second_factor_token(user)
-    status = _totp_status(user, token)
+def _totp_status_with_token(signed_in: SignedIn) -> TOTPStatus:
+    token = users.create_second_factor_token(
+        signed_in.user, signed_in.session_id
+    )
+    status = _totp_status(signed_in, token)
     status.second_factor_token = token
     return status
 
 
 @router.get("/user/totp")
 def get_user_totp(
-    current_user: SessionUser,
+    signed_in: CurrentSession,
     x_second_factor: Annotated[str | None, Header()] = None,
 ) -> TOTPStatus:
     """Whether two-factor authentication is set up, and whether this session
     has entered a code recently.
     """
-    return _totp_status(current_user, x_second_factor)
+    return _totp_status(signed_in, x_second_factor)
 
 
 class TOTPSetup(BaseModel):
@@ -1316,11 +1351,12 @@ class TOTPConfirm(TOTPCode):
 
 @router.post("/user/totp/confirm")
 def post_user_totp_confirm(
-    session: SessionDep, current_user: SessionUser, req: TOTPConfirm
+    session: SessionDep, signed_in: CurrentSession, req: TOTPConfirm
 ) -> TOTPStatus:
     """Finish setting up an authenticator app with a code from it and the
     one emailed.
     """
+    current_user = signed_in.user
     totp = current_user.totp
     if totp is None:
         raise HTTPException(
@@ -1335,29 +1371,31 @@ def post_user_totp_confirm(
     session.add(totp)
     session.commit()
     session.refresh(current_user)
-    return _totp_status_with_token(current_user)
+    return _totp_status_with_token(signed_in)
 
 
 @router.post("/user/totp/verify")
 def post_user_totp_verify(
-    session: SessionDep, current_user: SessionUser, req: TOTPCode
+    session: SessionDep, signed_in: CurrentSession, req: TOTPCode
 ) -> TOTPStatus:
     """Enter a code, getting a token that lets this session take sensitive
     actions for a while.
     """
+    current_user = signed_in.user
     totp = current_user.totp
     if totp is None or totp.confirmed_at is None:
         raise HTTPException(404, "Two-factor authentication isn't set up")
     users.check_totp_code(session, totp, req.code)
     session.refresh(current_user)
-    return _totp_status_with_token(current_user)
+    return _totp_status_with_token(signed_in)
 
 
 @router.delete("/user/totp")
 def delete_user_totp(
-    session: SessionDep, current_user: SessionUser, req: TOTPCode
+    session: SessionDep, signed_in: CurrentSession, req: TOTPCode
 ) -> TOTPStatus:
     """Turn off two-factor authentication, which takes a current code."""
+    current_user = signed_in.user
     totp = current_user.totp
     if totp is None or totp.confirmed_at is None:
         raise HTTPException(404, "Two-factor authentication isn't set up")
@@ -1365,4 +1403,4 @@ def delete_user_totp(
     session.delete(totp)
     session.commit()
     session.refresh(current_user)
-    return _totp_status(current_user)
+    return _totp_status(signed_in)

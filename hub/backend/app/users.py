@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -25,11 +26,13 @@ from app.core import (
 from app.github import token_resp_text_to_dict
 from app.messaging import (
     EMAIL_VERIFICATION_CODE_MINUTES,
+    generate_confirm_email_change_email,
     generate_confirm_two_factor_email,
     send_email,
 )
 from app.models import (
     Account,
+    RefreshToken,
     User,
     UserCreate,
     UserEmailVerification,
@@ -336,10 +339,10 @@ def mark_email_verified(*, session: Session, user: User) -> User:
     return user
 
 
-def confirm_email_verification_code(
+def check_email_verification_code(
     *, session: Session, user: User, code: str
-) -> User:
-    """Check an entered code and, if it's right, mark the email verified.
+) -> None:
+    """Check a code emailed to the user's current address, using it up.
 
     A wrong code counts as an attempt; past the limit the code is thrown
     away and a new one has to be requested, which is what keeps guessing
@@ -348,6 +351,8 @@ def confirm_email_verification_code(
     pending = user.email_verification
     if pending is None:
         raise HTTPException(400, "No verification code has been sent")
+    # Locked, so parallel guesses can't all get in under the limit
+    session.refresh(pending, with_for_update=True)
     if pending.expires < utcnow():
         session.delete(pending)
         session.commit()
@@ -363,7 +368,76 @@ def confirm_email_verification_code(
         session.add(pending)
         session.commit()
         raise HTTPException(400, "That code isn't right")
+    session.delete(pending)
+
+
+def confirm_email_verification_code(
+    *, session: Session, user: User, code: str
+) -> User:
+    """Check an entered code and, if it's right, mark the email verified."""
+    check_email_verification_code(session=session, user=user, code=code)
     return mark_email_verified(session=session, user=user)
+
+
+def send_email_change_code(
+    *, session: Session, user: User, new_email: str
+) -> None:
+    """Email a code to the user's current address for changing it.
+
+    Whoever holds a session could otherwise move the account to an address
+    they control, and with it everything that's proven by email, e.g.,
+    setting up a second factor or resetting the password.
+    """
+    if not user.email_verified:
+        raise HTTPException(400, "An unverified email can be changed as is")
+    code, _ = create_email_verification(session=session, user=user)
+    email_data = generate_confirm_email_change_email(
+        email_to=user.email, new_email=new_email, code=code
+    )
+    send_email(
+        email_to=user.email,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
+
+
+def change_email(
+    *, session: Session, user: User, new_email: str, code: str | None
+) -> None:
+    """Change the user's email, which takes a code sent to the current one
+    if it's verified.
+
+    The new address isn't verified until the user proves it is.
+    """
+    if user.email_verified:
+        if not code:
+            raise HTTPException(
+                403, "Changing a verified email takes a code sent to it"
+            )
+        check_email_verification_code(session=session, user=user, code=code)
+    user.email = new_email
+    user.email_verified_at = None
+    session.add(user)
+
+
+def end_sign_in_sessions(
+    *, session: Session, user: User, keep: uuid.UUID | None = None
+) -> None:
+    """Sign the user out everywhere, except the session to keep, e.g.,
+    after their password changes.
+
+    Access tokens are short-lived, and anything sensitive also checks that
+    its session is still live, so this takes effect right away there.
+    """
+    tokens = session.exec(
+        select(RefreshToken)
+        .where(RefreshToken.user_id == user.id)
+        .where(RefreshToken.is_active)
+    ).all()
+    for token in tokens:
+        if keep is None or token.session_id != keep:
+            token.is_active = False
+            session.add(token)
 
 
 def confirm_email_verification_token(*, session: Session, token: str) -> User:
@@ -1017,6 +1091,9 @@ def start_totp_setup(session: Session, user: User) -> str:
     totp = user.totp
     if totp is not None and totp.confirmed_at is not None:
         raise HTTPException(409, "Two-factor authentication is already set up")
+    # Otherwise the code could go to an address that isn't the user's
+    if not user.email_verified:
+        raise HTTPException(403, "Verify your email first")
     now = utcnow()
     if (
         totp is not None
@@ -1054,6 +1131,8 @@ def check_totp_setup_email_code(
     session: Session, totp: UserTOTP, code: str
 ) -> None:
     """Check the code emailed when setting up an authenticator app."""
+    # Locked, so parallel guesses can't all get in under the limit
+    session.refresh(totp, with_for_update=True)
     if totp.email_code_hash is None or totp.email_code_expires is None:
         raise HTTPException(400, "No setup code has been sent")
     if totp.email_code_expires < utcnow():
@@ -1080,6 +1159,9 @@ def check_totp_code(session: Session, totp: UserTOTP, code: str) -> None:
     is worthless.
     """
     now = utcnow()
+    # Locked, so parallel guesses can't all get in under the limit, and a
+    # code can't be used twice at once
+    session.refresh(totp, with_for_update=True)
     if totp.locked_until is not None and totp.locked_until > now:
         raise HTTPException(
             429, "Too many attempts; try again in a few minutes"
@@ -1103,14 +1185,16 @@ def check_totp_code(session: Session, totp: UserTOTP, code: str) -> None:
     session.commit()
 
 
-def create_second_factor_token(user: User) -> str:
+def create_second_factor_token(user: User, session_id: uuid.UUID) -> str:
     """A token for the session that just entered a second factor."""
     return security_create_second_factor_token(
-        user.id, timedelta(hours=SECOND_FACTOR_HOURS)
+        user.id, session_id, timedelta(hours=SECOND_FACTOR_HOURS)
     )
 
 
-def require_second_factor(user: User, token: str | None) -> None:
+def require_second_factor(
+    user: User, session_id: uuid.UUID, token: str | None
+) -> None:
     """Refuse sensitive actions unless this session entered a second
     factor recently.
 
@@ -1122,7 +1206,11 @@ def require_second_factor(user: User, token: str | None) -> None:
     if totp is None or totp.confirmed_at is None:
         raise HTTPException(403, SECOND_FACTOR_SETUP_REQUIRED)
     payload = decode_second_factor_token(token) if token else None
-    if payload is None or payload.get("sub") != str(user.id):
+    if (
+        payload is None
+        or payload.get("sub") != str(user.id)
+        or payload.get("sid") != str(session_id)
+    ):
         raise HTTPException(403, SECOND_FACTOR_REQUIRED)
     # Tokens from before it was last set up don't count
     issued = datetime.fromtimestamp(payload.get("iat", 0), tz=UTC).replace(

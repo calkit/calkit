@@ -81,15 +81,18 @@ def create_relay_token(
 ) -> str:
     """Create a JWT for opening one relay connection.
 
-    These carry a scope, so the API's own auth rejects them.
+    These are signed with a key of their own, so the relay, which is
+    exposed to the internet, never holds one that can sign logins. Each has
+    a unique ID, so the relay can take it only once.
     """
     payload = {
         "exp": datetime.now(timezone.utc) + expires_delta,
         "sub": str(operator_id),
         "user_id": str(user_id),
         "scope": f"relay:{kind}",
+        "jti": secrets.token_hex(16),
     }
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, settings.RELAY_SECRET_KEY, algorithm=ALGORITHM)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -244,20 +247,21 @@ SECOND_FACTOR_SCOPE = "second-factor"
 
 
 def create_second_factor_token(
-    user_id: uuid.UUID, expires_delta: timedelta
+    user_id: uuid.UUID, session_id: uuid.UUID, expires_delta: timedelta
 ) -> str:
     """Create a token proving a second factor was entered in one session.
 
-    The session keeps it and sends it along with sensitive requests, so a
-    code entered in one browser doesn't also vouch for every other
-    credential the user has. It carries a scope, so the API's own auth
-    rejects it as a login.
+    The session keeps it and sends it along with sensitive requests. It
+    names that session, so it's worthless to any other credential the user
+    has, and stops working when the session ends. It carries a scope, so
+    the API's own auth rejects it as a login.
     """
     now = datetime.now(timezone.utc)
     payload = {
         "exp": now + expires_delta,
         "iat": now,
         "sub": str(user_id),
+        "sid": str(session_id),
         "scope": SECOND_FACTOR_SCOPE,
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)

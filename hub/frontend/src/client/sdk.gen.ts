@@ -80,6 +80,7 @@ import type {
   DeviceAuthRequest,
   DeviceTokenRequest,
   DiscountCodePost,
+  EmailChangeCode,
   EmailVerificationConfirm,
   EmailVerificationToken,
   Environment,
@@ -395,6 +396,8 @@ import type {
   PostProjectZoteroSyncResponses,
   PostReleaseCommentErrors,
   PostReleaseCommentResponses,
+  PostUserEmailChangeCodeErrors,
+  PostUserEmailChangeCodeResponses,
   PostUserEmailVerificationConfirmErrors,
   PostUserEmailVerificationConfirmResponses,
   PostUserEmailVerificationResponses,
@@ -978,8 +981,9 @@ export class LoginService {
    *
    * Authorize a pending CLI device auth request.
    *
-   * The user must be authenticated. This endpoint is called by the frontend
-   * after the user has logged in and clicked "Authorize".
+   * The user must be signed in, not using a token, which could otherwise be
+   * traded for a login. This endpoint is called by the frontend after the
+   * user has logged in and clicked "Authorize".
    */
   public static postLoginDeviceAuthorize<ThrowOnError extends boolean = true>(
     parameters: {
@@ -1211,9 +1215,46 @@ export class UsersService {
   }
 
   /**
+   * Post User Email Change Code
+   *
+   * Email the current address a code for changing it to another.
+   */
+  public static postUserEmailChangeCode<ThrowOnError extends boolean = true>(
+    parameters: {
+      emailChangeCode: EmailChangeCode
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserEmailChangeCodeResponses,
+    PostUserEmailChangeCodeErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "emailChangeCode", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserEmailChangeCodeResponses,
+      PostUserEmailChangeCodeErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/email-change-code",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Update Current User Password
    *
-   * Update own password.
+   * Update own password, signing out everywhere else.
    */
   public static updateCurrentUserPassword<ThrowOnError extends boolean = true>(
     parameters: {

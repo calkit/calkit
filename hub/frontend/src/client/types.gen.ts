@@ -1105,6 +1105,16 @@ export type DvcPipelineStage = {
 }
 
 /**
+ * EmailChangeCode
+ */
+export type EmailChangeCode = {
+  /**
+   * Email
+   */
+  email: string
+}
+
+/**
  * EmailVerificationConfirm
  */
 export type EmailVerificationConfirm = {
@@ -6354,6 +6364,10 @@ export type UserUpdateMe = {
    * Analytics Consent
    */
   analytics_consent?: boolean | null
+  /**
+   * Email Code
+   */
+  email_code?: string | null
 }
 
 /**
@@ -7687,6 +7701,33 @@ export type UpdateCurrentUserResponses = {
 
 export type UpdateCurrentUserResponse =
   UpdateCurrentUserResponses[keyof UpdateCurrentUserResponses]
+
+export type PostUserEmailChangeCodeData = {
+  body: EmailChangeCode
+  path?: never
+  query?: never
+  url: "/user/email-change-code"
+}
+
+export type PostUserEmailChangeCodeErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserEmailChangeCodeError =
+  PostUserEmailChangeCodeErrors[keyof PostUserEmailChangeCodeErrors]
+
+export type PostUserEmailChangeCodeResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserEmailChangeCodeResponse =
+  PostUserEmailChangeCodeResponses[keyof PostUserEmailChangeCodeResponses]
 
 export type UpdateCurrentUserPasswordData = {
   body: UpdatePassword

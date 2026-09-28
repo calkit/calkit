@@ -1991,6 +1991,19 @@ export const DvcPipelineStageSchema = {
   title: "DvcPipelineStage",
 } as const
 
+export const EmailChangeCodeSchema = {
+  properties: {
+    email: {
+      type: "string",
+      format: "email",
+      title: "Email",
+    },
+  },
+  type: "object",
+  required: ["email"],
+  title: "EmailChangeCode",
+} as const
+
 export const EmailVerificationConfirmSchema = {
   properties: {
     code: {
@@ -11178,6 +11191,18 @@ export const UserUpdateMeSchema = {
         },
       ],
       title: "Analytics Consent",
+    },
+    email_code: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 8,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email Code",
     },
   },
   type: "object",

@@ -143,6 +143,7 @@ services:
       - ENVIRONMENT=${ENVIRONMENT}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
       - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - RELAY_SECRET_KEY=${RELAY_SECRET_KEY?Variable not set}
       - FERNET_KEY=${FERNET_KEY?Variable not set}
       - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
       - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
@@ -399,7 +400,7 @@ services:
       - traefik-public
       - default
     environment:
-      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - RELAY_SECRET_KEY=${RELAY_SECRET_KEY?Variable not set}
     command: ["fastapi", "run", "--workers", "1", "--port", "8002", "relay.py"]
     labels:
       - traefik.enable=true

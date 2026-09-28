@@ -1,4 +1,5 @@
 import uuid
+from contextlib import contextmanager
 from datetime import timedelta
 
 import jwt
@@ -10,10 +11,12 @@ from starlette.websockets import WebSocketDisconnect
 from app import users
 from app.config import settings
 from app.core import utcnow
-from app.models import Operator, User, UserTOTP
+from app.models import Operator, RefreshToken, User, UserTOTP
 from app.security import (
+    create_access_token,
     create_second_factor_token,
     encrypt_secret,
+    generate_email_verification_token,
     generate_totp_secret,
 )
 from app.users import SECOND_FACTOR_REQUIRED, SECOND_FACTOR_SETUP_REQUIRED
@@ -26,6 +29,23 @@ def test_operators(
     superuser_token_headers: dict[str, str],
 ) -> None:
     hostname = f"Lab-Box-{uuid.uuid4().hex[:6]}"
+    # Registering takes a verified email, since that's what setting up the
+    # second factor for opening sessions proves itself with
+    me = client.get("/user", headers=normal_user_token_headers).json()
+    user = db.get(User, uuid.UUID(me["id"]))
+    assert user is not None
+    user.email_verified_at = None
+    db.add(user)
+    db.commit()
+    r = client.post(
+        "/operators",
+        headers=normal_user_token_headers,
+        json={"hostname": hostname},
+    )
+    assert r.status_code == 403
+    user.email_verified_at = utcnow()
+    db.add(user)
+    db.commit()
     # Names default to the slugified hostname, suffixed until unique
     r = client.post(
         "/operators",
@@ -77,7 +97,9 @@ def test_operators(
     check_in = r.json()
     assert check_in["relay_url"] == settings.relay_url
     payload = jwt.decode(
-        check_in["relay_token"], settings.SECRET_KEY, algorithms=["HS256"]
+        check_in["relay_token"],
+        settings.RELAY_SECRET_KEY,
+        algorithms=["HS256"],
     )
     assert payload["scope"] == "relay:operator"
     assert payload["sub"] == op["id"]
@@ -175,17 +197,60 @@ def test_operators(
     )
     assert r.status_code == 403
     assert r.json()["detail"] == SECOND_FACTOR_REQUIRED
-    second_factor = users.create_second_factor_token(user)
+    access_token = normal_user_token_headers["Authorization"].split()[1]
+    session_id = uuid.UUID(
+        jwt.decode(access_token, settings.SECRET_KEY, algorithms=["HS256"])[
+            "sid"
+        ]
+    )
+    second_factor = users.create_second_factor_token(user, session_id)
     with_second_factor = normal_user_token_headers | {
         "X-Second-Factor": second_factor
     }
-    # Another user's proof doesn't count
-    other = create_second_factor_token(uuid.uuid4(), timedelta(hours=1))
-    r = client.post(
-        f"/operators/{op['id']}/relay-token",
-        headers=normal_user_token_headers | {"X-Second-Factor": other},
+    # Another user's proof doesn't count, nor does the user's own from
+    # another session
+    for other in [
+        create_second_factor_token(
+            uuid.uuid4(), session_id, timedelta(hours=1)
+        ),
+        create_second_factor_token(user.id, uuid.uuid4(), timedelta(hours=1)),
+    ]:
+        r = client.post(
+            f"/operators/{op['id']}/relay-token",
+            headers=normal_user_token_headers | {"X-Second-Factor": other},
+        )
+        assert r.status_code == 403
+    # Nor do logins that aren't a person signing in to the web app, e.g.,
+    # the CLI's, a GitHub token's, or an emailed link's, even with proof
+    cli_session_id = uuid.uuid4()
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash=uuid.uuid4().hex,
+            expires=utcnow() + timedelta(days=1),
+            session_id=cli_session_id,
+        )
     )
-    assert r.status_code == 403
+    db.commit()
+    for token in [
+        create_access_token(
+            user.id,
+            timedelta(minutes=5),
+            add_payload={"sid": str(cli_session_id)},
+        ),
+        create_access_token(user.id, timedelta(minutes=5)),
+        generate_email_verification_token(user.id, user.email),
+    ]:
+        r = client.post(
+            f"/operators/{op['id']}/relay-token",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Second-Factor": create_second_factor_token(
+                    user.id, cli_session_id, timedelta(hours=1)
+                ),
+            },
+        )
+        assert r.status_code == 403
     # Nor do tokens made for scripts, even with the proof
     r = client.post(
         "/user/tokens",
@@ -204,7 +269,7 @@ def test_operators(
     )
     assert r.status_code == 200, r.text
     payload = jwt.decode(
-        r.json()["token"], settings.SECRET_KEY, algorithms=["HS256"]
+        r.json()["token"], settings.RELAY_SECRET_KEY, algorithms=["HS256"]
     )
     assert payload["scope"] == "relay:browser"
     assert payload["sub"] == op["id"]
@@ -284,7 +349,7 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from app.security import create_relay_token
 
-    monkeypatch.setenv("SECRET_KEY", settings.SECRET_KEY)
+    monkeypatch.setenv("RELAY_SECRET_KEY", settings.RELAY_SECRET_KEY)
     operator_id = uuid.uuid4()
     user_id = uuid.uuid4()
 
@@ -296,30 +361,36 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
             expires_delta=timedelta(minutes=1),
         )
 
+    @contextmanager
+    def connect(client, path, tok):
+        # Tokens go in the first message, not the URL, to stay out of logs
+        with client.websocket_connect(path) as ws:
+            ws.send_json({"type": "auth", "token": tok})
+            yield ws
+
     with TestClient(relay.app) as client:
-        # Bad tokens, and tokens of the wrong kind, are refused
+        # Bad tokens, tokens of the wrong kind, and used ones are refused
+        used = token("browser")
+        with pytest.raises(WebSocketDisconnect):
+            with connect(client, "/browser", used) as ws:
+                ws.receive_text()
         for path, tok in [
             ("/operator", "nope"),
             ("/operator", token("browser")),
             ("/browser", token("operator")),
+            ("/browser", used),
         ]:
             with pytest.raises(WebSocketDisconnect) as e:
-                with client.websocket_connect(f"{path}?token={tok}") as ws:
+                with connect(client, path, tok) as ws:
                     ws.receive_text()
             assert e.value.code == relay.CLOSE_UNAUTHORIZED
         # Browsers can't connect to an Operator that isn't connected
         with pytest.raises(WebSocketDisconnect) as e:
-            with client.websocket_connect(
-                f"/browser?token={token('browser')}"
-            ) as ws:
+            with connect(client, "/browser", token("browser")) as ws:
                 ws.receive_text()
         assert e.value.code == relay.CLOSE_OPERATOR_OFFLINE
-        with client.websocket_connect(
-            f"/operator?token={token('operator')}"
-        ) as op_ws:
-            with client.websocket_connect(
-                f"/browser?token={token('browser')}"
-            ) as browser_ws:
+        with connect(client, "/operator", token("operator")) as op_ws:
+            with connect(client, "/browser", token("browser")) as browser_ws:
                 opened = op_ws.receive_json()
                 assert opened["type"] == "channel.open"
                 assert opened["user_id"] == str(user_id)

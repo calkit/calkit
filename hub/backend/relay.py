@@ -2,7 +2,8 @@
 
 It runs as one process, separate from the API, so both ends of a pairing
 meet in memory. It has no database and trusts only relay tokens the API
-signed, so the only setting it needs is ``SECRET_KEY``. It lives outside
+signed, so the only setting it needs is ``RELAY_SECRET_KEY``, which can't
+sign logins. It lives outside
 the ``app`` package because importing that loads the API's settings,
 which require all of its secrets.
 See docs/dev/operator-protocol.md.
@@ -12,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -24,6 +26,8 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 MAX_MESSAGE_BYTES = 256 * 1024
+# How long a new connection has to send its token
+AUTH_TIMEOUT_SECONDS = 10
 METER_LOG_INTERVAL_SECONDS = 60
 # Close codes
 CLOSE_TOO_BIG = 1009
@@ -39,12 +43,45 @@ def decode_relay_token(
     """Decode a relay token, returning None if it's invalid or expired."""
     try:
         payload = jwt.decode(
-            token, os.environ["SECRET_KEY"], algorithms=["HS256"]
+            token, os.environ["RELAY_SECRET_KEY"], algorithms=["HS256"]
         )
     except jwt.InvalidTokenError:
         return None
     if payload.get("scope") != f"relay:{kind}":
         return None
+    # Each token opens one connection, so one copied from somewhere is
+    # worthless once it has
+    jti = payload.get("jti")
+    now = time.time()
+    for used, exp in list(used_tokens.items()):
+        if exp < now:
+            del used_tokens[used]
+    if not isinstance(jti, str) or jti in used_tokens:
+        return None
+    used_tokens[jti] = float(payload["exp"])
+    return payload
+
+
+async def authenticate(
+    ws: WebSocket, kind: Literal["operator", "browser"]
+) -> dict | None:
+    """Accept a connection and take its token from its first message.
+
+    Tokens go in a message rather than the URL, so they stay out of
+    access logs.
+    """
+    await ws.accept()
+    try:
+        async with asyncio.timeout(AUTH_TIMEOUT_SECONDS):
+            msg = await _receive(ws)
+    except (TimeoutError, WebSocketDisconnect):
+        msg = None
+    token = msg.get("token") if msg else None
+    payload = (
+        decode_relay_token(token, kind) if isinstance(token, str) else None
+    )
+    if payload is None:
+        await ws.close(CLOSE_UNAUTHORIZED)
     return payload
 
 
@@ -56,6 +93,8 @@ class Operator:
 
 
 operators: dict[str, Operator] = {}
+# IDs of relay tokens already used, with when they expire
+used_tokens: dict[str, float] = {}
 # Bytes relayed per Operator since the last log, as (to Operator, from it)
 meter: dict[str, list[int]] = defaultdict(lambda: [0, 0])
 
@@ -110,12 +149,10 @@ async def _send(ws: WebSocket, msg: dict) -> int:
 
 
 @app.websocket("/operator")
-async def operator_ws(ws: WebSocket, token: str) -> None:
-    payload = decode_relay_token(token, "operator")
+async def operator_ws(ws: WebSocket) -> None:
+    payload = await authenticate(ws, "operator")
     if payload is None:
-        await ws.close(CLOSE_UNAUTHORIZED)
         return
-    await ws.accept()
     operator_id = payload["sub"]
     existing = operators.get(operator_id)
     if existing is not None:
@@ -150,17 +187,15 @@ async def operator_ws(ws: WebSocket, token: str) -> None:
 
 
 @app.websocket("/browser")
-async def browser_ws(ws: WebSocket, token: str) -> None:
-    payload = decode_relay_token(token, "browser")
+async def browser_ws(ws: WebSocket) -> None:
+    payload = await authenticate(ws, "browser")
     if payload is None:
-        await ws.close(CLOSE_UNAUTHORIZED)
         return
     operator_id = payload["sub"]
     operator = operators.get(operator_id)
     if operator is None:
         await ws.close(CLOSE_OPERATOR_OFFLINE)
         return
-    await ws.accept()
     ch = uuid.uuid4().hex[:12]
     operator.channels[ch] = ws
     meter[operator_id][0] += await _send(

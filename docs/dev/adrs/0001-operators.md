@@ -465,10 +465,13 @@ so it follows the pipeline integration phase.
    the relay, and shared DVC caches and stage locks per machine.
 4. Detached remote stages.
 5. Sharing: collaborator workspaces and multiplayer.
-6. Later: Operators owned by organizations, e.g., for a shared lab machine
-   that members can have workspaces on (the schema leaves room for an
-   organization owner), upgrading Calkit and restarting an Operator from
-   the hub, loops and fleet rollouts (#90), parallel `group` stages (#185),
+   Operators stay owner-only until how others may use one is decided;
+   anything run for someone else would be sandboxed, e.g., in a
+   container with only their workspace mounted.
+   A shared machine gives each user their own Operator, through
+   JupyterHub where it has one ([ADR 0002](0002-jupyterhub.md)), rather
+   than one Operator running as root.
+6. Later: upgrading Calkit and restarting an Operator from the hub, loops and fleet rollouts (#90), parallel `group` stages (#185),
    a startup command for sessions, agent notifications, and an ACP chat
    view.
 

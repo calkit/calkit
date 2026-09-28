@@ -197,6 +197,10 @@ so it runs the same way from any workspace, and admins needn't maintain a
 server option for every project's needs.
 Quotas, queues, and allocations still belong to the infrastructure, and
 jobs run as the user, on their own allocation.
+Running stages somewhere else is an explicit change to the project's
+environments rather than a per-user override, so where each stage ran is
+always versioned; switching among clusters a project already declares is
+covered by [ADR 0003](0003-switchable-environments.md).
 
 ### Container runtimes
 

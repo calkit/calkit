@@ -469,7 +469,7 @@ so it follows the pipeline integration phase.
    anything run for someone else would be sandboxed, e.g., in a
    container with only their workspace mounted.
    A shared machine gives each user their own Operator, through
-   JupyterHub where it has one ([ADR 0002](0002-jupyterhub.md)), rather
+   JupyterHub where it has one (#1744), rather
    than one Operator running as root.
 6. Later: upgrading Calkit and restarting an Operator from the hub,
    loops and fleet rollouts (#90), parallel `group` stages (#185),

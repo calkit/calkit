@@ -58,7 +58,7 @@ import {
   releaseLocation,
   releasePagePath,
 } from "../../../../../lib/releases"
-import { decodeBase64Utf8 } from "../../../../../lib/strings"
+import { decodeBase64Utf8, safeHref } from "../../../../../lib/strings"
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/",
@@ -500,7 +500,7 @@ function ProjectView() {
                           issue.title
                         )}{" "}
                         (
-                        <Link isExternal href={issue.url}>
+                        <Link isExternal href={safeHref(issue.url)}>
                           #{issue.number}
                         </Link>
                         )
@@ -511,7 +511,7 @@ function ProjectView() {
                 {issuesUrl && (visibleIssues?.length ?? 0) > 0 ? (
                   <Link
                     isExternal
-                    href={issuesUrl}
+                    href={safeHref(issuesUrl)}
                     fontSize="sm"
                     display="inline-block"
                     mt={2}

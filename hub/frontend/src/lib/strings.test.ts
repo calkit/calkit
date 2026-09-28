@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { trimForSave } from "./strings"
+import { safeHref, trimForSave } from "./strings"
 
 describe("trimForSave", () => {
   it("strips trailing whitespace and ends with exactly one newline", () => {
@@ -37,5 +37,29 @@ describe("trimForSave", () => {
     )
     // With no original, everything is trimmed as before
     expect(trimForSave("one  \ntwo  \n")).toBe("one\ntwo\n")
+  })
+})
+
+describe("safeHref", () => {
+  it("keeps http(s), mailto, and same-origin relative URLs", () => {
+    expect(safeHref("https://github.com/a/b")).toBe("https://github.com/a/b")
+    expect(safeHref("http://example.com")).toBe("http://example.com")
+    expect(safeHref("mailto:a@b.org")).toBe("mailto:a@b.org")
+    expect(safeHref("/a/b?c=d")).toBe("/a/b?c=d")
+    expect(safeHref("#section")).toBe("#section")
+  })
+  it("drops script, protocol-relative, and unparseable URLs", () => {
+    expect(safeHref("javascript:alert(1)")).toBeUndefined()
+    expect(safeHref(" JavaScript:alert(1)")).toBeUndefined()
+    expect(safeHref("javascript://github.com/%0Aalert(1)")).toBeUndefined()
+    expect(safeHref("data:text/html,<script>alert(1)</script>")).toBeUndefined()
+    expect(safeHref("vbscript:x")).toBeUndefined()
+    expect(safeHref("//evil.com")).toBeUndefined()
+    expect(safeHref("/\\evil.com")).toBeUndefined()
+    expect(safeHref("/\t/evil.com")).toBeUndefined()
+    expect(safeHref("not a url")).toBeUndefined()
+    expect(safeHref("")).toBeUndefined()
+    expect(safeHref(null)).toBeUndefined()
+    expect(safeHref(undefined)).toBeUndefined()
   })
 })

@@ -67,6 +67,7 @@ import InputsRow, { type InputLink } from "./InputsRow"
 import Markdown from "./Markdown"
 import PdfCanvas from "./PdfCanvas"
 import PdfDocumentViewer from "./PdfDocumentViewer"
+import { safeHref } from "../../lib/strings"
 const IpynbRenderer = lazy(() =>
   import("react-ipynb-renderer").then(async (m) => {
     await import("react-ipynb-renderer/dist/styles/monokai.css")
@@ -162,7 +163,7 @@ function ArtifactContent({
       )
     }
     return (
-      <Link href={pub.url} isExternal color="blue.500">
+      <Link href={safeHref(pub.url)} isExternal color="blue.500">
         Open publication
       </Link>
     )

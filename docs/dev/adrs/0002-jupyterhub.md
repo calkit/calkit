@@ -162,6 +162,42 @@ None of these are required, but each makes Calkit work better on a hub:
   server's root directory to its project, and picks its image or
   environment from the project's specs.
 
+### Expensive compute
+
+JupyterHub doesn't dispatch work anywhere.
+It sizes each user's server when it starts, from a menu its admins
+define, e.g., KubeSpawner profiles mapped to resource requests, or
+batchspawner and Open OnDemand forms choosing a partition, GPUs, and
+walltime for a job the whole server runs in.
+The server is the unit of compute, sized for the heaviest thing it will
+do and holding those resources while idle, and sending work elsewhere is
+left to add-ons its admins deploy, e.g., Dask Gateway.
+
+Calkit keeps compute requirements in the project instead: a stage's
+environment names where it runs, e.g., a `slurm` environment with a
+`host`, and the stage's scheduler options say what it needs.
+So a JupyterHub server can stay small, for interactive work, while
+`calkit run` sends heavy stages where the project says:
+
+- From a server on the cluster itself, e.g., under batchspawner, a
+  `slurm` environment submits jobs from there, where the center allows
+  submitting from compute nodes.
+- From a server elsewhere, e.g., on a Kubernetes hub while the GPUs are on
+  an HPC cluster, a stage reaches the cluster through the user's Operator
+  there, by the routing by host planned in ADR 0001, with no SSH keys on
+  the server and no repeated second factor prompts.
+- With detached remote stages, also planned in ADR 0001, the server
+  needn't stay up while a cluster job runs; the Operator on the cluster
+  pushes the results when it finishes.
+
+This follows from Calkit's general approach of giving users control and
+keeping configuration in the project rather than the infrastructure:
+where each stage runs and what it needs are versioned with the project,
+so it runs the same way from any workspace, and admins needn't maintain a
+server option for every project's needs.
+Quotas, queues, and allocations still belong to the infrastructure, and
+jobs run as the user, on their own allocation.
+
 ### Container runtimes
 
 Only environments of kind `docker` need a container runtime, including
@@ -197,6 +233,9 @@ Instead:
 - Registration codes replace putting the user's login on machines when
   installing Operators, anywhere.
 - Running containers inside servers stays up to each hub's admins.
+- Heavy compute follows the project rather than the server, which depends
+  on ADR 0001's routing by host and detached remote stages for servers that
+  aren't on the cluster.
 
 ## Alternatives considered
 

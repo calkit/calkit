@@ -471,7 +471,8 @@ so it follows the pipeline integration phase.
    A shared machine gives each user their own Operator, through
    JupyterHub where it has one ([ADR 0002](0002-jupyterhub.md)), rather
    than one Operator running as root.
-6. Later: upgrading Calkit and restarting an Operator from the hub, loops and fleet rollouts (#90), parallel `group` stages (#185),
+6. Later: upgrading Calkit and restarting an Operator from the hub,
+   loops and fleet rollouts (#90), parallel `group` stages (#185),
    a startup command for sessions, agent notifications, and an ACP chat
    view.
 

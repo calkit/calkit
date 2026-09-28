@@ -200,7 +200,7 @@ jobs run as the user, on their own allocation.
 Running stages somewhere else is an explicit change to the project's
 environments rather than a per-user override, so where each stage ran is
 always versioned; switching among clusters a project already declares is
-covered by [ADR 0003](0003-switchable-environments.md).
+proposed in #1743.
 
 ### Container runtimes
 

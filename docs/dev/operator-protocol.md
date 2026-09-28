@@ -99,7 +99,13 @@ each opens only one connection.
   Closes with code 4404 if the Operator isn't connected.
 
 When a browser connects, the relay assigns it a channel ID and sends the
-Operator `{"type": "channel.open", "ch": ..., "user_id": ...}`.
+Operator `{"type": "channel.open", "ch": ..., "user_id": ..., "grant": ...}`.
+The grant, which comes from the browser's relay token, is an EdDSA JWT
+the API signed, with the Operator's ID as `aud`, its owner as `sub`, a
+`jti`, and a 60 second `exp`.
+The Operator checks it against the key it pinned from `grant_public_key`
+when it registered (or at its first check-in, if registered before), and
+refuses channels without a valid, unused one.
 Browser messages are forwarded to the Operator as
 `{"type": "channel.message", "ch": ..., "msg": ...}`,
 and the Operator sends `{"ch": ..., "msg": ...}` to reach a browser, which

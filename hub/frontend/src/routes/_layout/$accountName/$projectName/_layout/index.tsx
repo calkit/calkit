@@ -29,6 +29,12 @@ import {
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { FaCheck, FaPlus, FaRegSquare } from "react-icons/fa"
+import {
+  GoGitPullRequest,
+  GoGitPullRequestClosed,
+  GoIssueClosed,
+  GoIssueOpened,
+} from "react-icons/go"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
@@ -279,7 +285,7 @@ function ProjectView() {
             {readmeRequest.isPending ? (
               <LoadingSpinner height="100vh" />
             ) : readmeRequest.data ? (
-              <Markdown>
+              <Markdown repo={{ accountName, projectName, ref }}>
                 {removeFirstLine(
                   decodeBase64Utf8(String(readmeRequest?.data?.content)),
                 )}
@@ -481,15 +487,36 @@ function ProjectView() {
                     artifactRoute && issue.artifact_path
                       ? `/${accountName}/${projectName}/${artifactRoute}?path=${encodeURIComponent(issue.artifact_path)}`
                       : null
+                  const isOpen = issue.state === "open"
+                  // GitHub's icons and colors, though closed pull requests
+                  // are grey since this doesn't know if they were merged
+                  const kindIcon = issue.is_pull_request
+                    ? isOpen
+                      ? GoGitPullRequest
+                      : GoGitPullRequestClosed
+                    : isOpen
+                      ? GoIssueOpened
+                      : GoIssueClosed
+                  const kindColor = isOpen
+                    ? "green.500"
+                    : issue.is_pull_request
+                      ? "gray.500"
+                      : "purple.500"
                   return (
                     <Flex key={issue.number} alignItems={"flex-start"}>
-                      <Checkbox
-                        isChecked={issue.state === "closed"}
-                        onChange={onTodoCheckbox}
-                        id={String(issue.number)}
-                        isDisabled={!userHasWriteAccess}
-                        mt={1}
-                      />
+                      {/* Checking off a pull request would close it without
+                          merging it, so they don't get a checkbox */}
+                      {issue.is_pull_request ? (
+                        <Box w={4} flexShrink={0} />
+                      ) : (
+                        <Checkbox
+                          isChecked={!isOpen}
+                          onChange={onTodoCheckbox}
+                          id={String(issue.number)}
+                          isDisabled={!userHasWriteAccess}
+                          mt={1}
+                        />
+                      )}
                       <Text ml={2}>
                         {" "}
                         {artifactHref ? (
@@ -501,6 +528,20 @@ function ProjectView() {
                         )}{" "}
                         (
                         <Link isExternal href={issue.url}>
+                          <Tooltip
+                            label={
+                              issue.is_pull_request ? "Pull request" : "Issue"
+                            }
+                          >
+                            <span>
+                              <Icon
+                                as={kindIcon}
+                                color={kindColor}
+                                mb={0.5}
+                                mr={0.5}
+                              />
+                            </span>
+                          </Tooltip>
                           #{issue.number}
                         </Link>
                         )
@@ -516,10 +557,8 @@ function ProjectView() {
                     display="inline-block"
                     mt={2}
                   >
-                    {(visibleIssues?.length ?? 0) > HOME_TODOS_LIMIT
-                      ? `See all ${visibleIssues?.length} on GitHub`
-                      : "See all on GitHub"}{" "}
-                    <Icon as={ExternalLinkIcon} mb={0.5} />
+                    {/* No count: this is GitHub's first page, not all */}
+                    See all on GitHub <Icon as={ExternalLinkIcon} mb={0.5} />
                   </Link>
                 ) : null}
               </>

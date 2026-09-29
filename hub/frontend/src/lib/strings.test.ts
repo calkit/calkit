@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { trimForSave } from "./strings"
+import { removeLeadingHeading, trimForSave } from "./strings"
 
 describe("trimForSave", () => {
   it("strips trailing whitespace and ends with exactly one newline", () => {
@@ -37,5 +37,36 @@ describe("trimForSave", () => {
     )
     // With no original, everything is trimmed as before
     expect(trimForSave("one  \ntwo  \n")).toBe("one\ntwo\n")
+  })
+})
+
+describe("removeLeadingHeading", () => {
+  it("drops only a leading Markdown H1", () => {
+    expect(removeLeadingHeading("# Project\n\nBody")).toBe("\nBody")
+    // A deeper heading is content, not a duplicate of the page title
+    expect(removeLeadingHeading("## Section\nBody")).toBe("## Section\nBody")
+    // The calkit README opens with a centered logo, so its first line is an
+    // HTML block that must survive or the markup is orphaned
+    const centered = '<p align="center">\n<img src="logo.png">\n</p>'
+    expect(removeLeadingHeading(centered)).toBe(centered)
+    expect(removeLeadingHeading("Body only")).toBe("Body only")
+    expect(removeLeadingHeading("")).toBe("")
+  })
+
+  it("recognizes every leading H1 form", () => {
+    // Closing hashes and trailing space are optional
+    expect(removeLeadingHeading("# Project #\nBody")).toBe("Body")
+    // Up to three leading spaces still make a heading...
+    expect(removeLeadingHeading("   # Project\nBody")).toBe("Body")
+    // ...but four make an indented code block, whose `#` is content
+    expect(removeLeadingHeading("    # not a heading\nBody")).toBe(
+      "    # not a heading\nBody",
+    )
+    // Setext H1: a paragraph line underlined with `=`
+    expect(removeLeadingHeading("Project\n=====\n\nBody")).toBe("\nBody")
+    // A `-` underline is an H2, which is content
+    expect(removeLeadingHeading("Project\n-----\nBody")).toBe(
+      "Project\n-----\nBody",
+    )
   })
 })

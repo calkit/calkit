@@ -536,7 +536,12 @@ function Files() {
                 )
               ) : selectedItemQuery?.data?.content ||
                 selectedItemQuery?.data?.url ? (
-                <FileContent item={selectedItemQuery.data!} />
+                <FileContent
+                  item={selectedItemQuery.data!}
+                  accountName={accountName}
+                  projectName={projectName}
+                  ref={ref}
+                />
               ) : null}
             </Box>
             <Box

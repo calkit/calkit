@@ -28,5 +28,4 @@ CLAUDE.md
 
 # >>> calkit markdown derived files (managed by calkit) >>>
 /.calkit/markdown/
-/.calkit/envs/plot/.venv/
 # <<< calkit markdown derived files <<<

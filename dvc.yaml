@@ -24,13 +24,14 @@ stages:
     desc: Automatically generated from the 'latex-word-round-trip' stage in calkit.yaml.
       Changes made here will be overwritten.
   latex-word-round-trip-figure:
-    cmd: calkit xenv -n plot --no-check -- python scripts/plot-latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-latex-word-round-trip.py
     deps:
       - scripts/plot-latex-word-round-trip.py
       - results/latex-word-round-trip/original.pdf
       - results/latex-word-round-trip/review.pdf
       - results/latex-word-round-trip/rebuilt.pdf
-      - .calkit/env-locks/plot
+      - uv.lock
+      - .python-version
     outs:
       - docs/img/latex-word-round-trip.png:
           cache: false

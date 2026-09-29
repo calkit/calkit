@@ -105,6 +105,8 @@ dev = [
   "mkdocs-glightbox>=0.5.2",
   "scipy>=1.15.3",
   "pypandoc-binary>=1.13",
+  "matplotlib>=3.10.8",
+  "pypdfium2>=5.13.0",
 ]
 
 [project.urls]

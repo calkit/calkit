@@ -396,7 +396,9 @@ function WorkspacePanel({
   )
   const staleStages: string[] = status?.pipeline?.stale_stage_names ?? []
   const staleDetail: Record<string, any> = status?.pipeline?.stale_stages ?? {}
-  const runningStages: string[] = status?.pipeline?.running_stages ?? []
+  // From the latest check-in until the live status arrives
+  const runningStages: string[] =
+    status?.pipeline?.running_stages ?? ws.running_stages ?? []
   // Environments aren't checked here, since that can build them; this is
   // what the record of their last checks says
   const envStates: Record<string, any> =
@@ -998,11 +1000,46 @@ function Compute() {
                   </Td>
                   <Td fontSize="xs">
                     {ws.branch ?? "detached"}@{ws.commit?.slice(0, 7) ?? "?"}
-                    {ws.running && (
-                      <Badge ml={2} colorScheme="blue" fontSize="2xs">
-                        running
-                      </Badge>
-                    )}
+                    {ws.running ? (
+                      <Tooltip
+                        label={
+                          ws.running_since
+                            ? `Since ${new Date(ws.running_since).toLocaleString()}`
+                            : "Pipeline running"
+                        }
+                      >
+                        <Badge ml={2} colorScheme="blue" fontSize="2xs">
+                          running
+                          {ws.running_stages?.length
+                            ? ` ${ws.running_stages.join(", ")}`
+                            : ""}
+                        </Badge>
+                      </Tooltip>
+                    ) : ws.last_run ? (
+                      <Tooltip
+                        label={`Last run ${ws.last_run.status}${
+                          ws.last_run.ended
+                            ? ` ${new Date(ws.last_run.ended).toLocaleString()}`
+                            : ""
+                        }`}
+                      >
+                        <Badge
+                          ml={2}
+                          colorScheme={
+                            ws.last_run.status === "failed" ? "red" : "green"
+                          }
+                          fontSize="2xs"
+                        >
+                          {ws.last_run.status === "failed"
+                            ? `failed${
+                                ws.last_run.failed_stages?.length
+                                  ? ` at ${ws.last_run.failed_stages.join(", ")}`
+                                  : ""
+                              }`
+                            : "last run ok"}
+                        </Badge>
+                      </Tooltip>
+                    ) : null}
                     {ws.dirty && (
                       <Badge ml={2} colorScheme="yellow" fontSize="2xs">
                         uncommitted

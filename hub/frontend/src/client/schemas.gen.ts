@@ -3838,6 +3838,54 @@ export const ItemLockSchema = {
   title: "ItemLock",
 } as const
 
+export const LastRunSchema = {
+  properties: {
+    status: {
+      type: "string",
+      maxLength: 16,
+      title: "Status",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    ended: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ended",
+    },
+    failed_stages: {
+      items: {
+        type: "string",
+        maxLength: 256,
+      },
+      type: "array",
+      maxItems: 50,
+      title: "Failed Stages",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["status"],
+  title: "LastRun",
+  description: "How the latest pipeline run in a workspace ended.",
+} as const
+
 export const MapPathEntrySchema = {
   properties: {
     src: {
@@ -11361,6 +11409,38 @@ export const WorkspaceSchema = {
       title: "Running",
       default: false,
     },
+    running_stages: {
+      items: {
+        type: "string",
+        maxLength: 256,
+      },
+      type: "array",
+      maxItems: 50,
+      title: "Running Stages",
+      default: [],
+    },
+    running_since: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Running Since",
+    },
+    last_run: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/LastRun",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
     operator_id: {
       type: "string",
       format: "uuid",
@@ -11494,6 +11574,38 @@ export const WorkspaceInfoSchema = {
       type: "boolean",
       title: "Running",
       default: false,
+    },
+    running_stages: {
+      items: {
+        type: "string",
+        maxLength: 256,
+      },
+      type: "array",
+      maxItems: 50,
+      title: "Running Stages",
+      default: [],
+    },
+    running_since: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Running Since",
+    },
+    last_run: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/LastRun",
+        },
+        {
+          type: "null",
+        },
+      ],
     },
   },
   type: "object",

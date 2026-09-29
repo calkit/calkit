@@ -2249,6 +2249,30 @@ export type ItemLock = {
 }
 
 /**
+ * LastRun
+ *
+ * How the latest pipeline run in a workspace ended.
+ */
+export type LastRun = {
+  /**
+   * Status
+   */
+  status: string
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Ended
+   */
+  ended?: string | null
+  /**
+   * Failed Stages
+   */
+  failed_stages?: Array<string>
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -6453,6 +6477,15 @@ export type Workspace = {
    */
   running?: boolean
   /**
+   * Running Stages
+   */
+  running_stages?: Array<string>
+  /**
+   * Running Since
+   */
+  running_since?: string | null
+  last_run?: LastRun | null
+  /**
    * Operator Id
    */
   operator_id: string
@@ -6520,6 +6553,15 @@ export type WorkspaceInfo = {
    * Running
    */
   running?: boolean
+  /**
+   * Running Stages
+   */
+  running_stages?: Array<string>
+  /**
+   * Running Since
+   */
+  running_since?: string | null
+  last_run?: LastRun | null
 }
 
 /**

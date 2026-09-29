@@ -659,6 +659,7 @@ export type {
   IssuePatch,
   IssuePost,
   ItemLock,
+  LastRun,
   ListReleaseSharesData,
   ListReleaseSharesError,
   ListReleaseSharesErrors,

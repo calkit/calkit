@@ -1,5 +1,5 @@
 import type { AnyRouter } from "@tanstack/react-router"
-import mixpanel from "mixpanel-browser"
+import mixpanel, { type Mixpanel } from "mixpanel-browser"
 
 export type AnalyticsConsent = "granted" | "denied"
 
@@ -11,13 +11,23 @@ export const analyticsEnabled = Boolean(import.meta.env.VITE_MIXPANEL_TOKEN)
 
 export const privacyPolicyUrl = "https://docs.calkit.org/privacy/"
 
+// Anonymous page views go to their own Mixpanel instance, configured to keep
+// nothing on the device and never send the visitor's IP address. Since it
+// stores no identifier and can't be tied to an account, it can run without
+// consent; the default instance, which identifies signed-in users, still
+// waits for it.
+let anonymous: Mixpanel | null = null
+
 let lastTrackedHref: string | null = null
 
 function trackPageView(): void {
   const href = window.location.href
   if (href === lastTrackedHref) return
   lastTrackedHref = href
-  mixpanel.track_pageview()
+  // A visitor who allowed analytics gets page views on their account; everyone
+  // else gets anonymous ones
+  if (getAnalyticsConsent() === "granted") mixpanel.track_pageview()
+  else anonymous?.track_pageview()
 }
 
 // Mixpanel is initialized opted out, and it records opt-outs the same way
@@ -86,8 +96,23 @@ export function initAnalytics(router: AnyRouter): void {
     if (granted) mixpanel.opt_in_tracking()
     else mixpanel.opt_out_tracking({ delete_user: false })
   }
+  if (analyticsEnabled && !anonymous) {
+    anonymous = mixpanel.init(
+      import.meta.env.VITE_MIXPANEL_TOKEN,
+      {
+        track_pageview: false,
+        disable_persistence: true,
+        ip: false,
+      },
+      "anonymous",
+    )
+  }
+  // The anonymous instance carries a marker so it can be filtered or excluded
+  // alongside the bot tag, which both instances receive
+  anonymous?.register({ anonymous: true })
   if (navigator.webdriver) {
     mixpanel.register({ bot: true })
+    anonymous?.register({ bot: true })
   }
   trackPageView()
   router.subscribe("onResolved", ({ hrefChanged }) => {

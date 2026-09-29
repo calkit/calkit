@@ -52,4 +52,21 @@ describe("removeLeadingHeading", () => {
     expect(removeLeadingHeading("Body only")).toBe("Body only")
     expect(removeLeadingHeading("")).toBe("")
   })
+
+  it("recognizes every leading H1 form", () => {
+    // Closing hashes and trailing space are optional
+    expect(removeLeadingHeading("# Project #\nBody")).toBe("Body")
+    // Up to three leading spaces still make a heading...
+    expect(removeLeadingHeading("   # Project\nBody")).toBe("Body")
+    // ...but four make an indented code block, whose `#` is content
+    expect(removeLeadingHeading("    # not a heading\nBody")).toBe(
+      "    # not a heading\nBody",
+    )
+    // Setext H1: a paragraph line underlined with `=`
+    expect(removeLeadingHeading("Project\n=====\n\nBody")).toBe("\nBody")
+    // A `-` underline is an H2, which is content
+    expect(removeLeadingHeading("Project\n-----\nBody")).toBe(
+      "Project\n-----\nBody",
+    )
+  })
 })

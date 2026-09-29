@@ -1344,7 +1344,6 @@ def _launchd_plist_path(at_boot: bool) -> str:
 
 def _launchd_plist(at_boot: bool) -> bytes:
     import plistlib
-    import pwd
 
     plist: dict[str, Any] = {
         "Label": SERVICE_LABEL,
@@ -1358,6 +1357,8 @@ def _launchd_plist(at_boot: bool) -> bytes:
         "EnvironmentVariables": {"HOME": config.get_user_home()},
     }
     if at_boot:
+        import pwd
+
         # From the OS rather than the environment, which says root under
         # sudo, and this must never run as root
         plist["UserName"] = pwd.getpwuid(os.getuid()).pw_name

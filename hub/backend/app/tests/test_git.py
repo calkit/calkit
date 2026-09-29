@@ -648,6 +648,22 @@ def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
     (ours / "inside.csv").symlink_to(ours / "ours.csv")
     assert tree.is_safe_symlink("inside.csv")
     assert tree.read_bytes("inside.csv") == b"ours\n"
+    # A symlinked directory is a way out too, including to a directory
+    # beyond it that isn't a link itself, so listing one finds nothing
+    (victim / "sub").mkdir()
+    (victim / "sub" / "more.csv").write_text("more,secret\n")
+    (ours / "dirlink").symlink_to(victim)
+    for path in ("dirlink", "dirlink/sub"):
+        with pytest.raises(HTTPException):
+            tree.listdir(path)
+    with pytest.raises(HTTPException):
+        tree.read_bytes("dirlink/sub/more.csv")
+    # A link out of the tree is sized as the link, so a listing of our own
+    # directory says nothing about the file it points to
+    assert tree.size("link.csv") == os.lstat(ours / "link.csv").st_size
+    assert tree.size("link.csv") != len("secret,data\n")
+    assert tree.size("inside.csv") == 5
+    assert "ours.csv" in tree.listdir(None)
 
 
 def test_remote_head_cache_is_bypassed_when_the_caller_wants_the_truth(

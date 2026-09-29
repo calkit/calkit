@@ -2016,11 +2016,18 @@ class WorkingTree(RepoTree):
         fpath = self._abs(path)
         if fpath is None:
             raise HTTPException(404)
+        # A symlink leaving the tree is sized as the link, not its target,
+        # so a listing can't report on files outside. Only links pay for
+        # resolving, since listings size every entry.
+        if os.path.islink(fpath) and not self.is_safe_symlink(path):
+            return os.lstat(fpath).st_size
         return os.path.getsize(fpath)
 
     def listdir(self, path: str | None) -> list[str]:
         fpath = self._abs(path)
-        if fpath is None:
+        # Resolved, since a symlinked directory on the way is as good a way
+        # out as `..`, and a listing names what's there
+        if fpath is None or (path and not self.is_safe_symlink(path)):
             raise HTTPException(404)
         return os.listdir(fpath)
 

@@ -1,12 +1,17 @@
 # TinyTeX image
 
+<!-- calkit values path=images/latex/sizes.json -->
+
 Based on
 [carteakey/tinytex-docker](https://github.com/carteakey/tinytex-docker),
 the purpose of this image is to provide most of the packages scientific
-articles need without the 6 GB of `texlive/texlive:latest-full`,
-a 2.7 GB download.
-Instead, this one is about 700 MB unpacked and under 400 MB to download,
-which speeds up downloads.
+articles need without the <!-- calkit value key=texlive_full.unpacked_gb format="{:.1f}" -->6.2<!-- /calkit value --> GB
+of `texlive/texlive:latest-full`, a <!-- calkit value key=texlive_full.download_gb format="{:.1f}" -->2.7<!-- /calkit value --> GB
+download.
+Instead, this one is <!-- calkit value key=calkit.unpacked_mb format="{:.0f}" -->703<!-- /calkit value --> MB
+unpacked and <!-- calkit value key=calkit.download_mb format="{:.0f}" -->386<!-- /calkit value --> MB
+to download, which speeds up downloads.
+These are measured for amd64, as described [below](#measuring-its-size).
 When run through `calkit latex build`,
 missing packages are installed into the project's `.calkit/local/texmf`
 directory the first time they're needed.
@@ -101,3 +106,84 @@ its checks won't run until someone pushes to it or closes and reopens it.
 
 The image is versioned on its own rather than with the Calkit release,
 since it changes rarely.
+
+## Measuring its size
+
+The sizes above are measured by this block,
+which runs in the pipeline at the root of this repo,
+against the image `calkit latex` uses by default:
+
+<!-- calkit stage name=sizes environment=dev
+     inputs=[calkit/latex.py]
+     outputs=[{path: images/latex/sizes.json, storage: git}] -->
+
+```python
+import json
+import re
+import subprocess
+
+
+def run(*args: str) -> str:
+    res = subprocess.run(args, capture_output=True, text=True, check=True)
+    return res.stdout
+
+
+def sizes(image: str) -> dict:
+    # The files inside the container, since what Docker reports depends
+    # on the platform and storage driver, and the compressed layers a
+    # registry serves
+    du = "du -sx --block-size=1 / 2>/dev/null | cut -f1"
+    unpacked = int(
+        run(
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            du,
+        )
+    )
+    fmt = (
+        "{{range .Manifest.Manifests}}{{if eq .Platform.Architecture "
+        '"amd64"}}{{.Digest}}{{end}}{{end}}'
+    )
+    digest = run(
+        "docker", "buildx", "imagetools", "inspect", image, "--format", fmt
+    ).strip()
+    manifest = json.loads(
+        run(
+            "docker",
+            "buildx",
+            "imagetools",
+            "inspect",
+            "--raw",
+            image.rsplit(":", 1)[0] + "@" + digest,
+        )
+    )
+    download = sum(layer["size"] for layer in manifest["layers"])
+    return {
+        "image": image,
+        "unpacked_mb": unpacked / 1e6,
+        "download_mb": download / 1e6,
+        "unpacked_gb": unpacked / 1e9,
+        "download_gb": download / 1e9,
+    }
+
+
+with open("calkit/latex.py") as f:
+    image = re.search(r'DEFAULT_LATEX_IMAGE = "([^"]+)"', f.read()).group(1)
+with open("images/latex/sizes.json", "w") as f:
+    json.dump(
+        {
+            "calkit": sizes(image),
+            "texlive_full": sizes("texlive/texlive:latest-full"),
+        },
+        f,
+        indent=2,
+    )
+    f.write("\n")
+```

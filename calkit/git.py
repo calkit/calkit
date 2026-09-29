@@ -251,19 +251,33 @@ def ensure_path_is_ignored(
     # No-op if Git already ignores this path.
     if target_repo.ignored(target_path):
         return
+    # A project in a subdirectory of the repo keeps its rules in its own
+    # .gitignore, relative to it, so they go wherever the project goes
+    gitignore_dir, entry = target_repo.working_dir, target_path
+    if target_repo is repo:
+        root = Path(repo.working_dir).resolve()
+        cwd = Path.cwd().resolve()
+        abs_path = (root / target_path).resolve()
+        if (
+            cwd != root
+            and cwd.is_relative_to(root)
+            and abs_path.is_relative_to(cwd)
+        ):
+            gitignore_dir = str(cwd)
+            entry = abs_path.relative_to(cwd).as_posix()
     # Read gitignore first to check if the path is already ignored
     # If not, we don't want to add a line for it since it was added
     # TODO: Add an option to remove cached (`git rm --cached`)
-    gitignore_path = os.path.join(target_repo.working_dir, ".gitignore")
+    gitignore_path = os.path.join(gitignore_dir, ".gitignore")
     if os.path.isfile(gitignore_path):
         with open(gitignore_path) as f:
             gitignore_txt = f.read()
         lines = [line for line in gitignore_txt.splitlines() if line]
-        if target_path in lines:
+        if entry in lines:
             # The direct rule exists; also remove any stale negation that
             # follows it, otherwise the negation wins and the path stays
             # unignored.
-            negation_variants = [f"!{target_path}", f"!/{target_path}"]
+            negation_variants = [f"!{entry}", f"!/{entry}"]
             stale = [n for n in negation_variants if n in lines]
             if not stale:
                 return
@@ -274,12 +288,12 @@ def ensure_path_is_ignored(
             return True
         # Remove any stale negations for this path so the ignore rule takes
         # effect cleanly without accumulating contradictory entries.
-        negation_variants = [f"!{target_path}", f"!/{target_path}"]
+        negation_variants = [f"!{entry}", f"!/{entry}"]
         stale = [n for n in negation_variants if n in lines]
         if stale:
             for n in stale:
                 lines.remove(n)
-            lines.append(target_path)
+            lines.append(entry)
             with open(gitignore_path, "w") as f:
                 f.write("\n".join(lines))
             return True
@@ -289,7 +303,7 @@ def ensure_path_is_ignored(
             and os.path.getsize(gitignore_path) > 0
         ):
             f.write("\n")
-        f.write(f"{target_path}\n")
+        f.write(f"{entry}\n")
         return True
 
 

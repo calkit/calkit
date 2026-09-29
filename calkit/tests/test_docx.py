@@ -5,6 +5,8 @@ Word's own import of the compiled paper, ``export.docx`` is ``to-docx``'s
 output, ``returned.docx`` has a reviewer's tracked edits and a comment,
 ``accepted.docx`` is that after accepting every change in Word, and
 ``resolved.docx`` additionally has the exported thread resolved.
+The ``libreoffice-*.docx`` fixtures are made by
+``make-libreoffice-fixtures.py``; see the README there.
 """
 
 import json
@@ -173,6 +175,80 @@ def test_latex_source_helpers(project: Path) -> None:
     assert calkit.latex.make_bookmark_name("paper/main.tex", 19).startswith(
         "ck_"
     )
+    # Display math is a block of its own through its closing line, and the
+    # prose after it starts another
+    eq = next(b for b in blks if b.display)
+    assert eq.display == "equation" and eq.text == ""
+    assert eq.lines[-1].text == "\\end{equation}"
+    after = blks[blks.index(eq) + 1]
+    assert after.text.startswith("where is the thrust")
+    assert eq.rows == [
+        (
+            "\\[\n  \\frac{\\Delta U}{U_\\infty} = "
+            "\\frac{C_T}{8 (1 + k x/D)^2},\n  \n\\]",
+            True,
+        )
+    ]
+    # Rows of an align are numbered one by one, unless marked otherwise
+    src = [
+        "\\begin{align}",
+        "  a &= b, \\label{eq:a} \\\\",
+        "  c &= \\begin{cases} 1 \\\\ 2 \\end{cases} \\nonumber \\\\",
+        "  e &= f.",
+        "\\end{align}",
+        "Then \\[ x = y \\] inline, and",
+        "\\begin{equation*} z \\end{equation*}",
+        "ends it.",
+    ]
+    disp = calkit.latex.blocks(
+        [calkit.latex.SourceLine("x.tex", i + 1, t) for i, t in enumerate(src)]
+    )
+    assert [b.display for b in disp] == ["align", None, "equation*", None]
+    assert [n for _, n in disp[0].rows] == [True, False, True]
+    assert "cases" in disp[0].rows[1][0] and "label" not in disp[0].rows[0][0]
+    assert disp[2].rows == [("\\[ z \\]", False)]
+    # An equation edited in Word lands in the source's own spelling: the
+    # converter reads macros, wrappers, and function names differently
+    block = calkit.latex.Block(
+        [
+            calkit.latex.SourceLine("x.tex", i + 1, t)
+            for i, t in enumerate(
+                [
+                    "\\begin{equation}",
+                    "  K_{\\mathrm{eq}} = \\frac{\\prod (\\sigma_j}{\\prod",
+                    "  (\\beta_j} + \\ln x",
+                    "\\end{equation}",
+                ]
+            )
+        ]
+    )
+    sent = "K_{eq} = \\frac{\\prod(\\sigma_{j}}{\\prod(\\beta_{j}} + \\ln x"
+    assert calkit.latex.apply_math_edit(
+        block, sent, sent.replace("\\prod", "\\sum")
+    ) == [
+        "\\begin{equation}",
+        "  K_{\\mathrm{eq}} = \\frac{\\sum (\\sigma_j}{\\sum",
+        "  (\\beta_j} + \\ln x",
+        "\\end{equation}",
+    ]
+    edited = calkit.latex.apply_math_edit(
+        block, sent, sent.replace("\\beta_{j}}", "\\beta_{j}} \\cdot 2")
+    )
+    assert edited is not None and "(\\beta_j}\\cdot 2 + \\ln x" in edited[2]
+    edited = calkit.latex.apply_math_edit(
+        block, sent, sent.replace("\\ln x", "ln y")
+    )
+    assert edited is not None and edited[2].endswith("\\ln y")
+    assert calkit.latex.apply_math_edit(block, sent, "q = r") is None
+    # What LibreOffice respells on saving an unchanged equation isn't a
+    # change
+    assert calkit.latex.math_tokens(
+        "\\begin{aligned} K & = \\frac{a}{b},\\quad {}^{i}\\ln x "
+        "\\end{aligned}"
+    ) == calkit.latex.math_tokens(
+        "\\begin{array}{r} K\\text{\\&}\\text{=}\\frac{a}{b},^{i}ln x "
+        "\\end{array}"
+    )
 
 
 def test_docx_round_trip(
@@ -194,13 +270,16 @@ def test_docx_round_trip(
         encoding="utf-8",
     )
     runs: list[list[str]] = []
+    run = subprocess.run
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
             calkit.cli.latex.subprocess,
             "run",
-            lambda cmd, **kw: runs.append(cmd),
+            lambda cmd, **kw: (
+                runs.append(cmd) if "calkit" in cmd else run(cmd, **kw)
+            ),
         )
-        calkit.cli.latex.to_docx("paper/main.pdf")
+        calkit.cli.latex.to_docx("paper/main.pdf", engine="word")
     assert runs and runs[0][-3:] == ["calkit", "run", "build-paper"]
     Path("calkit.yaml").write_text("", encoding="utf-8")
     doc = calkit.docx.Document("paper/main-for-review.docx")
@@ -209,24 +288,57 @@ def test_docx_round_trip(
     assert original.source == "paper/main.tex"
     assert original.id
     assert doc.tracking and doc.protection is None
+    # Package parts keep their default namespace, since LibreOffice refuses
+    # a document whose relationships are prefixed
+    assert doc.parts["word/_rels/document.xml.rels"].startswith(
+        b"<?xml version='1.0' encoding='UTF-8'?>\n<Relationships xmlns="
+    )
+    assert b"<Types xmlns=" in doc.parts["[Content_Types].xml"]
     paras = doc.paragraphs
     assert sum(p.bookmark is not None for p in paras) == len(
         original.paragraphs
-    )
+    ) + len(original.equations)
     assert all(
-        original.paragraphs[p.bookmark] == p.text for p in paras if p.bookmark
+        original.paragraphs[p.bookmark] == p.text
+        for p in paras
+        if p.bookmark in original.paragraphs
     )
     # The .tex thread went out as a Word comment with its reply linked
+    # The display equation went in converted from the source, numbered as
+    # in the PDF, in place of Word's picture of it
+    eq_name = calkit.latex.make_bookmark_name("paper/methods.tex", 15)
+    assert list(original.equations) == [eq_name]
+    assert "\\frac{C_{T}}{8(1 + kx/D)^{2}}" in original.equations[eq_name]
+    math, pending = doc.equations([eq_name])[eq_name]
+    assert math is not None and pending is None
+    assert any(p.text == "(1)" for p in paras)
+    # Inline math Word left as text went in as equations too, leaving the
+    # prose around it, and a table cell's value after it, alone
+    inline = next(p for p in paras if "inline equation" in p.text)
+    assert inline.element is not None
+    assert inline.element.find(f"{{{calkit.docx.M}}}oMath") is not None
+    assert "contains an inline equation and a hyphenated" in inline.text
+    assert any(
+        p.text.startswith("Growth rate") and "0.05" in p.text for p in paras
+    )
+    assert not any(p.text.strip() in (", (1)", ",(1)") for p in paras)
     comments = doc.comments
     assert [c.author for c in comments] == ["T. Author", "P. Bachant"]
     assert comments[1].parent_id == comments[0].para_id
     model = next(p for p in paras if p.text.startswith("The mean velocity"))
     assert comments[0].bookmark == model.bookmark
-    records = os.listdir(calkit.latex.DOCX_EXPORTS_DIR)
-    assert records == [f"{original.id}.json"]
-    export = LatexDocxExport.model_validate_json(
-        Path(calkit.latex.DOCX_EXPORTS_DIR, records[0]).read_text()
+    # The record stays on this machine unless asked for, named by time
+    records = os.listdir(calkit.latex.LOCAL_DOCX_EXPORTS_DIR)
+    assert len(records) == 1
+    assert re.fullmatch(
+        rf"\d{{4}}-\d\d-\d\dT\d\d-\d\d-\d\d-{original.id}\.json",
+        records[0],
     )
+    assert not os.path.exists(calkit.latex.DOCX_EXPORTS_DIR)
+    export = LatexDocxExport.model_validate_json(
+        Path(calkit.latex.LOCAL_DOCX_EXPORTS_DIR, records[0]).read_text()
+    )
+    assert export.inline_equations > 0
     assert set(export.files) == {
         "paper/main.tex",
         "paper/methods.tex",
@@ -255,8 +367,8 @@ def test_docx_round_trip(
     assert "not yet accepted" in res.stderr + res.stdout
     record = json.loads(
         Path(
-            calkit.latex.DOCX_MERGES_DIR,
-            os.listdir(calkit.latex.DOCX_MERGES_DIR)[0],
+            calkit.latex.LOCAL_DOCX_MERGES_DIR,
+            os.listdir(calkit.latex.LOCAL_DOCX_MERGES_DIR)[0],
         ).read_text(encoding="utf-8")
     )
     assert [c["author"] for c in record["changes"]] == ["Bachant, Pete"] * 2
@@ -364,19 +476,25 @@ def test_docx_round_trip(
     assert "% COMMENT resolved=true\n%   T. Author:" in methods
     parsed = calkit.latex.parse_comments(methods.split("\n"))
     assert [c.resolved for c in parsed] == [True]
+    # With --log, the record is kept in the project too
     os.remove("paper/main-for-review.docx")
-    calkit.cli.latex.to_docx("paper/main.pdf")
+    calkit.cli.latex.to_docx("paper/main.pdf", engine="word", log=True)
+    assert len(os.listdir(calkit.latex.DOCX_EXPORTS_DIR)) == 1
+    assert os.listdir(calkit.latex.DOCX_EXPORTS_DIR)[0] in os.listdir(
+        calkit.latex.LOCAL_DOCX_EXPORTS_DIR
+    )
     exported = calkit.docx.Document("paper/main-for-review.docx").comments
     assert [c.done for c in exported if c.author == "T. Author"] == [True]
     assert Path("paper/main.tex").read_text(encoding="utf-8") == main
-    merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
+    merges = sorted(os.listdir(calkit.latex.LOCAL_DOCX_MERGES_DIR))
     assert len(merges) == 7
     fixture = returned.read_original()
     assert fixture is not None
     fixture_id = fixture.id
-    assert merges[0].startswith(fixture_id) and merges[0].endswith(".json")
+    # Named by time first, so the first listed is the first merged
+    assert merges[0].endswith(f"-{fixture_id}.json")
     merge = LatexDocxMerge.model_validate_json(
-        Path(calkit.latex.DOCX_MERGES_DIR, merges[-1]).read_text()
+        Path(calkit.latex.LOCAL_DOCX_MERGES_DIR, merges[-1]).read_text()
     )
     assert set(merge.files) == {
         "paper/main.tex",
@@ -395,3 +513,105 @@ def test_docx_round_trip(
     )
     assert res.returncode != 0
     assert "not exported by Calkit" in res.stderr + res.stdout
+    # An equation edited in Word merges into the source, though Word moves
+    # a bookmark at the start of a table cell out to the row
+    doc = calkit.docx.Document("paper/main-for-review.docx")
+    # A merge above took a line out ahead of the equation
+    sent_doc = doc.read_original()
+    assert sent_doc is not None
+    eq_name = list(sent_doc.equations)[0]
+    m_t = f"{{{calkit.docx.M}}}t"
+    for t in doc.doc.iter(m_t):
+        if t.text == "8":
+            t.text = "4"
+    start = next(
+        b
+        for b in doc.doc.iter(f"{{{calkit.docx.W}}}bookmarkStart")
+        if b.get(f"{{{calkit.docx.W}}}name") == eq_name
+    )
+    start_para = doc._parents[start]
+    cell = doc._parents[start_para]
+    row = doc._parents[cell]
+    start_para.remove(start)
+    row.insert(list(row).index(cell), start)
+    doc.save("reviews/eq.docx")
+    subprocess.run(
+        ["calkit", "latex", "merge-docx", "reviews/eq.docx"], check=True
+    )
+    methods = Path("paper/methods.tex").read_text(encoding="utf-8")
+    assert "\\frac{C_T}{4 (1 + k x/D)^2}" in methods
+    # A review done in LibreOffice merges like one done in Word, though
+    # LibreOffice rewrites every equation's markup on saving and doesn't
+    # track changes inside one. The source has moved on since the export.
+    for name in ["returned", "accepted"]:
+        shutil.copy(
+            FIXTURES / f"libreoffice-{name}.docx", f"reviews/lo-{name}.docx"
+        )
+    res = subprocess.run(
+        ["calkit", "latex", "merge-docx", "reviews/lo-returned.docx"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "not yet accepted" in res.stderr + res.stdout
+    assert "Wakes really matter" not in Path("paper/main.tex").read_text(
+        encoding="utf-8"
+    )
+    assert "\\frac{C_P}{" in Path("paper/methods.tex").read_text(
+        encoding="utf-8"
+    )
+    subprocess.run(
+        ["calkit", "latex", "merge-docx", "reviews/lo-accepted.docx"],
+        check=True,
+    )
+    main = Path("paper/main.tex").read_text(encoding="utf-8")
+    methods = Path("paper/methods.tex").read_text(encoding="utf-8")
+    assert "Wakes really matter" in main
+    assert (
+        '% COMMENT highlight={text: "reasonably well"}\n'
+        "%   Libre Reviewer:\n"
+        "%     Quantify this.\n"
+    ) in main
+    assert "\\frac{C_P}{4 (1 + k x/D)^2}" in methods
+    assert "Edited this equation" not in methods
+    # Without Word, TeX4ht and LibreOffice make the copy from the source,
+    # leaving nothing beside it, and it anchors and merges the same way
+    if shutil.which("make4ht") and calkit.docx.find_soffice():
+        # A figure for TeX4ht to convert: a blank one-page PDF
+        objs = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>",
+        ]
+        pdf, offsets = b"%PDF-1.4\n", []
+        for i, obj in enumerate(objs, 1):
+            offsets.append(len(pdf))
+            pdf += b"%d 0 obj\n%s\nendobj\n" % (i, obj)
+        xref = len(pdf)
+        pdf += b"xref\n0 4\n0000000000 65535 f \n"
+        pdf += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+        pdf += b"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n%d\n" % xref
+        Path("paper/fig1.pdf").write_bytes(pdf + b"%%EOF\n")
+        beside = sorted(os.listdir("paper"))
+        calkit.cli.latex.to_docx(
+            "paper/main.pdf",
+            output="reviews/lo-export.docx",
+            engine="libreoffice",
+        )
+        assert sorted(os.listdir("paper")) == beside
+        lo = calkit.docx.Document("reviews/lo-export.docx")
+        lo_sent = lo.read_original()
+        assert lo_sent is not None and len(lo_sent.equations) == 1
+        assert len(lo_sent.paragraphs) >= 15
+        assert any(p.text == "(1)" for p in lo.paragraphs)
+        main = Path("paper/main.tex").read_text(encoding="utf-8")
+        methods = Path("paper/methods.tex").read_text(encoding="utf-8")
+        res = subprocess.run(
+            ["calkit", "latex", "merge-docx", "reviews/lo-export.docx"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "Applied 0 edits" in res.stdout
+        assert Path("paper/main.tex").read_text(encoding="utf-8") == main
+        assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods

@@ -62,6 +62,21 @@ def test_ensure_path_is_ignored(tmp_dir):
     with open(".gitignore") as f:
         gi_root = f.read()
     assert "sub/test.txt" not in gi_root.splitlines()
+    # A project in a subdirectory keeps its rules in its own .gitignore,
+    # relative to it, whether given a repo-relative or absolute path
+    os.makedirs("proj/out")
+    os.makedirs("proj/figs")
+    root = os.getcwd()
+    os.chdir("proj")
+    try:
+        calkit.git.ensure_path_is_ignored(repo, path="proj/out")
+        calkit.git.ensure_path_is_ignored(repo, path=os.path.abspath("figs"))
+    finally:
+        os.chdir(root)
+    lines = Path("proj/.gitignore").read_text().splitlines()
+    assert [ln for ln in lines if ln] == ["out", "figs"]
+    assert Path(".gitignore").read_text() == gi_root
+    assert repo.ignored("proj/out", "proj/figs") == ["proj/out", "proj/figs"]
 
 
 def test_ensure_path_is_not_ignored(tmp_dir):

@@ -565,7 +565,15 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
         posted.append(json)
         return {"git_repo_url": remote["url"]}
 
+    existing: set[str] = set()
+
+    def get(path, **kwargs):
+        if path not in existing:
+            raise RuntimeError("404: Not found")
+        return {}
+
     monkeypatch.setattr(calkit.hub, "post", post)
+    monkeypatch.setattr(calkit.hub, "get", get)
     monkeypatch.setattr(
         calkit.hub, "get_current_user", lambda: {"github_username": "someone"}
     )
@@ -605,3 +613,16 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
         assert ck_info["git_repo_url"] == remote["url"]
         assert ck_info["owner"] == "someone"
         assert git("status", "--porcelain") == ""
+    # A project already on the hub, e.g., created there for this repo, is
+    # connected to without asking the hub to create it again
+    existing.add("/projects/someone/my-project")
+    n_posted = len(posted)
+    git("remote", "set-url", "origin", remote["url"])
+    with open("calkit.yaml", "w") as f:
+        f.write("name: my-project\ntitle: My project\n")
+    git("commit", "-q", "-am", "Disconnect")
+    result = runner.invoke(update_app, ["hub", "https://hub.test"])
+    assert result.exit_code == 0, result.output
+    assert "already exists" in result.output
+    assert len(posted) == n_posted
+    assert calkit.load_calkit_info()["hub"] == "https://hub.test"

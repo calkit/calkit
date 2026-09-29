@@ -239,6 +239,18 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "conda": _MINIFORGE_INSTALLER,
     "R": _R_INSTALLER,
+    # Converts equations for Word exports of LaTeX documents
+    "pandoc": {
+        "mac": {
+            "script": "brew install pandoc",
+            "path_add": _BREW_BINS,
+            "requires": ["brew"],
+        },
+        "windows": {
+            "script": _WINGET + "JohnMacFarlane.Pandoc",
+            "path_add": "%LOCALAPPDATA%\\Pandoc",
+        },
+    },
 }
 # Aliases for the binaries users actually invoke / list as deps; sharing
 # the same installer dict by reference keeps the entries in lockstep.
@@ -280,6 +292,12 @@ _PLATFORM_UNSUPPORTED: dict[str, dict[Platform, str]] = {
         "linux": (
             "Install VS Code with your system package manager; see "
             "https://code.visualstudio.com/docs/setup/linux."
+        ),
+    },
+    "pandoc": {
+        "linux": (
+            "Install Pandoc with your system package manager, e.g., "
+            "'sudo apt install pandoc', or see https://pandoc.org/installing."
         ),
     },
     "R": {

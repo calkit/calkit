@@ -171,7 +171,9 @@ def add(workspace_path: str, is_stage_output: bool = False):
         # Stage the updated info file
         repo.git.add(PATH_MAP_PATH)
     # Ensure the workspace dir is gitignored
-    calkit.git.ensure_path_is_ignored(repo, path=workspace_path)
+    calkit.git.ensure_path_is_ignored(
+        repo, path=os.path.abspath(workspace_path)
+    )
     repo.git.add(".gitignore")
     cleanup_sync_records()
     if not is_stage_output:

@@ -225,6 +225,17 @@ def delete_operator(
     return _out(operator)
 
 
+class LastRun(BaseModel):
+    """How the latest pipeline run in a workspace ended."""
+
+    status: str = Field(max_length=16)
+    started: str | None = Field(default=None, max_length=64)
+    ended: str | None = Field(default=None, max_length=64)
+    failed_stages: list[Annotated[str, Field(max_length=256)]] = Field(
+        default=[], max_length=50
+    )
+
+
 class WorkspaceInfo(BaseModel):
     """A workspace as an Operator reports it at check-in."""
 
@@ -237,8 +248,15 @@ class WorkspaceInfo(BaseModel):
     dirty: bool | None = None
     ahead: int | None = None
     behind: int | None = None
-    # Whether a pipeline run is in progress there
+    # Whether a pipeline run is in progress there, which stages, and since
+    # when, and how the latest one ended, so the hub can show it without
+    # connecting
     running: bool = False
+    running_stages: list[Annotated[str, Field(max_length=256)]] = Field(
+        default=[], max_length=50
+    )
+    running_since: str | None = Field(default=None, max_length=64)
+    last_run: LastRun | None = None
 
 
 class CheckIn(BaseModel):
@@ -288,6 +306,10 @@ def _update_workspaces(
         ws.ahead = info.ahead
         ws.behind = info.behind
         ws.running = info.running
+        ws.run_state = info.model_dump(
+            mode="json",
+            include={"running_stages", "running_since", "last_run"},
+        )
         ws.updated = now
         session.add(ws)
     for ws in existing.values():
@@ -432,6 +454,9 @@ def _list_workspaces(
                 ahead=ws.ahead,
                 behind=ws.behind,
                 running=ws.running,
+                running_stages=ws.run_state.get("running_stages") or [],
+                running_since=ws.run_state.get("running_since"),
+                last_run=ws.run_state.get("last_run"),
                 updated=ws.updated.isoformat(),
                 operator_id=operator.id,
                 operator_name=operator.name,

@@ -122,7 +122,14 @@ def test_operators(
     assert operator is not None
     assert len(operator.hashed_verifier) == 64
     # Checking in again updates workspaces in place, drops ones that are gone,
-    # and reports runs in progress
+    # and reports runs in progress, which stages, and how the last run ended,
+    # so the hub can show them without connecting
+    last_run = {
+        "status": "failed",
+        "started": "2026-09-28T09:00:00+00:00",
+        "ended": "2026-09-28T09:10:00+00:00",
+        "failed_stages": ["plot"],
+    }
     r = client.post(
         "/operators/check-in",
         headers=op_headers,
@@ -132,6 +139,9 @@ def test_operators(
                     "path": "/home/me/calkit/a",
                     "project": project,
                     "running": True,
+                    "running_stages": ["train"],
+                    "running_since": "2026-09-29T12:05:00+00:00",
+                    "last_run": last_run,
                 },
                 {"path": "/home/me/calkit/b", "project": "someone/other"},
                 {"path": "/home/me/misc"},
@@ -148,6 +158,10 @@ def test_operators(
         "/home/me/misc",
     ]
     assert mine[2]["project"] is None
+    assert mine[0]["running"] and mine[0]["running_stages"] == ["train"]
+    assert mine[0]["running_since"] == "2026-09-29T12:05:00+00:00"
+    assert mine[0]["last_run"] == last_run
+    assert mine[1]["running_stages"] == [] and mine[1]["last_run"] is None
     # Workspaces are listed per project, matched case-insensitively
     owner, name = project.split("/")
     r = client.get(

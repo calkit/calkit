@@ -647,6 +647,14 @@ class OperatorWorkspace(SQLModel, table=True):
     behind: int | None = None
     # Whether a pipeline run held DVC's lock at the check-in
     running: bool = False
+    # Which stages were running and since when, and how the latest run
+    # ended, as the Operator reported them
+    run_state: dict = Field(
+        default_factory=dict,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="{}"
+        ),
+    )
     updated: datetime = Field(default_factory=utcnow)
     # Relationships
     operator: Operator = Relationship(back_populates="workspaces")

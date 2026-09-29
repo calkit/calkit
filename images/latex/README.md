@@ -107,7 +107,7 @@ its checks won't run until someone pushes to it or closes and reopens it.
 The image is versioned on its own rather than with the Calkit release,
 since it changes rarely.
 
-## Measuring its size
+## Measuring image size
 
 The sizes above are measured by this block,
 which runs in the pipeline at the root of this repo,

@@ -69,7 +69,19 @@ export const repoImagePath = (src: string, dir = ""): string | null => {
   }
   // A leading slash is the repo root, as on GitHub
   const parts = (src.startsWith("/") ? [] : dir.split("/")).filter(Boolean)
-  for (const part of src.split(/[?#]/)[0].split("/")) {
+  for (const raw of src.split(/[?#]/)[0].split("/")) {
+    // Written URL-encoded in Markdown, e.g., "my%20logo.png", but named
+    // plainly in the repo. An encoded separator would smuggle in a path
+    // this loop never sees, so one is refused.
+    let part: string
+    try {
+      part = decodeURIComponent(raw)
+    } catch {
+      return null
+    }
+    if (/[/\\]/.test(part)) {
+      return null
+    }
     if (part === "..") {
       if (parts.length === 0) {
         return null
@@ -263,28 +275,33 @@ const Markdown = ({
     }
     // Fetched through the hub, so a private project's images load too,
     // from Git or DVC alike
-    const RepoImage = ({ src, alt, ...props }: any) => {
-      const path = repoImagePath(String(src ?? ""), repoDir)
+    const FetchedImage = ({ path, alt, ...props }: any) => {
       const { data } = useQuery({
         queryKey: ["projects", repoOwner, repoName, "contents", path, repoRef],
         queryFn: () =>
           ProjectsService.getProjectContents({
             owner_name: repoOwner,
             project_name: repoName,
-            path: String(path),
+            path,
             ref: repoRef,
           }).then((response) => response.data),
-        enabled: path !== null,
         retry: false,
       })
-      if (path === null) {
-        return <img src={src} alt={alt ?? ""} {...props} />
-      }
-      const ext = path.split(".").pop()?.toLowerCase() ?? ""
+      const ext = String(path).split(".").pop()?.toLowerCase() ?? ""
       const resolved = data?.content
         ? `data:${IMAGE_TYPES[ext] ?? "image/png"};base64,${data.content}`
         : data?.url ?? undefined
-      return resolved ? <img src={resolved} alt={alt ?? ""} {...props} /> : null
+      return resolved ? <img {...props} src={resolved} alt={alt ?? ""} /> : null
+    }
+    // Only an image in the repo goes through the hub; anything else is
+    // left as written and never touches the query cache
+    const RepoImage = ({ src, alt, ...props }: any) => {
+      const path = repoImagePath(String(src ?? ""), repoDir)
+      return path === null ? (
+        <img {...props} src={src} alt={alt ?? ""} />
+      ) : (
+        <FetchedImage path={path} alt={alt} {...props} />
+      )
     }
     return RepoImage
   }, [repoOwner, repoName, repoRef, repoDir])

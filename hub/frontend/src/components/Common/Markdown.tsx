@@ -145,9 +145,23 @@ const inlineParagraph = ({ children, ...props }: any) => {
 }
 
 // Send prop to children of <pre> to differentiate if they are block code or not
+// The background lives on this scrolling box rather than on the inner <code>:
+// a block <code> is only as wide as the container, so when the content
+// overflows and scrolls, the area revealed to the right of it had no
+// background at all.
 const pre = ({ children, ...props }: any) => {
   return (
-    <Box as="pre" maxW="100%" overflowX="auto" {...props}>
+    <Box
+      as="pre"
+      maxW="100%"
+      overflowX="auto"
+      my={2}
+      p={2}
+      borderRadius="sm"
+      bg="gray.100"
+      _dark={{ bg: "whiteAlpha.300" }}
+      {...props}
+    >
       {React.Children.map(children, (child) => {
         return React.cloneElement(child, { insidePre: true })
       })}
@@ -157,13 +171,16 @@ const pre = ({ children, ...props }: any) => {
 
 const code = ({ insidePre = false, ...props }: codeProps) => {
   if (insidePre) {
-    // A block keeps its own line breaks; the <pre> around it scrolls.
+    // A block keeps its own line breaks; the <pre> around it scrolls and
+    // carries the background, so this must not paint one of its own on top.
     return (
       <Code
-        my={2}
+        bg="transparent"
+        _dark={{ bg: "transparent" }}
+        color="inherit"
         whiteSpace={"pre"}
         display={"block"}
-        p={2}
+        p={0}
         fontSize="0.9em"
         {...props}
       />

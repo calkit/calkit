@@ -10,6 +10,11 @@ import PresentationView from "../Presentations/PresentationView"
 
 interface FileContentProps {
   item: ContentsItem
+  /** Account and project the file belongs to, so Markdown images given by a
+   * repo path resolve against it, as they do on the project page. */
+  accountName?: string
+  projectName?: string
+  ref?: string
 }
 
 // Render a Quarto/R Markdown source as Markdown while keeping the leading
@@ -47,7 +52,12 @@ export function getLanguage(name: string): string {
   return "text"
 }
 
-function FileContent({ item }: FileContentProps) {
+function FileContent({
+  item,
+  accountName,
+  projectName,
+  ref,
+}: FileContentProps) {
   const { name, content, url } = item
   // Match extensions case-insensitively so all-caps names (FOO.PDF, IMG.PNG,
   // SLIDES.PPTX, …) render the same as their lowercase equivalents.
@@ -120,7 +130,20 @@ function FileContent({ item }: FileContentProps) {
         py={2}
         px={4}
       >
-        <Markdown>
+        <Markdown
+          repo={
+            accountName && projectName
+              ? {
+                  accountName,
+                  projectName,
+                  ref,
+                  dir: item.path.includes("/")
+                    ? item.path.slice(0, item.path.lastIndexOf("/"))
+                    : undefined,
+                }
+              : undefined
+          }
+        >
           {lowerName.endsWith(".qmd") ? qmdToMarkdown(decoded) : decoded}
         </Markdown>
       </Box>

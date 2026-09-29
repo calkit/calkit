@@ -94,6 +94,16 @@ describe("Markdown", () => {
     const preStyles = html.match(new RegExp(`\\.${preClass}\\{([^}]*)\\}`))?.[1]
     expect(preStyles).toContain("max-width:100%")
     expect(preStyles).toContain("overflow-x:auto")
+    // The background rides on the scrolling container, or the area a wide
+    // block scrolls into would sit on the bare page background.
+    expect(preStyles).toContain("background:")
+    const codeClass = html.match(
+      /<code[^>]*class="[^"]*\b(css-[a-z0-9]+)\b[^>]*>/i,
+    )?.[1]
+    const codeStyles = html.match(
+      new RegExp(`\\.${codeClass}\\{([^}]*)\\}`),
+    )?.[1]
+    expect(codeStyles).toContain("background:var(--chakra-colors-transparent)")
   })
 })
 

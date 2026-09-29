@@ -505,18 +505,16 @@ function ProjectView() {
                   return (
                     <Flex key={issue.number} alignItems={"flex-start"}>
                       {/* Checking off a pull request would close it without
-                          merging it, so they don't get a checkbox */}
-                      {issue.is_pull_request ? (
-                        <Box w={4} flexShrink={0} />
-                      ) : (
-                        <Checkbox
-                          isChecked={!isOpen}
-                          onChange={onTodoCheckbox}
-                          id={String(issue.number)}
-                          isDisabled={!userHasWriteAccess}
-                          mt={1}
-                        />
-                      )}
+                          merging it, so its checkbox is disabled */}
+                      <Checkbox
+                        isChecked={!isOpen}
+                        onChange={onTodoCheckbox}
+                        id={String(issue.number)}
+                        isDisabled={
+                          !userHasWriteAccess || issue.is_pull_request
+                        }
+                        mt={1}
+                      />
                       <Text ml={2}>
                         {" "}
                         {artifactHref ? (
@@ -537,7 +535,7 @@ function ProjectView() {
                               <Icon
                                 as={kindIcon}
                                 color={kindColor}
-                                mb={0.5}
+                                verticalAlign="-0.125em"
                                 mr={0.5}
                               />
                             </span>

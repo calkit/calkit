@@ -4547,7 +4547,9 @@ def map_paths(
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
         shutil.copy2(src_path, dest_path)
-        calkit.git.ensure_path_is_ignored(repo, path=dest_path)
+        calkit.git.ensure_path_is_ignored(
+            repo, path=os.path.abspath(dest_path)
+        )
     for copy_file in file_to_dir:
         src_path, dest_dir = validate_and_split(copy_file)
         if os.path.isfile(dest_dir):
@@ -4556,7 +4558,9 @@ def map_paths(
             os.makedirs(dest_dir, exist_ok=True)
         dest_path = os.path.join(dest_dir, os.path.basename(src_path))
         shutil.copy2(src_path, dest_path)
-        calkit.git.ensure_path_is_ignored(repo, path=dest_path)
+        calkit.git.ensure_path_is_ignored(
+            repo, path=os.path.abspath(dest_path)
+        )
     for replace_dir_with_dir in dir_to_dir_replace:
         src_dir, dest_dir = validate_and_split(replace_dir_with_dir)
         # This deletes the destination before copying, so the project root
@@ -4576,7 +4580,7 @@ def map_paths(
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
         shutil.copytree(src_dir, dest_dir)
-        calkit.git.ensure_path_is_ignored(repo, path=dest_dir)
+        calkit.git.ensure_path_is_ignored(repo, path=os.path.abspath(dest_dir))
     for merge_dir_to_dir in dir_to_dir_merge:
         src_dir, dest_dir = validate_and_split(merge_dir_to_dir)
         if os.path.isfile(dest_dir):

@@ -1,0 +1,101 @@
+# yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json
+owner: calkit
+name: calkit
+title: Calkit
+hub: https://calkit.io
+description: >-
+  Calkit's claims about itself, e.g., in its docs, computed by its own
+  pipeline so they stay true.
+
+questions:
+  - question: >-
+      Can Calkit convert LaTeX to docx and back again without losing
+      information, e.g., in math, or comments?
+    answer:
+      if same and pdf_same and eq_docx == eq_src and inline_docx == inline_src and threads_docx == threads_src:
+        >-
+        Yes, for the LaTeX/Word example: exported to Word and merged back
+        with no edits, its source comes back byte for byte and builds the
+        same PDF, and all {eq_src} display equation rows, {inline_src}
+        inline expressions and {threads_src} comment threads went into the
+        Word copy.
+      else: >-
+        Not yet: exported to Word and merged back with no edits, the
+        example's source came back unchanged: {same}; the PDF rebuilt the
+        same: {pdf_same}; {eq_docx} of {eq_src} display equation rows,
+        {inline_docx} of {inline_src} inline expressions and
+        {threads_docx} of {threads_src} comment threads went into Word.
+    evidence:
+      - kind: figure
+        path: docs/img/latex-word-round-trip.png
+      - kind: result
+        path: results/latex-word-round-trip.json
+        values:
+          same: source_unchanged
+          pdf_same: pdf_unchanged
+          eq_src: display_equations.source
+          eq_docx: display_equations.docx
+          inline_src: inline_equations.source
+          inline_docx: inline_equations.docx
+          threads_src: comment_threads.source
+          threads_docx: comment_threads.docx
+
+requirements:
+  - docker
+  - uv
+
+environments:
+  dev:
+    kind: uv
+    path: pyproject.toml
+    description: Calkit itself, from this checkout, with its dev tools.
+
+pipeline:
+  stages:
+    latex-word-round-trip:
+      kind: python-script
+      script_path: scripts/latex-word-round-trip.py
+      environment: dev
+      description: >-
+        Export the LaTeX/Word example to Word and merge it back, with no
+        edits, and count what went out and came back.
+      inputs:
+        - calkit/cli/latex.py
+        - calkit/docx.py
+        - calkit/latex.py
+        - examples/latex-word/calkit.yaml
+        - examples/latex-word/paper/main.tex
+        - examples/latex-word/paper/methods.tex
+        - examples/latex-word/paper/refs.bib
+        - examples/latex-word/scripts/plot-wake.py
+      outputs:
+        - results/latex-word-round-trip/original.pdf
+        - results/latex-word-round-trip/review.docx
+        - results/latex-word-round-trip/review.pdf
+        - results/latex-word-round-trip/rebuilt.pdf
+        - path: results/latex-word-round-trip.json
+          storage: git
+    latex-word-round-trip-figure:
+      kind: python-script
+      script_path: scripts/plot-latex-word-round-trip.py
+      environment: dev
+      inputs:
+        - results/latex-word-round-trip/original.pdf
+        - results/latex-word-round-trip/review.pdf
+        - results/latex-word-round-trip/rebuilt.pdf
+      outputs:
+        - path: docs/img/latex-word-round-trip.png
+          storage: git
+
+    latex-image-readme:
+      kind: markdown
+      target_path: images/latex/README.md
+      environment: dev
+
+figures:
+  - path: docs/img/latex-word-round-trip.png
+    title: LaTeX to Word and back
+    description: >-
+      A page of the LaTeX/Word example as built from LaTeX, as exported to
+      Word, and as built again after merging the Word copy back.
+    stage: latex-word-round-trip-figure

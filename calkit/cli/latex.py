@@ -1694,12 +1694,37 @@ def to_docx(
         bool,
         typer.Option("--force", "-f", help="Overwrite an existing export."),
     ] = False,
+    engine: Annotated[
+        str | None,
+        typer.Option(
+            "--engine",
+            help=(
+                "What makes the Word copy: 'word', which imports the "
+                "compiled PDF so the copy looks like it, or 'libreoffice', "
+                "which converts the source with TeX4ht's make4ht and then "
+                "LibreOffice. Defaults to Word where it's installed."
+            ),
+        ),
+    ] = None,
+    log: Annotated[
+        bool,
+        typer.Option(
+            "--log",
+            "-l",
+            help=(
+                "Also keep the export record in the project, under "
+                ".calkit/latex/docx-exports, rather than only on this "
+                "machine."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Export a Word copy of a LaTeX document for review.
 
-    Uses Word's own PDF import, so the copy looks like the PDF, then records
-    inside the file which source line each paragraph came from and the text
-    as sent, so ``merge-docx`` can bring edits and comments back.
+    Uses Word's own PDF import where Word is installed, so the copy looks
+    like the PDF, else TeX4ht and LibreOffice. Then records inside the file
+    which source line each paragraph came from and the text as sent, so
+    ``merge-docx`` can bring edits and comments back.
     """
     import datetime
     import sys
@@ -1745,11 +1770,157 @@ def to_docx(
         )
     if os.path.exists(output) and not force:
         raise_error(f"{output} already exists; use --force to overwrite it")
-    typer.echo("Converting the PDF with Word")
-    try:
-        calkit.docx.pdf_to_docx(pdf_path, output)
-    except RuntimeError as e:
-        raise_error(str(e))
+    if engine is None:
+        engine = "word" if calkit.docx.word_installed() else "libreoffice"
+    if engine == "word":
+        typer.echo("Converting the PDF with Word")
+        try:
+            calkit.docx.pdf_to_docx(pdf_path, output)
+        except RuntimeError as e:
+            raise_error(str(e))
+    elif engine == "libreoffice":
+        import shlex
+
+        if calkit.docx.find_soffice() is None:
+            raise_error(
+                "Converting without Word requires LibreOffice; install it "
+                "from https://www.libreoffice.org"
+            )
+        typer.echo("Converting the source with TeX4ht and LibreOffice")
+        # TeX4ht runs beside the source, since its ODT misses equations
+        # when built elsewhere, under a job name of its own so it leaves
+        # the PDF build's files alone. What it adds there is cleared up.
+        # The result goes in the project, where a containerized TeX can
+        # write it.
+        src_dir = os.path.dirname(source) or "."
+        job = Path(source).stem + "-calkit-docx"
+        build = os.path.join(calkit.latex.DOCX_BUILD_DIR, Path(source).stem)
+        shutil.rmtree(build, ignore_errors=True)
+        os.makedirs(build)
+        # The PDF build's bibliography, since TeX4ht doesn't run BibTeX
+        bbl = Path(source).with_suffix(".bbl")
+        if bbl.is_file():
+            shutil.copy(bbl, os.path.join(src_dir, job + ".bbl"))
+        m4h = [
+            "make4ht",
+            "--format",
+            "odt",
+            "--jobname",
+            job,
+            "--output-dir",
+            os.path.relpath(build, src_dir),
+            os.path.basename(source),
+            "mathml",
+        ]
+        environment = (
+            stages[stage_name].get("environment") if stage_name else None
+        )
+
+        def listing() -> set[str]:
+            # Files under the source's directory, not under hidden ones
+            out: set[str] = set()
+            for d, dirs, files in os.walk(src_dir):
+                dirs[:] = [x for x in dirs if not x.startswith(".")]
+                out.update(
+                    os.path.relpath(os.path.join(d, f), src_dir) for f in files
+                )
+            return out
+
+        existing = listing() - {job + ".bbl"}
+        # TeX can loop forever, e.g., older TeX4ht on a cases environment,
+        # so a run gets a time limit, and loses its LaTeX child with it
+        import time
+
+        limit = 600
+        timed_out = False
+        try:
+            if environment is None and calkit.check_dep_exists("make4ht"):
+                import signal
+
+                proc = subprocess.Popen(
+                    m4h,
+                    cwd=src_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=sys.platform != "win32",
+                )
+                try:
+                    out, _ = proc.communicate(timeout=limit)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    if sys.platform == "win32":
+                        subprocess.run(
+                            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                            capture_output=True,
+                        )
+                    else:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    out, _ = proc.communicate()
+            else:
+                # Inside the environment, e.g., a container, which stops
+                # with everything in it when the shell exits
+                run = shlex.join(m4h)
+                cd = (
+                    f"cd {shlex.quote(src_dir)} && if command -v timeout "
+                    f">/dev/null; then timeout {limit} {run}; else {run}; fi"
+                )
+                started = time.monotonic()
+                res = subprocess.run(
+                    _tex_cmd(
+                        ["sh", "-c", cd],
+                        environment=environment,
+                        no_check=True,
+                        verbose=False,
+                        dep="make4ht",
+                    ),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                # By the time, since the environment may not pass on the
+                # timeout's exit code
+                out = res.stdout
+                timed_out = bool(res.returncode) and (
+                    time.monotonic() - started >= limit
+                )
+            Path(build, "make4ht.log").write_bytes(out)
+        finally:
+            # TeX's log is kept with the build, for when something's wrong
+            tex_log = os.path.join(src_dir, job + ".log")
+            if os.path.isfile(tex_log):
+                shutil.move(tex_log, build)
+            # It also writes figures converted to images beside them, named
+            # after them
+            for leftover in listing() - existing:
+                name = os.path.basename(leftover)
+                if name.startswith(job) or re.search(
+                    r"-\.(png|svg|jpe?g)(\.4og)?$", name
+                ):
+                    os.remove(os.path.join(src_dir, leftover))
+        odt = os.path.join(build, job + ".odt")
+        has_text = False
+        if os.path.isfile(odt):
+            import zipfile
+
+            with zipfile.ZipFile(odt) as z:
+                content = z.read("content.xml")
+                has_text = b"<text:p" in content or b"<text:h" in content
+        if timed_out:
+            raise_error(
+                f"TeX4ht didn't finish converting the source in {limit} "
+                f"seconds; see the logs in {build}. An older TeX Live's "
+                "TeX4ht can loop on some math, e.g., cases."
+            )
+        if not has_text:
+            raise_error(
+                "TeX4ht could not convert the source; see the logs in "
+                f"{build}. Its make4ht comes with TeX Live's tex4ht package."
+            )
+        try:
+            calkit.docx.odt_to_docx(odt, output)
+        except RuntimeError as e:
+            raise_error(f"{e}\nTeX4ht's logs are in {build}")
+    else:
+        raise_error("--engine must be 'word' or 'libreoffice'")
     doc = calkit.docx.Document(output)
     lines = calkit.latex.flatten(source)
     blks = calkit.latex.blocks(lines)
@@ -1770,6 +1941,394 @@ def to_docx(
         doc.add_bookmark(para.element, name, 9000 + i)
         original[name] = para.text
         para_for_block.setdefault(id(blk), para.element)
+    # Display math goes in as Word equations converted from the source,
+    # replacing what Word's PDF import or TeX4ht made of it
+    equations: dict[str, str] = {}
+    left_as_imported = 0
+    has_display = any(b.display for b in blks)
+    # Word's PDF import leaves inline math as text and pictures, which
+    # TeX4ht doesn't, so only then does it need converting too
+    has_inline = engine == "word" and any(b.inline_math for b in blks)
+    inline_count = 0
+    if (has_display or has_inline) and calkit.docx.find_pandoc() is None:
+        import calkit.install
+
+        typer.echo("Pandoc converts equations from the source to Word's")
+        calkit.install.prompt_and_install(
+            "pandoc", interactive=sys.stdin.isatty()
+        )
+    if (has_display or has_inline) and calkit.docx.find_pandoc() is None:
+        warn(
+            "Pandoc isn't installed, so equations are as converted "
+            "with the document; run 'calkit install pandoc' to fix that"
+        )
+    elif has_display or has_inline:
+        from xml.etree import ElementTree as ET
+
+        eq_num = r"\(([A-Z]?\.?\d+(?:\.\d+)*[a-z]?)\)"
+        first: dict[int, int] = {}
+        last: dict[int, int] = {}
+        for i, blk in enumerate(matched):
+            if blk is not None:
+                first.setdefault(id(blk), i)
+                last[id(blk)] = i
+        # Displays grouped by the anchored prose paragraphs around them,
+        # only where nothing but displays sits between those in the source,
+        # so no unanchored prose is taken for equation fragments
+        groups: dict[tuple[int, int], list[calkit.latex.Block]] = {}
+        for j, blk in enumerate(blks):
+            if not blk.display:
+                continue
+            jb = next(
+                (k for k in range(j - 1, -1, -1) if id(blks[k]) in last), None
+            )
+            # The next prose after, skipping figures and tables, which can
+            # float in between
+            ja = next(
+                (
+                    k
+                    for k in range(j + 1, len(blks))
+                    if not blks[k].floating
+                    and jb is not None
+                    and first.get(id(blks[k]), -1) > last[id(blks[jb])]
+                ),
+                None,
+            )
+            if (
+                jb is None
+                or ja is None
+                or not all(b.display or b.floating for b in blks[jb + 1 : ja])
+            ):
+                left_as_imported += 1
+                continue
+            key = (last[id(blks[jb])], first[id(blks[ja])])
+            groups.setdefault(key, []).append(blk)
+        # What goes: what the gap holds that's too short or small to be
+        # anything but equation fragments, by the body element it's in.
+        # Word lays some displays out in tables of its own, which go too
+        # if all else they hold is the prose on either side, moved out.
+        emu_limit = int(1.5 * 914400)
+        w_body = doc.doc.find(calkit.docx._tag(calkit.docx.W, "body"))
+        assert w_body is not None
+        w_p = calkit.docx._tag(calkit.docx.W, "p")
+        w_tbl = calkit.docx._tag(calkit.docx.W, "tbl")
+
+        def text_of(el: Any) -> str:
+            return "".join(
+                t.text or ""
+                for t in el.iter(calkit.docx._tag(calkit.docx.W, "t"))
+            )
+
+        anchored = {p.element for p, b in zip(paras, matched) if b is not None}
+
+        def fragment(el: Any, context: str) -> bool:
+            # Never prose: anything anchored to the source, e.g., a caption
+            # that floated in, or reading like the prose around it, e.g.,
+            # the rest of a paragraph broken across a column. Equation
+            # fragments have few words, e.g., "Q(σprodβprod)νprod".
+            text = text_of(el)
+            words = set(re.findall(r"[a-zA-Z]{3,}", text.lower()))
+            # A single shared word is often a symbol, e.g., "RPFR =, (2)"
+            # after prose defining RPFR, and a number ends a display
+            prose_like = (
+                len(words) >= 2
+                and calkit.latex.similarity(text, context) >= 0.5
+                and not re.search(eq_num + r"\s*$", text)
+            )
+            if el in anchored or len(words) > 3 or prose_like:
+                return False
+            tall = any(
+                int(e.get("cy", "0")) > emu_limit
+                for e in el.iter(
+                    "{http://schemas.openxmlformats.org/drawingml/2006/"
+                    "wordprocessingDrawing}extent"
+                )
+            )
+            return not tall
+
+        def unit_of(el: Any) -> Any:
+            while doc._parents.get(el) is not w_body:
+                el = doc._parents[el]
+            return el
+
+        # Paragraphs in text boxes aren't listed, e.g., a drawn fraction bar
+        listed = {p.element for p in paras}
+        claimed: set[Any] = set()
+        plans = []
+        for (before, after), group in groups.items():
+            ends = {paras[before].element, paras[after].element}
+            context = " ".join(
+                b.text for b in (matched[before], matched[after]) if b
+            )
+            # Everything in the body from the one anchor to the other,
+            # since a paragraph of only math or a picture isn't listed
+            children = list(w_body)
+            lo = children.index(unit_of(paras[before].element))
+            hi = children.index(unit_of(paras[after].element))
+            gap: list[Any] = []
+            for unit in children[lo : hi + 1]:
+                if (
+                    unit in ends
+                    or unit in claimed
+                    or unit.tag
+                    not in (
+                        w_p,
+                        w_tbl,
+                    )
+                ):
+                    continue
+                held = [
+                    q
+                    for q in unit.iter(w_p)
+                    if q not in ends and (q in listed or unit.tag == w_p)
+                ]
+                if held and all(fragment(q, context) for q in held):
+                    gap.append(unit)
+            claimed.update(gap)
+            if not gap:
+                left_as_imported += len(group)
+                continue
+            numbers = re.findall(
+                eq_num,
+                " ".join(
+                    text_of(q)
+                    for u in gap
+                    for q in u.iter(w_p)
+                    if q not in ends
+                ),
+            )
+            # Word sometimes runs the last number into the next paragraph
+            lead = re.match(r"\s*" + eq_num + r"\s*", paras[after].text)
+            if lead is not None:
+                numbers.append(lead.group(1))
+            plans.append(
+                (group, gap, numbers, lead, paras[before], paras[after])
+            )
+        pieces = [
+            (blk, k, tex, numbered)
+            for group, *_ in plans
+            for blk in group
+            for k, (tex, numbered) in enumerate(blk.rows)
+        ]
+        preamble = "\n".join(
+            ln.text
+            for ln in lines
+            if re.match(
+                r"\s*\\(newcommand|renewcommand|providecommand|"
+                r"DeclareMathOperator|def)\b",
+                ln.text,
+            )
+        )
+        maths = calkit.docx.latex_to_omml([p[2] for p in pieces], preamble)
+        converted = dict(zip([(id(p[0]), p[1]) for p in pieces], maths))
+        bid = 100000
+        last_number: str | None = None
+        for group, gap, numbers, lead, before_para, after_para in plans:
+            if any(
+                converted.get((id(blk), k)) is None
+                for blk in group
+                for k in range(len(blk.rows))
+            ):
+                left_as_imported += len(group)
+                continue
+            rows: list[tuple[Any, str | None, str]] = []
+            for blk in group:
+                name = calkit.latex.make_bookmark_name(blk.path, blk.lineno)
+                for k, (tex, numbered) in enumerate(blk.rows):
+                    number = numbers.pop(0) if numbered and numbers else None
+                    # TeX4ht doesn't write every number out as text, so a
+                    # missing one follows on from the one before
+                    prev = re.fullmatch(r"(.*?)(\d+)", last_number or "")
+                    if numbered and number is None and prev is not None:
+                        number = prev.group(1) + str(int(prev.group(2)) + 1)
+                    last_number = number or last_number
+                    rows.append(
+                        (
+                            converted[(id(blk), k)],
+                            number,
+                            name if k == 0 else f"{name}_r{k + 1}",
+                        )
+                    )
+            # Prose inside a table of Word's that's going moves out of it
+            for para, unit, end in (
+                (before_para, gap[0], False),
+                (after_para, gap[-1], True),
+            ):
+                if para.element is not None and para.element in unit.iter(w_p):
+                    doc.move_out(para.element, unit, after=end)
+            doc.insert_equations(gap[0], rows, bid)
+            bid += len(rows)
+            for el in gap:
+                doc.remove(el)
+            if lead is not None and after_para.element is not None:
+                doc.trim_start(after_para.element, lead.end())
+            for math, _, name in rows:
+                equations[name] = ET.tostring(math, encoding="unicode")
+        # Inline math: in each anchored paragraph, what's between the words
+        # of prose on either side of it in the source, which may be text,
+        # pictures or both, goes in as an equation
+
+        def tokens(prose: str) -> list[str]:
+            # Numbers count, e.g., a table cell "0.05" after the math
+            return re.findall(r"[A-Za-z0-9]+", prose)
+
+        def find_start(text: str, cursor: int, before: str) -> int | None:
+            start = cursor
+            bw = tokens(before)[-2:]
+            tail = before
+            if bw:
+                m = re.compile(
+                    r"(?<![A-Za-z0-9])"
+                    + r"[^A-Za-z0-9]+".join(map(re.escape, bw))
+                    + r"(?![A-Za-z0-9])"
+                ).search(text, cursor)
+                if m is None:
+                    return None
+                start = m.end()
+                tail = before[before.rfind(bw[-1]) + len(bw[-1]) :]
+            # Past the prose's own punctuation, e.g., "(" before the math
+            for ch in tail.replace(" ", ""):
+                while start < len(text) and text[start].isspace():
+                    start += 1
+                if text[start : start + 1] != ch:
+                    break
+                start += 1
+            while start < len(text) and text[start].isspace():
+                start += 1
+            return start
+
+        def find_end(text: str, start: int, after: str) -> int | None:
+            aw = tokens(after)[:2]
+            head = (after[: after.find(aw[0])] if aw else after).replace(
+                " ", ""
+            )
+            end = len(text)
+            if aw:
+                m = re.compile(
+                    r"(?<![A-Za-z0-9])"
+                    + r"[^A-Za-z0-9]+".join(map(re.escape, aw))
+                    + r"(?![A-Za-z0-9])"
+                ).search(text, start)
+                if m is None:
+                    return None
+                end = m.start()
+            # Back before the prose's punctuation, e.g., ")" after the math
+            for ch in reversed(head):
+                while end > start and text[end - 1].isspace():
+                    end -= 1
+                if text[end - 1 : end] != ch:
+                    break
+                end -= 1
+            while end > start and text[end - 1].isspace():
+                end -= 1
+            return end
+
+        def mathlike(region: str, tex: str) -> bool:
+            # Math as Word renders it has no prose words in it
+            words = re.findall(r"[A-Za-z]{4,}", region)
+            return bool(region.strip()) and all(
+                w.lower() in tex.lower() for w in words
+            )
+
+        # Each as (paragraph, start, end, LaTeX), and for math Word broke
+        # across paragraphs, the rest in the next one as (paragraph, 0,
+        # end, None)
+        inline: list[tuple[Any, int, int, str | None]] = []
+        if has_inline:
+            by_block: dict[int, list[Any]] = {}
+            for p, b in zip(paras, matched):
+                if b is not None and p.element is not None:
+                    by_block.setdefault(id(b), []).append(p.element)
+            for b in blks:
+                els = by_block.get(id(b), [])
+                texts = [doc.linear_text(el) for el in els]
+                pi, cursor = 0, 0
+                for pre, tex, post in b.inline_math if els else []:
+                    # In the paragraph where the last one was, or a later
+                    # one when the block continues past a page or float
+                    for k in range(pi, len(els)):
+                        s0 = find_start(
+                            texts[k], cursor if k == pi else 0, pre
+                        )
+                        if s0 is None:
+                            continue
+                        e0 = find_end(texts[k], s0, post)
+                        if e0 is not None and mathlike(texts[k][s0:e0], tex):
+                            inline.append((els[k], s0, e0, tex))
+                            pi, cursor = k, e0
+                            break
+                        e1 = (
+                            find_end(texts[k + 1], 0, post)
+                            if e0 is None and k + 1 < len(els)
+                            else None
+                        )
+                        if (
+                            e1 is not None
+                            and mathlike(texts[k][s0:], tex)
+                            and mathlike(texts[k + 1][:e1], tex)
+                        ):
+                            inline.append((els[k], s0, len(texts[k]), tex))
+                            inline.append((els[k + 1], 0, e1, None))
+                            pi, cursor = k + 1, e1
+                            break
+            inline_maths = iter(
+                calkit.docx.latex_to_omml(
+                    [f"${t}$" for *_, t in inline if t is not None], preamble
+                )
+            )
+            inline_omml = [
+                next(inline_maths) if t is not None else None
+                for *_, t in inline
+            ]
+            # From the end of each paragraph, so earlier offsets still hold
+            order = sorted(
+                range(len(inline)),
+                key=lambda i: (id(inline[i][0]), -inline[i][1]),
+            )
+            for i in order:
+                el, s0, e0, itex = inline[i]
+                math = inline_omml[i]
+                if itex is not None and math is None:
+                    continue
+                if doc.replace_range(el, s0, e0, math) and itex is not None:
+                    inline_count += 1
+            # A paragraph Word broke inside the math is whole again, under
+            # the first one's bookmark
+            for i in range(1, len(inline)):
+                first_el, second_el = inline[i - 1][0], inline[i][0]
+                if (
+                    inline[i][3] is not None
+                    or second_el.find(
+                        f"{calkit.docx._tag(calkit.docx.W, 'pPr')}/"
+                        f"{calkit.docx._tag(calkit.docx.W, 'sectPr')}"
+                    )
+                    is not None
+                ):
+                    continue
+                skip = {
+                    calkit.docx._tag(calkit.docx.W, t)
+                    for t in ("pPr", "bookmarkStart", "bookmarkEnd")
+                }
+                for child in list(second_el):
+                    if child.tag not in skip:
+                        second_el.remove(child)
+                        first_el.append(child)
+                doc.remove(second_el)
+        doc.prune_media()
+        # Keep the equations as the converter reads them back, so a merge
+        # can tell what a reviewer changed
+        names = list(equations)
+        read_back = calkit.docx.omml_to_latex(
+            [ET.fromstring(equations[n]) for n in names]
+        )
+        equations = {n: t for n, t in zip(names, read_back) if t is not None}
+        # Trimming a stray number changed a paragraph's text
+        original = {
+            p.bookmark: p.text
+            for p in doc.paragraphs
+            if p.bookmark and p.bookmark in original
+        }
+    doc.even_margins()
     # Existing comment blocks in the source go out as Word comments
     threads, anchors, highlights, resolved = [], [], [], []
     for path in sorted({ln.path for ln in lines}):
@@ -1802,7 +2361,12 @@ def to_docx(
     export_id = str(uuid.uuid4())
     doc.write_original(
         calkit.docx.Original(
-            export_id, rev, source, original, doc.media_hashes
+            export_id,
+            rev,
+            source,
+            original,
+            doc.media_hashes,
+            equations=equations,
         )
     )
     doc.set_identifier(f"calkit-latex-export:{export_id}:{rev or ''}:{source}")
@@ -1815,12 +2379,15 @@ def to_docx(
         docx=Path(output).as_posix(),
         rev=rev,
         dirty=dirty,
+        engine=engine,
         permission="comment" if comment_only else "suggest",
         paragraphs=len(original),
         unanchored=sum(
             1 for p, m in zip(paras, matched) if m is None and p.text
         ),
         comments_exported=len(threads),
+        equations=len(equations),
+        inline_equations=inline_count,
         files={
             p: "md5:" + calkit.get_md5(p)
             for p in sorted(
@@ -1829,18 +2396,41 @@ def to_docx(
             )
         },
     )
-    os.makedirs(calkit.latex.DOCX_EXPORTS_DIR, exist_ok=True)
-    with open(
-        os.path.join(calkit.latex.DOCX_EXPORTS_DIR, f"{export_id}.json"),
-        "w",
-        encoding="utf-8",
-        newline="\n",
-    ) as f:
-        f.write(record.model_dump_json(indent=2))
+    # Named by time first, like run logs, so the records list in order
+    stamp = (
+        record.created.replace(tzinfo=None)
+        .isoformat(timespec="seconds")
+        .replace(":", "-")
+    )
+    dirs = [calkit.latex.LOCAL_DOCX_EXPORTS_DIR]
+    if log:
+        dirs.append(calkit.latex.DOCX_EXPORTS_DIR)
+    name = f"{stamp}-{export_id}"
+    # Within the same second, e.g., merging the same file twice, a count
+    # after the seconds keeps them in order
+    n = 1
+    while any(os.path.exists(os.path.join(d, name + ".json")) for d in dirs):
+        n += 1
+        name = f"{stamp}.{n}-{export_id}"
+    for d in dirs:
+        os.makedirs(d, exist_ok=True)
+        with open(
+            os.path.join(d, name + ".json"),
+            "w",
+            encoding="utf-8",
+            newline="\n",
+        ) as f:
+            f.write(record.model_dump_json(indent=2))
     typer.echo(
         f"Wrote {output} ({record.paragraphs} paragraphs anchored, "
-        f"{record.unanchored} not, {len(threads)} comments)"
+        f"{record.unanchored} not, {len(threads)} comments, "
+        f"{len(equations)} equations, {inline_count} inline)"
     )
+    if left_as_imported:
+        warn(
+            f"{left_as_imported} displayed equations couldn't be placed and "
+            "are as converted with the document"
+        )
 
 
 @latex_app.command(name="merge-docx")
@@ -1850,6 +2440,18 @@ def merge_docx(
         bool,
         typer.Option(
             "--no-comments", help="Don't write comments to the .tex."
+        ),
+    ] = False,
+    log: Annotated[
+        bool,
+        typer.Option(
+            "--log",
+            "-l",
+            help=(
+                "Also keep the merge record in the project, under "
+                ".calkit/latex/docx-merges, rather than only on this "
+                "machine."
+            ),
         ),
     ] = False,
 ) -> None:
@@ -1879,11 +2481,11 @@ def merge_docx(
         raise_error(f"Source {original.source} does not exist")
     # Figures come from the pipeline, so a picture swapped or edited in
     # Word can't be merged
+    # By content, since Word renumbers images when it saves
     media = doc.media_hashes
     changed = sorted(
-        name
-        for name in set(media) | set(original.media)
-        if media.get(name) != original.media.get(name)
+        {n for n, h in media.items() if h not in original.media.values()}
+        | {n for n, h in original.media.items() if h not in media.values()}
     )
     if changed:
         warn(
@@ -1958,6 +2560,118 @@ def merge_docx(
             )
         )
         typer.echo(f"Applied edit at {loc}")
+    # Equations edited in Word go back through the LaTeX the converter
+    # reads them as, applied to the source's own spelling; one that can't
+    # be placed that way goes in as a comment on the equation
+    eq_comments: list[tuple[calkit.latex.Block, calkit.latex.TexComment]] = []
+    found = doc.equations(list(original.equations))
+    if found and calkit.docx.find_pandoc() is None:
+        warn(
+            "Pandoc isn't installed, so edits to equations aren't merged; "
+            "run 'calkit install pandoc'"
+        )
+    elif found:
+        present = [m for m, _ in found.values() if m is not None]
+        it = iter(calkit.docx.omml_to_latex(present))
+        now = {
+            n: (next(it) if m is not None else None, authors)
+            for n, (m, authors) in found.items()
+        }
+        working: dict[int, calkit.latex.Block] = {}
+        for name, (eq_tex, pending) in now.items():
+            sent_eq = original.equations[name]
+            if eq_tex is not None and calkit.latex.math_tokens(
+                eq_tex
+            ) == calkit.latex.math_tokens(sent_eq):
+                continue
+            parts = name.split("_")
+            path, lineno = path_for_hash.get(parts[1], ""), int(parts[2])
+            blk = calkit.latex.find_display(blks, path, lineno, sent_eq)
+            if blk is None:
+                warn(f"Can't place an equation edit from {path}:{lineno}")
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=path, lineno=lineno, status="unplaced"
+                    )
+                )
+                continue
+            loc = f"{blk.path}:{blk.lineno}"
+            if pending is not None:
+                warn(f"Tracked change at {loc} not yet accepted or rejected")
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=blk.path,
+                        lineno=blk.lineno,
+                        status="pending",
+                        author=", ".join(pending) or None,
+                    )
+                )
+                continue
+            if eq_tex is None:
+                warn(f"The equation at {loc} was removed in Word")
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=blk.path, lineno=blk.lineno, status="unplaced"
+                    )
+                )
+                continue
+            # Rows of one display are edited in turn on the same lines
+            current = working.get(id(blk), blk)
+            if calkit.latex.math_similarity(
+                current, eq_tex
+            ) > calkit.latex.math_similarity(current, sent_eq):
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=blk.path,
+                        lineno=blk.lineno,
+                        status="already-applied",
+                    )
+                )
+                continue
+            new_lines = calkit.latex.apply_math_edit(current, sent_eq, eq_tex)
+            if new_lines is None:
+                warn(f"Equation edit at {loc} goes in as a comment")
+                eq_comments.append(
+                    (
+                        blk,
+                        calkit.latex.TexComment(
+                            [
+                                calkit.latex.Entry(
+                                    doc.last_modified_by or "Word",
+                                    "Edited this equation to read: "
+                                    + " ".join(eq_tex.split()),
+                                )
+                            ]
+                        ),
+                    )
+                )
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=blk.path, lineno=blk.lineno, status="unplaced"
+                    )
+                )
+                continue
+            working[id(blk)] = calkit.latex.Block(
+                [
+                    calkit.latex.SourceLine(blk.path, blk.lineno + i, text)
+                    for i, text in enumerate(new_lines)
+                ]
+            )
+            changes.append(
+                LatexDocxMergeChange(
+                    path=blk.path, lineno=blk.lineno, status="applied"
+                )
+            )
+            typer.echo(f"Applied equation edit at {loc}")
+        for blk in blks:
+            if id(blk) in working:
+                edits.setdefault(blk.path, []).append(
+                    (
+                        blk.lineno,
+                        len(blk.lines),
+                        [ln.text for ln in working[id(blk)].lines],
+                    )
+                )
     files = {
         p: Path(p).read_text(encoding="utf-8").split("\n")
         for p in {ln.path for ln in lines}
@@ -2007,6 +2721,7 @@ def merge_docx(
                 )
                 continue
             placed.append((blk, tc))
+        placed += eq_comments
         for blk, tc in sorted(
             placed, key=lambda x: (x[0].path, x[0].lineno), reverse=True
         ):
@@ -2070,17 +2785,30 @@ def merge_docx(
             )
         },
     )
-    os.makedirs(calkit.latex.DOCX_MERGES_DIR, exist_ok=True)
-    stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
-    with open(
-        os.path.join(
-            calkit.latex.DOCX_MERGES_DIR, f"{original.id}-{stamp}.json"
-        ),
-        "w",
-        encoding="utf-8",
-        newline="\n",
-    ) as f:
-        f.write(record.model_dump_json(indent=2))
+    stamp = (
+        record.created.replace(tzinfo=None)
+        .isoformat(timespec="seconds")
+        .replace(":", "-")
+    )
+    dirs = [calkit.latex.LOCAL_DOCX_MERGES_DIR]
+    if log:
+        dirs.append(calkit.latex.DOCX_MERGES_DIR)
+    name = f"{stamp}-{original.id}"
+    # Within the same second, e.g., merging the same file twice, a count
+    # after the seconds keeps them in order
+    n = 1
+    while any(os.path.exists(os.path.join(d, name + ".json")) for d in dirs):
+        n += 1
+        name = f"{stamp}.{n}-{original.id}"
+    for d in dirs:
+        os.makedirs(d, exist_ok=True)
+        with open(
+            os.path.join(d, name + ".json"),
+            "w",
+            encoding="utf-8",
+            newline="\n",
+        ) as f:
+            f.write(record.model_dump_json(indent=2))
     counts = {
         s: sum(1 for c in changes if c.status == s)
         for s in ("applied", "already-applied", "pending", "unplaced")

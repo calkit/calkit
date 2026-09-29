@@ -3528,7 +3528,7 @@ Options:
 
 Export a Word copy of a LaTeX document for review.
 
-Uses Word's own PDF import, so the copy looks like the PDF, then records inside the file which source line each paragraph came from and the text as sent, so `merge-docx` can bring edits and comments back.
+Uses Word's own PDF import where Word is installed, so the copy looks like the PDF, else TeX4ht and LibreOffice. Then records inside the file which source line each paragraph came from and the text as sent, so `merge-docx` can bring edits and comments back.
 
 Usage:
 
@@ -3544,12 +3544,14 @@ Arguments:
 
 Options:
 
-| Option           | Type    | Required | Default | Description                                                                             |
-| ---------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------- |
-| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF. |
-| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                            |
-| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                          |
-| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                           |
+| Option           | Type    | Required | Default | Description                                                                                                                                                                                                                |
+| ---------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF.                                                                                                                                    |
+| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                                                                                                                                                               |
+| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                                                                                                                                                             |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                                                                                                                                                              |
+| `--engine`       | str     | no       |         | What makes the Word copy: 'word', which imports the compiled PDF so the copy looks like it, or 'libreoffice', which converts the source with TeX4ht's make4ht and then LibreOffice. Defaults to Word where it's installed. |
+| `--log`, `-l`    | boolean | no       | False   | Also keep the export record in the project, under .calkit/latex/docx-exports, rather than only on this machine.                                                                                                            |
 
 <a id="subcommand-latex-tex-merge-docx"></a>
 
@@ -3573,9 +3575,10 @@ Arguments:
 
 Options:
 
-| Option          | Type    | Required | Default | Description                       |
-| --------------- | ------- | -------- | ------- | --------------------------------- |
-| `--no-comments` | boolean | no       | False   | Don't write comments to the .tex. |
+| Option          | Type    | Required | Default | Description                                                                                                   |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
+| `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
 
 <a id="command-group-overleaf-ol"></a>
 

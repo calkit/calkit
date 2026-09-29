@@ -1,6 +1,6 @@
 # LaTeX and Word review example
 
-A small two-column paper, split across `paper/main.tex` and
+A small paper, split across `paper/main.tex` and
 `paper/methods.tex`, for trying the Word review workflow described in
 [the tutorial](https://docs.calkit.org/tutorials/latex-word/).
 It has a figure, a table, display and inline math, citations, and one

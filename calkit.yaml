@@ -1,4 +1,6 @@
 # yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json
+owner: calkit
+name: calkit
 title: Calkit
 description: >-
   Calkit's claims about itself, e.g., in its docs, computed by its own
@@ -95,3 +97,4 @@ figures:
       A page of the LaTeX/Word example as built from LaTeX, as exported to
       Word, and as built again after merging the Word copy back.
     stage: latex-word-round-trip-figure
+hub: https://calkit.io

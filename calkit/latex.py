@@ -476,6 +476,10 @@ _DISPLAY_RE = re.compile(
     r"^\s*(?:\\begin\{(equation|align|gather|multline|eqnarray|flalign)"
     r"(\*?)\}|(\\\[)|(\$\$))"
 )
+_FLOAT_RE = re.compile(
+    r"\\(begin|end)\{(figure|table|wrapfigure|sidewaysfigure|sidewaystable)"
+    r"\*?\}"
+)
 # Environments whose rows are numbered one by one
 _MULTIROW_ENVS = frozenset({"align", "gather", "eqnarray", "flalign"})
 
@@ -492,6 +496,9 @@ class Block:
     """A run of source lines that renders as one Word paragraph."""
 
     lines: list[SourceLine]
+    # Inside a figure or table, which can float away from the prose around
+    # it in the rendered document
+    floating: bool = False
 
     @property
     def path(self) -> str:
@@ -681,6 +688,17 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
         cur.append(ln)
     if cur:
         out.append(Block(cur))
+    in_float: set[tuple[str, int]] = set()
+    depth = 0
+    for ln in lines:
+        for m in _FLOAT_RE.finditer(ln.text.split("%")[0]):
+            depth = max(0, depth + (1 if m.group(1) == "begin" else -1))
+            if m.group(1) == "begin":
+                in_float.add((ln.path, ln.lineno))
+        if depth:
+            in_float.add((ln.path, ln.lineno))
+    for b in out:
+        b.floating = (b.path, b.lineno) in in_float
     return [b for b in out if b.text or b.display]
 
 
@@ -699,6 +717,7 @@ def align(
     """Match rendered paragraphs to source blocks, in order."""
     out: list[Block | None] = []
     last = 0
+    floats = [j for j, b in enumerate(blks) if b.floating]
     for text in texts:
         # A short line ending in an equation number is a display's
         # fragment, even when it shares a word with the prose around it
@@ -708,15 +727,27 @@ def align(
             out.append(None)
             continue
         # On a tie the nearest block wins, so a short heading can't jump
-        # ahead to a later paragraph sharing its words
-        scores = [
-            (similarity(text, b.text), -j)
-            for j, b in enumerate(blks[last:], last)
-        ]
+        # ahead to a later paragraph sharing its words. A figure or table
+        # can be anywhere, since it floats, and doesn't move the place in
+        # the source the prose has reached.
+        candidates = sorted(set(range(last, len(blks))) | set(floats))
+        scores = [(similarity(text, blks[j].text), -j) for j in candidates]
         best = max(scores, default=(0.0, 1))
+        # A table's rows or a caption's lines stay with it on a tie, e.g.,
+        # a row "Growth rate k 0.05" beside prose about the growth rate
+        prev = next((b for b in reversed(out) if b is not None), None)
+        if (
+            prev is not None
+            and prev.floating
+            and best[0] >= threshold
+            and similarity(text, prev.text) >= best[0]
+        ):
+            out.append(prev)
+            continue
         if best[0] >= threshold:
             out.append(blks[-best[1]])
-            last = -best[1]
+            if not blks[-best[1]].floating:
+                last = -best[1]
         else:
             out.append(None)
     return out

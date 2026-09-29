@@ -1803,12 +1803,56 @@ def to_docx(
         environment = (
             stages[stage_name].get("environment") if stage_name else None
         )
-        existing = set(os.listdir(src_dir)) - {job + ".bbl"}
+
+        def listing() -> set[str]:
+            # Files under the source's directory, not under hidden ones
+            out: set[str] = set()
+            for d, dirs, files in os.walk(src_dir):
+                dirs[:] = [x for x in dirs if not x.startswith(".")]
+                out.update(
+                    os.path.relpath(os.path.join(d, f), src_dir) for f in files
+                )
+            return out
+
+        existing = listing() - {job + ".bbl"}
+        # TeX can loop forever, e.g., older TeX4ht on a cases environment,
+        # so a run gets a time limit, and loses its LaTeX child with it
+        import time
+
+        limit = 600
+        timed_out = False
         try:
             if environment is None and calkit.check_dep_exists("make4ht"):
-                res = subprocess.run(m4h, cwd=src_dir, capture_output=True)
+                import signal
+
+                proc = subprocess.Popen(
+                    m4h,
+                    cwd=src_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=sys.platform != "win32",
+                )
+                try:
+                    out, _ = proc.communicate(timeout=limit)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    if sys.platform == "win32":
+                        subprocess.run(
+                            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                            capture_output=True,
+                        )
+                    else:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    out, _ = proc.communicate()
             else:
-                cd = f"cd {shlex.quote(src_dir)} && {shlex.join(m4h)}"
+                # Inside the environment, e.g., a container, which stops
+                # with everything in it when the shell exits
+                run = shlex.join(m4h)
+                cd = (
+                    f"cd {shlex.quote(src_dir)} && if command -v timeout "
+                    f">/dev/null; then timeout {limit} {run}; else {run}; fi"
+                )
+                started = time.monotonic()
                 res = subprocess.run(
                     _tex_cmd(
                         ["sh", "-c", cd],
@@ -1817,27 +1861,29 @@ def to_docx(
                         verbose=False,
                         dep="make4ht",
                     ),
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                 )
-            Path(build, "make4ht.log").write_bytes(res.stdout + res.stderr)
+                # By the time, since the environment may not pass on the
+                # timeout's exit code
+                out = res.stdout
+                timed_out = bool(res.returncode) and (
+                    time.monotonic() - started >= limit
+                )
+            Path(build, "make4ht.log").write_bytes(out)
         finally:
             # TeX's log is kept with the build, for when something's wrong
             tex_log = os.path.join(src_dir, job + ".log")
             if os.path.isfile(tex_log):
                 shutil.move(tex_log, build)
-            # It also writes figures converted to images beside the source,
-            # named after them
-            for leftover in set(os.listdir(src_dir)) - existing:
-                if not (
-                    leftover.startswith(job)
-                    or re.search(r"-\.(png|svg|jpe?g)(\.4og)?$", leftover)
+            # It also writes figures converted to images beside them, named
+            # after them
+            for leftover in listing() - existing:
+                name = os.path.basename(leftover)
+                if name.startswith(job) or re.search(
+                    r"-\.(png|svg|jpe?g)(\.4og)?$", name
                 ):
-                    continue
-                path = os.path.join(src_dir, leftover)
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
-                else:
-                    os.remove(path)
+                    os.remove(os.path.join(src_dir, leftover))
         odt = os.path.join(build, job + ".odt")
         has_text = False
         if os.path.isfile(odt):
@@ -1846,6 +1892,12 @@ def to_docx(
             with zipfile.ZipFile(odt) as z:
                 content = z.read("content.xml")
                 has_text = b"<text:p" in content or b"<text:h" in content
+        if timed_out:
+            raise_error(
+                f"TeX4ht didn't finish converting the source in {limit} "
+                f"seconds; see the logs in {build}. An older TeX Live's "
+                "TeX4ht can loop on some math, e.g., cases."
+            )
         if not has_text:
             raise_error(
                 "TeX4ht could not convert the source; see the logs in "
@@ -1914,14 +1966,22 @@ def to_docx(
             jb = next(
                 (k for k in range(j - 1, -1, -1) if id(blks[k]) in last), None
             )
+            # The next prose after, skipping figures and tables, which can
+            # float in between
             ja = next(
-                (k for k in range(j + 1, len(blks)) if id(blks[k]) in first),
+                (
+                    k
+                    for k in range(j + 1, len(blks))
+                    if not blks[k].floating
+                    and jb is not None
+                    and first.get(id(blks[k]), -1) > last[id(blks[jb])]
+                ),
                 None,
             )
             if (
                 jb is None
                 or ja is None
-                or not all(b.display for b in blks[jb + 1 : ja])
+                or not all(b.display or b.floating for b in blks[jb + 1 : ja])
             ):
                 left_as_imported += 1
                 continue
@@ -1943,7 +2003,24 @@ def to_docx(
                 for t in el.iter(calkit.docx._tag(calkit.docx.W, "t"))
             )
 
-        def fragment(el: Any) -> bool:
+        anchored = {p.element for p, b in zip(paras, matched) if b is not None}
+
+        def fragment(el: Any, context: str) -> bool:
+            # Never prose: anything anchored to the source, e.g., a caption
+            # that floated in, or reading like the prose around it, e.g.,
+            # the rest of a paragraph broken across a column. Equation
+            # fragments have few words, e.g., "Q(σprodβprod)νprod".
+            text = text_of(el)
+            words = set(re.findall(r"[a-zA-Z]{3,}", text.lower()))
+            # A single shared word is often a symbol, e.g., "RPFR =, (2)"
+            # after prose defining RPFR, and a number ends a display
+            prose_like = (
+                len(words) >= 2
+                and calkit.latex.similarity(text, context) >= 0.5
+                and not re.search(eq_num + r"\s*$", text)
+            )
+            if el in anchored or len(words) > 3 or prose_like:
+                return False
             tall = any(
                 int(e.get("cy", "0")) > emu_limit
                 for e in el.iter(
@@ -1951,7 +2028,7 @@ def to_docx(
                     "wordprocessingDrawing}extent"
                 )
             )
-            return len(text_of(el)) < 300 and not tall
+            return not tall
 
         def unit_of(el: Any) -> Any:
             while doc._parents.get(el) is not w_body:
@@ -1964,6 +2041,9 @@ def to_docx(
         plans = []
         for (before, after), group in groups.items():
             ends = {paras[before].element, paras[after].element}
+            context = " ".join(
+                b.text for b in (matched[before], matched[after]) if b
+            )
             # Everything in the body from the one anchor to the other,
             # since a paragraph of only math or a picture isn't listed
             children = list(w_body)
@@ -1986,7 +2066,7 @@ def to_docx(
                     for q in unit.iter(w_p)
                     if q not in ends and (q in listed or unit.tag == w_p)
                 ]
-                if held and all(fragment(q) for q in held):
+                if held and all(fragment(q, context) for q in held):
                     gap.append(unit)
             claimed.update(gap)
             if not gap:
@@ -2150,8 +2230,12 @@ def to_docx(
         },
     )
     os.makedirs(calkit.latex.DOCX_EXPORTS_DIR, exist_ok=True)
+    # Named by time first, so the records list in the order they were made
+    stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
     with open(
-        os.path.join(calkit.latex.DOCX_EXPORTS_DIR, f"{export_id}.json"),
+        os.path.join(
+            calkit.latex.DOCX_EXPORTS_DIR, f"{stamp}-{export_id}.json"
+        ),
         "w",
         encoding="utf-8",
         newline="\n",
@@ -2513,7 +2597,7 @@ def merge_docx(
     stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
     with open(
         os.path.join(
-            calkit.latex.DOCX_MERGES_DIR, f"{original.id}-{stamp}.json"
+            calkit.latex.DOCX_MERGES_DIR, f"{stamp}-{original.id}.json"
         ),
         "w",
         encoding="utf-8",

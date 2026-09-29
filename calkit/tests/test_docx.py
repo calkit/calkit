@@ -319,7 +319,10 @@ def test_docx_round_trip(
     model = next(p for p in paras if p.text.startswith("The mean velocity"))
     assert comments[0].bookmark == model.bookmark
     records = os.listdir(calkit.latex.DOCX_EXPORTS_DIR)
-    assert records == [f"{original.id}.json"]
+    assert len(records) == 1
+    assert re.fullmatch(
+        rf"\d{{8}}T\d{{6}}\.\d{{6}}Z-{original.id}\.json", records[0]
+    )
     export = LatexDocxExport.model_validate_json(
         Path(calkit.latex.DOCX_EXPORTS_DIR, records[0]).read_text()
     )
@@ -470,7 +473,8 @@ def test_docx_round_trip(
     fixture = returned.read_original()
     assert fixture is not None
     fixture_id = fixture.id
-    assert merges[0].startswith(fixture_id) and merges[0].endswith(".json")
+    # Named by time first, so the first listed is the first merged
+    assert merges[0].endswith(f"-{fixture_id}.json")
     merge = LatexDocxMerge.model_validate_json(
         Path(calkit.latex.DOCX_MERGES_DIR, merges[-1]).read_text()
     )

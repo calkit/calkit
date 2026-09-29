@@ -549,7 +549,9 @@ class Document:
                     for side, value in target.items():
                         mar.set(_tag(W, side), str(value))
                 for el in els:
-                    for p in el.iter(_tag(W, "p")):
+                    # A table moves as a whole, so what's inside it doesn't
+                    # move again
+                    for p in [el] if el.tag == _tag(W, "p") else []:
                         ppr = p.find(_tag(W, "pPr"))
                         if ppr is None:
                             ppr = ET.Element(_tag(W, "pPr"))
@@ -566,7 +568,7 @@ class Document:
                             ind.set(
                                 key, str(int(ind.get(key, "0")) + delta[side])
                             )
-                    for tpr in el.iter(_tag(W, "tblPr")):
+                    for tpr in el.findall(_tag(W, "tblPr")):
                         tind = tpr.find(_tag(W, "tblInd"))
                         if tind is None:
                             tind = ET.SubElement(
@@ -975,17 +977,20 @@ def word_installed() -> bool:
     if sys.platform == "win32":
         import winreg
 
-        try:
-            winreg.CloseKey(
-                winreg.OpenKey(
-                    winreg.HKEY_LOCAL_MACHINE,
-                    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths"
-                    "\\Winword.exe",
+        # Machine-wide, else for this user, as Office installs either way
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                winreg.CloseKey(
+                    winreg.OpenKey(
+                        hive,
+                        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion"
+                        "\\App Paths\\Winword.exe",
+                    )
                 )
-            )
-        except OSError:
-            return False
-        return True
+            except OSError:
+                continue
+            return True
+        return False
     return False
 
 
@@ -1048,6 +1053,9 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     tmp_path = docx_path.removesuffix(".docx") + ".tmp.docx"
     if sys.platform == "darwin":
         script = (
+            # A long paper can take Word longer than AppleScript's default
+            # two minutes to import
+            "with timeout of 600 seconds\n"
             'tell application "Microsoft Word"\n'
             "set display alerts to alerts none\n"
             f'open (POSIX file "{pdf_path}")\n'
@@ -1059,8 +1067,10 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
             "end repeat\n"
             f'set doc to document "{os.path.basename(pdf_path)}"\n'
             f'save as doc file name "{tmp_path}" file format format document\n'
-            f'close document "{os.path.basename(tmp_path)}" saving no\n'
-            "end tell"
+            # By reference, since Word may not find the saved copy by name
+            "close active document saving no\n"
+            "end tell\n"
+            "end timeout"
         )
         res = subprocess.run(
             ["osascript", "-e", script], capture_output=True, text=True

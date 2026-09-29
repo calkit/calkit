@@ -179,7 +179,7 @@ export const PRESETS: Preset[] = [
     envName: "latex",
     // Calkit's own image, pinned like the CLI's default; the publish
     // workflow moves this tag with each release
-    image: "ghcr.io/calkit/latex:0.1.3",
+    image: "ghcr.io/calkit/latex:0.1.4",
   },
   {
     name: "julia",

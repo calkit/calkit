@@ -166,6 +166,13 @@ def _in(el_parents: dict, el: ET.Element, stop: ET.Element, tag: str) -> bool:
     return False
 
 
+def _wrap(el: ET.Element) -> ET.Element:
+    """A run holding just ``el``, to measure it as run content."""
+    run = ET.Element(_tag(W, "r"))
+    run.append(copy.deepcopy(el))
+    return run
+
+
 class Document:
     """A .docx package, edited in place and written back out."""
 
@@ -729,6 +736,109 @@ class Document:
                 waiting = []
         return out
 
+    # Parts of a run's content that read as one character each: pictures
+    # and other objects, which is how Word may render inline math
+    _OBJECT_TAGS = frozenset(
+        [
+            _tag(W, "drawing"),
+            _tag(W, "pict"),
+            _tag(W, "object"),
+            "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
+            "AlternateContent",
+        ]
+    )
+
+    def _runs(self, para: ET.Element) -> list[ET.Element]:
+        """The paragraph's runs in order, including those in hyperlinks."""
+        out = []
+        for child in para:
+            if child.tag == _tag(W, "r"):
+                out.append(child)
+            elif child.tag == _tag(W, "hyperlink"):
+                out.extend(r for r in child if r.tag == _tag(W, "r"))
+        return out
+
+    def _run_text(self, run: ET.Element) -> str:
+        parts = []
+        for c in run:
+            if c.tag == _tag(W, "t"):
+                parts.append(c.text or "")
+            elif c.tag in (_tag(W, "tab"), _tag(W, "br"), _tag(W, "cr")):
+                parts.append(" ")
+            elif c.tag in self._OBJECT_TAGS:
+                parts.append("\ufffc")
+        return "".join(parts)
+
+    def linear_text(self, para: ET.Element) -> str:
+        """The paragraph's text with each picture or object as U+FFFC, so
+        offsets into it can say where a range of runs starts and ends."""
+        return "".join(self._run_text(r) for r in self._runs(para))
+
+    def _split_at(self, para: ET.Element, offset: int) -> None:
+        """Split the run spanning a linear text offset, so a run boundary
+        falls there."""
+        pos = 0
+        for run in self._runs(para):
+            length = len(self._run_text(run))
+            if pos < offset < pos + length:
+                parent = self._parents[run]
+                left, right = copy.deepcopy(run), copy.deepcopy(run)
+                for part, keep_left in ((left, True), (right, False)):
+                    at = pos
+                    for c in list(part):
+                        if c.tag == _tag(W, "rPr"):
+                            continue
+                        text = (
+                            (c.text or "")
+                            if c.tag == _tag(W, "t")
+                            else self._run_text(_wrap(c))
+                        )
+                        n = len(text)
+                        cut = offset - at
+                        if c.tag == _tag(W, "t") and 0 < cut < n:
+                            c.text = text[:cut] if keep_left else text[cut:]
+                            c.set(
+                                "{http://www.w3.org/XML/1998/namespace}space",
+                                "preserve",
+                            )
+                        elif (at + n <= offset) != keep_left:
+                            part.remove(c)
+                        at += n
+                idx = list(parent).index(run)
+                parent.remove(run)
+                parent.insert(idx, right)
+                parent.insert(idx, left)
+                self._parents = {c: p for p in self.doc.iter() for c in p}
+                return
+            pos += length
+
+    def replace_range(
+        self,
+        para: ET.Element,
+        start: int,
+        end: int,
+        element: ET.Element | None,
+    ) -> bool:
+        """Replace what spans a range of the paragraph's linear text with an
+        element, e.g., an equation, or with nothing; False if the range
+        crosses a hyperlink or holds nothing."""
+        self._split_at(para, end)
+        self._split_at(para, start)
+        inside, pos = [], 0
+        for run in self._runs(para):
+            length = len(self._run_text(run))
+            if length and start <= pos and pos + length <= end:
+                inside.append(run)
+            pos += length
+        if not inside or any(self._parents[r] is not para for r in inside):
+            return False
+        if element is not None:
+            para.insert(list(para).index(inside[0]), element)
+        for run in inside:
+            para.remove(run)
+        self._parents = {c: p for p in self.doc.iter() for c in p}
+        return True
+
     def prune_media(self) -> None:
         """Drop images the document body no longer shows, as Word would on
         saving, so they don't read as figures changed in review."""
@@ -1145,12 +1255,14 @@ def _pandoc(args: list[str], data: bytes) -> bytes:
 def latex_to_omml(
     equations: list[str], preamble: str = ""
 ) -> list[ET.Element | None]:
-    """Convert display math to Word equations, one ``m:oMath`` each.
+    """Convert math to Word equations, one ``m:oMath`` each.
 
     Every equation goes through one Pandoc run, each after a marker
     paragraph so its output can be picked out; ``preamble`` carries the
     document's macro definitions.
     """
+    if not equations:
+        return []
     src = (
         preamble
         + "\n\n"
@@ -1180,6 +1292,8 @@ def omml_to_latex(maths: list[ET.Element]) -> list[str | None]:
     import io
     import json
 
+    if not maths:
+        return []
     body = "".join(
         f"<w:p><w:r><w:t>CKEQ{i}</w:t></w:r></w:p><w:p><m:oMathPara>"
         + ET.tostring(m, encoding="unicode")

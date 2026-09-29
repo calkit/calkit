@@ -1706,6 +1706,18 @@ def to_docx(
             ),
         ),
     ] = None,
+    log: Annotated[
+        bool,
+        typer.Option(
+            "--log",
+            "-l",
+            help=(
+                "Also keep the export record in the project, under "
+                ".calkit/latex/docx-exports, rather than only on this "
+                "machine."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Export a Word copy of a LaTeX document for review.
 
@@ -1934,19 +1946,23 @@ def to_docx(
     equations: dict[str, str] = {}
     left_as_imported = 0
     has_display = any(b.display for b in blks)
-    if has_display and calkit.docx.find_pandoc() is None:
+    # Word's PDF import leaves inline math as text and pictures, which
+    # TeX4ht doesn't, so only then does it need converting too
+    has_inline = engine == "word" and any(b.inline_math for b in blks)
+    inline_count = 0
+    if (has_display or has_inline) and calkit.docx.find_pandoc() is None:
         import calkit.install
 
         typer.echo("Pandoc converts equations from the source to Word's")
         calkit.install.prompt_and_install(
             "pandoc", interactive=sys.stdin.isatty()
         )
-    if has_display and calkit.docx.find_pandoc() is None:
+    if (has_display or has_inline) and calkit.docx.find_pandoc() is None:
         warn(
             "Pandoc isn't installed, so equations are as converted "
             "with the document; run 'calkit install pandoc' to fix that"
         )
-    elif has_display:
+    elif has_display or has_inline:
         from xml.etree import ElementTree as ET
 
         eq_num = r"\(([A-Z]?\.?\d+(?:\.\d+)*[a-z]?)\)"
@@ -2148,6 +2164,156 @@ def to_docx(
                 doc.trim_start(after_para.element, lead.end())
             for math, _, name in rows:
                 equations[name] = ET.tostring(math, encoding="unicode")
+        # Inline math: in each anchored paragraph, what's between the words
+        # of prose on either side of it in the source, which may be text,
+        # pictures or both, goes in as an equation
+
+        def tokens(prose: str) -> list[str]:
+            # Numbers count, e.g., a table cell "0.05" after the math
+            return re.findall(r"[A-Za-z0-9]+", prose)
+
+        def find_start(text: str, cursor: int, before: str) -> int | None:
+            start = cursor
+            bw = tokens(before)[-2:]
+            tail = before
+            if bw:
+                m = re.compile(
+                    r"(?<![A-Za-z0-9])"
+                    + r"[^A-Za-z0-9]+".join(map(re.escape, bw))
+                    + r"(?![A-Za-z0-9])"
+                ).search(text, cursor)
+                if m is None:
+                    return None
+                start = m.end()
+                tail = before[before.rfind(bw[-1]) + len(bw[-1]) :]
+            # Past the prose's own punctuation, e.g., "(" before the math
+            for ch in tail.replace(" ", ""):
+                while start < len(text) and text[start].isspace():
+                    start += 1
+                if text[start : start + 1] != ch:
+                    break
+                start += 1
+            while start < len(text) and text[start].isspace():
+                start += 1
+            return start
+
+        def find_end(text: str, start: int, after: str) -> int | None:
+            aw = tokens(after)[:2]
+            head = (after[: after.find(aw[0])] if aw else after).replace(
+                " ", ""
+            )
+            end = len(text)
+            if aw:
+                m = re.compile(
+                    r"(?<![A-Za-z0-9])"
+                    + r"[^A-Za-z0-9]+".join(map(re.escape, aw))
+                    + r"(?![A-Za-z0-9])"
+                ).search(text, start)
+                if m is None:
+                    return None
+                end = m.start()
+            # Back before the prose's punctuation, e.g., ")" after the math
+            for ch in reversed(head):
+                while end > start and text[end - 1].isspace():
+                    end -= 1
+                if text[end - 1 : end] != ch:
+                    break
+                end -= 1
+            while end > start and text[end - 1].isspace():
+                end -= 1
+            return end
+
+        def mathlike(region: str, tex: str) -> bool:
+            # Math as Word renders it has no prose words in it
+            words = re.findall(r"[A-Za-z]{4,}", region)
+            return bool(region.strip()) and all(
+                w.lower() in tex.lower() for w in words
+            )
+
+        # Each as (paragraph, start, end, LaTeX), and for math Word broke
+        # across paragraphs, the rest in the next one as (paragraph, 0,
+        # end, None)
+        inline: list[tuple[Any, int, int, str | None]] = []
+        if has_inline:
+            by_block: dict[int, list[Any]] = {}
+            for p, b in zip(paras, matched):
+                if b is not None and p.element is not None:
+                    by_block.setdefault(id(b), []).append(p.element)
+            for b in blks:
+                els = by_block.get(id(b), [])
+                texts = [doc.linear_text(el) for el in els]
+                pi, cursor = 0, 0
+                for pre, tex, post in b.inline_math if els else []:
+                    # In the paragraph where the last one was, or a later
+                    # one when the block continues past a page or float
+                    for k in range(pi, len(els)):
+                        s0 = find_start(
+                            texts[k], cursor if k == pi else 0, pre
+                        )
+                        if s0 is None:
+                            continue
+                        e0 = find_end(texts[k], s0, post)
+                        if e0 is not None and mathlike(texts[k][s0:e0], tex):
+                            inline.append((els[k], s0, e0, tex))
+                            pi, cursor = k, e0
+                            break
+                        e1 = (
+                            find_end(texts[k + 1], 0, post)
+                            if e0 is None and k + 1 < len(els)
+                            else None
+                        )
+                        if (
+                            e1 is not None
+                            and mathlike(texts[k][s0:], tex)
+                            and mathlike(texts[k + 1][:e1], tex)
+                        ):
+                            inline.append((els[k], s0, len(texts[k]), tex))
+                            inline.append((els[k + 1], 0, e1, None))
+                            pi, cursor = k + 1, e1
+                            break
+            inline_maths = iter(
+                calkit.docx.latex_to_omml(
+                    [f"${t}$" for *_, t in inline if t is not None], preamble
+                )
+            )
+            inline_omml = [
+                next(inline_maths) if t is not None else None
+                for *_, t in inline
+            ]
+            # From the end of each paragraph, so earlier offsets still hold
+            order = sorted(
+                range(len(inline)),
+                key=lambda i: (id(inline[i][0]), -inline[i][1]),
+            )
+            for i in order:
+                el, s0, e0, itex = inline[i]
+                math = inline_omml[i]
+                if itex is not None and math is None:
+                    continue
+                if doc.replace_range(el, s0, e0, math) and itex is not None:
+                    inline_count += 1
+            # A paragraph Word broke inside the math is whole again, under
+            # the first one's bookmark
+            for i in range(1, len(inline)):
+                first_el, second_el = inline[i - 1][0], inline[i][0]
+                if (
+                    inline[i][3] is not None
+                    or second_el.find(
+                        f"{calkit.docx._tag(calkit.docx.W, 'pPr')}/"
+                        f"{calkit.docx._tag(calkit.docx.W, 'sectPr')}"
+                    )
+                    is not None
+                ):
+                    continue
+                skip = {
+                    calkit.docx._tag(calkit.docx.W, t)
+                    for t in ("pPr", "bookmarkStart", "bookmarkEnd")
+                }
+                for child in list(second_el):
+                    if child.tag not in skip:
+                        second_el.remove(child)
+                        first_el.append(child)
+                doc.remove(second_el)
         doc.prune_media()
         # Keep the equations as the converter reads them back, so a merge
         # can tell what a reviewer changed
@@ -2221,6 +2387,7 @@ def to_docx(
         ),
         comments_exported=len(threads),
         equations=len(equations),
+        inline_equations=inline_count,
         files={
             p: "md5:" + calkit.get_md5(p)
             for p in sorted(
@@ -2229,22 +2396,35 @@ def to_docx(
             )
         },
     )
-    os.makedirs(calkit.latex.DOCX_EXPORTS_DIR, exist_ok=True)
-    # Named by time first, so the records list in the order they were made
-    stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
-    with open(
-        os.path.join(
-            calkit.latex.DOCX_EXPORTS_DIR, f"{stamp}-{export_id}.json"
-        ),
-        "w",
-        encoding="utf-8",
-        newline="\n",
-    ) as f:
-        f.write(record.model_dump_json(indent=2))
+    # Named by time first, like run logs, so the records list in order
+    stamp = (
+        record.created.replace(tzinfo=None)
+        .isoformat(timespec="seconds")
+        .replace(":", "-")
+    )
+    dirs = [calkit.latex.LOCAL_DOCX_EXPORTS_DIR]
+    if log:
+        dirs.append(calkit.latex.DOCX_EXPORTS_DIR)
+    name = f"{stamp}-{export_id}"
+    # Within the same second, e.g., merging the same file twice, a count
+    # after the seconds keeps them in order
+    n = 1
+    while any(os.path.exists(os.path.join(d, name + ".json")) for d in dirs):
+        n += 1
+        name = f"{stamp}.{n}-{export_id}"
+    for d in dirs:
+        os.makedirs(d, exist_ok=True)
+        with open(
+            os.path.join(d, name + ".json"),
+            "w",
+            encoding="utf-8",
+            newline="\n",
+        ) as f:
+            f.write(record.model_dump_json(indent=2))
     typer.echo(
         f"Wrote {output} ({record.paragraphs} paragraphs anchored, "
         f"{record.unanchored} not, {len(threads)} comments, "
-        f"{len(equations)} equations)"
+        f"{len(equations)} equations, {inline_count} inline)"
     )
     if left_as_imported:
         warn(
@@ -2260,6 +2440,18 @@ def merge_docx(
         bool,
         typer.Option(
             "--no-comments", help="Don't write comments to the .tex."
+        ),
+    ] = False,
+    log: Annotated[
+        bool,
+        typer.Option(
+            "--log",
+            "-l",
+            help=(
+                "Also keep the merge record in the project, under "
+                ".calkit/latex/docx-merges, rather than only on this "
+                "machine."
+            ),
         ),
     ] = False,
 ) -> None:
@@ -2593,17 +2785,30 @@ def merge_docx(
             )
         },
     )
-    os.makedirs(calkit.latex.DOCX_MERGES_DIR, exist_ok=True)
-    stamp = record.created.strftime("%Y%m%dT%H%M%S.%fZ")
-    with open(
-        os.path.join(
-            calkit.latex.DOCX_MERGES_DIR, f"{stamp}-{original.id}.json"
-        ),
-        "w",
-        encoding="utf-8",
-        newline="\n",
-    ) as f:
-        f.write(record.model_dump_json(indent=2))
+    stamp = (
+        record.created.replace(tzinfo=None)
+        .isoformat(timespec="seconds")
+        .replace(":", "-")
+    )
+    dirs = [calkit.latex.LOCAL_DOCX_MERGES_DIR]
+    if log:
+        dirs.append(calkit.latex.DOCX_MERGES_DIR)
+    name = f"{stamp}-{original.id}"
+    # Within the same second, e.g., merging the same file twice, a count
+    # after the seconds keeps them in order
+    n = 1
+    while any(os.path.exists(os.path.join(d, name + ".json")) for d in dirs):
+        n += 1
+        name = f"{stamp}.{n}-{original.id}"
+    for d in dirs:
+        os.makedirs(d, exist_ok=True)
+        with open(
+            os.path.join(d, name + ".json"),
+            "w",
+            encoding="utf-8",
+            newline="\n",
+        ) as f:
+            f.write(record.model_dump_json(indent=2))
     counts = {
         s: sum(1 for c in changes if c.status == s)
         for s in ("applied", "already-applied", "pending", "unplaced")

@@ -312,20 +312,33 @@ def test_docx_round_trip(
     math, pending = doc.equations([eq_name])[eq_name]
     assert math is not None and pending is None
     assert any(p.text == "(1)" for p in paras)
+    # Inline math Word left as text went in as equations too, leaving the
+    # prose around it, and a table cell's value after it, alone
+    inline = next(p for p in paras if "inline equation" in p.text)
+    assert inline.element is not None
+    assert inline.element.find(f"{{{calkit.docx.M}}}oMath") is not None
+    assert "contains an inline equation and a hyphenated" in inline.text
+    assert any(
+        p.text.startswith("Growth rate") and "0.05" in p.text for p in paras
+    )
     assert not any(p.text.strip() in (", (1)", ",(1)") for p in paras)
     comments = doc.comments
     assert [c.author for c in comments] == ["T. Author", "P. Bachant"]
     assert comments[1].parent_id == comments[0].para_id
     model = next(p for p in paras if p.text.startswith("The mean velocity"))
     assert comments[0].bookmark == model.bookmark
-    records = os.listdir(calkit.latex.DOCX_EXPORTS_DIR)
+    # The record stays on this machine unless asked for, named by time
+    records = os.listdir(calkit.latex.LOCAL_DOCX_EXPORTS_DIR)
     assert len(records) == 1
     assert re.fullmatch(
-        rf"\d{{8}}T\d{{6}}\.\d{{6}}Z-{original.id}\.json", records[0]
+        rf"\d{{4}}-\d\d-\d\dT\d\d-\d\d-\d\d-{original.id}\.json",
+        records[0],
     )
+    assert not os.path.exists(calkit.latex.DOCX_EXPORTS_DIR)
     export = LatexDocxExport.model_validate_json(
-        Path(calkit.latex.DOCX_EXPORTS_DIR, records[0]).read_text()
+        Path(calkit.latex.LOCAL_DOCX_EXPORTS_DIR, records[0]).read_text()
     )
+    assert export.inline_equations > 0
     assert set(export.files) == {
         "paper/main.tex",
         "paper/methods.tex",
@@ -354,8 +367,8 @@ def test_docx_round_trip(
     assert "not yet accepted" in res.stderr + res.stdout
     record = json.loads(
         Path(
-            calkit.latex.DOCX_MERGES_DIR,
-            os.listdir(calkit.latex.DOCX_MERGES_DIR)[0],
+            calkit.latex.LOCAL_DOCX_MERGES_DIR,
+            os.listdir(calkit.latex.LOCAL_DOCX_MERGES_DIR)[0],
         ).read_text(encoding="utf-8")
     )
     assert [c["author"] for c in record["changes"]] == ["Bachant, Pete"] * 2
@@ -463,12 +476,17 @@ def test_docx_round_trip(
     assert "% COMMENT resolved=true\n%   T. Author:" in methods
     parsed = calkit.latex.parse_comments(methods.split("\n"))
     assert [c.resolved for c in parsed] == [True]
+    # With --log, the record is kept in the project too
     os.remove("paper/main-for-review.docx")
-    calkit.cli.latex.to_docx("paper/main.pdf", engine="word")
+    calkit.cli.latex.to_docx("paper/main.pdf", engine="word", log=True)
+    assert len(os.listdir(calkit.latex.DOCX_EXPORTS_DIR)) == 1
+    assert os.listdir(calkit.latex.DOCX_EXPORTS_DIR)[0] in os.listdir(
+        calkit.latex.LOCAL_DOCX_EXPORTS_DIR
+    )
     exported = calkit.docx.Document("paper/main-for-review.docx").comments
     assert [c.done for c in exported if c.author == "T. Author"] == [True]
     assert Path("paper/main.tex").read_text(encoding="utf-8") == main
-    merges = sorted(os.listdir(calkit.latex.DOCX_MERGES_DIR))
+    merges = sorted(os.listdir(calkit.latex.LOCAL_DOCX_MERGES_DIR))
     assert len(merges) == 7
     fixture = returned.read_original()
     assert fixture is not None
@@ -476,7 +494,7 @@ def test_docx_round_trip(
     # Named by time first, so the first listed is the first merged
     assert merges[0].endswith(f"-{fixture_id}.json")
     merge = LatexDocxMerge.model_validate_json(
-        Path(calkit.latex.DOCX_MERGES_DIR, merges[-1]).read_text()
+        Path(calkit.latex.LOCAL_DOCX_MERGES_DIR, merges[-1]).read_text()
     )
     assert set(merge.files) == {
         "paper/main.tex",

@@ -459,8 +459,12 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     return sorted(found)
 
 
+# Records of Word exports and merges: always kept on this machine, like run
+# logs, and in the project too when asked, e.g., with --log
 DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")
 DOCX_MERGES_DIR = os.path.join(".calkit", "latex", "docx-merges")
+LOCAL_DOCX_EXPORTS_DIR = os.path.join(LOCAL_DIR, "docx-exports")
+LOCAL_DOCX_MERGES_DIR = os.path.join(LOCAL_DIR, "docx-merges")
 # Where TeX4ht builds a Word export's source; machine-local, like the diffs
 DOCX_BUILD_DIR = os.path.join(LOCAL_DIR, "latex-docx-build")
 # Word bookmark names: 40 chars max, letters/digits/underscores
@@ -479,6 +483,10 @@ _DISPLAY_RE = re.compile(
 _FLOAT_RE = re.compile(
     r"\\(begin|end)\{(figure|table|wrapfigure|sidewaysfigure|sidewaystable)"
     r"\*?\}"
+)
+# Inline math, $...$ or \\(...\\), but not $$
+_INLINE_MATH_RE = re.compile(
+    r"(?<![\\$])\$(?!\$)((?:\\.|[^$\\])+?)\$|\\\((.+?)\\\)", re.S
 )
 # Environments whose rows are numbered one by one
 _MULTIROW_ENVS = frozenset({"align", "gather", "eqnarray", "flalign"})
@@ -513,6 +521,27 @@ class Block:
         if self.display:
             return ""
         return detex("\n".join(ln.text for ln in self.lines))
+
+    @property
+    def inline_math(self) -> list[tuple[str, str, str]]:
+        """Each piece of inline math, with the prose on either side of it as
+        rendered: (before, LaTeX, after)."""
+        if self.display:
+            return []
+        src = "\n".join(ln.text.split("%")[0] for ln in self.lines)
+        found = list(_INLINE_MATH_RE.finditer(src))
+        out = []
+        for i, m in enumerate(found):
+            start = found[i - 1].end() if i else 0
+            end = found[i + 1].start() if i + 1 < len(found) else len(src)
+            out.append(
+                (
+                    detex(src[start : m.start()]),
+                    m.group(1) or m.group(2),
+                    detex(src[m.end() : end]),
+                )
+            )
+        return out
 
     @property
     def display(self) -> str | None:

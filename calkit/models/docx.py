@@ -38,6 +38,9 @@ class LatexDocxExport(BaseModel):
     equations: int = Field(
         default=0, description="Display equations converted from the source."
     )
+    inline_equations: int = Field(
+        default=0, description="Inline equations converted from the source."
+    )
     files: dict[str, str] = Field(
         default={},
         description=(

@@ -2,7 +2,7 @@ import { ChakraProvider } from "@chakra-ui/react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
-import Markdown from "./Markdown"
+import Markdown, { repoImagePath } from "./Markdown"
 
 describe("Markdown", () => {
   it("renders LaTeX math in figure titles as KaTeX", () => {
@@ -91,5 +91,27 @@ describe("Markdown", () => {
     const preStyles = html.match(new RegExp(`\\.${preClass}\\{([^}]*)\\}`))?.[1]
     expect(preStyles).toContain("max-width:100%")
     expect(preStyles).toContain("overflow-x:auto")
+  })
+})
+
+describe("repoImagePath", () => {
+  it("resolves repo images against the file's directory", () => {
+    expect(repoImagePath("docs/img/logo.png")).toBe("docs/img/logo.png")
+    expect(repoImagePath("./logo.png", "docs")).toBe("docs/logo.png")
+    expect(repoImagePath("../img/logo.png", "docs/guide")).toBe(
+      "docs/img/logo.png",
+    )
+    // A leading slash is the repo root, as on GitHub
+    expect(repoImagePath("/img/logo.png", "docs")).toBe("img/logo.png")
+    expect(repoImagePath("logo.png?raw=true")).toBe("logo.png")
+  })
+
+  it("leaves images that aren't in the repo alone", () => {
+    expect(repoImagePath("https://example.com/logo.png")).toBeNull()
+    expect(repoImagePath("//example.com/logo.png")).toBeNull()
+    expect(repoImagePath("data:image/png;base64,AAAA")).toBeNull()
+    expect(repoImagePath("")).toBeNull()
+    // Above the repo root
+    expect(repoImagePath("../logo.png")).toBeNull()
   })
 })

@@ -8609,6 +8609,9 @@ def get_project_issues(
     }
     resp_fmt = []
     for issue in resp_json:
+        # GitHub lists pull requests as issues too, but they aren't to-dos
+        if "pull_request" in issue:
+            continue
         linked = comment_by_url.get(issue["html_url"])
         resp_fmt.append(
             Issue(

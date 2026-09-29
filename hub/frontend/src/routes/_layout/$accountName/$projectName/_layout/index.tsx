@@ -279,7 +279,7 @@ function ProjectView() {
             {readmeRequest.isPending ? (
               <LoadingSpinner height="100vh" />
             ) : readmeRequest.data ? (
-              <Markdown>
+              <Markdown repo={{ accountName, projectName, ref }}>
                 {removeFirstLine(
                   decodeBase64Utf8(String(readmeRequest?.data?.content)),
                 )}
@@ -516,10 +516,8 @@ function ProjectView() {
                     display="inline-block"
                     mt={2}
                   >
-                    {(visibleIssues?.length ?? 0) > HOME_TODOS_LIMIT
-                      ? `See all ${visibleIssues?.length} on GitHub`
-                      : "See all on GitHub"}{" "}
-                    <Icon as={ExternalLinkIcon} mb={0.5} />
+                    {/* No count: this is GitHub's first page, not all */}
+                    See all on GitHub <Icon as={ExternalLinkIcon} mb={0.5} />
                   </Link>
                 ) : null}
               </>

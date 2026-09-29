@@ -9,6 +9,7 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { Box } from "@chakra-ui/react"
+import { useQuery } from "@tanstack/react-query"
 import React, { useMemo } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeKatex from "rehype-katex"
@@ -17,6 +18,8 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import "katex/dist/katex.min.css"
+
+import { ProjectsService } from "../../client"
 
 // Preserve the class names remark-math emits (`math`, `math-inline`,
 // `math-display`) through sanitization so rehype-katex, which runs afterward,
@@ -43,6 +46,49 @@ interface MarkdownProps {
    * into one wall of text. Set this to get the paragraphs back.
    */
   foldedProse?: boolean
+  /**
+   * The project the text comes from, e.g., its README, so images given by
+   * a path in the repo load from it, as they do on GitHub, rather than
+   * from this page's URL.
+   */
+  repo?: {
+    accountName: string
+    projectName: string
+    ref?: string
+    /** The directory the text's file is in; the repo root by default. */
+    dir?: string
+  }
+}
+
+/** The repo path an image source points at, resolved against the directory
+ * of the file it's in, or null for one that isn't in the repo, e.g., a URL.
+ */
+export const repoImagePath = (src: string, dir = ""): string | null => {
+  if (!src || /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) {
+    return null
+  }
+  // A leading slash is the repo root, as on GitHub
+  const parts = (src.startsWith("/") ? [] : dir.split("/")).filter(Boolean)
+  for (const part of src.split(/[?#]/)[0].split("/")) {
+    if (part === "..") {
+      if (parts.length === 0) {
+        return null
+      }
+      parts.pop()
+    } else if (part && part !== ".") {
+      parts.push(part)
+    }
+  }
+  return parts.length ? parts.join("/") : null
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+  webp: "image/webp",
 }
 
 /** Restore paragraph breaks YAML folding collapsed into single newlines.
@@ -131,6 +177,7 @@ const Markdown = ({
   inline = false,
   noOfLines,
   foldedProse = false,
+  repo,
 }: MarkdownProps) => {
   const tableBorderColor = useColorModeValue("gray.200", "whiteAlpha.300")
   const tableHeaderBg = useColorModeValue("gray.50", "whiteAlpha.100")
@@ -206,6 +253,42 @@ const Markdown = ({
   // it, so a map rebuilt each render tears down and re-creates everything
   // this Markdown rendered. That reads as a flash wherever something else
   // on the page re-renders -- opening a modal over it, say.
+  const repoOwner = repo?.accountName
+  const repoName = repo?.projectName
+  const repoRef = repo?.ref
+  const repoDir = repo?.dir
+  const repoImage = useMemo(() => {
+    if (!repoOwner || !repoName) {
+      return undefined
+    }
+    // Fetched through the hub, so a private project's images load too,
+    // from Git or DVC alike
+    const RepoImage = ({ src, alt, ...props }: any) => {
+      const path = repoImagePath(String(src ?? ""), repoDir)
+      const { data } = useQuery({
+        queryKey: ["projects", repoOwner, repoName, "contents", path, repoRef],
+        queryFn: () =>
+          ProjectsService.getProjectContents({
+            owner_name: repoOwner,
+            project_name: repoName,
+            path: String(path),
+            ref: repoRef,
+          }).then((response) => response.data),
+        enabled: path !== null,
+        retry: false,
+      })
+      if (path === null) {
+        return <img src={src} alt={alt ?? ""} {...props} />
+      }
+      const ext = path.split(".").pop()?.toLowerCase() ?? ""
+      const resolved = data?.content
+        ? `data:${IMAGE_TYPES[ext] ?? "image/png"};base64,${data.content}`
+        : data?.url ?? undefined
+      return resolved ? <img src={resolved} alt={alt ?? ""} {...props} /> : null
+    }
+    return RepoImage
+  }, [repoOwner, repoName, repoRef, repoDir])
+
   const components = useMemo(
     () => ({
       h1: H1,
@@ -218,9 +301,10 @@ const Markdown = ({
       pre,
       code,
       a: BlueLink,
+      ...(repoImage ? { img: repoImage } : {}),
       ...tableComponents,
     }),
-    [inline, tableComponents],
+    [inline, tableComponents, repoImage],
   )
 
   return (

@@ -303,12 +303,14 @@ def test_service_files(tmp_path, monkeypatch):
     assert operator._launchd_plist_path(at_boot=False).startswith(
         str(tmp_path)
     )
-    # At boot it's a system daemon that still runs as this user
-    daemon = plistlib.loads(operator._launchd_plist(at_boot=True))
-    assert daemon["UserName"]
-    assert operator._launchd_plist_path(at_boot=True).startswith(
-        "/Library/LaunchDaemons/"
-    )
+    # At boot it's a system daemon that still runs as this user, which only
+    # macOS has
+    if sys.platform != "win32":
+        daemon = plistlib.loads(operator._launchd_plist(at_boot=True))
+        assert daemon["UserName"]
+        assert operator._launchd_plist_path(at_boot=True).startswith(
+            "/Library/LaunchDaemons/"
+        )
     # On Windows, a script in the Startup folder runs it hidden at login
     script = operator._windows_startup_script()
     assert "--mode" in script and "service" in script

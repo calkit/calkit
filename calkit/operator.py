@@ -316,9 +316,9 @@ def discover_workspaces(cfg: dict) -> list[dict]:
                 path=path,
                 kind=kind,
                 project=project,
-                running=is_pipeline_running(path),
             )
             | _git_status(path)
+            | get_run_state(path)
         )
     return workspaces
 
@@ -503,18 +503,71 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     }
 
 
-def is_pipeline_running(wdir: str) -> bool:
-    """Whether a pipeline run holds DVC's lock, which is cheap to check.
+def get_run_state(wdir: str) -> dict:
+    """What the pipeline is doing, or last did, from the files a run leaves,
+    which are cheap enough to read at every check-in.
 
-    DVC records what a run is reading and writing in its lock file for as
-    long as it runs, which is also what the VS Code extension watches.
+    A run is in progress while a live process holds DVC's lock, and its
+    log says which stage it's on; `calkit run` records how each run ended.
     """
-    try:
-        with open(os.path.join(wdir, ".dvc", "tmp", "rwlock")) as f:
-            lock = json.load(f)
-    except (OSError, ValueError):
-        return False
-    return isinstance(lock, dict) and any(lock.get(k) for k in lock)
+    from calkit.cli.main.core import (
+        _stage_run_info_from_log_content,
+        _stage_target_from_cmd,
+    )
+    from calkit.dvc.core import get_running_pipeline_processes
+
+    def latest(kind: str, suffix: str) -> str | None:
+        # Named by start time, so the latest sorts last
+        d = os.path.join(wdir, ".calkit", "local", kind)
+        try:
+            names = [f for f in os.listdir(d) if f.endswith(suffix)]
+        except OSError:
+            return None
+        return os.path.join(d, max(names)) if names else None
+
+    state: dict[str, Any] = dict(
+        running=False, running_stages=[], running_since=None, last_run=None
+    )
+    processes = get_running_pipeline_processes(wdir)
+    if processes:
+        state["running"] = True
+        # Items of a sweep run in their own processes, naming their stage
+        stages = [
+            target
+            for p in processes
+            if (target := _stage_target_from_cmd(p.get("cmd", "")))
+        ]
+        log = latest("logs", ".log")
+        if not stages and log is not None:
+            try:
+                with open(log) as f:
+                    info = _stage_run_info_from_log_content(f.read())
+            except OSError:
+                info = {}
+            stages = [name for name, i in info.items() if "status" not in i]
+            starts = [info[name]["start_time"] for name in stages]
+            if starts:
+                # Logged in UTC, without saying so
+                state["running_since"] = min(starts) + "+00:00"
+        state["running_stages"] = [s[:256] for s in stages[:50]]
+    record = latest("runs", ".json")
+    if record is not None:
+        try:
+            with open(record) as f:
+                run = json.load(f)
+            state["last_run"] = dict(
+                status=run["status"],
+                started=run["start_time"],
+                ended=run["end_time"],
+                failed_stages=[
+                    name[:256]
+                    for name, i in (run.get("stages") or {}).items()
+                    if i.get("status") == "failed"
+                ][:50],
+            )
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            pass
+    return state
 
 
 def pull_workspace(wdir: str) -> None:

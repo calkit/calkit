@@ -1,8 +1,10 @@
 """Tests for ``calkit.operator``."""
 
 import asyncio
+import json
 import os
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -389,16 +391,76 @@ def test_workspace_actions(tmp_path, monkeypatch):
     assert set(git["untracked_files"]) == {"notes.txt", "scratch.log"}
     assert status["status"]["pipeline"]["stale_stage_names"] == []
     assert status["commits_ahead"] == 0
-    # A run in progress is flagged cheaply from DVC's lock
-    assert not operator.is_pipeline_running(wdir)
+    # What the pipeline is doing, or last did, comes cheaply from the files
+    # a run leaves: DVC's lock, while a live process holds it, the run log
+    # for the stage it's on, and the record of how the last run ended
+    assert operator.get_run_state(wdir) == {
+        "running": False,
+        "running_stages": [],
+        "running_since": None,
+        "last_run": None,
+    }
     lock = os.path.join(wdir, ".dvc", "tmp", "rwlock")
     os.makedirs(os.path.dirname(lock), exist_ok=True)
+    local = os.path.join(wdir, ".calkit", "local")
+    os.makedirs(os.path.join(local, "logs"))
+    os.makedirs(os.path.join(local, "runs"))
+    with open(
+        os.path.join(local, "logs", "2026-09-29T12-00-00-a.log"), "w"
+    ) as f:
+        f.write(
+            "2026-09-29 12:00:00,000 - INFO - Running stage 'prep':\n"
+            "2026-09-29 12:05:00,000 - INFO - Running stage 'train':\n"
+        )
+    with open(
+        os.path.join(local, "runs", "2026-09-28T09-00-00-b.json"), "w"
+    ) as f:
+        json.dump(
+            {
+                "status": "failed",
+                "start_time": "2026-09-28T09:00:00+00:00",
+                "end_time": "2026-09-28T09:10:00+00:00",
+                "stages": {
+                    "prep": {"status": "completed"},
+                    "plot": {"status": "failed"},
+                },
+            },
+            f,
+        )
+    last_run = {
+        "status": "failed",
+        "started": "2026-09-28T09:00:00+00:00",
+        "ended": "2026-09-28T09:10:00+00:00",
+        "failed_stages": ["plot"],
+    }
+    # A lock left by a process that's gone doesn't count as running
     with open(lock, "w") as f:
-        f.write('{"read": {}, "write": {"out.txt": {"pid": 1}}}')
-    assert operator.is_pipeline_running(wdir)
+        json.dump(
+            {
+                "read": {},
+                "write": {"out.txt": {"pid": 2**22, "cmd": "calkit run"}},
+            },
+            f,
+        )
+    assert not operator.get_run_state(wdir)["running"]
+    with open(lock, "w") as f:
+        json.dump(
+            {
+                "read": {},
+                "write": {"out.txt": {"pid": os.getpid(), "cmd": "x"}},
+            },
+            f,
+        )
+    assert operator.get_run_state(wdir) == {
+        "running": True,
+        "running_stages": ["train"],
+        "running_since": "2026-09-29T12:05:00+00:00",
+        "last_run": last_run,
+    }
     with open(lock, "w") as f:
         f.write('{"read": {}, "write": {}}')
-    assert not operator.is_pipeline_running(wdir)
+    assert operator.get_run_state(wdir)["last_run"] == last_run
+    shutil.rmtree(os.path.join(wdir, ".calkit"))
     # Paths from the hub have to be plain ones inside the workspace, so they
     # can't be taken as options or reach anything else on the machine
     outside = os.path.join(str(tmp_path), "secret")

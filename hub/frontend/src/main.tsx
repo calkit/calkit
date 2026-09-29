@@ -7,7 +7,7 @@ import ReactDOM from "react-dom/client"
 import { StrictMode } from "react"
 import { client } from "./client/client.gen"
 import NotFound from "./components/Common/NotFound"
-import { initAnalytics } from "./lib/analytics"
+import { initAnalytics, sensitivePropertyBlacklist } from "./lib/analytics"
 import { getValidAccessToken } from "./lib/auth"
 import { reloadOnStaleChunk } from "./lib/staleChunks"
 import { routeTree } from "./routeTree.gen"
@@ -40,6 +40,9 @@ mixpanel.init(mixpanelToken, {
   // consent banner (see lib/analytics)
   opt_out_tracking_by_default: true,
   opt_out_persistence_by_default: true,
+  // Our URLs can carry secrets, e.g., reset and invitation tokens, so Mixpanel
+  // never receives the full current URL or referrer
+  property_blacklist: sensitivePropertyBlacklist,
 })
 
 const queryClient = new QueryClient({

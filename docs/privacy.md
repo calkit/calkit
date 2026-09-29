@@ -51,11 +51,13 @@ watch what any one person is doing.
 The hub always counts anonymous page views, and keeps fuller usage
 information only if you allow it.
 
-Anonymous page views record which pages are opened, when, and basic browser
-and device information. They are not linked to your account, no identifier
-is stored on your device, and no IP address is sent with them, so they
-can't be traced back to you. They're used only to see how much each part of
-the site is used.
+Anonymous page views record which pages are opened, when, and whether the
+visit looks like a person rather than a bot. They are not linked to your
+account, no identifier is stored on your device, and no IP address is sent
+to our analytics provider, so they can't be traced back to you. The hub
+briefly uses your IP address and browser's user agent to tell one day's
+visits apart, then discards them. These counts are used only to see how
+much each part of the site is used.
 
 When you first visit, the hub also asks whether you allow fuller usage
 information to be recorded. If you accept, the hub records the features you

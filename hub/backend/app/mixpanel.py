@@ -26,6 +26,37 @@ def track(
     )
 
 
+def track_anonymous_pageview(
+    visitor_id: str,
+    path: str,
+    bot: bool,
+    interacted: bool,
+    dwell_ms: int = 0,
+) -> None:
+    """A page view from a visitor who hasn't opted in.
+
+    ``visitor_id`` is a per-day hash computed by the caller, so views from one
+    visitor group for the day without being linkable across days, and nothing
+    is ever stored on the visitor's device. ``interacted`` says whether any
+    real input happened, which is what tells a person apart from a
+    browser-driving bot that reports no such signal.
+    """
+    mp.track(
+        visitor_id,
+        event_name="$mp_web_page_view",
+        properties={
+            "path": path,
+            "bot": bot,
+            "interacted": interacted,
+            "human": not bot and interacted,
+            "dwell_ms": dwell_ms,
+            "anonymous": True,
+            # Tells Mixpanel not to geolocate or store the request's IP
+            "$ip": "0",
+        },
+    )
+
+
 def user_created_new_token(user: User, scope: str | None, expires_days: int):
     track(
         user,

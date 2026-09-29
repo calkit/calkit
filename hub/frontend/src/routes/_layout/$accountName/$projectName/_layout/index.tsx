@@ -64,7 +64,10 @@ import {
   releaseLocation,
   releasePagePath,
 } from "../../../../../lib/releases"
-import { decodeBase64Utf8 } from "../../../../../lib/strings"
+import {
+  decodeBase64Utf8,
+  removeLeadingHeading,
+} from "../../../../../lib/strings"
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/",
@@ -142,11 +145,7 @@ function ProjectView() {
     (b.date ?? "").localeCompare(a.date ?? ""),
   )
   const topReleases = sortedReleases.slice(0, HOME_RELEASES_LIMIT)
-  const removeFirstLine = (txt: any) => {
-    const lines = String(txt).split("\n")
-    lines.splice(0, 1)
-    return lines.join("\n")
-  }
+  const removeTitle = (txt: any) => removeLeadingHeading(String(txt))
   const onClosedTodosSwitch = (e: any) => {
     setShowClosedTodos(e.target.checked)
   }
@@ -286,7 +285,7 @@ function ProjectView() {
               <LoadingSpinner height="100vh" />
             ) : readmeRequest.data ? (
               <Markdown repo={{ accountName, projectName, ref }}>
-                {removeFirstLine(
+                {removeTitle(
                   decodeBase64Utf8(String(readmeRequest?.data?.content)),
                 )}
               </Markdown>

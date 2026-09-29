@@ -40,7 +40,9 @@ rejects its token and the Operator shuts down.
 - `POST /operators/check-in`, with the Operator token, records that the
   Operator is alive, how it runs (`mode`: `service`, `foreground`, or
   `cron`), whether it's `connected` to the relay, and what workspaces it
-  has.
+  has, each with its Git state and pipeline run state: `running`,
+  `running_stages`, `running_since`, and `last_run` (`status`, `started`,
+  `ended`, and `failed_stages`).
   It returns the relay URL, an Operator relay token, and `connect`, which
   tells an Operator in cron mode whether to connect.
   Operators check in every 60 seconds while connected.

@@ -233,7 +233,13 @@ There are two kinds:
 
 Check-ins carry only what's cheap to get for every workspace every minute:
 branch, commit, whether there are uncommitted changes, how far it is from
-its remote, and whether a pipeline run holds DVC's lock.
+its remote, and the pipeline's run state.
+That's whether a live process holds DVC's lock, which stages are running
+and since when, from the run's log, and how the latest run ended, from
+the record `calkit run` leaves.
+The hub shows these without connecting to the Operator or asking for a
+second factor, so someone who only wants to know whether a run is going
+or failed doesn't need a session.
 The full status, i.e., stale stages and why, running stages, and changed
 files and data, comes from `calkit status --json`, the same source as the
 VS Code extension's sidebar.

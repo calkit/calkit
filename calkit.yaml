@@ -2,6 +2,7 @@
 owner: calkit
 name: calkit
 title: Calkit
+hub: https://calkit.io
 description: >-
   Calkit's claims about itself, e.g., in its docs, computed by its own
   pipeline so they stay true.
@@ -11,7 +12,8 @@ questions:
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?
     answer:
-      if same and pdf_same and eq_docx == eq_src and inline_docx == inline_src and threads_docx == threads_src: >-
+      if same and pdf_same and eq_docx == eq_src and inline_docx == inline_src and threads_docx == threads_src:
+        >-
         Yes, for the LaTeX/Word example: exported to Word and merged back
         with no edits, its source comes back byte for byte and builds the
         same PDF, and all {eq_src} display equation rows, {inline_src}
@@ -97,4 +99,3 @@ figures:
       A page of the LaTeX/Word example as built from LaTeX, as exported to
       Word, and as built again after merging the Word copy back.
     stage: latex-word-round-trip-figure
-hub: https://calkit.io

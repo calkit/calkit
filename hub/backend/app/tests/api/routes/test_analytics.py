@@ -51,6 +51,25 @@ def test_pageviews_group_a_visitors_views_for_the_day(
     assert first["human"] is True
 
 
+def test_pageviews_carry_the_owner_and_project(client: TestClient) -> None:
+    with patch.object(mixpanel.mp, "track") as mp_track:
+        _post(
+            client,
+            [
+                {
+                    "path": "/pete/proj/datasets",
+                    "owner_name": "pete",
+                    "project_name": "proj",
+                }
+            ],
+            signals={"interacted": True},
+        )
+    props = mp_track.call_args.kwargs["properties"]
+    assert props["path"] == "/pete/proj/datasets"
+    assert props["owner_name"] == "pete"
+    assert props["project_name"] == "proj"
+
+
 def test_pageviews_identify_a_visitor_per_day(client: TestClient) -> None:
     def visitor_id(ip: str, ua: str, day: str) -> str:
         with (

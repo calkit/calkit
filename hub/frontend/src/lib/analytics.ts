@@ -38,27 +38,63 @@ let lastTrackedHref: string | null = null
 
 let interacted = false
 
-let pendingViews: { path: string; ts: number }[] = []
+type PageContext = {
+  path: string
+  owner_name?: string
+  project_name?: string
+}
+
+let pendingViews: (PageContext & { ts: number })[] = []
 
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 
-// The matched route's template, e.g., "/join/$token" or
-// "/$accountName/$projectName", which names the page without revealing any of
-// its parameter values
-function pagePath(): string {
-  if (!router) return "/"
-  const { matchedRoutes } = router.getMatchedRoutes(
+// Route parameters that are secrets, e.g., an invitation token. These keep
+// their placeholder in the path so they never reach analytics; every other
+// value, including the owner and project, is filled in so the path names the
+// actual page rather than a template.
+const SECRET_PARAM_NAMES = new Set([
+  "token",
+  "code",
+  "user_code",
+  "secret",
+  "key",
+  "access_token",
+  "refresh_token",
+])
+
+function resolvePath(template: string, params: Record<string, string>): string {
+  return template.replace(/\$(\w+)/g, (placeholder, name: string) =>
+    SECRET_PARAM_NAMES.has(name) ? placeholder : params[name] ?? placeholder,
+  )
+}
+
+// The page's resolved path, e.g., "/pete/proj/datasets" or "/join/$token",
+// plus the owner and project for project pages. The owner and project name the
+// page rather than the visitor, and are what makes project views useful to
+// group.
+function pageContext(): PageContext {
+  if (!router) return { path: "/" }
+  const { matchedRoutes, routeParams } = router.getMatchedRoutes(
     window.location.pathname,
     undefined,
   )
-  return matchedRoutes[matchedRoutes.length - 1]?.fullPath || "/"
+  return {
+    path: resolvePath(
+      matchedRoutes[matchedRoutes.length - 1]?.fullPath || "/",
+      routeParams,
+    ),
+    owner_name: routeParams.accountName,
+    project_name: routeParams.projectName,
+  }
 }
 
-function pageViewProperties(path: string) {
+function pageViewProperties(context: PageContext) {
   return {
-    current_url_path: path,
+    current_url_path: context.path,
     current_domain: window.location.hostname,
     current_url_protocol: window.location.protocol,
+    owner_name: context.owner_name,
+    project_name: context.project_name,
   }
 }
 
@@ -91,6 +127,8 @@ function flushPageViews(): void {
     JSON.stringify({
       views: views.map((view) => ({
         path: view.path,
+        owner_name: view.owner_name,
+        project_name: view.project_name,
         dwell_ms: Math.max(0, now - view.ts),
       })),
       // Whether the browser was driven, and whether any real input happened;
@@ -100,8 +138,8 @@ function flushPageViews(): void {
   )
 }
 
-function queuePageView(path: string): void {
-  pendingViews.push({ path, ts: Date.now() })
+function queuePageView(context: PageContext): void {
+  pendingViews.push({ ...context, ts: Date.now() })
   if (pendingViews.length >= MAX_VIEWS_PER_BEACON) {
     flushPageViews()
     return
@@ -116,17 +154,17 @@ function trackPageView(): void {
   const href = window.location.href
   if (href === lastTrackedHref) return
   lastTrackedHref = href
-  const path = pagePath()
+  const context = pageContext()
   // A visitor who allowed analytics gets page views on their account; everyone
   // else gets anonymous ones the hub counts
   if (getAnalyticsConsent() === "granted") {
     mixpanel.track(PAGE_VIEW_EVENT, {
-      ...pageViewProperties(path),
+      ...pageViewProperties(context),
       webdriver: Boolean(navigator.webdriver),
       interacted,
     })
   } else {
-    queuePageView(path)
+    queuePageView(context)
   }
 }
 

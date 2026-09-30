@@ -32,6 +32,8 @@ def track_anonymous_pageview(
     bot: bool,
     interacted: bool,
     dwell_ms: int = 0,
+    owner_name: str | None = None,
+    project_name: str | None = None,
 ) -> None:
     """A page view from a visitor who hasn't opted in.
 
@@ -39,21 +41,28 @@ def track_anonymous_pageview(
     visitor group for the day without being linkable across days, and nothing
     is ever stored on the visitor's device. ``interacted`` says whether any
     real input happened, which is what tells a person apart from a
-    browser-driving bot that reports no such signal.
+    browser-driving bot that reports no such signal. ``owner_name`` and
+    ``project_name`` name the page for project views, which is what lets
+    interest in a project be seen.
     """
+    properties: dict[str, object] = {
+        "path": path,
+        "bot": bot,
+        "interacted": interacted,
+        "human": not bot and interacted,
+        "dwell_ms": dwell_ms,
+        "anonymous": True,
+        # Tells Mixpanel not to geolocate or store the request's IP
+        "$ip": "0",
+    }
+    if owner_name is not None:
+        properties["owner_name"] = owner_name
+    if project_name is not None:
+        properties["project_name"] = project_name
     mp.track(
         visitor_id,
         event_name="$mp_web_page_view",
-        properties={
-            "path": path,
-            "bot": bot,
-            "interacted": interacted,
-            "human": not bot and interacted,
-            "dwell_ms": dwell_ms,
-            "anonymous": True,
-            # Tells Mixpanel not to geolocate or store the request's IP
-            "$ip": "0",
-        },
+        properties=properties,
     )
 
 

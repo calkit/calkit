@@ -21,7 +21,10 @@ function setWebdriver(value: boolean): void {
   })
 }
 
-function makeRouter(templates: Record<string, string> = {}) {
+function makeRouter(
+  templates: Record<string, string> = {},
+  params: Record<string, string> = {},
+) {
   let handler: ((event: { hrefChanged: boolean }) => void) | undefined
   let fullPath = "/"
   return {
@@ -42,7 +45,7 @@ function makeRouter(templates: Record<string, string> = {}) {
     },
     getMatchedRoutes: () => ({
       matchedRoutes: [{ fullPath }],
-      routeParams: {},
+      routeParams: params,
       foundRoute: undefined,
     }),
   }
@@ -104,15 +107,33 @@ describe("initAnalytics", () => {
     expect(payload.signals.interacted).toBe(false)
   })
 
-  it("sends a route template instead of the URL", async () => {
+  it("resolves the path but leaves a secret parameter as its placeholder", async () => {
     const { initAnalytics } = await load()
-    const router = makeRouter({ "/join/secret-token": "/join/$token" })
+    const router = makeRouter(
+      { "/join/secret-token": "/join/$token" },
+      { token: "secret-token" },
+    )
     initAnalytics(router)
     router.navigate("/join/secret-token")
     flush()
     const payload = lastBeacon()
     expect(payload.views[1].path).toBe("/join/$token")
     expect(JSON.stringify(payload)).not.toContain("secret-token")
+  })
+
+  it("names the owner and project in a project page path", async () => {
+    const { initAnalytics } = await load()
+    const router = makeRouter(
+      { "/pete/proj": "/$accountName/$projectName" },
+      { accountName: "pete", projectName: "proj" },
+    )
+    initAnalytics(router)
+    router.navigate("/pete/proj")
+    flush()
+    const view = lastBeacon().views[1]
+    expect(view.path).toBe("/pete/proj")
+    expect(view.owner_name).toBe("pete")
+    expect(view.project_name).toBe("proj")
   })
 
   it("drops the query string", async () => {

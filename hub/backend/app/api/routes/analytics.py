@@ -31,6 +31,7 @@ router = APIRouter()
 # into unbounded work. Paths are route templates, so they are short.
 MAX_VIEWS_PER_REQUEST = 20
 MAX_PATH_LENGTH = 200
+MAX_NAME_LENGTH = 100
 MAX_BODY_BYTES = 64 * 1024
 
 # The browser sends a batch at most every 15 seconds, so this is far more than
@@ -52,9 +53,13 @@ _BOT_UA_RE = re.compile(
 
 
 class PageViewIn(BaseModel):
-    # The matched route's template, e.g., "/join/$token", with no parameter
-    # values, so nothing identifying is recorded
+    # The page's resolved path, e.g., "/pete/proj/datasets", with any secret
+    # parameter, e.g., an invitation token, left as its placeholder
     path: str = Field(max_length=MAX_PATH_LENGTH)
+    # The owner and project a project page belongs to; names, not secrets,
+    # which is what lets interest in a project be measured
+    owner_name: str | None = Field(default=None, max_length=MAX_NAME_LENGTH)
+    project_name: str | None = Field(default=None, max_length=MAX_NAME_LENGTH)
     # Milliseconds between the view and the batch being sent
     dwell_ms: int = Field(default=0, ge=0)
 
@@ -143,6 +148,8 @@ def _record(
             bot=bot,
             interacted=interacted,
             dwell_ms=view.dwell_ms,
+            owner_name=view.owner_name,
+            project_name=view.project_name,
         )
 
 

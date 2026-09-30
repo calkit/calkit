@@ -1,4 +1,11 @@
-import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
+import {
+  Box,
+  Flex,
+  Icon,
+  Spinner,
+  Text,
+  useColorModeValue,
+} from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import type { IconType } from "react-icons"
@@ -82,9 +89,10 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     strict: false,
   }) as any
   const currentRef: string | undefined = layoutSearch?.ref
-  // Only controls the compute icon color: green when one of the user's
-  // Operators is online with a workspace for this project. Same key as the
-  // compute page, so they share one request.
+  // Colors the compute icon green when one of the user's Operators is
+  // online with a workspace for this project, and says when the pipeline is
+  // running on one. Same key as the compute and pipeline pages, so they
+  // share one request.
   const workspacesQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "workspaces"],
     queryFn: () =>
@@ -95,6 +103,8 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     enabled: Boolean(user),
     retry: false,
     refetchOnWindowFocus: false,
+    // As often as Operators check in
+    refetchInterval: 60000,
   })
   const computeColor = workspacesQuery.data?.some((ws) => ws.operator_online)
     ? "ui.success"
@@ -117,6 +127,10 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     refetchOnWindowFocus: false,
   })
   const pipelineIsStale = pipelineQuery.data?.status === "stale"
+  // Running on one of the user's machines, which says more than stale
+  const runningOn = (workspacesQuery.data ?? [])
+    .filter((ws) => ws.running)
+    .map((ws) => ws.operator_name)
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {
@@ -152,7 +166,20 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
           alignSelf="center"
         />
         <Text ml={2}>{title}</Text>
-        {title === "Pipeline" && pipelineIsStale ? (
+        {title === "Pipeline" && runningOn.length ? (
+          <Tooltip label={`Running on ${runningOn.join(", ")}`}>
+            <Box
+              ml="auto"
+              mr={1}
+              alignSelf="center"
+              display="flex"
+              role="img"
+              aria-label="Pipeline is running"
+            >
+              <Spinner size="xs" color="blue.400" />
+            </Box>
+          </Tooltip>
+        ) : title === "Pipeline" && pipelineIsStale ? (
           <Tooltip label="The pipeline has changed since it was last run">
             <Box
               // Pushed to the far edge rather than trailing the label, so

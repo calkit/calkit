@@ -60,11 +60,11 @@ visits apart, then discards them. These counts are used only to see how
 much each part of the site is used.
 
 When you first visit, the hub also asks whether you allow fuller usage
-information to be recorded. If you accept, the hub records the features you
-use, along with an approximate location derived from your IP address. While
-you're signed in, this is associated with your account, and includes actions
-recorded by the hub's server, such as creating a project or publishing a
-release.
+information to be recorded. If you accept, page views stop being anonymous
+and the hub records the pages you visit and the features you use, along with
+an approximate location derived from your IP address. While you're signed
+in, this is associated with your account, and includes actions recorded by
+the hub's server, such as creating a project or publishing a release.
 
 If you reject, only the anonymous page views described above are kept; none
 of the fuller information is recorded, and nothing for this purpose is

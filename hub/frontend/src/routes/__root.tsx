@@ -75,8 +75,8 @@ function AnalyticsConsentBanner() {
       >
         <Text fontSize={{ base: "xs", md: "sm" }} flex={1} alignSelf="stretch">
           Calkit counts anonymous page views to see how the site is used. If you
-          allow it, we'll also record which features you use, tied to your
-          account. Nothing is sold or shared.{" "}
+          allow it, we'll also record the pages and features you use, tied to
+          your account. Nothing is sold or shared.{" "}
           <Link href={privacyPolicyUrl} isExternal textDecoration="underline">
             Privacy policy
           </Link>

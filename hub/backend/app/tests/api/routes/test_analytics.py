@@ -3,9 +3,10 @@
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app import mixpanel
+from app import cache, mixpanel
 from app.api.routes import analytics
 from app.config import settings
 
@@ -85,6 +86,26 @@ def test_pageviews_flag_bots(client: TestClient) -> None:
     props = [call.kwargs["properties"] for call in mp_track.call_args_list]
     assert [p["bot"] for p in props] == [True, True, False]
     assert [p["human"] for p in props] == [False, False, False]
+
+
+def test_pageviews_are_rate_limited(client: TestClient) -> None:
+    if cache.get_client() is None:
+        pytest.skip("Rate limiting needs the shared cache")
+    with (
+        patch.object(analytics, "RATE_LIMIT_REQUESTS", 1),
+        patch.object(mixpanel.mp, "track"),
+    ):
+        assert _post(client, [{"path": "/"}]).status_code == 204
+        assert _post(client, [{"path": "/"}]).status_code == 429
+
+
+def test_pageviews_reject_an_oversized_batch(client: TestClient) -> None:
+    resp = client.post(
+        "/pageviews",
+        content=b"x" * (analytics.MAX_BODY_BYTES + 1),
+        headers={"content-type": "text/plain"},
+    )
+    assert resp.status_code == 413
 
 
 def test_pageviews_reject_a_bad_batch(client: TestClient) -> None:

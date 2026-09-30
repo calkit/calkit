@@ -20,7 +20,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field, ValidationError
 
-from app import mixpanel
+from app import cache, mixpanel
 from app.config import settings
 from app.core import utcnow
 
@@ -29,8 +29,16 @@ router = APIRouter()
 # A batch is what the browser accumulated between flushes, which is bounded on
 # that side too; the cap here is what stops a crafted request from fanning out
 # into unbounded work. Paths are route templates, so they are short.
-MAX_VIEWS_PER_REQUEST = 50
+MAX_VIEWS_PER_REQUEST = 20
 MAX_PATH_LENGTH = 200
+MAX_BODY_BYTES = 64 * 1024
+
+# The browser sends a batch at most every 15 seconds, so this is far more than
+# a real session needs while still bounding what one address can do. The
+# endpoint is unauthenticated and fans out into outbound calls, so without
+# this a small flood could tie up workers and run up analytics cost.
+RATE_LIMIT_REQUESTS = 60
+RATE_LIMIT_WINDOW_SECONDS = 60
 
 # User agents that name themselves as crawlers or command-line clients. Bots
 # driving a real browser don't show up here, which is why the interaction
@@ -101,6 +109,27 @@ def _is_bot(signals: SignalsIn, user_agent: str) -> bool:
     return signals.webdriver or bool(_BOT_UA_RE.search(user_agent))
 
 
+def _rate_limited(ip: str) -> bool:
+    """Whether this address has used up its allowance.
+
+    Counted in the shared cache so the limit holds across API workers. If the
+    cache is unavailable the request goes through: analytics is not worth
+    failing a page over, and the caps on body size and views still bound the
+    work.
+    """
+    client = cache.get_client()
+    if client is None:
+        return False
+    key = f"pageviews:{ip}"
+    try:
+        count = client.incr(key)
+        if count == 1:
+            client.expire(key, RATE_LIMIT_WINDOW_SECONDS)
+        return count > RATE_LIMIT_REQUESTS
+    except Exception:
+        return False
+
+
 def _record(
     visitor_id: str,
     views: list[PageViewIn],
@@ -132,8 +161,21 @@ async def post_pageviews(
     """
     if not settings.MIXPANEL_TOKEN:
         return Response(status_code=204)
+    ip = _client_ip(request)
+    if _rate_limited(ip):
+        raise HTTPException(429, "Too many requests")
+    content_length = request.headers.get("content-length")
+    if (
+        content_length
+        and content_length.isdigit()
+        and int(content_length) > MAX_BODY_BYTES
+    ):
+        raise HTTPException(413, "Batch too large")
+    body = await request.body()
+    if len(body) > MAX_BODY_BYTES:
+        raise HTTPException(413, "Batch too large")
     try:
-        payload = PageViewsIn.model_validate_json(await request.body())
+        payload = PageViewsIn.model_validate_json(body)
     except ValidationError:
         raise HTTPException(422, "Invalid page view batch")
     user_agent = request.headers.get("user-agent", "")

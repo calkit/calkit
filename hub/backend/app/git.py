@@ -549,7 +549,13 @@ def get_repo(
                     except subprocess.CalledProcessError:
                         logger.error("Failed to clone repo")
                         shutil.rmtree(staging_dir, ignore_errors=True)
-                        raise HTTPException(404, "Git repo not found")
+                        # Not a 404: the project exists, and GitHub can
+                        # briefly deny a repo created seconds ago, so let the
+                        # client retry rather than show "not found".
+                        raise HTTPException(
+                            502,
+                            "Could not clone this project's repository.",
+                        )
                     except subprocess.TimeoutExpired:
                         # Every retry starts this repo over from nothing, so
                         # a repo too big to clone inside the budget never
@@ -837,6 +843,70 @@ def push_to_shared_read_clone(
     except (GitCommandError, ValueError, OSError) as e:
         logger.info(f"Could not push to the shared checkout for {label}: {e}")
     return False
+
+
+def seed_shared_read_clone(project: Project, repo: git.Repo) -> None:
+    """Make the shared checkout of a new project from the writer's clone.
+
+    Otherwise the first read clones it from GitHub with the App's token,
+    which GitHub can answer with "Repository not found" for a few seconds
+    after the repo is created. Best effort: without it, the read clones.
+    """
+    base_dir = shared_read_clone_dir(project)
+    repo_dir = os.path.join(base_dir, "repo")
+    updated_fpath = os.path.join(base_dir, "updated.txt")
+    staging_dir = repo_dir + ".cloning"
+    label = f"{project.owner_github_name}/{project.name}"
+    git_plain_url = project.git_repo_url or ""
+    if git_plain_url and not git_plain_url.endswith(".git"):
+        git_plain_url += ".git"
+    try:
+        os.makedirs(base_dir, exist_ok=True)
+        with FileLock(os.path.join(base_dir, "updating.lock"), timeout=5):
+            try:
+                # A project made seconds ago has no checkout worth keeping;
+                # one here is left from a deleted project of the same name.
+                # The marker goes first so a failure can't leave it claiming
+                # a complete checkout.
+                if os.path.isfile(updated_fpath):
+                    os.remove(updated_fpath)
+                for stale in (staging_dir, repo_dir):
+                    if os.path.isdir(stale):
+                        shutil.rmtree(stale, ignore_errors=True)
+                with _timed("seed-shared", repo=label):
+                    subprocess.check_call(
+                        ["git", "clone", str(repo.working_dir), staging_dir]
+                    )
+                seeded = git.Repo(staging_dir)
+                seeded.remotes.origin.set_url(git_plain_url)
+                # A partial clone has to keep fetching missing objects from
+                # GitHub, not from the writer's clone.
+                writer_config = repo.config_reader()
+                section = 'remote "origin"'
+                with seeded.config_writer() as config:
+                    for key in ("promisor", "partialclonefilter"):
+                        if writer_config.has_option(section, key):
+                            config.set_value(
+                                section,
+                                key,
+                                writer_config.get_value(section, key),
+                            )
+                os.rename(staging_dir, repo_dir)
+                _install_read_only_hooks(repo_dir)
+                subprocess.call(["touch", updated_fpath])
+            except (
+                subprocess.CalledProcessError,
+                GitCommandError,
+                OSError,
+            ) as e:
+                logger.info(
+                    f"Could not seed the shared checkout for {label}: {e}"
+                )
+                # Only while holding the lock: otherwise this could be
+                # another request's clone in progress.
+                shutil.rmtree(staging_dir, ignore_errors=True)
+    except (Timeout, OSError) as e:
+        logger.info(f"Could not seed the shared checkout for {label}: {e}")
 
 
 def push_and_expire(

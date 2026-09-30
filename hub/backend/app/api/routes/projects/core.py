@@ -117,6 +117,7 @@ from app.git import (
     record_project_update,
     resolve_commit_sha,
     search_refs,
+    seed_shared_read_clone,
 )
 from app.models import (
     Account,
@@ -1183,6 +1184,7 @@ def post_project(
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
             push_and_expire(project, repo)
+            seed_shared_read_clone(project, repo)
         except Exception as e:
             # The project row is already committed, and it would block a retry
             # since a Git repo can only back one project, so remove it and let

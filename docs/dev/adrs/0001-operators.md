@@ -229,6 +229,51 @@ There are two kinds:
   stages.
   They are shown in the hub but not edited there.
 
+The hub presents itself as a workspace too: the default one, and the
+project's source of truth, which can be viewed and edited but runs
+nothing.
+A "view from" select in the project's menu switches between the hub, its
+change batches (#445), which extends the existing `ref` picker, and the
+user's machines' workspaces, read live through their Operators, so only
+while they're online and with the second factor sessions take.
+What's in the view is always relative to the hub, and the key design
+point is showing how far each change has gone, in plain words rather
+than Git's:
+
+- Changed on a machine, i.e., uncommitted: "only on office-laptop,
+  unsaved".
+- Saved on a machine, i.e., committed but not pushed: "saved on
+  office-laptop, not shared".
+- In a change batch, i.e., pushed to its branch: "in batch: Revise
+  figure 3".
+- In the project, i.e., merged into `main`, which is the default and needs
+  no label.
+
+A bar says which workspace is in view and what it holds beyond the hub,
+anything that differs from the hub carries its label and can be
+compared with the hub's version side by side, and each state offers the
+next step: save, share, and add to the project.
+DVC outputs follow the same states, e.g., a figure produced on a machine
+but not yet pushed to storage.
+The hub's check-in badges use the same words, e.g., "1 not shared"
+rather than "1 ahead".
+
+A workspace on `main` can sync with the hub automatically, pushing what's
+saved and pulling what's new, so for work straight on the project the
+saved and shared states collapse into one, while change batches keep an
+explicit step before anything reaches `main`.
+It's opt-in per workspace, since it pushes without asking, and stops at
+anything that needs a person, e.g., a merge conflict, which the hub then
+shows on that workspace.
+
+What's in view decides where edits go.
+Viewing the hub or a batch, edits are saved to it as commits, and builds
+run in a managed workspace on a machine, as in [editor
+builds](#editor-builds), leaving the user's own checkout alone.
+Viewing a machine's workspace, edits land in that checkout, unsaved, as
+if the user were at the machine, and runs happen there, which is how to
+continue a session at the office from home.
+
 ### Workspace status
 
 Check-ins carry only what's cheap to get for every workspace every minute:
@@ -422,22 +467,31 @@ names it, optionally locking its properties so a change on the hub
 shows up in the project (#1749).
 The compute page can list Operators and brokered compute together.
 
-### LaTeX builds
+### Editor builds
 
-The hub's LaTeX editor compiles a preview in the browser with a WASM TeX
-engine, which lacks the stage's real environment and some packages and
-fonts, so the hub labels its output unofficial.
+The most important thing Operators enable is plugging in a machine to do
+the work behind the hub's editors: edit a figure or a paper on the hub,
+and have the machine produce the real result, with its own environment,
+before and after saving.
+Seeing where the pipeline is running and rerunning it on a chosen machine
+come next, and sessions are for advanced users.
+
+The hub's figure editor previews with Pyodide and its LaTeX editor with a
+WASM TeX engine, both in the browser, which lack the stage's real
+environment, so the hub labels their output unofficial, and saving
+commits only the source, leaving the stage stale.
 The goal is official builds from the hub: saving commits the source,
-builds the PDF with the stage's own environment, pushes it to the
+builds the output with the stage's own environment, pushes it to the
 project's storage, and commits the updated `dvc.lock`, leaving the stage
 up to date.
 The editor can instead build on one of the user's Operators, chosen from
-a "build on" menu that defaults to the browser.
+a "build on" menu that defaults to the browser (#1111).
 
 The Operator builds in a managed workspace for the project, reset for
 every build:
 it checks out the commit the editor loaded, with `--force`, writes the
-editor's unsaved files over it, and runs only the LaTeX stage, like
+editor's unsaved files over it, and runs only the stages the change
+affects, e.g., the figure's or the LaTeX stage, like
 `calkit run --single-item`.
 The stage's other inputs, e.g., figures, come from the DVC cache or remote
 rather than being recomputed, and nothing is committed.
@@ -447,17 +501,23 @@ build carries into the next.
 One build runs per workspace at a time, and a newer request replaces a
 queued one.
 
-A preview build stops there.
+A preview build stops there, and the editor shows the result next to the
+current one, so the change can be judged before it's kept; discarding it
+leaves nothing behind.
 A save does the same in the managed workspace, then commits the source
-and `dvc.lock`, pushes the PDF with DVC, and pushes the commit.
+and `dvc.lock`, pushes the output with DVC, and pushes the commit, to
+`main` or to a change batch, a simplified branch the save dialog offers
+alongside `main` (#445).
 If the branch moved since the editor loaded it, the Operator merges and
 rebuilds rather than overwriting, and reports conflicts back to the
 editor.
 
 The build log streams over the relay.
-The PDF does not, since it's bulk data:
+The output does not, since it's bulk data:
 the Operator uploads it to object storage with a presigned URL from the
 API, where it expires after a day, and the editor loads it from there.
+A build runs project code on the machine, so like a session it takes the
+grant and second factor the relay requires.
 
 To fetch the commit, the Operator uses a personal workspace of the same
 project on that machine if there is one, and otherwise the machine's own
@@ -527,8 +587,10 @@ so it follows the pipeline integration phase.
    with liveness, the local server's features moved onto the relay, and
    persistent shell sessions. Done, along with cron mode, `--ssh`
    install, and two-factor authentication.
-2. The file tree and editor, scheduler jobs, and LaTeX preview and
-   official builds.
+2. Editor builds for figures and papers, with change batches; where the
+   pipeline is running shown on the pipeline view, and rerunning stages
+   on a chosen machine; then the file tree and editor, and scheduler
+   jobs.
 3. Pipeline integration: stages on hosts served by an Operator run through
    the relay, and shared DVC caches and stage locks per machine.
 4. Detached remote stages.

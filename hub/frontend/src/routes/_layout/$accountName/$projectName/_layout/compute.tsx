@@ -1,4 +1,6 @@
 import {
+  Alert,
+  AlertIcon,
   Badge,
   Box,
   Button,
@@ -23,7 +25,14 @@ import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { FiCheck, FiMinus, FiPlus, FiRefreshCw, FiX } from "react-icons/fi"
+import {
+  FiCheck,
+  FiMinus,
+  FiPlay,
+  FiPlus,
+  FiRefreshCw,
+  FiX,
+} from "react-icons/fi"
 import { z } from "zod"
 
 import {
@@ -53,6 +62,9 @@ const computeSearchSchema = z.object({
   workspace: z.string().optional(),
   // An open modal for acting on that workspace
   modal: z.enum(["save", "discard", "new_stage"]).optional(),
+  // A run asked for from another page, e.g., the pipeline's, which waits
+  // for a click here: a stage's name, or "*" for the whole pipeline
+  confirm_run: z.string().optional(),
 })
 
 export const Route = createFileRoute(
@@ -339,6 +351,8 @@ function WorkspacePanel({
   setModal,
   runInSession,
   onChanged,
+  confirmRun,
+  clearConfirmRun,
 }: {
   ws: Workspace
   conn: OperatorConnection
@@ -347,6 +361,8 @@ function WorkspacePanel({
   setModal: (modal: Modal | undefined) => void
   runInSession: (command: string) => void
   onChanged: () => void
+  confirmRun: string | undefined
+  clearConfirmRun: () => void
 }) {
   const showToast = useCustomToast()
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
@@ -435,7 +451,8 @@ function WorkspacePanel({
   // Windows has no sessions to watch a run in, so it runs without one
   const runsInSession = ws.operator_platform !== "windows"
   const runMutation = useMutation({
-    mutationFn: () => request("workspace.run"),
+    mutationFn: (stages?: string[]) =>
+      request("workspace.run", stages ? { stages } : {}),
     onSuccess: (result) =>
       result.ok
         ? showToast("Success!", "The pipeline ran.", "success")
@@ -443,6 +460,17 @@ function WorkspacePanel({
     onError: (err: Error) => showToast("Error", err.message, "error"),
     onSettled: refresh,
   })
+  // The whole pipeline, or just some stages
+  const run = (stages?: string[]) => {
+    if (runsInSession) {
+      setRunStartedAt(Date.now())
+      // Quoted for the POSIX shells sessions run
+      const quoted = (stages ?? []).map((s) => `'${s.replace(/'/g, "'\\''")}'`)
+      runInSession(["calkit run", ...quoted].join(" "))
+    } else {
+      runMutation.mutate(stages)
+    }
+  }
   const check = <Icon ml={1} as={FiCheck} color="green.500" />
   return (
     <Box bg={bg} borderRadius="lg" p={4} mb={6}>
@@ -459,6 +487,36 @@ function WorkspacePanel({
           isDisabled={!connected}
         />
       </Flex>
+      {confirmRun && editable && (
+        <Alert status="info" borderRadius="md" mb={3} gap={2}>
+          <AlertIcon />
+          <Text flex={1}>
+            Run{" "}
+            {confirmRun === "*" ? (
+              "the pipeline"
+            ) : (
+              <>
+                <Code fontSize="xs">{confirmRun}</Code>
+              </>
+            )}{" "}
+            on {ws.operator_name}?
+          </Text>
+          <Button
+            size="xs"
+            variant="primary"
+            isDisabled={!connected}
+            onClick={() => {
+              run(confirmRun === "*" ? undefined : [confirmRun])
+              clearConfirmRun()
+            }}
+          >
+            Run
+          </Button>
+          <Button size="xs" onClick={clearConfirmRun}>
+            Cancel
+          </Button>
+        </Alert>
+      )}
       {!connected ? (
         <Text>Waiting for the Operator to connect.</Text>
       ) : statusQuery.isPending ? (
@@ -586,14 +644,7 @@ function WorkspacePanel({
                 size="xs"
                 variant="primary"
                 isLoading={runMutation.isPending}
-                onClick={() => {
-                  if (runsInSession) {
-                    setRunStartedAt(Date.now())
-                    runInSession("calkit run")
-                  } else {
-                    runMutation.mutate()
-                  }
-                }}
+                onClick={() => run()}
               >
                 Run
               </Button>
@@ -616,11 +667,25 @@ function WorkspacePanel({
           {staleStages
             .filter((stage) => !runningStages.includes(stage))
             .map((stage) => (
-              <Tooltip key={stage} label={describeStale(stage)}>
-                <Code fontSize="xs" mr={1} color="yellow.500">
-                  {stage}
-                </Code>
-              </Tooltip>
+              <Flex key={stage} display="inline-flex" align="center" mr={2}>
+                <Tooltip label={describeStale(stage)}>
+                  <Code fontSize="xs" color="yellow.500">
+                    {stage}
+                  </Code>
+                </Tooltip>
+                {editable && (
+                  <Tooltip label={`Run ${stage}`}>
+                    <IconButton
+                      aria-label={`Run ${stage}`}
+                      icon={<FiPlay />}
+                      size="xs"
+                      variant="ghost"
+                      isDisabled={running}
+                      onClick={() => run([stage])}
+                    />
+                  </Tooltip>
+                )}
+              </Flex>
             ))}
           {Object.keys(envStates).length > 0 && (
             <>
@@ -1125,6 +1190,12 @@ function Compute() {
           setModal={setModal}
           runInSession={(command) => newSession(selected, command)}
           onChanged={() => workspacesQuery.refetch()}
+          confirmRun={search.confirm_run}
+          clearConfirmRun={() =>
+            navigate({
+              search: (prev) => ({ ...prev, confirm_run: undefined }),
+            })
+          }
         />
       )}
       {project?.git_repo_url && cloneTargets.length > 0 && (

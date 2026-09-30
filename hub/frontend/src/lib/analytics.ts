@@ -11,13 +11,123 @@ export const analyticsEnabled = Boolean(import.meta.env.VITE_MIXPANEL_TOKEN)
 
 export const privacyPolicyUrl = "https://docs.calkit.org/privacy/"
 
+const PAGE_VIEW_EVENT = "$mp_web_page_view"
+
+// Mixpanel attaches the full current URL and the referrer to every event by
+// default. Our URLs carry secrets, e.g., password reset and invitation tokens,
+// and the names of accounts and projects, so those properties are dropped and
+// page views send only a route template with its parameter values left out.
+export const sensitivePropertyBlacklist = [
+  "$current_url",
+  "$referrer",
+  "$referring_domain",
+  "$initial_referrer",
+  "$initial_referring_domain",
+]
+
+// Anonymous page views are counted by the hub rather than sent to Mixpanel
+// from the browser, so nothing is stored on the visitor's device and they can
+// be collected without consent. The whole session's views go in one beacon
+// where possible, since a beacon has nobody waiting on it.
+const MAX_VIEWS_PER_BEACON = 20
+const BEACON_INTERVAL_MS = 15_000
+
+let router: AnyRouter | null = null
+
 let lastTrackedHref: string | null = null
 
+let interacted = false
+
+let pendingViews: { path: string; ts: number }[] = []
+
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+// The matched route's template, e.g., "/join/$token" or
+// "/$accountName/$projectName", which names the page without revealing any of
+// its parameter values
+function pagePath(): string {
+  if (!router) return "/"
+  const { matchedRoutes } = router.getMatchedRoutes(
+    window.location.pathname,
+    undefined,
+  )
+  return matchedRoutes[matchedRoutes.length - 1]?.fullPath || "/"
+}
+
+function pageViewProperties(path: string) {
+  return {
+    current_url_path: path,
+    current_domain: window.location.hostname,
+    current_url_protocol: window.location.protocol,
+  }
+}
+
+function sendBeacon(body: string): void {
+  const url = `${import.meta.env.VITE_API_URL ?? ""}/pageviews`
+  // A string body is sent as text/plain, which stays a simple cross-origin
+  // request, so no preflight stands between the visitor leaving and this
+  // arriving
+  if (navigator.sendBeacon?.(url, body)) return
+  fetch(url, {
+    method: "POST",
+    body,
+    keepalive: true,
+    headers: { "Content-Type": "text/plain" },
+  }).catch(() => {
+    // Analytics is best-effort; a visitor shouldn't see anything from it
+  })
+}
+
+function flushPageViews(): void {
+  if (!pendingViews.length) return
+  const views = pendingViews
+  pendingViews = []
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer)
+    flushTimer = null
+  }
+  const now = Date.now()
+  sendBeacon(
+    JSON.stringify({
+      views: views.map((view) => ({
+        path: view.path,
+        dwell_ms: Math.max(0, now - view.ts),
+      })),
+      // Whether the browser was driven, and whether any real input happened;
+      // the hub uses the pair to tell a person from a bot driving a browser
+      signals: { webdriver: Boolean(navigator.webdriver), interacted },
+    }),
+  )
+}
+
+function queuePageView(path: string): void {
+  pendingViews.push({ path, ts: Date.now() })
+  if (pendingViews.length >= MAX_VIEWS_PER_BEACON) {
+    flushPageViews()
+    return
+  }
+  if (flushTimer === null) {
+    flushTimer = setTimeout(flushPageViews, BEACON_INTERVAL_MS)
+  }
+}
+
 function trackPageView(): void {
+  if (!analyticsEnabled) return
   const href = window.location.href
   if (href === lastTrackedHref) return
   lastTrackedHref = href
-  mixpanel.track_pageview()
+  const path = pagePath()
+  // A visitor who allowed analytics gets page views on their account; everyone
+  // else gets anonymous ones the hub counts
+  if (getAnalyticsConsent() === "granted") {
+    mixpanel.track(PAGE_VIEW_EVENT, {
+      ...pageViewProperties(path),
+      webdriver: Boolean(navigator.webdriver),
+      interacted,
+    })
+  } else {
+    queuePageView(path)
+  }
 }
 
 // Mixpanel is initialized opted out, and it records opt-outs the same way
@@ -66,7 +176,8 @@ export function setAnalyticsConsent(consent: AnalyticsConsent): void {
   for (const listener of consentListeners) listener()
   if (consent === "granted") {
     mixpanel.opt_in_tracking()
-    // The page the visitor accepted on was dropped while opted out
+    // The page the visitor accepted on was counted anonymously, so it is
+    // tracked again now that it can be tied to their account
     lastTrackedHref = null
     trackPageView()
   } else {
@@ -75,10 +186,35 @@ export function setAnalyticsConsent(consent: AnalyticsConsent): void {
 }
 
 // Automated browsers (Selenium, Puppeteer, Playwright) set navigator.webdriver
-// even when they spoof their user agent. We tag their events with a bot super
-// property, which sticks to every event for the session, so this traffic can be
-// filtered out in Mixpanel rather than dropped before it gets there.
-export function initAnalytics(router: AnyRouter): void {
+// even when they spoof their user agent, so it's one signal among several.
+// The stronger one for a bot driving a real browser is that it never produces
+// real input, which is what `interacted` records.
+function watchForInteraction(): () => void {
+  const markInteracted = () => {
+    interacted = true
+  }
+  const events = ["pointerdown", "keydown", "touchstart", "scroll"]
+  for (const event of events) {
+    window.addEventListener(event, markInteracted, {
+      passive: true,
+      once: true,
+    })
+  }
+  return () => {
+    for (const event of events) {
+      window.removeEventListener(event, markInteracted)
+    }
+  }
+}
+
+// Set when this has already run, so a hot reload can drop the previous
+// listeners instead of counting every later view twice
+const INIT_KEY = "__calkitAnalyticsCleanup"
+
+export function initAnalytics(appRouter: AnyRouter): void {
+  router = appRouter
+  const previous = (window as unknown as Record<string, unknown>)[INIT_KEY]
+  if (typeof previous === "function") previous()
   // Our key is the record of what the visitor chose, so bring Mixpanel's own
   // opt-in state back in line if its storage was cleared separately
   const granted = getAnalyticsConsent() === "granted"
@@ -89,8 +225,19 @@ export function initAnalytics(router: AnyRouter): void {
   if (navigator.webdriver) {
     mixpanel.register({ bot: true })
   }
+  const stopWatching = watchForInteraction()
+  const onHidden = () => {
+    if (document.visibilityState === "hidden") flushPageViews()
+  }
+  document.addEventListener("visibilitychange", onHidden)
+  window.addEventListener("pagehide", flushPageViews)
+  ;(window as unknown as Record<string, unknown>)[INIT_KEY] = () => {
+    stopWatching()
+    document.removeEventListener("visibilitychange", onHidden)
+    window.removeEventListener("pagehide", flushPageViews)
+  }
   trackPageView()
-  router.subscribe("onResolved", ({ hrefChanged }) => {
+  appRouter.subscribe("onResolved", ({ hrefChanged }) => {
     if (hrefChanged) trackPageView()
   })
 }

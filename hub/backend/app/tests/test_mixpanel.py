@@ -28,3 +28,31 @@ def test_track_sends_events_for_users_who_consented():
         properties={"source": "wizard"},
         meta=None,
     )
+
+
+@pytest.mark.parametrize(
+    "bot,interacted,human",
+    [(False, True, True), (True, True, False), (False, False, False)],
+)
+def test_track_anonymous_pageview(bot, interacted, human):
+    with patch.object(mixpanel.mp, "track") as mp_track:
+        mixpanel.track_anonymous_pageview(
+            visitor_id="abc123",
+            path="/projects",
+            bot=bot,
+            interacted=interacted,
+            dwell_ms=12,
+        )
+    mp_track.assert_called_once_with(
+        "abc123",
+        event_name="$mp_web_page_view",
+        properties={
+            "path": "/projects",
+            "bot": bot,
+            "interacted": interacted,
+            "human": human,
+            "dwell_ms": 12,
+            "anonymous": True,
+            "$ip": "0",
+        },
+    )

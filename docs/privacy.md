@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated: 2026-09-14
+Last updated: 2026-09-29
 
 This covers the Calkit hub at [calkit.io](https://calkit.io), the Calkit
 command line tool and Python package, and the Calkit browser extension.
@@ -11,10 +11,11 @@ Calkit is run by Pete Bachant as a sole proprietor, who is responsible for
 the information described here. Questions and requests go to
 [help@calkit.io](mailto:help@calkit.io).
 
-The short version: we keep what's needed to run your account, and, only if
-you allow it, a record of which features you use so we can make Calkit
-better. Your data is never sold, never used for advertising, and never
-shared with anyone for their own purposes.
+The short version: we keep what's needed to run your account, count
+anonymous page views to see how the site is used, and, only if you allow
+it, keep a record of which features you use so we can make Calkit better.
+Your data is never sold, never used for advertising, and never shared with
+anyone for their own purposes.
 
 ## How usage information is used
 
@@ -47,20 +48,33 @@ watch what any one person is doing.
 
 ### Usage information
 
-When you first visit the hub, it asks whether you allow usage information
-to be recorded. If you accept, the hub records the pages you visit and the
-features you use, along with basic browser and device information and an
-approximate location derived from your IP address. While you're signed in,
-this is associated with your account, and includes actions recorded by the
-hub's server, such as creating a project or publishing a release.
+The hub always counts anonymous page views, and keeps fuller usage
+information only if you allow it.
 
-If you reject, none of it is recorded, and nothing for this purpose is
+Anonymous page views record which pages are opened, when, and whether the
+visit looks like a person rather than a bot. They are not linked to your
+account, no identifier is stored on your device, and no IP address is sent
+to our analytics provider, so they can't be traced back to you. The hub
+briefly uses your IP address and browser's user agent to tell one day's
+visits apart, then discards them. These counts are used only to see how
+much each part of the site is used.
+
+When you first visit, the hub also asks whether you allow fuller usage
+information to be recorded. If you accept, page views stop being anonymous
+and the hub records the pages you visit and the features you use, along with
+an approximate location derived from your IP address. While you're signed
+in, this is associated with your account, and includes actions recorded by
+the hub's server, such as creating a project or publishing a release.
+
+If you reject, only the anonymous page views described above are kept; none
+of the fuller information is recorded, and nothing for this purpose is
 stored on your device. Once you're signed in, your choice is saved to your
 account, so it applies on every device you use.
 
 You can change your choice at any time under Settings → Privacy. Stopping
-it stops future recording. To have usage information that was already
-recorded deleted, email [help@calkit.io](mailto:help@calkit.io).
+it stops future recording of the fuller information. To have usage
+information that was already recorded deleted, email
+[help@calkit.io](mailto:help@calkit.io).
 
 ### Server logs
 
@@ -89,8 +103,10 @@ governed by that service's policy.
 
 - **Account information and your work**: needed to provide the service you
   signed up for.
-- **Usage information**: only with your consent, which you can withdraw at
-  any time.
+- **Anonymous page views**: our legitimate interest in understanding how the
+  site is used, without identifying you or storing anything on your device.
+- **Fuller usage information**: only with your consent, which you can
+  withdraw at any time.
 - **Server logs**: our legitimate interest in keeping the service running
   and secure.
 

@@ -176,21 +176,24 @@ managed workspaces, which are checked out with `--force` to run stages.
 `~/calkit` with the machine's own Git credentials, where it becomes a
 workspace, and returns its `path`.
 
-## LaTeX builds
+## Editor builds
 
-The browser sends `latex.build` with `id`, `project` (`owner/name`),
-`stage`, `commit`, and `files`, a list of `{"path": ..., "contents": ...}`
-for the editor's unsaved files only.
+The figure and LaTeX editors send `build.start` with `id`, `project`
+(`owner/name`), `stages`, `commit`, and `files`, a list of
+`{"path": ..., "contents": ...}` for the editor's unsaved files only.
+For a save, it also has `save` true, `message`, and `branch`, i.e., `main`
+or a change batch's branch.
 The Operator answers with `{"build": ...}` once it has queued the build,
 then sends:
 
-- `{"type": "latex.log", "build": ..., "data": ...}` as the build runs.
-- `{"type": "latex.done", "build": ..., "ok": ..., "pdf_url": ...}` when
-  it finishes, with `pdf_url` a short-lived URL to the uploaded PDF, or
-  null if there's no PDF.
+- `{"type": "build.log", "build": ..., "data": ...}` as the build runs.
+- `{"type": "build.done", "build": ..., "ok": ..., "outputs": ...}` when
+  it finishes, with `outputs` a list of `{"path": ..., "url": ...}`, each
+  URL short-lived, and for a save, `commit`, the commit it pushed.
 
-To upload, the Operator calls `POST /operators/builds` with its Operator
-token and the project, and gets back a presigned upload URL and a
-download URL, which expire after a day.
+To upload outputs, the Operator calls `POST /operators/builds` with its
+Operator token and the project, and gets back presigned upload URLs and
+download URLs, which expire after a day.
 
-The Operator only accepts channels whose `user_id` is its owner's.
+Like everything on a channel, builds only run for channels opened with a
+valid grant.

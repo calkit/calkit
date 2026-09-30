@@ -1715,10 +1715,22 @@ def update_hub(
             f"Not logged in to {hub_url}; run 'calkit hub login' ({e})"
         )
     owner = ck_info.get("owner") or user.get("github_username")
+    # A project that already exists on the hub, e.g., one created there
+    # for this repo, is connected to rather than created again, which the
+    # hub would refuse since a repo belongs to one project
+    exists = False
+    if owner is not None:
+        try:
+            calkit.hub.get(f"/projects/{owner}/{name}", max_retries=1)
+            exists = True
+        except Exception:
+            pass
     # Creating it is the step that can already be done, so a project that
     # exists is not an error: the point is to end up connected
     resp = None
     try:
+        if exists:
+            raise RuntimeError("Project already exists")
         resp = calkit.hub.post(
             "/projects",
             json=dict(

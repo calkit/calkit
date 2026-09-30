@@ -29,6 +29,12 @@ import {
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { FaCheck, FaPlus, FaRegSquare } from "react-icons/fa"
+import {
+  GoGitPullRequest,
+  GoGitPullRequestClosed,
+  GoIssueClosed,
+  GoIssueOpened,
+} from "react-icons/go"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
@@ -58,7 +64,11 @@ import {
   releaseLocation,
   releasePagePath,
 } from "../../../../../lib/releases"
-import { decodeBase64Utf8, safeHref } from "../../../../../lib/strings"
+import {
+  decodeBase64Utf8,
+  removeLeadingHeading,
+  safeHref,
+} from "../../../../../lib/strings"
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/",
@@ -136,11 +146,7 @@ function ProjectView() {
     (b.date ?? "").localeCompare(a.date ?? ""),
   )
   const topReleases = sortedReleases.slice(0, HOME_RELEASES_LIMIT)
-  const removeFirstLine = (txt: any) => {
-    const lines = String(txt).split("\n")
-    lines.splice(0, 1)
-    return lines.join("\n")
-  }
+  const removeTitle = (txt: any) => removeLeadingHeading(String(txt))
   const onClosedTodosSwitch = (e: any) => {
     setShowClosedTodos(e.target.checked)
   }
@@ -279,8 +285,8 @@ function ProjectView() {
             {readmeRequest.isPending ? (
               <LoadingSpinner height="100vh" />
             ) : readmeRequest.data ? (
-              <Markdown>
-                {removeFirstLine(
+              <Markdown repo={{ accountName, projectName, ref }}>
+                {removeTitle(
                   decodeBase64Utf8(String(readmeRequest?.data?.content)),
                 )}
               </Markdown>
@@ -481,13 +487,32 @@ function ProjectView() {
                     artifactRoute && issue.artifact_path
                       ? `/${accountName}/${projectName}/${artifactRoute}?path=${encodeURIComponent(issue.artifact_path)}`
                       : null
+                  const isOpen = issue.state === "open"
+                  // GitHub's icons and colors, though closed pull requests
+                  // are grey since this doesn't know if they were merged
+                  const kindIcon = issue.is_pull_request
+                    ? isOpen
+                      ? GoGitPullRequest
+                      : GoGitPullRequestClosed
+                    : isOpen
+                      ? GoIssueOpened
+                      : GoIssueClosed
+                  const kindColor = isOpen
+                    ? "green.500"
+                    : issue.is_pull_request
+                      ? "gray.500"
+                      : "purple.500"
                   return (
                     <Flex key={issue.number} alignItems={"flex-start"}>
+                      {/* Checking off a pull request would close it without
+                          merging it, so its checkbox is disabled */}
                       <Checkbox
-                        isChecked={issue.state === "closed"}
+                        isChecked={!isOpen}
                         onChange={onTodoCheckbox}
                         id={String(issue.number)}
-                        isDisabled={!userHasWriteAccess}
+                        isDisabled={
+                          !userHasWriteAccess || issue.is_pull_request
+                        }
                         mt={1}
                       />
                       <Text ml={2}>
@@ -501,6 +526,20 @@ function ProjectView() {
                         )}{" "}
                         (
                         <Link isExternal href={safeHref(issue.url)}>
+                          <Tooltip
+                            label={
+                              issue.is_pull_request ? "Pull request" : "Issue"
+                            }
+                          >
+                            <span>
+                              <Icon
+                                as={kindIcon}
+                                color={kindColor}
+                                verticalAlign="-0.125em"
+                                mr={0.5}
+                              />
+                            </span>
+                          </Tooltip>
                           #{issue.number}
                         </Link>
                         )
@@ -516,10 +555,8 @@ function ProjectView() {
                     display="inline-block"
                     mt={2}
                   >
-                    {(visibleIssues?.length ?? 0) > HOME_TODOS_LIMIT
-                      ? `See all ${visibleIssues?.length} on GitHub`
-                      : "See all on GitHub"}{" "}
-                    <Icon as={ExternalLinkIcon} mb={0.5} />
+                    {/* No count: this is GitHub's first page, not all */}
+                    See all on GitHub <Icon as={ExternalLinkIcon} mb={0.5} />
                   </Link>
                 ) : null}
               </>

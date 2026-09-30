@@ -19,3 +19,51 @@ The mean velocity deficit is modeled as
 where $C_T$ is the thrust coefficient and $k$ is the wake growth rate.
 Figure~\ref{fig:one} shows the result, and Table~\ref{tab:params} lists
 the parameters.
+
+\subsection{Wake model}
+\label{sec:model}
+
+Far downstream, the momentum the rotor extracts is carried by the
+deficit, so that
+\begin{equation}
+  \int_{A} \rho\, U \left( \Uinf - U \right) \mathrm{d}A
+  = \frac{1}{2} \rho\, C_T A_0 \Uinf^2,
+  \label{eq:momentum}
+\end{equation}
+where $A_0 = \pi D^2/4$ is the rotor area.
+Assuming a self-similar Gaussian profile~\citep{bastankhah2014} and
+satisfying Eq.~\eqref{eq:momentum} gives
+\begin{equation}
+  \frac{\Delta U}{\Uinf} = \left( 1 - \sqrt{1 - \frac{C_T}{8 (\sigma/D)^2}}
+  \right) \exp\left[ -\frac{1}{2} \left( \frac{r}{\sigma} \right)^2
+  \right],
+  \label{eq:gaussian}
+\end{equation}
+where the wake widens as $\sigma/D = k^* x/D + \varepsilon$, with
+$\varepsilon = 0.2\sqrt{\beta}$ and
+$\beta = \frac{1}{2} \left( 1 + \sqrt{1 - C_T} \right) / \sqrt{1 - C_T}$.
+The rotor adds turbulence to the wake~\citep{crespo1996}:
+\begin{align}
+  I_+ &= 0.73\, a^{0.8325} I_\infty^{0.0325}
+    \left( \frac{x}{D} \right)^{-0.32}, \label{eq:added} \\
+  a &= \frac{1}{2} \left( 1 - \sqrt{1 - C_T} \right),
+\end{align}
+and the growth rate follows from the local turbulence intensity
+$I = \sqrt{I_\infty^2 + I_+^2}$ as
+\begin{equation*}
+  k^* = \begin{cases}
+    0.38\, I + 0.004, & I < 0.3, \\
+    0.12, & \text{otherwise}.
+  \end{cases}
+\end{equation*}
+Momentum is transported into the wake by the Reynolds shear stress
+$-\rho\,\overline{u'v'}$, which balances the streamwise decay
+$\partial U / \partial x$ of the deficit.
+For a farm of $N$ turbines, deficits combine in quadrature, so turbine
+$i$ produces
+\begin{equation}
+  P_i = \frac{1}{2} \rho A_0 C_P \left( \Uinf
+  - \sqrt{\sum_{j \neq i} \Delta U_{ij}^2} \right)^3,
+  \qquad P = \sum_{i=1}^{N} P_i .
+  \label{eq:farm}
+\end{equation}

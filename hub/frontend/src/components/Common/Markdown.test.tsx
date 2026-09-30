@@ -1,8 +1,11 @@
 import { ChakraProvider } from "@chakra-ui/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
-import Markdown from "./Markdown"
+import { ProjectsService } from "../../client"
+
+import Markdown, { repoImagePath } from "./Markdown"
 
 describe("Markdown", () => {
   it("renders LaTeX math in figure titles as KaTeX", () => {
@@ -91,5 +94,90 @@ describe("Markdown", () => {
     const preStyles = html.match(new RegExp(`\\.${preClass}\\{([^}]*)\\}`))?.[1]
     expect(preStyles).toContain("max-width:100%")
     expect(preStyles).toContain("overflow-x:auto")
+    // The background rides on the scrolling container, or the area a wide
+    // block scrolls into would sit on the bare page background.
+    expect(preStyles).toContain("background:")
+    const codeClass = html.match(
+      /<code[^>]*class="[^"]*\b(css-[a-z0-9]+)\b[^>]*>/i,
+    )?.[1]
+    const codeStyles = html.match(
+      new RegExp(`\\.${codeClass}\\{([^}]*)\\}`),
+    )?.[1]
+    expect(codeStyles).toContain("background:var(--chakra-colors-transparent)")
+  })
+})
+
+describe("repoImagePath", () => {
+  it("resolves repo images against the file's directory", () => {
+    expect(repoImagePath("docs/img/logo.png")).toBe("docs/img/logo.png")
+    expect(repoImagePath("./logo.png", "docs")).toBe("docs/logo.png")
+    expect(repoImagePath("../img/logo.png", "docs/guide")).toBe(
+      "docs/img/logo.png",
+    )
+    // A leading slash is the repo root, as on GitHub
+    expect(repoImagePath("/img/logo.png", "docs")).toBe("img/logo.png")
+    expect(repoImagePath("logo.png?raw=true")).toBe("logo.png")
+    // Markdown URL-encodes what the repo names plainly
+    expect(repoImagePath("docs/my%20logo.png")).toBe("docs/my logo.png")
+    expect(repoImagePath("%2e%2e/logo.png", "docs")).toBe("logo.png")
+  })
+
+  it("leaves images that aren't in the repo alone", () => {
+    expect(repoImagePath("https://example.com/logo.png")).toBeNull()
+    expect(repoImagePath("//example.com/logo.png")).toBeNull()
+    expect(repoImagePath("data:image/png;base64,AAAA")).toBeNull()
+    expect(repoImagePath("")).toBeNull()
+    // Above the repo root
+    expect(repoImagePath("../logo.png")).toBeNull()
+    expect(repoImagePath("%2e%2e/logo.png")).toBeNull()
+    // Separators or bad escapes smuggled in by encoding
+    expect(repoImagePath("..%2f..%2fsecret.png", "docs")).toBeNull()
+    expect(repoImagePath("a%5c..%5csecret.png")).toBeNull()
+    expect(repoImagePath("bad%zzname.png")).toBeNull()
+  })
+})
+
+describe("Markdown with a repo", () => {
+  const repo = { accountName: "me", projectName: "proj", ref: "main" }
+  const render = (text: string, client: QueryClient) =>
+    renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <ChakraProvider>
+          <Markdown repo={repo}>{text}</Markdown>
+        </ChakraProvider>
+      </QueryClientProvider>,
+    )
+  const key = (path: string) => [
+    "projects",
+    "me",
+    "proj",
+    "contents",
+    path,
+    "main",
+  ]
+
+  it("shows repo images from their content or storage URL", () => {
+    const client = new QueryClient()
+    client.setQueryData(key("docs/logo.png"), { content: "AAAA" })
+    client.setQueryData(key("figs/plot.png"), {
+      url: "https://storage.test/plot.png",
+    })
+    const html = render(
+      '<img src="docs/logo.png" alt="Logo">\n\n![Plot](figs/plot.png)',
+      client,
+    )
+    expect(html).toContain('src="data:image/png;base64,AAAA"')
+    expect(html).toContain('alt="Logo"')
+    expect(html).toContain('src="https://storage.test/plot.png"')
+  })
+
+  it("leaves images from elsewhere alone and asks the hub for nothing", () => {
+    const fetch = vi.spyOn(ProjectsService, "getProjectContents")
+    const client = new QueryClient()
+    const html = render("![Badge](https://img.shields.io/badge.svg)", client)
+    expect(html).toContain('src="https://img.shields.io/badge.svg"')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(client.getQueryCache().getAll()).toHaveLength(0)
+    fetch.mockRestore()
   })
 })

@@ -5,6 +5,7 @@ import glob
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -128,6 +129,9 @@ def output_from_pipeline(
         return outs[0]
 
 
+_MD5_RE = re.compile(r"[0-9a-f]{32}(\.dir)?")
+
+
 def get_data_fpath_for_md5(
     owner_name: str,
     project_name: str,
@@ -142,7 +146,9 @@ def get_data_fpath_for_md5(
     an object that has gone away must be observed as missing. Callers that
     resolve many artifacts at once should parallelize instead.
     """
-    if not md5 or len(md5) < 3:
+    # The hash comes from the project's own dvc.lock or .dvc files, so it
+    # is checked to be one before it goes into a storage path
+    if not md5 or not _MD5_RE.fullmatch(md5):
         return None
     if fs is None:
         fs = get_object_fs()

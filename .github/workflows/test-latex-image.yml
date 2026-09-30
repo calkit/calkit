@@ -29,6 +29,28 @@ jobs:
           tags: calkit/latex:pr
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # Compactness is the point of this image rather than texlive-full,
+      # so every change shows what it costs. The download size is the
+      # compressed layers, which is what a registry serves, next to the
+      # published image's.
+      - name: Report image size
+        run: |
+          set -euo pipefail
+          unpacked="$(docker image inspect calkit/latex:pr --format '{{.Size}}')"
+          download="$(docker save calkit/latex:pr | gzip -c | wc -c)"
+          published="$(docker buildx imagetools inspect --raw \
+            "$(docker buildx imagetools inspect ghcr.io/calkit/latex:latest \
+              --format '{{range .Manifest.Manifests}}{{if eq .Platform.Architecture "amd64"}}ghcr.io/calkit/latex@{{.Digest}}{{end}}{{end}}')" \
+            | jq '[.layers[].size] | add')"
+          mb() { echo "$(( $1 / 1000000 )) MB"; }
+          {
+            echo "### LaTeX image size"
+            echo
+            echo "| | This change | Published latest |"
+            echo "|---|---|---|"
+            echo "| Download | $(mb "$download") | $(mb "$published") |"
+            echo "| Unpacked | $(mb "$unpacked") | |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Smoke test image
         run: |
           set -euxo pipefail
@@ -129,6 +151,45 @@ jobs:
             kpsewhich lipsum.sty
           '
           test -n "$(find "$cache" -name lipsum.sty -print -quit)"
+      # What `calkit latex to-docx --engine libreoffice` runs: TeX4ht
+      # converting a paper with math and a PDF figure to ODT, which needs
+      # luaxml, Ghostscript and zip besides TeX4ht itself, as the user.
+      # Each equation becomes an object in the ODT, and the figure an
+      # image; a figure that failed to convert leaves an ODT LibreOffice
+      # can't open. make4ht warns that xtpipes and then tidy failed, once
+      # per file, which is expected: that post-processing needs Java, which
+      # the image leaves out, and the ODT only loses a few text styles.
+      - name: Convert a paper with TeX4ht
+        run: |
+          set -euxo pipefail
+          work="$(mktemp -d)"
+          cat > "$work/fig.tex" <<'EOF'
+          \documentclass{article}
+          \pagestyle{empty}
+          \begin{document}
+          Figure
+          \end{document}
+          EOF
+          cat > "$work/main.tex" <<'EOF'
+          \documentclass{article}
+          \usepackage{graphicx}
+          \begin{document}
+          Inline $a^2 + b^2 = c^2$ and
+          \begin{equation}
+            \frac{x}{y} = 1
+          \end{equation}
+          \includegraphics[width=2cm]{fig.pdf}
+          \end{document}
+          EOF
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$work":/work -w /work calkit/latex:pr sh -c '
+            set -eux
+            latexmk -pdf -interaction=nonstopmode fig.tex
+            make4ht --format odt main.tex mathml
+          '
+          unzip -l "$work/main.odt" | tee "$work/odt.txt"
+          test "$(grep -c "main-m[0-9]*/content.xml" "$work/odt.txt")" -eq 2
+          grep -q "Pictures/fig-.png" "$work/odt.txt"
       # Every journal class the image claims to carry has to build with
       # nothing installed at run time. Trimming a package that only one
       # class needs would otherwise go unnoticed until someone submitted

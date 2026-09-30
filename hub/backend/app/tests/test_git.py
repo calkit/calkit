@@ -421,11 +421,13 @@ def test_get_repo_clone_failures_leave_nothing_readable(tmp_path, monkeypatch):
         assert not os.path.isdir(repo_dir)
         assert not os.path.isdir(repo_dir + ".cloning")
         assert not os.path.isfile(updated_fpath)
-        # A repo that isn't there at all is still a 404
+        # A clone GitHub refuses is a 502, not a 404: the project exists,
+        # and a repo created seconds ago can be briefly refused, so the
+        # client should retry rather than show "not found"
         outcome["mode"] = "missing"
         with pytest.raises(HTTPException) as excinfo:
             app.git.get_repo(project=project, user=None, session=None, ttl=600)
-        assert excinfo.value.status_code == 404
+        assert excinfo.value.status_code == 502
         assert not os.path.isdir(repo_dir)
     finally:
         _shutil.rmtree(base_dir, ignore_errors=True)
@@ -648,6 +650,22 @@ def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
     (ours / "inside.csv").symlink_to(ours / "ours.csv")
     assert tree.is_safe_symlink("inside.csv")
     assert tree.read_bytes("inside.csv") == b"ours\n"
+    # A symlinked directory is a way out too, including to a directory
+    # beyond it that isn't a link itself, so listing one finds nothing
+    (victim / "sub").mkdir()
+    (victim / "sub" / "more.csv").write_text("more,secret\n")
+    (ours / "dirlink").symlink_to(victim)
+    for path in ("dirlink", "dirlink/sub"):
+        with pytest.raises(HTTPException):
+            tree.listdir(path)
+    with pytest.raises(HTTPException):
+        tree.read_bytes("dirlink/sub/more.csv")
+    # A link out of the tree is sized as the link, so a listing of our own
+    # directory says nothing about the file it points to
+    assert tree.size("link.csv") == os.lstat(ours / "link.csv").st_size
+    assert tree.size("link.csv") != len("secret,data\n")
+    assert tree.size("inside.csv") == 5
+    assert "ours.csv" in tree.listdir(None)
 
 
 def test_remote_head_cache_is_bypassed_when_the_caller_wants_the_truth(
@@ -875,6 +893,95 @@ def test_push_and_expire_updates_the_shared_checkout(tmp_path) -> None:
     assert (shared_base / "repo" / "data" / "raw.csv").exists()
     # And it is marked current, so the next read doesn't refresh it at all
     assert (shared_base / "updated.txt").stat().st_mtime > 0
+
+
+def test_seed_shared_read_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil as _shutil
+    from typing import Any
+
+    from filelock import Timeout
+
+    project: Any = _StubProject("ck-shared-seed")
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    monkeypatch.setattr(
+        app.git, "shared_reader_root", lambda: str(shared_root)
+    )
+    # The writer's clone of a project just created and pushed
+    writer = git.Repo.init(str(tmp_path / "writer"))
+    _identify(writer)
+    writer.git.remote(["add", "origin", project.git_repo_url + ".git"])
+    head = _commit(writer, "notes.txt", "one")
+    app.git.seed_shared_read_clone(project, writer)
+    # The shared checkout holds what was pushed, points at GitHub rather
+    # than the writer's clone, refuses writes, and is marked complete
+    shared = git.Repo(str(shared_base / "repo"))
+    assert shared.head.commit.hexsha == head
+    assert shared.remotes.origin.url == project.git_repo_url + ".git"
+    for hook in app.git._SHARED_HOOKS:
+        assert os.access(
+            shared_base / "repo" / ".git" / "hooks" / hook, os.X_OK
+        )
+    assert (shared_base / "updated.txt").is_file()
+    assert not (shared_base / "repo.cloning").exists()
+    # The first read uses it without cloning from GitHub
+    real_check_call = subprocess.check_call
+
+    def no_clone(cmd: list[str], *args: Any, **kwargs: Any) -> int:
+        assert cmd[:2] != ["git", "clone"], "read cloned from GitHub"
+        return real_check_call(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "check_call", no_clone)
+    session: Any = None
+    repo = app.git.get_repo(
+        project=project,
+        user=None,
+        session=session,
+        ttl=600,
+        read_only=True,
+    )
+    assert repo.working_dir == str(shared_base / "repo")
+    monkeypatch.setattr(subprocess, "check_call", real_check_call)
+    # A checkout left from a deleted project of the same name is replaced,
+    # even when a rejected push has expired its marker
+    os.utime(shared_base / "updated.txt", (0, 0))
+    writer = git.Repo.init(str(tmp_path / "writer2"))
+    _identify(writer)
+    writer.git.remote(["add", "origin", project.git_repo_url + ".git"])
+    head = _commit(writer, "notes.txt", "two")
+    app.git.seed_shared_read_clone(project, writer)
+    assert git.Repo(str(shared_base / "repo")).head.commit.hexsha == head
+    assert (shared_base / "updated.txt").stat().st_mtime > 0
+    # While another request holds the lock, its clone in progress is left
+    # alone
+    (shared_base / "repo.cloning").mkdir()
+
+    class _HeldLock:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> None:
+            raise Timeout("held")
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+    with monkeypatch.context() as m:
+        m.setattr(app.git, "FileLock", _HeldLock)
+        app.git.seed_shared_read_clone(project, writer)
+    assert (shared_base / "repo.cloning").is_dir()
+    assert git.Repo(str(shared_base / "repo")).head.commit.hexsha == head
+    # A seed that fails leaves nothing a read would mistake for a checkout
+    missing: Any = _StubProject("ck-shared-seed-missing")
+    missing_base = shared_root / missing.owner_github_name / missing.name
+    gone = git.Repo.init(str(tmp_path / "gone"))
+    _shutil.rmtree(str(tmp_path / "gone"))
+    app.git.seed_shared_read_clone(missing, gone)
+    assert not (missing_base / "repo").exists()
+    assert not (missing_base / "repo.cloning").exists()
+    assert not (missing_base / "updated.txt").exists()
 
 
 def test_a_read_after_a_write_touches_the_network_not_at_all(

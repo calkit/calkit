@@ -2200,6 +2200,10 @@ export type Issue = {
    * Artifact Path
    */
   artifact_path?: string | null
+  /**
+   * Is Pull Request
+   */
+  is_pull_request?: boolean
 }
 
 /**

@@ -3762,6 +3762,11 @@ export const IssueSchema = {
       ],
       title: "Artifact Path",
     },
+    is_pull_request: {
+      type: "boolean",
+      title: "Is Pull Request",
+      default: false,
+    },
   },
   type: "object",
   required: [

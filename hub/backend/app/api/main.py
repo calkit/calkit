@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     accounts,
+    analytics,
     datasets,
     feedback,
     login,
@@ -16,6 +17,7 @@ from app.api.routes.projects import releases
 
 api_router = APIRouter()
 api_router.include_router(accounts.router, tags=["accounts"])
+api_router.include_router(analytics.router, tags=["analytics"])
 api_router.include_router(login.router, tags=["login"])
 api_router.include_router(users.router, tags=["users"])
 api_router.include_router(misc.router, tags=["misc"])

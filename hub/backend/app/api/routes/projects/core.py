@@ -118,6 +118,7 @@ from app.git import (
     record_project_update,
     resolve_commit_sha,
     search_refs,
+    seed_shared_read_clone,
 )
 from app.models import (
     Account,
@@ -1197,6 +1198,7 @@ def post_project(
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
             push_and_expire(project, repo)
+            seed_shared_read_clone(project, repo)
         except Exception as e:
             # The project row is already committed, and it would block a retry
             # since a Git repo can only back one project, so remove it and let
@@ -8589,6 +8591,8 @@ class Issue(BaseModel):
     body: str | None
     artifact_type: str | None = None
     artifact_path: str | None = None
+    # GitHub lists pull requests as issues too
+    is_pull_request: bool = False
 
 
 @router.get("/projects/{owner_name}/{project_name}/issues")
@@ -8650,6 +8654,7 @@ def get_project_issues(
                 body=issue["body"],
                 artifact_type=linked.artifact_type if linked else None,
                 artifact_path=linked.artifact_path if linked else None,
+                is_pull_request="pull_request" in issue,
             )
         )
     return resp_fmt

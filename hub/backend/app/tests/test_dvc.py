@@ -3,7 +3,12 @@
 import os
 from copy import deepcopy
 
-from app.dvc import make_mermaid_diagram, output_from_pipeline, run_dvc_command
+from app.dvc import (
+    get_data_fpath_for_md5,
+    make_mermaid_diagram,
+    output_from_pipeline,
+    run_dvc_command,
+)
 
 
 def test_ck_remote_scheme_is_registered(tmp_path):
@@ -119,3 +124,35 @@ def test_expand_dvc_lock_outs():
     populated in the dev environment.
     """
     pass  # TODO
+
+
+def test_get_data_fpath_for_md5_takes_only_hashes():
+    class FakeFs:
+        def __init__(self):
+            self.looked_up: list[str] = []
+
+        def isfile(self, path):
+            self.looked_up.append(path)
+            return True
+
+        exists = isfile
+
+    fs = FakeFs()
+    md5 = "0123456789abcdef0123456789abcdef"
+    for valid in (md5, md5 + ".dir"):
+        path = get_data_fpath_for_md5("me", "proj", valid, fs=fs)
+        assert path is not None and path.endswith(valid[2:])
+    # The hash comes from the project's own files, so anything that isn't
+    # one never makes it into a storage path
+    fs.looked_up.clear()
+    crafted = [
+        "ab/../../../them/their-proj/files/md5/01/23456789",
+        "../" + md5,
+        md5 + "/..",
+        md5.upper(),
+        "abc",
+        "",
+    ]
+    for bad in crafted:
+        assert get_data_fpath_for_md5("me", "proj", bad, fs=fs) is None
+    assert fs.looked_up == []

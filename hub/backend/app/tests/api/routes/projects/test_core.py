@@ -15,6 +15,7 @@ from app import users, zotero
 from app.api.routes.projects.core import (
     _normalize_artifact_file_path,
     get_project_comments,
+    get_project_issues,
 )
 from app.config import settings
 from app.core import ryaml
@@ -286,6 +287,58 @@ def test_get_project_comments_uses_all_results() -> None:
     assert session.exec_result.all_called is True
     assert comments == [fake_comment]
     mock_sync.assert_called_once_with(session, [fake_comment], None)
+
+
+def test_get_project_issues_marks_pull_requests() -> None:
+    fake_project = SimpleNamespace(id="project-id", github_repo="me/proj")
+    linked = SimpleNamespace(
+        external_url="https://github.com/me/proj/issues/2",
+        artifact_type="figure",
+        artifact_path="figures/a.png",
+    )
+    session = SimpleNamespace(
+        exec=lambda _query: SimpleNamespace(all=lambda: [linked])
+    )
+    gh_items = [
+        {
+            "id": n,
+            "number": n,
+            "html_url": f"https://github.com/me/proj/{kind}/{n}",
+            "user": {"login": "me"},
+            "state": "open",
+            "title": f"Item {n}",
+            "body": None,
+            **({"pull_request": {}} if kind == "pull" else {}),
+        }
+        for n, kind in [(3, "pull"), (2, "issues")]
+    ]
+    resp = SimpleNamespace(status_code=200, json=lambda: gh_items)
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.requests.get", return_value=resp
+        ) as mock_get,
+    ):
+        issues = get_project_issues(
+            owner_name="me",
+            project_name="proj",
+            current_user=None,
+            session=session,  # type: ignore
+        )
+    # Pull requests stay in the list, in GitHub's order, marked as such
+    assert [(i.number, i.is_pull_request) for i in issues] == [
+        (3, True),
+        (2, False),
+    ]
+    assert issues[1].artifact_path == "figures/a.png"
+    assert issues[0].artifact_path is None
+    # GitHub does the paging
+    assert mock_get.call_args.kwargs["params"] == dict(
+        page=1, per_page=30, state="open"
+    )
 
 
 def _make_fake_blob(path: str) -> SimpleNamespace:

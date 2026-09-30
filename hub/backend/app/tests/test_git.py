@@ -901,6 +901,8 @@ def test_seed_shared_read_clone(
     import shutil as _shutil
     from typing import Any
 
+    from filelock import Timeout
+
     project: Any = _StubProject("ck-shared-seed")
     shared_root = tmp_path / "_shared"
     shared_base = shared_root / project.owner_github_name / project.name
@@ -942,9 +944,34 @@ def test_seed_shared_read_clone(
     )
     assert repo.working_dir == str(shared_base / "repo")
     monkeypatch.setattr(subprocess, "check_call", real_check_call)
-    # A checkout already there is left alone
-    _commit(writer, "notes.txt", "two")
+    # A checkout left from a deleted project of the same name is replaced,
+    # even when a rejected push has expired its marker
+    os.utime(shared_base / "updated.txt", (0, 0))
+    writer = git.Repo.init(str(tmp_path / "writer2"))
+    _identify(writer)
+    writer.git.remote(["add", "origin", project.git_repo_url + ".git"])
+    head = _commit(writer, "notes.txt", "two")
     app.git.seed_shared_read_clone(project, writer)
+    assert git.Repo(str(shared_base / "repo")).head.commit.hexsha == head
+    assert (shared_base / "updated.txt").stat().st_mtime > 0
+    # While another request holds the lock, its clone in progress is left
+    # alone
+    (shared_base / "repo.cloning").mkdir()
+
+    class _HeldLock:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> None:
+            raise Timeout("held")
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+    with monkeypatch.context() as m:
+        m.setattr(app.git, "FileLock", _HeldLock)
+        app.git.seed_shared_read_clone(project, writer)
+    assert (shared_base / "repo.cloning").is_dir()
     assert git.Repo(str(shared_base / "repo")).head.commit.hexsha == head
     # A seed that fails leaves nothing a read would mistake for a checkout
     missing: Any = _StubProject("ck-shared-seed-missing")

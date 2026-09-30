@@ -523,6 +523,12 @@ def test_workspace_actions(tmp_path, monkeypatch):
     # Running without a terminal reports how it went; this stage's script
     # doesn't exist, so it fails
     result = operator.run_pipeline(wdir)
+    # Single stages can be run, and their names can't be options
+    result = operator.run_pipeline(wdir, stages=["plot"])
+    assert result["ok"] is False and "plot" in result["output"]
+    for bad in ["--force", "-f", "a b", "x;y", ""]:
+        with pytest.raises(ValueError):
+            operator.run_pipeline(wdir, stages=[bad])
     assert result["ok"] is False
     assert result["output"]
     subprocess.run(["git", "checkout", "--", "."], cwd=wdir, check=True)

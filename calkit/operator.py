@@ -725,15 +725,19 @@ def add_stage(
         repo.git.push(["origin", repo.active_branch.name])
 
 
-def run_pipeline(wdir: str) -> dict:
-    """Run the pipeline without a terminal, returning whether it succeeded
-    and the end of its output.
+def run_pipeline(wdir: str, stages: list[str] | None = None) -> dict:
+    """Run the pipeline, or some of its stages, without a terminal,
+    returning whether it succeeded and the end of its output.
 
     This is for Operators that can't run sessions, i.e., on Windows; others
     run the pipeline in a session so its output can be watched.
     """
+    # Stage names become arguments, so they can't be options
+    for stage in stages or []:
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@:/-]*", str(stage)):
+            raise ValueError(f"Invalid stage name '{stage}'")
     result = subprocess.run(
-        [sys.executable, "-m", "calkit", "run"],
+        [sys.executable, "-m", "calkit", "run", *(stages or [])],
         cwd=wdir,
         capture_output=True,
         text=True,

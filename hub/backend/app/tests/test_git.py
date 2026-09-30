@@ -421,11 +421,13 @@ def test_get_repo_clone_failures_leave_nothing_readable(tmp_path, monkeypatch):
         assert not os.path.isdir(repo_dir)
         assert not os.path.isdir(repo_dir + ".cloning")
         assert not os.path.isfile(updated_fpath)
-        # A repo that isn't there at all is still a 404
+        # A clone GitHub refuses is a 502, not a 404: the project exists,
+        # and a repo created seconds ago can be briefly refused, so the
+        # client should retry rather than show "not found"
         outcome["mode"] = "missing"
         with pytest.raises(HTTPException) as excinfo:
             app.git.get_repo(project=project, user=None, session=None, ttl=600)
-        assert excinfo.value.status_code == 404
+        assert excinfo.value.status_code == 502
         assert not os.path.isdir(repo_dir)
     finally:
         _shutil.rmtree(base_dir, ignore_errors=True)
@@ -891,6 +893,68 @@ def test_push_and_expire_updates_the_shared_checkout(tmp_path) -> None:
     assert (shared_base / "repo" / "data" / "raw.csv").exists()
     # And it is marked current, so the next read doesn't refresh it at all
     assert (shared_base / "updated.txt").stat().st_mtime > 0
+
+
+def test_seed_shared_read_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil as _shutil
+    from typing import Any
+
+    project: Any = _StubProject("ck-shared-seed")
+    shared_root = tmp_path / "_shared"
+    shared_base = shared_root / project.owner_github_name / project.name
+    monkeypatch.setattr(
+        app.git, "shared_reader_root", lambda: str(shared_root)
+    )
+    # The writer's clone of a project just created and pushed
+    writer = git.Repo.init(str(tmp_path / "writer"))
+    _identify(writer)
+    writer.git.remote(["add", "origin", project.git_repo_url + ".git"])
+    head = _commit(writer, "notes.txt", "one")
+    app.git.seed_shared_read_clone(project, writer)
+    # The shared checkout holds what was pushed, points at GitHub rather
+    # than the writer's clone, refuses writes, and is marked complete
+    shared = git.Repo(str(shared_base / "repo"))
+    assert shared.head.commit.hexsha == head
+    assert shared.remotes.origin.url == project.git_repo_url + ".git"
+    for hook in app.git._SHARED_HOOKS:
+        assert os.access(
+            shared_base / "repo" / ".git" / "hooks" / hook, os.X_OK
+        )
+    assert (shared_base / "updated.txt").is_file()
+    assert not (shared_base / "repo.cloning").exists()
+    # The first read uses it without cloning from GitHub
+    real_check_call = subprocess.check_call
+
+    def no_clone(cmd: list[str], *args: Any, **kwargs: Any) -> int:
+        assert cmd[:2] != ["git", "clone"], "read cloned from GitHub"
+        return real_check_call(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "check_call", no_clone)
+    session: Any = None
+    repo = app.git.get_repo(
+        project=project,
+        user=None,
+        session=session,
+        ttl=600,
+        read_only=True,
+    )
+    assert repo.working_dir == str(shared_base / "repo")
+    monkeypatch.setattr(subprocess, "check_call", real_check_call)
+    # A checkout already there is left alone
+    _commit(writer, "notes.txt", "two")
+    app.git.seed_shared_read_clone(project, writer)
+    assert git.Repo(str(shared_base / "repo")).head.commit.hexsha == head
+    # A seed that fails leaves nothing a read would mistake for a checkout
+    missing: Any = _StubProject("ck-shared-seed-missing")
+    missing_base = shared_root / missing.owner_github_name / missing.name
+    gone = git.Repo.init(str(tmp_path / "gone"))
+    _shutil.rmtree(str(tmp_path / "gone"))
+    app.git.seed_shared_read_clone(missing, gone)
+    assert not (missing_base / "repo").exists()
+    assert not (missing_base / "repo.cloning").exists()
+    assert not (missing_base / "updated.txt").exists()
 
 
 def test_a_read_after_a_write_touches_the_network_not_at_all(

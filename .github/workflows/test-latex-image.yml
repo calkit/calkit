@@ -242,6 +242,15 @@ jobs:
           \begin{document}\title{T}\author{A}\maketitle
           Hello.\end{document}
           EOF
+          # Not a class, but what JFM and others pair with one: newtx's
+          # text-companion symbols need tex-gyre's metrics, which, like
+          # txfonts', can't be fetched on demand
+          write newtx <<'EOF'
+          \documentclass{article}
+          \usepackage{newtxtext}
+          \usepackage{newtxmath}
+          \begin{document}25\textdegree, 3\,\textmu m.\end{document}
+          EOF
           for d in "$work"/*/; do
             name="$(basename "$d")"
             if docker run --rm --user "$(id -u):$(id -g)" \
@@ -259,7 +268,8 @@ jobs:
       # Every paper template Calkit ships has to build, since that is what
       # someone gets before they have asked for anything. JFM also needs
       # txfonts' metrics, which report as a font error rather than a
-      # missing file, so nothing would fetch it on demand.
+      # missing file, so nothing would fetch it on demand; the same goes
+      # for tex-gyre's, which its text-companion symbols need.
       - name: Build each paper template
         run: |
           set -euxo pipefail

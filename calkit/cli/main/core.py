@@ -1780,9 +1780,13 @@ def push(
             if not success:
                 # Leaving the tag would fake a registry digest on the image
                 calkit.docker.untag_image(remote_ref)
+                hint = calkit.docker.registry_login_hint(
+                    remote_ref, push_output
+                )
                 warn(
                     f"Failed to push image to {remote_ref}\n"
                     + textwrap.indent(push_output.strip()[-500:], "    ")
+                    + (f"\n{hint}" if hint else "")
                 )
     if "git" in selected:
         typer.echo("Pushing to Git remote")

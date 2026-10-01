@@ -43,6 +43,38 @@ repos:
         pass_filenames: false
         files: \.pyi?$
 
+  # Generated docs are regenerated here rather than only by 'make format',
+  # so a change to what they are generated from can't be committed while
+  # they still describe the old behavior. Each runs only when something it
+  # reads has changed, and they run in this order because the README
+  # embeds docs that the earlier ones write.
+  - repo: local
+    hooks:
+      - id: generate-schema
+        name: generate calkit.yaml schema
+        language: system
+        entry: bash -c 'uv run calkit describe schema -o docs/schemas/calkit.json && cp docs/schemas/calkit.json vscode-ext/schemas/calkit.json'
+        pass_filenames: false
+        files: ^calkit/models/.*\.py$
+      - id: generate-docs-references
+        name: generate docs references
+        language: system
+        entry: bash -c 'uv run python scripts/generate-docs-references.py'
+        pass_filenames: false
+        files: ^(calkit/.*\.py|scripts/generate-docs-references\.py)$
+      - id: sync-docs
+        name: sync docs into README
+        language: system
+        entry: bash -c 'uv run python scripts/sync-docs.py'
+        pass_filenames: false
+        files: ^(docs/.*\.md|README\.md|scripts/sync-docs\.py)$
+      - id: sync-resources
+        name: sync project resources
+        language: system
+        entry: bash -c 'uv run python scripts/sync-resources.py'
+        pass_filenames: false
+        files: ^(calkit/resources/.*|actions/run/.*|scripts/sync-resources\.py)$
+
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.0.3"
     hooks:

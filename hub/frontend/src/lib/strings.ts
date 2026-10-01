@@ -19,6 +19,29 @@ export const encodeBase64Utf8 = (text: string): string => {
   return btoa(bin)
 }
 
+// Drop a leading Markdown H1, whose text the surrounding page already shows.
+// Only a heading is removed: a README can just as well open with an HTML
+// block, e.g., a logo centered with `<p align="center">`, and splicing out that
+// line would orphan the markup and break the layout.
+export const removeLeadingHeading = (text: string): string => {
+  const lines = text.split("\n")
+  // ATX, with up to three leading spaces (four or more is an indented code
+  // block, whose `#` is content). The trailing `#`s and the space before
+  // them are optional, so a bare `#` counts too.
+  if (/^ {0,3}#(\s|$)/.test(lines[0] ?? "")) {
+    return lines.slice(1).join("\n")
+  }
+  // Setext: a paragraph line underlined by a run of `=`
+  if (
+    lines[0]?.trim() &&
+    lines.length > 1 &&
+    /^ {0,3}=+\s*$/.test(lines[1] ?? "")
+  ) {
+    return lines.slice(2).join("\n")
+  }
+  return lines.join("\n")
+}
+
 export const capitalizeFirstLetter = (val: string) => {
   return val.charAt(0).toUpperCase() + val.slice(1)
 }

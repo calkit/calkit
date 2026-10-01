@@ -134,3 +134,5 @@ Code plugin) include:
   `dvc.yaml` directly
 - The `calkit xr` command for auto-detecting stage type, environment, and I/O
 - Key CLI commands for running, checking, and committing
+- The questions and answers workflow: Record a question, produce evidence
+  with the pipeline, and write an answer that references it

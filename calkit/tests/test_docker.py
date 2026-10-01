@@ -1,6 +1,7 @@
 """Tests for ``calkit.docker``."""
 
 import sys
+from unittest import mock
 from unittest.mock import Mock
 
 import pytest
@@ -350,6 +351,30 @@ def test_is_auth_error():
     assert not is_auth_error("")
 
 
+def test_registry_login_hint(monkeypatch):
+    import calkit.docker
+
+    monkeypatch.setattr(
+        calkit.docker, "get_github_username", lambda: "someone"
+    )
+    ref = "ghcr.io/o/p/img:latest"
+    # A refusal from GHCR says how to get a token that can push, since a
+    # push that can't prompt otherwise ends on a bare "unauthorized"
+    hint = calkit.docker.registry_login_hint(
+        ref, "error from registry: unauthorized"
+    )
+    assert calkit.docker.GITHUB_PACKAGES_TOKEN_URL in hint
+    assert "docker login ghcr.io -u someone" in hint
+    assert "calkit push docker" in hint
+    # Another registry gets only what Calkit knows: log in to it
+    hint = calkit.docker.registry_login_hint(
+        "docker.io/someone/img:v1", "unauthorized: authentication required"
+    )
+    assert "docker login docker.io" in hint
+    # Anything other than refused credentials is no login problem
+    assert calkit.docker.registry_login_hint(ref, "manifest unknown") == ""
+
+
 def test_login_to_registry_ignores_other_registries():
     # Only GHCR has credentials Calkit can obtain; everything else relies
     # on the user's own docker login
@@ -425,7 +450,8 @@ def test_run_showing_output_collapses_repeated_layer_status(capfd):
     # Everything Docker said is kept, since what a registry says on refusal
     # decides what happens next
     assert output.count("abc123: Waiting") == 2
-    shown = capfd.readouterr().out
+    # On stderr, so a command run in the environment keeps stdout
+    shown = capfd.readouterr().err
     # ...but a repeat of the same status isn't worth showing twice
     assert shown.count("abc123: Waiting") == 1
     assert shown.count("def456: Waiting") == 1
@@ -490,3 +516,63 @@ def test_get_image_name(tmp_dir):
     assert (
         get_image_name({"kind": "docker", "path": "Dockerfile"}, "env") is None
     )
+
+
+def test_ensure_image_available() -> None:
+    # An image already here needs no registry at all
+    with mock.patch("calkit.docker.image_exists_locally", return_value=True):
+        with mock.patch("calkit.docker.pull_image") as pull:
+            calkit.docker.ensure_image_available("some/image:1")
+            pull.assert_not_called()
+    # A pull that says nothing never reached the registry, which is local
+    # and affects every pull on the machine, so it's reported that way
+    # rather than as a missing image
+    with mock.patch("calkit.docker.image_exists_locally", return_value=False):
+        with mock.patch(
+            "calkit.docker.pull_image",
+            return_value=(False, "Docker said nothing for 60 seconds"),
+        ):
+            with pytest.raises(ValueError, match="never reached the registry"):
+                calkit.docker.ensure_image_available("some/image:1")
+        # One that got as far as talking to the registry is about the image
+        with mock.patch(
+            "calkit.docker.pull_image",
+            return_value=(False, "1: Pulling from some/image\nnot found"),
+        ):
+            with pytest.raises(ValueError, match="may not exist"):
+                calkit.docker.ensure_image_available("some/image:1")
+        # A successful pull is not an error
+        with mock.patch(
+            "calkit.docker.pull_image", return_value=(True, "1: Pulling")
+        ):
+            calkit.docker.ensure_image_available("some/image:1")
+
+
+def test_lock_digest_refs_stay_with_their_repo() -> None:
+    # A digest recorded against another repository is left over from an
+    # image the project no longer uses. Pulling it would go on building
+    # with the old image however the environment was changed, which is
+    # what made changing an image in calkit.yaml do nothing.
+    stale = {"RepoDigests": ["texlive/texlive@sha256:abc"]}
+    assert (
+        calkit.docker.get_lock_digest_refs(stale, "ghcr.io/calkit/latex:0.1.0")
+        == []
+    )
+    same = {"RepoDigests": ["ghcr.io/calkit/latex@sha256:abc"]}
+    assert calkit.docker.get_lock_digest_refs(
+        same, "ghcr.io/calkit/latex:0.1.0"
+    ) == ["ghcr.io/calkit/latex@sha256:abc"]
+    # Docker reports what it pulled in full while a project names it short
+    assert calkit.docker.get_lock_digest_refs(
+        {"RepoDigests": ["docker.io/library/alpine@sha256:abc"]}, "alpine:3.19"
+    ) == ["docker.io/library/alpine@sha256:abc"]
+    # A bare digest names no repository, so it belongs to whichever one
+    # the environment now points at; a digest that isn't there fails the
+    # pull and the tag is fetched instead
+    assert calkit.docker.get_lock_digest_refs(
+        {"RepoDigests": ["sha256:abc"]}, "ghcr.io/calkit/latex:0.1.0"
+    ) == ["ghcr.io/calkit/latex@sha256:abc"]
+    # With nowhere to pull from, only self-describing digests are usable
+    assert calkit.docker.get_lock_digest_refs(
+        {"RepoDigests": ["sha256:abc", "foo/bar@sha256:def"]}, None
+    ) == ["foo/bar@sha256:def"]

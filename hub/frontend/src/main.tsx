@@ -7,7 +7,7 @@ import ReactDOM from "react-dom/client"
 import { StrictMode } from "react"
 import { client } from "./client/client.gen"
 import NotFound from "./components/Common/NotFound"
-import { initAnalytics } from "./lib/analytics"
+import { initAnalytics, sensitivePropertyBlacklist } from "./lib/analytics"
 import { getValidAccessToken } from "./lib/auth"
 import { reloadOnStaleChunk } from "./lib/staleChunks"
 import { routeTree } from "./routeTree.gen"
@@ -36,10 +36,14 @@ mixpanel.init(mixpanelToken, {
   // automated sessions can be tagged before any event is sent.
   track_pageview: false,
   persistence: "localStorage",
-  // Nothing is sent or stored until the visitor accepts analytics in the
-  // consent banner (see lib/analytics)
+  // Mixpanel is initialized opted out, so it sends and stores nothing until
+  // the visitor accepts analytics in the consent banner. Anonymous page views
+  // are counted by the hub separately, without this SDK (see lib/analytics).
   opt_out_tracking_by_default: true,
   opt_out_persistence_by_default: true,
+  // Our URLs can carry secrets, e.g., reset and invitation tokens, so Mixpanel
+  // never receives the full current URL or referrer
+  property_blacklist: sensitivePropertyBlacklist,
 })
 
 const queryClient = new QueryClient({

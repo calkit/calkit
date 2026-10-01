@@ -119,6 +119,7 @@ from app.git import (
     record_project_update,
     resolve_commit_sha,
     search_refs,
+    seed_shared_read_clone,
 )
 from app.models import (
     Account,
@@ -893,6 +894,10 @@ def post_project(
         project_in.git_repo_url = (
             f"https://github.com/{current_user.account.name}/{project_in.name}"
         )
+    if project_in.empty_repo and project_in.template is not None:
+        raise HTTPException(
+            400, "A project from a template can't have an empty repo"
+        )
     # First check if template even exists, if specified
     template_project: Project | None = None
     template_git_repo_url: str | None = None
@@ -1024,7 +1029,7 @@ def post_project(
             "has_wiki": True,
         }
         # If creating from a template repo, we want it to be empty
-        if project_in.template is None:
+        if project_in.template is None and not project_in.empty_repo:
             body["gitignore_template"] = "Python"
         if is_user_org:
             post_url = f"https://api.github.com/orgs/{owner_name}/repos"
@@ -1070,6 +1075,10 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
+        # The client pushes its own history, which already has everything
+        # the scaffold below would write
+        if project_in.empty_repo:
+            return project
         try:
             # Clone the repo and set up the Calkit DVC remote
             repo = get_repo(
@@ -1113,7 +1122,9 @@ def post_project(
             # Add a calkit.yaml file
             # First existing info, which is empty unless we're using a template
             ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
-            _ = ck_info.pop("questions", None)
+            # A template's questions are kept, as 'calkit new project' keeps
+            # them: an example's question and the stages that answer it are
+            # the working example, and the new project reproduces the answer
             ck_info |= {
                 "owner": owner_name,
                 "name": project.name,
@@ -1178,6 +1189,7 @@ def post_project(
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
             push_and_expire(project, repo)
+            seed_shared_read_clone(project, repo)
         except Exception as e:
             # The project row is already committed, and it would block a retry
             # since a Git repo can only back one project, so remove it and let
@@ -5686,6 +5698,21 @@ def get_project_publications(
         wdir=repo.working_dir, ck_info=ck_info, fix_legacy=False
     )
     resp = []
+    # LaTeX stages that keep diffs, validated so their diff paths come out
+    # the same as the CLI's
+    latex_stages: dict[str, CkLatexStage] = {}
+    ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for stage_name, stage_def in ck_stages.items():
+        if (
+            not isinstance(stage_def, dict)
+            or stage_def.get("kind") != "latex"
+            or not stage_def.get("diffs")
+        ):
+            continue
+        try:
+            latex_stages[stage_name] = CkLatexStage.model_validate(stage_def)
+        except ValidationError as e:
+            logger.warning(f"Invalid LaTeX stage '{stage_name}': {e}")
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
     (
         ck_info_full,
@@ -5760,6 +5787,61 @@ def get_project_publications(
                 logger.warning(
                     f"Failed to get publication at path {pub['path']}: {e}"
                 )
+        # Diffs of the LaTeX stage that builds it, matched by name, or by
+        # its PDF for a publication that doesn't name its stage
+        latex_stage_name = next(
+            (
+                name
+                for name, stage in latex_stages.items()
+                if name == pub.get("stage")
+                or Path(
+                    os.path.normpath(
+                        os.path.join(stage.wdir or "", stage.pdf_path)
+                    )
+                ).as_posix()
+                == pub["path"]
+            ),
+            None,
+        )
+        pub["latex_diffs"] = []
+        if latex_stage_name is not None:
+            latex_stage = latex_stages[latex_stage_name]
+            for (from_ref, to_ref), diff_path in zip(
+                latex_stage.diff_pairs, latex_stage.diff_paths
+            ):
+                diff_path = Path(
+                    os.path.normpath(
+                        os.path.join(latex_stage.wdir or "", diff_path)
+                    )
+                ).as_posix()
+                diff: dict[str, Any] = dict(
+                    from_ref=from_ref,
+                    to_ref=to_ref,
+                    path=diff_path,
+                    stage=calkit.latex.get_diff_stage_name(
+                        latex_stage_name, from_ref, to_ref
+                    ),
+                )
+                # Listed even when not built, so the viewer can say how
+                try:
+                    item = app.projects.get_contents_from_tree(
+                        project=project,
+                        tree=tree,
+                        path=diff_path,
+                        ck_info=ck_info_full,
+                        dvc_lock_outs=dvc_lock_outs,
+                        zip_path_map=zip_path_map,
+                    )
+                    diff["content"] = (
+                        item.content
+                        if include_content or not item.url
+                        else None
+                    )
+                    diff["url"] = item.url
+                    diff["storage"] = item.storage
+                except HTTPException:
+                    pass
+                pub["latex_diffs"].append(diff)
         resp.append(Publication.model_validate(pub))
     return resp
 
@@ -6848,19 +6930,24 @@ async def post_project_overleaf_publication(
         raise HTTPException(
             400, f"A stage named '{stage_name}' already exists; please provide"
         )
-    # Check environment spec, auto-detecting a TeXlive env to use
+    # Check environment spec, auto-detecting a TeX Live env to use, which
+    # is either a TeX Live image or Calkit's own
     envs = ck_info.get("environments", {})
     env_name = environment_name
+
+    def is_tex_image(image: str) -> bool:
+        return "texlive" in image or "calkit/latex" in image
+
     if not env_name:
         for en, e in envs.items():
-            if e.get("kind") == "docker" and "texlive" in e.get("image", ""):
+            if e.get("kind") == "docker" and is_tex_image(e.get("image", "")):
                 env_name = en
-                logger.info(f"Detected TeXlive env '{en}'")
+                logger.info(f"Detected TeX Live env '{en}'")
                 break
     elif env_name and env_name in envs:
         env = envs[env_name]
-        if env.get("kind") != "docker" and "texlive" not in env.get(
-            "image", ""
+        if env.get("kind") != "docker" and not is_tex_image(
+            env.get("image", "")
         ):
             raise HTTPException(
                 400,
@@ -6875,7 +6962,7 @@ async def post_project_overleaf_publication(
         while env_name in envs:
             env_name = f"tex-{n}"
             n += 1
-        env = {"kind": "docker", "image": "texlive/texlive:latest-full"}
+        env = dict(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
         envs[env_name] = env
         ck_info["environments"] = envs
     # Determine mode: link vs zip
@@ -8649,6 +8736,8 @@ class Issue(BaseModel):
     body: str | None
     artifact_type: str | None = None
     artifact_path: str | None = None
+    # GitHub lists pull requests as issues too
+    is_pull_request: bool = False
 
 
 @router.get("/projects/{owner_name}/{project_name}/issues")
@@ -8710,6 +8799,7 @@ def get_project_issues(
                 body=issue["body"],
                 artifact_type=linked.artifact_type if linked else None,
                 artifact_path=linked.artifact_path if linked else None,
+                is_pull_request="pull_request" in issue,
             )
         )
     return resp_fmt

@@ -1,5 +1,6 @@
 """Tests for ``calkit.pipeline``."""
 
+import json
 import os
 import subprocess
 import sys
@@ -2629,6 +2630,7 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert "*.aux" in contents
     assert "*.fdb_latexmk" in contents
     assert "*.synctex.gz" in contents
+    assert "*.log" in contents
     # The compiled PDF must never be ignored
     assert "*.pdf" not in contents
     assert "managed by calkit" in contents
@@ -2647,6 +2649,33 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     # The block is not duplicated and the unrelated entry survives
     assert contents.count("# >>> calkit latex aux files") == 1
     assert "figs/*.png" in contents
+    # An aux dir is ignored whole, since packages write files with any
+    # extension, but not one outside the source directory
+    stage.output_dir = None
+    stage.aux_dir = "paper/aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        contents = f.read()
+    assert "/aux/*\n" in contents
+    assert "!/aux/*.pdf" not in contents
+    # Unless the PDF goes there too
+    stage.output_dir = "paper/aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "!/aux/*.pdf" in f.read()
+    stage.output_dir = None
+    stage.aux_dir = "build/aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "aux/*" not in f.read()
+    # Nor the source directory itself
+    stage.aux_dir = "paper"
+    assert _ensure_latex_aux_gitignore(stage) is False
+    # Windows separators name the same directory
+    stage.aux_dir = "paper\\aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "/aux/*\n" in f.read()
     # When the stage has a wdir, paths are relative to it, so the .gitignore
     # lands under <wdir>/<source dir>, not the project root
     os.makedirs("sub/doc")
@@ -2903,6 +2932,86 @@ def test_revision_key(tmp_dir):
         assert key("HEAD") == key("main")
     finally:
         os.chdir(cwd)
+
+
+def test_to_dvc_working_tree_latex_diff_staleness(tmp_dir):
+    import calkit.pipeline
+
+    def commit(message: str) -> None:
+        subprocess.check_call(["git", "add", "-A"])
+        subprocess.check_call(
+            [
+                "git",
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-qm",
+                message,
+            ]
+        )
+
+    def status() -> dict:
+        out = subprocess.check_output(
+            ["calkit", "dvc", "status", "--json", stage], text=True
+        )
+        return json.loads(out)
+
+    subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
+    subprocess.check_call(["calkit", "dvc", "init", "-q"])
+    os.makedirs("paper/figs")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\includegraphics{figs/plot}\n")
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("old\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    commit("first")
+    subprocess.check_call(["git", "tag", "v1"])
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "inputs": ["paper/figs"],
+                    "diffs": ["v1"],
+                }
+            }
+        },
+    }
+    stage = "paper-diff-v1"
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    # Stands in for building the diff, recording what it read
+    os.makedirs(".calkit/env-locks/tex")
+    with open(".calkit/env-locks/tex/arm64.json", "w") as f:
+        f.write("{}\n")
+    out = ".calkit/latex-diffs/v1/paper/main.pdf"
+    os.makedirs(os.path.dirname(out))
+    with open(out, "w") as f:
+        f.write("diff\n")
+    subprocess.check_call(["calkit", "dvc", "commit", "-qf", stage])
+    assert status() == {}
+    # Committing what was checked changes nothing the diff reads, so it
+    # stays current rather than needing a second commit
+    commit("second")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert status() == {}
+    # A change to a DVC-tracked figure in the working tree makes it stale
+    # before anything is committed, since the figures are dependencies
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("new\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert stage in status()
+    subprocess.check_call(["calkit", "dvc", "commit", "-qf", stage])
+    assert status() == {}
+    # So does an edit to the document itself
+    with open("paper/main.tex", "a") as f:
+        f.write("More text\n")
+    assert stage in status()
 
 
 def test_to_dvc_unfilters_notebook_outputs(tmp_dir):
@@ -3599,3 +3708,96 @@ def test_get_stage_for_output_reads_map_paths_destinations():
     # The original is still the plotting stage's, not the copy's
     assert get_stage_for_output("figures/a.png", ck_info) == "plot"
     assert get_stage_for_output("paper/figures/nope.png", ck_info) is None
+
+
+def test_table_iteration_names(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+
+    def stage(values):
+        return {
+            "kind": "shell-command",
+            "environment": "_system",
+            "command": "echo {scenario}{sfx}-{seed} > s{scenario}-{seed}.txt",
+            "iterate_over": [
+                {"arg_name": ["scenario", "sfx"], "values": values},
+                {"arg_name": "seed", "values": [1, 2]},
+            ],
+            "outputs": ["s{scenario}-{seed}.txt"],
+        }
+
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "ev": stage([[1, ""], [3, "_mm"]]),
+                "plain": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo {n} > n{n}.txt",
+                    "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
+                    "outputs": ["n{n}.txt"],
+                },
+                "collect": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "cat s*.txt > all.txt",
+                    "inputs": [{"from_stage_outputs": "ev"}],
+                    "outputs": ["all.txt"],
+                },
+            }
+        }
+    }
+    # An existing project ran its table items under their positions
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "schema": "2.0",
+                "stages": {
+                    "ev@_arg00-1": {"cmd": "a"},
+                    "ev@_arg01-2": {"cmd": "b"},
+                    "plain@1": {"cmd": "c"},
+                },
+            },
+            f,
+        )
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    # Callers still get the matrix form
+    assert "matrix" in stages["ev"]
+    with open("dvc.yaml") as f:
+        written = calkit.ryaml.load(f)["stages"]
+    # Written, a table row is named by its values, blanks left out
+    assert list(written["ev"]["foreach"]) == [
+        "1-1",
+        "1-2",
+        "3-_mm-1",
+        "3-_mm-2",
+    ]
+    assert written["ev"]["foreach"]["3-_mm-2"] == {
+        "scenario": 3,
+        "sfx": "_mm",
+        "seed": 2,
+    }
+    assert written["ev"]["do"]["outs"] == [
+        "s${item.scenario}-${item.seed}.txt"
+    ]
+    # A stage without a table keeps DVC's own naming
+    assert "matrix" in written["plain"]
+    # What depends on the items still sees each one
+    assert written["collect"]["deps"] == [
+        "s1-1.txt",
+        "s1-2.txt",
+        "s3-1.txt",
+        "s3-2.txt",
+    ]
+    # Lock entries follow, so what ran under the old names is still current
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)["stages"]
+    assert list(lock) == ["ev@1-1", "ev@3-_mm-2", "plain@1"]
+    assert lock["ev@3-_mm-2"] == {"cmd": "b"}
+    names = subprocess.check_output(["dvc", "stage", "list", "--name-only"])
+    assert "ev@3-_mm-2" in names.decode()
+    # Rows that would share a name keep DVC's positional names
+    ck_info["pipeline"]["stages"]["ev"] = stage([["a", ""], ["", "a"]])
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open("dvc.yaml") as f:
+        assert "matrix" in calkit.ryaml.load(f)["stages"]["ev"]

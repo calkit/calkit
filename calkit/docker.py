@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -582,14 +583,35 @@ def get_remote_image_ref(
     return f"{path}:{tag or 'latest'}"
 
 
-def _run_showing_output(cmd: list[str]) -> tuple[bool, str]:
+# How long Docker may say nothing at all, before it has said anything, be-
+# fore we give up on it. It applies only until the first line: Docker
+# announces what it's pulling straight away, so silence before that is a
+# stall rather than a slow network, while silence afterward can just be a
+# large layer on a bad connection. Waiting on a wedged credential helper
+# looks like the former and used to hang indefinitely.
+PULL_START_TIMEOUT = 60.0
+
+
+def _run_showing_output(
+    cmd: list[str], start_timeout: float | None = None
+) -> tuple[bool, str]:
     """Run a command, showing its output as it happens and keeping it.
 
     Pushing and pulling an image are the slowest things Calkit does, and
     swallowing Docker's progress for minutes on end looks like a hang, so
-    the output goes to the terminal as it arrives. It's captured too, since
+    the output goes to the terminal as it arrives. It goes to stderr, since
+    stdout of a command run in an environment belongs to that command,
+    e.g., latexdiff's marked-up document. It's captured too, since
     what a registry says on refusal decides what happens next.
+
+    ``start_timeout`` gives up when Docker says nothing at all before it
+    has said anything, which is what waiting on a credential helper that
+    never answers looks like. It stops applying once output starts, so a
+    slow transfer is left alone however long its layers take.
     """
+    import queue
+    import threading
+
     lines: list[str] = []
     try:
         proc = subprocess.Popen(
@@ -602,22 +624,105 @@ def _run_showing_output(cmd: list[str]) -> tuple[bool, str]:
     except FileNotFoundError:
         return False, "Docker is not installed"
     assert proc.stdout is not None
+    # Read on a thread so the wait for each line can time out; reading the
+    # pipe directly can only block forever.
+    line_queue: queue.Queue[str | None] = queue.Queue()
+
+    def read_lines() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line_queue.put(line)
+        line_queue.put(None)
+
+    threading.Thread(target=read_lines, daemon=True).start()
     # Docker redraws each layer's status in place on a terminal, but writes
     # every repeat as its own line through a pipe, so a slow push scrolls
     # hundreds of identical 'Waiting' lines past. Only changes are worth
     # showing; a real transfer changes its byte count and still comes
     # through.
     last_status: dict[str, str] = {}
-    for line in proc.stdout:
+    while True:
+        try:
+            # Only the wait for the first line is bounded; once Docker is
+            # talking, it is working
+            line = line_queue.get(timeout=start_timeout if not lines else None)
+        except queue.Empty:
+            proc.kill()
+            proc.wait()
+            message = (
+                f"Docker said nothing for {start_timeout:.0f} seconds and "
+                "never started; giving up"
+            )
+            print(message, flush=True)
+            return False, message
+        if line is None:
+            break
         lines.append(line)
         layer_id, sep, status = line.partition(": ")
         if sep and " " not in layer_id:
             if last_status.get(layer_id) == status:
                 continue
             last_status[layer_id] = status
-        print(line, end="", flush=True)
+        print(line, end="", file=sys.stderr, flush=True)
     proc.stdout.close()
     return proc.wait() == 0, "".join(lines)
+
+
+def image_exists_locally(ref: str) -> bool:
+    """Whether the image is already on this machine."""
+    try:
+        return (
+            subprocess.run(
+                ["docker", "image", "inspect", ref],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def ensure_image_available(ref: str, platform: str | None = None) -> None:
+    """Make sure an image can be run, or say why it can't.
+
+    ``docker run`` pulls implicitly, and a pull of an image that isn't
+    there doesn't fail: it sits waiting on the registry, which looks
+    exactly like a slow download. Pulling deliberately first means a
+    missing image is reported as one.
+    """
+    if image_exists_locally(ref):
+        return
+    success, output = pull_image(ref, platform=platform)
+    if success:
+        return
+    # Docker announces what it's pulling before it fetches anything, so a
+    # pull that produced nothing at all never reached the registry. That
+    # is local: most often a credential helper that doesn't answer, which
+    # blocks every pull on the machine rather than this one image.
+    if not output.strip().startswith(ref.rsplit(":", 1)[-1]):
+        raise ValueError(
+            f"Could not pull '{ref}', and Docker said nothing before "
+            "giving up, so it never reached the registry. Check that "
+            "Docker is working, e.g., 'docker pull alpine', and that its "
+            "credential helper answers: 'docker-credential-"
+            f"{get_creds_store() or 'desktop'} list'. Restarting Docker "
+            f"usually clears it.\n{output.strip()[-500:]}"
+        )
+    raise ValueError(
+        f"Could not pull '{ref}'. It may not exist, or may not be "
+        "public; check the name and tag, and whether you need to log in "
+        f"to its registry.\n{output.strip()[-500:]}"
+    )
+
+
+def get_creds_store() -> str | None:
+    """Which credential helper Docker is configured to use, if any."""
+    try:
+        with open(os.path.join(Path.home(), ".docker", "config.json")) as f:
+            store = json.load(f).get("credsStore")
+    except (OSError, ValueError):
+        return None
+    return store if isinstance(store, str) else None
 
 
 def pull_image(ref: str, platform: str | None = None) -> tuple[bool, str]:
@@ -626,7 +731,7 @@ def pull_image(ref: str, platform: str | None = None) -> tuple[bool, str]:
     if platform is not None:
         cmd += ["--platform", platform]
     cmd.append(ref)
-    return _run_showing_output(cmd)
+    return _run_showing_output(cmd, start_timeout=PULL_START_TIMEOUT)
 
 
 def pull_image_with_login(ref: str, platform: str | None = None) -> bool:
@@ -817,8 +922,12 @@ def get_lock_digest_refs(
             refs.append(f"{remote_repo}@{digest}")
     if remote_repo is None:
         return refs
-    preferred = [r for r in refs if r.split("@", 1)[0] == remote_repo]
-    return preferred + [r for r in refs if r not in preferred]
+    # A digest only names this environment's image if it came from this
+    # environment's repository. One recorded against another repository is
+    # left over from an image the project no longer uses, and pulling it
+    # would quietly go on building with the old image however the
+    # environment was changed.
+    return [r for r in refs if _same_repo(get_repo_from_ref(r), remote_repo)]
 
 
 def build_lock(
@@ -877,6 +986,24 @@ def resolve_registry_prefix(env: dict, wdir: str | None = None) -> str | None:
     if registry.lower() in AUTO_REGISTRY_VALUES:
         return get_default_registry_prefix(wdir=wdir)
     return registry
+
+
+def _same_repo(a: str, b: str) -> bool:
+    """Whether two repositories are the same one written two ways.
+
+    Docker reports what it pulled in full, e.g., ``docker.io/library/foo``,
+    while a project names it as ``foo``.
+    """
+
+    def canonical(repo: str) -> str:
+        for prefix in ("docker.io/library/", "docker.io/", "index."):
+            if repo.startswith(prefix):
+                repo = repo[len(prefix) :]
+        if repo.startswith("docker.io/"):
+            repo = repo[len("docker.io/") :]
+        return repo
+
+    return canonical(a) == canonical(b)
 
 
 def get_repo_from_ref(ref: str) -> str:
@@ -1015,6 +1142,35 @@ def is_auth_error(output: str) -> bool:
     """Return True if a registry refused the credentials it was given."""
     lowered = output.lower()
     return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
+
+
+def registry_login_hint(ref: str, output: str) -> str:
+    """Return how to log in to a registry that refused a push, or ''.
+
+    Calkit walks the user through creating a token itself when it can
+    prompt, so this is for when it can't: a push from a pipeline, a script
+    or an agent would otherwise end on the registry's bare "unauthorized",
+    which says nothing about what to do next.
+    """
+    if not is_auth_error(output):
+        return ""
+    host = ref.split("/", 1)[0]
+    if host != "ghcr.io":
+        return (
+            f"{host} refused the push; log Docker in to it with "
+            f"'docker login {host}' and push again"
+        )
+    return (
+        "The GitHub Container Registry refused the push: no credential "
+        "Calkit has can write packages. To fix this, either:\n"
+        "  - run 'calkit push docker' in a terminal, which walks you "
+        "through creating a token and remembers it; or\n"
+        "  - create a token with the 'write:packages' scope at\n"
+        f"      {GITHUB_PACKAGES_TOKEN_URL}\n"
+        "    log Docker in with it, pasting the token as the password:\n"
+        f"      docker login ghcr.io -u {get_github_username()}\n"
+        "    and push again with 'calkit push docker'"
+    )
 
 
 def get_github_token_scopes(token: str) -> set[str]:

@@ -749,6 +749,10 @@ class ProjectPost(ProjectBase):
     # Whether a project made from a template keeps the template's commits.
     # Off by default: the new project's history starts with itself.
     keep_template_history: bool = False
+    # Create the Git repo with no commits, for a project that already has
+    # its own history to push, e.g., one connected with 'calkit update hub'.
+    # A scaffolded repo shares no history with it, so its push is rejected.
+    empty_repo: bool = False
     # An Overleaf project to take the title from, when none is given
     overleaf_project_url: str | None = Field(default=None, max_length=2048)
 
@@ -1472,6 +1476,19 @@ class _DeclaredArtifact(BaseModel):
 PublicationKind = CkPublicationKind
 
 
+class PublicationLatexDiff(BaseModel):
+    """A PDF marking up what changed in a publication between revisions."""
+
+    from_ref: str
+    to_ref: str
+    path: str
+    # The generated DVC stage that builds it
+    stage: str | None = None
+    content: str | None = None
+    url: str | None = None
+    storage: Literal["git", "dvc", "dvc-zip"] | None = None
+
+
 class Publication(_DeclaredArtifact):
     """A publication declared in calkit.yaml."""
 
@@ -1491,6 +1508,8 @@ class Publication(_DeclaredArtifact):
     url: str | None = None
     overleaf: PublicationOverleaf | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # From the diffs of the LaTeX stage that builds it
+    latex_diffs: list[PublicationLatexDiff] = []
 
 
 #: What a component is. A publication is made of files -- the sources in

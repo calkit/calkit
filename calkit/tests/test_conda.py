@@ -204,6 +204,7 @@ def conda_env_name():
     delete_env(name)
 
 
+@pytest.mark.xdist_group("conda")
 @skipif_windows_conda
 def test_check_env(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
@@ -349,6 +350,7 @@ def conda_env_prefix():
     subprocess.check_call([conda, "env", "remove", "-y", "--prefix", prefix])
 
 
+@pytest.mark.xdist_group("conda")
 @skipif_windows_conda
 def test_check_prefix_env(tmp_dir, conda_env_prefix):
     subprocess.check_call(["calkit", "init"])
@@ -423,6 +425,7 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
     )
 
 
+@pytest.mark.xdist_group("conda")
 @skipif_windows_conda
 def test_check_env_editable(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])

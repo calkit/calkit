@@ -344,6 +344,21 @@ def test_matlabcommandstage():
     assert sd["cmd"] == (
         'matlab -noFigureWindows -batch "disp(\\"Hello, MATLAB!\\");"'
     )
+    # A named system environment on its own is the machine's own MATLAB,
+    # so the stage starts it, as it does for _system
+    s = MatlabCommandStage(name="d", environment="lab", command="disp(1);")
+    s._system_env = "lab"
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n lab --no-check -- matlab -noFigureWindows -batch "
+        '"disp(1);"'
+    )
+    # Wrapping a MATLAB environment, that environment starts MATLAB
+    s = MatlabCommandStage(name="e", environment="lab:m1", command="disp(1);")
+    s._system_env = "lab"
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n lab --no-check -- calkit xenv -n m1 --no-check -- "
+        '"disp(1);"'
+    )
 
 
 def test_matlabscriptstage():
@@ -559,9 +574,8 @@ def test_latex_stage_diffs():
         inputs=["figures/fig1.png"],
         diffs=[["v1", "v2"], "main"],
     )
-    # A bare revision compares it against HEAD. Every comparison in a
-    # pipeline is between two commits; one against the working tree can't
-    # be reproduced, so it isn't the project's to keep.
+    # A bare revision is named for HEAD, which is what the working tree it's
+    # compared with becomes once committed
     assert stage.diff_pairs == [("v1", "v2"), ("main", "HEAD")]
     # Building the document and comparing revisions of it have different
     # inputs, so they are separate DVC stages: adding a comparison
@@ -585,6 +599,13 @@ def test_latex_stage_diffs():
         "calkit latex diff -e tex --no-check --from v1 --to v2 "
         "--revision-key aaa1111..bbb2222 --input figures/fig1.png "
         "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
+    )
+    # A bare revision is compared with the working tree, like any other
+    # stage reads it, so there's no --to and only its own key
+    assert extra["paper-1-diff-main"]["cmd"] == (
+        "calkit latex diff -e tex --no-check --from main "
+        "--revision-key ccc3333 --input figures/fig1.png "
+        "--output-dir .calkit/latex-diffs/main pubs/paper-1/main.tex"
     )
     # HEAD is what a comparison runs up to unless it says otherwise, so
     # naming it would only add noise
@@ -630,11 +651,12 @@ def test_latex_stage_diffs():
         latexdiff_args=["--graphics-markup=both"],
         inputs=["pubs/paper-1/figs/"],
         diffs=[["v1", "v2"]],
+        keep_diff_tex=True,
     )
     assert configured.extra_dvc_stages()["paper-1-diff-v1-v2"]["cmd"] == (
         "calkit latex diff -e tex --no-check --from v1 --to v2 "
         "-r pubs/paper-1/.latexmkrc --latexmk-arg -shell-escape "
-        "--latexdiff-arg --graphics-markup=both "
+        "--latexdiff-arg --graphics-markup=both --keep-tex "
         "--input pubs/paper-1/figs/ "
         "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
     )
@@ -645,6 +667,39 @@ def test_latex_stage_diffs():
     assert "--input figures/fig2.png" in main_diff["cmd"]
     assert "figures/fig2.png" in main_diff["deps"]
     assert with_outputs["paper-1-diff-v1-v2"]["deps"] == []
+    # A filter's script is passed along and depended on, and runs in an
+    # environment only if one is named
+    filtered = LatexStage(
+        name="paper-1",
+        kind="latex",
+        environment="tex",
+        target_path="pubs/paper-1/main.tex",
+        diffs=[["v1", "v2"]],
+        diff_filter={
+            "kind": "python-script",
+            "script_path": "scripts/filter.py",
+            "args": ["--quiet"],
+        },
+    )
+    filtered_diff = filtered.extra_dvc_stages()["paper-1-diff-v1-v2"]
+    assert (
+        "--filter-script scripts/filter.py --filter-arg --quiet"
+        in filtered_diff["cmd"]
+    )
+    assert "--filter-env" not in filtered_diff["cmd"]
+    assert filtered_diff["deps"] == ["scripts/filter.py"]
+    assert filtered.diff_filter is not None
+    filtered.diff_filter.environment = "py"
+    filtered_diff = filtered.extra_dvc_stages()["paper-1-diff-v1-v2"]
+    assert "--filter-env py" in filtered_diff["cmd"]
+    with pytest.raises(ValidationError):
+        LatexStage(
+            name="paper-1",
+            kind="latex",
+            environment="tex",
+            target_path="pubs/paper-1/main.tex",
+            diff_filter="python3 scripts/filter.py",
+        )
     for bad in [[["v1"]], [["v1", "v2", "v3"]], [["v1", ""]], [["v1", "v1"]]]:
         with pytest.raises(ValidationError):
             LatexStage(

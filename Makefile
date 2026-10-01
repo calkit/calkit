@@ -24,7 +24,7 @@ frontend-client: ## Regenerate the hub frontend's API client.
 	@$(MAKE) -C hub/frontend client
 
 .PHONY: format
-format: sync-docs sync-resources ## Automatically format files.
+format: ## Automatically format files and regenerate what's generated.
 	@echo "🚀 Linting code with pre-commit"
 	@uv run pre-commit run -a
 

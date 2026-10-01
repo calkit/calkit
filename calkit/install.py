@@ -239,6 +239,18 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "conda": _MINIFORGE_INSTALLER,
     "R": _R_INSTALLER,
+    # Converts equations for Word exports of LaTeX documents
+    "pandoc": {
+        "mac": {
+            "script": "brew install pandoc",
+            "path_add": _BREW_BINS,
+            "requires": ["brew"],
+        },
+        "windows": {
+            "script": _WINGET + "JohnMacFarlane.Pandoc",
+            "path_add": "%LOCALAPPDATA%\\Pandoc",
+        },
+    },
 }
 # Aliases for the binaries users actually invoke / list as deps; sharing
 # the same installer dict by reference keeps the entries in lockstep.
@@ -280,6 +292,12 @@ _PLATFORM_UNSUPPORTED: dict[str, dict[Platform, str]] = {
         "linux": (
             "Install VS Code with your system package manager; see "
             "https://code.visualstudio.com/docs/setup/linux."
+        ),
+    },
+    "pandoc": {
+        "linux": (
+            "Install Pandoc with your system package manager, e.g., "
+            "'sudo apt install pandoc', or see https://pandoc.org/installing."
         ),
     },
     "R": {
@@ -445,18 +463,18 @@ def prompt_and_install(app: str, *, interactive: bool) -> bool:
     for req in entry.get("requires", []):
         if shutil.which(req) is None:
             print(f"'{app}' is installed with '{req}', which is missing.")
-            if not prompt_and_install(req, interactive=True):
+            if not prompt_and_install(req, interactive=interactive):
                 return False
+    # Shown before the question rather than after a refusal: agreeing to a
+    # command you haven't been shown isn't agreeing to much, and this is
+    # often the first thing Calkit asks anyone
+    print(f"  {entry['script']}")
     try:
-        answer = (
-            input(f"Install '{app}' now via the upstream installer? [Y/n] ")
-            .strip()
-            .lower()
-        )
+        answer = input(f"Run this to install '{app}'? [Y/n] ").strip().lower()
     except EOFError:
         answer = "n"
     if answer not in ("", "y", "yes"):
-        print(f"  Skipped. To install, run:  {entry['script']}")
+        print(f"  Skipped. Run 'calkit install {app}' when you want it.")
         return False
     ok = install(app)
     if not ok:

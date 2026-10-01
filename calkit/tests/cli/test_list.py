@@ -127,6 +127,85 @@ def test_list_stages(tmp_dir):
     assert set(json.loads(out)) == {"stage1"}
 
 
+def test_list_latex_diffs(tmp_dir):
+    def commit(message: str) -> None:
+        subprocess.check_call(["git", "add", "-A"])
+        subprocess.check_call(
+            [
+                "git",
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-qm",
+                message,
+            ]
+        )
+
+    def listed() -> dict:
+        out = subprocess.check_output(
+            ["calkit", "list", "latex-diffs", "--json"], text=True
+        )
+        return {diff["stage"]: diff for diff in json.loads(out)}
+
+    subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
+    subprocess.check_call(["calkit", "dvc", "init", "-q"])
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("Hello\n")
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "diffs": ["v1", ["v1", "v2"]],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    commit("first")
+    subprocess.check_call(["git", "tag", "v1"])
+    subprocess.check_call(["git", "tag", "v2"])
+    diffs = listed()
+    # A bare revision is compared with the working tree, and nothing has
+    # been built yet
+    assert diffs["paper-diff-v1"] == {
+        "path": ".calkit/latex-diffs/v1/paper/main.pdf",
+        "document": "paper/main.tex",
+        "latex_stage": "paper",
+        "stage": "paper-diff-v1",
+        "from_ref": "v1",
+        "to_ref": None,
+        "status": "not built",
+    }
+    assert diffs["paper-diff-v1-v2"]["to_ref"] == "v2"
+    assert diffs["paper-diff-v1-v2"]["status"] == "not built"
+    # Once built it's current, until something it reads changes
+    os.makedirs(".calkit/env-locks/tex")
+    with open(".calkit/env-locks/tex/arm64.json", "w") as f:
+        f.write("{}\n")
+    out = ".calkit/latex-diffs/v1/paper/main.pdf"
+    os.makedirs(os.path.dirname(out))
+    with open(out, "w") as f:
+        f.write("diff\n")
+    subprocess.check_call(["calkit", "dvc", "commit", "-qf", "paper-diff-v1"])
+    assert listed()["paper-diff-v1"]["status"] == "up to date"
+    with open("paper/main.tex", "a") as f:
+        f.write("More\n")
+    assert listed()["paper-diff-v1"]["status"] == "stale"
+    # The human-readable listing says what each compares
+    out = subprocess.check_output(["calkit", "list", "latex-diffs"], text=True)
+    assert "- path: .calkit/latex-diffs/v1/paper/main.pdf" in out
+    assert "to: working tree" in out
+    assert "status: stale" in out
+
+
 def test_list_results(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("results")

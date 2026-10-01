@@ -2304,6 +2304,18 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "diff_filter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PythonScriptDiffFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Script each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text."
+        },
         "diff_pdf_storage": {
           "anyOf": [
             {
@@ -2323,7 +2335,7 @@
         },
         "diffs": {
           "default": [],
-          "description": "Comparisons to keep for this document, each a pair of revisions. A bare string is shorthand for comparing that revision against the working tree.",
+          "description": "Comparisons to keep for this document, each a pair of revisions. A bare string compares that revision against the working tree, like the document itself is built from.",
           "items": {
             "anyOf": [
               {
@@ -2409,6 +2421,12 @@
           "default": null,
           "description": "Arguments over which to run this stage multiple times.",
           "title": "Iterate Over"
+        },
+        "keep_diff_tex": {
+          "default": false,
+          "description": "Keep the old, new, and marked-up .tex files beside each diff PDF for inspection.",
+          "title": "Keep Diff Tex",
+          "type": "boolean"
         },
         "kind": {
           "const": "latex",
@@ -5214,6 +5232,50 @@
         "path"
       ],
       "title": "PublicationEvidence",
+      "type": "object"
+    },
+    "PythonScriptDiffFilter": {
+      "description": "A Python script each marked-up document is piped through.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "Arguments passed to the script.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Environment to run the script in. Defaults to Calkit's own Python, which has only the standard library and Calkit's dependencies.",
+          "title": "Environment"
+        },
+        "kind": {
+          "const": "python-script",
+          "description": "Run a Python script, reading the marked-up document on stdin and writing the result to stdout.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "script_path": {
+          "description": "Path to the Python script to run.",
+          "title": "Script Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "script_path"
+      ],
+      "title": "PythonScriptDiffFilter",
       "type": "object"
     },
     "PythonScriptStage": {

@@ -1015,6 +1015,7 @@ export type {
   Publication,
   PublicationComponent,
   PublicationComponents,
+  PublicationLatexDiff,
   PublicationOverleaf,
   PutOrgSubscriptionData,
   PutOrgSubscriptionError,

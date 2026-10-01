@@ -12,7 +12,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli.core import raise_error
+from calkit.cli.core import raise_error, warn
 
 config_app = typer.Typer(no_args_is_help=True)
 
@@ -189,8 +189,16 @@ def setup_remote(
 ):
     """Set up the Calkit hub as the default DVC remote and store a token
     in the local config.
+
+    Deprecated: this configures the project, not Calkit itself, which is
+    what the rest of this app is for.
     """
     from git.exc import InvalidGitRepositoryError
+
+    warn(
+        "'calkit config remote' is deprecated; use 'calkit update hub', "
+        "which also creates the project on the hub if it isn't there"
+    )
 
     from calkit.dvc import configure_remote, set_remote_auth
 

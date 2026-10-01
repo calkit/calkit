@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from calkit.core import LOCAL_DIR
+from calkit.core import LOCAL_DIR, ensure_local_dir
 
 if TYPE_CHECKING:
     # Only ever named in annotations here, which this module's
@@ -50,6 +50,100 @@ LOCAL_DIFF_DIR = os.path.join(LOCAL_DIR, "latex-diffs")
 # What the working tree is called when a comparison is named after its
 # ends
 WORKING_NAME = "working"
+
+# The image a LaTeX stage builds in when the project doesn't name an
+# environment of its own. Built from images/latex, and a ninth the size
+# of a full TeX Live image. Pinned to an exact tag rather than :latest so
+# a document keeps building against the same TeX until this is moved
+# deliberately; what it carries is recorded in images/latex/README.md.
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.5"
+# The environment created for a document that doesn't have one, wherever
+# that happens: a new publication, an Overleaf import, or a stage whose
+# environment is worked out from what it runs. Copied where it's used,
+# since what's written into a project is the caller's to amend.
+DEFAULT_LATEX_ENVIRONMENT = {
+    "kind": "docker",
+    "image": DEFAULT_LATEX_IMAGE,
+    "description": "TeX Live via Calkit's LaTeX image.",
+}
+
+
+def get_source_date_epoch(tex_file: str) -> str | None:
+    """When to say the PDF was built, in seconds since the epoch.
+
+    pdfTeX stamps the current time into the PDF's metadata and trailer
+    ID, so two builds of identical source differ byte for byte, and every
+    rebuild rewrites the output's hash in ``dvc.lock``. Taking the date
+    from the last commit that touched the document keeps it meaningful
+    while the bytes stay put until the document itself changes.
+    """
+    import subprocess
+
+    tex_dir = os.path.dirname(os.path.abspath(tex_file)) or os.getcwd()
+    # A commit's date describes what that commit holds, so it can only
+    # speak for a document that has been saved. With edits still in the
+    # working tree, the honest answer is now, which is what pdfTeX does
+    # left alone.
+    try:
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain", "-uno", "--", tex_dir],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    if dirty:
+        return None
+    # A document with no commits of its own, e.g., one added but not yet
+    # saved, falls back to the repository's last commit
+    for pathspec in [["--", tex_dir], []]:
+        try:
+            out = subprocess.check_output(
+                ["git", "log", "-1", "--format=%ct"] + pathspec,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        if out:
+            return out
+    return None
+
+
+# Where the project's TeX package cache is inside a container, with the
+# working directory mounted at /work, as Calkit mounts it
+CONTAINER_TEXMF_DIR = "/work/.calkit/local/texmf"
+# LaTeX's messages for a file it couldn't find, and a font whose metrics it
+# couldn't, e.g., "Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable"
+_MISSING_FILE_RE = re.compile(r"File `([^']+)' not found")
+_MISSING_TFM_RE = re.compile(
+    r"Font \S+=(\S+?)(?: at \S+)? not loadable: Metric \(TFM\) file"
+)
+
+
+def get_texmf_cache_dir(wdir: str | None = None) -> str:
+    """Where TeX packages fetched at run time are kept, per project.
+
+    Inside the project's gitignored ``.calkit/local``, so the working
+    directory a container mounts already covers it, whatever environment
+    the container comes from, and nothing fetched can be committed. It is
+    ``TEXMFHOME`` in the container, not the distribution's own tree, since
+    mounting over that hides TinyTeX and leaves no TeX at all.
+    """
+    return os.path.join(ensure_local_dir(wdir), "texmf")
+
+
+def find_missing_tex_files(log: str) -> list[str]:
+    """The files a LaTeX log says it couldn't find, in the order it says.
+
+    Style and class files are named as they are; a font whose metrics are
+    missing is named as its ``.tfm`` file, which is what finds the package
+    providing it.
+    """
+    found = _MISSING_FILE_RE.findall(log) + [
+        f"{name}.tfm" for name in _MISSING_TFM_RE.findall(log)
+    ]
+    return list(dict.fromkeys(found))
 
 
 def _ref_dirname(ref: str) -> str:
@@ -120,10 +214,8 @@ def diff_stage_suffix(from_ref: str, to_ref: str | None = None) -> str:
 def get_diff_pairs(diffs: list) -> list[tuple[str, str]]:
     """The revisions a latex stage's ``diffs`` compare, oldest side first.
 
-    A bare revision compares it against ``HEAD``. Every comparison in a
-    pipeline is between two commits: one against the working tree can't be
-    reproduced, so it belongs to whoever is doing the work rather than to
-    the project.
+    A bare revision is paired with ``HEAD``, which is what the working tree
+    it's compared with becomes once committed.
     """
     pairs: list[tuple[str, str]] = []
     for entry in diffs:
@@ -152,6 +244,68 @@ def get_diff_stage_names(stage_name: str, stage: dict) -> list[str]:
         get_diff_stage_name(stage_name, from_ref, to_ref)
         for from_ref, to_ref in get_diff_pairs(stage.get("diffs") or [])
     ]
+
+
+def get_pipeline_diffs(ck_info: dict, status: bool = False) -> list[dict]:
+    """Every diff the project's latex stages keep, with where each is.
+
+    ``to_ref`` is None for a bare revision, which is compared with the
+    working tree. Paths are in the project's frame rather than a stage's
+    ``wdir``.
+
+    With ``status``, each also says whether it's ``up to date``, ``stale``,
+    or ``not built``, which means compiling the pipeline and asking DVC.
+    """
+    diffs = []
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage in stages.items():
+        if not isinstance(stage, dict) or stage.get("kind") != "latex":
+            continue
+        wdir = stage.get("wdir") or ""
+        target = stage.get("target_path") or ""
+        for entry, (from_ref, to_ref) in zip(
+            stage.get("diffs") or [], get_diff_pairs(stage.get("diffs") or [])
+        ):
+            diffs.append(
+                {
+                    "path": Path(
+                        os.path.normpath(
+                            os.path.join(
+                                wdir, get_diff_path(target, from_ref, to_ref)
+                            )
+                        )
+                    ).as_posix(),
+                    "document": Path(
+                        os.path.normpath(os.path.join(wdir, target))
+                    ).as_posix(),
+                    "latex_stage": name,
+                    "stage": get_diff_stage_name(name, from_ref, to_ref),
+                    "from_ref": from_ref,
+                    "to_ref": None if isinstance(entry, str) else to_ref,
+                }
+            )
+    if status and diffs:
+        import calkit.pipeline
+
+        # Environments and notebooks don't decide whether a diff is stale,
+        # and checking them is the slow part
+        result = calkit.pipeline.get_status(
+            ck_info=ck_info,
+            targets=[diff["stage"] for diff in diffs],
+            check_environments=False,
+            clean_notebooks=False,
+        )
+        if result.errors:
+            raise RuntimeError("; ".join(result.errors))
+        stale = set(result.stale_stage_names)
+        for diff in diffs:
+            if not os.path.isfile(diff["path"]):
+                diff["status"] = "not built"
+            elif diff["stage"] in stale:
+                diff["status"] = "stale"
+            else:
+                diff["status"] = "up to date"
+    return diffs
 
 
 def diff_state_path(output: str) -> str:
@@ -309,8 +463,14 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     return sorted(found)
 
 
+# Records of Word exports and merges: always kept on this machine, like run
+# logs, and in the project too when asked, e.g., with --log
 DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")
 DOCX_MERGES_DIR = os.path.join(".calkit", "latex", "docx-merges")
+LOCAL_DOCX_EXPORTS_DIR = os.path.join(LOCAL_DIR, "docx-exports")
+LOCAL_DOCX_MERGES_DIR = os.path.join(LOCAL_DIR, "docx-merges")
+# Where TeX4ht builds a Word export's source; machine-local, like the diffs
+DOCX_BUILD_DIR = os.path.join(LOCAL_DIR, "latex-docx-build")
 # Word bookmark names: 40 chars max, letters/digits/underscores
 _INCLUDE_RE = re.compile(
     r"^\s*\\(input|include|subfile|import)\{([^}]*)\}(?:\{([^}]*)\})?"
@@ -319,6 +479,21 @@ _BLOCK_START_RE = re.compile(
     r"^\s*\\(begin|end|section|subsection|subsubsection|chapter|part|item|"
     r"caption|maketitle|documentclass)\b"
 )
+# Display math, which Word gets as equations rather than paragraphs
+_DISPLAY_RE = re.compile(
+    r"^\s*(?:\\begin\{(equation|align|gather|multline|eqnarray|flalign)"
+    r"(\*?)\}|(\\\[)|(\$\$))"
+)
+_FLOAT_RE = re.compile(
+    r"\\(begin|end)\{(figure|table|wrapfigure|sidewaysfigure|sidewaystable)"
+    r"\*?\}"
+)
+# Inline math, $...$ or \\(...\\), but not $$
+_INLINE_MATH_RE = re.compile(
+    r"(?<![\\$])\$(?!\$)((?:\\.|[^$\\])+?)\$|\\\((.+?)\\\)", re.S
+)
+# Environments whose rows are numbered one by one
+_MULTIROW_ENVS = frozenset({"align", "gather", "eqnarray", "flalign"})
 
 
 @dataclass
@@ -333,6 +508,9 @@ class Block:
     """A run of source lines that renders as one Word paragraph."""
 
     lines: list[SourceLine]
+    # Inside a figure or table, which can float away from the prose around
+    # it in the rendered document
+    floating: bool = False
 
     @property
     def path(self) -> str:
@@ -344,7 +522,95 @@ class Block:
 
     @property
     def text(self) -> str:
+        if self.display:
+            return ""
         return detex("\n".join(ln.text for ln in self.lines))
+
+    @property
+    def inline_math(self) -> list[tuple[str, str, str]]:
+        """Each piece of inline math, with the prose on either side of it as
+        rendered: (before, LaTeX, after)."""
+        if self.display:
+            return []
+        src = "\n".join(ln.text.split("%")[0] for ln in self.lines)
+        found = list(_INLINE_MATH_RE.finditer(src))
+        out = []
+        for i, m in enumerate(found):
+            start = found[i - 1].end() if i else 0
+            end = found[i + 1].start() if i + 1 < len(found) else len(src)
+            out.append(
+                (
+                    detex(src[start : m.start()]),
+                    m.group(1) or m.group(2),
+                    detex(src[m.end() : end]),
+                )
+            )
+        return out
+
+    @property
+    def display(self) -> str | None:
+        """The display math environment this block is, if any, e.g.,
+        ``equation*``, or ``[`` for ``\\[``."""
+        m = _DISPLAY_RE.match(self.lines[0].text)
+        if m is None:
+            return None
+        if m.group(1):
+            return m.group(1) + m.group(2)
+        return "[" if m.group(3) else "$$"
+
+    @property
+    def rows(self) -> list[tuple[str, bool]]:
+        """The display's math as LaTeX for a converter, with whether each
+        piece is numbered: one piece per row when rows are numbered one by
+        one, else one for the whole display."""
+        env = self.display
+        if env is None:
+            return []
+        src = "\n".join(ln.text.split("%")[0] for ln in self.lines)
+        src = re.sub(r"\\(label|tag\*?)\{[^}]*\}", "", src)
+        body = re.sub(
+            r"^\s*(\\begin\{[^}]*\}|\\\[|\$\$)|(\\end\{[^}]*\}|\\\]|\$\$)\s*$",
+            "",
+            src.strip(),
+        )
+        name, starred = env.rstrip("*"), env.endswith("*")
+        numbered = not starred and env not in ("[", "$$")
+        if name not in _MULTIROW_ENVS:
+            unnumbered = re.search(r"\\(nonumber|notag)\b", body)
+            body = re.sub(r"\\(nonumber|notag)\b", "", body)
+            wrapped = f"\\begin{{{name}*}}{body}\\end{{{name}*}}"
+            if name in ("[", "$$", "equation"):
+                wrapped = f"\\[{body}\\]"
+            return [(wrapped, numbered and not unnumbered)]
+        # Split on top-level row breaks, not those in nested environments
+        rows, depth, start = [], 0, 0
+        for m in re.finditer(r"\\(begin|end)\{[^}]*\}|\\\\", body):
+            if m.group(1) == "begin":
+                depth += 1
+            elif m.group(1) == "end":
+                depth -= 1
+            elif depth == 0:
+                rows.append(body[start : m.start()])
+                start = m.end()
+        rows.append(body[start:])
+        rows = [r for r in rows if r.strip()]
+        inner = (
+            "aligned"
+            if name in ("align", "flalign", "eqnarray")
+            else ("gathered")
+        )
+
+        def wrap(r: str) -> str:
+            return f"\\[\\begin{{{inner}}}{r}\\end{{{inner}}}\\]"
+
+        flags = [
+            numbered and not re.search(r"\\(nonumber|notag)\b", r)
+            for r in rows
+        ]
+        rows = [re.sub(r"\\(nonumber|notag)\b", "", r) for r in rows]
+        if sum(flags) <= 1:
+            return [(wrap("\\\\".join(rows)), any(flags))]
+        return [(wrap(r), f) for r, f in zip(rows, flags)]
 
 
 def flatten(main_path: str) -> list[SourceLine]:
@@ -416,8 +682,28 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
     """Split flattened source into paragraph-sized blocks."""
     out: list[Block] = []
     cur: list[SourceLine] = []
+    # The text that closes the display math being read, if any
+    closing: str | None = None
     for ln in lines:
-        stripped = ln.text.strip()
+        stripped, rest = ln.text.strip(), ln.text
+        # Display math is a block of its own, through its closing line
+        m = _DISPLAY_RE.match(ln.text) if closing is None else None
+        if m is not None:
+            if cur:
+                out.append(Block(cur))
+            cur = []
+            closing = (
+                f"\\end{{{m.group(1)}{m.group(2)}}}"
+                if m.group(1)
+                else ("\\]" if m.group(3) else "$$")
+            )
+            rest = ln.text[m.end() :]
+        if closing is not None:
+            cur.append(ln)
+            if closing in rest:
+                out.append(Block(cur))
+                cur, closing = [], None
+            continue
         if not stripped:
             if cur:
                 out.append(Block(cur))
@@ -435,7 +721,18 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
         cur.append(ln)
     if cur:
         out.append(Block(cur))
-    return [b for b in out if b.text]
+    in_float: set[tuple[str, int]] = set()
+    depth = 0
+    for ln in lines:
+        for m in _FLOAT_RE.finditer(ln.text.split("%")[0]):
+            depth = max(0, depth + (1 if m.group(1) == "begin" else -1))
+            if m.group(1) == "begin":
+                in_float.add((ln.path, ln.lineno))
+        if depth:
+            in_float.add((ln.path, ln.lineno))
+    for b in out:
+        b.floating = (b.path, b.lineno) in in_float
+    return [b for b in out if b.text or b.display]
 
 
 def _words(text: str) -> set[str]:
@@ -453,15 +750,37 @@ def align(
     """Match rendered paragraphs to source blocks, in order."""
     out: list[Block | None] = []
     last = 0
+    floats = [j for j, b in enumerate(blks) if b.floating]
     for text in texts:
-        scores = [
-            (similarity(text, b.text), j)
-            for j, b in enumerate(blks[last:], last)
-        ]
-        best = max(scores, default=(0.0, -1))
+        # A short line ending in an equation number is a display's
+        # fragment, even when it shares a word with the prose around it
+        if re.search(r"\(([A-Z]\.)?\d+(\.\d+)*\)\s*$", text) and (
+            len(_words(text)) < 4
+        ):
+            out.append(None)
+            continue
+        # On a tie the nearest block wins, so a short heading can't jump
+        # ahead to a later paragraph sharing its words. A figure or table
+        # can be anywhere, since it floats, and doesn't move the place in
+        # the source the prose has reached.
+        candidates = sorted(set(range(last, len(blks))) | set(floats))
+        scores = [(similarity(text, blks[j].text), -j) for j in candidates]
+        best = max(scores, default=(0.0, 1))
+        # A table's rows or a caption's lines stay with it on a tie, e.g.,
+        # a row "Growth rate k 0.05" beside prose about the growth rate
+        prev = next((b for b in reversed(out) if b is not None), None)
+        if (
+            prev is not None
+            and prev.floating
+            and best[0] >= threshold
+            and similarity(text, prev.text) >= best[0]
+        ):
+            out.append(prev)
+            continue
         if best[0] >= threshold:
-            out.append(blks[best[1]])
-            last = best[1]
+            out.append(blks[-best[1]])
+            if not blks[-best[1]].floating:
+                last = -best[1]
         else:
             out.append(None)
     return out
@@ -478,10 +797,39 @@ def find_block(
     """The block a bookmark points at, by line first and text second."""
     same_file = [b for b in blks if b.path == path]
     for b in same_file:
-        if b.lineno == lineno and similarity(text, b.text) >= 0.5:
+        if b.lineno == lineno and (
+            b.display or similarity(text, b.text) >= 0.5
+        ):
             return b
     scored = [
         (similarity(text, b.text), -abs(b.lineno - lineno), b)
+        for b in same_file
+    ]
+    best = max(scored, key=lambda s: s[:2], default=None)
+    return best[2] if best and best[0] >= 0.6 else None
+
+
+def math_similarity(block: Block, math: str) -> float:
+    """How much a display block's source reads like ``math``, as a
+    converter spells it, ignoring grouping and wrappers."""
+    want = [t for t in math_tokens(math) if t not in _MATH_NOISE]
+    have = _MATH_TOKEN_RE.findall("\n".join(ln.text for ln in block.lines))
+    have = [t for t in have if t not in _MATH_NOISE]
+    return difflib.SequenceMatcher(a=want, b=have, autojunk=False).ratio()
+
+
+def find_display(
+    blks: list[Block], path: str, lineno: int, math: str
+) -> Block | None:
+    """The display block a bookmark points at, by line first, else the one
+    in the file whose math reads most like ``math``, as a converter spells
+    it, e.g., after edits above it moved it."""
+    same_file = [b for b in blks if b.path == path and b.display]
+    for b in same_file:
+        if b.lineno == lineno:
+            return b
+    scored = [
+        (math_similarity(b, math), -abs(b.lineno - lineno), b)
         for b in same_file
     ]
     best = max(scored, key=lambda s: s[:2], default=None)
@@ -573,6 +921,127 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
     # A line emptied by a deletion goes, since a blank line would split
     # the paragraph
     return [ln.rstrip() for ln in src.split("\n") if ln.strip()]
+
+
+_MATH_TOKEN_RE = re.compile(r"\\[a-zA-Z]+|\\.|\S")
+_MATH_FUNCTIONS = (
+    "arccos arcsin arctan arg cos cosh cot coth det exp lg lim ln log max "
+    "min sec sin sinh sup tan tanh"
+).split()
+# Grouping and wrappers that the source and a converter may disagree on
+_MATH_NOISE = frozenset(
+    ["{", "}", "\\mathrm", "\\text", "\\operatorname", "\\left", "\\right"]
+)
+
+
+def normalize_math(tex: str) -> str:
+    """Math as a converter reads it back, without what LibreOffice
+    respells on saving an equation it hasn't changed: operators as text,
+    spacing, empty groups, and aligned rows as arrays."""
+    tex = re.sub(r"\\text\{(\\&|[^{}\\a-zA-Z0-9\s])\}", r"\1", tex)
+    tex = tex.replace("\\&", "&")
+    tex = re.sub(r"\\begin\{array\}\{[lcr]*\}", r"\\begin{aligned}", tex)
+    tex = tex.replace("\\end{array}", "\\end{aligned}")
+    tex = re.sub(r"\\(quad|qquad)\b|\\[,;:! ]", " ", tex)
+    # Word may save a function name as plain letters
+    tex = re.sub(
+        r"\\(" + "|".join(_MATH_FUNCTIONS) + r")(?![a-zA-Z])", r"\1 ", tex
+    )
+    tex = tex.replace("{}", "")
+    return " ".join(tex.split())
+
+
+def math_tokens(tex: str) -> list[str]:
+    """Normalized math as tokens, so spacing doesn't count as a change."""
+    return _MATH_TOKEN_RE.findall(normalize_math(tex))
+
+
+def apply_math_edit(block: Block, old: str, new: str) -> list[str] | None:
+    """The display block's lines rewritten so math that read as ``old``
+    reads as ``new``.
+
+    ``old`` and ``new`` are a converter's LaTeX for the equation as sent
+    and as returned, so they share its spelling, which the source may not,
+    e.g., where it uses its own macros or ``\\mathrm``. The converter's
+    tokens are aligned with the source's, ignoring grouping and wrappers,
+    and each change goes to the source span its tokens align with. If a
+    change's tokens don't all align, None is returned.
+    """
+    ot, nt = math_tokens(old), math_tokens(new)
+    src = "\n".join(ln.text for ln in block.lines)
+    # Source tokens with their spans, function names spelled out as the
+    # converter may read them back
+    st: list[tuple[str, int, int]] = []
+    for m in _MATH_TOKEN_RE.finditer(src):
+        t = m.group(0)
+        if t.lstrip("\\") in _MATH_FUNCTIONS and t.startswith("\\"):
+            st += [(c, m.start(), m.end()) for c in t[1:]]
+        else:
+            st.append((t, m.start(), m.end()))
+
+    def content(t: str) -> bool:
+        return t not in _MATH_NOISE
+
+    oi = [i for i, t in enumerate(ot) if content(t)]
+    si = [k for k, (t, _, _) in enumerate(st) if content(t)]
+    to_src: dict[int, int] = {}
+    matcher = difflib.SequenceMatcher(
+        a=[ot[i] for i in oi], b=[st[k][0] for k in si], autojunk=False
+    )
+    for blk in matcher.get_matching_blocks():
+        for n in range(blk.size):
+            to_src[oi[blk.a + n]] = si[blk.b + n]
+    edits: list[tuple[int, int, str]] = []
+    sm = difflib.SequenceMatcher(a=ot, b=nt, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        text = ""
+        for t in nt[j1:j2]:
+            # Space a command name from what follows, as people write it
+            if re.search(r"\\[a-zA-Z]+$", text) and t[0].isalnum():
+                text += " "
+            text += t
+        changed = [i for i in range(i1, i2) if content(ot[i])]
+        if changed:
+            if not all(i in to_src for i in changed):
+                return None
+            k1, k2 = to_src[changed[0]], to_src[changed[-1]]
+            # Take in the braces that close groups the span opens, and
+            # open groups it closes
+            depth = sum((t == "{") - (t == "}") for t, _, _ in st[k1 : k2 + 1])
+            while depth > 0 and k2 + 1 < len(st) and st[k2 + 1][0] == "}":
+                k2, depth = k2 + 1, depth - 1
+            while depth < 0 and k1 > 0 and st[k1 - 1][0] == "{":
+                k1, depth = k1 - 1, depth + 1
+            start, end = st[k1][1], st[k2][2]
+        else:
+            # An insertion goes after the aligned token before it, past
+            # as many closing braces as the converter has between them
+            prev = next(
+                (i for i in range(i1 - 1, -1, -1) if content(ot[i])), None
+            )
+            if prev is None or prev not in to_src:
+                return None
+            k = to_src[prev]
+            for t in ot[prev + 1 : i1]:
+                if t == "}" and k + 1 < len(st) and st[k + 1][0] == "}":
+                    k += 1
+            start = end = st[k][2]
+        if re.search(r"\\[a-zA-Z]+$", src[:start]) and text[:1].isalpha():
+            text = " " + text
+        edits.append((start, end, text))
+    for start, end, text in sorted(edits, reverse=True):
+        src = src[:start] + text + src[end:]
+
+    def balance(text: str) -> int:
+        return len(re.findall(r"(?<!\\)\{", text)) - len(
+            re.findall(r"(?<!\\)\}", text)
+        )
+
+    if balance(src) != balance("\n".join(ln.text for ln in block.lines)):
+        return None
+    return src.split("\n")
 
 
 _AUTHOR_RE = re.compile(

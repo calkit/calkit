@@ -18,6 +18,7 @@ from calkit.questions import (
     evaluate_condition,
     expand_questions_stages,
     format_status,
+    format_summary,
     latex_values,
     parse_conditional,
     placeholders,
@@ -69,6 +70,14 @@ def test_render():
         render("{missing}", values)
     with pytest.raises(ValueError):
         render("{best:.2f}", values)
+    # A value the spec can't take at all, e.g., a null, is a ValueError
+    # too, not a TypeError nothing expects
+    for bad in (None, {"a": 1}):
+        with pytest.raises(ValueError, match="cannot be formatted"):
+            render("{x:.2f}", {"x": bad})
+    # The check reports it as a problem rather than crashing
+    problems = calkit.questions._placeholder_problems("{x:.2f}", {"x": None})
+    assert problems and "cannot render" in problems[0]
 
 
 def _commit(msg: str) -> str:
@@ -905,6 +914,42 @@ def test_conditional_answers(tmp_dir):
         assert (checked.status == "error") == bool(expected), answer
         for fragment in expected:
             assert fragment in messages, (answer, messages)
+
+
+def test_format_summary():
+    from calkit.questions import QuestionCheck
+
+    def check(status, answered=True):
+        return QuestionCheck(
+            index=1, question="Q?", answered=answered, status=status
+        )
+
+    assert format_summary(QuestionsStatus()) == "No questions defined."
+    # One clean question reads as a verdict, and counts are singular
+    assert (
+        format_summary(QuestionsStatus(questions=[check("ok")]))
+        == "1 question, all answered with current evidence ✅"
+    )
+    # Everything worth knowing lands on the one line
+    summary = format_summary(
+        QuestionsStatus(
+            questions=[
+                check("ok"),
+                check("unanswered", answered=False),
+                check("unanswered", answered=False),
+                check("stale"),
+                check("missing"),
+                check("error"),
+                check("frozen"),
+                check("no-evidence"),
+            ]
+        )
+    )
+    assert summary == (
+        "8 questions, 2 unanswered, 1 with stale evidence, "
+        "1 with missing evidence, 1 with broken references, "
+        "1 resting on a frozen stage, 1 with no evidence"
+    )
 
 
 def test_latex_values(tmp_dir):

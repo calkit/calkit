@@ -12,6 +12,7 @@ from unittest.mock import patch
 import git
 from fastapi.testclient import TestClient
 
+import calkit.latex
 from app.core import ryaml
 
 URL = "/projects/o/p/publications"
@@ -411,3 +412,142 @@ def test_get_project_publication_components(
             headers=normal_user_token_headers,
         )
         assert resp.status_code == 400, resp.text
+
+
+def test_post_project_overleaf_publication_creates_tex_env(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    repo, _ = _make_repo(tmp_path, {"README.md": b"Hi\n"}, {"name": "p"})
+    wdir = str(repo.working_dir)
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        id=uuid.uuid4(),
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
+    zip_data = _zip_bytes(
+        {
+            "main.tex": (
+                b"\\documentclass{article}\n\\title{A paper}\n"
+                b"\\begin{document}\\maketitle\\end{document}\n"
+            ),
+        }
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=repo),
+    ):
+        for path in ["paper", "talk"]:
+            resp = client.post(
+                f"{URL}/overleaf",
+                data={"path": path, "kind": "journal-article"},
+                files={"file": ("paper.zip", zip_data, "application/zip")},
+                headers=normal_user_token_headers,
+            )
+            assert resp.status_code == 200, resp.text
+    with open(os.path.join(wdir, "calkit.yaml")) as f:
+        ck = ryaml.load(f)
+    # Built with Calkit's LaTeX image, and found again by the second import
+    # rather than duplicated
+    assert ck["environments"] == {
+        "tex": dict(calkit.latex.DEFAULT_LATEX_ENVIRONMENT)
+    }
+    stages = ck["pipeline"]["stages"]
+    assert {s["environment"] for s in stages.values()} == {"tex"}
+
+
+def test_get_project_publications_latex_diffs(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    ck_info: dict[str, Any] = {
+        "name": "p",
+        "pipeline": {
+            "stages": {
+                "build-paper": {
+                    "kind": "latex",
+                    "target_path": "paper/main.tex",
+                    "environment": "tex",
+                    "diffs": ["v1", ["v1", "v2"]],
+                },
+                # Found by its PDF, relative to its working directory
+                "build-notes": {
+                    "kind": "latex",
+                    "target_path": "notes.tex",
+                    "output_dir": "build",
+                    "wdir": "notes",
+                    "environment": "tex",
+                    "diffs": ["v1"],
+                },
+                "build-other": {
+                    "kind": "latex",
+                    "target_path": "other/main.tex",
+                    "environment": "tex",
+                },
+            }
+        },
+        "publications": [
+            {
+                "path": "paper/main.pdf",
+                "title": "Paper",
+                "stage": "build-paper",
+            },
+            {"path": "notes/build/notes.pdf", "title": "Notes"},
+            {"path": "other/main.pdf", "title": "Other"},
+        ],
+    }
+    files = {
+        "paper/main.tex": b"\\documentclass{article}\n",
+        "paper/main.pdf": b"%PDF paper",
+        ".calkit/latex-diffs/v1/paper/main.pdf": b"%PDF diff",
+        "notes/notes.tex": b"\\documentclass{article}\n",
+        "other/main.tex": b"\\documentclass{article}\n",
+    }
+    repo, _ = _make_repo(tmp_path, files, ck_info)
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        id=uuid.uuid4(),
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+        file_locks=[],
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=repo),
+    ):
+        resp = client.get(URL, headers=normal_user_token_headers)
+    assert resp.status_code == 200, resp.text
+    pubs = {pub["path"]: pub for pub in resp.json()}
+    paper_diffs = pubs["paper/main.pdf"]["latex_diffs"]
+    assert [(d["from_ref"], d["to_ref"]) for d in paper_diffs] == [
+        ("v1", "HEAD"),
+        ("v1", "v2"),
+    ]
+    assert paper_diffs[0]["path"] == ".calkit/latex-diffs/v1/paper/main.pdf"
+    assert paper_diffs[0]["stage"] == "build-paper-diff-v1"
+    assert paper_diffs[0]["storage"] == "git"
+    assert paper_diffs[0]["content"] is not None
+    # Not built yet, but still listed
+    assert (
+        paper_diffs[1]["path"] == ".calkit/latex-diffs/v1..v2/paper/main.pdf"
+    )
+    assert paper_diffs[1]["stage"] == "build-paper-diff-v1-v2"
+    assert paper_diffs[1]["content"] is None
+    assert paper_diffs[1]["url"] is None
+    notes_diffs = pubs["notes/build/notes.pdf"]["latex_diffs"]
+    assert [d["path"] for d in notes_diffs] == [
+        "notes/.calkit/latex-diffs/v1/notes.pdf"
+    ]
+    assert notes_diffs[0]["stage"] == "build-notes-diff-v1"
+    assert pubs["other/main.pdf"]["latex_diffs"] == []

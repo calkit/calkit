@@ -251,19 +251,33 @@ def ensure_path_is_ignored(
     # No-op if Git already ignores this path.
     if target_repo.ignored(target_path):
         return
+    # A project in a subdirectory of the repo keeps its rules in its own
+    # .gitignore, relative to it, so they go wherever the project goes
+    gitignore_dir, entry = target_repo.working_dir, target_path
+    if target_repo is repo:
+        root = Path(repo.working_dir).resolve()
+        cwd = Path.cwd().resolve()
+        abs_path = (root / target_path).resolve()
+        if (
+            cwd != root
+            and cwd.is_relative_to(root)
+            and abs_path.is_relative_to(cwd)
+        ):
+            gitignore_dir = str(cwd)
+            entry = abs_path.relative_to(cwd).as_posix()
     # Read gitignore first to check if the path is already ignored
     # If not, we don't want to add a line for it since it was added
     # TODO: Add an option to remove cached (`git rm --cached`)
-    gitignore_path = os.path.join(target_repo.working_dir, ".gitignore")
+    gitignore_path = os.path.join(gitignore_dir, ".gitignore")
     if os.path.isfile(gitignore_path):
         with open(gitignore_path) as f:
             gitignore_txt = f.read()
         lines = [line for line in gitignore_txt.splitlines() if line]
-        if target_path in lines:
+        if entry in lines:
             # The direct rule exists; also remove any stale negation that
             # follows it, otherwise the negation wins and the path stays
             # unignored.
-            negation_variants = [f"!{target_path}", f"!/{target_path}"]
+            negation_variants = [f"!{entry}", f"!/{entry}"]
             stale = [n for n in negation_variants if n in lines]
             if not stale:
                 return
@@ -274,12 +288,12 @@ def ensure_path_is_ignored(
             return True
         # Remove any stale negations for this path so the ignore rule takes
         # effect cleanly without accumulating contradictory entries.
-        negation_variants = [f"!{target_path}", f"!/{target_path}"]
+        negation_variants = [f"!{entry}", f"!/{entry}"]
         stale = [n for n in negation_variants if n in lines]
         if stale:
             for n in stale:
                 lines.remove(n)
-            lines.append(target_path)
+            lines.append(entry)
             with open(gitignore_path, "w") as f:
                 f.write("\n".join(lines))
             return True
@@ -289,7 +303,7 @@ def ensure_path_is_ignored(
             and os.path.getsize(gitignore_path) > 0
         ):
             f.write("\n")
-        f.write(f"{target_path}\n")
+        f.write(f"{entry}\n")
         return True
 
 
@@ -569,6 +583,9 @@ def ensure_path_is_not_filtered(
     return True
 
 
+_warned_refs: set[str] = set()
+
+
 def resolve_ref(repo: git.Repo, ref: str) -> str | None:
     """Return the commit a revision points at, fetching if it isn't here.
 
@@ -582,18 +599,61 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
     doesn't exist rather than isn't here yet.
     """
 
+    def rev_parse(name: str) -> str | None:
+        try:
+            return str(repo.git.rev_parse("--verify", "--quiet", name)).strip()
+        except Exception:
+            return None
+
+    def warn_once(message: str) -> None:
+        # A ref is resolved several times as a pipeline compiles
+        from calkit.cli import warn
+
+        if message not in _warned_refs:
+            _warned_refs.add(message)
+            warn(message, err=True)
+
+    def is_ancestor(older: str, newer: str) -> bool:
+        try:
+            repo.git.merge_base("--is-ancestor", older, newer)
+        except Exception:
+            return False
+        return True
+
     def parse() -> str | None:
+        local = rev_parse(f"refs/heads/{ref}")
+        if local is not None:
+            # A local branch means what it means everywhere else here, even
+            # if its remote has moved on, but that's worth knowing, since
+            # a comparison elsewhere would see something different
+            upstream = rev_parse(f"{ref}@{{upstream}}") or rev_parse(
+                f"refs/remotes/origin/{ref}"
+            )
+            if upstream is not None and upstream != local:
+                if is_ancestor(local, upstream):
+                    warn_once(
+                        f"Local branch '{ref}' is behind its remote, which "
+                        f"is at {upstream[:7]}; update it with "
+                        f"'git branch -f {ref} {upstream[:12]}' to compare "
+                        "against that"
+                    )
+                elif not is_ancestor(upstream, local):
+                    warn_once(
+                        f"Local branch '{ref}' has diverged from its "
+                        "remote, so a comparison against it elsewhere "
+                        "would differ; reconcile and push it"
+                    )
+            return local
         # A clone that fetched only one branch has the others solely as
         # remote-tracking refs, if at all
-        for name in (ref, f"origin/{ref}"):
-            try:
-                sha = str(repo.git.rev_parse(name)).strip()
-            except Exception:
-                continue
+        for name in [ref] + [f"{remote.name}/{ref}" for remote in remotes]:
+            sha = rev_parse(name)
             if sha:
                 return sha
         return None
 
+    # Origin first, since that's where a clone came from
+    remotes = sorted(repo.remotes, key=lambda remote: remote.name != "origin")
     sha = parse()
     if sha is not None:
         return sha

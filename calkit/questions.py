@@ -249,6 +249,17 @@ class _Formatter(string.Formatter):
             raise KeyError(field_name)
         return kwargs[field_name], field_name
 
+    def format_field(self, value: Any, format_spec: str) -> Any:
+        # A value the spec can't format, e.g., a null under ':.2f', raises
+        # TypeError, which callers don't expect; as ValueError it is
+        # reported as a template that cannot render rather than a crash
+        try:
+            return super().format_field(value, format_spec)
+        except TypeError as e:
+            raise ValueError(
+                f"{value!r} cannot be formatted as {format_spec!r}"
+            ) from e
+
 
 _FORMATTER = _Formatter()
 _PLACEHOLDER = re.compile(r"(?<!\{)\{([^{}:!]+)(?:[:!][^{}]*)?\}(?!\})")
@@ -1060,8 +1071,7 @@ def _check_publication_label(
         return "skipped", f"label {label!r} not checked here"
     if not sources:
         return "skipped", (
-            f"label {label!r} not checked: no LaTeX stage produces "
-            f"{ev['path']}"
+            f"label {label!r} not checked: no LaTeX stage produces {ev['path']}"
         )
     pattern = re.compile(r"\\label\{" + re.escape(label) + r"\}")
     for src in sources:
@@ -1572,12 +1582,15 @@ def check_questions(
     check_pipeline: bool = True,
     view: QuestionsView | None = None,
     repo: Any = None,
+    stale_stages: set[str] | None = None,
+    frozen_stages: set[str] | None = None,
 ) -> QuestionsStatus:
     """Check every question in a project against its evidence.
 
     ``check_pipeline`` asks DVC which stages are out of date, which is the
     slowest thing here; turning it off skips that and the frozen check with
-    it, leaving the rest of the report intact.
+    it, leaving the rest of the report intact. A caller that already has
+    those stage sets, e.g., ``calkit status``, can pass them instead.
 
     ``view`` says how to reach the project's files, and ``repo`` how to
     reach its history. Without either, both are taken from ``wdir``, which
@@ -1603,9 +1616,10 @@ def check_questions(
         if repo is not None
         else None
     )
-    stale_stages, frozen_stages = pipeline_stage_sets(
-        ck_info, wdir, check_pipeline
-    )
+    if stale_stages is None or frozen_stages is None:
+        stale_stages, frozen_stages = pipeline_stage_sets(
+            ck_info, wdir, check_pipeline
+        )
     return QuestionsStatus(
         questions=[
             check_question(
@@ -1702,3 +1716,26 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
             f"{len(status.deprecated)} (use 'kind: value')"
         )
     return "\n".join(lines)
+
+
+def format_summary(status: QuestionsStatus) -> str:
+    """One line on the state of the project's questions."""
+    n_questions = len(status.questions)
+    if not n_questions:
+        return "No questions defined."
+    parts = [f"{n_questions} question" + ("s" if n_questions != 1 else "")]
+    counts = [
+        (n_questions - len(status.answered), "unanswered"),
+        (len(status.stale), "with stale evidence"),
+        (len(status.missing), "with missing evidence"),
+        (len(status.errors), "with broken references"),
+        (len(status.frozen), "resting on a frozen stage"),
+        (
+            sum(1 for q in status.answered if q.status == "no-evidence"),
+            "with no evidence",
+        ),
+    ]
+    parts += [f"{count} {label}" for count, label in counts if count]
+    if len(parts) == 1:
+        parts.append("all answered with current evidence ✅")
+    return ", ".join(parts)

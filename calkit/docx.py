@@ -23,6 +23,8 @@ W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 DC = "http://purl.org/dc/elements/1.1/"
+# Office Math, Word's equation markup
+M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 # Namespace of the custom XML part in which Calkit records where a
 # document came from
 CALKIT_NS = "https://calkit.org/latex-export"
@@ -46,6 +48,9 @@ for _p, _u in [
     ("w15", W15),
     ("r", REL),
     ("dc", DC),
+    ("m", M),
+    ("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
+    ("pic", "http://schemas.openxmlformats.org/drawingml/2006/picture"),
     (
         "cp",
         "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
@@ -62,6 +67,7 @@ def _tag(ns: str, name: str) -> str:
 
 
 _XMLNS_RE = re.compile(r'xmlns:(\w+)="([^"]*)"')
+_XMLNS_DEFAULT_RE = re.compile(r'\sxmlns="([^"]*)"')
 
 
 def _parse(data: bytes) -> ET.Element:
@@ -76,11 +82,27 @@ def _dump(root: ET.Element, original: bytes | None) -> bytes:
     """Serialize a part, restoring declarations ElementTree drops.
 
     Word lists prefixes in ``mc:Ignorable`` and refuses a part that doesn't
-    declare them, even when nothing uses them.
+    declare them, even when nothing uses them. A part written with a default
+    namespace keeps it, since LibreOffice won't read prefixed relationships.
     """
     out: str = ET.tostring(
         root, xml_declaration=True, encoding="UTF-8"
     ).decode()
+    default = (
+        _XMLNS_DEFAULT_RE.search(original.decode()[:4000])
+        if original is not None
+        else None
+    )
+    if default is not None:
+        # ElementTree's default_namespace option rejects unprefixed
+        # attributes, so drop the prefix it gave the namespace instead
+        prefix = re.search(
+            rf'xmlns:(\w+)="{re.escape(default.group(1))}"', out
+        )
+        if prefix is not None:
+            p = prefix.group(1)
+            out = re.sub(rf"<(/?){p}:", r"<\1", out)
+            out = out.replace(f"xmlns:{p}=", "xmlns=", 1)
     if original is not None:
         start = out.index("<", out.index("?>"))
         end = out.index(">", start)
@@ -127,6 +149,8 @@ class Original:
     source: str
     paragraphs: dict[str, str]
     media: dict[str, str] = field(default_factory=dict)
+    # Each equation's LaTeX as the converter reads it back, by bookmark
+    equations: dict[str, str] = field(default_factory=dict)
 
 
 def normalize(text: str) -> str:
@@ -140,6 +164,13 @@ def _in(el_parents: dict, el: ET.Element, stop: ET.Element, tag: str) -> bool:
             return True
         node = el_parents.get(node)
     return False
+
+
+def _wrap(el: ET.Element) -> ET.Element:
+    """A run holding just ``el``, to measure it as run content."""
+    run = ET.Element(_tag(W, "r"))
+    run.append(copy.deepcopy(el))
+    return run
 
 
 class Document:
@@ -217,6 +248,10 @@ class Document:
             m = ET.SubElement(root, _tag(CALKIT_NS, "media"))
             m.set("name", name)
             m.set("sha1", digest)
+        for name, tex in original.equations.items():
+            eq = ET.SubElement(root, _tag(CALKIT_NS, "eq"))
+            eq.set("id", name)
+            eq.text = tex
         self.parts["customXml/item1.xml"] = ET.tostring(
             root, xml_declaration=True, encoding="UTF-8"
         )
@@ -254,6 +289,10 @@ class Document:
             media={
                 m.get("name", ""): m.get("sha1", "")
                 for m in root.iter(_tag(CALKIT_NS, "media"))
+            },
+            equations={
+                eq.get("id", ""): eq.text or ""
+                for eq in root.iter(_tag(CALKIT_NS, "eq"))
             },
         )
 
@@ -451,6 +490,412 @@ class Document:
             cm.done = top.done
         return out
 
+    def even_margins(self) -> None:
+        """Give sections that share a page the same side margins, moving a
+        narrower section's extra margin into its paragraphs' indents.
+
+        Word's PDF import sets off a title block with wide margins and a
+        continuous break, which Word can show but LibreOffice can't: it
+        takes one page's margins for everything on it.
+        """
+        wp = (
+            "{http://schemas.openxmlformats.org/drawingml/2006/"
+            "wordprocessingDrawing}"
+        )
+        body = self.doc.find(_tag(W, "body"))
+        if body is None:
+            return
+        # Body elements by the section they end up in
+        sections: list[tuple[ET.Element, list[ET.Element]]] = []
+        members: list[ET.Element] = []
+        for child in list(body):
+            if child.tag == _tag(W, "sectPr"):
+                sections.append((child, members))
+                continue
+            members.append(child)
+            sect = child.find(f"{_tag(W, 'pPr')}/{_tag(W, 'sectPr')}")
+            if sect is not None:
+                sections.append((sect, members))
+                members = []
+        # Runs of sections that continue on the same page
+        runs: list[list[tuple[ET.Element, list[ET.Element]]]] = []
+        for sect, els in sections:
+            kind = sect.find(_tag(W, "type"))
+            if (
+                runs
+                and kind is not None
+                and kind.get(_tag(W, "val")) == ("continuous")
+            ):
+                runs[-1].append((sect, els))
+            else:
+                runs.append([(sect, els)])
+
+        def margin(sect: ET.Element, side: str) -> int:
+            mar = sect.find(_tag(W, "pgMar"))
+            return (
+                int(mar.get(_tag(W, side), "1440"))
+                if mar is not None
+                else 1440
+            )
+
+        for run in runs:
+            if len(run) < 2:
+                continue
+            target = {
+                side: min(margin(s, side) for s, _ in run)
+                for side in ("left", "right")
+            }
+            for sect, els in run:
+                delta = {
+                    side: margin(sect, side) - target[side] for side in target
+                }
+                if not any(delta.values()):
+                    continue
+                mar = sect.find(_tag(W, "pgMar"))
+                if mar is not None:
+                    for side, value in target.items():
+                        mar.set(_tag(W, side), str(value))
+                for el in els:
+                    # A table moves as a whole, so what's inside it doesn't
+                    # move again
+                    for p in [el] if el.tag == _tag(W, "p") else []:
+                        ppr = p.find(_tag(W, "pPr"))
+                        if ppr is None:
+                            ppr = ET.Element(_tag(W, "pPr"))
+                            p.insert(0, ppr)
+                        ind = ppr.find(_tag(W, "ind"))
+                        if ind is None:
+                            ind = ET.SubElement(ppr, _tag(W, "ind"))
+                        for side, alt in (("left", "start"), ("right", "end")):
+                            key = (
+                                _tag(W, alt)
+                                if ind.get(_tag(W, alt))
+                                else (_tag(W, side))
+                            )
+                            ind.set(
+                                key, str(int(ind.get(key, "0")) + delta[side])
+                            )
+                    for tpr in el.findall(_tag(W, "tblPr")):
+                        tind = tpr.find(_tag(W, "tblInd"))
+                        if tind is None:
+                            tind = ET.SubElement(
+                                tpr,
+                                _tag(W, "tblInd"),
+                                {_tag(W, "type"): "dxa"},
+                            )
+                        tind.set(
+                            _tag(W, "w"),
+                            str(
+                                int(tind.get(_tag(W, "w"), "0"))
+                                + delta["left"]
+                            ),
+                        )
+                    # Floating pictures placed from the margin stay put
+                    for pos in el.iter(f"{wp}positionH"):
+                        off = pos.find(f"{wp}posOffset")
+                        if off is not None and pos.get("relativeFrom") in (
+                            "margin",
+                            "column",
+                        ):
+                            off.text = str(
+                                int(off.text or "0") + 635 * delta["left"]
+                            )
+
+    def column_width(self, el: ET.Element) -> int:
+        """The width of a text column where a body element sits, in
+        twentieths of a point, from the section it's in: a section ends at
+        a paragraph carrying its properties, the last at the body's."""
+        body = self._parents[el]
+        sect = None
+        for child in list(body)[list(body).index(el) :]:
+            sect = child.find(f"{_tag(W, 'pPr')}/{_tag(W, 'sectPr')}")
+            if child.tag == _tag(W, "sectPr"):
+                sect = child
+            if sect is not None:
+                break
+        if sect is None:
+            return 9360
+        size, mar = sect.find(_tag(W, "pgSz")), sect.find(_tag(W, "pgMar"))
+        if size is None or mar is None:
+            return 9360
+        width = int(size.get(_tag(W, "w"), "12240")) - sum(
+            int(mar.get(_tag(W, side), "1440")) for side in ("left", "right")
+        )
+        cols = sect.find(_tag(W, "cols"))
+        num = int(cols.get(_tag(W, "num"), "1")) if cols is not None else 1
+        space = (
+            int(cols.get(_tag(W, "space"), "720")) if cols is not None else 0
+        )
+        return (width - space * (num - 1)) // num
+
+    def insert_equations(
+        self,
+        before: ET.Element,
+        rows: list[tuple[ET.Element, str | None, str]],
+        first_bid: int,
+    ) -> None:
+        """Insert display equations before a body element as a borderless
+        table of (math, number, bookmark name) rows, which Word and
+        LibreOffice both lay out like LaTeX: centered, numbered at right.
+        """
+        width = self.column_width(before)
+        side = width // 8
+        cols = [side, width - 2 * side, side]
+        tbl = ET.Element(_tag(W, "tbl"))
+        pr = ET.SubElement(tbl, _tag(W, "tblPr"))
+        ET.SubElement(pr, _tag(W, "tblW"), {_tag(W, "w"): str(width)}).set(
+            _tag(W, "type"), "dxa"
+        )
+        borders = ET.SubElement(pr, _tag(W, "tblBorders"))
+        for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            ET.SubElement(borders, _tag(W, edge), {_tag(W, "val"): "nil"})
+        ET.SubElement(pr, _tag(W, "tblLayout"), {_tag(W, "type"): "fixed"})
+        grid = ET.SubElement(tbl, _tag(W, "tblGrid"))
+        for w in cols:
+            ET.SubElement(grid, _tag(W, "gridCol"), {_tag(W, "w"): str(w)})
+        for i, (math, number, name) in enumerate(rows):
+            tr = ET.SubElement(tbl, _tag(W, "tr"))
+            for j, w in enumerate(cols):
+                tc = ET.SubElement(tr, _tag(W, "tc"))
+                tcpr = ET.SubElement(tc, _tag(W, "tcPr"))
+                ET.SubElement(
+                    tcpr, _tag(W, "tcW"), {_tag(W, "w"): str(w)}
+                ).set(_tag(W, "type"), "dxa")
+                ET.SubElement(
+                    tcpr, _tag(W, "vAlign"), {_tag(W, "val"): "center"}
+                )
+                p = ET.SubElement(tc, _tag(W, "p"))
+                ppr = ET.SubElement(p, _tag(W, "pPr"))
+                ET.SubElement(
+                    ppr,
+                    _tag(W, "spacing"),
+                    {_tag(W, "before"): "60", _tag(W, "after"): "60"},
+                )
+                if j == 1:
+                    ET.SubElement(
+                        ppr, _tag(W, "jc"), {_tag(W, "val"): "center"}
+                    )
+                    # The bookmark spans the equation, since Word drops an
+                    # empty one beside it
+                    bid = str(first_bid + i)
+                    ET.SubElement(
+                        p,
+                        _tag(W, "bookmarkStart"),
+                        {_tag(W, "id"): bid, _tag(W, "name"): name},
+                    )
+                    ET.SubElement(p, _tag(M, "oMathPara")).append(math)
+                    ET.SubElement(
+                        p, _tag(W, "bookmarkEnd"), {_tag(W, "id"): bid}
+                    )
+                elif j == 2 and number:
+                    ET.SubElement(
+                        ppr, _tag(W, "jc"), {_tag(W, "val"): "right"}
+                    )
+                    r = ET.SubElement(p, _tag(W, "r"))
+                    ET.SubElement(r, _tag(W, "t")).text = f"({number})"
+        body = self._parents[before]
+        body.insert(list(body).index(before), tbl)
+        self._parents = {c: p for p in self.doc.iter() for c in p}
+
+    def equations(
+        self, names: list[str]
+    ) -> dict[str, tuple[ET.Element | None, list[str] | None]]:
+        """The equation after each named bookmark, and who has tracked
+        changes pending in its paragraph, or None if none are. Word moves
+        a bookmark at the start of a table cell out of the paragraph, so
+        this goes by document order rather than paragraph."""
+        out: dict[str, tuple[ET.Element | None, list[str] | None]] = {
+            n: (None, None) for n in names
+        }
+        waiting: list[str] = []
+        for el in self.doc.iter():
+            if el.tag == _tag(W, "bookmarkStart"):
+                name = el.get(_tag(W, "name"), "")
+                if name in out:
+                    waiting.append(name)
+            elif el.tag == _tag(M, "oMath") and waiting:
+                para = el
+                while para.tag != _tag(W, "p") and para in self._parents:
+                    para = self._parents[para]
+                marks = [
+                    e
+                    for e in para.iter()
+                    if e.tag in (_tag(W, "ins"), _tag(W, "del"))
+                ]
+                authors = (
+                    list(
+                        dict.fromkeys(
+                            e.get(_tag(W, "author"), "") for e in marks
+                        )
+                    )
+                    if marks
+                    else None
+                )
+                for name in waiting:
+                    out[name] = (el, authors)
+                waiting = []
+        return out
+
+    # Parts of a run's content that read as one character each: pictures
+    # and other objects, which is how Word may render inline math
+    _OBJECT_TAGS = frozenset(
+        [
+            _tag(W, "drawing"),
+            _tag(W, "pict"),
+            _tag(W, "object"),
+            "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
+            "AlternateContent",
+        ]
+    )
+
+    def _runs(self, para: ET.Element) -> list[ET.Element]:
+        """The paragraph's runs in order, including those in hyperlinks."""
+        out = []
+        for child in para:
+            if child.tag == _tag(W, "r"):
+                out.append(child)
+            elif child.tag == _tag(W, "hyperlink"):
+                out.extend(r for r in child if r.tag == _tag(W, "r"))
+        return out
+
+    def _run_text(self, run: ET.Element) -> str:
+        parts = []
+        for c in run:
+            if c.tag == _tag(W, "t"):
+                parts.append(c.text or "")
+            elif c.tag in (_tag(W, "tab"), _tag(W, "br"), _tag(W, "cr")):
+                parts.append(" ")
+            elif c.tag in self._OBJECT_TAGS:
+                parts.append("\ufffc")
+        return "".join(parts)
+
+    def linear_text(self, para: ET.Element) -> str:
+        """The paragraph's text with each picture or object as U+FFFC, so
+        offsets into it can say where a range of runs starts and ends."""
+        return "".join(self._run_text(r) for r in self._runs(para))
+
+    def _split_at(self, para: ET.Element, offset: int) -> None:
+        """Split the run spanning a linear text offset, so a run boundary
+        falls there."""
+        pos = 0
+        for run in self._runs(para):
+            length = len(self._run_text(run))
+            if pos < offset < pos + length:
+                parent = self._parents[run]
+                left, right = copy.deepcopy(run), copy.deepcopy(run)
+                for part, keep_left in ((left, True), (right, False)):
+                    at = pos
+                    for c in list(part):
+                        if c.tag == _tag(W, "rPr"):
+                            continue
+                        text = (
+                            (c.text or "")
+                            if c.tag == _tag(W, "t")
+                            else self._run_text(_wrap(c))
+                        )
+                        n = len(text)
+                        cut = offset - at
+                        if c.tag == _tag(W, "t") and 0 < cut < n:
+                            c.text = text[:cut] if keep_left else text[cut:]
+                            c.set(
+                                "{http://www.w3.org/XML/1998/namespace}space",
+                                "preserve",
+                            )
+                        elif (at + n <= offset) != keep_left:
+                            part.remove(c)
+                        at += n
+                idx = list(parent).index(run)
+                parent.remove(run)
+                parent.insert(idx, right)
+                parent.insert(idx, left)
+                self._parents = {c: p for p in self.doc.iter() for c in p}
+                return
+            pos += length
+
+    def replace_range(
+        self,
+        para: ET.Element,
+        start: int,
+        end: int,
+        element: ET.Element | None,
+    ) -> bool:
+        """Replace what spans a range of the paragraph's linear text with an
+        element, e.g., an equation, or with nothing; False if the range
+        crosses a hyperlink or holds nothing."""
+        self._split_at(para, end)
+        self._split_at(para, start)
+        inside, pos = [], 0
+        for run in self._runs(para):
+            length = len(self._run_text(run))
+            if length and start <= pos and pos + length <= end:
+                inside.append(run)
+            pos += length
+        if not inside or any(self._parents[r] is not para for r in inside):
+            return False
+        if element is not None:
+            para.insert(list(para).index(inside[0]), element)
+        for run in inside:
+            para.remove(run)
+        self._parents = {c: p for p in self.doc.iter() for c in p}
+        return True
+
+    def prune_media(self) -> None:
+        """Drop images the document body no longer shows, as Word would on
+        saving, so they don't read as figures changed in review."""
+        name = "word/_rels/document.xml.rels"
+        rels = _parse(self.parts[name])
+        used = {
+            v
+            for el in self.doc.iter()
+            for k, v in el.attrib.items()
+            if k.startswith(f"{{{REL}}}")
+        }
+        others = b"".join(
+            data
+            for n, data in self.parts.items()
+            if n.endswith(".rels") and n != name
+        )
+        for rel in list(rels):
+            target = rel.get("Target", "")
+            if (
+                rel.get("Type") != f"{REL}/image"
+                or rel.get("Id") in used
+                or rel.get("TargetMode") == "External"
+            ):
+                continue
+            rels.remove(rel)
+            part = "word/" + target.removeprefix("/word/").removeprefix("/")
+            if target.encode() not in others:
+                self.parts.pop(part, None)
+        self.parts[name] = _dump(rels, self.parts[name])
+
+    def move_out(self, el: ET.Element, unit: ET.Element, after: bool) -> None:
+        """Move an element out of a body element, e.g., a table, to just
+        before or after it."""
+        self._parents[el].remove(el)
+        body = self._parents[unit]
+        body.insert(list(body).index(unit) + after, el)
+        self._parents = {c: p for p in self.doc.iter() for c in p}
+
+    def remove(self, el: ET.Element) -> None:
+        """Remove a body element, keeping a section break it carries."""
+        parent = self._parents[el]
+        sect = el.find(f"{_tag(W, 'pPr')}/{_tag(W, 'sectPr')}")
+        if sect is not None:
+            for child in list(el):
+                if child.tag != _tag(W, "pPr"):
+                    el.remove(child)
+            return
+        parent.remove(el)
+
+    def trim_start(self, para: ET.Element, count: int) -> None:
+        """Drop the first ``count`` characters of a paragraph's text."""
+        for t in para.iter(_tag(W, "t")):
+            if count <= 0:
+                break
+            text = t.text or ""
+            t.text, count = text[count:], count - len(text)
+
     def _split_run(self, para: ET.Element, offset: int) -> int:
         """Split the run containing text offset ``offset`` so a marker can
         go there; returns the child index the marker goes at."""
@@ -628,6 +1073,88 @@ class Document:
         self._save_content_types(root)
 
 
+def word_installed() -> bool:
+    """Whether Microsoft Word is installed, which only it can tell on
+    Windows, through the path it registers."""
+    if sys.platform == "darwin":
+        return any(
+            os.path.isdir(os.path.expanduser(p))
+            for p in (
+                "/Applications/Microsoft Word.app",
+                "~/Applications/Microsoft Word.app",
+            )
+        )
+    if sys.platform == "win32":
+        import winreg
+
+        # Machine-wide, else for this user, as Office installs either way
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                winreg.CloseKey(
+                    winreg.OpenKey(
+                        hive,
+                        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion"
+                        "\\App Paths\\Winword.exe",
+                    )
+                )
+            except OSError:
+                continue
+            return True
+        return False
+    return False
+
+
+def find_soffice() -> str | None:
+    """LibreOffice's command, from ``PATH`` or where it installs itself."""
+    import shutil
+
+    found = shutil.which("soffice") or shutil.which("libreoffice")
+    if found is not None:
+        return found
+    candidates = [
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        os.path.expandvars(
+            "%ProgramFiles%\\LibreOffice\\program\\soffice.exe"
+        ),
+    ]
+    return next((c for c in candidates if os.path.isfile(c)), None)
+
+
+def odt_to_docx(odt_path: str, docx_path: str) -> None:
+    """Convert an OpenDocument text to .docx with LibreOffice."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    soffice = find_soffice()
+    if soffice is None:
+        raise RuntimeError("Converting to Word requires LibreOffice")
+    with tempfile.TemporaryDirectory() as tmp:
+        # A profile of its own, since a LibreOffice already open would take
+        # the job and exit without doing it
+        res = subprocess.run(
+            [
+                soffice,
+                f"-env:UserInstallation={Path(tmp, 'profile').as_uri()}",
+                "--headless",
+                "--convert-to",
+                "docx:MS Word 2007 XML",
+                "--outdir",
+                tmp,
+                os.path.abspath(odt_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        out = os.path.join(tmp, Path(odt_path).stem + ".docx")
+        if not os.path.isfile(out):
+            raise RuntimeError(
+                "LibreOffice could not convert the document: "
+                + (res.stderr or res.stdout).strip()
+            )
+        shutil.move(out, docx_path)
+
+
 def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     """Convert a PDF to .docx with Word's own importer."""
     pdf_path, docx_path = os.path.abspath(pdf_path), os.path.abspath(docx_path)
@@ -636,6 +1163,9 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     tmp_path = docx_path.removesuffix(".docx") + ".tmp.docx"
     if sys.platform == "darwin":
         script = (
+            # A long paper can take Word longer than AppleScript's default
+            # two minutes to import
+            "with timeout of 600 seconds\n"
             'tell application "Microsoft Word"\n'
             "set display alerts to alerts none\n"
             f'open (POSIX file "{pdf_path}")\n'
@@ -647,8 +1177,10 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
             "end repeat\n"
             f'set doc to document "{os.path.basename(pdf_path)}"\n'
             f'save as doc file name "{tmp_path}" file format format document\n'
-            f'close document "{os.path.basename(tmp_path)}" saving no\n'
-            "end tell"
+            # By reference, since Word may not find the saved copy by name
+            "close active document saving no\n"
+            "end tell\n"
+            "end timeout"
         )
         res = subprocess.run(
             ["osascript", "-e", script], capture_output=True, text=True
@@ -690,3 +1222,121 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
             "Converting PDF to Word requires Word on macOS or Windows"
         )
     os.replace(tmp_path, docx_path)
+
+
+def find_pandoc() -> str | None:
+    """Pandoc from the pypandoc-binary package, if it's installed, else one
+    on ``PATH``."""
+    import importlib.util
+    import shutil
+
+    # Found by path, since importing pypandoc is slow
+    spec = importlib.util.find_spec("pypandoc")
+    if spec is not None and spec.origin is not None:
+        name = "pandoc.exe" if sys.platform == "win32" else "pandoc"
+        bundled = os.path.join(os.path.dirname(spec.origin), "files", name)
+        if os.path.isfile(bundled):
+            return bundled
+    return shutil.which("pandoc")
+
+
+def _pandoc(args: list[str], data: bytes) -> bytes:
+    pandoc = find_pandoc()
+    if pandoc is None:
+        raise RuntimeError("Pandoc is required to convert equations")
+    res = subprocess.run([pandoc, *args], input=data, capture_output=True)
+    if res.returncode != 0:
+        raise RuntimeError(
+            "Pandoc could not convert equations: " + res.stderr.decode()
+        )
+    return res.stdout
+
+
+def latex_to_omml(
+    equations: list[str], preamble: str = ""
+) -> list[ET.Element | None]:
+    """Convert math to Word equations, one ``m:oMath`` each.
+
+    Every equation goes through one Pandoc run, each after a marker
+    paragraph so its output can be picked out; ``preamble`` carries the
+    document's macro definitions.
+    """
+    if not equations:
+        return []
+    src = (
+        preamble
+        + "\n\n"
+        + "".join(f"CKEQ{i}\n\n{eq}\n\n" for i, eq in enumerate(equations))
+    )
+    out = _pandoc(["-f", "latex", "-t", "docx", "-o", "-"], src.encode())
+    import io
+
+    with zipfile.ZipFile(io.BytesIO(out)) as z:
+        body = ET.fromstring(z.read("word/document.xml"))
+    maths: list[ET.Element | None] = [None] * len(equations)
+    current = None
+    for p in body.iter(_tag(W, "p")):
+        text = "".join(t.text or "" for t in p.iter(_tag(W, "t")))
+        m = re.fullmatch(r"CKEQ(\d+)", text.strip())
+        if m is not None:
+            current = int(m.group(1))
+            continue
+        math = p.find(f".//{_tag(M, 'oMath')}")
+        if current is not None and math is not None and maths[current] is None:
+            maths[current] = math
+    return maths
+
+
+def omml_to_latex(maths: list[ET.Element]) -> list[str | None]:
+    """Read Word equations back as LaTeX, as Pandoc spells it."""
+    import io
+    import json
+
+    if not maths:
+        return []
+    body = "".join(
+        f"<w:p><w:r><w:t>CKEQ{i}</w:t></w:r></w:p><w:p><m:oMathPara>"
+        + ET.tostring(m, encoding="unicode")
+        + "</m:oMathPara></w:p>"
+        for i, m in enumerate(maths)
+    )
+    # ElementTree declares the math namespace on each equation; the
+    # markers need the main one declared
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{W}" xmlns:m="{M}"><w:body>{body}'
+        "</w:body></w:document>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://'
+            'schemas.openxmlformats.org/package/2006/content-types"><Default'
+            ' Extension="rels" ContentType="application/vnd.openxmlformats-'
+            'package.relationships+xml"/><Default Extension="xml" Content'
+            'Type="application/xml"/><Override PartName="/word/document.xml"'
+            ' ContentType="application/vnd.openxmlformats-officedocument.'
+            'wordprocessingml.document.main+xml"/></Types>',
+        )
+        z.writestr(
+            "_rels/.rels",
+            f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns='
+            f'"{PKG_REL}"><Relationship Id="rId1" Type="{REL}/officeDocument"'
+            ' Target="word/document.xml"/></Relationships>',
+        )
+        z.writestr("word/document.xml", document)
+    ast = json.loads(_pandoc(["-f", "docx", "-t", "json"], buf.getvalue()))
+    out: list[str | None] = [None] * len(maths)
+    current = None
+    for block in ast["blocks"]:
+        inlines = block.get("c") if block.get("t") in ("Para", "Plain") else []
+        for el in inlines or []:
+            if el.get("t") == "Str":
+                m = re.fullmatch(r"CKEQ(\d+)", el["c"])
+                if m is not None:
+                    current = int(m.group(1))
+            elif el.get("t") == "Math" and current is not None:
+                if out[current] is None:
+                    out[current] = el["c"][1].strip()
+    return out

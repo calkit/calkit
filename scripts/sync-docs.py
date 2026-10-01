@@ -59,10 +59,15 @@ def convert_relative_links(content: str) -> str:
             return url
         if url.startswith("/"):
             return f"https://docs.calkit.org{url}"
-        if is_markdown_doc_link and url.endswith("/index.md"):
-            return f"https://docs.calkit.org/{url[:-9]}"
-        if is_markdown_doc_link and url.endswith(".md"):
-            return f"https://docs.calkit.org/{url[:-3]}"
+        # A link to a heading carries its anchor, which the extension has
+        # to be taken off in front of rather than at the end of. Left
+        # whole, the published URL keeps a '.md' the site doesn't serve.
+        path, sep, anchor = url.partition("#")
+        anchor = sep + anchor
+        if is_markdown_doc_link and path.endswith("/index.md"):
+            return f"https://docs.calkit.org/{path[:-9]}{anchor}"
+        if is_markdown_doc_link and path.endswith(".md"):
+            return f"https://docs.calkit.org/{path[:-3]}{anchor}"
         return f"https://docs.calkit.org/{url}"
 
     def to_readme_image_url(url: str) -> str:

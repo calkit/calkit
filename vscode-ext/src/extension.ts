@@ -50,6 +50,13 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
+import {
+  latexStagePdf,
+  latexStageSource,
+  latexWorkingDiffPath,
+  pipelineLatexDiffs,
+  type PipelineLatexDiff,
+} from "./latex/core";
 import { openFiguresCarousel } from "./figures/view";
 import { ComponentsProvider } from "./components/view";
 import { questionLines, stagePdfOutput } from "./components/core";
@@ -96,6 +103,9 @@ const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
 const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_RUN_COMPONENT_STAGE = "calkit-vscode.runComponentStage";
+const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
+const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
+const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_COMPONENT_OBJECT = "calkit-vscode.viewComponentObject";
@@ -436,6 +446,101 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  // A LaTeX document and the PDF its stage builds take each other's place,
+  // like a Plotly figure and its preview. The other file opens in the same
+  // group first, since closing the last tab first can close the group too.
+  const swapActiveTab = async (
+    from: vscode.Uri,
+    open: () => Promise<unknown>,
+  ): Promise<void> => {
+    await open();
+    const group = vscode.window.tabGroups.activeTabGroup;
+    const previous = group.tabs.find(
+      (tab) =>
+        !tab.isActive && tabResourceUri(tab)?.toString() === from.toString(),
+    );
+    if (previous) {
+      await vscode.window.tabGroups.close(previous);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_SHOW_LATEX_PDF,
+      async (uri?: vscode.Uri) => {
+        const fileUri = activeTabUri(uri);
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const texFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const pdfFile = latexStagePdf(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          texFile,
+        );
+        if (!pdfFile) {
+          void vscode.window.showInformationMessage(
+            "No LaTeX stage in the pipeline builds this document.",
+          );
+          return;
+        }
+        const pdfUri = vscode.Uri.file(path.join(workspaceRoot, pdfFile));
+        try {
+          await vscode.workspace.fs.stat(pdfUri);
+        } catch {
+          void vscode.window.showInformationMessage(
+            `${pdfFile} hasn't been built yet. Run the stage to build it first.`,
+          );
+          return;
+        }
+        if (!isLatexWorkshopInstalled()) {
+          await vscode.env.openExternal(pdfUri);
+          return;
+        }
+        await swapActiveTab(fileUri, () =>
+          openPdfInLatexWorkshop(context, pdfUri),
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_SHOW_LATEX_SOURCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = activeTabUri(uri);
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const pdfFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const texFile = latexStageSource(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          pdfFile,
+        );
+        if (!texFile) {
+          void vscode.window.showInformationMessage(
+            "No LaTeX stage in the pipeline builds this PDF.",
+          );
+          return;
+        }
+        const texUri = vscode.Uri.file(path.join(workspaceRoot, texFile));
+        await swapActiveTab(fileUri, () =>
+          Promise.resolve(
+            vscode.window.showTextDocument(texUri, {
+              viewColumn: vscode.ViewColumn.Active,
+              preview: false,
+            }),
+          ),
+        );
+      },
+    ),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_RUN_STAGE,
@@ -599,6 +704,261 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.Uri.file(path.join(workspaceRoot, target)),
           { viewColumn: vscode.ViewColumn.Active },
         );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DIFF_LATEX,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        // Run calkit with a cancellable progress notification, reporting a
+        // failure with a way to see the output
+        const runCalkit = (args: string[], title: string) => {
+          log(`Running: calkit ${args.join(" ")}`);
+          return vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title,
+              cancellable: true,
+            },
+            async (_progress, token) => {
+              const abort = new AbortController();
+              token.onCancellationRequested(() => abort.abort());
+              try {
+                const { stdout, stderr } = await execFileAsync("calkit", args, {
+                  cwd: workspaceRoot,
+                  maxBuffer: 16 * 1024 * 1024,
+                  signal: abort.signal,
+                });
+                log([stdout, stderr].filter(Boolean).join("\n").trim());
+                return true;
+              } catch (error: unknown) {
+                if (abort.signal.aborted) {
+                  return false;
+                }
+                const err = error as {
+                  stdout?: string;
+                  stderr?: string;
+                  message?: string;
+                };
+                log([err.stdout, err.stderr].filter(Boolean).join("\n").trim());
+                const errMsg = (err.stderr || err.message || String(error))
+                  .trim()
+                  .split("\n")
+                  .pop();
+                void vscode.window
+                  .showErrorMessage(
+                    `LaTeX diff failed: ${errMsg}`,
+                    "View Output",
+                  )
+                  .then((choice) => {
+                    if (choice === "View Output") {
+                      outputChannel.show(true);
+                    }
+                  });
+                return false;
+              }
+            },
+          );
+        };
+        const openPdf = async (relPath: string) => {
+          const pdfUri = vscode.Uri.file(path.join(workspaceRoot, relPath));
+          if (isLatexWorkshopInstalled()) {
+            await openPdfInLatexWorkshop(context, pdfUri);
+          } else {
+            await vscode.env.openExternal(pdfUri);
+          }
+        };
+        let texFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+        // A PDF a latex stage builds is diffed as the document it's built
+        // from
+        if (texFile.toLowerCase().endsWith(".pdf")) {
+          const source = latexStageSource(stages, texFile);
+          if (!source) {
+            void vscode.window.showInformationMessage(
+              "No LaTeX stage in the pipeline builds this PDF.",
+            );
+            return;
+          }
+          texFile = source;
+        }
+        // The newer side is the working tree, so unsaved edits belong in it
+        await vscode.workspace.textDocuments
+          .find((d) => d.uri.fsPath === fileUri.fsPath && d.isDirty)
+          ?.save();
+        // Offer the default branch, then branches and tags, then commits
+        // that touched the document, and accept any typed revision
+        const defaultItem: vscode.QuickPickItem = {
+          label: "$(git-merge) Default branch",
+          description: "merge base with this branch",
+        };
+        // The pipeline's own diffs of this document come first, marked with
+        // whether they're current
+        const pipelineItems = new Map<
+          vscode.QuickPickItem,
+          PipelineLatexDiff
+        >();
+        for (const diff of pipelineLatexDiffs(stages)) {
+          if (diff.document !== texFile) {
+            continue;
+          }
+          let built = true;
+          try {
+            await vscode.workspace.fs.stat(
+              vscode.Uri.file(path.join(workspaceRoot, diff.path)),
+            );
+          } catch {
+            built = false;
+          }
+          const status = !built
+            ? "not built"
+            : staleStageNames.has(diff.stage)
+            ? "stale"
+            : "up to date";
+          pipelineItems.set(
+            {
+              label: `$(diff) ${diff.fromRef} against ${
+                diff.toRef ?? "the working tree"
+              }`,
+              description: `pipeline, ${status}`,
+              detail: status === "up to date" ? undefined : "Builds it first",
+            },
+            diff,
+          );
+        }
+        const items: vscode.QuickPickItem[] = [];
+        if (pipelineItems.size) {
+          items.push(
+            {
+              label: "Kept by the pipeline",
+              kind: vscode.QuickPickItemKind.Separator,
+            },
+            ...pipelineItems.keys(),
+            {
+              label: "Compare against",
+              kind: vscode.QuickPickItemKind.Separator,
+            },
+          );
+        }
+        items.push(defaultItem);
+        try {
+          const { stdout } = await execFileAsync(
+            "git",
+            [
+              "for-each-ref",
+              "--sort=-committerdate",
+              "--count=30",
+              "--format=%(refname:short)|%(objecttype)|%(subject)",
+              "refs/heads",
+              "refs/tags",
+              "refs/remotes",
+            ],
+            { cwd: workspaceRoot },
+          );
+          for (const line of stdout.split("\n").filter(Boolean)) {
+            const [ref, type, ...subject] = line.split("|");
+            if (ref.endsWith("/HEAD")) {
+              continue;
+            }
+            items.push({
+              label: `$(${type === "tag" ? "tag" : "git-branch"}) ${ref}`,
+              description: subject.join("|"),
+            });
+          }
+        } catch {
+          // Not a Git repo; the CLI will say so
+        }
+        for (const commit of await getGitHistory(workspaceRoot, texFile)) {
+          items.push({
+            label: `$(git-commit) ${commit.shortHash}`,
+            description: commit.subject,
+            detail: `${commit.author}, ${commit.date}`,
+          });
+        }
+        const picker = vscode.window.createQuickPick();
+        picker.title = `Diff ${path.basename(texFile)} against...`;
+        picker.placeholder = "Pick or type a Git revision";
+        picker.items = items;
+        picker.onDidChangeValue((value) => {
+          const typed = value.trim();
+          picker.items =
+            typed && !items.some((i) => i.label.endsWith(` ${typed}`))
+              ? [{ label: typed, description: "revision" }, ...items]
+              : items;
+        });
+        const picked = await new Promise<vscode.QuickPickItem | undefined>(
+          (resolve) => {
+            picker.onDidAccept(() => resolve(picker.selectedItems[0]));
+            picker.onDidHide(() => resolve(undefined));
+            picker.show();
+          },
+        );
+        picker.dispose();
+        if (!picked) {
+          return;
+        }
+        const pipelineDiff = pipelineItems.get(picked);
+        if (pipelineDiff) {
+          // What's there opens straight away; a stale one is rebuilt after,
+          // and the viewer reloads it when the new one lands
+          const status = picked.description ?? "";
+          if (!status.endsWith("not built")) {
+            await openPdf(pipelineDiff.path);
+          }
+          if (!status.endsWith("up to date")) {
+            const ok = await runCalkit(
+              ["run", pipelineDiff.stage],
+              `Building ${pipelineDiff.stage}...`,
+            );
+            ensureRunStatusPolling(context);
+            if (ok && status.endsWith("not built")) {
+              await openPdf(pipelineDiff.path);
+            }
+          }
+          return;
+        }
+        const fromRef =
+          picked === defaultItem
+            ? undefined
+            : picked.label.replace(/^\$\([^)]*\)\s*/, "");
+        const outPath = latexWorkingDiffPath(texFile, fromRef);
+        const args = [
+          "latex",
+          "diff",
+          texFile,
+          ...(fromRef ? ["--from", fromRef] : []),
+          "-o",
+          outPath,
+        ];
+        // A previous comparison against the same revision opens straight
+        // away while it's brought up to date
+        let existed = true;
+        try {
+          await vscode.workspace.fs.stat(
+            vscode.Uri.file(path.join(workspaceRoot, outPath)),
+          );
+          await openPdf(outPath);
+        } catch {
+          existed = false;
+        }
+        const ok = await runCalkit(
+          args,
+          `${existed ? "Updating the diff" : "Diffing"} ${path.basename(
+            texFile,
+          )} against ${fromRef ?? "the default branch"}...`,
+        );
+        if (ok && !existed) {
+          await openPdf(outPath);
+        }
       },
     ),
   );

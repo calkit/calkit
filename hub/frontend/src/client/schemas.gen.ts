@@ -3707,6 +3707,11 @@ export const IssueSchema = {
       ],
       title: "Artifact Path",
     },
+    is_pull_request: {
+      type: "boolean",
+      title: "Is Pull Request",
+      default: false,
+    },
   },
   type: "object",
   required: [
@@ -6344,6 +6349,11 @@ export const ProjectPostSchema = {
       title: "Keep Template History",
       default: false,
     },
+    empty_repo: {
+      type: "boolean",
+      title: "Empty Repo",
+      default: false,
+    },
     overleaf_project_url: {
       anyOf: [
         {
@@ -6778,6 +6788,14 @@ export const PublicationSchema = {
       ],
       title: "Storage",
     },
+    latex_diffs: {
+      items: {
+        $ref: "#/components/schemas/PublicationLatexDiff",
+      },
+      type: "array",
+      title: "Latex Diffs",
+      default: [],
+    },
   },
   type: "object",
   required: ["path", "title"],
@@ -7005,6 +7023,73 @@ export const PublicationComponentsSchema = {
   type: "object",
   required: ["folder"],
   title: "PublicationComponents",
+} as const
+
+export const PublicationLatexDiffSchema = {
+  properties: {
+    from_ref: {
+      type: "string",
+      title: "From Ref",
+    },
+    to_ref: {
+      type: "string",
+      title: "To Ref",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    storage: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["git", "dvc", "dvc-zip"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Storage",
+    },
+  },
+  type: "object",
+  required: ["from_ref", "to_ref", "path"],
+  title: "PublicationLatexDiff",
+  description:
+    "A PDF marking up what changed in a publication between revisions.",
 } as const
 
 export const PublicationOverleafSchema = {

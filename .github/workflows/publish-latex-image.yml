@@ -25,6 +25,8 @@ jobs:
       packages: write
       attestations: write
       id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       IMAGE: ghcr.io/calkit/latex
     steps:
@@ -63,3 +65,45 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  # The CLI, the dev container, the VS Code settings, the docs' examples,
+  # and the hub's environment preset all pin an exact tag, so a release
+  # that doesn't reach them changes nothing for anyone
+  pin:
+    name: Pin the new tag 📌
+    needs: publish
+    if: startsWith(github.event.release.tag_name, 'latex-image/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      VERSION: ${{ needs.publish.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Open a pull request pinning the new tag
+        run: |
+          set -euo pipefail
+          bash scripts/update-latex-image-tag.sh ${VERSION}
+          if git diff --quiet; then
+            echo "Already pinned to ${VERSION}"
+            exit 0
+          fi
+          branch="pin-latex-image-${VERSION}"
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "${branch}"
+          git commit -qam "Use LaTeX image v${VERSION}"
+          git push -q origin "${branch}"
+          # A pull request opened with GITHUB_TOKEN doesn't start the
+          # workflows it would otherwise, so say what to do about it
+          body="Pins the default LaTeX image to the tag published by the [latex-image/v${VERSION}](${{ github.event.release.html_url }}) release. Opened by the publish workflow, so its checks don't start on their own; push to the branch, or close and reopen it, to run them."
+          gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "Use LaTeX image v${VERSION}" \
+            --body "${body}"

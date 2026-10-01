@@ -397,7 +397,7 @@ def test_latex_diff_setup(tmp_dir):
     )
     assert result.returncode != 0
     assert "does not exist at" in result.stderr
-    assert not os.path.isdir(os.path.join(DIFF_TMP_DIR, "base"))
+    assert not os.listdir(DIFF_TMP_DIR)
     assert DIFF_TMP_DIR not in subprocess.check_output(
         ["git", "worktree", "list"], text=True
     )
@@ -446,11 +446,13 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
             'for a in "$@"; do tex="$a"; case "$a" in '
             '-outdir=*) out="${a#-outdir=}";; esac; done\n'
             'cd "$(dirname "$tex")"\n'
+            '[ -n "$SLOW" ] && sleep 1\n'
             '[ -f setup.tex ] && echo present > "$RECORD_DIR/setup.txt"\n'
             'stem=$(basename "$tex" .tex)\n'
             'if [ -n "$FAIL" ]; then\n'
             '  printf "junk\\n! Undefined control sequence.\\nl.3 \\\\oops\\n"'
             ' > "$out/$stem.log"\n'
+            '  [ -n "$PARTIAL" ] && : > "$out/$stem.pdf"\n'
             "  exit 12\n"
             "fi\n"
             ': > "$out/$stem.pdf"\n'
@@ -470,8 +472,12 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     with open("paper/main.tex", "w", encoding="utf-8") as f:
         f.write("\\documentclass{article}\n")
         f.write("\\newcommand{\\wc}[1]{\\verbatiminput{#1.wcsum}}\n")
+        f.write("\\newcommand{\\singlecol}[1]{\\onecolumn{#1}\\twocolumn}\n")
         f.write("\\begin{document}\nGreen\u2019s function\n")
-        f.write("\\includegraphics{figs/plot}\n\\end{document}\n")
+        f.write("\\includegraphics{figs/plot}\n")
+        # What latexdiff's figure markup leaves in a table it marked up
+        f.write("\\DIFaddendFL \\hline \\DIFaddbeginFL \\label{x}\n")
+        f.write("\\singlecol{\n\\input{setup}\n}\n\\end{document}\n")
     with open("paper/.latexmkrc", "w") as f:
         f.write("$aux_dir = 'aux';\n")
     with open("paper/figs/plot.png", "w") as f:
@@ -532,24 +538,47 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     output = get_diff_path("paper/main.tex", "v1", "HEAD")
     with open(output) as f:
         assert f.read() == "old\nnew\n"
-    with open("paper/main-diff.tex", encoding="utf-8") as f:
+    # --keep-tex keeps what latexdiff saw beside the diff PDF, so a
+    # --flatten or macro expansion failure can be inspected
+    kept_stem = output.removesuffix(".pdf")
+    assert not os.path.exists("paper/main-diff.tex")
+    with open(f"{kept_stem}-diff.tex", encoding="utf-8") as f:
         marked_up = f.read()
     # A verbatim input named by a macro parameter is broken onto its own
     # line in each checkout rather than by latexdiff's --filter-script,
     # which mangles non-ASCII text
     assert "\\verbatiminput%\n{#1.wcsum}" in marked_up
     assert "Green\u2019s function" in marked_up
+    # A figure marker can't come before anything starting a table row
+    assert "\\DIFaddendFL \\hline" not in marked_up
+    assert "\\hline \\DIFaddbeginFL \\label{x}" in marked_up
     with open(stubs / "latexdiff-args.txt") as f:
-        assert "--filter-script" not in f.read()
+        latexdiff_args = f.read()
+    assert "--filter-script" not in latexdiff_args
+    # A macro wrapping a block is expanded, so latexdiff compares what it
+    # wraps rather than one token or a table marked up as text
+    assert "--append-textcmd" not in latexdiff_args
+    assert (
+        "\\onecolumn\\begingroup \n\\input{setup}\n\\endgroup \\twocolumn"
+        in (marked_up)
+    )
     assert "\\includegraphics{../../base/paper/figs/plot.png}" in marked_up
     assert "\\includegraphics{figs/plot}" in marked_up
     assert not os.path.exists("paper/figs")
+    with open(f"{kept_stem}-old.tex", encoding="utf-8") as f:
+        old_tex = f.read()
+    with open(f"{kept_stem}-new.tex", encoding="utf-8") as f:
+        new_tex = f.read()
+    assert "\\verbatiminput%\n{#1.wcsum}" in old_tex
+    assert "\\verbatiminput%\n{#1.wcsum}" in new_tex
+    assert "../../base/paper/figs/plot.png" in old_tex
+    assert "../../base/paper/figs/plot.png" not in new_tex
     # The diff is built with the document's rc file, read before the
     # directories Calkit sets so those win, and latexdiff gets its options
     with open(stubs / "latexmk-args.txt") as f:
         latexmk_args = f.read().split()
     rc = latexmk_args[latexmk_args.index("-r") + 1]
-    assert rc.endswith("latex-diff-build/head/paper/.latexmkrc")
+    assert rc.endswith("/head/paper/.latexmkrc")
     auxdir = next(a for a in latexmk_args if a.startswith("-auxdir="))
     assert latexmk_args.index("-r") < latexmk_args.index(auxdir)
     # Inside the directory the document is built in, since TeX refuses to
@@ -601,6 +630,9 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     # diff even though the marked-up source is the same
     working_output = get_diff_path("paper/main.tex", "v1")
     os.makedirs("paper/figs")
+    # A file of the user's with the marked-up document's name is left alone
+    with open("paper/main-diff.tex", "w") as f:
+        f.write("mine\n")
     for content in ["newer\n", "newest\n"]:
         with open("paper/figs/plot.png", "w") as f:
             f.write(content)
@@ -609,16 +641,67 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
         with open(working_output) as f:
             assert f.read() == "old\n" + content
     # Building beside the working tree's document leaves nothing behind
-    assert not os.path.exists("paper/calkit-latex-diff-aux")
+    assert not [p for p in os.listdir("paper") if "calkit-latex-diff" in p]
+    with open("paper/main-diff.tex") as f:
+        assert f.read() == "mine\n"
+    # A run that was killed leaves its checkout behind, which the next
+    # one clears away
+    dead_run = os.path.join(DIFF_TMP_DIR, "999999999")
+    os.makedirs(os.path.join(dead_run, "base"))
+    # Two at once, e.g., from the editor while the pipeline runs, don't
+    # build over each other
+    procs = [
+        subprocess.Popen(
+            diff + ["--force", "-o", f"at-once-{n}.pdf"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env | {"SLOW": "1"},
+        )
+        for n in range(2)
+    ]
+    for n, proc in enumerate(procs):
+        _, stderr = proc.communicate()
+        assert proc.returncode == 0, stderr
+        with open(f"at-once-{n}.pdf") as f:
+            assert f.read() == "old\nnewest\n"
+    assert not os.path.exists(dead_run)
     os.remove(stubs / "latexmk-args.txt")
+    os.remove(stubs / "latexdiff-args.txt")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
     assert "is up to date" in result.stdout
     assert not os.path.exists(stubs / "latexmk-args.txt")
+    # Known from what it's made of, so latexdiff doesn't run either
+    assert not os.path.exists(stubs / "latexdiff-args.txt")
     with open("paper/.latexmkrc", "a") as f:
         f.write("$max_repeat = 5;\n")
     result = subprocess.run(diff, capture_output=True, text=True, env=env)
     assert result.returncode == 0, result.stderr
     assert os.path.exists(stubs / "latexmk-args.txt")
+    # A filter rewrites the marked-up document before it's built, and the
+    # working tree's sources are prepared like a checkout's, in a copy
+    with open("filter.py", "w") as f:
+        f.write(
+            "import sys\n"
+            "text = sys.stdin.read()\n"
+            "sys.stdout.write(text.replace(sys.argv[1], sys.argv[2]))\n"
+        )
+    filter_args = ["--filter-script", "filter.py"]
+    filter_args += ["--filter-arg", "Green", "--filter-arg", "Blue"]
+    result = subprocess.run(
+        diff + filter_args + ["--keep-tex"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    working_stem = working_output.removesuffix(".pdf")
+    with open(f"{working_stem}-diff.tex", encoding="utf-8") as f:
+        assert "Green" not in f.read()
+    with open(f"{working_stem}-new.tex", encoding="utf-8") as f:
+        assert "\\onecolumn\\begingroup" in f.read()
+    with open("paper/main.tex", encoding="utf-8") as f:
+        assert "\\singlecol{" in f.read()
     # -silent hides why latexmk failed, so the errors LaTeX logged are shown
     result = subprocess.run(
         cmd + ["--force"],
@@ -629,7 +712,71 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert result.returncode != 0
     assert "! Undefined control sequence." in result.stderr
     assert "l.3 \\oops" in result.stderr
-    assert "exit status 12" in result.stderr
+    assert "exit code 12" in result.stderr
+    # A PDF latexmk built despite errors is kept, with a warning, since a
+    # diff that's mostly right is more use than none
+    result = subprocess.run(
+        cmd + ["--force"],
+        capture_output=True,
+        text=True,
+        env=env | {"FAIL": "1", "PARTIAL": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "! Undefined control sequence." in result.stderr
+    assert "built despite the LaTeX errors" in result.stderr
+    with open(stubs / "latexmk-args.txt") as f:
+        assert "-f" in f.read().split()
+    # Detection can't find another stage's uncached output at a revision
+    os.remove(stubs / "setup.txt")
+    bare = ["calkit", "latex", "diff", "paper/main.tex", "--from", "v1"]
+    bare += ["--to", "HEAD", "--force"]
+    result = subprocess.run(bare, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert not os.path.exists(stubs / "setup.txt")
+    # But a document the pipeline builds is diffed the way its stage builds
+    # it, fetching what the compiled stage depends on
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "pipeline:\n"
+            "  stages:\n"
+            "    paper:\n"
+            "      kind: latex\n"
+            "      target_path: paper/main.tex\n"
+            "      latexmkrc_path: paper/.latexmkrc\n"
+            "      latexdiff_args: [--type=CFONT]\n"
+        )
+    with open("dvc.yaml", "a") as f:
+        f.write(
+            "  paper:\n"
+            "    cmd: calkit latex build paper/main.tex\n"
+            "    deps: [paper/main.tex, paper/.latexmkrc, paper/setup.tex]\n"
+        )
+    result = subprocess.run(bare, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    with open(stubs / "setup.txt") as f:
+        assert f.read() == "present\n"
+    with open(stubs / "latexdiff-args.txt") as f:
+        assert "--type=CFONT" in f.read().split()
+    with open(stubs / "latexmk-args.txt") as f:
+        latexmk_args = f.read().split()
+    assert latexmk_args[latexmk_args.index("-r") + 1].endswith(
+        "paper/.latexmkrc"
+    )
+    # A revision's data comes from a remote through the project's cache, so
+    # the next comparison against it needn't download anything
+    import hashlib
+
+    remote = tmp_path_factory.mktemp("remote") / "store"
+    subprocess.check_call(
+        ["calkit", "dvc", "remote", "add", "-d", "r", remote]
+    )
+    # A local remote is laid out like the cache, and DVC won't push data for
+    # a revision from before the remote existed
+    shutil.move(".dvc/cache", remote)
+    result = subprocess.run(bare, capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    old_md5 = hashlib.md5(b"old\n").hexdigest()
+    assert os.path.isfile(f".dvc/cache/files/md5/{old_md5[:2]}/{old_md5[2:]}")
 
 
 def test_marked_up_digest_ignores_the_header():
@@ -698,6 +845,128 @@ def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     )
     assert "Couldn't open" not in result.stderr
     assert result.returncode == 0, result.stderr
+
+
+def test_get_source_date_epoch(tmp_dir):
+    from calkit.latex import get_source_date_epoch
+
+    # Outside a repo there's nothing to read a date from
+    os.makedirs("paper")
+    with open(os.path.join("paper", "main.tex"), "w") as f:
+        f.write("\\documentclass{article}\\begin{document}Hi\\end{document}\n")
+    assert get_source_date_epoch("paper/main.tex") is None
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "add", "paper/main.tex"])
+    subprocess.check_call(["git", "commit", "-q", "-m", "Add the paper"])
+    committed = subprocess.check_output(
+        ["git", "log", "-1", "--format=%ct"], text=True
+    ).strip()
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # A commit elsewhere doesn't restamp a document it didn't touch
+    with open("notes.txt", "w") as f:
+        f.write("sup\n")
+    subprocess.check_call(["git", "add", "notes.txt"])
+    subprocess.check_call(
+        ["git", "commit", "-q", "-m", "Add notes", "--date", "2030-01-01"]
+    )
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # Build artifacts are untracked, and say nothing about the source
+    with open(os.path.join("paper", "main.log"), "w") as f:
+        f.write("log\n")
+    assert get_source_date_epoch("paper/main.tex") == committed
+    # An edit in the working tree can only have been made now
+    with open(os.path.join("paper", "main.tex"), "a") as f:
+        f.write("% edit\n")
+    assert get_source_date_epoch("paper/main.tex") is None
+
+
+def test_fetch_missing_packages(tmp_dir, monkeypatch):
+    from calkit.cli import latex as cli_latex
+    from calkit.latex import find_missing_tex_files
+
+    # What LaTeX says, for a style file and for a font it has no metrics for
+    log = (
+        "! LaTeX Error: File `xurl.sty' not found.\n"
+        "! Font OT1/pcr/m/n/10=pcrr7t at 10.0pt not loadable: Metric (TFM) "
+        "file not found.\n"
+        "! LaTeX Error: File `xurl.sty' not found.\n"
+    )
+    assert find_missing_tex_files(log) == ["xurl.sty", "pcrr7t.tfm"]
+    assert find_missing_tex_files("Output written on main.pdf") == []
+    os.makedirs("paper")
+    log_path = os.path.join("paper", "main.log")
+    fdb_path = os.path.join("paper", "main.fdb_latexmk")
+    calls: list[list[str]] = []
+    # Each build writes the log LaTeX would, missing what isn't installed
+    state = {"installed": set(), "unfetchable": set()}
+
+    def latexmk(cmd):
+        missing = {"xurl.sty"} - state["installed"]
+        missing |= state["unfetchable"]
+        with open(log_path, "w") as f:
+            for name in missing:
+                f.write(f"! LaTeX Error: File `{name}' not found.\n")
+        with open(fdb_path, "w") as f:
+            f.write("fdb")
+        if missing:
+            raise subprocess.CalledProcessError(12, cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[0] == "latexmk":
+            captured.append(kwargs.get("capture_output"))
+            return latexmk(cmd)
+        if "search" in cmd:
+            name = cmd[-1].lstrip("/")
+            out = f"{name.split('.')[0]}:\n\ttexmf-dist/tex/latex/x/{name}\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=out)
+        assert "install" in cmd
+        state["installed"] |= {"xurl.sty"}
+        # As a font's install does, failing on the map after the files land
+        return subprocess.CompletedProcess(cmd, 1, stdout="")
+
+    captured: list[bool] = []
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: False)
+    monkeypatch.setattr(
+        calkit.docker, "ensure_image_available", lambda image: None
+    )
+
+    def build(quiet: bool = False):
+        return cli_latex._run_latexmk(
+            ["latexmk", "paper/main.tex"],
+            env=None,
+            log_path=log_path,
+            fdb_path=fdb_path,
+            environment=None,
+            verbose=False,
+            quiet=quiet,
+        )
+
+    # Fetched into the project and built on the retry, the install's error
+    # notwithstanding, with latexmk made to try again
+    assert build() == 0
+    installs = [c for c in calls if "install" in c]
+    assert len(installs) == 1 and installs[0][-1] == "xurl"
+    assert "TEXMFHOME=/work/.calkit/local/texmf" in installs[0]
+    assert os.path.isdir(os.path.join(".calkit", "local", "texmf"))
+    # Something fetching doesn't fix fails rather than looping
+    state["installed"].clear()
+    state["unfetchable"] = {"nope.sty"}
+    calls.clear()
+    assert build() == 12
+    assert len([c for c in calls if c[0] == "latexmk"]) == 2
+    # A system TeX is the user's, so nothing is fetched into it
+    monkeypatch.setattr(calkit, "check_dep_exists", lambda dep: True)
+    calls.clear()
+    assert build() == 12
+    assert not [c for c in calls if "tlmgr" in c]
+    # Quiet keeps latexmk's output out of the way, for a caller that reports
+    # what went wrong from the log
+    captured.clear()
+    build(quiet=True)
+    assert captured == [True]
 
 
 def test_from_questions(tmp_dir):

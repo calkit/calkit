@@ -49,9 +49,26 @@ calkit new publication paper --template latex/jfm --stage paper \
 
 Available templates are `latex/article` (generic), `latex/ieee-conference`
 (IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
-(chapters, for a thesis or technical report). Each uses packages that ship
-with TeX Live, so the `texlive/texlive:latest-full` Docker environment
-builds all of them.
+(chapters, for a thesis or technical report).
+The environment created uses Calkit's LaTeX Docker image,
+which can build all of them.
+
+## Packages
+
+Calkit's LaTeX image includes the packages used by common journal classes
+and most papers,
+which makes it a fraction of the size of a full TeX Live distribution.
+If a document uses a package the image doesn't include,
+`calkit latex build` will install it the first time it's needed.
+Installed packages are kept in the project in `.calkit/local/texmf`,
+which is ignored by Git,
+so they don't need to be installed again on the next build.
+
+Packages are only installed automatically when building with Calkit's
+image, either directly, i.e., with no environment specified,
+or in a Docker environment built from it.
+For other images or a LaTeX distribution installed on your machine,
+you'll need to install packages the usual way.
 
 ## Inputs
 
@@ -71,6 +88,19 @@ document.
 Undeclared inputs mean editing the class file doesn't rebuild the paper, and
 the web app's in-browser editor, which loads exactly what the stage declares,
 can't compile the document at all.
+
+## Build dates
+
+pdfTeX writes the build time into the PDF,
+so building the same document twice produces two different files,
+and each rebuild writes a new hash to `dvc.lock`,
+even if the document didn't change.
+
+To avoid this, Calkit sets the build date to that of the last commit
+that modified the document's directory.
+This way the date is still meaningful,
+and the PDF won't change until the document does.
+If there are uncommitted changes, the current time is used instead.
 
 ## Comparing revisions
 
@@ -106,10 +136,19 @@ document can usually diff it too.
 
 ### For pull request reviewers
 
-A single revision compares it against `HEAD`, so `- main` means "what this
-branch has committed, against the `main` branch".
+A single revision is compared against the working tree,
+which is what the document itself is built from,
+so `- main` means "what this branch changes, against the `main` branch".
 That's the diff you'd want to see for a pull request,
 and it will be rebuilt by the pipeline whenever the PR or `main` changes.
+Since it reads the working tree, you can make an edit, run the pipeline to
+check both the document and its diff, and commit them together.
+
+A branch named in `diffs` means the local branch, like it does everywhere
+else in the pipeline.
+If it's behind its remote-tracking branch,
+e.g., because it was updated on GitHub and fetched but never checked out,
+Calkit prints a warning with the command to update it.
 
 On the default branch, `main` and `HEAD` are the same commit, so the
 comparison comes out empty and the diff will show no changes.
@@ -208,6 +247,42 @@ pipeline:
         - --type=CFONT
 ```
 
+A macro that wraps a block of the document, e.g., one that switches the
+appendix to a single column, is expanded before comparing,
+so what it wraps is marked up like the rest of the document.
+
+To post-process the marked-up document before it's built,
+set `diff_filter` to a Python script that reads it on stdin and writes the
+result to stdout, e.g., to drop changes that only replace text with the
+equivalent glossary entry:
+
+```yaml
+pipeline:
+  stages:
+    paper-1:
+      kind: latex
+      environment: tex
+      target_path: pubs/paper-1/main.tex
+      diffs:
+        - paper-1-submitted
+      diff_filter:
+        kind: python-script
+        script_path: scripts/glossary-filter.py
+```
+
+By default the script runs with Calkit's own Python,
+so it can only use the standard library and Calkit's dependencies.
+To run it in one of the project's environments instead,
+set `environment` on the filter, and pass any arguments with `args`.
+The script is a dependency of the diff stage, so changing it rebuilds the
+diff.
+
+If LaTeX reports errors building the marked-up document but still produces
+a PDF, the diff is kept and the errors are shown in a warning.
+Some of these errors come from the document itself, and can be hidden when
+building it normally, e.g., by an aux directory kept between runs,
+so check that the document builds from an empty aux directory.
+
 ### Running diffs
 
 Each comparison is its own pipeline substage, named after the document's
@@ -219,22 +294,66 @@ To run all of a document's comparisons:
 calkit run paper-1.diffs
 ```
 
-### Comparing against uncommitted work
-
-`calkit latex diff` runs a comparison on demand, and with no `--to` the
-newer side is the working tree:
+To see which diffs the pipeline keeps, and whether each is up to date,
+stale, or not built yet:
 
 ```sh
-calkit latex diff pubs/paper-1/main.tex --from main --env tex
+calkit list latex-diffs
+```
+
+To open one, name it by its stage, the document, or the revision it compares
+against:
+
+```sh
+calkit show latex-diff paper-1-submitted
+```
+
+From a VS Code terminal it opens in the editor, and otherwise in the system's
+PDF viewer.
+Pass `--run` to build it first if it's stale or hasn't been built.
+
+In VS Code, the Calkit sidebar lists each diff under its stage and its
+publication, marked as up to date, stale, or not built,
+with a button to build it.
+Clicking a built diff opens it.
+The diff button in the editor toolbar, shown for a `.tex` file or a PDF a
+`latex` stage builds, lists the pipeline's diffs for that document too.
+A diff that's already built opens straight away,
+and one that's stale is rebuilt after it opens, with the viewer reloading when
+it's done.
+
+The toolbar also has a button to switch between a `.tex` file and the PDF its
+stage builds in the same tab, as well as LaTeX Workshop's button that opens
+the PDF beside it.
+
+### Comparing on demand
+
+To compare against a revision that isn't in the pipeline's `diffs`,
+`calkit latex diff` runs a comparison on demand,
+and with no `--to` option specified, the comparison is the working copy:
+
+```sh
+calkit latex diff pubs/paper-1/main.tex --from main
 # .calkit/local/latex-diffs/main..working/pubs/paper-1/main.pdf
 ```
 
 Those diffs can't be reproduced from two revisions, so they're not tracked,
 ending up in the project's `.calkit/local` directory.
-With no `--from` it compares against the merge base with the default branch.
-DVC-tracked files the document names directly are fetched for the older
-side, but a pipeline output without a `.dvc` file isn't found that way, so
-name any of those with `--input`, e.g., `--input pubs/paper-1/figs/`.
+With no `--from` it compares against the merge base with the default
+branch--typically `main`.
+If a `latex` pipeline stage builds the document,
+the diff is built with the stage configuration, i.e.,
+its environment, settings, and inputs,
+so the diff uses both revisions of the figures, tables, and results.
+
+To see the .tex files sent into `latexdiff`, e.g., when the
+marked-up document fails to build, pass `--keep-tex`,
+or set `keep_diff_tex: true` on the stage.
+The old, new, and marked-up `.tex` files are kept beside the diff PDF,
+e.g., `main-old.tex`, `main-new.tex`, and `main-diff.tex`.
+
+In VS Code, the Calkit extension's "Diff LaTeX Document Against..." command
+does the same from the editor, and opens the result.
 
 ## Interoperability with Microsoft Word
 

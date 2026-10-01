@@ -1,6 +1,7 @@
 """Tests for ``calkit.cli.notebooks``."""
 
 import base64
+import copy
 import json
 import os
 import shutil
@@ -20,6 +21,39 @@ def test_clean_notebook_outputs(tmp_dir):
     )
     shutil.copy(nb_fpath, "notebook.ipynb")
     subprocess.check_call(["calkit", "nb", "clean", "notebook.ipynb"])
+
+
+def test_clean_notebook_is_invariant_to_cell_ids():
+    """Cleaning must not depend on whether a clean filter touched the source.
+
+    nbstripout rewrites cell IDs to ordinals, so a notebook committed through
+    that filter reaches a fresh clone with different IDs than the working tree
+    it was committed from. When the cleaned copy carried them, its hash -- and
+    therefore the stage depending on it -- differed between the two, leaving
+    the stage stale on every clone.
+    """
+    executed = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "id": "44539ead",
+                "metadata": {},
+                "execution_count": 3,
+                "outputs": [{"output_type": "stream", "text": "hi"}],
+                "source": ["print('hi')"],
+            }
+        ],
+        "metadata": {"kernelspec": {"name": "python3"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    stripped = copy.deepcopy(executed)
+    stripped["cells"][0]["id"] = "0"
+    stripped["cells"][0]["execution_count"] = None
+    stripped["cells"][0]["outputs"] = []
+    assert calkit.notebooks.clean_notebook(
+        executed
+    ) == calkit.notebooks.clean_notebook(stripped)
 
 
 def test_execute_notebook(tmp_dir):

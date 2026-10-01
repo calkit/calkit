@@ -401,7 +401,7 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     with open(f"locks/{arch}.json", "rb") as f:
         lock_bytes = f.read()
     subprocess.check_call(["docker", "rmi", "-f", "alpine:3.18"])
-    out = subprocess.check_output(argv, text=True)
+    out = subprocess.check_output(argv, text=True, stderr=subprocess.STDOUT)
     assert "Pulling image by digest" in out
     with open(f"locks/{arch}.json", "rb") as f:
         assert f.read() == lock_bytes
@@ -412,6 +412,15 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
 def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
+    def get_layers() -> list[str]:
+        layers: list[str] = json.loads(
+            subprocess.check_output(
+                ["docker", "image", "inspect", "-f", "{{json .RootFS.Layers}}"]
+                + [image]
+            )
+        )
+        return layers
+
     image = "calkit-legacy-lock-test"
     subprocess.check_call(["calkit", "init"])
     with open("Dockerfile", "w") as f:
@@ -445,11 +454,16 @@ def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
         subprocess.check_call(
             ["docker", "build", "-t", image, "-f", "Other.dockerfile", "."]
         )
+        other_layers = get_layers()
         subprocess.check_call(check_argv)
         assert not os.path.isfile(legacy_lock_fpath)
         with open(lock_fpath) as f:
             migrated = json.load(f)
-        assert migrated["RootFS"]["Layers"] == built_lock["RootFS"]["Layers"]
+        # The rebuild can't be compared with the first build's layers, since
+        # a test running alongside this one may delete the base image and
+        # with it the build cache
+        assert migrated["RootFS"]["Layers"] != other_layers
+        assert migrated["RootFS"]["Layers"] == get_layers()
         assert migrated["DockerfileMD5"] == built_lock["DockerfileMD5"]
     finally:
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
@@ -525,7 +539,9 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         # checking sends the image rather than leave the lock naming
         # nothing to pull
         digests_at_build = engine_records_build_digests()
-        out = subprocess.check_output(check_argv, text=True)
+        out = subprocess.check_output(
+            check_argv, text=True, stderr=subprocess.STDOUT
+        )
         if digests_at_build:
             assert "Pushing image" not in out
         else:
@@ -567,7 +583,9 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
                 f"{registry}/proj/{image}:latest",
             ]
         )
-        out = subprocess.check_output(check_argv, text=True)
+        out = subprocess.check_output(
+            check_argv, text=True, stderr=subprocess.STDOUT
+        )
         assert "Pulling image by digest" in out
         assert "Pushing image" not in out
         # Coming back from the registry has to leave the lock exactly as it
@@ -1244,16 +1262,13 @@ def test_check_questions(tmp_dir):
     ck_info["questions"][0]["evidence"][0].pop("git_ref")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    # Questions are a check of their own, not part of status
+    # Status summarizes the questions, with the detail left to this check
     out = subprocess.check_output(["calkit", "status", "--json"], text=True)
-    assert "questions" not in json.loads(out)
-    bad = subprocess.run(
-        ["calkit", "status", "-c", "questions"],
-        capture_output=True,
-        text=True,
+    assert json.loads(out)["questions"]["questions"][0]["index"] == 1
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "questions"], text=True
     )
-    assert bad.returncode != 0
-    assert "Invalid category" in bad.stderr
+    assert "1 question, all answered with current evidence" in out
     out = subprocess.check_output(["calkit", "list", "questions"], text=True)
     assert "answer: 0 of eight do." in out
     # Reviewing the answer is an edit to the question, which clears the

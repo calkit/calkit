@@ -39,6 +39,7 @@
 | [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                      |
 | [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
 | [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
+| [`show`](#command-group-show)                    | Show Calkit objects.                                                                                         |
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
@@ -429,6 +430,7 @@ Options:
 | `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                                                                                                                                              |
 | `--setup`          | str     | no       |         | Shell command to run before the command, in the same shell (repeat for multiple). A pipeline stage gets these from its own 'setup' and its environment's 'default_setup', already combined when the pipeline is compiled.           |
 | `--setup-file`     | str     | no       |         | Path to a JSON list of setup commands, used instead of --setup. This is what a compiled pipeline stage carries, since a path survives being parsed by cmd.exe on Windows and by a POSIX shell elsewhere, and quoted commands don't. |
+| `--env-var`        | str     | no       |         | Environmental variable to set for the command, as KEY=VALUE. Can be given multiple times. Set in the process the command runs in, and passed into a container for an environment that runs in one.                                  |
 | `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                               |
 
 <a id="top-command-install"></a>
@@ -742,6 +744,8 @@ Arguments:
 #### `calkit config remote`
 
 Set up the Calkit hub as the default DVC remote and store a token in the local config.
+
+Deprecated: this configures the project, not Calkit itself, which is what the rest of this app is for.
 
 Usage:
 
@@ -1871,6 +1875,7 @@ List Calkit objects.
 | [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
 | [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                                                                          |
+| [`latex-diffs`](#subcommand-list-ls-latex-diffs)                | List the LaTeX diffs the pipeline keeps and whether each is current.                           |
 | [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                                                                      |
 | [`imports`](#subcommand-list-ls-imports)                        | List everything in the project that was imported from elsewhere.                               |
 
@@ -2158,6 +2163,24 @@ Options:
 | `--stale`      | boolean | no       | False   | Show only stale stages. |
 | `--json`       | boolean | no       | False   | Output result as JSON.  |
 
+<a id="subcommand-list-ls-latex-diffs"></a>
+
+#### `calkit list|ls latex-diffs`
+
+List the LaTeX diffs the pipeline keeps and whether each is current.
+
+Usage:
+
+```text
+calkit list|ls latex-diffs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
 <a id="subcommand-list-ls-remotes"></a>
 
 #### `calkit list|ls remotes`
@@ -2197,6 +2220,42 @@ Options:
 | Option   | Type    | Required | Default | Description            |
 | -------- | ------- | -------- | ------- | ---------------------- |
 | `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="command-group-show"></a>
+
+### `calkit show`
+
+Show Calkit objects.
+
+| Command                                     | Description                           |
+| ------------------------------------------- | ------------------------------------- |
+| [`latex-diff`](#subcommand-show-latex-diff) | Open a LaTeX diff the pipeline keeps. |
+
+<a id="subcommand-show-latex-diff"></a>
+
+#### `calkit show latex-diff`
+
+Open a LaTeX diff the pipeline keeps.
+
+From VS Code's terminal it opens in the editor, otherwise in the system's PDF viewer.
+
+Usage:
+
+```text
+calkit show latex-diff [OPTIONS] [TARGET]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                                                                |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target` | str  | no       |         | Which diff: its stage or PDF, the document or its PDF, the latex stage, or the revision it compares against. Can be omitted if the project keeps only one. |
+
+Options:
+
+| Option  | Type    | Required | Default | Description                                      |
+| ------- | ------- | -------- | ------- | ------------------------------------------------ |
+| `--run` | boolean | no       | False   | Build the diff first if it's stale or not built. |
 
 <a id="command-group-describe-desc"></a>
 
@@ -2542,6 +2601,7 @@ Update objects.
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
+| [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2954,6 +3014,36 @@ Options:
 | `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
 | `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                                                                |
 | `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                                                                                                                                |
+
+<a id="subcommand-update-hub"></a>
+
+#### `calkit update hub`
+
+Connect this project to a Calkit hub.
+
+Creates the project on the hub if it isn't there, then points DVC at the hub's storage so data and outputs have somewhere to go. This is what 'calkit new project --hub' does at creation time, for a project that was created without it.
+
+A project that already has a Git remote keeps it: the hub adopts that repository rather than creating a second one for the same work. One with no remote is offered a new repository, since otherwise there is nowhere to push code.
+
+Usage:
+
+```text
+calkit update hub [OPTIONS] [HUB]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                                                              |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hub`    | str  | no       |         | Hub to connect this project to, e.g., 'calkit.io'. Defaults to the one already set for the project, else the 'default_hub' config value, else calkit.io. |
+
+Options:
+
+| Option          | Type    | Required | Default | Description                                                                                                                     |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--public`      | boolean | no       | False   | Create the project as public.                                                                                                   |
+| `--create-repo` | boolean | no       | False   | Let the hub create a Git repository without asking, for a project that has no remote. Asked about interactively when not given. |
+| `--no-commit`   | boolean | no       | False   | Do not commit the changes.                                                                                                      |
 
 <a id="command-group-check"></a>
 
@@ -3467,7 +3557,10 @@ Options:
 | `--latexdiff-arg`    | str     | no       |         | Extra argument to pass through to latexdiff, e.g., '--type=CFONT'. Changed figures are shown old and new by default; pass '--graphics-markup=new-only' to show only the new. Repeat the option to pass more than one. |
 | `--input`            | str     | no       |         | File or directory the document reads. Anything in it tracked with DVC is fetched as it was at each revision. Defaults to the inputs detected in the document. Repeat the option to pass more than one.                |
 | `--force`, `-f`      | boolean | no       | False   | Rebuild even if nothing the diff depends on has changed since it was last built.                                                                                                                                      |
-| `--keep-tex`         | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                                     |
+| `--keep-tex`         | boolean | no       | False   | Keep the old, new, and diff .tex files beside the diff PDF for inspection, e.g., .calkit/latex-diffs/v1/paper/main-old.tex.                                                                                           |
+| `--filter-script`    | str     | no       |         | Python script to pipe the marked-up document through before it's built, e.g., to drop changes that don't change the rendered text. It reads the document on stdin and writes the result to stdout.                    |
+| `--filter-env`       | str     | no       |         | Environment to run the filter script in. Defaults to Calkit's own Python.                                                                                                                                             |
+| `--filter-arg`       | str     | no       |         | Argument to pass to the filter script. Repeat the option to pass more than one.                                                                                                                                       |
 | `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                                                  |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                 |
 
@@ -3477,7 +3570,7 @@ Options:
 
 Export a Word copy of a LaTeX document for review.
 
-Uses Word's own PDF import, so the copy looks like the PDF, then records inside the file which source line each paragraph came from and the text as sent, so `merge-docx` can bring edits and comments back.
+Uses Word's own PDF import where Word is installed, so the copy looks like the PDF, else TeX4ht and LibreOffice. Then records inside the file which source line each paragraph came from and the text as sent, so `merge-docx` can bring edits and comments back.
 
 Usage:
 
@@ -3493,12 +3586,14 @@ Arguments:
 
 Options:
 
-| Option           | Type    | Required | Default | Description                                                                             |
-| ---------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------- |
-| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF. |
-| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                            |
-| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                          |
-| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                           |
+| Option           | Type    | Required | Default | Description                                                                                                                                                                                                                |
+| ---------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF.                                                                                                                                    |
+| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                                                                                                                                                               |
+| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                                                                                                                                                             |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                                                                                                                                                              |
+| `--engine`       | str     | no       |         | What makes the Word copy: 'word', which imports the compiled PDF so the copy looks like it, or 'libreoffice', which converts the source with TeX4ht's make4ht and then LibreOffice. Defaults to Word where it's installed. |
+| `--log`, `-l`    | boolean | no       | False   | Also keep the export record in the project, under .calkit/latex/docx-exports, rather than only on this machine.                                                                                                            |
 
 <a id="subcommand-latex-tex-merge-docx"></a>
 
@@ -3522,9 +3617,10 @@ Arguments:
 
 Options:
 
-| Option          | Type    | Required | Default | Description                       |
-| --------------- | ------- | -------- | ------- | --------------------------------- |
-| `--no-comments` | boolean | no       | False   | Don't write comments to the .tex. |
+| Option          | Type    | Required | Default | Description                                                                                                   |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
+| `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
 
 <a id="command-group-overleaf-ol"></a>
 

@@ -25,3 +25,7 @@ vscode-ext/out
 TODO.md
 **/__pycache__/
 CLAUDE.md
+
+# >>> calkit markdown derived files (managed by calkit) >>>
+/.calkit/markdown/
+# <<< calkit markdown derived files <<<

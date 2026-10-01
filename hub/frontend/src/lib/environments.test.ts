@@ -172,6 +172,7 @@ describe("buildEnvironment", () => {
     // The LaTeX preset is the image-only case, which is the one that bit.
     const latex = PRESETS.find((p) => p.name === "latex")
     expect(latex?.kind).toBe("docker")
+    expect(latex?.image).toMatch(/^ghcr\.io\/calkit\/latex:\d+\.\d+\.\d+$/)
     expect(latex?.packages ?? []).toHaveLength(0)
   })
 

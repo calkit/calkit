@@ -10479,11 +10479,6 @@ export const UserSubscriptionAdminUpdateSchema = {
       ],
       title: "Paid Until",
     },
-    is_active: {
-      type: "boolean",
-      title: "Is Active",
-      default: true,
-    },
   },
   type: "object",
   required: ["plan_name", "period_months", "price"],

@@ -11,7 +11,11 @@ from app import mixpanel, users
 from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
-from app.tests import random_email, random_lower_string
+from app.tests import (
+    random_email,
+    random_lower_string,
+    user_authentication_headers,
+)
 
 
 def test_get_users_superuser_me(
@@ -450,11 +454,10 @@ def test_put_user_subscription_admin(
     normal_user_token_headers: dict[str, str],
     db: Session,
 ) -> None:
+    password = random_lower_string()
     user = users.create_user(
         session=db,
-        user_create=UserCreate(
-            email=random_email(), password=random_lower_string()
-        ),
+        user_create=UserCreate(email=random_email(), password=password),
     )
     assert user.subscription is not None
     user.subscription.processor = "stripe"
@@ -475,6 +478,13 @@ def test_put_user_subscription_admin(
         url,
         headers=superuser_token_headers,
         json=data | {"paid_until": None},
+    )
+    assert r.status_code == 422
+    # A free plan with a price would be treated as paid
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json={"plan_name": "free", "period_months": 1, "price": 5},
     )
     assert r.status_code == 422
     # Aware timestamps are stored as naive UTC, and Stripe refs are kept
@@ -508,6 +518,20 @@ def test_put_user_subscription_admin(
     db.refresh(user)
     assert user.subscription is not None
     assert user.subscription.plan_name == "professional"
+    # A $0 comp that has lapsed is dropped like a lapsed paid plan
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": "2020-01-01T00:00:00"},
+    )
+    assert r.status_code == 200
+    user_headers = user_authentication_headers(
+        client=client, email=user.email, password=password
+    )
+    with patch("app.stripe.get_customer", return_value=None):
+        r = client.get("/user", headers=user_headers)
+    assert r.status_code == 200
+    assert r.json()["subscription"] is None
     # Unknown user
     r = client.put(
         f"/users/{uuid.uuid4()}/subscription",

@@ -398,7 +398,6 @@ def put_user_subscription_admin(
     subscription.period_months = req.period_months
     subscription.price = req.price
     subscription.paid_until = paid_until
-    subscription.is_active = req.is_active
     session.commit()
     session.refresh(subscription)
     return subscription

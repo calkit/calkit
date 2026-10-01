@@ -1,6 +1,5 @@
 import {
   Button,
-  Checkbox,
   FormControl,
   FormErrorMessage,
   FormLabel,
@@ -39,7 +38,6 @@ interface SubscriptionForm {
   price: number
   // A date input's YYYY-MM-DD, treated as UTC midnight
   paid_until: string
-  is_active: boolean
 }
 
 const EditUserSubscription = ({
@@ -65,7 +63,6 @@ const EditUserSubscription = ({
       period_months: String(sub?.period_months ?? 1),
       price: sub?.price ?? 0,
       paid_until: sub?.paid_until ? sub.paid_until.slice(0, 10) : "",
-      is_active: sub?.is_active ?? true,
     },
   })
   const planName = watch("plan_name")
@@ -92,7 +89,6 @@ const EditUserSubscription = ({
       period_months: Number(data.period_months) as 1 | 12,
       price: data.price,
       paid_until: data.paid_until ? `${data.paid_until}T00:00:00Z` : null,
-      is_active: data.is_active,
     })
   }
   const onCancel = () => {
@@ -146,6 +142,10 @@ const EditUserSubscription = ({
               {...register("price", {
                 valueAsNumber: true,
                 min: { value: 0, message: "Price can't be negative" },
+                validate: (value) =>
+                  planName !== "free" ||
+                  value === 0 ||
+                  "The free plan can't have a price",
               })}
             />
             {errors.price && (
@@ -170,11 +170,6 @@ const EditUserSubscription = ({
             {errors.paid_until && (
               <FormErrorMessage>{errors.paid_until.message}</FormErrorMessage>
             )}
-          </FormControl>
-          <FormControl mt={4}>
-            <Checkbox {...register("is_active")} colorScheme="teal">
-              Active
-            </Checkbox>
           </FormControl>
         </ModalBody>
         <ModalFooter gap={3}>

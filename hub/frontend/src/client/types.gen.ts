@@ -5972,10 +5972,6 @@ export type UserSubscriptionAdminUpdate = {
    * Paid Until
    */
   paid_until?: string | null
-  /**
-   * Is Active
-   */
-  is_active?: boolean
 }
 
 /**

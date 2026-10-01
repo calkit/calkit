@@ -325,9 +325,7 @@ function UsersTable() {
                   <Td isTruncated maxWidth="150px">
                     {user.email}
                   </Td>
-                  <Td fontSize="sm" whiteSpace="nowrap">
-                    {formatTimestamp(user.created)}
-                  </Td>
+                  <Td fontSize="sm">{formatTimestamp(user.created)}</Td>
                   <Td>
                     <Button
                       variant="link"

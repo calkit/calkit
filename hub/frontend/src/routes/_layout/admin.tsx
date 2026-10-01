@@ -19,7 +19,12 @@ import {
   Tr,
 } from "@chakra-ui/react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  notFound,
+  redirect,
+  useNavigate,
+} from "@tanstack/react-router"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { FaPlus } from "react-icons/fa"
 import { useDebounce } from "use-debounce"
@@ -32,7 +37,7 @@ import ClearableInput from "../../components/Common/ClearableInput"
 import FeatureVotesTable from "../../components/Admin/FeatureVotesTable"
 import FeedbackTable from "../../components/Admin/FeedbackTable"
 import ActionsMenu from "../../components/Common/ActionsMenu"
-import { isLoggedIn } from "../../hooks/useAuth"
+import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
 import { capitalizeFirstLetter, formatTimestamp } from "../../lib/strings"
 
@@ -401,6 +406,11 @@ function UsersTable() {
 }
 
 function Admin() {
+  // The layout renders this only once the current user has loaded
+  const { user } = useAuth()
+  if (!user?.is_superuser) {
+    throw notFound()
+  }
   return (
     <Container maxW={pageWidthNoSidebar}>
       <Heading size="lg" textAlign={{ base: "center", md: "left" }} pt={12}>

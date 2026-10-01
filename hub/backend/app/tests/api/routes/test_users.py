@@ -518,7 +518,7 @@ def test_put_user_subscription_admin(
     db.refresh(user)
     assert user.subscription is not None
     assert user.subscription.plan_name == "professional"
-    # A $0 comp that has lapsed is dropped like a lapsed paid plan
+    # A $0 comp that has lapsed reverts to free like a lapsed paid plan
     r = client.put(
         url,
         headers=superuser_token_headers,
@@ -531,7 +531,10 @@ def test_put_user_subscription_admin(
     with patch("app.stripe.get_customer", return_value=None):
         r = client.get("/user", headers=user_headers)
     assert r.status_code == 200
-    assert r.json()["subscription"] is None
+    sub = r.json()["subscription"]
+    assert sub["plan_name"] == "free"
+    assert sub["price"] == 0
+    assert sub["paid_until"] is None
     # Unknown user
     r = client.put(
         f"/users/{uuid.uuid4()}/subscription",

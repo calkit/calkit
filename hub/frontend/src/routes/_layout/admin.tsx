@@ -27,13 +27,14 @@ import { z } from "zod"
 
 import { type UserPublic, UsersService } from "../../client"
 import AddUser from "../../components/Admin/AddUser"
+import EditUserSubscription from "../../components/Admin/EditUserSubscription"
 import ClearableInput from "../../components/Common/ClearableInput"
 import FeatureVotesTable from "../../components/Admin/FeatureVotesTable"
 import FeedbackTable from "../../components/Admin/FeedbackTable"
 import ActionsMenu from "../../components/Common/ActionsMenu"
 import { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
-import { formatTimestamp } from "../../lib/strings"
+import { capitalizeFirstLetter, formatTimestamp } from "../../lib/strings"
 
 const usersSearchSchema = z.object({
   page: z.number().catch(1),
@@ -43,6 +44,7 @@ const usersSearchSchema = z.object({
   sort_by: z.enum(["created", "email", "full_name"]).catch("created"),
   desc: z.boolean().catch(true),
   add_user_open: z.boolean().optional(),
+  subscription_user_id: z.string().optional(),
 })
 
 export const Route = createFileRoute("/_layout/admin")({
@@ -136,6 +138,7 @@ function UsersTable() {
     sort_by: sortBy,
     desc: descending,
     add_user_open: addUserOpen,
+    subscription_user_id: subscriptionUserId,
   } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const setPage = (page: number) =>
@@ -186,6 +189,9 @@ function UsersTable() {
     placeholderData: (prevData) => prevData,
   })
 
+  const subscriptionUser = users?.data.find(
+    (user) => user.id === subscriptionUserId,
+  )
   const hasNextPage = !isPlaceholderData && users?.data.length === PER_PAGE
   const hasPreviousPage = page > 1
 
@@ -247,16 +253,16 @@ function UsersTable() {
           <Thead>
             <Tr>
               <SortableTh
-                width="18%"
+                width="16%"
                 active={sortBy === "full_name"}
                 descending={descending}
                 onToggle={() => toggleSort("full_name")}
               >
                 Full name
               </SortableTh>
-              <Th width="16%">GitHub username</Th>
+              <Th width="14%">GitHub username</Th>
               <SortableTh
-                width="30%"
+                width="24%"
                 active={sortBy === "email"}
                 descending={descending}
                 onToggle={() => toggleSort("email")}
@@ -264,16 +270,17 @@ function UsersTable() {
                 Email
               </SortableTh>
               <SortableTh
-                width="16%"
+                width="14%"
                 active={sortBy === "created"}
                 descending={descending}
                 onToggle={() => toggleSort("created")}
               >
                 Signed up
               </SortableTh>
-              <Th width="10%">Role</Th>
-              <Th width="10%">Status</Th>
-              <Th width="10%">Actions</Th>
+              <Th width="8%">Plan</Th>
+              <Th width="8%">Role</Th>
+              <Th width="8%">Status</Th>
+              <Th width="8%">Actions</Th>
             </Tr>
           </Thead>
           {isPending ? (
@@ -321,6 +328,24 @@ function UsersTable() {
                   <Td fontSize="sm" whiteSpace="nowrap">
                     {formatTimestamp(user.created)}
                   </Td>
+                  <Td>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={() =>
+                        navigate({
+                          search: (prev) => ({
+                            ...prev,
+                            subscription_user_id: user.id,
+                          }),
+                        })
+                      }
+                    >
+                      {user.subscription
+                        ? capitalizeFirstLetter(user.subscription.plan_name)
+                        : "None"}
+                    </Button>
+                  </Td>
                   <Td>{user.is_superuser ? "Superuser" : "User"}</Td>
                   <Td>
                     <Flex gap={2}>
@@ -347,6 +372,17 @@ function UsersTable() {
           )}
         </Table>
       </TableContainer>
+      {subscriptionUser ? (
+        <EditUserSubscription
+          user={subscriptionUser}
+          isOpen
+          onClose={() =>
+            navigate({
+              search: (prev) => ({ ...prev, subscription_user_id: undefined }),
+            })
+          }
+        />
+      ) : null}
       <Flex
         gap={4}
         alignItems="center"

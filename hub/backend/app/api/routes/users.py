@@ -3,7 +3,7 @@
 import logging
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, Sequence
 
 import requests
@@ -53,6 +53,7 @@ from app.models import (
     UserRegister,
     UsersPublic,
     UserSubscription,
+    UserSubscriptionAdminUpdate,
     UserToken,
     UserTokenPublic,
     UserUpdate,
@@ -363,6 +364,44 @@ def update_user(
         session=session, db_user=db_user, user_in=user_in
     )
     return db_user
+
+
+@router.put(
+    "/users/{user_id}/subscription",
+    dependencies=[Depends(get_current_active_superuser)],
+)
+def put_user_subscription_admin(
+    *,
+    session: SessionDep,
+    user_id: uuid.UUID,
+    req: UserSubscriptionAdminUpdate,
+) -> UserSubscription:
+    """Set a user's subscription directly, without touching Stripe."""
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    paid_until = req.paid_until
+    # Stored naive in UTC, so it compares against utcnow()
+    if paid_until is not None and paid_until.tzinfo is not None:
+        paid_until = paid_until.astimezone(UTC).replace(tzinfo=None)
+    # Update in place so Stripe references survive an admin edit
+    subscription = user.subscription
+    if subscription is None:
+        subscription = UserSubscription(
+            user_id=user.id,
+            period_months=req.period_months,
+            plan_id=PLAN_IDS[req.plan_name],
+            price=req.price,
+        )
+        user.subscription = subscription
+    subscription.plan_id = PLAN_IDS[req.plan_name]
+    subscription.period_months = req.period_months
+    subscription.price = req.price
+    subscription.paid_until = paid_until
+    subscription.is_active = req.is_active
+    session.commit()
+    session.refresh(subscription)
+    return subscription
 
 
 @router.delete(

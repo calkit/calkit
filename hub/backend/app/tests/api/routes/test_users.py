@@ -444,6 +444,79 @@ def test_update_user_email_exists(
     assert r.json()["detail"] == "User with this email already exists"
 
 
+def test_put_user_subscription_admin(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    normal_user_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(), password=random_lower_string()
+        ),
+    )
+    assert user.subscription is not None
+    user.subscription.processor = "stripe"
+    user.subscription.processor_subscription_id = "sub_123"
+    db.commit()
+    url = f"/users/{user.id}/subscription"
+    data = {
+        "plan_name": "professional",
+        "period_months": 12,
+        "price": 0,
+        "paid_until": "2030-01-01T05:00:00-05:00",
+    }
+    # Only superusers can do this
+    r = client.put(url, headers=normal_user_token_headers, json=data)
+    assert r.status_code == 403
+    # A paid plan needs a paid_until or it'd be dropped on next request
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": None},
+    )
+    assert r.status_code == 422
+    # Aware timestamps are stored as naive UTC, and Stripe refs are kept
+    r = client.put(url, headers=superuser_token_headers, json=data)
+    assert r.status_code == 200
+    resp = r.json()
+    assert resp["plan_name"] == "professional"
+    assert resp["paid_until"] == "2030-01-01T10:00:00"
+    db.refresh(user)
+    assert user.subscription is not None
+    assert user.subscription.plan_id == 2
+    assert user.subscription.period_months == 12
+    assert user.subscription.processor_subscription_id == "sub_123"
+    assert users.check_user_subscription_active(session=db, user=user)
+    # It shows up in the admin user listing
+    r = client.get(f"/users/{user.id}", headers=superuser_token_headers)
+    assert r.json()["subscription"]["plan_name"] == "professional"
+    # Back to free, which doesn't need paid_until
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json={"plan_name": "free", "period_months": 1, "price": 0},
+    )
+    assert r.status_code == 200
+    assert r.json()["plan_name"] == "free"
+    # A user without a subscription gets one
+    db.delete(user.subscription)
+    db.commit()
+    r = client.put(url, headers=superuser_token_headers, json=data)
+    assert r.status_code == 200
+    db.refresh(user)
+    assert user.subscription is not None
+    assert user.subscription.plan_name == "professional"
+    # Unknown user
+    r = client.put(
+        f"/users/{uuid.uuid4()}/subscription",
+        headers=superuser_token_headers,
+        json=data,
+    )
+    assert r.status_code == 404
+
+
 def test_delete_user_me(client: TestClient, db: Session) -> None:
     username = random_email()
     password = random_lower_string()

@@ -5951,6 +5951,34 @@ export type UserSubscription = {
 }
 
 /**
+ * UserSubscriptionAdminUpdate
+ *
+ * A superuser's direct edit of a user's subscription, bypassing Stripe.
+ */
+export type UserSubscriptionAdminUpdate = {
+  /**
+   * Plan Name
+   */
+  plan_name: "free" | "standard" | "professional"
+  /**
+   * Period Months
+   */
+  period_months: 1 | 12
+  /**
+   * Price
+   */
+  price: number
+  /**
+   * Paid Until
+   */
+  paid_until?: string | null
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+}
+
+/**
  * UserTokenPublic
  */
 export type UserTokenPublic = {
@@ -7474,6 +7502,38 @@ export type UpdateUserResponses = {
 }
 
 export type UpdateUserResponse = UpdateUserResponses[keyof UpdateUserResponses]
+
+export type PutUserSubscriptionAdminData = {
+  body: UserSubscriptionAdminUpdate
+  path: {
+    /**
+     * User Id
+     */
+    user_id: string
+  }
+  query?: never
+  url: "/users/{user_id}/subscription"
+}
+
+export type PutUserSubscriptionAdminErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserSubscriptionAdminError =
+  PutUserSubscriptionAdminErrors[keyof PutUserSubscriptionAdminErrors]
+
+export type PutUserSubscriptionAdminResponses = {
+  /**
+   * Successful Response
+   */
+  200: UserSubscription
+}
+
+export type PutUserSubscriptionAdminResponse =
+  PutUserSubscriptionAdminResponses[keyof PutUserSubscriptionAdminResponses]
 
 export type GetUserGithubReposData = {
   body?: never

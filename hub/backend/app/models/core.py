@@ -448,6 +448,23 @@ class SubscriptionUpdate(BaseModel):
     discount_code: str | None = None
 
 
+class UserSubscriptionAdminUpdate(BaseModel):
+    """A superuser's direct edit of a user's subscription, bypassing Stripe."""
+
+    plan_name: Literal["free", "standard", "professional"]
+    period_months: Literal[1, 12]
+    price: float = Field(ge=0)
+    paid_until: datetime | None = None
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def check_paid_until(self) -> "UserSubscriptionAdminUpdate":
+        # Without it, a paid plan is checked against Stripe and dropped
+        if self.plan_name != "free" and self.paid_until is None:
+            raise ValueError("paid_until is required for a paid plan")
+        return self
+
+
 class UpdateSubscriptionResponse(BaseModel):
     subscription: UserSubscription | OrgSubscription
     stripe_session_client_secret: str | None

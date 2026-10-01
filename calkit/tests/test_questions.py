@@ -70,6 +70,14 @@ def test_render():
         render("{missing}", values)
     with pytest.raises(ValueError):
         render("{best:.2f}", values)
+    # A value the spec can't take at all, e.g., a null, is a ValueError
+    # too, not a TypeError nothing expects
+    for bad in (None, {"a": 1}):
+        with pytest.raises(ValueError, match="cannot be formatted"):
+            render("{x:.2f}", {"x": bad})
+    # The check reports it as a problem rather than crashing
+    problems = calkit.questions._placeholder_problems("{x:.2f}", {"x": None})
+    assert problems and "cannot render" in problems[0]
 
 
 def _commit(msg: str) -> str:

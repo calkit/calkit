@@ -248,6 +248,17 @@ class _Formatter(string.Formatter):
             raise KeyError(field_name)
         return kwargs[field_name], field_name
 
+    def format_field(self, value: Any, format_spec: str) -> Any:
+        # A value the spec can't format, e.g., a null under ':.2f', raises
+        # TypeError, which callers don't expect; as ValueError it is
+        # reported as a template that cannot render rather than a crash
+        try:
+            return super().format_field(value, format_spec)
+        except TypeError as e:
+            raise ValueError(
+                f"{value!r} cannot be formatted as {format_spec!r}"
+            ) from e
+
 
 _FORMATTER = _Formatter()
 _PLACEHOLDER = re.compile(r"(?<!\{)\{([^{}:!]+)(?:[:!][^{}]*)?\}(?!\})")
@@ -933,8 +944,7 @@ def _check_publication_label(
     sources = _find_latex_sources(ev["path"], ck_info, wdir)
     if not sources:
         return "skipped", (
-            f"label {label!r} not checked: no LaTeX stage produces "
-            f"{ev['path']}"
+            f"label {label!r} not checked: no LaTeX stage produces {ev['path']}"
         )
     pattern = re.compile(r"\\label\{" + re.escape(label) + r"\}")
     for src in sources:

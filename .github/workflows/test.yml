@@ -43,6 +43,13 @@ jobs:
               - "!mkdocs.yml"
               - "!CITATION.cff"
               - "!LICENSE"
+              # Subprojects with suites of their own, which nothing in the
+              # package reads
+              - "!images/**"
+              - "!assistant/**"
+              - "!.github/workflows/test-latex-image.yml"
+              - "!.github/workflows/publish-latex-image.yml"
+              - "!.github/workflows/test-assistant.yml"
             # The JupyterLab extension depends on the core Python package,
             # so run its tests for any change outside the other subprojects
             jlab:
@@ -55,6 +62,13 @@ jobs:
               - "!mkdocs.yml"
               - "!CITATION.cff"
               - "!LICENSE"
+              # Subprojects with suites of their own, which nothing in the
+              # package reads
+              - "!images/**"
+              - "!assistant/**"
+              - "!.github/workflows/test-latex-image.yml"
+              - "!.github/workflows/publish-latex-image.yml"
+              - "!.github/workflows/test-assistant.yml"
             vscode:
               - "vscode-ext/**"
             browser:

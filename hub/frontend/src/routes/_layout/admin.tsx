@@ -312,7 +312,7 @@ function UsersTable() {
                 Signed up
               </SortableTh>
               <Th width="8%">Plan</Th>
-              <Th width="6%">Projects (private)</Th>
+              <Th width="6%">Proj. (pvt)</Th>
               <Th width="6%">Storage</Th>
               <Th width="8%">Role</Th>
               <Th width="8%">Status</Th>

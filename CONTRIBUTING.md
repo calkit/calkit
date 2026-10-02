@@ -44,6 +44,10 @@ This guide will help you get started.
    ```sh
    uv tool install -e .
    ```
+   Dev installs aren't upgraded automatically.
+   To pull the latest changes on the current branch and reinstall,
+   picking up any new dependencies, run `calkit upgrade`.
+   To install from another branch, run `calkit dev upgrade <branch>`.
 1. Install the JupyterLab extension in development mode
    (if working on the JupyterLab extension):
    ```sh

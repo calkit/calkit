@@ -232,8 +232,9 @@ to learn how to install agent skills for working with Calkit.
 
 Calkit checks for a new version once a day.
 If it was installed with uv, as above, or pipx,
-it upgrades itself after the command you ran finishes,
-and tells you the next time you run a command.
+it upgrades itself in the background,
+so your next command runs on the new version
+and starts by telling you which version that is.
 Otherwise, it tells you a new version is available.
 
 To be told about new versions but not upgrade automatically, run:

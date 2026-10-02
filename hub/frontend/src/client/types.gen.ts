@@ -5790,6 +5790,59 @@ export type UpdateSubscriptionResponse = {
 }
 
 /**
+ * UserAdminPublic
+ *
+ * A user as listed for a superuser, with what they own.
+ */
+export type UserAdminPublic = {
+  /**
+   * Email
+   */
+  email: string
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Superuser
+   */
+  is_superuser?: boolean
+  /**
+   * Full Name
+   */
+  full_name?: string | null
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Github Username
+   */
+  github_username: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
+  subscription: UserSubscription | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+  /**
+   * N Projects
+   */
+  n_projects?: number
+  /**
+   * N Private Projects
+   */
+  n_private_projects?: number
+}
+
+/**
  * UserCreate
  */
 export type UserCreate = {
@@ -6071,7 +6124,7 @@ export type UsersPublic = {
   /**
    * Data
    */
-  data: Array<UserPublic>
+  data: Array<UserAdminPublic>
   /**
    * Count
    */
@@ -6628,6 +6681,59 @@ export type UpdateSubscriptionResponseWritable = {
 }
 
 /**
+ * UserAdminPublic
+ *
+ * A user as listed for a superuser, with what they own.
+ */
+export type UserAdminPublicWritable = {
+  /**
+   * Email
+   */
+  email: string
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Superuser
+   */
+  is_superuser?: boolean
+  /**
+   * Full Name
+   */
+  full_name?: string | null
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Github Username
+   */
+  github_username: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
+  subscription: UserSubscriptionWritable | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+  /**
+   * N Projects
+   */
+  n_projects?: number
+  /**
+   * N Private Projects
+   */
+  n_private_projects?: number
+}
+
+/**
  * UserPublic
  */
 export type UserPublicWritable = {
@@ -6731,7 +6837,7 @@ export type UsersPublicWritable = {
   /**
    * Data
    */
-  data: Array<UserPublicWritable>
+  data: Array<UserAdminPublicWritable>
   /**
    * Count
    */
@@ -7407,6 +7513,38 @@ export type RegisterUserResponses = {
 
 export type RegisterUserResponse =
   RegisterUserResponses[keyof RegisterUserResponses]
+
+export type GetUserStorageByIdData = {
+  body?: never
+  path: {
+    /**
+     * User Id
+     */
+    user_id: string
+  }
+  query?: never
+  url: "/users/{user_id}/storage"
+}
+
+export type GetUserStorageByIdErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserStorageByIdError =
+  GetUserStorageByIdErrors[keyof GetUserStorageByIdErrors]
+
+export type GetUserStorageByIdResponses = {
+  /**
+   * Successful Response
+   */
+  200: StorageUsage
+}
+
+export type GetUserStorageByIdResponse =
+  GetUserStorageByIdResponses[keyof GetUserStorageByIdResponses]
 
 export type DeleteUserData = {
   body?: never

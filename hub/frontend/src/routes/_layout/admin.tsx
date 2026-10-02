@@ -93,6 +93,35 @@ function getUsersQueryOptions({
 }
 
 /**
+ * A user's storage usage, fetched per row, since measuring it lists their
+ * objects in storage, which would hold up the whole page.
+ */
+function StorageCell({ userId }: { userId: string }) {
+  const { data, isPending, isError } = useQuery({
+    queryKey: ["users", userId, "storage"],
+    queryFn: () =>
+      UsersService.getUserStorageById({ user_id: userId }).then(
+        (response) => response.data,
+      ),
+    staleTime: 5 * 60 * 1000,
+  })
+  if (isPending) {
+    return <SkeletonText noOfLines={1} />
+  }
+  if (isError) {
+    return <Text color="ui.dim">N/A</Text>
+  }
+  // A small project is a few MB, which would round to 0.00 GB
+  return (
+    <>
+      {data.used_gb < 1
+        ? `${(data.used_gb * 1000).toFixed(1)} MB`
+        : `${data.used_gb.toFixed(2)} GB`}
+    </>
+  )
+}
+
+/**
  * A column header that sorts on click and on Enter or Space.
  *
  * The header cell keeps its `aria-sort` so a screen reader announces the
@@ -258,16 +287,16 @@ function UsersTable() {
           <Thead>
             <Tr>
               <SortableTh
-                width="16%"
+                width="14%"
                 active={sortBy === "full_name"}
                 descending={descending}
                 onToggle={() => toggleSort("full_name")}
               >
                 Full name
               </SortableTh>
-              <Th width="14%">GitHub username</Th>
+              <Th width="12%">GitHub username</Th>
               <SortableTh
-                width="24%"
+                width="18%"
                 active={sortBy === "email"}
                 descending={descending}
                 onToggle={() => toggleSort("email")}
@@ -283,6 +312,8 @@ function UsersTable() {
                 Signed up
               </SortableTh>
               <Th width="8%">Plan</Th>
+              <Th width="6%">Projects (private)</Th>
+              <Th width="6%">Storage</Th>
               <Th width="8%">Role</Th>
               <Th width="8%">Status</Th>
               <Th width="8%">Actions</Th>
@@ -348,6 +379,12 @@ function UsersTable() {
                         ? capitalizeFirstLetter(user.subscription.plan_name)
                         : "None"}
                     </Button>
+                  </Td>
+                  <Td>
+                    {user.n_projects} ({user.n_private_projects})
+                  </Td>
+                  <Td>
+                    <StorageCell userId={user.id} />
                   </Td>
                   <Td>{user.is_superuser ? "Superuser" : "User"}</Td>
                   <Td>

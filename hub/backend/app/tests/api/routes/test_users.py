@@ -156,6 +156,8 @@ def test_create_user_by_normal_user(
 def test_retrieve_users(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
+    from app.models import Project
+
     username = random_email()
     password = random_lower_string()
     user_in = UserCreate(email=username, password=password)
@@ -170,6 +172,50 @@ def test_retrieve_users(
     assert "count" in all_users
     for item in all_users["data"]:
         assert "email" in item
+    # Each user comes with how many projects they own, and how many of
+    # those are private
+    owner = users.get_user_by_email(session=db, email=username)
+    assert owner is not None and owner.account is not None
+    for is_public in [True, False, False]:
+        db.add(
+            Project(
+                name=f"proj-{uuid.uuid4().hex[:8]}",
+                title="Project",
+                git_repo_url="https://github.com/someone/proj",
+                owner_account_id=owner.account.id,
+                is_public=is_public,
+            )
+        )
+    db.commit()
+    r = client.get(
+        "/users/",
+        headers=superuser_token_headers,
+        params={"search_for": username},
+    )
+    by_email = {u["email"]: u for u in r.json()["data"]}
+    assert by_email[username]["n_projects"] == 3
+    assert by_email[username]["n_private_projects"] == 2
+    r = client.get(
+        "/users/",
+        headers=superuser_token_headers,
+        params={"search_for": username2},
+    )
+    assert r.json()["data"][0]["n_projects"] == 0
+    # Storage usage is fetched per user, by superusers only
+    url = f"/users/{owner.id}/storage"
+    with patch("app.api.routes.users.get_storage_usage", return_value=1.5):
+        r = client.get(url, headers=superuser_token_headers)
+    assert r.status_code == 200
+    assert r.json() == {"limit_gb": 10, "used_gb": 1.5}
+    user2_headers = user_authentication_headers(
+        client=client, email=username2, password=password2
+    )
+    r = client.get(url, headers=user2_headers)
+    assert r.status_code == 403
+    r = client.get(
+        f"/users/{uuid.uuid4()}/storage", headers=superuser_token_headers
+    )
+    assert r.status_code == 404
 
 
 def test_update_user_me(

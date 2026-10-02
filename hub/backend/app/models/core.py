@@ -333,8 +333,15 @@ class UserEmailVerification(SQLModel, table=True):
     user: User = Relationship(back_populates="email_verification")
 
 
+class UserAdminPublic(UserPublic):
+    """A user as listed for a superuser, with what they own."""
+
+    n_projects: int = 0
+    n_private_projects: int = 0
+
+
 class UsersPublic(SQLModel):
-    data: list[UserPublic]
+    data: list[UserAdminPublic]
     count: int
 
 

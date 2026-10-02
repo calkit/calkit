@@ -34,6 +34,7 @@ import { type UserPublic, UsersService } from "../../client"
 import AddUser from "../../components/Admin/AddUser"
 import EditUserSubscription from "../../components/Admin/EditUserSubscription"
 import ClearableInput from "../../components/Common/ClearableInput"
+import Tooltip from "../../components/Common/Tooltip"
 import FeatureVotesTable from "../../components/Admin/FeatureVotesTable"
 import FeedbackTable from "../../components/Admin/FeedbackTable"
 import ActionsMenu from "../../components/Common/ActionsMenu"
@@ -90,6 +91,35 @@ function getUsersQueryOptions({
       }).then((response) => response.data),
     queryKey: ["users", { page, searchFor, sortBy, descending }],
   }
+}
+
+/**
+ * A user's storage usage, fetched per row, since measuring it lists their
+ * objects in storage, which would hold up the whole page.
+ */
+function StorageCell({ userId }: { userId: string }) {
+  const { data, isPending, isError } = useQuery({
+    queryKey: ["users", userId, "storage"],
+    queryFn: () =>
+      UsersService.getUserStorageById({ user_id: userId }).then(
+        (response) => response.data,
+      ),
+    staleTime: 5 * 60 * 1000,
+  })
+  if (isPending) {
+    return <SkeletonText noOfLines={1} />
+  }
+  if (isError) {
+    return <Text color="ui.dim">N/A</Text>
+  }
+  // A small project is a few MB, which would round to 0.00 GB
+  return (
+    <>
+      {data.used_gb < 1
+        ? `${(data.used_gb * 1000).toFixed(1)} MB`
+        : `${data.used_gb.toFixed(2)} GB`}
+    </>
+  )
 }
 
 /**
@@ -258,16 +288,16 @@ function UsersTable() {
           <Thead>
             <Tr>
               <SortableTh
-                width="16%"
+                width="14%"
                 active={sortBy === "full_name"}
                 descending={descending}
                 onToggle={() => toggleSort("full_name")}
               >
                 Full name
               </SortableTh>
-              <Th width="14%">GitHub username</Th>
+              <Th width="12%">GitHub name</Th>
               <SortableTh
-                width="24%"
+                width="18%"
                 active={sortBy === "email"}
                 descending={descending}
                 onToggle={() => toggleSort("email")}
@@ -283,6 +313,8 @@ function UsersTable() {
                 Signed up
               </SortableTh>
               <Th width="8%">Plan</Th>
+              <Th width="6%">Projects</Th>
+              <Th width="6%">Storage</Th>
               <Th width="8%">Role</Th>
               <Th width="8%">Status</Th>
               <Th width="8%">Actions</Th>
@@ -328,7 +360,9 @@ function UsersTable() {
                     )}
                   </Td>
                   <Td isTruncated maxWidth="150px">
-                    {user.email}
+                    <Tooltip label={user.email}>
+                      <span>{user.email}</span>
+                    </Tooltip>
                   </Td>
                   <Td fontSize="sm">{formatTimestamp(user.created)}</Td>
                   <Td>
@@ -349,6 +383,12 @@ function UsersTable() {
                         : "None"}
                     </Button>
                   </Td>
+                  <Td>
+                    {user.n_projects} ({user.n_private_projects})
+                  </Td>
+                  <Td>
+                    <StorageCell userId={user.id} />
+                  </Td>
                   <Td>{user.is_superuser ? "Superuser" : "User"}</Td>
                   <Td>
                     <Flex gap={2}>
@@ -367,6 +407,14 @@ function UsersTable() {
                       type="User"
                       value={user}
                       disabled={currentUser?.id === user.id}
+                      onEditSubscription={() =>
+                        navigate({
+                          search: (prev) => ({
+                            ...prev,
+                            subscription_user_id: user.id,
+                          }),
+                        })
+                      }
                     />
                   </Td>
                 </Tr>

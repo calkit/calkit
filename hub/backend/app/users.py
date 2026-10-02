@@ -965,18 +965,22 @@ def check_user_subscription_active(session: Session, user: User) -> bool:
     if subscription.plan_id == 0:
         logger.info(f"{user.email} has a free subscription")
         return True
+    if subscription.price == 0 and subscription.paid_until is None:
+        logger.info(f"{user.email} has a comp with no end date")
+        return True
     if (
         subscription.paid_until is not None
         and subscription.paid_until >= utcnow()
     ):
         return True
     # Check with Stripe if the subscription has been paid
-    customer = app.stripe.get_customer(email=user.email)
-    if customer is None:
-        return False
-    stripe_subs = app.stripe.get_customer_subscriptions(
-        customer_id=customer.id, status="active"
-    )
+    stripe_subs = [
+        sub
+        for customer in app.stripe.get_user_customers(user)
+        for sub in app.stripe.get_customer_subscriptions(
+            customer_id=customer.id, status="active"
+        )
+    ]
     if not stripe_subs:
         return False
     sub_period_end_timestamps = [sub.current_period_end for sub in stripe_subs]

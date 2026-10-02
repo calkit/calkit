@@ -10137,6 +10137,106 @@ export const UpdateSubscriptionResponseSchema = {
   title: "UpdateSubscriptionResponse",
 } as const
 
+export const UserAdminPublicSchema = {
+  properties: {
+    email: {
+      type: "string",
+      maxLength: 255,
+      format: "email",
+      title: "Email",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_superuser: {
+      type: "boolean",
+      title: "Is Superuser",
+      default: false,
+    },
+    full_name: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Full Name",
+    },
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    github_username: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Username",
+    },
+    email_verified: {
+      type: "boolean",
+      title: "Email Verified",
+    },
+    subscription: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/UserSubscription",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
+    n_projects: {
+      type: "integer",
+      title: "N Projects",
+      default: 0,
+    },
+    n_private_projects: {
+      type: "integer",
+      title: "N Private Projects",
+      default: 0,
+    },
+  },
+  type: "object",
+  required: [
+    "email",
+    "id",
+    "created",
+    "github_username",
+    "email_verified",
+    "subscription",
+  ],
+  title: "UserAdminPublic",
+  description: "A user as listed for a superuser, with what they own.",
+} as const
+
 export const UserCreateSchema = {
   properties: {
     email: {
@@ -10673,7 +10773,7 @@ export const UsersPublicSchema = {
   properties: {
     data: {
       items: {
-        $ref: "#/components/schemas/UserPublic",
+        $ref: "#/components/schemas/UserAdminPublic",
       },
       type: "array",
       title: "Data",
@@ -11582,6 +11682,106 @@ export const UpdateSubscriptionResponseWritableSchema = {
   title: "UpdateSubscriptionResponse",
 } as const
 
+export const UserAdminPublicWritableSchema = {
+  properties: {
+    email: {
+      type: "string",
+      maxLength: 255,
+      format: "email",
+      title: "Email",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_superuser: {
+      type: "boolean",
+      title: "Is Superuser",
+      default: false,
+    },
+    full_name: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Full Name",
+    },
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    github_username: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Username",
+    },
+    email_verified: {
+      type: "boolean",
+      title: "Email Verified",
+    },
+    subscription: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/UserSubscriptionWritable",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
+    n_projects: {
+      type: "integer",
+      title: "N Projects",
+      default: 0,
+    },
+    n_private_projects: {
+      type: "integer",
+      title: "N Private Projects",
+      default: 0,
+    },
+  },
+  type: "object",
+  required: [
+    "email",
+    "id",
+    "created",
+    "github_username",
+    "email_verified",
+    "subscription",
+  ],
+  title: "UserAdminPublic",
+  description: "A user as listed for a superuser, with what they own.",
+} as const
+
 export const UserPublicWritableSchema = {
   properties: {
     email: {
@@ -11773,7 +11973,7 @@ export const UsersPublicWritableSchema = {
   properties: {
     data: {
       items: {
-        $ref: "#/components/schemas/UserPublicWritable",
+        $ref: "#/components/schemas/UserAdminPublicWritable",
       },
       type: "array",
       title: "Data",

@@ -240,6 +240,8 @@ import type {
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
+  GetUserStorageByIdErrors,
+  GetUserStorageByIdResponses,
   GetUserStorageResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
@@ -1356,6 +1358,39 @@ export class UsersService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get User Storage By Id
+   *
+   * Get a user's storage usage, which is slow enough to list a page of
+   * users without, so it's fetched per user.
+   */
+  public static getUserStorageById<ThrowOnError extends boolean = true>(
+    parameters: {
+      user_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserStorageByIdResponses,
+    GetUserStorageByIdErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "user_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetUserStorageByIdResponses,
+      GetUserStorageByIdErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/users/{user_id}/storage",
+      ...options,
+      ...params,
     })
   }
 

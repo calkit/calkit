@@ -2,6 +2,7 @@ import {
   Button,
   FormControl,
   FormErrorMessage,
+  FormHelperText,
   FormLabel,
   Input,
   Modal,
@@ -66,6 +67,7 @@ const EditUserSubscription = ({
     },
   })
   const planName = watch("plan_name")
+  const price = watch("price")
   const mutation = useMutation({
     mutationFn: (data: UserSubscriptionAdminUpdate) =>
       UsersService.putUserSubscriptionAdmin({
@@ -162,13 +164,17 @@ const EditUserSubscription = ({
               data-lpignore="true"
               {...register("paid_until", {
                 validate: (value) =>
-                  planName === "free" ||
+                  Number(price) === 0 ||
                   Boolean(value) ||
                   "Required for a paid plan",
               })}
             />
-            {errors.paid_until && (
+            {errors.paid_until ? (
               <FormErrorMessage>{errors.paid_until.message}</FormErrorMessage>
+            ) : (
+              <FormHelperText>
+                Leave empty for a $0 comp with no end date.
+              </FormHelperText>
             )}
           </FormControl>
         </ModalBody>

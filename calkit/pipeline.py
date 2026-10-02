@@ -151,6 +151,9 @@ class PipelineStatus(BaseModel):
     ignored_files_in_inputs: dict[str, dict[str, list[str]]] = Field(
         default_factory=dict
     )
+    # DVC's data status, when asked for, computed alongside the stage status
+    # so it reuses that index and those hashes; not part of the output
+    dvc_data_status: dict | None = Field(default=None, exclude=True)
 
     @field_validator("stale_stages", mode="before")
     @classmethod
@@ -853,11 +856,14 @@ def get_status(
     clean_notebooks: bool = True,
     compile_to_dvc: bool = True,
     force_env_check: bool = False,
+    with_data_status: bool = False,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
     This can compile the Calkit pipeline to DVC, clean notebook outputs,
     check pipeline environments, then query DVC for out-of-date stages.
+    With ``with_data_status``, DVC's data status is attached as well, left
+    None if it fails so the caller can ask again and report why.
     """
     import calkit.environments
     import calkit.markdown
@@ -945,8 +951,9 @@ def get_status(
             # DVC's own target filtering can miss stale propagation from
             # isolated subprojects, which makes targeted status disagree with
             # the full-project status view.
-            # Held across both so DVC doesn't drop the index it built for
-            # status and build it again for the outputs
+            # Held across all of these so DVC builds its index and hashes
+            # each path once, rather than dropping them between calls
+            dvc_data_status = None
             with (
                 dvc.repo.lock_repo(dvc_repo),
                 calkit.dvc.memoized_hashes(),
@@ -956,6 +963,11 @@ def get_status(
                     Path(os.path.relpath(out.fs_path)).as_posix()
                     for out in dvc_repo.index.outs
                 ]
+                if with_data_status:
+                    try:
+                        dvc_data_status = dict(dvc_repo.data_status())
+                    except Exception:
+                        pass
             raw_status = calkit.dvc.status_as_posix(raw_status)
         except LockError:
             # Another DVC process is holding the repo lock---most often a
@@ -1311,6 +1323,7 @@ def get_status(
             stale_stages=result["stale_stages"],
             errors=result["errors"],
             ignored_files_in_inputs=ignored_files_in_inputs,
+            dvc_data_status=dvc_data_status,
         )
     finally:
         if wdir is not None:

@@ -509,6 +509,15 @@ def get_status(
     import git
     from git.exc import InvalidGitRepositoryError
 
+    def get_dvc_data_status() -> dict:
+        # Reuse what the pipeline status computed under the same DVC lock
+        if (
+            pipeline_status is not None
+            and pipeline_status.dvc_data_status is not None
+        ):
+            return dict(pipeline_status.dvc_data_status)
+        return dict(calkit.dvc.get_dvc_repo().data_status())
+
     dotenv.load_dotenv(dotenv_path=".env")
     # Status only reads calkit.yaml, so skip the slower round-trip parser
     ck_info = calkit.load_calkit_info(read_only=True)
@@ -576,6 +585,7 @@ def get_status(
             check_environments=not no_check_envs,
             clean_notebooks=True,
             compile_to_dvc=True,
+            with_data_status="dvc" in categories,
         )
         if pipeline_status.failed_environment_checks:
             warn(
@@ -652,8 +662,7 @@ def get_status(
                 status_dict["git"] = {"error": "Not a Git repository"}
         if "dvc" in categories:
             try:
-                dvc_repo = calkit.dvc.get_dvc_repo()
-                data_status = dict(dvc_repo.data_status())
+                data_status = get_dvc_data_status()
                 data_status.pop("git", None)
                 status_dict["dvc"] = calkit.dvc.data_status_as_posix(
                     data_status
@@ -722,8 +731,7 @@ def get_status(
             )
         else:
             zip_path_map = calkit.dvc.zip.get_zip_path_map()
-            dvc_repo = calkit.dvc.get_dvc_repo()
-            raw = dict(dvc_repo.data_status())
+            raw = get_dvc_data_status()
             raw.pop("git", None)
             raw = calkit.dvc.data_status_as_posix(raw)
             typer.echo(_format_dvc_data_status(raw, zip_path_map))

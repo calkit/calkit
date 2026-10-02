@@ -153,19 +153,34 @@ def test_memoized_hashes(tmp_dir, monkeypatch):
 
     subprocess.check_call(["git", "init", "-q"])
     subprocess.check_call(["dvc", "init", "-q"])
-    os.makedirs("data")
-    for n in range(3):
-        with open(f"data/{n}.txt", "w") as f:
-            f.write(str(n))
+    # Outputs are written up front and persisted, so the stages' commands
+    # don't need a shell that can write them
+    for path in ["data/0.txt", "data/1.txt", "out/0.txt", "figs/b.txt"]:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(path)
+    # 'data' feeds two stages, 'out' is a directory output, and 'figs' holds
+    # an output tracked on its own while also being another stage's input
     with open("dvc.yaml", "w") as f:
         f.write(
             "stages:\n"
-            "  a:\n    cmd: echo a > a.txt\n    deps: [data]\n"
-            "    outs: [a.txt]\n"
-            "  b:\n    cmd: echo b > b.txt\n    deps: [data]\n"
-            "    outs: [b.txt]\n"
+            "  a:\n    cmd: echo a\n    deps: [data]\n"
+            "    outs: [{out: {persist: true}}]\n"
+            "  b:\n    cmd: echo b\n    deps: [data]\n"
+            "    outs: [{figs/b.txt: {persist: true}}]\n"
+            "  c:\n    cmd: echo c\n    deps: [figs]\n"
         )
     subprocess.check_call(["dvc", "repro", "-q"])
+
+    def check() -> tuple[dict, dict]:
+        # Data status must read the same with the hashes shared as without
+        expected = dict(dvc.repo.Repo().data_status())
+        repo = dvc.repo.Repo()
+        with dvc.repo.lock_repo(repo), calkit.dvc.memoized_hashes():
+            status = repo.status()
+            assert dict(repo.data_status()) == expected
+        return status, expected
+
     # Count the hashes DVC really computes, beneath the memo
     hashed = []
     original = Output._get_hash_meta
@@ -175,16 +190,21 @@ def test_memoized_hashes(tmp_dir, monkeypatch):
         return original(self)
 
     monkeypatch.setattr(Output, "_get_hash_meta", counting)
-    repo = dvc.repo.Repo()
-    with calkit.dvc.memoized_hashes():
-        assert repo.status() == {}
+    status, data_status = check()
+    assert status == {}
+    assert not data_status["uncommitted"]
     assert hashed.count("data") == 1
     assert Output._get_hash_meta is counting
     # A change is still seen by every stage that depends on it
     with open("data/0.txt", "w") as f:
         f.write("changed")
-    with calkit.dvc.memoized_hashes():
-        assert set(dvc.repo.Repo().status()) == {"a", "b"}
+    status, _ = check()
+    assert set(status) == {"a", "b"}
+    # And a changed output is still uncommitted
+    with open("out/0.txt", "w") as f:
+        f.write("changed")
+    _, data_status = check()
+    assert data_status["uncommitted"] == {"modified": ["out/"]}
 
 
 def test_register_ck_scheme_updates_schema_and_registry():

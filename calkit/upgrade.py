@@ -165,7 +165,7 @@ def get_dev_upgrade_cmds(branch: str | None = None) -> list[list[str]]:
             ).strip()
 
         try:
-            toplevel = git("rev-parse", "--show-toplevel")
+            toplevel = os.path.normpath(git("rev-parse", "--show-toplevel"))
         except (OSError, subprocess.CalledProcessError):
             raise ValueError(f"{src} is not in a Git repo")
         if branch is None:

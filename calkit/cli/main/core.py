@@ -125,6 +125,7 @@ def _to_shell_cmd(cmd: list[str]) -> str:
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool,
         typer.Option("--version", help="Show version and exit."),
@@ -169,6 +170,7 @@ def main(
     # didn't, so a CALKIT_HUB in .env sent the two to different hubs.
     dotenv.load_dotenv(dotenv_path=".env")
     _warn_on_stale_calkit_env()
+    calkit.upgrade.check(ctx.invoked_subcommand)
 
 
 def _warn_on_stale_calkit_env() -> None:
@@ -4339,42 +4341,26 @@ def upgrade(
         bool, typer.Option("--skills", help="Upgrade agent skills as well.")
     ] = False,
 ) -> None:
-    """Upgrade Calkit."""
-    # First detect how Calkit is installed
-    # If installed with uv tool, calkit will be located at something like
-    # ~/.local/bin/calkit
-    which_calkit = shutil.which("calkit")
-    if which_calkit is None:
-        raise_error("Calkit is not installed")
-    split_path = os.path.normpath(str(which_calkit)).split(os.sep)
-    if (
-        ".local" in split_path
-        and "bin" in split_path
-        and calkit.check_dep_exists("uv")
-    ):
-        # This is a uv tool install
-        cmd = [
-            "uv",
-            "tool",
-            "install",
-            "--upgrade",
-            "calkit-python",
-        ]
-    elif "pipx" in split_path and calkit.check_dep_exists("pipx"):
-        cmd = ["pipx", "upgrade", "calkit-python"]
-    else:
-        cmd = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--upgrade",
-            "calkit-python",
-        ]
-    res = subprocess.run(cmd)
-    if res.returncode != 0:
-        raise_error("Upgrade failed")
-    typer.echo("Success!")
+    """Upgrade Calkit.
+
+    A dev (editable) install is updated from the branch it's on, as with
+    'calkit dev upgrade'.
+    """
+    from calkit.upgrade import (
+        get_dev_upgrade_cmds,
+        get_editable_path,
+        get_upgrade_cmd,
+        run_upgrade_cmds,
+    )
+
+    try:
+        if get_editable_path() is not None:
+            cmds = get_dev_upgrade_cmds()
+        else:
+            cmds = [get_upgrade_cmd()]
+        run_upgrade_cmds(cmds)
+    except Exception as e:
+        raise_error(str(e))
     if skills:
         from calkit.cli.update import update_agent_skills
 

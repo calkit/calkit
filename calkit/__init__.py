@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         schema,
         server,
         templates,
+        upgrade,
         workspace,
     )
 
@@ -94,6 +95,7 @@ _SUBMODULES = {
     "schema",
     "server",
     "templates",
+    "upgrade",
     "workspace",
 }
 

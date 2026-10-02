@@ -7,7 +7,18 @@ import {
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
 import { isUnsupportedByHub, RequestFailed, send } from "../core/messages";
+import {
+  componentBadge,
+  componentLabel,
+  componentProblem,
+  componentsSummary,
+  editUrl,
+  sortComponents,
+  valueText,
+} from "../core/components";
 import type {
+  PublicationComponent,
+  PublicationComponents,
   GithubRepo,
   OverleafLinkPublic,
   OverleafSyncStatus,
@@ -54,6 +65,131 @@ function fileRow(file: OverleafSyncStatusFile): HTMLElement {
           `${file.stage_status?.status}; run the pipeline before syncing`,
       }),
   ]);
+}
+
+/**
+ * One component the paper shows, with what is wrong with it and a way into
+ * the project to fix it.
+ *
+ * Overleaf can't run the pipeline, so the useful action is not "rebuild"
+ * but "go and change what makes this", which is a link into the hub at the
+ * producing script.
+ */
+function componentRow(
+  item: PublicationComponent,
+  link: OverleafLinkPublic,
+): HTMLElement {
+  const badge = componentBadge(item);
+  const problem = componentProblem(item);
+  const shown = valueText(item.current_value);
+  const pages = item.pages ?? [];
+  const where = pages.length
+    ? ` \u00b7 ${pages.length === 1 ? "p." : "pp."} ${pages.join(", ")}`
+    : "";
+  return el("div", { class: "row" }, [
+    el("div", { class: "grow" }, [
+      el("div", { class: "name", text: componentLabel(item) }),
+      el("div", {
+        class: "dim small",
+        text:
+          (item.kind === "value" && shown ? `${shown} \u00b7 ` : "") +
+          (item.stage ? `stage ${item.stage}` : item.kind) +
+          where,
+      }),
+      problem && el("div", { class: "dim small", text: problem }),
+    ]),
+    badge && el("span", { class: `badge ${badge.level}`, text: badge.text }),
+    // Only worth offering where there is something to open: a component
+    // the project accounts for but no stage makes has nothing to edit
+    (item.script || item.stage) &&
+      el("a", {
+        class: "small",
+        text: "Edit",
+        href: editUrl(
+          hubWebUrl,
+          link.project_owner_name,
+          link.project_name,
+          item,
+        ),
+        title: item.script
+          ? `Open ${item.script} in the project`
+          : `Open stage ${item.stage} in the project`,
+      }),
+  ]);
+}
+
+/**
+ * What the paper takes from the project, and whether the reader is looking
+ * at something the project still produces.
+ *
+ * Loaded after the sync status rather than with it: syncing is what the
+ * panel is for, and this is a slower question the hub answers from the
+ * document's provenance record. A paper never built with provenance on has
+ * no record, and that is not a problem to report.
+ */
+async function renderComponents(
+  body: HTMLElement,
+  link: OverleafLinkPublic,
+  path: string,
+): Promise<void> {
+  const section = el("div", { style: { marginTop: "8px" } });
+  // Above the sync buttons: they are the panel's action, and nothing
+  // should appear below them
+  const actions = body.querySelector(".actions");
+  if (actions) {
+    body.insertBefore(section, actions);
+  } else {
+    body.append(section);
+  }
+  let data: PublicationComponents;
+  try {
+    data = await send({
+      type: "project.publicationComponents",
+      owner: link.project_owner_name,
+      project: link.project_name,
+      path,
+    });
+  } catch (e) {
+    // A hub without the endpoint, or a document it can't place: the sync
+    // panel is still useful, so this stays quiet
+    if (!isUnsupportedByHub(e)) {
+      section.append(
+        el("div", {
+          class: "dim small",
+          text: "Could not check what this paper takes from the project.",
+        }),
+      );
+    }
+    return;
+  }
+  // The panel is about what the paper shows, not what its folder holds:
+  // the file listing belongs to the hub's own components view
+  const items = (data.items ?? []).filter((item) => item.kind !== "file");
+  if (!data.built || items.length === 0) {
+    return;
+  }
+  const summary = componentsSummary(items);
+  section.append(
+    el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [
+        el("div", {
+          class: "small",
+          style: { fontWeight: "600" },
+          text: "From the project",
+        }),
+        el("div", {
+          class: "dim small",
+          text:
+            `${items.length} value${items.length === 1 ? "" : "s"}, ` +
+            "figures and blocks this paper shows",
+        }),
+      ]),
+      summary
+        ? el("span", { class: "badge warn", text: summary })
+        : el("span", { class: "badge ok", text: "all current" }),
+    ]),
+    ...sortComponents(items).map((item) => componentRow(item, link)),
+  );
 }
 
 function renderStatus(
@@ -629,6 +765,9 @@ async function load(overleafProjectId: string): Promise<void> {
     }
     lastSyncNeeded = !statuses[0].in_sync;
     renderStatus(content, link, statuses[0], reload);
+    // After the sync status, since that is what the panel is for and this
+    // is the slower question
+    void renderComponents(content, link, statuses[0].path);
     if (links.length > 1) {
       content.append(
         el("div", {

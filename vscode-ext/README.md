@@ -41,11 +41,67 @@ project in a plain folder.
 
 - **Show Source**: From an open figure, PDF, dataset, or other pipeline output,
   jump straight to the producing stage in the sidebar (and into its source).
-- **Figure source links**: In Quarto (`.qmd`) and LaTeX (`.tex`) documents, a
-  "Source: \<stage\>" CodeLens appears above each `![](…)` / `\includegraphics{…}`
-  that references a pipeline output; right-click also offers **Go to Figure
+- **Figure source links**: right-click a figure reference for **Go to Figure
   Source**. (From a compiled PDF, LaTeX Workshop's reverse-SyncTeX takes you to
-  the `\includegraphics` line, where these actions take over.)
+  the `\includegraphics` line, where these actions take over.) The CodeLens
+  that used to sit above each reference is now part of the components lens
+  below, so a line carries one lens rather than two.
+- **Document components**: In a LaTeX document that uses project content
+  (`\result[…]`, an `\includegraphics` of a pipeline output, `\ckfindings`),
+  hover any of it to see the
+  value, the file and key it came from, the stage and script behind it, the
+  pages it lands on, and whether it is still current, with links to open the
+  file, its script, and the thing itself or its stage in the Calkit sidebar. **Go to Definition**
+  (F12) opens the results file at that key or the figure itself; **Go to
+  Declaration** opens the producing script, so the loop is: hover a number,
+  jump to the script, tweak, come back. A CodeLens flags a line whose content
+  needs a rerun, has drifted from the project since the document was built, or
+  came from nowhere at all, and offers to run the stage. Beside it, a second
+  lens names the stage the line came from and opens it in the Calkit sidebar,
+  where its script, inputs and outputs are. A third names what the line uses,
+  and opens that: the figure, the results file, or the question, wherever the
+  project declares it. A figure nothing accounts for says so on that lens,
+  since its sidebar entry is where its origin gets recorded. The lens also works in
+  Quarto and Markdown, where there is no provenance record to read and it falls
+  back to naming the stage behind each figure reference. The same readings go
+  into **Problems**, so a value that moved on page nine is counted rather than
+  waiting to be scrolled to: an error for content the project no longer has, a
+  warning for content out of date, and a warning for content nothing accounts
+  for, which no rerun will fix. Questions are reported there too, on the line in `calkit.yaml` that
+  declares them, since a placeholder that fills from nothing, or evidence that
+  has moved since the answer was written, is about the question rather than the
+  paper that typesets it. The editor reports what changed, not whether the
+  answer is still right, which is a question about the sentence.
+- **Clickable paths**: Every value in `calkit.yaml` that names something in the
+  project is a link. A file opens in the editor; a directory, such as a stage
+  input that names a whole folder, is focused and expanded in the file tree the
+  way the sidebar's own input and output rows do it. Which strings are paths is
+  decided by what is on disk, not by a list of keys, so a path a new stage kind
+  introduces works without the extension knowing about it.
+- **Cited values**: A results file in the sidebar lists the values something
+  in the project actually quotes, and what quotes them: the document whose
+  source references one, or the question whose answer rests on it. A results
+  file holds every number a stage wrote; these are the few that are
+  load-bearing. A `json-to-latex` stage putting a key within a document's
+  reach is not the document quoting it, so availability does not count.
+- **Questions**: An answer is shown with its placeholders filled from the
+  evidence behind them, so it reads "the proof (1)" rather than "the proof
+  ({proof})"; the value evidence row names the key and what the answer calls
+  it. Each question opens `calkit.yaml` where it is written, which is the only
+  place it lives.
+- **map-paths stages**: A copy stage shows what it copies, one row per
+  mapping, opening the source it copies from. Its copies are left out of the
+  figure and dataset lists, since the file they came from is already there and
+  two rows for one figure is two things to keep track of. Editing one opens
+  `calkit.yaml` where it is written, which is the only place its mappings live.
+- **Document toolbar**: A `.tex` or `.qmd` with a build stage gets a button to
+  its rendered PDF, opened in the same pane rather than a split. The PDF gets
+  the way back to its source, and a play button to run the stage that builds
+  it.
+- **Stage definitions**: The Calkit sidebar's stage rows open `calkit.yaml`
+  scrolled to where the stage is written, since its script, notebook or target
+  is already listed under the stage's own properties. A stage a Markdown file
+  declares opens that file at its block.
 - **Stale-output awareness**: Outputs whose stage needs re-running are flagged
   in the sidebar and in the file explorer.
 - **File history**: View a tracked file's history from the sidebar or explorer.

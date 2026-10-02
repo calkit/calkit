@@ -125,9 +125,65 @@ try:
     # PyYAML ships prebuilt wheels with libyaml on every platform we target,
     # so this is the normal path; the fallback keeps a source install or an
     # exotic build working, just slower.
-    from yaml import CSafeLoader as _YamlLoader
+    from yaml import CSafeLoader as _BaseYamlLoader
 except ImportError:  # pragma: no cover - depends on the libyaml build
-    from yaml import SafeLoader as _YamlLoader
+    from yaml import SafeLoader as _BaseYamlLoader
+
+
+class _YamlLoader(_BaseYamlLoader):  # type: ignore[no-any-unimported]
+    """The C loader, reading scalars as YAML 1.2 like ``ryaml`` does.
+
+    PyYAML follows YAML 1.1, where ``no`` and ``on`` are booleans, ``1:30``
+    is 90, and ``010`` is octal, so the same file would load differently
+    depending on which parser read it.
+    """
+
+
+def _construct_yaml12_int(loader: Any, node: Any) -> int:
+    value = str(loader.construct_scalar(node)).replace("_", "")
+    sign = -1 if value.startswith("-") else 1
+    value = value.lstrip("+-")
+    for prefix, base in (("0b", 2), ("0o", 8), ("0x", 16)):
+        if value.startswith(prefix):
+            return sign * int(value[2:], base)
+    return sign * int(value)
+
+
+# ruamel.yaml's YAML 1.2 resolvers for the scalars that differ from 1.1
+_YAML12_RESOLVERS = {
+    "tag:yaml.org,2002:bool": (
+        r"^(?:true|True|TRUE|false|False|FALSE)$",
+        "tTfF",
+    ),
+    "tag:yaml.org,2002:float": (
+        r"""^(?:[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+        |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
+        |[-+]?\.[0-9_]+(?:[eE][-+][0-9]+)?
+        |[-+]?\.(?:inf|Inf|INF)
+        |\.(?:nan|NaN|NAN))$""",
+        "-+0123456789.",
+    ),
+    "tag:yaml.org,2002:int": (
+        r"""^(?:[-+]?0b[0-1_]+
+        |[-+]?0o?[0-7_]+
+        |[-+]?[0-9_]+
+        |[-+]?0x[0-9a-fA-F_]+)$""",
+        "-+0123456789",
+    ),
+}
+_YamlLoader.yaml_implicit_resolvers = {
+    first: [
+        (tag, regexp)
+        for tag, regexp in resolvers
+        if tag not in _YAML12_RESOLVERS
+    ]
+    for first, resolvers in _BaseYamlLoader.yaml_implicit_resolvers.items()
+}
+for _tag, (_pattern, _first) in _YAML12_RESOLVERS.items():
+    _YamlLoader.add_implicit_resolver(
+        _tag, re.compile(_pattern, re.X), list(_first)
+    )
+_YamlLoader.add_constructor("tag:yaml.org,2002:int", _construct_yaml12_int)
 
 
 def _load_yaml_readonly(stream: Any) -> Any:

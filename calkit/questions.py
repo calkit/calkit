@@ -687,10 +687,10 @@ def _load_calkit_yaml_text(text: str) -> dict:
     """
     import yaml
 
-    # libyaml's loader, when PyYAML was built with it, is ~10x faster
-    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    from calkit.core import _load_yaml_readonly
+
     try:
-        loaded = yaml.load(text, Loader=loader)
+        loaded = _load_yaml_readonly(text)
     except yaml.YAMLError:
         # A revision whose calkit.yaml uses something PyYAML refuses is
         # still worth reading; the round-trip parser is more forgiving

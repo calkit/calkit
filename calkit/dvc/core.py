@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from collections.abc import Iterator
 from itertools import groupby
 from pathlib import Path
@@ -210,6 +211,9 @@ def dvc_lock_timeout(seconds: float):
         dvc.lock.DEFAULT_TIMEOUT = previous
 
 
+_memoized_hashes_lock = threading.RLock()
+
+
 @contextlib.contextmanager
 def memoized_hashes() -> Iterator[None]:
     """Hash each output or dependency path only once while active.
@@ -230,80 +234,92 @@ def memoized_hashes() -> Iterator[None]:
     # By name, since dvc_data.index exports a build function that shadows it
     index_build: Any = importlib.import_module("dvc_data.index.build")
 
-    original_get_hash_meta = Output._get_hash_meta
-    original_diff = dvc.repo.data._diff_index_to_wtree
-    original_build_index = dvc.repo.index.build_data_index
-    original_build_entries = index_build.build_entries
-    memo: dict[tuple, Any] = {}
-    # Local directories already hashed, as (meta, hash_info) by repo, path,
-    # and hash name, and whether the walk in progress only needs those
-    dirs: dict[tuple[int | None, str, str], Any] = {}
-    shallow = False
-    walking: int | None = None
-    skipped: dict[str, Any] = {}
+    # The patches are process-wide, so threads take turns rather than
+    # capturing and restoring each other's
+    with _memoized_hashes_lock:
+        original_get_hash_meta = Output._get_hash_meta
+        original_diff = dvc.repo.data._diff_index_to_wtree
+        original_build_index = dvc.repo.index.build_data_index
+        original_build_entries = index_build.build_entries
+        memo: dict[tuple, Any] = {}
+        # Local directories already hashed, as (meta, hash_info) by repo,
+        # path, and hash name, and whether the walk in progress only needs
+        # those
+        dirs: dict[tuple[int | None, str, str], Any] = {}
+        shallow = False
+        walking: int | None = None
+        skipped: dict[str, Any] = {}
 
-    def _get_hash_meta(self: Any) -> Any:
-        key = (
-            id(self.repo),
-            self.fs.protocol,
-            self.fs_path,
-            self.hash_name,
-            self.use_cache,
-        )
-        if key not in memo:
-            memo[key] = original_get_hash_meta(self)
-            meta, hash_info = memo[key]
-            if self.fs.protocol == "local" and hash_info and hash_info.isdir:
-                dirs[(id(self.repo), self.fs_path, self.hash_name)] = memo[key]
-        return memo[key]
+        def _get_hash_meta(self: Any) -> Any:
+            key = (
+                id(self.repo),
+                self.fs.protocol,
+                self.fs_path,
+                self.hash_name,
+                self.use_cache,
+            )
+            if key not in memo:
+                memo[key] = original_get_hash_meta(self)
+                meta, hash_info = memo[key]
+                if (
+                    self.fs.protocol == "local"
+                    and hash_info
+                    and hash_info.isdir
+                ):
+                    dirs[(id(self.repo), self.fs_path, self.hash_name)] = memo[
+                        key
+                    ]
+            return memo[key]
 
-    def _diff_index_to_wtree(*args: Any, **kwargs: Any) -> Any:
-        nonlocal shallow
-        shallow = not kwargs.get("granular", False)
+        def _diff_index_to_wtree(*args: Any, **kwargs: Any) -> Any:
+            nonlocal shallow
+            shallow = not kwargs.get("granular", False)
+            try:
+                return original_diff(*args, **kwargs)
+            finally:
+                shallow = False
+
+        def build_entries(
+            path: str, fs: Any, *args: Any, **kwargs: Any
+        ) -> Any:
+            key = (walking, path, kwargs.get("hash_name", "md5"))
+            if key in dirs:
+                skipped[path] = dirs[key]
+                return iter(())
+            return original_build_entries(path, fs, *args, **kwargs)
+
+        def build_data_index(
+            index: Any, path: str, fs: Any, *args: Any, **kwargs: Any
+        ) -> Any:
+            nonlocal walking
+            if not (shallow and kwargs.get("compute_hash")):
+                return original_build_index(index, path, fs, *args, **kwargs)
+            walking = id(index.repo)
+            skipped.clear()
+            try:
+                data = original_build_index(index, path, fs, *args, **kwargs)
+            finally:
+                walking = None
+            # Outputs whose walk was skipped get the hashes already computed
+            # rather than those of their now-empty listing
+            for dir_path, (meta, hash_info) in skipped.items():
+                entry = data.get(fs.relparts(dir_path, path))
+                if entry is not None:
+                    entry.meta = meta
+                    entry.hash_info = hash_info
+            return data
+
+        Output._get_hash_meta = _get_hash_meta
+        dvc.repo.data._diff_index_to_wtree = _diff_index_to_wtree
+        dvc.repo.index.build_data_index = build_data_index
+        index_build.build_entries = build_entries
         try:
-            return original_diff(*args, **kwargs)
+            yield
         finally:
-            shallow = False
-
-    def build_entries(path: str, fs: Any, *args: Any, **kwargs: Any) -> Any:
-        key = (walking, path, kwargs.get("hash_name", "md5"))
-        if key in dirs:
-            skipped[path] = dirs[key]
-            return iter(())
-        return original_build_entries(path, fs, *args, **kwargs)
-
-    def build_data_index(
-        index: Any, path: str, fs: Any, *args: Any, **kwargs: Any
-    ) -> Any:
-        nonlocal walking
-        if not (shallow and kwargs.get("compute_hash")):
-            return original_build_index(index, path, fs, *args, **kwargs)
-        walking = id(index.repo)
-        skipped.clear()
-        try:
-            data = original_build_index(index, path, fs, *args, **kwargs)
-        finally:
-            walking = None
-        # Outputs whose walk was skipped get the hashes already computed
-        # rather than those of their now-empty listing
-        for dir_path, (meta, hash_info) in skipped.items():
-            entry = data.get(fs.relparts(dir_path, path))
-            if entry is not None:
-                entry.meta = meta
-                entry.hash_info = hash_info
-        return data
-
-    Output._get_hash_meta = _get_hash_meta
-    dvc.repo.data._diff_index_to_wtree = _diff_index_to_wtree
-    dvc.repo.index.build_data_index = build_data_index
-    index_build.build_entries = build_entries
-    try:
-        yield
-    finally:
-        Output._get_hash_meta = original_get_hash_meta
-        dvc.repo.data._diff_index_to_wtree = original_diff
-        dvc.repo.index.build_data_index = original_build_index
-        index_build.build_entries = original_build_entries
+            Output._get_hash_meta = original_get_hash_meta
+            dvc.repo.data._diff_index_to_wtree = original_diff
+            dvc.repo.index.build_data_index = original_build_index
+            index_build.build_entries = original_build_entries
 
 
 class CalkitDVCFileSystem(ObjectFileSystem):

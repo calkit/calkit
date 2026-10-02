@@ -38,8 +38,11 @@ def read_state() -> dict[str, Any]:
 def write_state(state: dict[str, Any]) -> None:
     fpath = get_state_fpath()
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
-    with open(fpath, "w") as f:
+    # Replaced whole so concurrent commands never read a partial file
+    tmp_fpath = f"{fpath}.{os.getpid()}.tmp"
+    with open(tmp_fpath, "w") as f:
         json.dump(state, f)
+    os.replace(tmp_fpath, fpath)
 
 
 def update_state(**kwargs: Any) -> None:
@@ -157,17 +160,21 @@ def get_dev_upgrade_cmds(branch: str | None = None) -> list[list[str]]:
         raise ValueError("Calkit is not an editable (dev) install")
     cmds: list[list[str]] = []
     target = src
-    if os.path.exists(os.path.join(src, ".git")) or branch is not None:
 
-        def git(*args: str) -> str:
-            return subprocess.check_output(
-                ["git", "-C", src, *args], text=True, stderr=subprocess.DEVNULL
-            ).strip()
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", src, *args], text=True, stderr=subprocess.DEVNULL
+        ).strip()
 
-        try:
-            toplevel = os.path.normpath(git("rev-parse", "--show-toplevel"))
-        except (OSError, subprocess.CalledProcessError):
-            raise ValueError(f"{src} is not in a Git repo")
+    try:
+        toplevel: str | None = os.path.normpath(
+            git("rev-parse", "--show-toplevel")
+        )
+    except (OSError, subprocess.CalledProcessError):
+        toplevel = None
+    if toplevel is None and branch is not None:
+        raise ValueError(f"{src} is not in a Git repo")
+    if toplevel is not None:
         if branch is None:
             branch = git("branch", "--show-current")
         worktrees: dict[str, str] = {}
@@ -177,11 +184,13 @@ def get_dev_upgrade_cmds(branch: str | None = None) -> list[list[str]]:
                 path = line.removeprefix("worktree ")
             elif line.startswith("branch refs/heads/") and path:
                 worktrees[line.removeprefix("branch refs/heads/")] = path
+        root = toplevel
         if branch in worktrees:
+            root = os.path.normpath(worktrees[branch])
             # The package may live below the repo root
             target = os.path.normpath(
                 os.path.join(
-                    worktrees[branch],
+                    root,
                     os.path.relpath(
                         os.path.realpath(src), os.path.realpath(toplevel)
                     ),
@@ -195,13 +204,25 @@ def get_dev_upgrade_cmds(branch: str | None = None) -> list[list[str]]:
                     "a worktree for it with 'git worktree add'"
                 )
             cmds.append(["git", "-C", toplevel, "checkout", branch])
-        # A detached HEAD or a branch with no upstream has nothing to pull
-        try:
-            if branch:
+        # A detached HEAD or a branch with no upstream has nothing to pull;
+        # one that only exists on a remote gets one when checked out
+        if branch:
+            try:
                 git("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
-                cmds.append(["git", "-C", target, "pull", "--ff-only"])
-        except subprocess.CalledProcessError:
-            pass
+                has_upstream = True
+            except subprocess.CalledProcessError:
+                local = git(
+                    "for-each-ref", "--format=%(refname:short)", "refs/heads"
+                ).splitlines()
+                has_upstream = branch not in local and bool(
+                    git(
+                        "for-each-ref",
+                        "--format=%(refname)",
+                        f"refs/remotes/*/{branch}",
+                    )
+                )
+            if has_upstream:
+                cmds.append(["git", "-C", root, "pull", "--ff-only"])
     if get_install_method() == "uv-tool" and shutil.which("uv"):
         python = f"{sys.version_info.major}.{sys.version_info.minor}"
         cmds.append(
@@ -260,7 +281,9 @@ def get_calkit_pids() -> list[int]:
     return pids
 
 
-def _popen_detached(cmd: list[str], log_fpath: str | None = None) -> None:
+def _popen_detached(
+    cmd: list[str], log_fpath: str | None = None, cwd: str | None = None
+) -> None:
     kws: dict[str, Any] = {}
     if sys.platform == "win32":
         kws["creationflags"] = (
@@ -276,6 +299,7 @@ def _popen_detached(cmd: list[str], log_fpath: str | None = None) -> None:
             stdout=out,
             stderr=subprocess.STDOUT,
             close_fds=True,
+            cwd=cwd,
             **kws,
         )
     finally:
@@ -412,14 +436,22 @@ def check(command: str | None) -> None:
             update_state(notified=now)
     if now - state.get("checked", 0) < CHECK_INTERVAL_SECONDS:
         return
-    # Mark the check as done up front, so commands started while it runs,
-    # e.g., by an editor, don't start their own
     try:
+        from calkit import config
+
+        # Mark the check as done up front, so commands started while it
+        # runs, e.g., by an editor, don't start their own
+        if config.read().auto_upgrade == "no-check":
+            update_state(checked=now, latest=None)
+            return
         update_state(checked=now)
+        # Started outside the project, since 'python -m' imports from the
+        # working directory first, and a project could have its own calkit
         _popen_detached(
             [sys.executable, "-m", "calkit.upgrade"]
             + [str(pid) for pid in get_calkit_pids()],
             log_fpath=get_log_fpath(),
+            cwd=os.path.dirname(get_state_fpath()),
         )
     except Exception:
         pass
@@ -445,12 +477,16 @@ def check_in_background(pids: list[int]) -> None:
     current = calkit.__version__
     if not is_newer(latest, current) or not can_auto_upgrade():
         return
-    if not config.read().auto_upgrade:
+    if config.read().auto_upgrade is not True:
         return
     # Recorded before upgrading, since on Windows the upgrade outlives this
     # process; the next command learns how it went by its own version
     update_state(upgraded_from=current, upgrading=time.time())
-    run_after_exit([get_upgrade_cmd()], pids + get_calkit_pids())
+    # On Windows this process holds files the upgrade replaces, so has to
+    # be waited for too; elsewhere it does the waiting itself
+    if sys.platform == "win32":
+        pids = pids + get_calkit_pids()
+    run_after_exit([get_upgrade_cmd()], pids)
 
 
 if __name__ == "__main__":

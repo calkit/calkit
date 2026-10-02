@@ -28,9 +28,13 @@ def test_check(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
     monkeypatch.setattr(calkit, "__version__", "1.0.0")
     spawned = []
-    monkeypatch.setattr(
-        upgrade, "_popen_detached", lambda cmd, **kws: spawned.append(cmd)
-    )
+
+    def popen_detached(cmd, cwd=None, **kws):
+        # Never from the project, which could shadow calkit
+        assert cwd == str(tmp_path / ".calkit")
+        spawned.append(cmd)
+
+    monkeypatch.setattr(upgrade, "_popen_detached", popen_detached)
     # Skipped under test and in CI
     upgrade.check("status")
     monkeypatch.delenv("CALKIT_ENV")
@@ -73,6 +77,12 @@ def test_check(tmp_path, monkeypatch, capsys):
     upgrade.update_state(checked=0)
     upgrade.check("status")
     assert len(spawned) == 2
+    # Unless checking is turned off, which also drops what it last found
+    monkeypatch.setenv("CALKIT_AUTO_UPGRADE", "no-check")
+    upgrade.update_state(checked=0, latest="1.1.0")
+    upgrade.check("status")
+    assert len(spawned) == 2
+    assert upgrade.read_state()["latest"] is None
 
 
 def test_check_in_background(tmp_path, monkeypatch):
@@ -92,10 +102,13 @@ def test_check_in_background(tmp_path, monkeypatch):
     upgrade.check_in_background([1])
     assert upgrade.read_state()["latest"] == "1.1.0"
     assert not runs
-    # On by default, it upgrades once the command that started it exits
+    # On by default, it upgrades once the command that started it exits,
+    # and on Windows this process too, since it holds files the upgrade
+    # replaces
     monkeypatch.delenv("CALKIT_TEST_AUTO_UPGRADE")
     upgrade.check_in_background([1])
-    assert runs == [([["up"]], [1, 2])]
+    pids = [1, 2] if sys.platform == "win32" else [1]
+    assert runs == [([["up"]], pids)]
     assert upgrade.read_state()["upgraded_from"] == "1.0.0"
     # Nothing happens when already up to date
     monkeypatch.setattr(upgrade, "get_latest_version", lambda: "1.0.0")
@@ -112,6 +125,24 @@ def test_check_in_background(tmp_path, monkeypatch):
     monkeypatch.setattr(upgrade, "get_latest_version", lambda: "1.3.0")
     upgrade.check_in_background([1])
     assert upgrade.read_state()["latest"] == "1.2.0"
+    # For real, the upgrade runs once the command exits, rather than this
+    # process waiting on itself
+    if sys.platform == "win32":
+        return
+    monkeypatch.undo()
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    monkeypatch.setattr(calkit, "__version__", "1.0.0")
+    monkeypatch.setattr(upgrade, "get_latest_version", lambda: "1.1.0")
+    monkeypatch.setattr(upgrade, "is_dev_install", lambda: False)
+    monkeypatch.setattr(upgrade, "can_auto_upgrade", lambda: True)
+    marker = tmp_path / "upgraded"
+    monkeypatch.setattr(
+        upgrade, "get_upgrade_cmd", lambda: ["touch", str(marker)]
+    )
+    cmd = subprocess.Popen(["sleep", "1"])
+    upgrade.check_in_background([cmd.pid])
+    assert cmd.poll() is not None
+    assert marker.exists()
 
 
 def test_get_dev_upgrade_cmds(tmp_path, monkeypatch):
@@ -160,7 +191,32 @@ def test_get_dev_upgrade_cmds(tmp_path, monkeypatch):
         ["git", "-C", str(repo), "pull", "--ff-only"],
         install(repo),
     ]
-    # Unless that would disturb uncommitted changes
+    # One only on the remote gets an upstream when checked out
+    assert upgrade.get_dev_upgrade_cmds("other") == [
+        ["git", "-C", str(repo), "checkout", "other"],
+        ["git", "-C", str(repo), "pull", "--ff-only"],
+        install(repo),
+    ]
+    # A package below the repo root is installed from the same place in
+    # whichever worktree
+    (repo / "pkg").mkdir()
+    monkeypatch.setattr(
+        upgrade, "get_editable_path", lambda: str(repo / "pkg")
+    )
+    assert upgrade.get_dev_upgrade_cmds() == [install(repo / "pkg")]
+    assert upgrade.get_dev_upgrade_cmds("feature") == [
+        ["git", "-C", str(wt), "pull", "--ff-only"],
+        install(wt / "pkg"),
+    ]
+    # A source outside Git can only be reinstalled
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setattr(upgrade, "get_editable_path", lambda: str(plain))
+    assert upgrade.get_dev_upgrade_cmds() == [install(plain)]
+    with pytest.raises(ValueError, match="not in a Git repo"):
+        upgrade.get_dev_upgrade_cmds("main")
+    # Checking out another branch would disturb uncommitted changes
+    monkeypatch.setattr(upgrade, "get_editable_path", lambda: str(repo))
     (repo / "new.txt").write_text("hi")
     with pytest.raises(ValueError, match="has changes"):
         upgrade.get_dev_upgrade_cmds("other")

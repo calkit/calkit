@@ -439,9 +439,9 @@ class Settings(BaseSettings):
     # 'calkit describe system' reports the ID actually in effect.
     machine_id: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
-    # Upgrade Calkit when a daily check finds a new version; when off, the
-    # check only notifies
-    auto_upgrade: bool = True
+    # Upgrade Calkit when a daily check finds a new version; when false,
+    # the check only notifies, and 'no-check' turns the check off
+    auto_upgrade: bool | Literal["no-check"] = True
     run_history_length: int = 10
     github_token: KeyringOptionalSecret | None = None
     # Kept apart from github_token, since pushing to the GitHub Container

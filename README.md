@@ -242,6 +242,12 @@ To be told about new versions but not upgrade automatically, run:
 calkit config set auto_upgrade false
 ```
 
+To stop checking for new versions altogether, run:
+
+```sh
+calkit config set auto_upgrade no-check
+```
+
 To upgrade by hand at any time, run:
 
 ```sh

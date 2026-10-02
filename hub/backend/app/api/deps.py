@@ -139,10 +139,11 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
         )
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
-    # Ensure that if this user has a paid subscription, it is valid
-    if user.subscription is not None and user.subscription.price > 0:
-        # Delete subscription if payment hasn't been received in 5 minutes
-        # since transaction started
+    # Ensure a non-free subscription is valid, including a $0 comp, since
+    # quotas read the plan without checking paid_until
+    if user.subscription is not None and user.subscription.plan_id != 0:
+        # Drop to free if payment hasn't been received in 5 minutes since
+        # the transaction started, or the paid period has lapsed
         if (
             user.subscription.paid_until is None
             and ((utcnow() - user.subscription.created).total_seconds() > 300)
@@ -171,8 +172,17 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                     session.refresh(user)
                     sub_valid = True
             if not sub_valid:
-                logger.info("Deleting invalid subscription")
-                session.delete(user.subscription)
+                logger.info("Reverting invalid subscription to free")
+                # Rather than deleting, since quotas need a subscription
+                subscription = user.subscription
+                subscription.plan_id = 0
+                subscription.price = 0.0
+                subscription.period_months = 1
+                subscription.paid_until = None
+                subscription.processor = None
+                subscription.processor_product_id = None
+                subscription.processor_price_id = None
+                subscription.processor_subscription_id = None
                 session.commit()
                 session.refresh(user)
     return user

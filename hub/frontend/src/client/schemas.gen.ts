@@ -10450,6 +10450,43 @@ export const UserSubscriptionSchema = {
   title: "UserSubscription",
 } as const
 
+export const UserSubscriptionAdminUpdateSchema = {
+  properties: {
+    plan_name: {
+      type: "string",
+      enum: ["free", "standard", "professional"],
+      title: "Plan Name",
+    },
+    period_months: {
+      type: "integer",
+      enum: [1, 12],
+      title: "Period Months",
+    },
+    price: {
+      type: "number",
+      minimum: 0,
+      title: "Price",
+    },
+    paid_until: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Paid Until",
+    },
+  },
+  type: "object",
+  required: ["plan_name", "period_months", "price"],
+  title: "UserSubscriptionAdminUpdate",
+  description:
+    "A superuser's direct edit of a user's subscription, bypassing Stripe.",
+} as const
+
 export const UserTokenPublicSchema = {
   properties: {
     id: {

@@ -582,17 +582,16 @@ def put_user_subscription(
     ) or (current_subscription is None and price > 0)
     if stripe_changing:
         # We need to setup payment stuff in Stripe
-        customer = app.stripe.get_customer(email=current_user.email)
-        if customer is None:
-            customer = app.stripe.create_customer(
-                email=current_user.email,
-                full_name=current_user.full_name,
-                user_id=current_user.id,
+        customer = app.stripe.get_or_create_user_customer(current_user)
+        # If the user already has any subscriptions, under any of their
+        # customers, update them
+        stripe_subs = [
+            sub
+            for cust in app.stripe.get_user_customers(current_user)
+            for sub in app.stripe.get_customer_subscriptions(
+                cust.id, status="active"
             )
-        # If the user already has any subscriptions, update them
-        stripe_subs = app.stripe.get_customer_subscriptions(
-            customer.id, status="active"
-        )
+        ]
         # Filter down for subscriptions without orgs in them
         stripe_subs = [s for s in stripe_subs if not s.metadata.get("org_id")]
         if len(stripe_subs) > 1:

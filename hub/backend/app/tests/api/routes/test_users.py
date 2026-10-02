@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -477,7 +478,7 @@ def test_put_user_subscription_admin(
     r = client.put(
         url,
         headers=superuser_token_headers,
-        json=data | {"paid_until": None},
+        json=data | {"price": 10, "paid_until": None},
     )
     assert r.status_code == 422
     # A free plan with a price would be treated as paid
@@ -528,7 +529,66 @@ def test_put_user_subscription_admin(
     user_headers = user_authentication_headers(
         client=client, email=user.email, password=password
     )
-    with patch("app.stripe.get_customer", return_value=None):
+    # A $0 comp with no end date runs indefinitely, without asking Stripe
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": None},
+    )
+    assert r.status_code == 200
+    # Old enough that a pending checkout would have been checked
+    db.refresh(user)
+    assert user.subscription is not None
+    user.subscription.created = datetime(2020, 1, 1)
+    db.commit()
+    with patch("app.stripe.find_customers", side_effect=AssertionError):
+        r = client.get("/user", headers=user_headers)
+    assert r.status_code == 200
+    assert r.json()["subscription"]["plan_name"] == "professional"
+    db.refresh(user)
+    assert users.check_user_subscription_active(session=db, user=user)
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": "2020-01-01T00:00:00"},
+    )
+    assert r.status_code == 200
+    # Stripe can have several customers with the user's email, and an
+    # active subscription under any of them keeps the plan
+    customers = [
+        SimpleNamespace(id="cus_old", created=1),
+        SimpleNamespace(id="cus_new", created=2),
+    ]
+    period_end = datetime(2031, 1, 1).timestamp()
+    stripe_subs = {
+        "cus_old": [],
+        "cus_new": [
+            SimpleNamespace(id="sub_456", current_period_end=period_end)
+        ],
+    }
+    with (
+        patch("app.stripe.find_customers", return_value=customers),
+        patch(
+            "app.stripe.get_customer_subscriptions",
+            side_effect=lambda customer_id, status: stripe_subs[customer_id],
+        ),
+    ):
+        r = client.get("/user", headers=user_headers)
+    assert r.status_code == 200
+    sub = r.json()["subscription"]
+    assert sub["plan_name"] == "professional"
+    assert sub["paid_until"] == "2031-01-01T00:00:00"
+    db.refresh(user)
+    assert user.subscription is not None
+    assert user.subscription.processor_subscription_id == "sub_456"
+    # With no active subscription anywhere, it reverts
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": "2020-01-01T00:00:00"},
+    )
+    assert r.status_code == 200
+    with patch("app.stripe.find_customers", return_value=[]):
         r = client.get("/user", headers=user_headers)
     assert r.status_code == 200
     sub = r.json()["subscription"]

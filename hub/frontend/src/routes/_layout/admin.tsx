@@ -367,6 +367,14 @@ function UsersTable() {
                       type="User"
                       value={user}
                       disabled={currentUser?.id === user.id}
+                      onEditSubscription={() =>
+                        navigate({
+                          search: (prev) => ({
+                            ...prev,
+                            subscription_user_id: user.id,
+                          }),
+                        })
+                      }
                     />
                   </Td>
                 </Tr>

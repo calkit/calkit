@@ -139,9 +139,15 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
         )
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
-    # Ensure a non-free subscription is valid, including a $0 comp, since
-    # quotas read the plan without checking paid_until
-    if user.subscription is not None and user.subscription.plan_id != 0:
+    # Ensure a non-free subscription is valid, including a $0 comp with an
+    # end date, since quotas read the plan without checking paid_until; a
+    # comp with no end date runs indefinitely
+    sub = user.subscription
+    if (
+        sub is not None
+        and sub.plan_id != 0
+        and not (sub.price == 0 and sub.paid_until is None)
+    ):
         # Drop to free if payment hasn't been received in 5 minutes since
         # the transaction started, or the paid period has lapsed
         if (
@@ -152,14 +158,13 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             and user.subscription.paid_until < utcnow()
         ):
             logger.info(f"Checking subscription for {user.email}")
-            stripe_cust = stripe.get_customer(user.email)
-            if stripe_cust is not None:
-                stripe_subs = stripe.get_customer_subscriptions(
-                    customer_id=stripe_cust.id, status="active"
+            stripe_subs = [
+                sub
+                for cust in stripe.get_user_customers(user)
+                for sub in stripe.get_customer_subscriptions(
+                    customer_id=cust.id, status="active"
                 )
-            else:
-                logger.info(f"No Stripe customer exists for {user.email}")
-                stripe_subs = []
+            ]
             sub_valid = False
             for sub in stripe_subs:
                 if sub.current_period_end > utcnow().timestamp():

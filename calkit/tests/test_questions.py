@@ -463,6 +463,19 @@ def test_check_questions(tmp_dir):
         "results/findings.json",
         "results/findings.json",
     ]
+    # Without history, the same checks hold but nothing is compared
+    # against when the answer was written
+    no_history = check_questions(
+        ck_info=ck_info, wdir=".", check_history=False
+    )
+    q4 = no_history.questions[3]
+    assert [q.status for q in no_history.questions] == [
+        q.status for q in status.questions
+    ]
+    assert q4.commit is None
+    assert not no_history.changed
+    assert "not yet committed" not in (q4.message or "")
+    assert q4.evidence[4].status == "unattributed"
     report = format_status(status)
     # It still earns a block, since nothing else would say it
     assert "[ok] Do the top structures use the rectifier?" in report
@@ -857,19 +870,39 @@ def test_conditional_answers(tmp_dir):
 
 
 def test_format_summary():
-    assert format_summary([]) == "No questions defined."
+    from calkit.questions import QuestionCheck
+
+    def check(status, answered=True):
+        return QuestionCheck(
+            index=1, question="Q?", answered=answered, status=status
+        )
+
+    assert format_summary(QuestionsStatus()) == "No questions defined."
+    # One clean question reads as a verdict, and counts are singular
     assert (
-        format_summary([{"question": "Q?", "answer": "Yes."}])
-        == "1 question, all answered"
+        format_summary(QuestionsStatus(questions=[check("ok")]))
+        == "1 question, all answered with current evidence ✅"
     )
-    # Bare strings and empty answers are unanswered
-    questions = [
-        {"question": "Q1?", "answer": "Yes."},
-        {"question": "Q2?", "answer": ""},
-        {"question": "Q3?"},
-        "Q4?",
-    ]
-    assert format_summary(questions) == "4 questions, 3 unanswered"
+    # Everything worth knowing lands on the one line
+    summary = format_summary(
+        QuestionsStatus(
+            questions=[
+                check("ok"),
+                check("unanswered", answered=False),
+                check("unanswered", answered=False),
+                check("stale"),
+                check("missing"),
+                check("error"),
+                check("frozen"),
+                check("no-evidence"),
+            ]
+        )
+    )
+    assert summary == (
+        "8 questions, 2 unanswered, 1 with stale evidence, "
+        "1 with missing evidence, 1 with broken references, "
+        "1 resting on a frozen stage, 1 with no evidence"
+    )
 
 
 def test_latex_values(tmp_dir):

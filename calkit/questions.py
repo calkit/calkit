@@ -1369,6 +1369,7 @@ def check_question(
     history: CalkitYamlHistory | None = None,
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
+    check_history: bool = True,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
     if isinstance(question, str):
@@ -1388,7 +1389,7 @@ def check_question(
         )
     since = (
         question_commit(question, repo, wdir, history)
-        if repo is not None
+        if repo is not None and check_history
         else None
     )
     checks = [
@@ -1441,7 +1442,7 @@ def check_question(
             "evidence changed since the answer was last edited; worth "
             "re-reading, and editing the question if it no longer holds"
         )
-    if since is None and repo is not None:
+    if since is None and repo is not None and check_history:
         messages.append("not yet committed, so history cannot be checked")
     return QuestionCheck(
         index=index,
@@ -1493,6 +1494,7 @@ def check_questions(
     check_pipeline: bool = True,
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
+    check_history: bool = True,
 ) -> QuestionsStatus:
     """Check every question in a project against its evidence.
 
@@ -1500,6 +1502,11 @@ def check_questions(
     slowest thing here; turning it off skips that and the frozen check with
     it, leaving the rest of the report intact. A caller that already has
     those stage sets, e.g., ``calkit status``, can pass them instead.
+
+    ``check_history`` reads ``calkit.yaml``'s history to find evidence that
+    changed after an answer was last edited, which is most of what the
+    check costs once the pipeline is known; turning it off leaves every
+    other check as it is.
     """
     wdir = wdir or os.getcwd()
     if ck_info is None:
@@ -1511,7 +1518,11 @@ def check_questions(
     questions = ck_info.get("questions", []) or []
     # One reading of calkit.yaml's history, and one of the pipeline, for all
     # of them
-    history = CalkitYamlHistory(repo, wdir) if repo is not None else None
+    history = (
+        CalkitYamlHistory(repo, wdir)
+        if repo is not None and check_history
+        else None
+    )
     if stale_stages is None or frozen_stages is None:
         stale_stages, frozen_stages = pipeline_stage_sets(
             ck_info, wdir, check_pipeline
@@ -1527,6 +1538,7 @@ def check_questions(
                 history,
                 stale_stages=stale_stages,
                 frozen_stages=frozen_stages,
+                check_history=check_history,
             )
             for n, q in enumerate(questions, start=1)
         ]
@@ -1614,23 +1626,24 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     return "\n".join(lines)
 
 
-def is_answered(question: str | dict) -> bool:
-    """Whether a ``calkit.yaml`` question entry has an answer."""
-    return isinstance(question, dict) and bool(question.get("answer"))
-
-
-def format_summary(questions: list) -> str:
-    """One line counting a project's questions and how many are answered."""
-    n_questions = len(questions)
+def format_summary(status: QuestionsStatus) -> str:
+    """One line on the state of the project's questions."""
+    n_questions = len(status.questions)
     if not n_questions:
         return "No questions defined."
-    n_unanswered = n_questions - sum(is_answered(q) for q in questions)
-    return (
-        f"{n_questions} question"
-        + ("s" if n_questions != 1 else "")
-        + (
-            f", {n_unanswered} unanswered"
-            if n_unanswered
-            else ", all answered"
-        )
-    )
+    parts = [f"{n_questions} question" + ("s" if n_questions != 1 else "")]
+    counts = [
+        (n_questions - len(status.answered), "unanswered"),
+        (len(status.stale), "with stale evidence"),
+        (len(status.missing), "with missing evidence"),
+        (len(status.errors), "with broken references"),
+        (len(status.frozen), "resting on a frozen stage"),
+        (
+            sum(1 for q in status.answered if q.status == "no-evidence"),
+            "with no evidence",
+        ),
+    ]
+    parts += [f"{count} {label}" for count, label in counts if count]
+    if len(parts) == 1:
+        parts.append("all answered with current evidence ✅")
+    return ", ".join(parts)

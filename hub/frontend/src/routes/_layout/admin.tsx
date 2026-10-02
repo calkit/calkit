@@ -295,7 +295,7 @@ function UsersTable() {
               >
                 Full name
               </SortableTh>
-              <Th width="12%">GitHub username</Th>
+              <Th width="12%">GitHub name</Th>
               <SortableTh
                 width="18%"
                 active={sortBy === "email"}
@@ -313,7 +313,7 @@ function UsersTable() {
                 Signed up
               </SortableTh>
               <Th width="8%">Plan</Th>
-              <Th width="6%">Proj. (pvt)</Th>
+              <Th width="6%">Projects</Th>
               <Th width="6%">Storage</Th>
               <Th width="8%">Role</Th>
               <Th width="8%">Status</Th>

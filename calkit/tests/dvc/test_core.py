@@ -148,6 +148,45 @@ def test_tolerate_lock_release_failures(tmp_dir, caplog):
         zc.lockfile._unlock_file = original
 
 
+def test_memoized_hashes(tmp_dir, monkeypatch):
+    from dvc.output import Output
+
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    os.makedirs("data")
+    for n in range(3):
+        with open(f"data/{n}.txt", "w") as f:
+            f.write(str(n))
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  a:\n    cmd: echo a > a.txt\n    deps: [data]\n"
+            "    outs: [a.txt]\n"
+            "  b:\n    cmd: echo b > b.txt\n    deps: [data]\n"
+            "    outs: [b.txt]\n"
+        )
+    subprocess.check_call(["dvc", "repro", "-q"])
+    # Count the hashes DVC really computes, beneath the memo
+    hashed = []
+    original = Output._get_hash_meta
+
+    def counting(self):
+        hashed.append(self.def_path)
+        return original(self)
+
+    monkeypatch.setattr(Output, "_get_hash_meta", counting)
+    repo = dvc.repo.Repo()
+    with calkit.dvc.memoized_hashes():
+        assert repo.status() == {}
+    assert hashed.count("data") == 1
+    assert Output._get_hash_meta is counting
+    # A change is still seen by every stage that depends on it
+    with open("data/0.txt", "w") as f:
+        f.write("changed")
+    with calkit.dvc.memoized_hashes():
+        assert set(dvc.repo.Repo().status()) == {"a", "b"}
+
+
 def test_register_ck_scheme_updates_schema_and_registry():
     register_ck_scheme()
 

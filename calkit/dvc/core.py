@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Iterator
 from itertools import groupby
 from pathlib import Path
 from typing import Any, Literal
@@ -207,6 +208,39 @@ def dvc_lock_timeout(seconds: float):
         yield
     finally:
         dvc.lock.DEFAULT_TIMEOUT = previous
+
+
+@contextlib.contextmanager
+def memoized_hashes() -> Iterator[None]:
+    """Hash each output or dependency path only once while active.
+
+    DVC hashes a directory again for every stage that depends on it, walking
+    every file each time, so a dataset that feeds twenty stages is walked
+    twenty times by one ``status``. Nothing on disk changes during a status
+    check, so the first answer stands for the rest.
+    """
+    from dvc.output import Output
+
+    original = Output._get_hash_meta
+    memo: dict[tuple, Any] = {}
+
+    def _get_hash_meta(self: Any) -> Any:
+        key = (
+            id(self.repo),
+            self.fs.protocol,
+            self.fs_path,
+            self.hash_name,
+            self.use_cache,
+        )
+        if key not in memo:
+            memo[key] = original(self)
+        return memo[key]
+
+    Output._get_hash_meta = _get_hash_meta
+    try:
+        yield
+    finally:
+        Output._get_hash_meta = original
 
 
 class CalkitDVCFileSystem(ObjectFileSystem):

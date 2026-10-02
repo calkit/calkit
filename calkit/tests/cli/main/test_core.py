@@ -1074,9 +1074,14 @@ def test_status(tmp_dir):
     ).decode()
     assert "Questions" in out
     assert "2 questions, 1 unanswered" in out
-    # The value isn't attributed to any stage, which is an error, so the
-    # summary says to go look
+    # Only counted; checking against evidence is left to its own command
     assert "calkit check questions" in out
+    out = json.loads(
+        subprocess.check_output(
+            ["calkit", "status", "--json", "-c", "questions"]
+        )
+    )
+    assert out["questions"] == {"total": 2, "answered": 1, "unanswered": 1}
     # A project with no questions gets no section at all
     ck_info.pop("questions")
     with open("calkit.yaml", "w") as f:

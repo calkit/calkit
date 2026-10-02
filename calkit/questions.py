@@ -687,13 +687,55 @@ def _load_calkit_yaml_text(text: str) -> dict:
     """
     import yaml
 
+    # libyaml's loader, when PyYAML was built with it, is ~10x faster
+    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
     try:
-        loaded = yaml.safe_load(io.StringIO(text))
+        loaded = yaml.load(text, Loader=loader)
     except yaml.YAMLError:
         # A revision whose calkit.yaml uses something PyYAML refuses is
         # still worth reading; the round-trip parser is more forgiving
         loaded = calkit.ryaml.load(io.StringIO(text))
     return loaded if isinstance(loaded, dict) else {}
+
+
+class _MemoizedRepo:
+    """A repo whose ``git`` calls are run once per distinct set of arguments.
+
+    Checking questions asks the same few things of Git over and over, e.g.,
+    whether a results file is tracked and what it held at the commit an
+    answer was written, once for every value cited from it. Nothing a check
+    asks changes while it runs, so each is a subprocess only the first time.
+    """
+
+    def __init__(self, repo: Any) -> None:
+        self._repo = repo
+        self._memo: dict[tuple, tuple[bool, Any]] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._repo, name)
+
+    @property
+    def git(self) -> Any:
+        repo = self
+
+        class _Git:
+            def __getattr__(self, cmd: str) -> Any:
+                def call(*args: str) -> Any:
+                    key = (cmd, args)
+                    if key not in repo._memo:
+                        try:
+                            result = getattr(repo._repo.git, cmd)(*args)
+                            repo._memo[key] = (True, result)
+                        except Exception as e:
+                            repo._memo[key] = (False, e)
+                    ok, value = repo._memo[key]
+                    if not ok:
+                        raise value
+                    return value
+
+                return call
+
+        return _Git()
 
 
 class CalkitYamlHistory:
@@ -1463,7 +1505,7 @@ def check_questions(
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     try:
-        repo = calkit.git.get_repo(wdir)
+        repo = _MemoizedRepo(calkit.git.get_repo(wdir))
     except Exception:
         repo = None
     questions = ck_info.get("questions", []) or []
@@ -1572,24 +1614,23 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     return "\n".join(lines)
 
 
-def format_summary(status: QuestionsStatus) -> str:
-    """One line on the state of the project's questions."""
-    n_questions = len(status.questions)
+def is_answered(question: str | dict) -> bool:
+    """Whether a ``calkit.yaml`` question entry has an answer."""
+    return isinstance(question, dict) and bool(question.get("answer"))
+
+
+def format_summary(questions: list) -> str:
+    """One line counting a project's questions and how many are answered."""
+    n_questions = len(questions)
     if not n_questions:
         return "No questions defined."
-    parts = [f"{n_questions} question" + ("s" if n_questions != 1 else "")]
-    counts = [
-        (n_questions - len(status.answered), "unanswered"),
-        (len(status.stale), "with stale evidence"),
-        (len(status.missing), "with missing evidence"),
-        (len(status.errors), "with broken references"),
-        (len(status.frozen), "resting on a frozen stage"),
-        (
-            sum(1 for q in status.answered if q.status == "no-evidence"),
-            "with no evidence",
-        ),
-    ]
-    parts += [f"{count} {label}" for count, label in counts if count]
-    if len(parts) == 1:
-        parts.append("all answered with current evidence ✅")
-    return ", ".join(parts)
+    n_unanswered = n_questions - sum(is_answered(q) for q in questions)
+    return (
+        f"{n_questions} question"
+        + ("s" if n_questions != 1 else "")
+        + (
+            f", {n_unanswered} unanswered"
+            if n_unanswered
+            else ", all answered"
+        )
+    )

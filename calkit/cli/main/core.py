@@ -274,8 +274,7 @@ def init(
 
     if project_is_initialized() and not force:
         raise_error(
-            "This project is already initialized. "
-            "Use --force to re-initialize."
+            "This project is already initialized. Use --force to re-initialize."
         )
     # Only create a Git repo if we're not already inside one; a project
     # can be a self-contained directory within a larger repo, and nesting
@@ -511,7 +510,8 @@ def get_status(
     from git.exc import InvalidGitRepositoryError
 
     dotenv.load_dotenv(dotenv_path=".env")
-    ck_info = calkit.load_calkit_info()
+    # Status only reads calkit.yaml, so skip the slower round-trip parser
+    ck_info = calkit.load_calkit_info(read_only=True)
     # Status is usually the first command someone runs on a project that
     # isn't theirs, which is exactly when the variables it declares are
     # missing. Ask while there's somebody to answer -- the environment
@@ -582,37 +582,11 @@ def get_status(
                 "Failed pipeline environment checks for: "
                 + ", ".join(pipeline_status.failed_environment_checks)
             )
-    # Checking questions needs to know which stages are stale, which is the
-    # expensive part of the pipeline status computed above, so reuse that
-    # rather than asking DVC a second time
-    questions_status = None
-    if "questions" in categories and ck_info.get("questions"):
-        from calkit.pipeline import frozen_tainted_stage_names
-        from calkit.questions import check_questions
-
-        stale_stages = None
-        frozen_stages = None
-        # A pipeline status that bailed out, e.g., on a failed environment
-        # check, has no staleness in it; let the check work it out itself
-        # rather than reporting evidence as current because nothing was
-        # computed
-        if (
-            pipeline_status is not None
-            and not pipeline_status.errors
-            and not pipeline_status.failed_environment_checks
-        ):
-            stale_stages = {
-                n.split("@")[0] for n in pipeline_status.stale_stage_names
-            }
-            try:
-                frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
-            except Exception:
-                frozen_stages = set()
-        questions_status = check_questions(
-            ck_info=ck_info,
-            stale_stages=stale_stages,
-            frozen_stages=frozen_stages,
-        )
+    # Only counted here; checking answers against their evidence reads
+    # history and is left to 'calkit check questions'
+    questions = (
+        ck_info.get("questions") or [] if "questions" in categories else []
+    )
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:
@@ -626,8 +600,15 @@ def get_status(
                     "timestamp": status.timestamp.isoformat(),
                 }
             )
-        if questions_status is not None:
-            status_dict["questions"] = questions_status.model_dump(mode="json")
+        if questions:
+            from calkit.questions import is_answered
+
+            n_answered = sum(is_answered(q) for q in questions)
+            status_dict["questions"] = {
+                "total": len(questions),
+                "answered": n_answered,
+                "unanswered": len(questions) - n_answered,
+            }
         if "git" in categories:
             try:
                 repo = calkit.git.get_repo()
@@ -710,15 +691,15 @@ def get_status(
                 'Project status not set. Use "calkit new status" to update.'
             )
         typer.echo()
-    if questions_status is not None:
+    if questions:
         from calkit.questions import format_summary
 
         print_sep("Questions")
-        # The summary can carry a check mark, which a Windows console
-        # can't encode
-        calkit.echo(format_summary(questions_status))
-        if not questions_status.ok:
-            typer.echo("Run 'calkit check questions' for detail.")
+        typer.echo(format_summary(questions))
+        typer.echo(
+            "Run 'calkit check questions' to check answers against their "
+            "evidence."
+        )
         typer.echo()
     if "git" in categories:
         print_sep("Git")
@@ -1147,8 +1128,7 @@ def add(
                 if pipeline_storage == "git":
                     if dry_run:
                         typer.echo(
-                            f"Would add {path} to Git "
-                            "(pipeline output storage)"
+                            f"Would add {path} to Git (pipeline output storage)"
                         )
                     else:
                         typer.echo(
@@ -2416,8 +2396,7 @@ def _print_running_pipeline_status(running_status: dict) -> None:
             label = typer.style(name, fg="green")
             if start:
                 typer.echo(
-                    f"        running:   {label} "
-                    f"({_format_run_elapsed(start)})"
+                    f"        running:   {label} ({_format_run_elapsed(start)})"
                 )
             else:
                 typer.echo(f"        running:   {label}")

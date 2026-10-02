@@ -934,6 +934,7 @@ def get_status(
                     f"{e.__class__.__name__}: {e}"
                 )
                 return PipelineStatus.model_validate(result)
+        import dvc.repo
         from dvc.lock import LockError
 
         try:
@@ -944,7 +945,17 @@ def get_status(
             # DVC's own target filtering can miss stale propagation from
             # isolated subprojects, which makes targeted status disagree with
             # the full-project status view.
-            raw_status = dvc_repo.status()
+            # Held across both so DVC doesn't drop the index it built for
+            # status and build it again for the outputs
+            with (
+                dvc.repo.lock_repo(dvc_repo),
+                calkit.dvc.memoized_hashes(),
+            ):
+                raw_status = dvc_repo.status()
+                dvc_out_paths = [
+                    Path(os.path.relpath(out.fs_path)).as_posix()
+                    for out in dvc_repo.index.outs
+                ]
             raw_status = calkit.dvc.status_as_posix(raw_status)
         except LockError:
             # Another DVC process is holding the repo lock---most often a
@@ -1207,9 +1218,7 @@ def get_status(
         # actually needs listing, so a pipeline without directory inputs
         # never pays for them.
         ignored_files_by_dir: dict[str, list[str]] = {}
-        git_repo = None
-        git_root = ""
-        dvc_out_paths: list[str] = []
+        stage_dirs: list[tuple[str, str]] = []
         for name, stage_def in dvc_yaml_stage_defs.items():
             if not isinstance(stage_def, dict):
                 continue
@@ -1230,71 +1239,70 @@ def get_status(
                     for target in targets
                 ):
                     continue
-                if dep_path not in ignored_files_by_dir:
-                    if git_repo is None:
-                        git_repo = calkit.git.get_repo()
-                        git_root = str(git_repo.working_tree_dir)
-                        dvc_out_paths = [
-                            Path(os.path.relpath(out.fs_path)).as_posix()
-                            for out in dvc_repo.index.outs
-                        ]
-                    # Git prints paths relative to the repo root, which may be
-                    # above the project, so make them project-relative; -z
-                    # keeps unusual file names from being quoted
-                    listing = git_repo.git.ls_files(
-                        "-z",
-                        "--others",
-                        "--ignored",
-                        "--exclude-standard",
-                        "--",
-                        os.path.abspath(dep_path),
-                    )
-                    files: list[str] = []
-                    for ignored_path in listing.split("\0"):
-                        if not ignored_path:
-                            continue
-                        ignored_path = Path(
-                            os.path.relpath(
-                                os.path.join(git_root, ignored_path)
-                            )
-                        ).as_posix()
-                        if any(
-                            ignored_path == out
-                            or ignored_path.startswith(out + "/")
-                            for out in dvc_out_paths
-                        ):
-                            continue
-                        if dvc_repo.dvcignore.is_ignored_file(
-                            os.path.abspath(ignored_path)
-                        ):
-                            continue
-                        files.append(ignored_path)
-                    ignored_files_by_dir[dep_path] = files
-                files = ignored_files_by_dir[dep_path]
-                if not files:
+                stage_dirs.append((name, dep_path))
+        if stage_dirs:
+            dirs = list(dict.fromkeys(d for _, d in stage_dirs))
+            ignored_files_by_dir = {d: [] for d in dirs}
+            git_repo = calkit.git.get_repo()
+            git_root = str(git_repo.working_tree_dir)
+            # One listing for every directory, chunked to stay under
+            # command line length limits, rather than a subprocess each
+            listing = ""
+            for i in range(0, len(dirs), 100):
+                # Git prints paths relative to the repo root, which may be
+                # above the project, so make them project-relative; -z
+                # keeps unusual file names from being quoted
+                listing += git_repo.git.ls_files(
+                    "-z",
+                    "--others",
+                    "--ignored",
+                    "--exclude-standard",
+                    "--",
+                    *[os.path.abspath(d) for d in dirs[i : i + 100]],
+                )
+                listing += "\0"
+            for ignored_path in dict.fromkeys(listing.split("\0")):
+                if not ignored_path:
                     continue
-                # When DVC reports the directory (or, if the dep was expanded
-                # around a subproject, a path inside it) as modified, annotate
-                # that input on the stale stage; otherwise it goes in the
-                # status-wide list as something that will bite elsewhere
-                annotated = False
-                for stale_stage in stale_by_base.get(name, []):
-                    for modified_input in stale_stage.modified_inputs:
-                        inside = [
-                            p
-                            for p in files
-                            if p == modified_input
-                            or p.startswith(modified_input.rstrip("/") + "/")
-                        ]
-                        if inside:
-                            stale_stage.ignored_files_in_inputs[
-                                modified_input
-                            ] = inside
-                            annotated = True
-                if not annotated:
-                    ignored_files_in_inputs.setdefault(name, {})[dep_path] = (
-                        files
-                    )
+                ignored_path = Path(
+                    os.path.relpath(os.path.join(git_root, ignored_path))
+                ).as_posix()
+                if any(
+                    ignored_path == out or ignored_path.startswith(out + "/")
+                    for out in dvc_out_paths
+                ):
+                    continue
+                if dvc_repo.dvcignore.is_ignored_file(
+                    os.path.abspath(ignored_path)
+                ):
+                    continue
+                for d in dirs:
+                    if ignored_path.startswith(d + "/") or d == ".":
+                        ignored_files_by_dir[d].append(ignored_path)
+        for name, dep_path in stage_dirs:
+            files = ignored_files_by_dir[dep_path]
+            if not files:
+                continue
+            # When DVC reports the directory (or, if the dep was expanded
+            # around a subproject, a path inside it) as modified, annotate
+            # that input on the stale stage; otherwise it goes in the
+            # status-wide list as something that will bite elsewhere
+            annotated = False
+            for stale_stage in stale_by_base.get(name, []):
+                for modified_input in stale_stage.modified_inputs:
+                    inside = [
+                        p
+                        for p in files
+                        if p == modified_input
+                        or p.startswith(modified_input.rstrip("/") + "/")
+                    ]
+                    if inside:
+                        stale_stage.ignored_files_in_inputs[modified_input] = (
+                            inside
+                        )
+                        annotated = True
+            if not annotated:
+                ignored_files_in_inputs.setdefault(name, {})[dep_path] = files
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],

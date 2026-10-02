@@ -1157,7 +1157,7 @@ def detect_project_name(
     If ``prepend_owner`` is False, fall back to the working directory name
     if there is no Git remote or name specified in ``calkit.yaml``.
     """
-    ck_info = load_calkit_info(wdir=wdir)
+    ck_info = load_calkit_info(wdir=wdir, read_only=True)
     name = ck_info.get("name")
     if name is not None and not prepend_owner:
         return name

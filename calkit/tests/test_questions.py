@@ -857,39 +857,19 @@ def test_conditional_answers(tmp_dir):
 
 
 def test_format_summary():
-    from calkit.questions import QuestionCheck
-
-    def check(status, answered=True):
-        return QuestionCheck(
-            index=1, question="Q?", answered=answered, status=status
-        )
-
-    assert format_summary(QuestionsStatus()) == "No questions defined."
-    # One clean question reads as a verdict, and counts are singular
+    assert format_summary([]) == "No questions defined."
     assert (
-        format_summary(QuestionsStatus(questions=[check("ok")]))
-        == "1 question, all answered with current evidence ✅"
+        format_summary([{"question": "Q?", "answer": "Yes."}])
+        == "1 question, all answered"
     )
-    # Everything worth knowing lands on the one line
-    summary = format_summary(
-        QuestionsStatus(
-            questions=[
-                check("ok"),
-                check("unanswered", answered=False),
-                check("unanswered", answered=False),
-                check("stale"),
-                check("missing"),
-                check("error"),
-                check("frozen"),
-                check("no-evidence"),
-            ]
-        )
-    )
-    assert summary == (
-        "8 questions, 2 unanswered, 1 with stale evidence, "
-        "1 with missing evidence, 1 with broken references, "
-        "1 resting on a frozen stage, 1 with no evidence"
-    )
+    # Bare strings and empty answers are unanswered
+    questions = [
+        {"question": "Q1?", "answer": "Yes."},
+        {"question": "Q2?", "answer": ""},
+        {"question": "Q3?"},
+        "Q4?",
+    ]
+    assert format_summary(questions) == "4 questions, 3 unanswered"
 
 
 def test_latex_values(tmp_dir):

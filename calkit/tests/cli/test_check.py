@@ -1262,13 +1262,11 @@ def test_check_questions(tmp_dir):
     ck_info["questions"][0]["evidence"][0].pop("git_ref")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    # Status summarizes the questions, with the detail left to this check
-    out = subprocess.check_output(["calkit", "status", "--json"], text=True)
-    assert json.loads(out)["questions"]["questions"][0]["index"] == 1
+    # Status only counts the questions, with the detail left to this check
     out = subprocess.check_output(
         ["calkit", "status", "-c", "questions"], text=True
     )
-    assert "1 question, all answered with current evidence" in out
+    assert "1 question, all answered" in out
     out = subprocess.check_output(["calkit", "list", "questions"], text=True)
     assert "answer: 0 of eight do." in out
     # Reviewing the answer is an edit to the question, which clears the

@@ -36,8 +36,9 @@ a number nobody can check, and it goes stale the moment a stage reruns. The
 number reaches the page through the pipeline: a stage computes it and
 writes it to a results file, a `json-to-latex` stage turns that file into
 LaTeX commands, and the manuscript says `\result[Speedup]`. The same
-applies to figures (`\ckfigure{...}` over a pipeline output) and to the
-answers in `calkit.yaml` (`{name}` placeholders over `value` evidence).
+applies to figures (an ordinary `\includegraphics` over a pipeline
+output, which Calkit traces on its own) and to the answers in
+`calkit.yaml` (`{name}` placeholders over `value` evidence).
 
 If you find yourself about to write `2.4x` into a `.tex` file, stop: that
 is the hole, not the fix. The `check-reproducibility` skill covers finding
@@ -76,8 +77,10 @@ building a pipeline from scratch.
 
 4. **Inject, don't copy.** Add a `json-to-latex` stage over the results
    file and reference the values from the manuscript with the generated
-   command. Replace the TODO with the sentence the user wrote, now with
-   `\result[...]` where the hole was.
+   command. Add `\usepackage[provenance]{calkit}` and set `provenance: true`
+   on the `latex` stage so every injected value is marked and the build
+   writes a provenance record. Replace the TODO with the sentence the user
+   wrote, now with `\result[...]` where the hole was.
 
 5. **Make the question match the paper.** A claim in the paper is an answer
    to a question. Add or update the entry under `questions` in

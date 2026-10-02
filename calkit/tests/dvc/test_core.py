@@ -204,6 +204,7 @@ def test_memoized_hashes(tmp_dir, monkeypatch):
     with open("out/0.txt", "w") as f:
         f.write("changed")
     _, data_status = check()
+    data_status = calkit.dvc.data_status_as_posix(data_status)
     assert data_status["uncommitted"] == {"modified": ["out/"]}
 
 

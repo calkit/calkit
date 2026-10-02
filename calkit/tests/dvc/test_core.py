@@ -205,7 +205,7 @@ def test_memoized_hashes(tmp_dir, monkeypatch):
         f.write("changed")
     _, data_status = check()
     data_status = calkit.dvc.data_status_as_posix(data_status)
-    assert data_status["uncommitted"] == {"modified": ["out/"]}
+    assert data_status["uncommitted"] == {"modified": ["out"]}
 
 
 def test_register_ck_scheme_updates_schema_and_registry():

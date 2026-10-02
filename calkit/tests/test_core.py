@@ -124,6 +124,19 @@ def test_load_calkit_info(tmp_dir, monkeypatch):
     ck_info = calkit.load_calkit_info()
     assert ck_info["environments"]["env1"]["image"] == "ubuntu"
     assert ck_info["environments"]["env2"]["image"] == "openfoam"
+    # The fast loader reads scalars as YAML 1.2, like the round-trip one,
+    # rather than PyYAML's 1.1, where these would be bools, 90, and 8
+    with open("calkit.yaml", "w") as f:
+        f.write("name: on\nanswer: no\ntime: 1:30\ncount: 010\nok: true\n")
+    expected = {
+        "name": "on",
+        "answer": "no",
+        "time": "1:30",
+        "count": 10,
+        "ok": True,
+    }
+    assert calkit.load_calkit_info(read_only=True) == expected
+    assert calkit.load_calkit_info() == expected
     # A project with no calkit.yaml loads as an empty dict
     os.remove("calkit.yaml")
     assert calkit.load_calkit_info() == {}

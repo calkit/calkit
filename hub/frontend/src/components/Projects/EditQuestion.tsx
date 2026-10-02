@@ -5,6 +5,7 @@ import {
   Flex,
   FormControl,
   FormErrorMessage,
+  FormHelperText,
   FormLabel,
   IconButton,
   Input,
@@ -54,14 +55,16 @@ interface EvidenceRow {
   // Combined "kind:path" so a single dropdown can pick figure or result.
   selection: string
   key: string
+  // What the value is called in the answer's "{name}" placeholders, and
+  // edited beside its key
+  name: string
   explanation: string
   // Not editable here: evidence can name the ref it was written against,
   // and the form rewrites the whole list, so a row that carries one has to
   // hand it back or saving an unrelated edit would quietly drop it.
   gitRef?: string
-  // Carried back for the same reason: a template names its value, and a
-  // citation of a publication or document points at a section of it.
-  name?: string
+  // Carried back for the same reason: a citation of a publication or
+  // document points at a section of it.
   section?: string
   label?: string
   // A result's named values, which the form doesn't edit but must keep,
@@ -79,6 +82,10 @@ interface EditQuestionForm {
 
 const rowToSelection = (kind: string, path: string) => `${kind}:${path}`
 
+// Kinds that point at one value inside a results file. "value" is the
+// current form; "result" with a key is the one it replaced.
+const KEYED_KINDS = new Set(["value", "result"])
+
 const parseSelection = (selection: string) => {
   const idx = selection.indexOf(":")
   if (idx < 0) {
@@ -87,6 +94,7 @@ const parseSelection = (selection: string) => {
   return {
     kind: selection.slice(0, idx) as
       | "figure"
+      | "value"
       | "result"
       | "value"
       | "table"
@@ -166,9 +174,9 @@ const EditQuestion = ({
       evidence: (question.evidence ?? []).map((ev) => ({
         selection: rowToSelection(ev.kind, ev.path),
         key: ev.key ?? "",
+        name: ev.name ?? "",
         explanation: ev.explanation ?? "",
         gitRef: ev.git_ref ?? undefined,
-        name: ev.name ?? undefined,
         section: ev.section ?? undefined,
         label: ev.label ?? undefined,
         values: ev.values
@@ -193,16 +201,17 @@ const EditQuestion = ({
             if (!parsed) {
               return []
             }
+            const keyed = KEYED_KINDS.has(parsed.kind) && !!row.key
             return [
               {
-                kind: parsed.kind,
+                // A result with a key is one value inside a file, which
+                // is what "value" means. `calkit check questions` says so
+                // on every run against the older spelling, so saving here
+                // writes the one it asks for.
+                kind: keyed ? "value" : parsed.kind,
                 path: parsed.path,
-                key:
-                  (parsed.kind === "result" || parsed.kind === "value") &&
-                  row.key
-                    ? row.key
-                    : undefined,
-                name: row.name ? row.name : undefined,
+                key: keyed ? row.key : undefined,
+                name: keyed && row.name ? row.name : undefined,
                 values:
                   parsed.kind === "result" &&
                   row.values &&
@@ -305,7 +314,12 @@ const EditQuestion = ({
                 size="xs"
                 ml={-1.5}
                 onClick={() =>
-                  append({ selection: "", key: "", explanation: "" })
+                  append({
+                    selection: "",
+                    key: "",
+                    name: "",
+                    explanation: "",
+                  })
                 }
               />
             </Flex>
@@ -331,7 +345,7 @@ const EditQuestion = ({
               const selectionInList =
                 (parsed?.kind === "figure" &&
                   figures.some((f) => f.path === parsed.path)) ||
-                (parsed?.kind === "result" &&
+                ((parsed?.kind === "result" || parsed?.kind === "value") &&
                   results.some((r) => r.path === parsed.path)) ||
                 (parsed?.kind === "table" &&
                   tables.some((t) => t.path === parsed.path)) ||
@@ -350,10 +364,6 @@ const EditQuestion = ({
                   <input
                     type="hidden"
                     {...register(`evidence.${index}.gitRef`)}
-                  />
-                  <input
-                    type="hidden"
-                    {...register(`evidence.${index}.name`)}
                   />
                   <input
                     type="hidden"
@@ -453,18 +463,46 @@ const EditQuestion = ({
                         </Text>
                       ))}
                     </Box>
-                  ) : parsed?.kind === "result" || parsed?.kind === "value" ? (
-                    <FormControl mb={2}>
-                      <FormLabel fontSize="xs" mb={1}>
-                        Key (optional)
-                      </FormLabel>
-                      <Input
-                        autoComplete="off"
-                        {...register(`evidence.${index}.key`)}
-                        placeholder="e.g. mean"
-                        size="sm"
-                      />
-                    </FormControl>
+                  ) : parsed && KEYED_KINDS.has(parsed.kind) ? (
+                    <>
+                      <FormControl mb={2}>
+                        <FormLabel fontSize="xs" mb={1}>
+                          Key (optional)
+                        </FormLabel>
+                        <Input
+                          autoComplete="off"
+                          data-form-type="other"
+                          data-lpignore="true"
+                          {...register(`evidence.${index}.key`)}
+                          placeholder="e.g., mean, or cases.a.cp"
+                          size="sm"
+                        />
+                        <FormHelperText fontSize="xs">
+                          One value inside the file. Dots reach into nested
+                          output, and whole numbers index into lists.
+                        </FormHelperText>
+                      </FormControl>
+                      {watch(`evidence.${index}.key`) ? (
+                        <FormControl mb={2}>
+                          <FormLabel fontSize="xs" mb={1}>
+                            Name (optional)
+                          </FormLabel>
+                          <Input
+                            autoComplete="off"
+                            data-form-type="other"
+                            data-lpignore="true"
+                            {...register(`evidence.${index}.name`)}
+                            placeholder="e.g., improvement"
+                            size="sm"
+                          />
+                          <FormHelperText fontSize="xs">
+                            What to call it in the answer, as{" "}
+                            <Code fontSize="xs">{"{name}"}</Code>. Defaults to
+                            the key, so a key with dots in it needs one.
+                          </FormHelperText>
+                        </FormControl>
+                      ) : null}
+                    </>
                   ) : null}
                   <FormControl>
                     <FormLabel fontSize="xs" mb={1}>

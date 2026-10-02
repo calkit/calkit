@@ -34,6 +34,7 @@ import { type UserPublic, UsersService } from "../../client"
 import AddUser from "../../components/Admin/AddUser"
 import EditUserSubscription from "../../components/Admin/EditUserSubscription"
 import ClearableInput from "../../components/Common/ClearableInput"
+import Tooltip from "../../components/Common/Tooltip"
 import FeatureVotesTable from "../../components/Admin/FeatureVotesTable"
 import FeedbackTable from "../../components/Admin/FeedbackTable"
 import ActionsMenu from "../../components/Common/ActionsMenu"
@@ -359,7 +360,9 @@ function UsersTable() {
                     )}
                   </Td>
                   <Td isTruncated maxWidth="150px">
-                    {user.email}
+                    <Tooltip label={user.email}>
+                      <span>{user.email}</span>
+                    </Tooltip>
                   </Td>
                   <Td fontSize="sm">{formatTimestamp(user.created)}</Td>
                   <Td>

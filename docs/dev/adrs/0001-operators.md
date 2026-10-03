@@ -598,6 +598,10 @@ so it follows the pipeline integration phase.
    Operators stay owner-only until how others may use one is decided;
    anything run for someone else would be sandboxed, e.g., in a
    container with only their workspace mounted.
+   The same goes for donating spare compute to others' projects, e.g.,
+   building their LaTeX papers, which also needs results checked, e.g.,
+   by running a job on two machines, and is a sharing policy on brokered
+   compute (#1749).
    A shared machine gives each user their own Operator, through
    JupyterHub where it has one (#1744), rather
    than one Operator running as root.

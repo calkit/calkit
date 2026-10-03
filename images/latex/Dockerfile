@@ -40,7 +40,11 @@ RUN fmtutil-sys --all
 # demand isn't enough on its own. aastex631.cls refuses to load without
 # revtex4-1 and stops without reporting a missing file. newtx needs
 # txfonts' metrics, which surface as "Metric (TFM) file not found"
-# rather than as a missing .sty. Nothing can auto-install either.
+# rather than as a missing .sty, and tex-gyre's for its text-companion
+# (TS1) symbols, e.g., \textdegree or \textmu, which load TeX Gyre
+# Termes (ts1-qtmr) and fail the same way. Nothing can auto-install
+# either. tex-gyre is about 27 MB, most of it fonts no class asks for,
+# but tlmgr can't install part of a package.
 # sectsty and cite are what Calkit's own paper templates ask for, which
 # is what someone starting a project gets before they have asked for
 # anything.
@@ -87,6 +91,7 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
             caption \
             newtx \
             txfonts \
+            tex-gyre \
             xpatch \
             xstring \
             carlisle \

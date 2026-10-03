@@ -131,6 +131,7 @@ def _to_shell_cmd(cmd: list[str]) -> str:
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool,
         typer.Option("--version", help="Show version and exit."),
@@ -175,6 +176,7 @@ def main(
     # didn't, so a CALKIT_HUB in .env sent the two to different hubs.
     dotenv.load_dotenv(dotenv_path=".env")
     _warn_on_stale_calkit_env()
+    calkit.upgrade.check(ctx.invoked_subcommand)
 
 
 def _warn_on_stale_calkit_env() -> None:
@@ -516,8 +518,18 @@ def get_status(
     import git
     from git.exc import InvalidGitRepositoryError
 
+    def get_dvc_data_status() -> dict:
+        # Reuse what the pipeline status computed under the same DVC lock
+        if (
+            pipeline_status is not None
+            and pipeline_status.dvc_data_status is not None
+        ):
+            return dict(pipeline_status.dvc_data_status)
+        return dict(calkit.dvc.get_dvc_repo().data_status())
+
     dotenv.load_dotenv(dotenv_path=".env")
-    ck_info = calkit.load_calkit_info()
+    # Status only reads calkit.yaml, so skip the slower round-trip parser
+    ck_info = calkit.load_calkit_info(read_only=True)
     # Status is usually the first command someone runs on a project that
     # isn't theirs, which is exactly when the variables it declares are
     # missing. Ask while there's somebody to answer -- the environment
@@ -582,6 +594,7 @@ def get_status(
             check_environments=not no_check_envs,
             clean_notebooks=True,
             compile_to_dvc=True,
+            with_data_status="dvc" in categories,
         )
         if pipeline_status.failed_environment_checks:
             warn(
@@ -614,10 +627,13 @@ def get_status(
                 frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
             except Exception:
                 frozen_stages = set()
+        # The summary doesn't say what changed since an answer was edited,
+        # which is the only part that needs history, so skip reading it
         questions_status = check_questions(
             ck_info=ck_info,
             stale_stages=stale_stages,
             frozen_stages=frozen_stages,
+            check_history=False,
         )
     if as_json:
         status_dict: dict[str, Any] = {}
@@ -677,8 +693,7 @@ def get_status(
                 status_dict["git"] = {"error": "Not a Git repository"}
         if "dvc" in categories:
             try:
-                dvc_repo = calkit.dvc.get_dvc_repo()
-                data_status = dict(dvc_repo.data_status())
+                data_status = get_dvc_data_status()
                 data_status.pop("git", None)
                 status_dict["dvc"] = calkit.dvc.data_status_as_posix(
                     data_status
@@ -747,8 +762,7 @@ def get_status(
             )
         else:
             zip_path_map = calkit.dvc.zip.get_zip_path_map()
-            dvc_repo = calkit.dvc.get_dvc_repo()
-            raw = dict(dvc_repo.data_status())
+            raw = get_dvc_data_status()
             raw.pop("git", None)
             raw = calkit.dvc.data_status_as_posix(raw)
             typer.echo(_format_dvc_data_status(raw, zip_path_map))
@@ -1786,9 +1800,13 @@ def push(
             if not success:
                 # Leaving the tag would fake a registry digest on the image
                 calkit.docker.untag_image(remote_ref)
+                hint = calkit.docker.registry_login_hint(
+                    remote_ref, push_output
+                )
                 warn(
                     f"Failed to push image to {remote_ref}\n"
                     + textwrap.indent(push_output.strip()[-500:], "    ")
+                    + (f"\n{hint}" if hint else "")
                 )
     if "git" in selected:
         typer.echo("Pushing to Git remote")
@@ -4365,42 +4383,26 @@ def upgrade(
         bool, typer.Option("--skills", help="Upgrade agent skills as well.")
     ] = False,
 ) -> None:
-    """Upgrade Calkit."""
-    # First detect how Calkit is installed
-    # If installed with uv tool, calkit will be located at something like
-    # ~/.local/bin/calkit
-    which_calkit = shutil.which("calkit")
-    if which_calkit is None:
-        raise_error("Calkit is not installed")
-    split_path = os.path.normpath(str(which_calkit)).split(os.sep)
-    if (
-        ".local" in split_path
-        and "bin" in split_path
-        and calkit.check_dep_exists("uv")
-    ):
-        # This is a uv tool install
-        cmd = [
-            "uv",
-            "tool",
-            "install",
-            "--upgrade",
-            "calkit-python",
-        ]
-    elif "pipx" in split_path and calkit.check_dep_exists("pipx"):
-        cmd = ["pipx", "upgrade", "calkit-python"]
-    else:
-        cmd = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--upgrade",
-            "calkit-python",
-        ]
-    res = subprocess.run(cmd)
-    if res.returncode != 0:
-        raise_error("Upgrade failed")
-    typer.echo("Success!")
+    """Upgrade Calkit.
+
+    A dev (editable) install is updated from the branch it's on, as with
+    'calkit dev upgrade'.
+    """
+    from calkit.upgrade import (
+        get_dev_upgrade_cmds,
+        get_editable_path,
+        get_upgrade_cmd,
+        run_upgrade_cmds,
+    )
+
+    try:
+        if get_editable_path() is not None:
+            cmds = get_dev_upgrade_cmds()
+        else:
+            cmds = [get_upgrade_cmd()]
+        run_upgrade_cmds(cmds)
+    except Exception as e:
+        raise_error(str(e))
     if skills:
         from calkit.cli.update import update_agent_skills
 

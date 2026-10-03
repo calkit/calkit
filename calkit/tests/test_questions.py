@@ -70,6 +70,14 @@ def test_render():
         render("{missing}", values)
     with pytest.raises(ValueError):
         render("{best:.2f}", values)
+    # A value the spec can't take at all, e.g., a null, is a ValueError
+    # too, not a TypeError nothing expects
+    for bad in (None, {"a": 1}):
+        with pytest.raises(ValueError, match="cannot be formatted"):
+            render("{x:.2f}", {"x": bad})
+    # The check reports it as a problem rather than crashing
+    problems = calkit.questions._placeholder_problems("{x:.2f}", {"x": None})
+    assert problems and "cannot render" in problems[0]
 
 
 def _commit(msg: str) -> str:
@@ -455,6 +463,19 @@ def test_check_questions(tmp_dir):
         "results/findings.json",
         "results/findings.json",
     ]
+    # Without history, the same checks hold but nothing is compared
+    # against when the answer was written
+    no_history = check_questions(
+        ck_info=ck_info, wdir=".", check_history=False
+    )
+    q4 = no_history.questions[3]
+    assert [q.status for q in no_history.questions] == [
+        q.status for q in status.questions
+    ]
+    assert q4.commit is None
+    assert not no_history.changed
+    assert "not yet committed" not in (q4.message or "")
+    assert q4.evidence[4].status == "unattributed"
     report = format_status(status)
     # It still earns a block, since nothing else would say it
     assert "[ok] Do the top structures use the rectifier?" in report

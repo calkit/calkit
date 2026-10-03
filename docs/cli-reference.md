@@ -523,6 +523,8 @@ Arguments:
 
 Upgrade Calkit.
 
+A dev (editable) install is updated from the branch it's on, as with 'calkit dev upgrade'.
+
 Usage:
 
 ```text
@@ -3915,10 +3917,11 @@ Options:
 
 Developer tools.
 
-| Command                              | Description                                     |
-| ------------------------------------ | ----------------------------------------------- |
-| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.  |
-| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment. |
+| Command                              | Description                                                     |
+| ------------------------------------ | --------------------------------------------------------------- |
+| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.                  |
+| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment.                 |
+| [`upgrade`](#subcommand-dev-upgrade) | Update a dev (editable) install: pull the branch and reinstall. |
 
 <a id="subcommand-dev-python"></a>
 
@@ -3943,6 +3946,24 @@ Usage:
 ```text
 calkit dev ipython [OPTIONS]
 ```
+
+<a id="subcommand-dev-upgrade"></a>
+
+#### `calkit dev upgrade`
+
+Update a dev (editable) install: pull the branch and reinstall.
+
+Usage:
+
+```text
+calkit dev upgrade [BRANCH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                                                    |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `branch` | str  | no       |         | Branch to install from: the worktree that has it checked out, or else the install's own, if it has no changes. Defaults to the current branch. |
 
 <a id="command-group-sync"></a>
 

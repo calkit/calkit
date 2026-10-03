@@ -1458,12 +1458,16 @@ def check_docker_env(
                     # Leaving the tag would fake a registry digest on the
                     # image, making every later push look unnecessary
                     ck_docker.untag_image(remote_ref)
+                    hint = ck_docker.registry_login_hint(
+                        remote_ref, push_output
+                    )
                     warn(
                         f"Failed to push image to {remote_ref}; its lock "
                         "file will record no digest, so anyone else who "
                         "uses this project will rebuild this image rather "
                         "than pull it\n"
                         + textwrap.indent(push_output.strip()[-500:], "    ")
+                        + (f"\n{hint}" if hint else "")
                     )
         identity = dict(identity, RepoDigests=remote_digests)
     elif fpath is None:

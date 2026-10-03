@@ -341,8 +341,15 @@ class UserEmailVerification(SQLModel, table=True):
     user: User = Relationship(back_populates="email_verification")
 
 
+class UserAdminPublic(UserPublic):
+    """A user as listed for a superuser, with what they own."""
+
+    n_projects: int = 0
+    n_private_projects: int = 0
+
+
 class UsersPublic(SQLModel):
-    data: list[UserPublic]
+    data: list[UserAdminPublic]
     count: int
 
 
@@ -454,6 +461,25 @@ class SubscriptionUpdate(BaseModel):
     plan_name: Literal["free", "standard", "professional"]
     period: Literal["monthly", "annual"]
     discount_code: str | None = None
+
+
+class UserSubscriptionAdminUpdate(BaseModel):
+    """A superuser's direct edit of a user's subscription, bypassing Stripe."""
+
+    plan_name: Literal["free", "standard", "professional"]
+    period_months: Literal[1, 12]
+    price: float = Field(ge=0)
+    paid_until: datetime | None = None
+
+    @model_validator(mode="after")
+    def check_consistent(self) -> "UserSubscriptionAdminUpdate":
+        if self.plan_name == "free" and self.price != 0:
+            raise ValueError("The free plan can't have a price")
+        # Without it, a paid plan is checked against Stripe and dropped; a
+        # $0 comp without one runs indefinitely
+        if self.price > 0 and self.paid_until is None:
+            raise ValueError("paid_until is required for a paid plan")
+        return self
 
 
 class UpdateSubscriptionResponse(BaseModel):

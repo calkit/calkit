@@ -3,7 +3,7 @@
 import logging
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Sequence
 
 import requests
@@ -50,12 +50,14 @@ from app.models import (
     UpdatePassword,
     UpdateSubscriptionResponse,
     User,
+    UserAdminPublic,
     UserCreate,
     UserOnboardingFlag,
     UserPublic,
     UserRegister,
     UsersPublic,
     UserSubscription,
+    UserSubscriptionAdminUpdate,
     UserToken,
     UserTokenPublic,
     UserUpdate,
@@ -67,7 +69,7 @@ from app.security import (
     verify_password,
 )
 from app.storage import get_storage_usage
-from app.subscriptions import PLAN_IDS, get_monthly_price
+from app.subscriptions import PLAN_IDS, get_monthly_price, get_storage_limit
 from app.zenodo import AUTH_URL as ZENODO_AUTH_URL
 
 logging.basicConfig(level=logging.INFO)
@@ -141,7 +143,33 @@ def read_users(
         else sqlalchemy.asc(order_column)  # type: ignore
     )
     users = session.exec(statement.offset(skip).limit(limit)).all()
-    return UsersPublic(data=users, count=count)
+    # Project counts for the whole page in one query
+    account_ids = [u.account.id for u in users if u.account is not None]
+    project_counts = {
+        account_id: (n, n_private)
+        for account_id, n, n_private in session.exec(
+            select(
+                Project.owner_account_id,
+                func.count(),
+                func.count().filter(col(Project.is_public).is_(False)),
+            )
+            .where(col(Project.owner_account_id).in_(account_ids))
+            .group_by(col(Project.owner_account_id))
+        ).all()
+    }
+    data = []
+    for user in users:
+        n, n_private = (
+            project_counts.get(user.account.id, (0, 0))
+            if user.account is not None
+            else (0, 0)
+        )
+        data.append(
+            UserAdminPublic.model_validate(
+                user, update=dict(n_projects=n, n_private_projects=n_private)
+            )
+        )
+    return UsersPublic(data=data, count=count)
 
 
 @router.post("/users", dependencies=[Depends(get_current_active_superuser)])
@@ -348,6 +376,30 @@ def register_user(session: SessionDep, user_in: UserRegister) -> UserPublic:
     return user
 
 
+@router.get(
+    "/users/{user_id}/storage",
+    dependencies=[Depends(get_current_active_superuser)],
+)
+def get_user_storage_by_id(
+    user_id: uuid.UUID, session: SessionDep
+) -> StorageUsage:
+    """Get a user's storage usage, which is slow enough to list a page of
+    users without, so it's fetched per user.
+    """
+    user = session.get(User, user_id)
+    if user is None or user.account is None:
+        raise HTTPException(404)
+    plan_name = (
+        user.subscription.plan_name
+        if user.subscription is not None
+        else "free"
+    )
+    return StorageUsage(
+        limit_gb=get_storage_limit(plan_name),  # type: ignore[arg-type]
+        used_gb=get_storage_usage(owner_name=user.account.name),
+    )
+
+
 @router.get("/users/{user_id}")
 def read_user_by_id(
     user_id: uuid.UUID, session: SessionDep, current_user: CurrentUser
@@ -396,6 +448,43 @@ def update_user(
         session=session, db_user=db_user, user_in=user_in
     )
     return db_user
+
+
+@router.put(
+    "/users/{user_id}/subscription",
+    dependencies=[Depends(get_current_active_superuser)],
+)
+def put_user_subscription_admin(
+    *,
+    session: SessionDep,
+    user_id: uuid.UUID,
+    req: UserSubscriptionAdminUpdate,
+) -> UserSubscription:
+    """Set a user's subscription directly, without touching Stripe."""
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    paid_until = req.paid_until
+    # Stored naive in UTC, so it compares against utcnow()
+    if paid_until is not None and paid_until.tzinfo is not None:
+        paid_until = paid_until.astimezone(UTC).replace(tzinfo=None)
+    # Update in place so Stripe references survive an admin edit
+    subscription = user.subscription
+    if subscription is None:
+        subscription = UserSubscription(
+            user_id=user.id,
+            period_months=req.period_months,
+            plan_id=PLAN_IDS[req.plan_name],
+            price=req.price,
+        )
+        user.subscription = subscription
+    subscription.plan_id = PLAN_IDS[req.plan_name]
+    subscription.period_months = req.period_months
+    subscription.price = req.price
+    subscription.paid_until = paid_until
+    session.commit()
+    session.refresh(subscription)
+    return subscription
 
 
 @router.delete(
@@ -577,17 +666,16 @@ def put_user_subscription(
     ) or (current_subscription is None and price > 0)
     if stripe_changing:
         # We need to setup payment stuff in Stripe
-        customer = app.stripe.get_customer(email=current_user.email)
-        if customer is None:
-            customer = app.stripe.create_customer(
-                email=current_user.email,
-                full_name=current_user.full_name,
-                user_id=current_user.id,
+        customer = app.stripe.get_or_create_user_customer(current_user)
+        # If the user already has any subscriptions, under any of their
+        # customers, update them
+        stripe_subs = [
+            sub
+            for cust in app.stripe.get_user_customers(current_user)
+            for sub in app.stripe.get_customer_subscriptions(
+                cust.id, status="active"
             )
-        # If the user already has any subscriptions, update them
-        stripe_subs = app.stripe.get_customer_subscriptions(
-            customer.id, status="active"
-        )
+        ]
         # Filter down for subscriptions without orgs in them
         stripe_subs = [s for s in stripe_subs if not s.metadata.get("org_id")]
         if len(stripe_subs) > 1:

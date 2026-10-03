@@ -57,6 +57,33 @@ If you use AI agents like Claude, Copilot, or Codex,
 see [AI tools](ai-tools.md)
 to learn how to install agent skills for working with Calkit.
 
+## Upgrading
+
+Calkit checks for a new version once a day.
+If it was installed with uv, as above, or pipx,
+it upgrades itself in the background,
+so your next command runs on the new version
+and starts by telling you which version that is.
+Otherwise, it tells you a new version is available.
+
+To be told about new versions but not upgrade automatically, run:
+
+```sh
+calkit config set auto_upgrade false
+```
+
+To stop checking for new versions altogether, run:
+
+```sh
+calkit config set auto_upgrade no-check
+```
+
+To upgrade by hand at any time, run:
+
+```sh
+calkit upgrade
+```
+
 ## Use without installing
 
 If you want to use Calkit without installing it,

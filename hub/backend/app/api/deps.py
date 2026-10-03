@@ -168,10 +168,17 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
         )
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
-    # Ensure that if this user has a paid subscription, it is valid
-    if user.subscription is not None and user.subscription.price > 0:
-        # Delete subscription if payment hasn't been received in 5 minutes
-        # since transaction started
+    # Ensure a non-free subscription is valid, including a $0 comp with an
+    # end date, since quotas read the plan without checking paid_until; a
+    # comp with no end date runs indefinitely
+    sub = user.subscription
+    if (
+        sub is not None
+        and sub.plan_id != 0
+        and not (sub.price == 0 and sub.paid_until is None)
+    ):
+        # Drop to free if payment hasn't been received in 5 minutes since
+        # the transaction started, or the paid period has lapsed
         if (
             user.subscription.paid_until is None
             and ((utcnow() - user.subscription.created).total_seconds() > 300)
@@ -180,14 +187,13 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             and user.subscription.paid_until < utcnow()
         ):
             logger.info(f"Checking subscription for {user.email}")
-            stripe_cust = stripe.get_customer(user.email)
-            if stripe_cust is not None:
-                stripe_subs = stripe.get_customer_subscriptions(
-                    customer_id=stripe_cust.id, status="active"
+            stripe_subs = [
+                sub
+                for cust in stripe.get_user_customers(user)
+                for sub in stripe.get_customer_subscriptions(
+                    customer_id=cust.id, status="active"
                 )
-            else:
-                logger.info(f"No Stripe customer exists for {user.email}")
-                stripe_subs = []
+            ]
             sub_valid = False
             for sub in stripe_subs:
                 if sub.current_period_end > utcnow().timestamp():
@@ -200,8 +206,17 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                     session.refresh(user)
                     sub_valid = True
             if not sub_valid:
-                logger.info("Deleting invalid subscription")
-                session.delete(user.subscription)
+                logger.info("Reverting invalid subscription to free")
+                # Rather than deleting, since quotas need a subscription
+                subscription = user.subscription
+                subscription.plan_id = 0
+                subscription.price = 0.0
+                subscription.period_months = 1
+                subscription.paid_until = None
+                subscription.processor = None
+                subscription.processor_product_id = None
+                subscription.processor_price_id = None
+                subscription.processor_subscription_id = None
                 session.commit()
                 session.refresh(user)
     return user

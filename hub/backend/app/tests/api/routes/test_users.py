@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,7 +12,11 @@ from app import mixpanel, users
 from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
-from app.tests import random_email, random_lower_string
+from app.tests import (
+    random_email,
+    random_lower_string,
+    user_authentication_headers,
+)
 
 
 def test_get_users_superuser_me(
@@ -151,6 +156,8 @@ def test_create_user_by_normal_user(
 def test_retrieve_users(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:
+    from app.models import Project
+
     username = random_email()
     password = random_lower_string()
     user_in = UserCreate(email=username, password=password)
@@ -165,6 +172,50 @@ def test_retrieve_users(
     assert "count" in all_users
     for item in all_users["data"]:
         assert "email" in item
+    # Each user comes with how many projects they own, and how many of
+    # those are private
+    owner = users.get_user_by_email(session=db, email=username)
+    assert owner is not None and owner.account is not None
+    for is_public in [True, False, False]:
+        db.add(
+            Project(
+                name=f"proj-{uuid.uuid4().hex[:8]}",
+                title="Project",
+                git_repo_url="https://github.com/someone/proj",
+                owner_account_id=owner.account.id,
+                is_public=is_public,
+            )
+        )
+    db.commit()
+    r = client.get(
+        "/users/",
+        headers=superuser_token_headers,
+        params={"search_for": username},
+    )
+    by_email = {u["email"]: u for u in r.json()["data"]}
+    assert by_email[username]["n_projects"] == 3
+    assert by_email[username]["n_private_projects"] == 2
+    r = client.get(
+        "/users/",
+        headers=superuser_token_headers,
+        params={"search_for": username2},
+    )
+    assert r.json()["data"][0]["n_projects"] == 0
+    # Storage usage is fetched per user, by superusers only
+    url = f"/users/{owner.id}/storage"
+    with patch("app.api.routes.users.get_storage_usage", return_value=1.5):
+        r = client.get(url, headers=superuser_token_headers)
+    assert r.status_code == 200
+    assert r.json() == {"limit_gb": 10, "used_gb": 1.5}
+    user2_headers = user_authentication_headers(
+        client=client, email=username2, password=password2
+    )
+    r = client.get(url, headers=user2_headers)
+    assert r.status_code == 403
+    r = client.get(
+        f"/users/{uuid.uuid4()}/storage", headers=superuser_token_headers
+    )
+    assert r.status_code == 404
 
 
 def test_update_user_me(
@@ -492,6 +543,161 @@ def test_update_user_email_exists(
     )
     assert r.status_code == 409
     assert r.json()["detail"] == "User with this email already exists"
+
+
+def test_put_user_subscription_admin(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    normal_user_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    password = random_lower_string()
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(email=random_email(), password=password),
+    )
+    assert user.subscription is not None
+    user.subscription.processor = "stripe"
+    user.subscription.processor_subscription_id = "sub_123"
+    db.commit()
+    url = f"/users/{user.id}/subscription"
+    data = {
+        "plan_name": "professional",
+        "period_months": 12,
+        "price": 0,
+        "paid_until": "2030-01-01T05:00:00-05:00",
+    }
+    # Only superusers can do this
+    r = client.put(url, headers=normal_user_token_headers, json=data)
+    assert r.status_code == 403
+    # A paid plan needs a paid_until or it'd be dropped on next request
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"price": 10, "paid_until": None},
+    )
+    assert r.status_code == 422
+    # A free plan with a price would be treated as paid
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json={"plan_name": "free", "period_months": 1, "price": 5},
+    )
+    assert r.status_code == 422
+    # Aware timestamps are stored as naive UTC, and Stripe refs are kept
+    r = client.put(url, headers=superuser_token_headers, json=data)
+    assert r.status_code == 200
+    resp = r.json()
+    assert resp["plan_name"] == "professional"
+    assert resp["paid_until"] == "2030-01-01T10:00:00"
+    db.refresh(user)
+    assert user.subscription is not None
+    assert user.subscription.plan_id == 2
+    assert user.subscription.period_months == 12
+    assert user.subscription.processor_subscription_id == "sub_123"
+    assert users.check_user_subscription_active(session=db, user=user)
+    # It shows up in the admin user listing
+    r = client.get(f"/users/{user.id}", headers=superuser_token_headers)
+    assert r.json()["subscription"]["plan_name"] == "professional"
+    # Back to free, which doesn't need paid_until
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json={"plan_name": "free", "period_months": 1, "price": 0},
+    )
+    assert r.status_code == 200
+    assert r.json()["plan_name"] == "free"
+    # A user without a subscription gets one
+    db.delete(user.subscription)
+    db.commit()
+    r = client.put(url, headers=superuser_token_headers, json=data)
+    assert r.status_code == 200
+    db.refresh(user)
+    assert user.subscription is not None
+    assert user.subscription.plan_name == "professional"
+    # A $0 comp that has lapsed reverts to free like a lapsed paid plan
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": "2020-01-01T00:00:00"},
+    )
+    assert r.status_code == 200
+    user_headers = user_authentication_headers(
+        client=client, email=user.email, password=password
+    )
+    # A $0 comp with no end date runs indefinitely, without asking Stripe
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": None},
+    )
+    assert r.status_code == 200
+    # Old enough that a pending checkout would have been checked
+    db.refresh(user)
+    assert user.subscription is not None
+    user.subscription.created = datetime(2020, 1, 1)
+    db.commit()
+    with patch("app.stripe.find_customers", side_effect=AssertionError):
+        r = client.get("/user", headers=user_headers)
+    assert r.status_code == 200
+    assert r.json()["subscription"]["plan_name"] == "professional"
+    db.refresh(user)
+    assert users.check_user_subscription_active(session=db, user=user)
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": "2020-01-01T00:00:00"},
+    )
+    assert r.status_code == 200
+    # Stripe can have several customers with the user's email, and an
+    # active subscription under any of them keeps the plan
+    customers = [
+        SimpleNamespace(id="cus_old", created=1),
+        SimpleNamespace(id="cus_new", created=2),
+    ]
+    period_end = datetime(2031, 1, 1).timestamp()
+    stripe_subs = {
+        "cus_old": [],
+        "cus_new": [
+            SimpleNamespace(id="sub_456", current_period_end=period_end)
+        ],
+    }
+    with (
+        patch("app.stripe.find_customers", return_value=customers),
+        patch(
+            "app.stripe.get_customer_subscriptions",
+            side_effect=lambda customer_id, status: stripe_subs[customer_id],
+        ),
+    ):
+        r = client.get("/user", headers=user_headers)
+    assert r.status_code == 200
+    sub = r.json()["subscription"]
+    assert sub["plan_name"] == "professional"
+    assert sub["paid_until"] == "2031-01-01T00:00:00"
+    db.refresh(user)
+    assert user.subscription is not None
+    assert user.subscription.processor_subscription_id == "sub_456"
+    # With no active subscription anywhere, it reverts
+    r = client.put(
+        url,
+        headers=superuser_token_headers,
+        json=data | {"paid_until": "2020-01-01T00:00:00"},
+    )
+    assert r.status_code == 200
+    with patch("app.stripe.find_customers", return_value=[]):
+        r = client.get("/user", headers=user_headers)
+    assert r.status_code == 200
+    sub = r.json()["subscription"]
+    assert sub["plan_name"] == "free"
+    assert sub["price"] == 0
+    assert sub["paid_until"] is None
+    # Unknown user
+    r = client.put(
+        f"/users/{uuid.uuid4()}/subscription",
+        headers=superuser_token_headers,
+        json=data,
+    )
+    assert r.status_code == 404
 
 
 def test_delete_user_me(client: TestClient, db: Session) -> None:

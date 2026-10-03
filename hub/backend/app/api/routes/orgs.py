@@ -354,13 +354,7 @@ def put_org_subscription(
     # Handle any discount codes
     if price > 0.0:
         # We need to setup payment stuff in Stripe
-        customer = app.stripe.get_customer(email=current_user.email)
-        if customer is None:
-            customer = app.stripe.create_customer(
-                email=current_user.email,
-                full_name=current_user.full_name,
-                user_id=current_user.id,
-            )
+        customer = app.stripe.get_or_create_user_customer(current_user)
         # TODO: If this is an update, we need to handle that
         # Get the Stripe price object for this plan
         stripe_price = app.stripe.get_price(plan_id=plan_id, period=req.period)

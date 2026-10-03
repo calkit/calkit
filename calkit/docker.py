@@ -1144,6 +1144,35 @@ def is_auth_error(output: str) -> bool:
     return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
 
 
+def registry_login_hint(ref: str, output: str) -> str:
+    """Return how to log in to a registry that refused a push, or ''.
+
+    Calkit walks the user through creating a token itself when it can
+    prompt, so this is for when it can't: a push from a pipeline, a script
+    or an agent would otherwise end on the registry's bare "unauthorized",
+    which says nothing about what to do next.
+    """
+    if not is_auth_error(output):
+        return ""
+    host = ref.split("/", 1)[0]
+    if host != "ghcr.io":
+        return (
+            f"{host} refused the push; log Docker in to it with "
+            f"'docker login {host}' and push again"
+        )
+    return (
+        "The GitHub Container Registry refused the push: no credential "
+        "Calkit has can write packages. To fix this, either:\n"
+        "  - run 'calkit push docker' in a terminal, which walks you "
+        "through creating a token and remembers it; or\n"
+        "  - create a token with the 'write:packages' scope at\n"
+        f"      {GITHUB_PACKAGES_TOKEN_URL}\n"
+        "    log Docker in with it, pasting the token as the password:\n"
+        f"      docker login ghcr.io -u {get_github_username()}\n"
+        "    and push again with 'calkit push docker'"
+    )
+
+
 def get_github_token_scopes(token: str) -> set[str]:
     """Return the OAuth scopes a GitHub token carries.
 

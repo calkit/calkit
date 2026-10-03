@@ -45,3 +45,26 @@ def run_ipython(
     from IPython import start_ipython
 
     start_ipython(argv=sys.argv[3:], user_ns={"calkit": calkit})
+
+
+@dev_app.command(name="upgrade")
+def upgrade(
+    branch: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Branch to install from: the worktree that has it checked "
+                "out, or else the install's own, if it has no changes. "
+                "Defaults to the current branch."
+            )
+        ),
+    ] = None,
+) -> None:
+    """Update a dev (editable) install: pull the branch and reinstall."""
+    from calkit.cli.core import raise_error
+    from calkit.upgrade import get_dev_upgrade_cmds, run_upgrade_cmds
+
+    try:
+        run_upgrade_cmds(get_dev_upgrade_cmds(branch))
+    except Exception as e:
+        raise_error(str(e))

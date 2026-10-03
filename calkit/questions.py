@@ -248,6 +248,17 @@ class _Formatter(string.Formatter):
             raise KeyError(field_name)
         return kwargs[field_name], field_name
 
+    def format_field(self, value: Any, format_spec: str) -> Any:
+        # A value the spec can't format, e.g., a null under ':.2f', raises
+        # TypeError, which callers don't expect; as ValueError it is
+        # reported as a template that cannot render rather than a crash
+        try:
+            return super().format_field(value, format_spec)
+        except TypeError as e:
+            raise ValueError(
+                f"{value!r} cannot be formatted as {format_spec!r}"
+            ) from e
+
 
 _FORMATTER = _Formatter()
 _PLACEHOLDER = re.compile(r"(?<!\{)\{([^{}:!]+)(?:[:!][^{}]*)?\}(?!\})")
@@ -676,13 +687,55 @@ def _load_calkit_yaml_text(text: str) -> dict:
     """
     import yaml
 
+    from calkit.core import _load_yaml_readonly
+
     try:
-        loaded = yaml.safe_load(io.StringIO(text))
+        loaded = _load_yaml_readonly(text)
     except yaml.YAMLError:
         # A revision whose calkit.yaml uses something PyYAML refuses is
         # still worth reading; the round-trip parser is more forgiving
         loaded = calkit.ryaml.load(io.StringIO(text))
     return loaded if isinstance(loaded, dict) else {}
+
+
+class _MemoizedRepo:
+    """A repo whose ``git`` calls are run once per distinct set of arguments.
+
+    Checking questions asks the same few things of Git over and over, e.g.,
+    whether a results file is tracked and what it held at the commit an
+    answer was written, once for every value cited from it. Nothing a check
+    asks changes while it runs, so each is a subprocess only the first time.
+    """
+
+    def __init__(self, repo: Any) -> None:
+        self._repo = repo
+        self._memo: dict[tuple, tuple[bool, Any]] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._repo, name)
+
+    @property
+    def git(self) -> Any:
+        repo = self
+
+        class _Git:
+            def __getattr__(self, cmd: str) -> Any:
+                def call(*args: str) -> Any:
+                    key = (cmd, args)
+                    if key not in repo._memo:
+                        try:
+                            result = getattr(repo._repo.git, cmd)(*args)
+                            repo._memo[key] = (True, result)
+                        except Exception as e:
+                            repo._memo[key] = (False, e)
+                    ok, value = repo._memo[key]
+                    if not ok:
+                        raise value
+                    return value
+
+                return call
+
+        return _Git()
 
 
 class CalkitYamlHistory:
@@ -933,8 +986,7 @@ def _check_publication_label(
     sources = _find_latex_sources(ev["path"], ck_info, wdir)
     if not sources:
         return "skipped", (
-            f"label {label!r} not checked: no LaTeX stage produces "
-            f"{ev['path']}"
+            f"label {label!r} not checked: no LaTeX stage produces {ev['path']}"
         )
     pattern = re.compile(r"\\label\{" + re.escape(label) + r"\}")
     for src in sources:
@@ -1317,6 +1369,7 @@ def check_question(
     history: CalkitYamlHistory | None = None,
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
+    check_history: bool = True,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
     if isinstance(question, str):
@@ -1336,7 +1389,7 @@ def check_question(
         )
     since = (
         question_commit(question, repo, wdir, history)
-        if repo is not None
+        if repo is not None and check_history
         else None
     )
     checks = [
@@ -1389,7 +1442,7 @@ def check_question(
             "evidence changed since the answer was last edited; worth "
             "re-reading, and editing the question if it no longer holds"
         )
-    if since is None and repo is not None:
+    if since is None and repo is not None and check_history:
         messages.append("not yet committed, so history cannot be checked")
     return QuestionCheck(
         index=index,
@@ -1441,6 +1494,7 @@ def check_questions(
     check_pipeline: bool = True,
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
+    check_history: bool = True,
 ) -> QuestionsStatus:
     """Check every question in a project against its evidence.
 
@@ -1448,18 +1502,27 @@ def check_questions(
     slowest thing here; turning it off skips that and the frozen check with
     it, leaving the rest of the report intact. A caller that already has
     those stage sets, e.g., ``calkit status``, can pass them instead.
+
+    ``check_history`` reads ``calkit.yaml``'s history to find evidence that
+    changed after an answer was last edited, which is most of what the
+    check costs once the pipeline is known; turning it off leaves every
+    other check as it is.
     """
     wdir = wdir or os.getcwd()
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     try:
-        repo = calkit.git.get_repo(wdir)
+        repo = _MemoizedRepo(calkit.git.get_repo(wdir))
     except Exception:
         repo = None
     questions = ck_info.get("questions", []) or []
     # One reading of calkit.yaml's history, and one of the pipeline, for all
     # of them
-    history = CalkitYamlHistory(repo, wdir) if repo is not None else None
+    history = (
+        CalkitYamlHistory(repo, wdir)
+        if repo is not None and check_history
+        else None
+    )
     if stale_stages is None or frozen_stages is None:
         stale_stages, frozen_stages = pipeline_stage_sets(
             ck_info, wdir, check_pipeline
@@ -1475,6 +1538,7 @@ def check_questions(
                 history,
                 stale_stages=stale_stages,
                 frozen_stages=frozen_stages,
+                check_history=check_history,
             )
             for n, q in enumerate(questions, start=1)
         ]

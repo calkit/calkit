@@ -34,7 +34,7 @@ environments:
     python: "3.13"
   texlive:
     kind: docker
-    image: ghcr.io/calkit/latex:0.1.4
+    image: ghcr.io/calkit/latex:0.1.5
 
 # Define the pipeline
 pipeline:

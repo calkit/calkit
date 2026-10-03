@@ -1,7 +1,11 @@
 """Integration tests for subproject support."""
 
+import contextlib
 import os
 import subprocess
+from types import SimpleNamespace
+
+import dvc.repo
 
 import calkit
 import calkit.dvc
@@ -501,6 +505,8 @@ def test_targeted_status_uses_full_subproject_status_for_stage_targets(
     }
 
     class FakeRepo:
+        index = SimpleNamespace(outs=[])
+
         def status(self, targets=None):
             if targets is None:
                 return {
@@ -511,6 +517,9 @@ def test_targeted_status_uses_full_subproject_status_for_stage_targets(
                 }
             return {}
 
+    monkeypatch.setattr(
+        dvc.repo, "lock_repo", lambda repo: contextlib.nullcontext()
+    )
     monkeypatch.setattr(
         calkit,
         "load_calkit_info",

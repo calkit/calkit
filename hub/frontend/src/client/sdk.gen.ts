@@ -249,6 +249,8 @@ import type {
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
+  GetUserStorageByIdErrors,
+  GetUserStorageByIdResponses,
   GetUserStorageResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
@@ -448,6 +450,8 @@ import type {
   PutUserOnboardingFlagResponses,
   PutUserOverleafTokenErrors,
   PutUserOverleafTokenResponses,
+  PutUserSubscriptionAdminErrors,
+  PutUserSubscriptionAdminResponses,
   PutUserSubscriptionErrors,
   PutUserSubscriptionResponses,
   QuestionPost,
@@ -502,6 +506,7 @@ import type {
   UpdateUserResponses,
   UserCreate,
   UserRegister,
+  UserSubscriptionAdminUpdate,
   UserUpdate,
   UserUpdateMe,
   ZoteroAuthFinish,
@@ -1425,6 +1430,39 @@ export class UsersService {
   }
 
   /**
+   * Get User Storage By Id
+   *
+   * Get a user's storage usage, which is slow enough to list a page of
+   * users without, so it's fetched per user.
+   */
+  public static getUserStorageById<ThrowOnError extends boolean = true>(
+    parameters: {
+      user_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserStorageByIdResponses,
+    GetUserStorageByIdErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "user_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetUserStorageByIdResponses,
+      GetUserStorageByIdErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/users/{user_id}/storage",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Delete User
    *
    * Delete a user.
@@ -1511,6 +1549,51 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/users/{user_id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Put User Subscription Admin
+   *
+   * Set a user's subscription directly, without touching Stripe.
+   */
+  public static putUserSubscriptionAdmin<ThrowOnError extends boolean = true>(
+    parameters: {
+      user_id: string
+      userSubscriptionAdminUpdate: UserSubscriptionAdminUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserSubscriptionAdminResponses,
+    PutUserSubscriptionAdminErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "user_id" },
+            { key: "userSubscriptionAdminUpdate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutUserSubscriptionAdminResponses,
+      PutUserSubscriptionAdminErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/users/{user_id}/subscription",
       ...options,
       ...params,
       headers: {

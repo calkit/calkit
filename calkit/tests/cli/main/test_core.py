@@ -2568,7 +2568,9 @@ def test_dotenv_is_loaded_for_every_command(tmp_dir):
     with patch.dict(os.environ):
         os.environ.pop("CALKIT_HUB", None)
         os.environ.pop("SOME_PROJECT_SECRET", None)
-        calkit_main(version=False, use_version=None)
+        calkit_main(
+            Mock(invoked_subcommand=None), version=False, use_version=None
+        )
         assert os.environ["CALKIT_HUB"] == "hub.example.edu"
         assert os.environ["SOME_PROJECT_SECRET"] == "abc123"
         assert calkit.config.get_hub() == "https://hub.example.edu"

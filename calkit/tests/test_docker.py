@@ -351,6 +351,30 @@ def test_is_auth_error():
     assert not is_auth_error("")
 
 
+def test_registry_login_hint(monkeypatch):
+    import calkit.docker
+
+    monkeypatch.setattr(
+        calkit.docker, "get_github_username", lambda: "someone"
+    )
+    ref = "ghcr.io/o/p/img:latest"
+    # A refusal from GHCR says how to get a token that can push, since a
+    # push that can't prompt otherwise ends on a bare "unauthorized"
+    hint = calkit.docker.registry_login_hint(
+        ref, "error from registry: unauthorized"
+    )
+    assert calkit.docker.GITHUB_PACKAGES_TOKEN_URL in hint
+    assert "docker login ghcr.io -u someone" in hint
+    assert "calkit push docker" in hint
+    # Another registry gets only what Calkit knows: log in to it
+    hint = calkit.docker.registry_login_hint(
+        "docker.io/someone/img:v1", "unauthorized: authentication required"
+    )
+    assert "docker login docker.io" in hint
+    # Anything other than refused credentials is no login problem
+    assert calkit.docker.registry_login_hint(ref, "manifest unknown") == ""
+
+
 def test_login_to_registry_ignores_other_registries():
     # Only GHCR has credentials Calkit can obtain; everything else relies
     # on the user's own docker login

@@ -151,7 +151,9 @@ def post_operator(
     base = base[:56] or "operator"
     taken = set(
         session.exec(
-            select(Operator.name).where(Operator.user_id == current_user.id)
+            select(Operator.name)
+            .where(Operator.user_id == current_user.id)
+            .where(Operator.is_active)
         ).all()
     )
     if req.name is not None and req.name in taken:

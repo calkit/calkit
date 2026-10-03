@@ -629,9 +629,15 @@ class OperatorPublic(SQLModel):
 
 
 class Operator(OperatorPublic, table=True):
+    # Names are unique among the user's active Operators, so a revoked
+    # one's name can be used again
     __table_args__ = (
-        sqlalchemy.UniqueConstraint(
-            "user_id", "name", name="uq_operator_user_name"
+        sqlalchemy.Index(
+            "uq_operator_user_name_active",
+            "user_id",
+            "name",
+            unique=True,
+            postgresql_where=sqlalchemy.text("is_active"),
         ),
     )
     selector: str = Field(index=True, unique=True, max_length=32)

@@ -368,6 +368,14 @@ def test_operators(
     assert "revoked" in r.json()["detail"]
     r = client.get("/operators", headers=normal_user_token_headers)
     assert op["id"] not in [o["id"] for o in r.json()]
+    # A revoked Operator's name can be used again
+    r = client.post(
+        "/operators",
+        headers=normal_user_token_headers,
+        json={"name": op["name"]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == op["name"]
 
 
 def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:

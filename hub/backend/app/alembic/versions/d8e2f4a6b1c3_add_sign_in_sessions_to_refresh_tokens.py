@@ -20,6 +20,14 @@ def upgrade():
     op.add_column('refreshtoken', sa.Column('session_id', sa.Uuid(), nullable=True))
     op.add_column('refreshtoken', sa.Column('interactive', sa.Boolean(), server_default=sa.false(), nullable=False))
     op.create_index(op.f('ix_refreshtoken_session_id'), 'refreshtoken', ['session_id'], unique=False)
+    # Sign-ins from before sessions were recorded, so people already signed
+    # in aren't refused: web ones are known by how their tokens are
+    # described, and each gets a session of its own, which rotations carry
+    op.execute(
+        "UPDATE refreshtoken SET interactive = true "
+        "WHERE description IN ('password login', 'GitHub login', 'Google login')"
+    )
+    op.execute("UPDATE refreshtoken SET session_id = id WHERE session_id IS NULL")
 
 
 def downgrade():

@@ -3,17 +3,27 @@ import {
   AlertDescription,
   AlertIcon,
   AlertTitle,
+  Badge,
   Box,
   Button,
+  Code,
   Flex,
   Heading,
   Icon,
   IconButton,
   Link,
+  Menu,
+  MenuButton,
+  MenuItem,
+  MenuList,
   Text,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import {
+  Link as RouterLink,
+  createFileRoute,
+  useNavigate,
+} from "@tanstack/react-router"
 import {
   type ReactNode,
   useCallback,
@@ -30,7 +40,7 @@ import { z } from "zod"
 
 import { FaExclamationTriangle } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
-import { ProjectsService } from "../../../../../client"
+import { OperatorsService, ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import Mermaid, {
@@ -38,6 +48,7 @@ import Mermaid, {
 } from "../../../../../components/Common/Mermaid"
 import PipelineEditorModal from "../../../../../components/Pipeline/PipelineEditorModal"
 import StageEditorModal from "../../../../../components/Pipeline/StageEditorModal"
+import useAuth from "../../../../../hooks/useAuth"
 import useProject, {
   useProjectEnvironments,
 } from "../../../../../hooks/useProject"
@@ -374,6 +385,41 @@ function ProjectPipeline() {
   } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
+  const { user } = useAuth()
+  // Where the pipeline is running, or how it last ran, on the user's own
+  // machines, from their Operators' check-ins; the same request as the
+  // sidebar's and the compute page's
+  const workspacesQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "workspaces"],
+    queryFn: () =>
+      OperatorsService.getProjectWorkspaces({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((r) => r.data),
+    enabled: Boolean(user),
+    retry: false,
+    refetchInterval: 30000,
+  })
+  const runs = (workspacesQuery.data ?? []).filter(
+    (ws) => ws.running || ws.last_run,
+  )
+  const runningStages = runs.flatMap((ws) =>
+    ws.running ? ws.running_stages ?? [] : [],
+  )
+  // Machines this can run on: the user's own checkouts, while online
+  const runTargets = (workspacesQuery.data ?? []).filter(
+    (ws) => ws.kind === "personal" && ws.operator_online && !ws.running,
+  )
+  // Runs wait for a click on the compute page, so a link can't start one
+  const runOn = (ws: (typeof runTargets)[number]) =>
+    navigate({
+      to: "/$accountName/$projectName/compute",
+      params: { accountName, projectName },
+      search: {
+        workspace: `${ws.operator_id}:${ws.path}`,
+        confirm_run: stage ?? "*",
+      },
+    })
   const pipelineQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "pipeline", ref],
     queryFn: () =>
@@ -497,7 +543,69 @@ function ProjectPipeline() {
                   </Alert>
                 ) : (
                   <>
+                    {runTargets.length > 0 && !ref && (
+                      <Menu>
+                        <MenuButton as={Button} size="xs" mb={2}>
+                          {stage ? `Run ${stage} on…` : "Run on…"}
+                        </MenuButton>
+                        <MenuList>
+                          {runTargets.map((ws) => (
+                            <MenuItem
+                              key={`${ws.operator_id}:${ws.path}`}
+                              onClick={() => runOn(ws)}
+                            >
+                              {ws.operator_name}: {ws.path}
+                            </MenuItem>
+                          ))}
+                        </MenuList>
+                      </Menu>
+                    )}
+                    {runs.length > 0 && (
+                      <Flex direction="column" gap={1} mb={2} fontSize="sm">
+                        {runs.map((ws) => (
+                          <Flex
+                            key={`${ws.operator_id}:${ws.path}`}
+                            align="center"
+                            gap={2}
+                            wrap="wrap"
+                          >
+                            {ws.running ? (
+                              <Badge colorScheme="blue">Running</Badge>
+                            ) : ws.last_run?.status === "failed" ? (
+                              <Badge colorScheme="red">Failed</Badge>
+                            ) : (
+                              <Badge colorScheme="green">Ran</Badge>
+                            )}
+                            {(ws.running
+                              ? ws.running_stages ?? []
+                              : ws.last_run?.failed_stages ?? []
+                            ).map((s) => (
+                              <Code key={s} fontSize="xs">
+                                {s}
+                              </Code>
+                            ))}
+                            <Text>
+                              on{" "}
+                              <Link
+                                as={RouterLink}
+                                to={`/${accountName}/${projectName}/compute`}
+                              >
+                                {ws.operator_name}
+                              </Link>
+                              {ws.running
+                                ? ws.running_since
+                                  ? ` since ${new Date(ws.running_since).toLocaleString()}`
+                                  : ""
+                                : ws.last_run?.ended
+                                  ? `, ${new Date(ws.last_run.ended).toLocaleString()}`
+                                  : ""}
+                            </Text>
+                          </Flex>
+                        ))}
+                      </Flex>
+                    )}
                     <Mermaid
+                      runningStages={runningStages}
                       isDiagramExpanded={isDiagramExpanded}
                       setIsDiagramExpanded={setIsDiagramExpanded}
                       stageCount={stageCount}

@@ -67,6 +67,7 @@ import {
 import {
   decodeBase64Utf8,
   removeLeadingHeading,
+  safeHref,
 } from "../../../../../lib/strings"
 
 export const Route = createFileRoute(
@@ -524,7 +525,7 @@ function ProjectView() {
                           issue.title
                         )}{" "}
                         (
-                        <Link isExternal href={issue.url}>
+                        <Link isExternal href={safeHref(issue.url)}>
                           <Tooltip
                             label={
                               issue.is_pull_request ? "Pull request" : "Issue"
@@ -549,7 +550,7 @@ function ProjectView() {
                 {issuesUrl && (visibleIssues?.length ?? 0) > 0 ? (
                   <Link
                     isExternal
-                    href={issuesUrl}
+                    href={safeHref(issuesUrl)}
                     fontSize="sm"
                     display="inline-block"
                     mt={2}

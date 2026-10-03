@@ -39,6 +39,7 @@ import FigureEditor from "../../../../../components/Figures/FigureEditor"
 import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
 
 import { ProjectsService } from "../../../../../client"
+import { safeHref } from "../../../../../lib/strings"
 
 // Which "add a dataset" form is open lives in the URL, the same way the
 // references page carries its own. Filling one in is several fields of
@@ -139,7 +140,7 @@ const DatasetSource = ({
         <Text fontSize="sm" isTruncated>
           <strong>Origin:</strong> downloaded from{" "}
           <Tooltip label={importedFrom.url}>
-            <Link href={importedFrom.url} isExternal>
+            <Link href={safeHref(importedFrom.url)} isExternal>
               {shown} <ExternalLinkIcon mb={0.5} />
             </Link>
           </Tooltip>
@@ -165,7 +166,7 @@ const DatasetSource = ({
         <Text fontSize="sm" isTruncated>
           <strong>Origin:</strong> from Git repo{" "}
           <Tooltip label={at ? `${label} at ${at}` : label}>
-            <Link href={treeUrl} isExternal>
+            <Link href={safeHref(treeUrl)} isExternal>
               {label} <ExternalLinkIcon mb={0.5} />
             </Link>
           </Tooltip>

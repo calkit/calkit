@@ -7,6 +7,7 @@ from app.api.routes import (
     feedback,
     login,
     misc,
+    operators,
     orgs,
     projects,
     references,
@@ -26,3 +27,4 @@ api_router.include_router(releases.router, tags=["releases"])
 api_router.include_router(orgs.router, tags=["orgs"])
 api_router.include_router(datasets.router, tags=["datasets"])
 api_router.include_router(feedback.router, tags=["feedback"])
+api_router.include_router(operators.router, tags=["operators"])

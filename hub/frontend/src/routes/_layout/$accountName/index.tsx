@@ -26,7 +26,7 @@ import { FaPlus } from "react-icons/fa"
 import { AccountsService, OrgsService, ProjectsService } from "../../../client"
 import NotFound from "../../../components/Common/NotFound"
 import AddMember from "../../../components/Orgs/AddMember"
-import { capitalizeFirstLetter } from "../../../lib/strings"
+import { capitalizeFirstLetter, safeHref } from "../../../lib/strings"
 
 export const Route = createFileRoute("/_layout/$accountName/")({
   component: AccountPage,
@@ -134,7 +134,7 @@ function ProjectsTable() {
                     </Link>
                   </Td>
                   <Td isTruncated maxWidth="150px">
-                    <Link href={project.git_repo_url} isExternal>
+                    <Link href={safeHref(project.git_repo_url)} isExternal>
                       <ExternalLinkIcon mx="2px" /> {project.git_repo_url}
                     </Link>
                   </Td>

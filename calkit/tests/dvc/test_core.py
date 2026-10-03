@@ -586,3 +586,35 @@ def test_commit_path_with_missing_dep(tmp_dir):
     # The output's hash should be kept, since there's nothing new to hash
     assert lock["stages"]["my-stage"]["outs"][0]["path"] == "output.txt"
     assert "md5" in lock["stages"]["my-stage"]["outs"][0]
+
+
+def test_set_remote_auth_only_for_hub_remotes(monkeypatch, tmp_path):
+    remote_name = calkit.dvc.make_remote_name()
+    monkeypatch.setattr(
+        calkit.hub, "get_base_url", lambda: "https://api.calkit.io"
+    )
+    calls = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda args, cwd=None: calls.append(args) or 0,
+    )
+    settings = calkit.config.read()
+    monkeypatch.setattr(settings, "dvc_token", "ckp_token", raising=False)
+    monkeypatch.setattr(calkit.config, "read", lambda: settings)
+    for url, sent in [
+        ("https://api.calkit.io/projects/o/p/dvc", True),
+        # A repo can name a remote like the hub's and point it anywhere
+        ("https://attacker.example/dvc", False),
+        ("https://api.calkit.io.attacker.example/dvc", False),
+    ]:
+        calls.clear()
+        monkeypatch.setattr(
+            calkit.dvc.core,
+            "get_remotes",
+            lambda wdir=None, url=url: {remote_name: url},
+        )
+        calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+        assert bool(calls) == sent, url
+        if sent:
+            assert calls[-1][-1] == "Bearer ckp_token"

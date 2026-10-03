@@ -113,6 +113,39 @@ def generate_verify_email_email(
     return EmailData(html_content=html_content, subject=subject)
 
 
+def generate_confirm_two_factor_email(email_to: str, code: str) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your two-factor setup code is {code}"
+    html_content = render_email_template(
+        template_name="confirm_two_factor.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "code": code,
+            "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_confirm_email_change_email(
+    email_to: str, new_email: str, code: str
+) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your email change code is {code}"
+    html_content = render_email_template(
+        template_name="confirm_email_change.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "new_email": new_email,
+            "code": code,
+            "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
 def generate_release_share_email(
     email_to: str,
     project_name: str,

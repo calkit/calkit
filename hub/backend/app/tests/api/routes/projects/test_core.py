@@ -4718,6 +4718,17 @@ def test_imported_from_info_reads_bare_strings() -> None:
     assert _imported_from_info("a colleague's USB stick") == {
         "description": "a colleague's USB stick"
     }
+    # Links that aren't http(s) are dropped, since they're rendered as hrefs
+    assert _imported_from_info(
+        {"url": "javascript:alert(1)", "date": "2026-01-02"}
+    ) == {"date": "2026-01-02"}
+    assert _imported_from_info(
+        {"git_repo_url": " JavaScript://github.com/%0Aalert(1)", "path": "a"}
+    ) == {"path": "a"}
+    # SSH clone URLs are kept
+    assert _imported_from_info({"git_repo_url": "git@github.com:a/b"}) == {
+        "git_repo_url": "git@github.com:a/b"
+    }
 
 
 def test_tables_listing_skips_map_paths_copies(tmp_path) -> None:
@@ -4906,6 +4917,80 @@ def test_post_project_empty_repo(client: TestClient, db: Session) -> None:
         }
     )
     assert resp.status_code == 400
+
+
+def test_post_project_git_repo_url_validation(
+    client: TestClient, db: Session
+) -> None:
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"repourl-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"repourl{suffix}",
+            github_username=f"repourl{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    # Stop at the repo create that follows validation
+    gh_get = SimpleNamespace(status_code=404, json=lambda: {}, text="")
+
+    def post(git_repo_url: str):
+        with (
+            patch(
+                "app.api.routes.projects.core.users.get_github_token",
+                return_value="gh-token",
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.get",
+                return_value=gh_get,
+            ) as get,
+            patch(
+                "app.api.routes.projects.core.requests.post",
+                return_value=SimpleNamespace(
+                    status_code=500, json=lambda: {}, text="stop here"
+                ),
+            ),
+        ):
+            resp = client.post(
+                "/projects",
+                headers=headers,
+                json={
+                    "name": f"proj-{suffix}",
+                    "title": "Repo URL validation",
+                    "is_public": True,
+                    "git_repo_url": git_repo_url,
+                },
+            )
+        return resp, get
+
+    # Anything but an https github.com repo URL is rejected up front
+    for bad in [
+        f"javascript://github.com/%0Aalert(1)//repourl{suffix}/proj",
+        f"http://github.com/repourl{suffix}/proj",
+        f"https://github.com.evil.com/repourl{suffix}/proj",
+        f"https://user@github.com/repourl{suffix}/proj",
+        f"https://github.com/repourl{suffix}/proj/extra",
+        f"https://github.com/repourl{suffix}/proj?x=1",
+        "https://github.com/",
+    ]:
+        resp, get = post(bad)
+        assert resp.status_code == 400, bad
+        get.assert_not_called()
+    # A valid one is normalized before GitHub is asked about it
+    for good in [
+        f"https://www.github.com/repourl{suffix}/proj",
+        f"https://GitHub.com/repourl{suffix}/proj/",
+    ]:
+        resp, get = post(good)
+        assert resp.status_code != 400, resp.text
+        get.assert_called_once()
+        assert get.call_args.args[0] == (
+            f"https://api.github.com/repos/repourl{suffix}/proj"
+        )
 
 
 def test_post_project_dataset_provenance(

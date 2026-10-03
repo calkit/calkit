@@ -50,6 +50,7 @@ import PdfDocumentViewer, {
   type HighlightTransform,
   type OnSelectionFinished,
 } from "../Common/PdfDocumentViewer"
+import { safeHref } from "../../lib/strings"
 
 // ---------------------------------------------------------------------------
 // Highlight shape that extends IHighlight with our DB id / comment body
@@ -200,7 +201,11 @@ export function HighlightPopup({
                 : ""}
             </Text>
             {highlight.externalUrl && (
-              <Link href={highlight.externalUrl} isExternal color="gray.500">
+              <Link
+                href={safeHref(highlight.externalUrl)}
+                isExternal
+                color="gray.500"
+              >
                 <Flex align="center" gap={0.5}>
                   <Icon as={FaGithub} boxSize={3} />
                   <ExternalLinkIcon boxSize={2.5} />

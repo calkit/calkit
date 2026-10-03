@@ -117,6 +117,9 @@ class OperatorConnection {
         operator_id: this.operatorId,
         "x-second-factor": getSecondFactorToken(),
       })
+      // Closed while the token was on its way, e.g., by leaving the page,
+      // so it mustn't open a channel that would keep the Operator awake
+      if (this.closed) return
       const { relay_url, token } = resp.data
       ws = new WebSocket(`${relay_url}/browser`)
       // Sent in a message rather than the URL to stay out of logs

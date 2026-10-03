@@ -1024,7 +1024,6 @@ def test_dvc_deps_are_unique_per_stage():
         inputs=["main.tex", "figures/plot.png"],
     )
     assert_unique(latex.dvc_deps)
-
     # One source copied to two destinations is one dependency, not two
     mapped = MapPathsStage(
         name="copy",
@@ -1034,7 +1033,6 @@ def test_dvc_deps_are_unique_per_stage():
         ],
     )
     assert_unique(mapped.dvc_deps)
-
     # The compiled stage is what reaches dvc.yaml
     for stage in [latex, mapped]:
         assert_unique(stage.to_dvc()["deps"])

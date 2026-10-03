@@ -41,6 +41,8 @@ OUTPUT_CHUNK_CHARS = 32 * 1024
 RECONNECT_MAX_DELAY_SECONDS = 60
 # Messages from the relay are at most 256 KiB, plus its wrapping
 MAX_FRAME_BYTES = 1024 * 1024
+# Session input waiting for its terminal to drain, e.g., a long paste
+MAX_INPUT_BUFFER_BYTES = 1024 * 1024
 # In cron mode, the Operator exits after this long with no sessions or
 # browsers, and cron starts it again when the hub asks
 CRON_IDLE_EXIT_SECONDS = 900
@@ -120,6 +122,19 @@ def use_own_hub() -> str:
     return url
 
 
+def is_registered(cfg: Any) -> bool:
+    """Whether a config is for one of the user's active Operators on their
+    own hub, rather than a revoked one or one from another hub, asked with
+    the user's login so it works for another machine's config too.
+    """
+    from calkit import hub
+
+    if not isinstance(cfg, dict) or cfg.get("api_url") != use_own_hub():
+        return False
+    active = hub._request("get", "/operators")
+    return any(o.get("id") == cfg.get("id") for o in active)
+
+
 def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
     """Register this machine as an Operator with the hub and save its
     config.
@@ -151,36 +166,6 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
     )
     save_config(cfg)
     return cfg
-
-
-def _git_status(path: str) -> dict:
-    """Branch, commit, dirtiness, and divergence of a checkout."""
-    try:
-        out = subprocess.run(
-            ["git", "status", "--porcelain=v2", "--branch"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        ).stdout
-    except (subprocess.SubprocessError, OSError):
-        return {}
-    info: dict[str, Any] = {"dirty": False}
-    for line in out.splitlines():
-        if line.startswith("# branch.oid "):
-            oid = line.split()[2]
-            info["commit"] = None if oid == "(initial)" else oid
-        elif line.startswith("# branch.head "):
-            head = line.split()[2]
-            info["branch"] = None if head == "(detached)" else head
-        elif line.startswith("# branch.ab "):
-            _, _, ahead, behind = line.split()
-            info["ahead"] = int(ahead)
-            info["behind"] = -int(behind)
-        elif not line.startswith("#"):
-            info["dirty"] = True
-    return info
 
 
 def install_remote(
@@ -218,7 +203,7 @@ def install_remote(
     ).stdout
     cfg = yaml.safe_load(existing) if existing.strip() else None
     registered = False
-    if not isinstance(cfg, dict) or cfg.get("api_url") != hub.get_base_url():
+    if not is_registered(cfg):
         info = ws.remote_system_info(target)
         hostname = info.get("hostname") or host
         resp = hub._request(
@@ -242,6 +227,7 @@ def install_remote(
             workspaces=[],
         )
         registered = True
+    assert isinstance(cfg, dict)
     try:
         if registered:
             # Only the user can read it there either, since it holds the
@@ -275,6 +261,36 @@ def discover_workspaces(cfg: dict) -> list[dict]:
     These are Calkit projects directly under ``~/calkit``, ones registered
     in the config, and the managed ones Calkit creates for running stages.
     """
+
+    def _git_status(path: str) -> dict:
+        """Branch, commit, dirtiness, and divergence of a checkout."""
+        try:
+            out = subprocess.run(
+                ["git", "status", "--porcelain=v2", "--branch"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            ).stdout
+        except (subprocess.SubprocessError, OSError):
+            return {}
+        info: dict[str, Any] = {"dirty": False}
+        for line in out.splitlines():
+            if line.startswith("# branch.oid "):
+                oid = line.split()[2]
+                info["commit"] = None if oid == "(initial)" else oid
+            elif line.startswith("# branch.head "):
+                head = line.split()[2]
+                info["branch"] = None if head == "(detached)" else head
+            elif line.startswith("# branch.ab "):
+                _, _, ahead, behind = line.split()
+                info["ahead"] = int(ahead)
+                info["behind"] = -int(behind)
+            elif not line.startswith("#"):
+                info["dirty"] = True
+        return info
+
     home = config.get_user_home()
     candidates: list[tuple[str, str]] = []
     root = os.path.join(home, "calkit")
@@ -433,28 +449,6 @@ def _calkit(args: list[str], wdir: str) -> None:
         )
 
 
-def _dvc_json(args: list[str], wdir: str) -> dict:
-    """Run a DVC command with JSON output in a workspace.
-
-    It's a subprocess rather than DVC's Python API, which resolves paths
-    against the process's working directory: that isn't the workspace, may
-    be on another drive on Windows, and can't be changed safely while other
-    actions run in threads.
-    """
-    result = subprocess.run(
-        [sys.executable, "-m", "dvc", *args, "--json"],
-        cwd=wdir,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            (result.stderr or result.stdout).strip() or "DVC failed"
-        )
-    out: dict = json.loads(result.stdout or "{}")
-    return out
-
-
 def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     """A workspace's status as ``calkit status --json`` reports it, the same
     as the VS Code extension shows, plus how far it is from its remote.
@@ -507,50 +501,34 @@ def get_run_state(wdir: str) -> dict:
     """What the pipeline is doing, or last did, from the files a run leaves,
     which are cheap enough to read at every check-in.
 
-    A run is in progress while a live process holds DVC's lock, and its
-    log says which stage it's on; `calkit run` records how each run ended.
+    The running part is what `calkit status` reports during a run, and
+    `calkit run` records how each run ended.
     """
-    from calkit.cli.main.core import (
-        _stage_run_info_from_log_content,
-        _stage_target_from_cmd,
-    )
-    from calkit.dvc.core import get_running_pipeline_processes
-
-    def latest(kind: str, suffix: str) -> str | None:
-        # Named by start time, so the latest sorts last
-        d = os.path.join(wdir, ".calkit", "local", kind)
-        try:
-            names = [f for f in os.listdir(d) if f.endswith(suffix)]
-        except OSError:
-            return None
-        return os.path.join(d, max(names)) if names else None
+    from calkit.cli.main.core import _get_running_pipeline_status
 
     state: dict[str, Any] = dict(
         running=False, running_stages=[], running_since=None, last_run=None
     )
-    processes = get_running_pipeline_processes(wdir)
-    if processes:
+    running = _get_running_pipeline_status(wdir)
+    if running is not None:
         state["running"] = True
-        # Items of a sweep run in their own processes, naming their stage
-        stages = [
-            target
-            for p in processes
-            if (target := _stage_target_from_cmd(p.get("cmd", "")))
-        ]
-        log = latest("logs", ".log")
-        if not stages and log is not None:
-            try:
-                with open(log) as f:
-                    info = _stage_run_info_from_log_content(f.read())
-            except OSError:
-                info = {}
-            stages = [name for name, i in info.items() if "status" not in i]
-            starts = [info[name]["start_time"] for name in stages]
-            if starts:
-                # Logged in UTC, without saying so
-                state["running_since"] = min(starts) + "+00:00"
+        stages = running["running_stages"]
         state["running_stages"] = [s[:256] for s in stages[:50]]
-    record = latest("runs", ".json")
+        starts = [
+            running["stages"][name]["start_time"]
+            for name in stages
+            if "start_time" in running["stages"].get(name, {})
+        ]
+        if starts:
+            # Logged in UTC, without saying so
+            state["running_since"] = min(starts) + "+00:00"
+    runs_dir = os.path.join(wdir, ".calkit", "local", "runs")
+    try:
+        names = [f for f in os.listdir(runs_dir) if f.endswith(".json")]
+    except OSError:
+        names = []
+    # Named by start time, so the latest sorts last
+    record = os.path.join(runs_dir, max(names)) if names else None
     if record is not None:
         try:
             with open(record) as f:
@@ -656,6 +634,28 @@ def ignore_path(
 
 def discard_changes(wdir: str) -> None:
     """Stash Git changes and check out DVC-tracked files that changed."""
+
+    def _dvc_json(args: list[str], wdir: str) -> dict:
+        """Run a DVC command with JSON output in a workspace.
+
+        It's a subprocess rather than DVC's Python API, which resolves paths
+        against the process's working directory: that isn't the workspace, may
+        be on another drive on Windows, and can't be changed safely while other
+        actions run in threads.
+        """
+        result = subprocess.run(
+            [sys.executable, "-m", "dvc", *args, "--json"],
+            cwd=wdir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                (result.stderr or result.stdout).strip() or "DVC failed"
+            )
+        out: dict = json.loads(result.stdout or "{}")
+        return out
+
     calkit.git.get_repo(wdir).git.stash()
     if not os.path.isdir(os.path.join(wdir, ".dvc")):
         return
@@ -684,6 +684,12 @@ def add_stage(
             raise ValueError(f"Unknown object type '{calkit_type}'")
         if calkit_object is None or not outs or len(outs) != 1:
             raise ValueError("An object needs its info and one output")
+        # Checked before anything is written, so a refusal leaves nothing
+        # behind
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+        objs = ck_info.get(calkit_type + "s", [])
+        if outs[0] in [obj.get("path") for obj in objs]:
+            raise ValueError(f"A {calkit_type} already exists at {outs[0]}")
     fpath = os.path.join(wdir, "dvc.yaml")
     pipeline: dict = {}
     if os.path.isfile(fpath):
@@ -711,10 +717,6 @@ def add_stage(
     repo.git.add("dvc.yaml")
     if calkit_type is not None:
         assert outs is not None and calkit_object is not None
-        ck_info = calkit.load_calkit_info(wdir=wdir)
-        objs = ck_info.get(calkit_type + "s", [])
-        if outs[0] in [obj.get("path") for obj in objs]:
-            raise ValueError(f"A {calkit_type} already exists at {outs[0]}")
         objs.append(dict(path=outs[0], stage=name) | calkit_object)
         ck_info[calkit_type + "s"] = objs
         with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
@@ -795,6 +797,8 @@ class Session:
     channels: set[str] = field(default_factory=set)
     pending: list[str] = field(default_factory=list)
     flush_scheduled: bool = False
+    # Input the terminal couldn't take yet, e.g., the rest of a long paste
+    input_buffer: bytearray = field(default_factory=bytearray)
     decoder: Any = field(
         default_factory=lambda: codecs.getincrementaldecoder("utf-8")(
             errors="replace"
@@ -842,15 +846,21 @@ class Operator:
         self.workspaces: list[dict] = []
         self.ws: Any = None
         self.check_in_interval = 60
-        # One Git or DVC operation at a time per workspace
+        # One Git or DVC operation at a time per workspace, and which
         self.workspace_locks: dict[str, asyncio.Lock] = {}
+        self.workspace_actions: dict[str, str] = {}
 
     async def send(self, ch: str, msg: dict) -> None:
         ws = self.ws
         if ws is None:
             return
         try:
-            await ws.send(json.dumps({"ch": ch, "msg": msg}))
+            # Unescaped, since escaping makes each non-ASCII character, e.g.,
+            # a TUI's box drawing, 6 to 12 bytes, which can push a chunk of
+            # output past the relay's message limit
+            await ws.send(
+                json.dumps({"ch": ch, "msg": msg}, ensure_ascii=False)
+            )
         except Exception as e:
             logger.debug(f"Dropped message to {ch}: {e}")
 
@@ -908,8 +918,35 @@ class Operator:
         # Typed ahead, so the shell runs it once it has started, and the
         # session carries on as a shell afterwards
         if command:
-            os.write(fd, command.encode() + b"\n")
+            self.write_input(session, command.encode() + b"\n")
         return session
+
+    def write_input(self, session: Session, data: bytes) -> None:
+        """Write to a session's terminal, keeping what it can't take yet and
+        writing that as it drains, since a terminal only buffers a little,
+        e.g., about 1 KiB on macOS.
+        """
+        if len(session.input_buffer) + len(data) > MAX_INPUT_BUFFER_BYTES:
+            raise ValueError("Too much input waiting for the terminal")
+        session.input_buffer += data
+        self._drain_input(session)
+
+    def _drain_input(self, session: Session) -> None:
+        loop = asyncio.get_running_loop()
+        while session.input_buffer:
+            try:
+                written = os.write(session.fd, session.input_buffer)
+            except BlockingIOError:
+                break
+            except OSError:
+                # The terminal is gone, which its reader handles
+                session.input_buffer.clear()
+                break
+            del session.input_buffer[:written]
+        if session.input_buffer:
+            loop.add_writer(session.fd, self._drain_input, session)
+        else:
+            loop.remove_writer(session.fd)
 
     def resize(self, session: Session, cols: int, rows: int) -> None:
         import fcntl
@@ -964,6 +1001,7 @@ class Operator:
     def _on_exit(self, session: Session) -> None:
         loop = asyncio.get_running_loop()
         loop.remove_reader(session.fd)
+        loop.remove_writer(session.fd)
         self._flush(session)
         try:
             os.close(session.fd)
@@ -1043,7 +1081,7 @@ class Operator:
         if kind == "sessions.input":
             data = msg.get("data", "")
             if isinstance(data, str) and data:
-                os.write(self._get_session(msg).fd, data.encode())
+                self.write_input(self._get_session(msg), data.encode())
             return None
         if kind == "sessions.resize":
             self.resize(self._get_session(msg), msg["cols"], msg["rows"])
@@ -1108,8 +1146,12 @@ class Operator:
                 path = await asyncio.to_thread(
                     clone_project, msg["git_repo_url"]
                 )
-                # So the hub lists it right away
-                await self.check_in()
+                # So the hub lists it right away, though the clone stands
+                # either way
+                try:
+                    await self.check_in()
+                except Exception as e:
+                    logger.warning(f"Check-in after cloning failed: {e}")
                 result: Any = {"path": path}
             else:
                 wdir = self.get_workspace(
@@ -1122,10 +1164,24 @@ class Operator:
                     if k not in ("type", "id", "workspace")
                 }
                 lock = self.workspace_locks.setdefault(wdir, asyncio.Lock())
-                async with lock:
-                    result = await asyncio.to_thread(
-                        WORKSPACE_ACTIONS[kind], wdir, **kwargs
-                    )
+                action = WORKSPACE_ACTIONS[kind]
+                # A run holds DVC's lock for as long as it goes, so status
+                # only reports its progress then, changing nothing, and
+                # needn't wait for it to finish
+                if (
+                    kind == "workspace.status"
+                    and self.workspace_actions.get(wdir) == "workspace.run"
+                ):
+                    result = await asyncio.to_thread(action, wdir, **kwargs)
+                else:
+                    async with lock:
+                        self.workspace_actions[wdir] = kind
+                        try:
+                            result = await asyncio.to_thread(
+                                action, wdir, **kwargs
+                            )
+                        finally:
+                            self.workspace_actions.pop(wdir, None)
         except Exception as e:
             logger.warning(f"{kind} failed: {e}")
             if req_id is not None:
@@ -1142,8 +1198,10 @@ class Operator:
         self.workspaces = await asyncio.to_thread(
             discover_workspaces, self.cfg
         )
+        # Whether browsers can reach it now, so the hub doesn't show it
+        # online while it's reconnecting
         resp = await asyncio.to_thread(
-            check_in, self.cfg, self.workspaces, self.mode
+            check_in, self.cfg, self.workspaces, self.mode, self.ws is not None
         )
         self.check_in_interval = resp.get("check_in_interval", 60)
         return resp
@@ -1442,9 +1500,12 @@ def _windows_startup_script() -> str:
         exe = pythonw
     args = " ".join(f'""{a}""' for a in [exe, *_service_command()[1:]])
     log = get_log_path()
+    # cmd strips the first and last quotes of a command with more than two,
+    # so the whole command gets a pair of its own (quotes are doubled in
+    # VBScript)
     return (
         'Set shell = CreateObject("WScript.Shell")\r\n'
-        f'shell.Run "cmd /c {args} >> ""{log}"" 2>&1", 0, False\r\n'
+        f'shell.Run "cmd /c ""{args} >> ""{log}"" 2>&1""", 0, False\r\n'
     )
 
 
@@ -1571,7 +1632,7 @@ def install_service(at_boot: bool = False) -> list[str]:
     return notes
 
 
-def _stop_windows_operator() -> None:
+def _stop_running_operator() -> None:
     import psutil
 
     pid = get_running_pid()
@@ -1583,7 +1644,7 @@ def uninstall_service() -> None:
     if platform.system() == "Windows":
         if os.path.isfile(_windows_startup_path()):
             os.remove(_windows_startup_path())
-        _stop_windows_operator()
+        _stop_running_operator()
         return
     if _cron_installed():
         _write_crontab(
@@ -1678,7 +1739,7 @@ def set_service_running(running: bool) -> None:
         if running:
             subprocess.Popen(["wscript", _windows_startup_path()])
         else:
-            _stop_windows_operator()
+            _stop_running_operator()
         return
     if system == "Linux" and os.path.isfile(_systemd_unit_path()):
         action = "start" if running else "stop"
@@ -1709,4 +1770,19 @@ def set_service_running(running: bool) -> None:
                     check=True,
                 )
             return
+    # Cron starts it, so starting it now just checks in, connecting if the
+    # hub asked, and stopping ends the one running, which cron starts again
+    # when the hub asks
+    if _cron_installed():
+        if running:
+            with open(get_log_path(), "a") as log:
+                subprocess.Popen(
+                    _service_command("cron"),
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+        else:
+            _stop_running_operator()
+        return
     raise RuntimeError("The Operator isn't installed as a service")

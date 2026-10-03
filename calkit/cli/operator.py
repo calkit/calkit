@@ -95,6 +95,11 @@ def install(
         typer.echo(f"✅ Installed Operator '{remote['name']}' on {ssh}")
         return
     cfg = operator.load_config()
+    # A revoked Operator, or one from another hub, would exit at its first
+    # check-in, so it's registered again
+    if cfg is not None and not operator.is_registered(cfg):
+        typer.echo(f"Operator '{cfg.get('name')}' is no longer registered")
+        cfg = None
     if cfg is None:
         typer.echo(f"Registering this machine with {hub_url}")
         cfg = operator.register()
@@ -222,7 +227,11 @@ def logs(
     from calkit import operator
 
     _require_config()
-    if platform.system() == "Linux":
+    # Only a systemd service logs to the journal; cron and the others log
+    # to a file
+    if platform.system() == "Linux" and os.path.isfile(
+        operator._systemd_unit_path()
+    ):
         cmd = ["journalctl", "--user", "-u", operator.SYSTEMD_UNIT]
         cmd += ["-f"] if follow else ["-n", "100", "--no-pager"]
     else:

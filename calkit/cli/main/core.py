@@ -2295,7 +2295,7 @@ def _prune_run_logs(
             pass
 
 
-def _get_latest_run_log_content() -> str | None:
+def _get_latest_run_log_content(wdir: str = ".") -> str | None:
     """Return the contents of the most recent run log, or ``None``.
 
     Looks in the private ``.calkit/local/logs`` directory (always written)
@@ -2304,8 +2304,8 @@ def _get_latest_run_log_content() -> str | None:
     """
     candidates = []
     for d in [
-        os.path.join(".calkit", "local", "logs"),
-        os.path.join(".calkit", "logs"),
+        os.path.join(wdir, ".calkit", "local", "logs"),
+        os.path.join(wdir, ".calkit", "logs"),
     ]:
         if os.path.isdir(d):
             candidates += [
@@ -2356,7 +2356,7 @@ def _stage_target_from_cmd(cmd: str) -> str | None:
     return targets[-1] if targets else None
 
 
-def _get_running_pipeline_status() -> dict | None:
+def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
     """Return live pipeline run progress, or ``None`` if no run is running.
 
     A run is in progress when a live process holds DVC's rwlock. The most
@@ -2365,7 +2365,7 @@ def _get_running_pipeline_status() -> dict | None:
     their own processes before the run log exists, so their stage names are
     also recovered from the lock's command strings.
     """
-    processes = calkit.dvc.get_running_pipeline_processes()
+    processes = calkit.dvc.get_running_pipeline_processes(wdir)
     if not processes:
         return None
     # Stage targets in the lock commands identify concurrently-run scheduler
@@ -2385,7 +2385,7 @@ def _get_running_pipeline_status() -> dict | None:
             "stages": {},
             "running_stages": concurrent_stages,
         }
-    content = _get_latest_run_log_content()
+    content = _get_latest_run_log_content(wdir)
     stages = (
         _stage_run_info_from_log_content(content)
         if content is not None

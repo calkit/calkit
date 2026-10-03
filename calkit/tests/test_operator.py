@@ -185,6 +185,20 @@ async def test_sessions(tmp_path, monkeypatch):
         )
 
     workspace = op.workspaces[0]["path"]
+
+    # Messages go out unescaped, since escaping a TUI's box drawing makes
+    # each character up to 12 bytes, which can pass the relay's limit
+    class FakeSocket:
+        def __init__(self):
+            self.sent: list[str] = []
+
+        async def send(self, text):
+            self.sent.append(text)
+
+    op.ws = FakeSocket()
+    await operator.Operator.send(op, "x", {"data": "───"})
+    assert op.ws.sent == ['{"ch": "x", "msg": {"data": "───"}}']
+    op.ws = None
     sent: list[tuple[str, dict]] = []
 
     async def send(ch, msg):
@@ -254,6 +268,10 @@ async def test_sessions(tmp_path, monkeypatch):
         },
     )
     await wait_for(lambda: "HI-42" in output("a"))
+    # Input the terminal can't take at once, e.g., a long paste, all arrives
+    paste = ("true " + "x" * 64 + "\n") * 300 + "echo PASTED-$((2*3))\n"
+    message("a", {"type": "sessions.input", "session": sid, "data": paste})
+    await wait_for(lambda: "PASTED-6" in output("a"), timeout=30)
     # A second channel attaching gets the scrollback replayed
     op.on_relay_message({"type": "channel.open", "ch": "b", "grant": grant()})
     message("b", {"type": "sessions.attach", "id": 4, "session": sid})
@@ -317,6 +335,9 @@ def test_service_files(tmp_path, monkeypatch):
     script = operator._windows_startup_script()
     assert "--mode" in script and "service" in script
     assert operator.get_log_path() in script
+    # The whole command has its own quotes, since cmd strips the outer pair
+    # of one with more than two (doubled here, for VBScript)
+    assert 'cmd /c ""' in script and '2>&1"""' in script
     unit = operator._systemd_unit()
     assert f"ExecStart={shlex.join(command)}" in unit
     assert "Restart=on-failure" in unit
@@ -352,6 +373,23 @@ def test_cron_and_lock(tmp_path, monkeypatch):
     operator.uninstall_service()
     assert table.read_text().splitlines() == ["0 * * * * echo mine"]
     assert operator.get_service_status() is None
+    # In cron mode, starting checks in now and stopping ends the running one
+    started, stopped = [], []
+    with monkeypatch.context() as m:
+        m.setattr(operator, "_cron_installed", lambda: True)
+        m.setattr(
+            operator.subprocess,
+            "Popen",
+            lambda argv, **kw: started.append(argv),
+        )
+        m.setattr(
+            operator, "_stop_running_operator", lambda: stopped.append(True)
+        )
+        m.setattr(operator.platform, "system", lambda: "Linux")
+        operator.set_service_running(True)
+        operator.set_service_running(False)
+    assert started == [operator._service_command("cron")]
+    assert stopped == [True]
     # Only one Operator runs at a time
     lock = operator.acquire_lock()
     assert lock is not None
@@ -511,6 +549,33 @@ def test_workspace_actions(tmp_path, monkeypatch):
         operator.add_stage(wdir, name="other", cmd="echo", outs=["fig.png"])
     import calkit
 
+    # A refusal over an object that's already there leaves nothing behind
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    ck_info["figures"].append({"path": "drawn.png", "title": "By hand"})
+    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.run(
+        ["git", "commit", "-qam", "Add figure"], cwd=wdir, check=True
+    )
+    with pytest.raises(ValueError):
+        operator.add_stage(
+            wdir,
+            name="draw",
+            cmd="echo",
+            outs=["drawn.png"],
+            calkit_type="figure",
+            calkit_object={"title": "Again"},
+        )
+    staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=wdir)
+    assert staged.returncode == 0
+    assert "draw" not in open(os.path.join(wdir, "dvc.yaml")).read()
+    ck_info["figures"].pop()
+    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.run(
+        ["git", "commit", "-qam", "Drop figure"], cwd=wdir, check=True
+    )
+
     figures = calkit.load_calkit_info(wdir=wdir)["figures"]
     assert figures == [
         {
@@ -523,14 +588,14 @@ def test_workspace_actions(tmp_path, monkeypatch):
     # Running without a terminal reports how it went; this stage's script
     # doesn't exist, so it fails
     result = operator.run_pipeline(wdir)
+    assert result["ok"] is False
+    assert result["output"]
     # Single stages can be run, and their names can't be options
     result = operator.run_pipeline(wdir, stages=["plot"])
     assert result["ok"] is False and "plot" in result["output"]
     for bad in ["--force", "-f", "a b", "x;y", ""]:
         with pytest.raises(ValueError):
             operator.run_pipeline(wdir, stages=[bad])
-    assert result["ok"] is False
-    assert result["output"]
     subprocess.run(["git", "checkout", "--", "."], cwd=wdir, check=True)
     # Changes to DVC-tracked files show up too, and discarding puts back
     # what was committed with either
@@ -596,9 +661,14 @@ def test_install_remote(monkeypatch):
         },
     )
     posted = {}
+    # The user's active Operators, as the hub lists them
+    active = []
 
     def request(kind, path, json=None, **kwargs):
+        if kind == "get":
+            return active
         posted.update(json)
+        active.append({"id": "op1"})
         return {"id": "op1", "name": "login1-cluster", "user_id": "u1"} | {
             "token": "cko_secret",
             "grant_public_key": "key",
@@ -639,6 +709,13 @@ def test_install_remote(monkeypatch):
     assert operator.install_remote("cluster") == cfg
     assert posted == {}
     assert len(runs) == 2
+    # One that was revoked is registered again rather than kept, since it
+    # would exit at its first check-in
+    active.clear()
+    runs.clear()
+    operator.install_remote("cluster")
+    assert posted["hostname"] == "login1.cluster"
+    assert len(runs) == 3
     # A registration whose install fails is revoked
     remote_config["text"] = ""
     fail_install = True

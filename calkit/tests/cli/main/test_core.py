@@ -1120,6 +1120,30 @@ def test_save(tmp_dir):
     assert last_commit_message == "A unique message"
 
 
+def test_save_missing_path(tmp_dir):
+    # A path that isn't in the workspace shouldn't abort the save: the files
+    # that are there still get committed, and the missing one gets reported
+    subprocess.check_call(["calkit", "init"])
+    with open("present.txt", "w") as f:
+        f.write("sup")
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "save",
+            "present.txt",
+            "not-there.txt",
+            "-m",
+            "Add present",
+            "--no-push",
+        ],
+        text=True,
+    )
+    assert "not-there.txt" in out
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Add present"
+    assert "present.txt" in repo.git.show("--name-only", "--format=", "HEAD")
+
+
 def test_save_data_not_in_cache(tmp_dir):
     # We should skip DVC-tracked paths that are missing from both the
     # workspace and the cache, e.g., because they were never pulled

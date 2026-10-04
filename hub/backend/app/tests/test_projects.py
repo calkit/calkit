@@ -831,6 +831,37 @@ def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
     )
 
 
+def test_dvc_outputs_from_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from app.git import WorkingTree
+
+    # A stage output stored in Git is a file in the tree; one stored with
+    # DVC is ignored by Git, so it isn't, and a `dvc add` pointer is
+    (tmp_path / "figures").mkdir()
+    (tmp_path / "figures" / "plot.png").write_bytes(b"png")
+    (tmp_path / "data.csv.dvc").write_text(
+        "outs:\n- md5: c3\n  path: data.csv\n"
+    )
+    lock_outs = {
+        "figures/plot.png": {"md5": "a1", "type": "file"},
+        "results/big.h5": {"md5": "b2", "type": "file"},
+    }
+    monkeypatch.setattr(
+        app.projects,
+        "get_ck_info_and_dvc_outs_from_tree",
+        lambda project, tree: SimpleNamespace(dvc_lock_outs=lock_outs),
+    )
+    outs = app.projects.dvc_outputs_from_tree(
+        project=None,  # type: ignore[arg-type]
+        tree=WorkingTree(str(tmp_path)),
+    )
+    assert set(outs) == {"results/big.h5", "data.csv"}
+    assert outs["data.csv"]["md5"] == "c3"
+
+
 def test_drop_stale_lock_stages() -> None:
     from app.dvc import drop_stale_lock_stages
 

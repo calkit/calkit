@@ -82,11 +82,12 @@ text = "".join(lines)
 # A local version's commit is the rev, which the footer gives already
 version = calkit.__version__.split("+")[0]
 dirty = git("status", "--porcelain", "--", *INPUTS, *{v.path for v in values})
-# The permalink reads with a short rev, and links with the full one, which
-# the hub can fetch even before it has the commit
+# The project links to its state at the full rev, which the hub can fetch
+# even before it has the commit, and reads with the short one
 footer = (
     rf"Built by Calkit v{version} from "
-    rf"\href{{{project_url}?ref={rev}}}{{{project}?ref={rev[:7]}}}"
+    rf"\href{{{project_url}?ref={rev}}}{{{project}}} at rev "
+    rf"\texttt{{{rev[:7]}}}"
     + (" with uncommitted changes" if dirty else "")
     + "."
 )

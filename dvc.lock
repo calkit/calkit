@@ -201,8 +201,8 @@ stages:
       size: 26148
     - path: scripts/one-pager-to-latex.py
       hash: md5
-      md5: 8f3df5e64462973d8555cb5c0e5c8516
-      size: 3361
+      md5: da10f6e19b0337cc7e07d099721cd57e
+      size: 3477
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -210,8 +210,8 @@ stages:
     outs:
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 121b8424d81d10221d4d60e2c4f5dd72
-      size: 7100
+      md5: 886392bc1e2c1f173af81a2a2814292b
+      size: 7089
   one-pager:
     cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
     deps:
@@ -226,14 +226,14 @@ stages:
       size: 50359
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 121b8424d81d10221d4d60e2c4f5dd72
-      size: 7100
+      md5: 886392bc1e2c1f173af81a2a2814292b
+      size: 7089
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 121b8424d81d10221d4d60e2c4f5dd72
-      size: 7100
+      md5: 886392bc1e2c1f173af81a2a2814292b
+      size: 7089
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 8b80f5851e0f22191759b86b01514cfa
-      size: 148477
+      md5: 309f6f68b1ffa29869f3e6a9d4e2e4dc
+      size: 121304

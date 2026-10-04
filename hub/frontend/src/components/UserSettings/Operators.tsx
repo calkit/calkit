@@ -18,6 +18,7 @@ import {
   Tr,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { QRCodeSVG } from "qrcode.react"
 import { useState } from "react"
 
@@ -37,8 +38,15 @@ function TwoFactor() {
   const showToast = useCustomToast()
   const { user } = useAuth()
   // Setup emails a code, so the address has to be verified first, which
-  // happens inline: a code is sent, and entering it carries on to setup
-  const [verifying, setVerifying] = useState(false)
+  // happens inline: a code is sent, and entering it carries on to setup.
+  // The step is kept in the URL, so a reload lands back on it.
+  const { verify_2fa } = useSearch({ from: "/_layout/settings" })
+  const navigate = useNavigate({ from: "/settings" })
+  const verifying = Boolean(verify_2fa) && !user?.email_verified
+  const setVerifying = (on: boolean) =>
+    navigate({
+      search: (prev) => ({ ...prev, verify_2fa: on || undefined }),
+    })
   const [verifyCode, setVerifyCode] = useState("")
   const [setup, setSetup] = useState<{
     secret: string
@@ -62,11 +70,19 @@ function TwoFactor() {
       setVerifyCode("")
       setVerifying(true)
     },
-    // Verified since this page loaded, so setup can go ahead
-    onError: (e: any): void =>
-      e.response?.data?.detail === "This email is already verified"
-        ? startMutation.mutate()
-        : onError(e),
+    onError: (e: any): void => {
+      const detail = e.response?.data?.detail ?? ""
+      if (detail === "This email is already verified") {
+        // Verified since this page loaded, so setup can go ahead
+        startMutation.mutate()
+      } else if (detail.startsWith("A code was just sent") && !verifying) {
+        // One is already on its way, so it's entered rather than resent
+        setVerifyCode("")
+        setVerifying(true)
+      } else {
+        onError(e)
+      }
+    },
   })
   const startMutation = useMutation({
     mutationFn: () => UsersService.postUserTotp().then((r) => r.data),

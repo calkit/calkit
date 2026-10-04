@@ -350,7 +350,12 @@ function TerminalPane({
           />
         </Tooltip>
       </Flex>
-      <Box ref={ref} h="360px" bg="black" p={1} />
+      {/* The padding is on a wrapper, since the fit addon sizes the
+          terminal to its element's full height, padding included, which
+          would cut off the last row */}
+      <Box bg="black" p={1}>
+        <Box ref={ref} h="352px" />
+      </Box>
     </Box>
   )
 }

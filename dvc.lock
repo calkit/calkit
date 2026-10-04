@@ -172,3 +172,68 @@ stages:
       hash: md5
       md5: 40d0d10932579dd1b99807c86efa78d8
       size: 348451
+  one-pager-latex:
+    cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: calkit.yaml
+      hash: md5
+      md5: 316bc5cab16d876f7eb50c8c29cb0127
+      size: 7374
+    - path: docs/one-pager/main.md
+      hash: md5
+      md5: e7d55a1d276af190f6baef087c3181fe
+      size: 3742
+    - path: docs/one-pager/one-pager.lua
+      hash: md5
+      md5: 161bbc0cccd2e991cdc03924cedaef55
+      size: 2101
+    - path: docs/one-pager/template.tex
+      hash: md5
+      md5: 47f68a484b191a8647cf6219c9a12e26
+      size: 2930
+    - path: results/research-flow.json
+      hash: md5
+      md5: b53e850573ec05f982c3d5d3b08850fa
+      size: 26148
+    - path: scripts/one-pager-to-latex.py
+      hash: md5
+      md5: 8f3df5e64462973d8555cb5c0e5c8516
+      size: 3361
+    - path: uv.lock
+      hash: md5
+      md5: 252c68ccae32923f843aa23a43371454
+      size: 1725871
+    outs:
+    - path: docs/one-pager/main.tex
+      hash: md5
+      md5: 121b8424d81d10221d4d60e2c4f5dd72
+      size: 7100
+  one-pager:
+    cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: 754729e57f9f4aa1cb5ceb64a84b6901.dir
+      size: 2658
+      nfiles: 2
+    - path: docs/img/pipeline.png
+      hash: md5
+      md5: 0c09798b4e2fd432f0ca5f0edefb5b38
+      size: 50359
+    - path: docs/one-pager/main.tex
+      hash: md5
+      md5: 121b8424d81d10221d4d60e2c4f5dd72
+      size: 7100
+    - path: docs/one-pager/main.tex
+      hash: md5
+      md5: 121b8424d81d10221d4d60e2c4f5dd72
+      size: 7100
+    outs:
+    - path: docs/one-pager/main.pdf
+      hash: md5
+      md5: 8b80f5851e0f22191759b86b01514cfa
+      size: 148477

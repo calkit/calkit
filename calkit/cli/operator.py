@@ -73,6 +73,18 @@ def install(
     from calkit import operator
     from calkit.cli import warn
 
+    def explain(e: Exception) -> str:
+        # Registering takes a verified email, since setting up two-factor
+        # authentication proves itself by email
+        if "Verify your email first" in str(e):
+            from calkit.hub import get_hub_url
+
+            return (
+                f"Verify your email in your settings at {get_hub_url()}/settings,"
+                " then run this again"
+            )
+        return str(e)
+
     # Sessions would be root shells, and it asks for sudo when it needs it
     if os.name == "posix" and os.geteuid() == 0 and os.getenv("SUDO_USER"):
         raise_error("Run this without sudo")
@@ -91,7 +103,9 @@ def install(
                 interactive=_is_interactive(),
             )
         except Exception as e:
-            raise_error(f"Failed to install the operator on {ssh}: {e}")
+            raise_error(
+                f"Failed to install the operator on {ssh}: {explain(e)}"
+            )
         typer.echo(f"✅ Installed Operator '{remote['name']}' on {ssh}")
         return
     cfg = operator.load_config()
@@ -102,7 +116,10 @@ def install(
         cfg = None
     if cfg is None:
         typer.echo(f"Registering this machine with {hub_url}")
-        cfg = operator.register()
+        try:
+            cfg = operator.register()
+        except Exception as e:
+            raise_error(f"Failed to register this machine: {explain(e)}")
         typer.echo(f"✅ Registered Operator '{cfg['name']}'")
     else:
         typer.echo(f"Operator '{cfg['name']}' is already registered")

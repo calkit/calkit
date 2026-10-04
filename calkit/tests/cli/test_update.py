@@ -626,3 +626,92 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert "already exists" in result.output
     assert len(posted) == n_posted
     assert calkit.load_calkit_info()["hub"] == "https://hub.test"
+
+
+def test_update_question(tmp_dir):
+    from datetime import date
+
+    from calkit.models.core import ProjectInfo
+
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "config", "user.name", "Ada"])
+    subprocess.check_call(["git", "config", "user.email", "ada@example.org"])
+    calkit.save_calkit_info(
+        {
+            "questions": [
+                "Does it work?",
+                {
+                    "question": "Why?",
+                    "name": "why",
+                    "hypothesis": "Because.",
+                    "answer": "Because.",
+                    "evidence": [],
+                },
+            ]
+        }
+    )
+    # Nothing to do, no such question, or AI disclosed with no review
+    for args in [
+        ["question", "1"],
+        ["question", "3", "--notes", "x"],
+        ["question", "nope", "--notes", "x"],
+        ["question", "1", "--with-ai", "Claude Opus 5"],
+    ]:
+        result = runner.invoke(update_app, args)
+        assert result.exit_code != 0, args
+    # A plain question becomes an entry when a field is set
+    result = runner.invoke(
+        update_app, ["question", "1", "--approach", "Run it."]
+    )
+    assert result.exit_code == 0, result.output
+    questions = calkit.load_calkit_info()["questions"]
+    assert questions[0] == {"question": "Does it work?", "approach": "Run it."}
+    # By name, a new field goes where it would be written by hand, and a
+    # review is recorded from Git's identity, covering this same update
+    result = runner.invoke(
+        update_app,
+        [
+            "question",
+            "why",
+            "--approach",
+            "Ask.",
+            "--review",
+            "Read it.",
+            "--with-ai",
+            "Claude Opus 5",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    q = calkit.load_calkit_info()["questions"][1]
+    assert list(q) == [
+        "question",
+        "name",
+        "hypothesis",
+        "approach",
+        "answer",
+        "evidence",
+        "reviews",
+    ]
+    assert q["reviews"] == [
+        {
+            "by": {
+                "name": "Ada",
+                "email": "ada@example.org",
+                "with_ai": "Claude Opus 5",
+            },
+            "date": date.today(),
+            "notes": "Read it.",
+        }
+    ]
+    # Reviewing again replaces that reviewer's sign-off, and notes are
+    # optional
+    result = runner.invoke(update_app, ["question", "2", "--review", ""])
+    assert result.exit_code == 0, result.output
+    q = calkit.load_calkit_info()["questions"][1]
+    assert q["reviews"] == [
+        {
+            "by": {"name": "Ada", "email": "ada@example.org"},
+            "date": date.today(),
+        }
+    ]
+    assert ProjectInfo.model_validate(calkit.load_calkit_info())

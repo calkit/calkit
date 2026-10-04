@@ -1356,6 +1356,149 @@ def update_figure(
     calkit.save_calkit_info(ck_info)
 
 
+@update_app.command(name="question")
+def update_question(
+    question: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The question's 1-based position, as 'calkit list questions' "
+                "numbers it, or its name."
+            )
+        ),
+    ],
+    hypothesis: Annotated[
+        str | None, typer.Option("--hypothesis", help="New hypothesis.")
+    ] = None,
+    approach: Annotated[
+        str | None,
+        typer.Option(
+            "--approach",
+            help="One sentence on how the question is answered.",
+        ),
+    ] = None,
+    answer: Annotated[
+        str | None,
+        typer.Option(
+            "--answer",
+            help=(
+                "New answer. One that picks its wording from the evidence is "
+                "written in calkit.yaml."
+            ),
+        ),
+    ] = None,
+    notes: Annotated[
+        str | None, typer.Option("--notes", help="New notes on the question.")
+    ] = None,
+    review: Annotated[
+        str | None,
+        typer.Option(
+            "--review",
+            help=(
+                "Sign off that the answer follows from the evidence, with "
+                "what you checked, e.g., 'Read the figure against the "
+                "answer.' Recorded with your Git name and email and today's "
+                "date, replacing any earlier review of yours, and applies to "
+                "the question as updated by this command."
+            ),
+        ),
+    ] = None,
+    with_ai: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--with-ai",
+            help=(
+                "A generative AI tool used in reviewing, e.g., 'Claude Opus "
+                "5'. Can be given more than once."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Update a question in calkit.yaml, or sign off on its answer."""
+    import git
+    from ruamel.yaml.comments import CommentedMap
+
+    def git_config(key: str) -> str | None:
+        try:
+            return git.Git().config("--get", key).strip() or None
+        except git.GitCommandError:
+            return None
+
+    if with_ai and review is None:
+        raise_error(
+            "--with-ai discloses tools used in a review; add --review."
+        )
+    updates = {
+        k: v
+        for k, v in [
+            ("hypothesis", hypothesis),
+            ("approach", approach),
+            ("answer", answer),
+            ("notes", notes),
+        ]
+        if v is not None
+    }
+    if not updates and review is None:
+        raise_error("No updates specified.")
+    ck_info = calkit.load_calkit_info()
+    questions = ck_info.get("questions") or []
+    if question.isdigit():
+        index = int(question) - 1
+        if not 0 <= index < len(questions):
+            raise_error(
+                f"There is no question {question}; there are {len(questions)}."
+            )
+    else:
+        found = [
+            n
+            for n, q in enumerate(questions)
+            if isinstance(q, dict) and q.get("name") == question
+        ]
+        if not found:
+            raise_error(f"No question is named {question!r}.")
+        index = found[0]
+    entry = questions[index]
+    if isinstance(entry, str):
+        entry = CommentedMap(question=entry)
+        questions[index] = entry
+    # New fields go where they'd be written by hand, not at the end
+    order = ["question", "name", "hypothesis", "approach", "answer", "notes"]
+    for key, value in updates.items():
+        if key not in entry:
+            later = [
+                n
+                for n, k in enumerate(entry)
+                if k not in order or order.index(k) > order.index(key)
+            ]
+            entry.insert(later[0] if later else len(entry), key, value)
+        else:
+            entry[key] = value
+    if review is not None:
+        email = git_config("user.email")
+        if email is None:
+            raise_error(
+                "A review is recorded with your Git email; set it with "
+                "'git config user.email'."
+            )
+        by = CommentedMap()
+        if name := git_config("user.name"):
+            by["name"] = name
+        by["email"] = email
+        if with_ai:
+            by["with_ai"] = with_ai[0] if len(with_ai) == 1 else with_ai
+        new = CommentedMap(by=by, date=datetime.now().date())
+        if review:
+            new["notes"] = review
+        # One per reviewer: reviewing again replaces their earlier one
+        entry["reviews"] = [
+            r
+            for r in entry.get("reviews") or []
+            if (r.get("by") or {}).get("email") != email
+        ] + [new]
+    ck_info["questions"] = questions
+    calkit.save_calkit_info(ck_info)
+
+
 @update_app.command(name="dataset")
 def update_dataset(
     path: Annotated[str, typer.Argument(help="Path to the dataset file.")],

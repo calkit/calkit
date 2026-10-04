@@ -1981,7 +1981,7 @@ Options:
 
 List the project's questions (1-indexed).
 
-Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`.
+Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. The pipeline stages behind each question's evidence are shown too, upstream first.
 
 Usage:
 
@@ -2566,6 +2566,7 @@ Update objects.
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`question`](#subcommand-update-question)             | Update a question in calkit.yaml, or sign off on its answer.                         |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 | [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
 
@@ -2949,6 +2950,35 @@ Options:
 | `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
 | `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
 | `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+
+<a id="subcommand-update-question"></a>
+
+#### `calkit update question`
+
+Update a question in calkit.yaml, or sign off on its answer.
+
+Usage:
+
+```text
+calkit update question [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                          |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                                                                                                                                                                                                                                                                   |
+| -------------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hypothesis` | str  | no       |         | New hypothesis.                                                                                                                                                                                                                                                               |
+| `--approach`   | str  | no       |         | One sentence on how the question is answered.                                                                                                                                                                                                                                 |
+| `--answer`     | str  | no       |         | New answer. One that picks its wording from the evidence is written in calkit.yaml.                                                                                                                                                                                           |
+| `--notes`      | str  | no       |         | New notes on the question.                                                                                                                                                                                                                                                    |
+| `--review`     | str  | no       |         | Sign off that the answer follows from the evidence, with what you checked, e.g., 'Read the figure against the answer.' Recorded with your Git name and email and today's date, replacing any earlier review of yours, and applies to the question as updated by this command. |
+| `--with-ai`    | str  | no       |         | A generative AI tool used in reviewing, e.g., 'Claude Opus 5'. Can be given more than once.                                                                                                                                                                                   |
 
 <a id="subcommand-update-dataset"></a>
 

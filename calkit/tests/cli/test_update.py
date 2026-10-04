@@ -626,3 +626,87 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert "already exists" in result.output
     assert len(posted) == n_posted
     assert calkit.load_calkit_info()["hub"] == "https://hub.test"
+
+
+def test_update_path_storage(tmp_dir):
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def update(*args: str):
+        return runner.invoke(update_app, ["path-storage", *args])
+
+    def outputs() -> list:
+        stage = calkit.load_calkit_info()["pipeline"]["stages"]["make"]
+        return list(stage["outputs"])
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt && echo yo > other.txt",
+                "outputs": [
+                    {"path": "out.txt", "storage": "git"},
+                    "other.txt",
+                ],
+            },
+            "paper": {
+                "kind": "latex",
+                "environment": "_system",
+                "target_path": "paper/main.tex",
+            },
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    os.makedirs("paper")
+    for path in ["paper/main.tex", "paper/main.pdf"]:
+        with open(path, "w") as f:
+            f.write("x")
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
+    subprocess.check_call(["calkit", "run", "make"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    # Nothing that isn't here, and only Git or DVC
+    assert update("missing.txt", "--to", "dvc").exit_code != 0
+    assert update("out.txt", "--to", "s3").exit_code != 0
+    # A Git-stored output moves to DVC without its stage rerunning, and its
+    # storage goes back to the default rather than being spelled out
+    result = update("out.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert outputs() == ["out.txt", "other.txt"]
+    assert not git("ls-files", "--", "out.txt").strip()
+    assert git("check-ignore", "out.txt").strip() == "out.txt"
+    assert "up to date" in subprocess.check_output(
+        ["dvc", "status", "make"], text=True
+    )
+    git("add", "-A")
+    git("commit", "-qm", "To DVC")
+    # Back to Git, with outputs and a file added on its own, which leaves
+    # none of them ignored or still tracked by DVC
+    result = update("out.txt", "other.txt", "data.csv", "--to", "git")
+    assert result.exit_code == 0, result.output
+    assert [o["storage"] for o in outputs()] == ["git", "git"]
+    for path in ["out.txt", "other.txt", "data.csv"]:
+        assert git("ls-files", "--", path).strip() == path
+    assert not os.path.isfile("data.csv.dvc")
+    git("commit", "-qam", "To Git")
+    # And the file on its own back to DVC
+    result = update("data.csv", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert os.path.isfile("data.csv.dvc")
+    assert not git("ls-files", "--", "data.csv").strip()
+    git("commit", "-qam", "To DVC again")
+    # A path a stage's kind implies, here a LaTeX PDF, is set where that
+    # stage declares it; recording it in DVC is refused while the stage is
+    # out of date, since that would pass it off as current
+    result = update("paper/main.pdf", "--to", "git")
+    assert result.exit_code == 0, result.output
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["paper"]
+    assert stage["pdf_storage"] == "git"
+    result = update("paper/main.pdf", "--to", "dvc")
+    assert result.exit_code != 0
+    assert "out of date" in result.output

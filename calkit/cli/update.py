@@ -1356,6 +1356,199 @@ def update_figure(
     calkit.save_calkit_info(ck_info)
 
 
+@update_app.command(name="path-storage")
+def update_path_storage(
+    paths: Annotated[
+        list[str],
+        typer.Argument(help="Files or directories to move, from the project."),
+    ],
+    to: Annotated[
+        str,
+        typer.Option("--to", "-t", help="Where to store them: git or dvc."),
+    ],
+) -> None:
+    """Move paths between Git and DVC storage without rerunning anything.
+
+    A pipeline output's storage is changed where the pipeline declares it,
+    e.g., an output's 'storage' or a LaTeX stage's 'pdf_storage', and a file
+    added on its own is added again with the other system. Either way it's
+    untracked from where it was, so it isn't left in both. The tracking
+    changes are staged, and calkit.yaml and dvc.yaml are left to commit.
+    """
+    from pathlib import Path
+
+    from git import GitCommandError
+    from ruamel.yaml.comments import CommentedMap
+
+    import calkit.dvc
+    import calkit.git
+    import calkit.pipeline
+    from calkit.models.pipeline import Pipeline
+
+    def storage_key(stage_name: str, stage: dict, path: str) -> str | None:
+        # The key in a stage's definition that sets this path's storage, if
+        # the stage produces it, whether declared or implied by its kind
+        for n, out in enumerate(stage.get("outputs") or []):
+            out_path = out if isinstance(out, str) else out.get("path")
+            if out_path is not None and Path(out_path).as_posix() == path:
+                return f"outputs.{n}"
+        try:
+            model = Pipeline.model_validate(
+                {"stages": {stage_name: stage}}
+            ).stages[stage_name]
+        except Exception:
+            return None
+        implied = {
+            "pdf_path": "pdf_storage",
+            "cleaned_notebook_path": "cleaned_ipynb_storage",
+            "executed_notebook_path": "executed_ipynb_storage",
+            "html_path": "html_storage",
+            "output_dir": "output_storage",
+        }
+        for attr, key in implied.items():
+            value = getattr(model, attr, None)
+            if (
+                key in type(model).model_fields
+                and isinstance(value, str)
+                and Path(value).as_posix() == path
+            ):
+                return key
+        return None
+
+    def set_storage(stage_name: str, stage: dict, key: str) -> None:
+        # Back to the default rather than spelled out where it can be
+        if key.startswith("outputs."):
+            n = int(key.split(".")[1])
+            out = stage["outputs"][n]
+            if isinstance(out, str):
+                out = CommentedMap(path=out)
+            out["storage"] = to
+            if to == "dvc" and set(out) <= {"path", "storage"}:
+                out = out["path"]
+            stage["outputs"][n] = out
+            return
+        model = Pipeline.model_validate({"stages": {stage_name: stage}})
+        field = type(model.stages[stage_name]).model_fields[key]
+        if field.default == to:
+            stage.pop(key, None)
+        else:
+            stage[key] = to
+
+    def in_git(path: str) -> bool:
+        return bool(repo.git.ls_files("--", path).strip())
+
+    def changed_gitignores() -> set[str]:
+        status = repo.git.status("--porcelain", "--untracked-files=all")
+        return {
+            line[3:].strip('"')
+            for line in status.splitlines()
+            if line.rstrip('"').endswith(".gitignore")
+        }
+
+    def dvc(*args: str) -> None:
+        if calkit.dvc.run_dvc_command(list(args)) != 0:
+            raise_error(f"'dvc {' '.join(args)}' failed")
+
+    if to not in ["git", "dvc"]:
+        raise_error(f"Storage must be git or dvc, not '{to}'")
+    repo = calkit.git.get_repo()
+    ck_info = calkit.load_calkit_info()
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # Each path with the stage and key that declare its storage, if any
+    outputs: dict[str, tuple[str, str]] = {}
+    others: list[str] = []
+    for raw in paths:
+        path = Path(raw).as_posix().rstrip("/")
+        if not os.path.exists(path):
+            raise_error(f"{path} isn't here; run 'calkit pull' first")
+        for stage_name, stage in stages.items():
+            key = (
+                storage_key(stage_name, stage, path)
+                if isinstance(stage, dict)
+                else None
+            )
+            if key is not None:
+                if stage.get("iterate_over"):
+                    raise_error(
+                        f"{path} comes from '{stage_name}', which iterates; "
+                        "set its storage in calkit.yaml instead"
+                    )
+                outputs[path] = (stage_name, key)
+                break
+        else:
+            others.append(path)
+    # Recording an output in DVC records its stage's inputs too, which would
+    # pass off a stage that's out of date as current
+    if outputs:
+        stale = {
+            name.split("@")[0]
+            for name in calkit.pipeline.get_status(
+                ck_info=ck_info,
+                check_environments=False,
+                clean_notebooks=False,
+                compile_to_dvc=False,
+            ).stale_stage_names
+        }
+        for path, (stage_name, _) in outputs.items():
+            if to == "dvc" and stage_name in stale:
+                raise_error(
+                    f"Stage '{stage_name}', which produces {path}, is out "
+                    "of date; run it first"
+                )
+    gitignores = changed_gitignores()
+    if outputs:
+        for path, (stage_name, key) in outputs.items():
+            set_storage(stage_name, stages[stage_name], key)
+        calkit.save_calkit_info(ck_info)
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    for path, (stage_name, _) in outputs.items():
+        if to == "dvc":
+            if in_git(path):
+                repo.git.rm("-r", "-q", "--cached", "--", path)
+        else:
+            calkit.git.ensure_path_is_not_ignored(repo, path)
+            repo.git.add("--", path)
+    if to == "dvc":
+        # Into the cache, and ignored by Git, without running anything
+        for stage_name in dict.fromkeys(s for s, _ in outputs.values()):
+            dvc("commit", "-f", "-q", stage_name)
+    for path in others:
+        pointer = f"{path}.dvc"
+        if to == "dvc":
+            if os.path.isfile(pointer):
+                continue
+            if in_git(path):
+                repo.git.rm("-r", "-q", "--cached", "--", path)
+            dvc("add", "-q", path)
+            repo.git.add("--", pointer)
+        else:
+            if os.path.isfile(pointer):
+                tracked = in_git(pointer)
+                dvc("remove", "-q", pointer)
+                if tracked:
+                    repo.git.add("-A", "--", pointer)
+            calkit.git.ensure_path_is_not_ignored(repo, path)
+            repo.git.add("--", path)
+    for gitignore in sorted(changed_gitignores() - gitignores):
+        try:
+            repo.git.add("--", gitignore)
+        except GitCommandError:
+            warn(f"Couldn't stage {gitignore}")
+    system = "Git" if to == "git" else "DVC"
+    for path in paths:
+        typer.echo(
+            f"{Path(path).as_posix().rstrip('/')} is now stored in {system}"
+        )
+    if outputs:
+        typer.echo(
+            "Commit calkit.yaml and dvc.yaml along with the staged changes"
+        )
+    if to == "dvc":
+        typer.echo(
+            "Then 'calkit push' to send them to the project's DVC remote"
+        )
+
+
 @update_app.command(name="dataset")
 def update_dataset(
     path: Annotated[str, typer.Argument(help="Path to the dataset file.")],

@@ -32,14 +32,12 @@ const DiscardChanges = ({
     mutationFn: () => {
       return request("workspace.discard")
     },
-    onSuccess: (result: { stashed?: boolean; moved_to?: string | null }) => {
-      const kept = [
-        result?.stashed ? "Git changes are in the stash" : "",
-        result?.moved_to ? `changed data is in ${result.moved_to}` : "",
-      ].filter(Boolean)
+    onSuccess: (result: { stashed?: boolean }) => {
       showToast(
         "Changes discarded",
-        kept.length ? `To get them back: ${kept.join("; ")}.` : "",
+        result?.stashed
+          ? "To get them back, run git stash pop, then calkit dvc checkout."
+          : "",
         "success",
       )
       onClose()
@@ -67,10 +65,10 @@ const DiscardChanges = ({
             </AlertDialogHeader>
             <AlertDialogCloseButton />
             <AlertDialogBody>
-              This puts the workspace back to its last commit. Changes to files
-              tracked with Git are stashed, so <Code>git stash pop</Code> brings
-              them back, and changed data tracked with DVC is moved to{" "}
-              <Code>.calkit/local/discarded</Code>. New files are left alone.
+              This puts the workspace back to its last commit. Changes are
+              stashed, including data tracked with DVC, so{" "}
+              <Code>git stash pop</Code> then <Code>calkit dvc checkout</Code>{" "}
+              brings them back. New files are left alone.
             </AlertDialogBody>
             <AlertDialogFooter gap={3}>
               <Button

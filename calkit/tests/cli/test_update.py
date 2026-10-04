@@ -657,22 +657,39 @@ def test_update_path_storage(tmp_dir):
                 "environment": "_system",
                 "target_path": "paper/main.tex",
             },
+            "sub": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "wdir": "sub",
+                "command": "echo s > out.txt",
+                "outputs": [{"path": "out.txt", "storage": "git"}],
+            },
+            "zipped": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo z > z.txt",
+                "outputs": [{"path": "z.txt", "storage": "dvc-zip"}],
+            },
         }
     }
     calkit.save_calkit_info(ck_info)
     os.makedirs("paper")
-    for path in ["paper/main.tex", "paper/main.pdf"]:
+    os.makedirs("sub")
+    for path in ["paper/main.tex", "paper/main.pdf", "z.txt", "notes.txt"]:
         with open(path, "w") as f:
             f.write("x")
     with open("data.csv", "w") as f:
         f.write("a,b\n")
     subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
-    subprocess.check_call(["calkit", "run", "make"])
+    subprocess.check_call(["calkit", "run", "make", "sub"])
     git("add", "-A")
     git("commit", "-qm", "Set up")
-    # Nothing that isn't here, and only Git or DVC
+    # Nothing that isn't here, only Git or DVC, and nothing zipped yet
     assert update("missing.txt", "--to", "dvc").exit_code != 0
     assert update("out.txt", "--to", "s3").exit_code != 0
+    result = update("z.txt", "--to", "git")
+    assert result.exit_code != 0
+    assert "zipped" in result.output
     # A Git-stored output moves to DVC without its stage rerunning, and its
     # storage goes back to the default rather than being spelled out
     result = update("out.txt", "--to", "dvc")
@@ -685,6 +702,14 @@ def test_update_path_storage(tmp_dir):
     )
     git("add", "-A")
     git("commit", "-qm", "To DVC")
+    # A stage's outputs are relative to its working directory
+    result = update("sub/out.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["sub"]
+    assert list(stage["outputs"]) == ["out.txt"]
+    assert not git("ls-files", "--", "sub/out.txt").strip()
+    git("add", "-A")
+    git("commit", "-qm", "Sub to DVC")
     # Back to Git, with outputs and a file added on its own, which leaves
     # none of them ignored or still tracked by DVC
     result = update("out.txt", "other.txt", "data.csv", "--to", "git")
@@ -700,6 +725,22 @@ def test_update_path_storage(tmp_dir):
     assert os.path.isfile("data.csv.dvc")
     assert not git("ls-files", "--", "data.csv").strip()
     git("commit", "-qam", "To DVC again")
+    # A file tracked by both is repaired rather than skipped
+    git("add", "-f", "data.csv")
+    git("commit", "-qm", "Track it twice")
+    result = update("data.csv", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert not git("ls-files", "--", "data.csv").strip()
+    git("commit", "-qm", "Repair")
+    # A .gitignore with changes of its own isn't staged, since that would
+    # commit them too, and when DVC's autostage, which 'calkit add' turned
+    # on, stages it anyway, that's said
+    with open(".gitignore", "a") as f:
+        f.write("# Mine\n")
+    result = update("notes.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert "check them before committing" in result.output
+    assert "/notes.txt" in open(".gitignore").read()
     # A path a stage's kind implies, here a LaTeX PDF, is set where that
     # stage declares it; recording it in DVC is refused while the stage is
     # out of date, since that would pass it off as current

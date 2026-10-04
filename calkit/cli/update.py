@@ -1381,6 +1381,7 @@ def update_path_storage(
     from ruamel.yaml.comments import CommentedMap
 
     import calkit.dvc
+    import calkit.dvc.zip
     import calkit.git
     import calkit.pipeline
     from calkit.models.pipeline import Pipeline
@@ -1388,16 +1389,30 @@ def update_path_storage(
     def storage_key(stage_name: str, stage: dict, path: str) -> str | None:
         # The key in a stage's definition that sets this path's storage, if
         # the stage produces it, whether declared or implied by its kind
+        def here(stage_path: str) -> str:
+            # A stage's paths are relative to its working directory
+            joined = os.path.join(stage.get("wdir") or "", stage_path)
+            return Path(os.path.normpath(joined)).as_posix()
+
         for n, out in enumerate(stage.get("outputs") or []):
             out_path = out if isinstance(out, str) else out.get("path")
-            if out_path is not None and Path(out_path).as_posix() == path:
-                return f"outputs.{n}"
+            if out_path is None or here(out_path) != path:
+                continue
+            if isinstance(out, dict) and out.get("storage") == "dvc-zip":
+                raise_error(f"{path} is stored zipped, which can't move yet")
+            return f"outputs.{n}"
         try:
             model = Pipeline.model_validate(
                 {"stages": {stage_name: stage}}
             ).stages[stage_name]
         except Exception:
             return None
+        log = model.scheduler_log_output
+        if log is not None and here(log.path) == path:
+            raise_error(
+                f"{path} is the scheduler log of '{stage_name}', which can't "
+                "move yet; set its log_storage in calkit.yaml"
+            )
         implied = {
             "pdf_path": "pdf_storage",
             "cleaned_notebook_path": "cleaned_ipynb_storage",
@@ -1410,7 +1425,7 @@ def update_path_storage(
             if (
                 key in type(model).model_fields
                 and isinstance(value, str)
-                and Path(value).as_posix() == path
+                and here(value) == path
             ):
                 return key
         return None
@@ -1437,13 +1452,17 @@ def update_path_storage(
     def in_git(path: str) -> bool:
         return bool(repo.git.ls_files("--", path).strip())
 
-    def changed_gitignores() -> set[str]:
+    def dirty_gitignores() -> dict[str, str]:
+        # Each .gitignore with changes not yet committed, and what it holds
         status = repo.git.status("--porcelain", "--untracked-files=all")
-        return {
-            line[3:].strip('"')
-            for line in status.splitlines()
-            if line.rstrip('"').endswith(".gitignore")
-        }
+        dirty = {}
+        for line in status.splitlines():
+            path = line[3:].strip('"')
+            if path.endswith(".gitignore"):
+                fpath = os.path.join(repo.working_dir, path)
+                exists = os.path.isfile(fpath)
+                dirty[path] = open(fpath).read() if exists else ""
+        return dirty
 
     def dvc(*args: str) -> None:
         if calkit.dvc.run_dvc_command(list(args)) != 0:
@@ -1457,8 +1476,9 @@ def update_path_storage(
     # Each path with the stage and key that declare its storage, if any
     outputs: dict[str, tuple[str, str]] = {}
     others: list[str] = []
+    zipped = calkit.dvc.zip.get_zip_path_map()
     for raw in paths:
-        path = Path(raw).as_posix().rstrip("/")
+        path = Path(os.path.normpath(raw)).as_posix()
         if not os.path.exists(path):
             raise_error(f"{path} isn't here; run 'calkit pull' first")
         for stage_name, stage in stages.items():
@@ -1476,26 +1496,29 @@ def update_path_storage(
                 outputs[path] = (stage_name, key)
                 break
         else:
+            if path in zipped:
+                raise_error(f"{path} is stored zipped, which can't move yet")
             others.append(path)
+    gitignores = dirty_gitignores()
     # Recording an output in DVC records its stage's inputs too, which would
-    # pass off a stage that's out of date as current
-    if outputs:
-        stale = {
-            name.split("@")[0]
-            for name in calkit.pipeline.get_status(
-                ck_info=ck_info,
-                check_environments=False,
-                clean_notebooks=False,
-                compile_to_dvc=False,
-            ).stale_stage_names
-        }
+    # pass off a stage that's out of date as current, so the pipeline as
+    # calkit.yaml has it now must be known to be up to date
+    if outputs and to == "dvc":
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, check_environments=False, clean_notebooks=False
+        )
+        if status.errors:
+            raise_error(
+                "Couldn't tell whether the stages producing these are up "
+                "to date: " + "; ".join(status.errors)
+            )
+        stale = {name.split("@")[0] for name in status.stale_stage_names}
         for path, (stage_name, _) in outputs.items():
-            if to == "dvc" and stage_name in stale:
+            if stage_name in stale:
                 raise_error(
                     f"Stage '{stage_name}', which produces {path}, is out "
                     "of date; run it first"
                 )
-    gitignores = changed_gitignores()
     if outputs:
         for path, (stage_name, key) in outputs.items():
             set_storage(stage_name, stages[stage_name], key)
@@ -1515,11 +1538,13 @@ def update_path_storage(
     for path in others:
         pointer = f"{path}.dvc"
         if to == "dvc":
-            if os.path.isfile(pointer):
-                continue
+            # Which also repairs a file DVC tracks that Git does too
             if in_git(path):
                 repo.git.rm("-r", "-q", "--cached", "--", path)
-            dvc("add", "-q", path)
+            if os.path.isfile(pointer):
+                calkit.git.ensure_path_is_ignored(repo, path)
+            else:
+                dvc("add", "-q", path)
             repo.git.add("--", pointer)
         else:
             if os.path.isfile(pointer):
@@ -1529,16 +1554,30 @@ def update_path_storage(
                     repo.git.add("-A", "--", pointer)
             calkit.git.ensure_path_is_not_ignored(repo, path)
             repo.git.add("--", path)
-    for gitignore in sorted(changed_gitignores() - gitignores):
+    # Staging one that already had changes would commit those too, though
+    # DVC may have staged it already if it autostages
+    for gitignore, text in sorted(dirty_gitignores().items()):
+        if gitignore in gitignores:
+            if text == gitignores[gitignore]:
+                continue
+            if repo.git.diff("--name-only", "--", gitignore).strip():
+                warn(
+                    f"{gitignore} already had changes, so the rules added "
+                    "to it aren't staged; stage it when it's ready"
+                )
+            else:
+                warn(
+                    f"{gitignore} already had changes, which DVC staged "
+                    "with the rules added to it; check them before committing"
+                )
+            continue
         try:
-            repo.git.add("--", gitignore)
+            repo.git.add("-A", "--", gitignore)
         except GitCommandError:
             warn(f"Couldn't stage {gitignore}")
     system = "Git" if to == "git" else "DVC"
-    for path in paths:
-        typer.echo(
-            f"{Path(path).as_posix().rstrip('/')} is now stored in {system}"
-        )
+    for path in [*outputs, *others]:
+        typer.echo(f"{path} is now stored in {system}")
     if outputs:
         typer.echo(
             "Commit calkit.yaml and dvc.yaml along with the staged changes"

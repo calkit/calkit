@@ -32,13 +32,13 @@ calculations.
 ## By the numbers
 
 - **<!-- calkit value key=goals.days_ratio format="{:.1f}×" -->2.6×<!-- /calkit value -->**
-  faster to an approved paper
+  faster to an approved paper, with agents and Calkit
 - **<!-- calkit value key=goals.student_days_ratio format="{:.1f}×" -->2.2×<!-- /calkit value -->**
-  as many papers in a PhD
-- **<!-- calkit value key="goals.alternatives.diy tooling.days_ratio" format="{:.1f}×" -->1.8×<!-- /calkit value -->**
-  with tooling built by hand instead
+  as many papers in a PhD, with agents and Calkit
+- **<!-- calkit value key=goals.steps.1.student_days_ratio format="{:.1f}×" -->1.3×<!-- /calkit value -->**
+  as many papers with agents alone
 
-Simulated for a first paper, with agents, in Calkit's own pipeline.
+Simulated for a first paper, in Calkit's own pipeline.
 
 ## A success story
 

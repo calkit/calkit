@@ -17,7 +17,6 @@
 \usepackage{fancyhdr}
 \usepackage{titlesec}
 \usepackage{enumitem}
-\usepackage{ragged2e}
 \usepackage{hyperref}
 \hypersetup{colorlinks=true,urlcolor=ckteal,linkcolor=ckteal,
   pdftitle={$title-meta$},pdfauthor={Calkit}}
@@ -80,7 +79,7 @@ $if(numbers)$
 $endif$
 \par\vspace{6pt}
 \begin{multicols}{2}
-\fontsize{10.6}{14}\selectfont\RaggedRight\hyphenpenalty=5000
+\fontsize{10.6}{14}\selectfont
 $body$
 \end{multicols}
 \end{document}

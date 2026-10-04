@@ -72,9 +72,9 @@ for v in reversed(values):
         rf"\ckvalue{{{escape_tex(v.key)}}}{{{escape_tex(v.text)}}}"
         rf"{{{escape_tex(v.path)}}}{{{escape_tex(stage)}}}"
     )
-    n = question_for_path.get(v.path)
-    if n is not None:
-        tex = rf"\href{{{project_url}/questions/{n}?ref={rev}}}{{{tex}}}"
+    number = question_for_path.get(v.path)
+    if number is not None:
+        tex = rf"\href{{{project_url}/questions/{number}?ref={rev}}}{{{tex}}}"
     raw = "`" + tex + "`{=latex}"
     # Markers on a line are replaced last to first, so offsets hold
     lines[v.line - 1] = line[: marker.start()] + raw + line[marker.end() :]

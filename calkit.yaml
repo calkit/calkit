@@ -79,6 +79,10 @@ environments:
     kind: uv
     path: pyproject.toml
     description: Calkit itself, from this checkout, with its dev tools.
+  tex:
+    kind: docker
+    image: ghcr.io/calkit/latex:0.1.5
+    description: Calkit's TeX Live image via Docker.
 
 pipeline:
   stages:
@@ -137,6 +141,31 @@ pipeline:
           storage: git
         - path: docs/img/research-flow-goals.png
           storage: git
+    one-pager-latex:
+      kind: python-script
+      script_path: scripts/one-pager-to-latex.py
+      environment: dev
+      description: >-
+        Lay out the one-pager's Markdown in LaTeX, with its values read from
+        the results and linked to the questions they bear on.
+      inputs:
+        - calkit.yaml
+        - docs/one-pager/main.md
+        - docs/one-pager/template.tex
+        - docs/one-pager/one-pager.lua
+        - results/research-flow.json
+      outputs:
+        - path: docs/one-pager/main.tex
+          storage: git
+    one-pager:
+      kind: latex
+      target_path: docs/one-pager/main.tex
+      environment: tex
+      pdf_storage: git
+      inputs:
+        - docs/img/pipeline.png
+        - from_stage_outputs: one-pager-latex
+
     latex-image-readme:
       kind: markdown
       target_path: images/latex/README.md

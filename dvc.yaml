@@ -66,6 +66,35 @@ stages:
           persist: false
     desc: Automatically generated from the 'research-flow-figure' stage in calkit.yaml.
       Changes made here will be overwritten.
+  one-pager-latex:
+    cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
+    deps:
+      - scripts/one-pager-to-latex.py
+      - calkit.yaml
+      - docs/one-pager/main.md
+      - docs/one-pager/template.tex
+      - docs/one-pager/one-pager.lua
+      - results/research-flow.json
+      - uv.lock
+      - .python-version
+    outs:
+      - docs/one-pager/main.tex:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'one-pager-latex' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  one-pager:
+    cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
+    deps:
+      - docs/one-pager/main.tex
+      - docs/img/pipeline.png
+      - .calkit/env-locks/tex
+      - docs/one-pager/main.tex
+    outs:
+      - docs/one-pager/main.pdf:
+          cache: false
+    desc: Automatically generated from the 'one-pager' stage in calkit.yaml. Changes
+      made here will be overwritten.
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
     deps:

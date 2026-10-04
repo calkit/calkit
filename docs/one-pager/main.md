@@ -27,6 +27,19 @@ shipped whole, providing full context and lighting fast verifiability, by
 linking all evidence for answers to research questions back to reproducible
 calculations.
 
+<!-- calkit values path=results/research-flow.json -->
+
+## By the numbers
+
+- **<!-- calkit value key=goals.days_ratio format="{:.1f}×" -->2.6×<!-- /calkit value -->**
+  faster to an approved paper
+- **<!-- calkit value key=goals.student_days_ratio format="{:.1f}×" -->2.2×<!-- /calkit value -->**
+  as many papers in a PhD
+- **<!-- calkit value key="goals.alternatives.diy tooling.days_ratio" format="{:.1f}×" -->1.8×<!-- /calkit value -->**
+  with tooling built by hand instead
+
+Simulated for a first paper, with agents, in Calkit's own pipeline.
+
 ## A success story
 
 Rebecca McCabe recently finished her PhD in Mechanical Engineering at Cornell.

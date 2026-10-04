@@ -22,14 +22,24 @@ import { QRCodeSVG } from "qrcode.react"
 import { useState } from "react"
 
 import { OperatorsService, UsersService } from "../../client"
+import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { storeSecondFactorToken } from "../../lib/auth"
+
+// What the API says when setting up two-factor authentication needs a
+// verified email first, from app/users.py
+const VERIFY_EMAIL_FIRST = "Verify your email first"
 
 // Opening sessions on an Operator takes an authenticator code, since it
 // gives shell access to the machine
 function TwoFactor() {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
+  const { user } = useAuth()
+  // Setup emails a code, so the address has to be verified first, which
+  // happens inline: a code is sent, and entering it carries on to setup
+  const [verifying, setVerifying] = useState(false)
+  const [verifyCode, setVerifyCode] = useState("")
   const [setup, setSetup] = useState<{
     secret: string
     otpauth_uri: string
@@ -46,11 +56,42 @@ function TwoFactor() {
   }
   const onError = (e: any) =>
     showToast("Error", e.response?.data?.detail ?? e.message, "error")
+  const sendVerifyMutation = useMutation({
+    mutationFn: () => UsersService.postUserEmailVerification(),
+    onSuccess: () => {
+      setVerifyCode("")
+      setVerifying(true)
+    },
+    // Verified since this page loaded, so setup can go ahead
+    onError: (e: any): void =>
+      e.response?.data?.detail === "This email is already verified"
+        ? startMutation.mutate()
+        : onError(e),
+  })
   const startMutation = useMutation({
     mutationFn: () => UsersService.postUserTotp().then((r) => r.data),
     onSuccess: setSetup,
+    onError: (e: any): void =>
+      e.response?.data?.detail === VERIFY_EMAIL_FIRST
+        ? sendVerifyMutation.mutate()
+        : onError(e),
+  })
+  const confirmVerifyMutation = useMutation({
+    mutationFn: () =>
+      UsersService.postUserEmailVerificationConfirm({
+        emailVerificationConfirm: { code: verifyCode },
+      }),
+    onSuccess: () => {
+      setVerifying(false)
+      queryClient.invalidateQueries({ queryKey: ["currentUser"] })
+      startMutation.mutate()
+    },
     onError,
   })
+  const startSetup = () =>
+    user && !user.email_verified
+      ? sendVerifyMutation.mutate()
+      : startMutation.mutate()
   const confirmMutation = useMutation({
     mutationFn: () =>
       UsersService.postUserTotpConfirm({
@@ -140,14 +181,58 @@ function TwoFactor() {
             </Button>
           </Flex>
         </>
+      ) : verifying ? (
+        <>
+          <Text mb={2}>
+            First, confirm your email: enter the code we sent to {user?.email}.
+          </Text>
+          <Flex gap={2} align="center" wrap="wrap">
+            <Input
+              size="sm"
+              maxW="140px"
+              placeholder="123456"
+              value={verifyCode}
+              onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, ""))}
+              inputMode="numeric"
+              maxLength={6}
+              autoComplete="one-time-code"
+            />
+            <Button
+              size="sm"
+              variant="primary"
+              isDisabled={verifyCode.length !== 6}
+              isLoading={
+                confirmVerifyMutation.isPending || startMutation.isPending
+              }
+              onClick={() => confirmVerifyMutation.mutate()}
+            >
+              Verify
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              isLoading={sendVerifyMutation.isPending}
+              onClick={() => sendVerifyMutation.mutate()}
+            >
+              Resend code
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setVerifying(false)}
+            >
+              Cancel
+            </Button>
+          </Flex>
+        </>
       ) : (
         <Flex align="center" gap={2}>
           <Text>Required to open sessions on your Operators.</Text>
           <Button
             size="sm"
             variant="primary"
-            isLoading={startMutation.isPending}
-            onClick={() => startMutation.mutate()}
+            isLoading={startMutation.isPending || sendVerifyMutation.isPending}
+            onClick={startSetup}
           >
             Set up
           </Button>

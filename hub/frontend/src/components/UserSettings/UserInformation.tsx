@@ -15,7 +15,7 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import type { AxiosError } from "axios"
@@ -69,15 +69,13 @@ const VerifyEmailCode = ({ email }: { email: string }) => {
       handleError(err, showToast)
     },
   })
+  // Not a form of its own, since it sits inside the profile form, and a
+  // nested form gets submitted by the browser, reloading the page
+  const confirm = () => {
+    if (code.length === 6) confirmMutation.mutate(code)
+  }
   return (
-    <Box
-      as="form"
-      mt={2}
-      onSubmit={(e: FormEvent) => {
-        e.preventDefault()
-        confirmMutation.mutate(code)
-      }}
-    >
+    <Box mt={2}>
       <FormControl>
         <FormLabel htmlFor="verification_code" fontSize="sm">
           Enter the 6-digit code we emailed to {email}
@@ -95,13 +93,19 @@ const VerifyEmailCode = ({ email }: { email: string }) => {
             w="8em"
             fontFamily="mono"
             letterSpacing="0.2em"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                confirm()
+              }
+            }}
           />
           <Button
-            type="submit"
             variant="primary"
             size="sm"
             isDisabled={code.length !== 6}
             isLoading={confirmMutation.isPending}
+            onClick={confirm}
           >
             Confirm
           </Button>
@@ -318,6 +322,18 @@ const UserInformation = () => {
                 <Input
                   id="email_change_code"
                   value={changeCode}
+                  // Inside the profile form, where Enter would submit it
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      if (changeCode.length === 6) {
+                        mutation.mutate({
+                          ...pendingChange,
+                          email_code: changeCode,
+                        })
+                      }
+                    }
+                  }}
                   onChange={(e) =>
                     setChangeCode(e.target.value.replace(/\D/g, ""))
                   }

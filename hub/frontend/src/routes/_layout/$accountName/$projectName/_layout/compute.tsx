@@ -477,12 +477,14 @@ function WorkspacePanel({
   const behind = statusQuery.data?.commits_behind ?? 0
   const dvcToPull = (status?.dvc?.not_in_cache ?? []).length > 0
   const dvcToPush = (status?.dvc?.not_in_remote ?? []).length > 0
-  const errors: string[] = [
-    ...(statusQuery.data?.errors ?? []).map((e: any) => e.info),
-    ...(status?.pipeline?.errors ?? []).map((e: any) =>
-      typeof e === "string" ? e : JSON.stringify(e),
-    ),
-  ]
+  const errors: string[] = (statusQuery.data?.errors ?? []).map(
+    (e: any) => e.info,
+  )
+  // Why the pipeline's status couldn't be worked out, e.g., it doesn't
+  // compile, in which case it can't be said to be up to date
+  const pipelineErrors: string[] = (status?.pipeline?.errors ?? []).map(
+    (e: any) => (typeof e === "string" ? e : JSON.stringify(e)),
+  )
   // Say why a stage is stale, as VS Code's sidebar does
   const describeStale = (stage: string) => {
     const d = staleDetail[stage] ?? {}
@@ -542,6 +544,13 @@ function WorkspacePanel({
     }
   }
   const outOfSync = ahead || behind || dvcToPull || dvcToPush
+  const syncSummary = [
+    ahead ? `${ahead} to push` : "",
+    behind ? `${behind} to pull` : "",
+    dvcToPull || dvcToPush ? "data to sync" : "",
+  ]
+    .filter(Boolean)
+    .join(", ")
   const changeCount = untracked.length + changed.length + staged.length
   const ready = connected && !statusQuery.isPending && !statusQuery.error
   const fileRow = (path: string, mark: string, color: string) => (
@@ -580,24 +589,32 @@ function WorkspacePanel({
         </Tooltip>
         {ready && (
           <Flex gap={1} wrap="wrap">
-            <Badge colorScheme={outOfSync ? "yellow" : "green"}>
-              {outOfSync ? "out of sync" : "in sync"}
-            </Badge>
+            <Tooltip label="Compared with the project's remotes">
+              <Badge colorScheme={outOfSync ? "yellow" : "green"}>
+                {outOfSync ? syncSummary : "in sync"}
+              </Badge>
+            </Tooltip>
             <Badge colorScheme={changeCount ? "yellow" : "green"}>
-              {changeCount
-                ? `${changeCount} change${changeCount === 1 ? "" : "s"}`
-                : "no changes"}
+              {changeCount ? `${changeCount} uncommitted` : "nothing to commit"}
             </Badge>
             <Badge
               colorScheme={
-                running ? "blue" : staleStages.length ? "yellow" : "green"
+                running
+                  ? "blue"
+                  : pipelineErrors.length
+                    ? "red"
+                    : staleStages.length
+                      ? "yellow"
+                      : "green"
               }
             >
               {running
-                ? "running"
-                : staleStages.length
-                  ? `${staleStages.length} stale`
-                  : "up to date"}
+                ? "pipeline running"
+                : pipelineErrors.length
+                  ? "pipeline error"
+                  : staleStages.length
+                    ? `${staleStages.length} stage${staleStages.length === 1 ? "" : "s"} out of date`
+                    : "pipeline up to date"}
             </Badge>
           </Flex>
         )}
@@ -781,11 +798,18 @@ function WorkspacePanel({
                 )
               }
             >
-              {!running && staleStages.length === 0 && (
-                <Text fontSize="sm" color="ui.dim">
-                  Up to date
+              {pipelineErrors.map((e) => (
+                <Text key={e} fontSize="sm" color="red.400" mb={1}>
+                  {e}
                 </Text>
-              )}
+              ))}
+              {!running &&
+                staleStages.length === 0 &&
+                pipelineErrors.length === 0 && (
+                  <Text fontSize="sm" color="ui.dim">
+                    Up to date
+                  </Text>
+                )}
               <Flex gap={1} wrap="wrap">
                 {runningStages.map((stage) => (
                   <Tag key={stage} size="sm" colorScheme="blue">

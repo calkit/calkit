@@ -97,7 +97,8 @@ ax3.set_title("Review interval", loc="left")
 ax3.grid(color=GRID)
 ax3.set_ylim(top=ax3.get_ylim()[1] * 1.12)
 ax3.legend(frameon=False, fontsize=9, loc="upper center", ncol=2)
-# Lean's advantage as handoffs get costlier and flaws more common
+# Lean with automation against stage-gate without, as the latter's
+# handoffs get costlier and flaws more common
 grid = np.array(r["ratio_grid"]["days_ratio"])
 cmap = LinearSegmentedColormap.from_list(
     "div", [COLORS["stage-gate"], "#f0efec", COLORS["lean"]]
@@ -112,8 +113,10 @@ fs = r["ratio_grid"]["flaw_scales"]
 ax4.set_xticks(range(len(fs)), [f"{f:g}×" for f in fs])
 ax4.set_yticks(range(len(cs)), [f"{c:g}×" for c in cs])
 ax4.set_xlabel("Flaw rate, relative to baseline")
-ax4.set_ylabel("Handoff and review prep cost,\nrelative to manual")
-ax4.set_title("Stage-gate time ÷ lean time, manual tooling", loc="left")
+ax4.set_ylabel(
+    "Stage-gate handoff and review prep cost,\nrelative to manual tooling"
+)
+ax4.set_title("Stage-gate manual ÷ lean automated time", loc="left")
 ax4.add_patch(
     plt.Rectangle(
         (fs.index(1.0) - 0.5, cs.index(1.0) - 0.5),

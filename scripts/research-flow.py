@@ -498,15 +498,17 @@ interval_sweep = {
     ]
     for t in TOOLING
 }
-# Where lean's advantage is large: scale the manual tooling's handoff and
-# prep costs and how often flaws get introduced
+# Where lean with automated tooling beats stage-gate with manual tooling
+# by most: scale the manual tooling's handoff and prep costs, and how often
+# flaws get introduced for both
 cost_scales = [0.0, 0.5, 1.0, 2.0, 4.0]
 flaw_scales = [0.0, 0.5, 1.0, 2.0, 3.0]
 ratio_grid: list[list[float]] = []
 for a, cs in enumerate(cost_scales):
     row: list[float] = []
     for b, fs in enumerate(flaw_scales):
-        over: dict[str, Any] = {
+        flaws = [min(f * fs, 1.0) for f in BASE["flaw_prob"]]
+        costs = {
             k: TOOLING["manual"][k] * cs
             for k in [
                 "handoff_fixed",
@@ -515,15 +517,15 @@ for a, cs in enumerate(cost_scales):
                 "prep_item",
             ]
         }
-        over["flaw_prob"] = [min(f * fs, 1.0) for f in BASE["flaw_prob"]]
-        p = params_for("manual", **over)
-        days = {
-            pol: summarize(simulate(pol, p, 150, 1000 + 50 * a + 10 * b + k))[
+        seed = 1000 + 50 * a + 10 * b
+        status_quo = params_for("manual", flaw_prob=flaws, **costs)
+        flagship = params_for("automated", flaw_prob=flaws)
+        row.append(
+            summarize(simulate("stage-gate", status_quo, 150, seed))[
                 "days_mean"
             ]
-            for k, pol in enumerate(POLICIES)
-        }
-        row.append(days["stage-gate"] / days["lean"])
+            / summarize(simulate("lean", flagship, 150, seed + 1))["days_mean"]
+        )
     ratio_grid.append(row)
 results = {
     "params": {

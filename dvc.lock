@@ -210,8 +210,8 @@ stages:
     outs:
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 782a569bd8fecd5ca4dbc74ff7ddc9e8
-      size: 7108
+      md5: 344e8af8cbb622ee13b1a1e28577e529
+      size: 7083
   one-pager:
     cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
     deps:
@@ -226,14 +226,14 @@ stages:
       size: 50359
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 782a569bd8fecd5ca4dbc74ff7ddc9e8
-      size: 7108
+      md5: 344e8af8cbb622ee13b1a1e28577e529
+      size: 7083
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 782a569bd8fecd5ca4dbc74ff7ddc9e8
-      size: 7108
+      md5: 344e8af8cbb622ee13b1a1e28577e529
+      size: 7083
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: d1e1d40fa8b4957036b47dcd9c4ce9ef
-      size: 143291
+      md5: b1095ee1fb47cbb44b7807d21fa9e470
+      size: 142915

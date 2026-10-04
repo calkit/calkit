@@ -290,6 +290,9 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
     Two sources: dvc.lock, which covers anything a pipeline stage
     produces, and the standalone ``.dvc`` pointer files that ``dvc add``
     leaves next to a tracked file, which the lock knows nothing about.
+    The lock also lists stage outputs stored in Git, e.g., with Calkit's
+    ``storage: git``, which are left out since they're in the tree itself
+    and were never pushed to object storage.
     """
     outs: dict[str, dict] = dict(
         get_ck_info_and_dvc_outs_from_tree(
@@ -327,7 +330,7 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
             else pointer_path[: -len(".dvc")]
         )
         outs.setdefault(path, out)
-    return outs
+    return {path: out for path, out in outs.items() if not tree.exists(path)}
 
 
 def read_project_file(

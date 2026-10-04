@@ -58,12 +58,8 @@ stages:
       - uv.lock
       - .python-version
     outs:
-      - docs/img/research-flow.png:
-          cache: false
-          persist: false
-      - docs/img/research-flow-goals.png:
-          cache: false
-          persist: false
+      - docs/img/research-flow.png
+      - docs/img/research-flow-goals.png
     desc: Automatically generated from the 'research-flow-figure' stage in calkit.yaml.
       Changes made here will be overwritten.
   one-pager-latex:
@@ -91,8 +87,7 @@ stages:
       - .calkit/env-locks/tex
       - docs/one-pager/main.tex
     outs:
-      - docs/one-pager/main.pdf:
-          cache: false
+      - docs/one-pager/main.pdf
     desc: Automatically generated from the 'one-pager' stage in calkit.yaml. Changes
       made here will be overwritten.
   latex-image-readme/sizes:

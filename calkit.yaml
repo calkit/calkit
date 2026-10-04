@@ -137,10 +137,8 @@ pipeline:
       inputs:
         - results/research-flow.json
       outputs:
-        - path: docs/img/research-flow.png
-          storage: git
-        - path: docs/img/research-flow-goals.png
-          storage: git
+        - docs/img/research-flow.png
+        - docs/img/research-flow-goals.png
     one-pager-latex:
       kind: python-script
       script_path: scripts/one-pager-to-latex.py
@@ -161,7 +159,6 @@ pipeline:
       kind: latex
       target_path: docs/one-pager/main.tex
       environment: tex
-      pdf_storage: git
       inputs:
         - docs/img/pipeline.png
         - from_stage_outputs: one-pager-latex

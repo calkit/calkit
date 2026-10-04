@@ -479,7 +479,7 @@ def test_check_questions(tmp_dir):
     report = format_status(status)
     # It still earns a block, since nothing else would say it
     assert "[ok] Do the top structures use the rectifier?" in report
-    assert "editing the question" in report
+    assert "editing the answer or reviewing the question" in report
     assert (
         "Evidence that changed after the answer was written: 2 (worth a look)"
         in report
@@ -867,6 +867,135 @@ def test_conditional_answers(tmp_dir):
         assert (checked.status == "error") == bool(expected), answer
         for fragment in expected:
             assert fragment in messages, (answer, messages)
+
+
+def test_reviews_and_stages(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 2.0}, f)
+    with open("results/plot.png", "w") as f:
+        f.write("png")
+    question = {
+        "question": "Does it work?",
+        "answer": "It does, by {r}x.",
+        "evidence": [
+            {"kind": "value", "path": "results/summary.json", "key": "r"},
+            {"kind": "figure", "path": "results/plot.png"},
+        ],
+    }
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "plot.py",
+                    "inputs": [{"from_stage_outputs": "summarize"}],
+                    "outputs": ["results/plot.png"],
+                },
+                "summarize": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "summarize.py",
+                    "inputs": ["summarize.py", "results/fit.json"],
+                    "outputs": [
+                        {"path": "results/summary.json", "storage": "git"}
+                    ],
+                },
+                "fit": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "fit.py",
+                    "outputs": ["results/fit.json"],
+                },
+                "unrelated": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "other.py",
+                    "outputs": ["results/other.json"],
+                },
+            }
+        },
+        "questions": [question],
+    }
+    # The stages behind the evidence, upstream first, followed through
+    # both input paths and from_stage_outputs
+    _write_yaml(ck_info)
+    status = check_questions(wdir=".", check_pipeline=False)
+    q = status.questions[0]
+    assert q.stages == ["fit", "summarize", "plot"]
+    assert q.reviews == [] and q.review_status == "none"
+    assert "Answers reviewed: 0/1" in format_status(status)
+    # A review not yet committed covers the working tree
+    question["reviews"] = [
+        {
+            "by": {"name": "Ada", "email": "ada@example.org"},
+            "date": "2026-10-04",
+        }
+    ]
+    _write_yaml(ck_info)
+    q = check_questions(wdir=".", check_pipeline=False).questions[0]
+    assert q.review_status == "current"
+    assert "not yet committed" in (q.reviews[0].message or "")
+    # Committed, it applies to that commit
+    sha = _commit("Review")
+    status = check_questions(wdir=".", check_pipeline=False)
+    assert status.questions[0].reviews[0].commit == sha
+    assert status.questions[0].review_status == "current"
+    assert status.ok
+    # Evidence changing after it makes it stale, which fails the check
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 3.0}, f)
+    _commit("Rerun")
+    status = check_questions(wdir=".", check_pipeline=False)
+    q = status.questions[0]
+    assert q.review_status == "stale"
+    assert "results/summary.json: r was 2 at" in (q.reviews[0].message or "")
+    assert not status.ok
+    assert [s.index for s in status.stale_reviews] == [1]
+    report = format_status(status)
+    assert "1. [ok, review stale] Does it work?" in report
+    assert "review by Ada on 2026-10-04 [stale]" in report
+    assert "Answers signed off on something that has since changed: 1" in (
+        report
+    )
+    assert format_summary(status) == "1 question, 1 with a stale review"
+    # The generic "edit or review" nudge gives way to the review's own
+    assert "editing the answer or reviewing" not in (q.message or "")
+    # Reviewing again replaces the sign-off, and is current
+    question["reviews"] = [
+        {
+            "by": {"name": "Ada", "email": "ada@example.org"},
+            "date": "2026-10-05",
+        }
+    ]
+    _write_yaml(ck_info)
+    _commit("Review again")
+    assert check_questions(wdir=".", check_pipeline=False).ok
+    # Editing the question after it does too, even its text, since the
+    # reviewed version is found by the review it carries
+    for field, value in [("answer", "It does."), ("question", "Does it?")]:
+        question[field] = value
+        _write_yaml(ck_info)
+        _commit(f"Edit the {field}")
+        q = check_questions(wdir=".", check_pipeline=False).questions[0]
+        assert q.review_status == "stale", field
+        assert "the question was edited after it" in (
+            q.reviews[0].message or ""
+        )
+    # Without history, a review can't be checked either way
+    q = check_questions(
+        wdir=".", check_pipeline=False, check_history=False
+    ).questions[0]
+    assert q.reviews[0].status == "unchecked"
+    assert q.review_status == "current"
+    # Reviews and the approach are part of the schema
+    assert ProjectInfo.model_validate(calkit.load_calkit_info())
+    with pytest.raises(ValueError):
+        Question.model_validate(
+            {"question": "Q?", "reviews": [{"by": {"name": "Ada"}}]}
+        )
 
 
 def test_format_summary():

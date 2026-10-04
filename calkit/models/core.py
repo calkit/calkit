@@ -1863,6 +1863,29 @@ class DocumentEvidence(BaseModel):
     )
 
 
+class Review(BaseModel):
+    """A person's sign-off that a question's answer follows from its evidence.
+
+    It applies to the question and evidence as they were at the commit that
+    added it, which is read from Git rather than written here. Evidence
+    changing after that commit, or the question being edited, makes it
+    stale, so a sign-off can't quietly carry over to results nobody read.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    by: _Person = Field(
+        description=(
+            "Who signed off. Generative AI tools used in reviewing are "
+            "disclosed with their ``with_ai``."
+        )
+    )
+    date: date_type = Field(description="When they signed off.")
+    notes: str | None = Field(
+        default=None,
+        description="What they checked, or anything they want on record.",
+    )
+
+
 class Question(BaseModel):
     """A question the project hopes to answer.
 
@@ -1880,9 +1903,9 @@ class Question(BaseModel):
 
     An answer is a claim about the evidence as it was when the answer was
     last edited, and Git records when that was. ``calkit check questions``
-    reports a question as stale when any of its evidence has changed since
-    that commit, so editing the question after re-reading it against the
-    new evidence is how to say it still holds.
+    reports evidence that has changed since that commit. A person saying
+    the answer still holds is recorded as a review, which goes stale in
+    turn when the evidence or the question changes after it.
     """
 
     name: str | None = Field(
@@ -1896,6 +1919,14 @@ class Question(BaseModel):
     )
     question: str
     hypothesis: str | None = None
+    approach: str | None = Field(
+        default=None,
+        description=(
+            "One sentence on how the question is answered, e.g., the method "
+            "the pipeline implements. The stages themselves aren't listed "
+            "here, since they follow from the evidence the pipeline produces."
+        ),
+    )
     answer: str | dict[str, str] | None = Field(
         default=None,
         description=(
@@ -1925,6 +1956,14 @@ class Question(BaseModel):
         ]
         | None
     ) = None
+    reviews: list[Review] | None = Field(
+        default=None,
+        description=(
+            "Sign-offs that the answer follows from the evidence, one per "
+            "reviewer; reviewing again replaces that reviewer's entry, and "
+            "Git keeps the earlier ones."
+        ),
+    )
 
     @field_validator("name")
     @classmethod

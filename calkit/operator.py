@@ -816,8 +816,14 @@ def ignore_path(
             git_repo.git.push("origin", git_repo.active_branch.name)
 
 
-def discard_changes(wdir: str) -> None:
-    """Stash Git changes and check out DVC-tracked files that changed."""
+def discard_changes(wdir: str) -> dict:
+    """Put a workspace back to its last commit, keeping what was discarded
+    so it can be got back, and returning where.
+
+    Git changes are stashed, and DVC-tracked data that changed is moved
+    aside before DVC checks out the committed version, since that data was
+    never cached and would otherwise be lost. New files are left alone.
+    """
 
     def _dvc_json(args: list[str], wdir: str) -> dict:
         """Run a DVC command with JSON output in a workspace.
@@ -840,12 +846,29 @@ def discard_changes(wdir: str) -> None:
         out: dict = json.loads(result.stdout or "{}")
         return out
 
-    calkit.git.get_repo(wdir).git.stash()
+    stamp = calkit.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+    out = calkit.git.get_repo(wdir).git.stash(
+        "push", "-m", f"Discarded from the hub at {stamp}"
+    )
+    result: dict = {"stashed": "Saved" in out, "moved_to": None}
     if not os.path.isdir(os.path.join(wdir, ".dvc")):
-        return
+        return result
     data = _dvc_json(["data", "status", "--no-remote-refresh"], wdir)
-    for path in data.get("uncommitted", {}).get("modified", []):
+    modified = data.get("uncommitted", {}).get("modified", [])
+    if modified:
+        # Ignored by Git, like everything under .calkit/local
+        dest = os.path.join(calkit.ensure_local_dir(wdir), "discarded", stamp)
+        for path in modified:
+            src = os.path.join(wdir, path)
+            if os.path.lexists(src):
+                os.makedirs(
+                    os.path.dirname(os.path.join(dest, path)), exist_ok=True
+                )
+                shutil.move(src, os.path.join(dest, path))
+        result["moved_to"] = os.path.relpath(dest, wdir)
+    for path in modified:
         _calkit(["dvc", "checkout", path, "--force"], wdir)
+    return result
 
 
 def add_stage(

@@ -36,7 +36,8 @@ calculations.
 - **<!-- calkit value key=goals.student_days_ratio format="{:.1f}×" -->2.2×<!-- /calkit value -->**
   as many with agents and Calkit
 
-Simulated for a first paper, in Calkit's own pipeline.
+Simulated in
+[Calkit's own pipeline](https://calkit.io/calkit/calkit/pipeline?stage=research-flow).
 
 ## A success story
 

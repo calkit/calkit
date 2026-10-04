@@ -7,8 +7,9 @@ values are written as calkit.sty's ``\\ckvalue``, which the template prints
 as is until that package is used.
 """
 
+import re
 import subprocess
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import pypandoc
 
@@ -79,6 +80,18 @@ for v in reversed(values):
     # Markers on a line are replaced last to first, so offsets hold
     lines[v.line - 1] = line[: marker.start()] + raw + line[marker.end() :]
 text = "".join(lines)
+
+
+def pin(match: re.Match) -> str:
+    # A link into the project on the hub shows it as it was built from
+    url = urlparse(match.group(1))
+    query = parse_qsl(url.query)
+    if not any(k == "ref" for k, _ in query):
+        query.append(("ref", rev))
+    return f"]({urlunparse(url._replace(query=urlencode(query)))})"
+
+
+text = re.sub(rf"\]\(({re.escape(project_url)}[^)\s]*)\)", pin, text)
 # A local version's commit is the rev, which the footer gives already
 version = calkit.__version__.split("+")[0]
 dirty = git("status", "--porcelain", "--", *INPUTS, *{v.path for v in values})

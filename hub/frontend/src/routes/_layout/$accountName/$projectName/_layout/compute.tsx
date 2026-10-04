@@ -7,10 +7,13 @@ import {
   Code,
   Flex,
   Heading,
-  Icon,
   IconButton,
   Input,
+  SimpleGrid,
+  Spinner,
   Table,
+  Tag,
+  TagLabel,
   Tbody,
   Td,
   Text,
@@ -24,9 +27,17 @@ import { Link as RouterLink, createFileRoute } from "@tanstack/react-router"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  FiCheck,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import {
+  FiChevronDown,
+  FiChevronRight,
   FiMinus,
   FiPlay,
   FiPlus,
@@ -346,6 +357,40 @@ function TerminalPane({
 
 type Modal = "save" | "discard" | "new_stage"
 
+const PANEL_COLLAPSED_KEY = "calkit-workspace-panel-collapsed"
+
+// One part of the workspace panel: a small card with a title and actions
+function PanelSection({
+  title,
+  actions,
+  children,
+}: {
+  title: string
+  actions?: ReactNode
+  children: ReactNode
+}) {
+  const border = useColorModeValue("gray.200", "whiteAlpha.200")
+  return (
+    <Box borderWidth="1px" borderColor={border} borderRadius="md" p={3}>
+      <Flex align="center" gap={2} mb={2} minH="24px">
+        <Text
+          fontSize="xs"
+          fontWeight="semibold"
+          textTransform="uppercase"
+          letterSpacing="wide"
+          color="ui.dim"
+        >
+          {title}
+        </Text>
+        <Flex gap={1} ml="auto">
+          {actions}
+        </Flex>
+      </Flex>
+      {children}
+    </Box>
+  )
+}
+
 function WorkspacePanel({
   ws,
   conn,
@@ -474,33 +519,103 @@ function WorkspacePanel({
       runMutation.mutate(stages)
     }
   }
-  const check = <Icon ml={1} as={FiCheck} color="green.500" />
+  // Collapsing is remembered per browser, since it's how someone prefers
+  // to see the page rather than anything about the workspace
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(PANEL_COLLAPSED_KEY) === "1"
+    } catch {
+      return false
+    }
+  })
+  const toggleCollapsed = () => {
+    setCollapsed(!collapsed)
+    try {
+      localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed ? "0" : "1")
+    } catch {
+      // Without storage it just isn't remembered
+    }
+  }
+  const outOfSync = ahead || behind || dvcToPull || dvcToPush
+  const changeCount = untracked.length + changed.length + staged.length
+  const ready = connected && !statusQuery.isPending && !statusQuery.error
+  const fileRow = (path: string, mark: string, color: string) => (
+    <Flex key={`${mark}:${path}`} align="center" gap={2} minH="24px">
+      <Text
+        as="span"
+        fontFamily="mono"
+        fontSize="xs"
+        fontWeight="bold"
+        color={color}
+        w="1em"
+        flexShrink={0}
+      >
+        {mark}
+      </Text>
+      <Text fontFamily="mono" fontSize="sm" noOfLines={1} title={path}>
+        {path}
+      </Text>
+    </Flex>
+  )
   return (
-    <Box bg={bg} borderRadius="lg" p={4} mb={6}>
-      <Flex align="center" gap={2} mb={3}>
-        <Heading size="sm">
-          {ws.operator_name}: <Code fontSize="sm">{ws.path}</Code>
-        </Heading>
+    <Box bg={bg} borderRadius="lg" p={3} mb={6}>
+      <Flex align="center" gap={2} wrap="wrap">
+        <IconButton
+          aria-label={collapsed ? "Show details" : "Hide details"}
+          icon={collapsed ? <FiChevronRight /> : <FiChevronDown />}
+          size="xs"
+          variant="ghost"
+          onClick={toggleCollapsed}
+        />
+        <Heading size="sm">{ws.operator_name}</Heading>
+        <Tooltip label={ws.path}>
+          <Code fontSize="xs" noOfLines={1} maxW="320px">
+            {ws.path}
+          </Code>
+        </Tooltip>
+        {ready && (
+          <Flex gap={1} wrap="wrap">
+            <Badge colorScheme={outOfSync ? "yellow" : "green"}>
+              {outOfSync ? "out of sync" : "in sync"}
+            </Badge>
+            <Badge colorScheme={changeCount ? "yellow" : "green"}>
+              {changeCount
+                ? `${changeCount} change${changeCount === 1 ? "" : "s"}`
+                : "no changes"}
+            </Badge>
+            <Badge
+              colorScheme={
+                running ? "blue" : staleStages.length ? "yellow" : "green"
+              }
+            >
+              {running
+                ? "running"
+                : staleStages.length
+                  ? `${staleStages.length} stale`
+                  : "up to date"}
+            </Badge>
+          </Flex>
+        )}
         <IconButton
           aria-label="Refresh status"
           icon={<FiRefreshCw />}
           size="xs"
+          variant="ghost"
+          ml="auto"
           onClick={refresh}
           isLoading={statusQuery.isFetching}
           isDisabled={!connected}
         />
       </Flex>
       {confirmRun && editable && (
-        <Alert status="info" borderRadius="md" mb={3} gap={2}>
+        <Alert status="info" borderRadius="md" mt={3} gap={2}>
           <AlertIcon />
           <Text flex={1}>
             Run{" "}
             {confirmRun === "*" ? (
               "the pipeline"
             ) : (
-              <>
-                <Code fontSize="xs">{confirmRun}</Code>
-              </>
+              <Code fontSize="xs">{confirmRun}</Code>
             )}{" "}
             on {ws.operator_name}?
           </Text>
@@ -520,209 +635,216 @@ function WorkspacePanel({
           </Button>
         </Alert>
       )}
-      {!connected ? (
-        <Text>Waiting for the Operator to connect.</Text>
+      {collapsed ? null : !connected ? (
+        <Text mt={3} color="ui.dim">
+          Waiting for the Operator to connect.
+        </Text>
       ) : statusQuery.isPending ? (
         <LoadingSpinner />
       ) : statusQuery.error ? (
-        <Text color="red.500">{statusQuery.error.message}</Text>
+        <Alert status="error" borderRadius="md" mt={3}>
+          <AlertIcon />
+          {statusQuery.error.message}
+        </Alert>
       ) : (
         <>
-          <Heading size="xs" mb={1}>
-            Sync
-          </Heading>
-          <Flex align="center" gap={2} mb={3} wrap="wrap">
-            {ahead || behind || dvcToPull || dvcToPush ? (
-              <Text color="yellow.500">
-                {[
+          <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3} mt={3}>
+            <PanelSection
+              title="Sync"
+              actions={
+                editable && (
+                  <>
+                    <Button
+                      size="xs"
+                      onClick={() => syncMutation.mutate("pull")}
+                      isLoading={
+                        syncMutation.isPending &&
+                        syncMutation.variables === "pull"
+                      }
+                    >
+                      Pull
+                    </Button>
+                    <Button
+                      size="xs"
+                      onClick={() => syncMutation.mutate("push")}
+                      isLoading={
+                        syncMutation.isPending &&
+                        syncMutation.variables === "push"
+                      }
+                    >
+                      Push
+                    </Button>
+                  </>
+                )
+              }
+            >
+              {outOfSync ? (
+                [
                   ahead ? `${ahead} commits to push` : "",
                   behind ? `${behind} commits to pull` : "",
-                  dvcToPull ? "data to pull" : "",
-                  dvcToPush ? "data to push" : "",
+                  dvcToPull ? "Data to pull" : "",
+                  dvcToPush ? "Data to push" : "",
                 ]
                   .filter(Boolean)
-                  .join(", ")}
-              </Text>
-            ) : (
-              <Text>
-                In sync with the remotes
-                {check}
-              </Text>
-            )}
-            {editable && (
-              <>
-                <Button
-                  size="xs"
-                  onClick={() => syncMutation.mutate("pull")}
-                  isLoading={
-                    syncMutation.isPending && syncMutation.variables === "pull"
-                  }
-                >
-                  Pull
-                </Button>
-                <Button
-                  size="xs"
-                  onClick={() => syncMutation.mutate("push")}
-                  isLoading={
-                    syncMutation.isPending && syncMutation.variables === "push"
-                  }
-                >
-                  Push
-                </Button>
-              </>
-            )}
-          </Flex>
-          {untracked.length > 0 && (
-            <>
-              <Heading size="xs" mb={1}>
-                Untracked files
-              </Heading>
-              {untracked.map((path) => (
-                <Flex key={path} align="center" mb={1}>
-                  <Text color="red.500" mr={1}>
-                    {path}
-                  </Text>
-                  {editable && (
-                    <>
-                      <AddPath path={path} request={request} onDone={refresh} />
-                      <IgnorePath
-                        path={path}
-                        request={request}
-                        onDone={refresh}
-                      />
-                    </>
-                  )}
-                </Flex>
-              ))}
-            </>
-          )}
-          <Flex align="center" gap={2} mt={3} mb={1}>
-            <Heading size="xs">Uncommitted changes</Heading>
-            {editable && (changed.length > 0 || staged.length > 0) && (
-              <>
-                <Button
-                  size="xs"
-                  variant="primary"
-                  onClick={() => setModal("save")}
-                >
-                  Commit
-                </Button>
-                <Button
-                  size="xs"
-                  variant="danger"
-                  onClick={() => setModal("discard")}
-                >
-                  Discard
-                </Button>
-              </>
-            )}
-          </Flex>
-          {staged.map((path) => (
-            <Text key={path} color="green.500">
-              {path}
-            </Text>
-          ))}
-          {changed.map((path) => (
-            <Text key={path} color="red.500">
-              {path}
-            </Text>
-          ))}
-          {changed.length === 0 && staged.length === 0 && (
-            <Text>
-              None
-              {check}
-            </Text>
-          )}
-          <Flex align="center" gap={2} mt={3} mb={1}>
-            <Heading size="xs">Pipeline</Heading>
-            {running ? (
-              <Badge colorScheme="blue">Running</Badge>
-            ) : staleStages.length ? (
-              <Badge colorScheme="yellow">Out of date</Badge>
-            ) : (
-              <Badge colorScheme="green">Up to date</Badge>
-            )}
-            {editable && (
-              <Button
-                size="xs"
-                variant="primary"
-                isLoading={runMutation.isPending}
-                onClick={() => run()}
-              >
-                Run
-              </Button>
-            )}
-            {editable && (
-              <Button
-                size="xs"
-                leftIcon={<FiPlus />}
-                onClick={() => setModal("new_stage")}
-              >
-                New stage
-              </Button>
-            )}
-          </Flex>
-          {runningStages.map((stage) => (
-            <Code key={stage} fontSize="xs" mr={1} color="blue.400">
-              {stage}
-            </Code>
-          ))}
-          {staleStages
-            .filter((stage) => !runningStages.includes(stage))
-            .map((stage) => (
-              <Flex key={stage} display="inline-flex" align="center" mr={2}>
-                <Tooltip label={describeStale(stage)}>
-                  <Code fontSize="xs" color="yellow.500">
-                    {stage}
-                  </Code>
-                </Tooltip>
-                {editable && (
-                  <Tooltip label={`Run ${stage}`}>
-                    <IconButton
-                      aria-label={`Run ${stage}`}
-                      icon={<FiPlay />}
-                      size="xs"
-                      variant="ghost"
-                      isDisabled={running}
-                      onClick={() => run([stage])}
-                    />
-                  </Tooltip>
-                )}
-              </Flex>
-            ))}
-          {Object.keys(envStates).length > 0 && (
-            <>
-              <Heading size="xs" mt={3} mb={1}>
-                Environments
-              </Heading>
-              {Object.entries(envStates).map(([name, state]) => (
-                <Flex key={name} align="center" gap={2}>
-                  <Code fontSize="xs">{name}</Code>
-                  {state.checked_at === null ? (
-                    <Badge fontSize="2xs">never checked</Badge>
-                  ) : !state.success ? (
-                    <Badge colorScheme="red" fontSize="2xs">
-                      last check failed
-                    </Badge>
-                  ) : state.changed ? (
-                    <Badge colorScheme="yellow" fontSize="2xs">
-                      changed since last check
-                    </Badge>
-                  ) : (
-                    <Text fontSize="xs">
-                      checked{" "}
-                      {new Date(`${state.checked_at}Z`).toLocaleString()}
+                  .map((line) => (
+                    <Text key={line} fontSize="sm">
+                      {line}
                     </Text>
-                  )}
-                </Flex>
-              ))}
-            </>
-          )}
+                  ))
+              ) : (
+                <Text fontSize="sm" color="ui.dim">
+                  In sync with the remotes
+                </Text>
+              )}
+            </PanelSection>
+            <PanelSection
+              title="Changes"
+              actions={
+                editable &&
+                (changed.length > 0 || staged.length > 0) && (
+                  <>
+                    <Button
+                      size="xs"
+                      variant="primary"
+                      onClick={() => setModal("save")}
+                    >
+                      Commit
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="danger"
+                      onClick={() => setModal("discard")}
+                    >
+                      Discard
+                    </Button>
+                  </>
+                )
+              }
+            >
+              {changeCount === 0 && (
+                <Text fontSize="sm" color="ui.dim">
+                  No uncommitted changes
+                </Text>
+              )}
+              <Box maxH="220px" overflowY="auto">
+                {staged.map((path) => fileRow(path, "A", "green.400"))}
+                {changed.map((path) => fileRow(path, "M", "yellow.500"))}
+                {untracked.map((path) => (
+                  <Flex key={`?:${path}`} align="center" gap={1}>
+                    <Box flex={1} minW={0}>
+                      {fileRow(path, "?", "ui.dim")}
+                    </Box>
+                    {editable && (
+                      <>
+                        <AddPath
+                          path={path}
+                          request={request}
+                          onDone={refresh}
+                        />
+                        <IgnorePath
+                          path={path}
+                          request={request}
+                          onDone={refresh}
+                        />
+                      </>
+                    )}
+                  </Flex>
+                ))}
+              </Box>
+            </PanelSection>
+            <PanelSection
+              title="Pipeline"
+              actions={
+                editable && (
+                  <>
+                    <Button
+                      size="xs"
+                      variant="primary"
+                      isLoading={runMutation.isPending}
+                      onClick={() => run()}
+                    >
+                      Run
+                    </Button>
+                    <Button
+                      size="xs"
+                      leftIcon={<FiPlus />}
+                      onClick={() => setModal("new_stage")}
+                    >
+                      New stage
+                    </Button>
+                  </>
+                )
+              }
+            >
+              {!running && staleStages.length === 0 && (
+                <Text fontSize="sm" color="ui.dim">
+                  Up to date
+                </Text>
+              )}
+              <Flex gap={1} wrap="wrap">
+                {runningStages.map((stage) => (
+                  <Tag key={stage} size="sm" colorScheme="blue">
+                    <TagLabel>{stage}</TagLabel>
+                    <Spinner size="xs" ml={1} />
+                  </Tag>
+                ))}
+                {staleStages
+                  .filter((stage) => !runningStages.includes(stage))
+                  .map((stage) => (
+                    <Tag key={stage} size="sm" colorScheme="yellow">
+                      <Tooltip label={describeStale(stage)}>
+                        <TagLabel>{stage}</TagLabel>
+                      </Tooltip>
+                      {editable && (
+                        <Tooltip label={`Run ${stage}`}>
+                          <IconButton
+                            aria-label={`Run ${stage}`}
+                            icon={<FiPlay />}
+                            size="xs"
+                            variant="ghost"
+                            minW="18px"
+                            h="18px"
+                            ml={1}
+                            isDisabled={running}
+                            onClick={() => run([stage])}
+                          />
+                        </Tooltip>
+                      )}
+                    </Tag>
+                  ))}
+              </Flex>
+            </PanelSection>
+            {Object.keys(envStates).length > 0 && (
+              <PanelSection title="Environments">
+                {Object.entries(envStates).map(([name, state]) => (
+                  <Flex key={name} align="center" gap={2} minH="24px">
+                    <Code fontSize="xs">{name}</Code>
+                    {state.checked_at === null ? (
+                      <Badge fontSize="2xs">never checked</Badge>
+                    ) : !state.success ? (
+                      <Badge colorScheme="red" fontSize="2xs">
+                        last check failed
+                      </Badge>
+                    ) : state.changed ? (
+                      <Badge colorScheme="yellow" fontSize="2xs">
+                        changed since last check
+                      </Badge>
+                    ) : (
+                      <Text fontSize="xs" color="ui.dim">
+                        checked{" "}
+                        {new Date(`${state.checked_at}Z`).toLocaleString()}
+                      </Text>
+                    )}
+                  </Flex>
+                ))}
+              </PanelSection>
+            )}
+          </SimpleGrid>
           {runMutation.data?.output && (
             <Box
               as="pre"
               fontSize="xs"
-              mt={2}
+              mt={3}
               p={2}
               maxH="240px"
               overflowY="auto"
@@ -734,11 +856,18 @@ function WorkspacePanel({
               {runMutation.data.output}
             </Box>
           )}
-          {errors.map((e) => (
-            <Text key={e} color="red.500" fontSize="sm" mt={2}>
-              {e}
-            </Text>
-          ))}
+          {errors.length > 0 && (
+            <Alert status="error" borderRadius="md" mt={3} alignItems="start">
+              <AlertIcon />
+              <Box>
+                {errors.map((e) => (
+                  <Text key={e} fontSize="sm">
+                    {e}
+                  </Text>
+                ))}
+              </Box>
+            </Alert>
+          )}
         </>
       )}
       {editable && (
@@ -970,19 +1099,33 @@ function Compute() {
         Workspaces
       </Heading>
       {secondFactorError === SECOND_FACTOR_SETUP_REQUIRED && (
-        <Text mb={4}>
-          Opening sessions takes two-factor authentication.{" "}
-          <RouterLink to="/settings" search={{ tab: "operators" }}>
-            <Text as="span" color="ui.main" textDecoration="underline">
-              Set it up
-            </Text>
-          </RouterLink>{" "}
-          to connect to your Operators.
-        </Text>
+        <Alert status="warning" borderRadius="md" mb={4}>
+          <AlertIcon />
+          <Text>
+            Opening sessions and running things on your machines takes
+            two-factor authentication.{" "}
+            <RouterLink to="/settings" search={{ tab: "operators" }}>
+              <Text as="span" color="ui.main" textDecoration="underline">
+                Set it up
+              </Text>
+            </RouterLink>{" "}
+            in your settings first.
+          </Text>
+        </Alert>
       )}
       {secondFactorError === SECOND_FACTOR_REQUIRED && (
-        <Flex align="center" gap={2} mb={4} wrap="wrap">
-          <Text>Enter a code from your authenticator app to connect.</Text>
+        <Alert
+          status="warning"
+          borderRadius="md"
+          mb={4}
+          gap={2}
+          flexWrap="wrap"
+        >
+          <AlertIcon />
+          <Text>
+            Opening sessions and running things on your machines takes a code
+            from your authenticator app.
+          </Text>
           <Input
             size="sm"
             maxW="140px"
@@ -1004,7 +1147,7 @@ function Compute() {
           >
             Verify
           </Button>
-        </Flex>
+        </Alert>
       )}
       {workspaces.length === 0 ? (
         <Text mb={4}>
@@ -1162,14 +1305,26 @@ function Compute() {
                       {ws.kind === "personal" &&
                         !ws.operator_asleep &&
                         ws.operator_platform !== "windows" && (
-                          <Button
-                            size="xs"
-                            leftIcon={<FiPlus />}
-                            isDisabled={!conn?.connected}
-                            onClick={() => newSession(ws)}
+                          <Tooltip
+                            label={
+                              secondFactorError
+                                ? "Enter a code from your authenticator app above first"
+                                : "Waiting for the Operator to connect"
+                            }
+                            isDisabled={!!conn?.connected}
                           >
-                            Session
-                          </Button>
+                            {/* A disabled button doesn't show a tooltip */}
+                            <span>
+                              <Button
+                                size="xs"
+                                leftIcon={<FiPlus />}
+                                isDisabled={!conn?.connected}
+                                onClick={() => newSession(ws)}
+                              >
+                                Session
+                              </Button>
+                            </span>
+                          </Tooltip>
                         )}
                       {ws.operator_online && (
                         <Button

@@ -1,23 +1,24 @@
 """Simulate a paper worked in small steps versus stage by stage.
 
-Each of the paper's findings passes through the same stages: experiment,
-analysis, figures and writing. A student does the work and a PI reviews it.
+Each of the paper's findings passes through the same stages, from a
+literature review to writing it up. A student does the work and a PI, who has
+an hour a week for them, reviews it.
 
 - Stage-gate: every finding goes through one stage before any goes through
   the next, and the PI reviews each batch at a gate, which the student
-  prepares for and waits on.
+  prepares for and waits on until the PI has been through all of it.
 - Lean: one finding at a time goes through every stage, and the PI reviews
   whatever changed at a weekly meeting while the student keeps working.
 
-Both are run with manual tooling, where moving work between stages and
-preparing for a review take real time, and with automated tooling, where a
-pipeline keeps the paper current so they take almost none.
+Both are run with manual tooling, where moving work between stages, preparing
+for a review, redoing downstream work and getting back into a stage take real
+time, and with automated tooling, where a pipeline keeps everything in one
+project and the paper current, so they take much less.
 
 Working at a stage can introduce a flaw into its method, which taints every
-finding done that way until a review catches it, at which point all of them
-are redone from that stage. Reviews of finished findings also prompt new
-ones. Coming back to a stage after a while costs time to remember it, e.g.,
-setting an experiment back up. Time is in working days.
+finding done that way until a review, or the student working downstream,
+catches it, at which point all of them are redone from that stage. Reviews of
+finished findings also prompt new ones. Time is in working days.
 
 Writes the results to results/research-flow.json.
 """
@@ -32,44 +33,65 @@ from typing import Any
 import numpy as np
 import simpy
 
-STAGES = ["experiment", "analysis", "figures", "writing"]
+STAGES = [
+    "literature review",
+    "experiment design",
+    "experiment",
+    "data processing",
+    "analysis",
+    "figures",
+    "writing",
+]
 NS = len(STAGES)
+# Stages whose outputs are files moved into the next stage's tools
+HANDOFF_FROM = {2, 3, 4, 5}
 BASE: dict[str, Any] = {
     "n_findings": 6,
     # Days of hands-on work per finding at each stage, and their spread
-    "work": [10.0, 5.0, 2.0, 3.0],
+    "work": [3.0, 2.0, 10.0, 3.0, 4.0, 2.0, 3.0],
     "work_cv": 0.5,
-    # Redoing a stage takes this fraction of doing it the first time
-    "rework_factor": 0.5,
+    # Redoing the stage a flaw was in, which includes working out the fix
+    "fix_factor": [0.5, 0.5, 0.75, 0.5, 0.5, 0.5, 0.5],
     # Chance that working on a finding introduces a flaw into a stage's
     # method, if it doesn't already have one
-    "flaw_prob": [0.15, 0.15, 0.05, 0.05],
-    # Chance a review catches a flaw in one finding it looks at, when the
-    # finding is written up and when it's only partway through
+    "flaw_prob": [0.10, 0.15, 0.10, 0.10, 0.15, 0.05, 0.05],
+    # Chance a PI review catches a flaw in one finding it looks at, when the
+    # finding is written up and when it's only partway through, and that the
+    # student notices one while working on a later stage of the finding
     "detect_full": 0.6,
     "detect_partial": 0.3,
-    # Chance an approved finding prompts a new one, halving each generation,
-    # and that the new one needs a new experiment rather than more analysis
+    "detect_self": 0.1,
+    # Chance an approved finding prompts something new, halving each
+    # generation, and how that splits into a new analysis, an addition to the
+    # experiment, and an additional reference
     "idea_prob": 0.3,
-    "idea_new_experiment": 0.3,
-    # Switching stages, plus remembering one not worked on for a while
-    "switch_cost": 0.1,
-    "forget_cost": [5.0, 2.0, 0.5, 1.0],
+    "idea_split": [0.5, 0.25, 0.25],
     "forget_tau": 40.0,
-    # Lean meetings are weekly; stage-gate reviews take the PI a while
+    # The PI's time for this student, and what reviewing takes
+    "pi_hours_per_week": 1.0,
+    "pi_hours_full": 1.0,
+    "pi_hours_partial": 0.25,
+    # Lean meets weekly; stage-gate submits at gates and the PI works
+    # through them at their weekly slot
     "review_interval": 5.0,
-    "gate_turnaround": 5.0,
-    "gate_turnaround_per_item": 0.5,
     "max_days": 5000.0,
 }
-TOOLING = {
+TOOLING: dict[str, dict[str, Any]] = {
     "manual": {
+        # Redoing a stage because something upstream of it changed
+        "redo_factor": [0.5, 0.5, 0.75, 0.5, 0.5, 0.5, 0.5],
+        # Most days it takes to get back into a stage after time away
+        "forget_cost": [1.0, 1.0, 5.0, 1.0, 2.0, 0.5, 1.0],
+        "switch_cost": 0.25,
         "handoff_fixed": 0.25,
         "handoff_item": 0.25,
-        "prep_fixed": 0.5,
-        "prep_item": 0.25,
+        "prep_fixed": 1.0,
+        "prep_item": 0.5,
     },
     "automated": {
+        "redo_factor": [0.5, 0.5, 0.75, 0.05, 0.1, 0.02, 0.2],
+        "forget_cost": [0.5, 0.5, 4.0, 0.1, 0.5, 0.05, 0.5],
+        "switch_cost": 0.05,
         "handoff_fixed": 0.01,
         "handoff_item": 0.01,
         "prep_fixed": 0.05,
@@ -77,6 +99,8 @@ TOOLING = {
     },
 }
 POLICIES = ["stage-gate", "lean"]
+# Fraction of time spent waiting on reviews that goes to other useful work
+PRODUCTIVE_WAIT = 0.5
 REPS = 400
 OUT = Path("results/research-flow.json")
 
@@ -85,20 +109,30 @@ OUT = Path("results/research-flow.json")
 class Flaw:
     stage: int
     detected: bool = False
+    fixed: bool = False
 
 
 @dataclass
 class Item:
-    gen: int
-    stage: int
+    path: list[int]
+    gen: int = 0
+    # Relative to a full finding, for review and prep
+    size: float = 1.0
+    work: dict[int, float] = field(default_factory=dict)
+    pos: int = 0
     started: bool = False
     version: int = 0
     changed: bool = False
     approved: bool = False
     approved_at: float | None = None
     idea_checked: bool = False
-    done_stages: set = field(default_factory=set)
-    taints: dict = field(default_factory=dict)
+    done_stages: set[int] = field(default_factory=set)
+    fixes: dict[int, Flaw] = field(default_factory=dict)
+    taints: dict[int, Flaw] = field(default_factory=dict)
+
+    @property
+    def stage(self) -> int:
+        return self.path[self.pos] if self.pos < len(self.path) else NS
 
 
 class Project:
@@ -108,7 +142,9 @@ class Project:
         self.rng = np.random.default_rng(seed)
         self.env = simpy.Environment()
         self.student = simpy.PriorityResource(self.env, capacity=1)
-        self.items = [Item(gen=0, stage=0) for _ in range(p["n_findings"])]
+        self.items = [
+            Item(path=list(range(NS))) for _ in range(p["n_findings"])
+        ]
         self.n_original = len(self.items)
         self.active_flaws: list[Flaw | None] = [None] * NS
         self.last_used: list[float | None] = [None] * NS
@@ -116,7 +152,10 @@ class Project:
         self.effort = dict.fromkeys(
             ["work", "rework", "wasted", "handoff", "setup", "prep"], 0.0
         )
-        self.n_reviews = 0
+        self.pi_hours = 0.0
+        self.queue: list[list] = []
+        self.gate_items: list[Item] | None = None
+        self.gate = self.env.event()
         self.reviewed = self.env.event()
         self.finished = self.env.event()
 
@@ -147,15 +186,38 @@ class Project:
         self.current_stage = s
         yield from self.spend("setup", cost)
 
-    def process(self, item: Item, s: int) -> Generator:
+    def catch(self, flaws: list[Flaw]) -> None:
+        # Send everything built on a caught flaw back to that stage
+        for flaw in flaws:
+            flaw.detected = True
+            if self.active_flaws[flaw.stage] is flaw:
+                self.active_flaws[flaw.stage] = None
+        for i in self.items:
+            caught = [s for s, f in i.taints.items() if f.detected]
+            if not caught:
+                continue
+            for s in caught:
+                i.fixes[s] = i.taints.pop(s)
+            i.pos = min(i.pos, i.path.index(min(caught)))
+            i.version += 1
+            i.approved = False
+
+    def process(self, item: Item) -> Generator:
+        s = item.stage
         yield from self.setup(s)
-        rework = s in item.done_stages
-        mean = self.p["work"][s] * (self.p["rework_factor"] if rework else 1)
+        flaw = item.fixes.get(s)
+        if s not in item.done_stages:
+            factor = 1.0
+        elif flaw is not None and not flaw.fixed:
+            factor = self.p["fix_factor"][s]
+        else:
+            factor = self.p["redo_factor"][s]
+        mean = item.work.get(s, self.p["work"][s]) * factor
         sigma2 = math.log(1 + self.p["work_cv"] ** 2)
         days = self.rng.lognormal(math.log(mean) - sigma2 / 2, sigma2**0.5)
         version = item.version
         item.started = True
-        kind = "rework" if rework else "work"
+        kind = "work" if factor == 1.0 else "rework"
         spent = 0.0
         # Work stops early if a review sends the finding back meanwhile
         while days > 1e-9 and item.version == version:
@@ -168,26 +230,45 @@ class Project:
             self.effort[kind] -= spent
             self.effort["wasted"] += spent
             return
+        if flaw is not None:
+            flaw.fixed = True
+            del item.fixes[s]
         item.taints.pop(s, None)
         if self.active_flaws[s] is None:
             if self.rng.random() < self.p["flaw_prob"][s]:
                 self.active_flaws[s] = Flaw(s)
-        if (flaw := self.active_flaws[s]) is not None:
-            item.taints[s] = flaw
+        if (new := self.active_flaws[s]) is not None:
+            item.taints[s] = new
         item.done_stages.add(s)
-        item.stage = s + 1
+        item.pos += 1
         item.changed = True
+        # Working downstream can show up a flaw upstream
+        noticed = [
+            f
+            for j, f in item.taints.items()
+            if j < s
+            and not f.detected
+            and self.rng.random() < self.p["detect_self"]
+        ]
+        if noticed:
+            self.catch(noticed)
 
-    def handoff(self, n: int) -> Generator:
+    def handoff(self, n: float) -> Generator:
         cost = self.p["handoff_fixed"] + self.p["handoff_item"] * n
         yield from self.spend("handoff", cost)
 
-    def prep(self, n: int, priority: int = 1) -> Generator:
-        cost = self.p["prep_fixed"] + self.p["prep_item"] * n
+    def submit(self, items: list[Item], priority: int = 1) -> Generator:
+        # Prepare the materials and put them in the PI's queue
+        size = sum(i.size for i in items)
+        cost = self.p["prep_fixed"] + self.p["prep_item"] * size
         yield from self.spend("prep", cost, priority=priority)
+        for i in items:
+            i.changed = False
+            full = i.stage == NS
+            hours = self.p["pi_hours_full" if full else "pi_hours_partial"]
+            self.queue.append([i, hours * i.size])
 
     def review(self, items: list[Item]) -> None:
-        self.n_reviews += 1
         # A flaw is caught if any of the findings it shows up in reveals it
         flaws = {
             id(f): f
@@ -195,6 +276,7 @@ class Project:
             for f in i.taints.values()
             if not f.detected
         }
+        caught = []
         for flaw in flaws.values():
             p_miss = 1.0
             for i in items:
@@ -206,42 +288,71 @@ class Project:
                     )
                     p_miss *= 1 - d
             if self.rng.random() < 1 - p_miss:
-                flaw.detected = True
-                if self.active_flaws[flaw.stage] is flaw:
-                    self.active_flaws[flaw.stage] = None
-        # Send everything built on a caught flaw back to that stage
-        for i in self.items:
-            caught = [s for s, f in i.taints.items() if f.detected]
-            if caught:
-                for s in caught:
-                    del i.taints[s]
-                i.stage = min(i.stage, *caught)
-                i.version += 1
-                i.approved = False
+                caught.append(flaw)
+        self.catch(caught)
         for i in items:
-            i.changed = False
             if i.stage != NS or i.approved:
                 continue
             i.approved = True
             i.approved_at = self.env.now
-            if not i.idea_checked:
-                i.idea_checked = True
-                p_idea = self.p["idea_prob"] * 0.5**i.gen
-                if self.rng.random() < p_idea:
-                    new_exp = self.rng.random() < self.p["idea_new_experiment"]
-                    self.items.append(
-                        Item(gen=i.gen + 1, stage=0 if new_exp else 1)
-                    )
+            if i.idea_checked:
+                continue
+            i.idea_checked = True
+            if self.rng.random() >= self.p["idea_prob"] * 0.5**i.gen:
+                continue
+            kind = self.rng.choice(3, p=self.p["idea_split"])
+            if kind == 0:
+                new = Item(path=[4, 5, 6], gen=i.gen + 1)
+            elif kind == 1:
+                new = Item(path=list(range(1, NS)), gen=i.gen + 1)
+            else:
+                new = Item(
+                    path=[0, 6],
+                    gen=i.gen + 1,
+                    size=0.25,
+                    work={0: 1.0, 6: 0.5},
+                )
+            self.items.append(new)
         self.reviewed.succeed()
         self.reviewed = self.env.event()
         if self.done():
             self.finished.succeed()
 
+    def pi(self) -> Generator:
+        # The PI's sessions, with their share of the hour a week, which isn't
+        # banked if nothing is waiting
+        interval = self.p["review_interval"] if self.policy == "lean" else 5.0
+        k = 0
+        while not self.done():
+            k += 1
+            yield self.env.timeout(max(0.0, k * interval - self.env.now))
+            if self.policy == "lean":
+                changed = [i for i in self.items if i.changed]
+                if changed:
+                    # Prep comes ahead of the student's other work
+                    yield from self.submit(changed, priority=0)
+            cap = self.p["pi_hours_per_week"] * interval / 5
+            completed = []
+            while self.queue and cap > 1e-9:
+                req = self.queue[0]
+                use = min(cap, req[1])
+                req[1] -= use
+                cap -= use
+                self.pi_hours += use
+                if req[1] <= 1e-9:
+                    completed.append(self.queue.pop(0)[0])
+            if self.policy == "lean" and completed:
+                self.review(completed)
+            elif self.gate_items is not None and not self.queue:
+                self.review(self.gate_items)
+                self.gate_items = None
+                self.gate.succeed()
+
     def lean_student(self) -> Generator:
         while not self.done():
             todo = [i for i in self.items if i.stage < NS]
             if not todo:
-                # Everything is written up, so wait for the meeting
+                # Everything is written up, so wait for the PI
                 yield self.reviewed | self.finished
                 continue
             # Finish what's started, furthest along first, before new work
@@ -249,18 +360,11 @@ class Project:
                 todo,
                 key=lambda i: (not i.started, -i.stage, self.items.index(i)),
             )
-            s = item.stage
-            yield from self.process(item, s)
-            if item.stage == s + 1 and s < NS - 1:
-                yield from self.handoff(1)
-
-    def lean_meetings(self) -> Generator:
-        while not self.done():
-            yield self.env.timeout(self.p["review_interval"])
-            changed = [i for i in self.items if i.changed]
-            # Prep comes ahead of the student's other work
-            yield from self.prep(len(changed), priority=0)
-            self.review([i for i in self.items if i.changed])
+            s, version = item.stage, item.version
+            yield from self.process(item)
+            moved = item.version == version and item.stage != s
+            if moved and s in HANDOFF_FROM:
+                yield from self.handoff(item.size)
 
     def gated_student(self) -> Generator:
         while not self.done():
@@ -269,9 +373,9 @@ class Project:
                 s = min(i.stage for i in todo)
                 batch = [i for i in todo if i.stage == s]
                 for item in batch:
-                    yield from self.process(item, s)
-                if s < NS - 1:
-                    yield from self.handoff(len(batch))
+                    yield from self.process(item)
+                if s in HANDOFF_FROM:
+                    yield from self.handoff(sum(i.size for i in batch))
                 # Gates look at the batch; the last one reads the paper
                 to_review = (
                     batch
@@ -280,19 +384,17 @@ class Project:
                 )
             else:
                 to_review = [i for i in self.items if i.stage == NS]
-            yield from self.prep(len(to_review))
-            yield self.env.timeout(
-                self.p["gate_turnaround"]
-                + self.p["gate_turnaround_per_item"] * len(to_review)
-            )
-            self.review(to_review)
+            yield from self.submit(to_review)
+            self.gate_items = to_review
+            yield self.gate
+            self.gate = self.env.event()
 
     def run(self) -> dict:
-        if self.policy == "lean":
-            self.env.process(self.lean_student())
-            self.env.process(self.lean_meetings())
-        else:
-            self.env.process(self.gated_student())
+        student = (
+            self.lean_student if self.policy == "lean" else self.gated_student
+        )
+        self.env.process(student())
+        self.env.process(self.pi())
         self.env.run(
             until=self.finished | self.env.timeout(self.p["max_days"])
         )
@@ -300,12 +402,13 @@ class Project:
         approved = [i.approved_at for i in originals if i.approved_at]
         return {
             "days": self.env.now,
+            "idle": self.env.now - sum(self.effort.values()),
             "finished": self.done(),
             "mean_days_to_finding": float(np.mean(approved)),
             "days_to_first_finding": float(min(approved)),
             "effort": dict(self.effort),
+            "pi_hours": self.pi_hours,
             "findings": len(self.items),
-            "reviews": self.n_reviews,
             "flawed_findings": sum(bool(i.taints) for i in self.items),
         }
 
@@ -321,21 +424,24 @@ def summarize(runs: list[dict]) -> dict:
     def stat(key: str) -> float:
         return float(np.mean([r[key] for r in runs]))
 
+    days = [r["days"] for r in runs]
     effort = {
         k: float(np.mean([r["effort"][k] for r in runs]))
         for k in runs[0]["effort"]
     }
     return {
         "days_mean": stat("days"),
-        "days_median": float(np.median([r["days"] for r in runs])),
-        "days_p10": float(np.percentile([r["days"] for r in runs], 10)),
-        "days_p90": float(np.percentile([r["days"] for r in runs], 90)),
+        "days_median": float(np.median(days)),
+        "days_p10": float(np.percentile(days, 10)),
+        "days_p90": float(np.percentile(days, 90)),
+        "idle_mean": stat("idle"),
+        "student_days_mean": stat("days") - PRODUCTIVE_WAIT * stat("idle"),
         "days_to_finding_mean": stat("mean_days_to_finding"),
         "days_to_first_finding_mean": stat("days_to_first_finding"),
         "effort": effort,
         "effort_total": sum(effort.values()),
+        "pi_hours_mean": stat("pi_hours"),
         "findings_mean": stat("findings"),
-        "reviews_mean": stat("reviews"),
         "flawed_findings_mean": stat("flawed_findings"),
         "unfinished": sum(not r["finished"] for r in runs),
     }
@@ -355,14 +461,35 @@ for t in TOOLING:
         )
 
 
-def ratio(key: str, tooling: str) -> float:
-    a = scenarios[f"stage-gate/{tooling}"][key]
-    b = scenarios[f"lean/{tooling}"][key]
-    return float(a / b)
+def ratio(key: str, a: str, b: str) -> float:
+    return float(scenarios[a][key] / scenarios[b][key])
 
 
+ratios = {}
+for key, name in [
+    ("days_mean", "days"),
+    ("student_days_mean", "student_days"),
+    ("days_to_finding_mean", "days_to_finding"),
+    ("days_to_first_finding_mean", "days_to_first_finding"),
+]:
+    for t in TOOLING:
+        ratios[f"{name}_{t}"] = ratio(key, f"stage-gate/{t}", f"lean/{t}")
+    ratios[f"{name}_combined"] = ratio(
+        key, "stage-gate/manual", "lean/automated"
+    )
+# Student-days per paper as more of the time spent waiting on reviews goes
+# to other useful work
+fractions = [0.0, 0.25, 0.5, 0.75, 1.0]
+wait_sweep = {}
+for t in TOOLING:
+    sg, ln = scenarios[f"stage-gate/{t}"], scenarios[f"lean/{t}"]
+    wait_sweep[t] = [
+        (sg["days_mean"] - f * sg["idle_mean"])
+        / (ln["days_mean"] - f * ln["idle_mean"])
+        for f in fractions
+    ]
 # How often lean should meet, with and without the tooling
-intervals = [1, 2, 5, 10, 20, 40, 80]
+intervals = [1, 2, 5, 10, 20, 40]
 interval_sweep = {
     t: [
         summarize(
@@ -372,8 +499,8 @@ interval_sweep = {
     ]
     for t in TOOLING
 }
-# Where lean's advantage is large: scale the manual tooling's costs and how
-# often flaws get introduced
+# Where lean's advantage is large: scale the manual tooling's handoff and
+# prep costs and how often flaws get introduced
 cost_scales = [0.0, 0.5, 1.0, 2.0, 4.0]
 flaw_scales = [0.0, 0.5, 1.0, 2.0, 3.0]
 ratio_grid: list[list[float]] = []
@@ -381,10 +508,16 @@ for a, cs in enumerate(cost_scales):
     row: list[float] = []
     for b, fs in enumerate(flaw_scales):
         over: dict[str, Any] = {
-            k: v * cs for k, v in TOOLING["manual"].items()
+            k: TOOLING["manual"][k] * cs
+            for k in [
+                "handoff_fixed",
+                "handoff_item",
+                "prep_fixed",
+                "prep_item",
+            ]
         }
         over["flaw_prob"] = [min(f * fs, 1.0) for f in BASE["flaw_prob"]]
-        p = {**BASE, **over}
+        p = params_for("manual", **over)
         days = {
             pol: summarize(simulate(pol, p, 150, 1000 + 50 * a + 10 * b + k))[
                 "days_mean"
@@ -394,30 +527,23 @@ for a, cs in enumerate(cost_scales):
         row.append(days["stage-gate"] / days["lean"])
     ratio_grid.append(row)
 results = {
-    "params": {"base": BASE, "tooling": TOOLING, "reps": REPS},
-    "scenarios": scenarios,
-    "ratio": {
-        "days_manual": ratio("days_mean", "manual"),
-        "days_automated": ratio("days_mean", "automated"),
-        "days_combined": scenarios["stage-gate/manual"]["days_mean"]
-        / scenarios["lean/automated"]["days_mean"],
-        "days_to_finding_manual": ratio("days_to_finding_mean", "manual"),
-        "days_to_finding_automated": ratio(
-            "days_to_finding_mean", "automated"
-        ),
-        "days_to_finding_combined": scenarios["stage-gate/manual"][
-            "days_to_finding_mean"
-        ]
-        / scenarios["lean/automated"]["days_to_finding_mean"],
-        "effort_manual": ratio("effort_total", "manual"),
-        "effort_automated": ratio("effort_total", "automated"),
+    "params": {
+        "stages": STAGES,
+        "base": BASE,
+        "tooling": TOOLING,
+        "productive_wait": PRODUCTIVE_WAIT,
+        "reps": REPS,
     },
+    "scenarios": scenarios,
+    "ratio": ratios,
+    "wait_sweep": {"fractions": fractions, "student_days_ratio": wait_sweep},
     "interval_sweep": {"intervals": intervals, "days_mean": interval_sweep},
     "ratio_grid": {
         "cost_scales": cost_scales,
         "flaw_scales": flaw_scales,
         "days_ratio": ratio_grid,
         "max": max(max(r) for r in ratio_grid),
+        "min": min(min(r) for r in ratio_grid),
     },
 }
 OUT.parent.mkdir(parents=True, exist_ok=True)

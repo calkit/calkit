@@ -14,17 +14,27 @@ questions:
       versus a more waterfall, stage gate style?
     hypothesis: An agile, lean approach is ~10x more efficient.
     answer:
-      if r_combined >= 10: >-
-        Yes, in a simulation of a six-finding paper: working in small steps
-        with automated tooling reached an approved paper {r_combined:.1f}x
-        sooner than working stage by stage with manual tooling.
+      if r_auto >= 2: >-
+        Yes, in a simulation of a six-finding paper: with automated
+        tooling, working in small steps reached an approved paper
+        {r_auto:.1f}x sooner than working stage by stage, and fit
+        {s_auto:.1f}x as many papers into a PhD with half the time spent
+        waiting on reviews put to other use.
+      elif r_combined >= 2: >-
+        Only together with automated tooling, in a simulation of a
+        six-finding paper: working in small steps with it reached an
+        approved paper {r_combined:.1f}x sooner than working stage by stage
+        without it, and fit {s_combined:.1f}x as many papers into a PhD with
+        half the time spent waiting on reviews put to other use. With the same
+        tooling for both, the gain was {r_manual:.1f}x manual and
+        {r_auto:.1f}x automated, though the first approved finding came
+        {f_first:.1f}x sooner.
       else: >-
         Not in a simulation of a six-finding paper, where working in small
         steps reached an approved paper {r_manual:.1f}x sooner than working
-        stage by stage with manual tooling and {r_auto:.1f}x with automated
-        tooling, and an approved finding {f_manual:.1f}x and {f_auto:.1f}x
-        sooner. Across the handoff costs and flaw rates swept, its advantage
-        peaked at {r_max:.1f}x.
+        stage by stage with manual tooling, {r_auto:.1f}x with automated
+        tooling, and {r_combined:.1f}x with automated tooling against stage
+        by stage without it.
     evidence:
       - kind: figure
         path: docs/img/research-flow.png
@@ -34,9 +44,9 @@ questions:
           r_manual: ratio.days_manual
           r_auto: ratio.days_automated
           r_combined: ratio.days_combined
-          f_manual: ratio.days_to_finding_manual
-          f_auto: ratio.days_to_finding_automated
-          r_max: ratio_grid.max
+          s_auto: ratio.student_days_automated
+          s_combined: ratio.student_days_combined
+          f_first: ratio.days_to_first_finding_automated
   - question: >-
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?

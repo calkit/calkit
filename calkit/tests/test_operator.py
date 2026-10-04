@@ -854,3 +854,49 @@ def test_workspace_lock(tmp_path, monkeypatch):
     operator.claim_workspace(wdir)
     assert operator.workspace_lock_holder(wdir)["pid"] == os.getpid()
     operator.release_workspace(wdir)
+
+
+@pytest.mark.asyncio
+async def test_relay_connection(monkeypatch):
+    import websockets.asyncio.client
+
+    sent = []
+
+    class FakeSocket:
+        async def send(self, text):
+            sent.append(json.loads(text))
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            # Open for a moment, as a real connection waits for messages
+            await asyncio.sleep(0.05)
+            raise StopAsyncIteration
+
+    class FakeConnect:
+        def __init__(self, url, **kwargs):
+            self.url = url
+
+        async def __aenter__(self):
+            return FakeSocket()
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(websockets.asyncio.client, "connect", FakeConnect)
+    op = operator.Operator({"name": "box", "workspaces": []})
+    check_ins = []
+
+    async def check_in():
+        check_ins.append(op.ws is not None)
+        return {}
+
+    monkeypatch.setattr(op, "check_in", check_in)
+    await op.connect({"relay_url": "wss://relay.hub", "relay_token": "tok"})
+    await op.connected_check_in
+    # The token goes in the first message, and the Operator checks in as
+    # connected right away, so the hub doesn't show it offline until the
+    # next regular check-in
+    assert sent == [{"type": "auth", "token": "tok"}]
+    assert check_ins == [True]

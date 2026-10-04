@@ -1035,6 +1035,7 @@ class Operator:
         self.workspace_actions: dict[str, str] = {}
         # Workspaces this Operator holds the lock for, against other hubs'
         self.claimed: set[str] = set()
+        self.connected_check_in: asyncio.Task | None = None
 
     async def send(self, ch: str, msg: dict) -> None:
         ws = self.ws
@@ -1414,6 +1415,12 @@ class Operator:
         self.check_in_interval = resp.get("check_in_interval", 60)
         return resp
 
+    async def check_in_quietly(self) -> None:
+        try:
+            await self.check_in()
+        except Exception as e:
+            logger.warning(f"Check-in failed: {e}")
+
     async def keep_checking_in(self) -> None:
         while True:
             await asyncio.sleep(self.check_in_interval)
@@ -1436,6 +1443,11 @@ class Operator:
             )
             self.ws = ws
             logger.info(f"Connected to relay as {self.cfg['name']}")
+            # The check-in before connecting said it wasn't, so the hub
+            # would show it offline until the next one
+            self.connected_check_in = asyncio.create_task(
+                self.check_in_quietly()
+            )
             try:
                 async for text in ws:
                     try:

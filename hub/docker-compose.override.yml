@@ -91,6 +91,10 @@ services:
       SMTP_HOST: "mailcatcher"
       SMTP_PORT: "1025"
       SMTP_TLS: "false"
+      # Mailcatcher doesn't do SMTP auth, so a login from .env would make
+      # every send fail
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
       EMAILS_FROM_EMAIL: "noreply@example.com"
       # The image bakes in whatever version it was built at, which goes
       # stale as you commit; this keeps /version tracking the working tree

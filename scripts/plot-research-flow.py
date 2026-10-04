@@ -22,7 +22,9 @@ plt.rcParams.update(
         "axes.spines.right": False,
     }
 )
-fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 9))
+fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(
+    3, 2, figsize=(12, 13.5)
+)
 # Days to an approved paper for each style and tooling
 x = np.arange(2)
 width = 0.36
@@ -129,5 +131,57 @@ ax4.add_patch(
 )
 for spine in ax4.spines.values():
     spine.set_visible(False)
+# Adopting the tooling, on a first paper and on later ones
+labels = {
+    "diy/word": "DIY, PI on Word",
+    "diy/adopts": "DIY, PI adopts",
+    "calkit/word": "Calkit, PI on Word",
+    "calkit/browser": "Calkit, PI in browser",
+}
+y = np.arange(len(labels))[::-1]
+for k, (paper, color) in enumerate(
+    [("first", COLORS["lean"]), ("later", "#1baf7a")]
+):
+    vals = [r["adoption"][name][paper]["days_ratio"] for name in labels]
+    pos = y + (0.5 - k) * 0.38
+    ax5.barh(pos, vals, 0.36, color=color, label=f"{paper} paper", zorder=2)
+    for p_, v in zip(pos, vals):
+        ax5.text(
+            v - 0.04, p_, f"{v:.2f}×", ha="right", va="center", color="white"
+        )
+for level in (1, 2):
+    ax5.axvline(level, color=MUTED, lw=1, ls="--" if level == 2 else "-")
+ax5.set_yticks(y, list(labels.values()))
+ax5.set_xlabel("Stage-gate manual time ÷ lean automated time")
+ax5.set_title("Learning the tooling, and the PI's side of it", loc="left")
+ax5.grid(axis="x", color=GRID, zorder=0)
+ax5.set_xlim(0, 2.6)
+ax5.legend(frameon=False, loc="upper right")
+# How much learning a first paper can absorb
+ls_ = r["learn_sweep"]
+for name, style, label in [
+    ("none", "-", "PI needs no translation"),
+    ("word", "--", "PI on Word, merged by hand"),
+]:
+    ax6.plot(
+        ls_["learn_days"],
+        ls_["days_ratio"][name],
+        style,
+        color=COLORS["lean"],
+        lw=2,
+        marker="o",
+        ms=6,
+        label=label,
+    )
+for level in (1, 2):
+    ax6.axhline(level, color=MUTED, lw=1, ls="--" if level == 2 else "-")
+for days, label in [(3, "Calkit"), (30, "DIY")]:
+    ax6.axvline(days, color=INK, lw=1, ls=":")
+    ax6.text(days + 2, 1.1, label, color=INK, fontsize=9)
+ax6.set_xlabel("Student days learning and setting up the tooling")
+ax6.set_ylabel("Stage-gate manual time ÷ lean automated time")
+ax6.set_title("First paper, by learning cost", loc="left")
+ax6.grid(color=GRID)
+ax6.legend(frameon=False, loc="upper right")
 fig.tight_layout()
 fig.savefig("docs/img/research-flow.png", dpi=150)

@@ -133,8 +133,8 @@ stages:
       size: 5
     - path: scripts/research-flow.py
       hash: md5
-      md5: 74b4598fb9116cd270854b6cedc88109
-      size: 19755
+      md5: e6d5bc211c19f430e41ffd5f16807573
+      size: 24872
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -142,8 +142,8 @@ stages:
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: 3c13bc595c3a662ad46760fd4581a492
-      size: 7861
+      md5: 9639526e7101cd942d53ea0b68f249e5
+      size: 16701
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -153,12 +153,12 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: 3c13bc595c3a662ad46760fd4581a492
-      size: 7861
+      md5: 9639526e7101cd942d53ea0b68f249e5
+      size: 16701
     - path: scripts/plot-research-flow.py
       hash: md5
-      md5: ab8e6ee43b7b95f1877da3e54ba403bd
-      size: 4650
+      md5: 396bfad6a941a1af2ebcd9fec14bc58f
+      size: 6625
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -166,5 +166,5 @@ stages:
     outs:
     - path: docs/img/research-flow.png
       hash: md5
-      md5: b8588aa25bc2084edc1e5dbe194d0d6e
-      size: 231930
+      md5: 7b7582e009a30a76134623a6ac219e37
+      size: 350640

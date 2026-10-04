@@ -74,6 +74,16 @@ BASE: dict[str, Any] = {
     # Lean meets weekly; stage-gate submits at gates and the PI works
     # through them at their weekly slot
     "review_interval": 5.0,
+    # Adopting automated tooling: days the student spends learning and
+    # setting it up first, the half-life over which its costs fall from
+    # manual tooling's to its own, what a PI who keeps reviewing in Word or
+    # Overleaf costs the student each review, and PI hours spent learning
+    # to review another way; all zero once there's nothing left to learn
+    "learn_days": 0.0,
+    "ramp_half_life": 0.0,
+    "translate_fixed": 0.0,
+    "translate_item": 0.0,
+    "pi_learn_hours": 0.0,
     "max_days": 5000.0,
 }
 TOOLING: dict[str, dict[str, Any]] = {
@@ -99,6 +109,34 @@ TOOLING: dict[str, dict[str, Any]] = {
     },
 }
 POLICIES = ["stage-gate", "lean"]
+# Ways of adopting automated tooling for lean, which end at the same costs
+# and differ in getting there, and in how the PI reviews
+ADOPTION: dict[str, dict[str, float]] = {
+    "diy/word": {
+        "learn_days": 30.0,
+        "ramp_half_life": 60.0,
+        "translate_fixed": 0.5,
+        "translate_item": 0.25,
+    },
+    "diy/adopts": {
+        "learn_days": 30.0,
+        "ramp_half_life": 60.0,
+        "pi_learn_hours": 20.0,
+    },
+    "calkit/word": {
+        "learn_days": 3.0,
+        "ramp_half_life": 10.0,
+        "translate_fixed": 0.05,
+        "translate_item": 0.02,
+    },
+    "calkit/browser": {
+        "learn_days": 3.0,
+        "ramp_half_life": 10.0,
+        "pi_learn_hours": 0.25,
+    },
+}
+# What's learned once, so later papers don't pay it again
+LEARNED = ["learn_days", "ramp_half_life", "pi_learn_hours"]
 # Fraction of time spent waiting on reviews that goes to other useful work
 PRODUCTIVE_WAIT = 0.5
 REPS = 400
@@ -146,6 +184,19 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     def done() -> bool:
         return all(i.stage == NS and i.approved for i in items)
 
+    def tool(key: str) -> Any:
+        # Tooling being learned costs what manual tooling does at first,
+        # closing the gap by half every half-life after setup
+        value = p[key]
+        if not p["ramp_half_life"]:
+            return value
+        since = max(env.now - p["learn_days"], 0.0)
+        w = 0.5 ** (since / p["ramp_half_life"])
+        start = TOOLING["manual"][key]
+        if isinstance(value, list):
+            return [v + (m - v) * w for v, m in zip(value, start)]
+        return value + (start - value) * w
+
     def spend(kind: str, days: float, priority: int = 1) -> Generator:
         # Student time, in chunks of at most a day so a meeting can come
         # between them
@@ -161,11 +212,11 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         nonlocal current_stage
         if current_stage == s:
             return
-        cost = p["switch_cost"]
+        cost = tool("switch_cost")
         last = last_used[s]
         if last is not None:
             idle = env.now - last
-            cost += p["forget_cost"][s] * (
+            cost += tool("forget_cost")[s] * (
                 1 - math.exp(-idle / p["forget_tau"])
             )
         current_stage = s
@@ -196,7 +247,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         elif flaw is not None and not flaw.fixed:
             factor = p["fix_factor"][s]
         else:
-            factor = p["redo_factor"][s]
+            factor = tool("redo_factor")[s]
         mean = item.work.get(s, p["work"][s]) * factor
         sigma2 = math.log(1 + p["work_cv"] ** 2)
         days = rng.lognormal(math.log(mean) - sigma2 / 2, sigma2**0.5)
@@ -237,14 +288,17 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             catch(noticed)
 
     def handoff(n: float) -> Generator:
-        cost = p["handoff_fixed"] + p["handoff_item"] * n
+        cost = tool("handoff_fixed") + tool("handoff_item") * n
         yield from spend("handoff", cost)
 
     def submit(to_review: list[Item], priority: int = 1) -> Generator:
         # Prepare the materials and put them in the PI's queue
         size = sum(i.size for i in to_review)
-        cost = p["prep_fixed"] + p["prep_item"] * size
+        cost = tool("prep_fixed") + tool("prep_item") * size
         yield from spend("prep", cost, priority=priority)
+        # Out to the PI's Word or Overleaf copy and their edits back in
+        cost = p["translate_fixed"] + p["translate_item"] * size
+        yield from spend("translate", cost, priority=priority)
         for i in to_review:
             i.changed = False
             full = i.stage == NS
@@ -303,6 +357,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         # The PI's sessions, with their share of the hour a week, which isn't
         # banked if nothing is waiting
         interval = p["review_interval"] if policy == "lean" else 5.0
+        # Time the PI spends learning to review comes out of the same hour
+        learning = p["pi_learn_hours"]
         k = 0
         while not done():
             k += 1
@@ -313,6 +369,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                     # Prep comes ahead of the student's other work
                     yield from submit(changed, priority=0)
             cap = p["pi_hours_per_week"] * interval / 5
+            use = min(cap, learning)
+            learning -= use
+            cap -= use
+            pi_hours += use
             completed = []
             while queue and cap > 1e-9:
                 req = queue[0]
@@ -330,6 +390,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                 gate.succeed()
 
     def lean_student() -> Generator:
+        yield from spend("learning", p["learn_days"])
         while not done():
             todo = [i for i in items if i.stage < NS]
             if not todo:
@@ -348,6 +409,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
 
     def gated_student() -> Generator:
         nonlocal gate_items, gate
+        yield from spend("learning", p["learn_days"])
         while not done():
             todo = [i for i in items if i.stage < NS]
             if todo:
@@ -379,7 +441,17 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     last_used: list[float | None] = [None] * NS
     current_stage = None
     effort = dict.fromkeys(
-        ["work", "rework", "wasted", "handoff", "setup", "prep"], 0.0
+        [
+            "learning",
+            "work",
+            "rework",
+            "wasted",
+            "handoff",
+            "setup",
+            "prep",
+            "translate",
+        ],
+        0.0,
     )
     pi_hours = 0.0
     queue: list[list] = []
@@ -527,6 +599,55 @@ for a, cs in enumerate(cost_scales):
             / summarize(simulate("lean", flagship, 150, seed + 1))["days_mean"]
         )
     ratio_grid.append(row)
+# Adopting the tooling, on a first paper, which pays to learn it, and on
+# later ones, which don't, against the status quo
+status_quo = scenarios["stage-gate/manual"]
+adoption: dict[str, dict] = {}
+for j, (name, opts) in enumerate(ADOPTION.items()):
+    adoption[name] = {}
+    for paper, over in [
+        ("first", opts),
+        ("later", {k: v for k, v in opts.items() if k not in LEARNED}),
+    ]:
+        summary = summarize(
+            simulate("lean", params_for("automated", **over), REPS, 200 + j)
+        )
+        adoption[name][paper] = summary | {
+            "days_ratio": status_quo["days_mean"] / summary["days_mean"],
+            "student_days_ratio": status_quo["student_days_mean"]
+            / summary["student_days_mean"],
+        }
+# How much learning a first paper can absorb and still beat the status quo,
+# with the savings arriving over twice as long as the setup takes, and the
+# PI reviewing in Word by hand or not needing a translation at all
+learn_days = [0.0, 10.0, 30.0, 60.0, 100.0, 150.0]
+learn_sweep: dict[str, list[float]] = {}
+for name, translate in [
+    ("word", ADOPTION["diy/word"]),
+    ("none", {}),
+]:
+    learn_sweep[name] = []
+    for j, d in enumerate(learn_days):
+        over = {
+            "learn_days": d,
+            "ramp_half_life": 2 * d,
+            "translate_fixed": translate.get("translate_fixed", 0.0),
+            "translate_item": translate.get("translate_item", 0.0),
+        }
+        days = summarize(
+            simulate("lean", params_for("automated", **over), 200, 300 + j)
+        )["days_mean"]
+        learn_sweep[name].append(status_quo["days_mean"] / days)
+
+
+def crossing(xs: list[float], ys: list[float], level: float) -> float | None:
+    # Where a falling curve first drops below a level, interpolated
+    for x0, x1, y0, y1 in zip(xs, xs[1:], ys, ys[1:]):
+        if y0 >= level > y1:
+            return x0 + (x1 - x0) * (y0 - level) / (y0 - y1)
+    return None
+
+
 results = {
     "params": {
         "stages": STAGES,
@@ -539,6 +660,19 @@ results = {
     "ratio": ratios,
     "wait_sweep": {"fractions": fractions, "student_days_ratio": wait_sweep},
     "interval_sweep": {"intervals": intervals, "days_mean": interval_sweep},
+    "adoption": adoption,
+    "learn_sweep": {
+        "learn_days": learn_days,
+        "days_ratio": learn_sweep,
+        # Learning a first paper can absorb before it's no longer 2x, or
+        # no better at all
+        "days_to_2x": {
+            k: crossing(learn_days, v, 2.0) for k, v in learn_sweep.items()
+        },
+        "days_to_1x": {
+            k: crossing(learn_days, v, 1.0) for k, v in learn_sweep.items()
+        },
+    },
     "ratio_grid": {
         "cost_scales": cost_scales,
         "flaw_scales": flaw_scales,
@@ -550,6 +684,9 @@ results = {
 OUT.parent.mkdir(parents=True, exist_ok=True)
 OUT.write_text(json.dumps(results, indent=2) + "\n")
 print(json.dumps(results["ratio"], indent=2))
+for k, v in adoption.items():
+    print(k, {pp: round(vv["days_ratio"], 2) for pp, vv in v.items()})
+print(json.dumps(results["learn_sweep"], indent=2))
 for k, v in scenarios.items():
     print(k, {kk: round(vv, 1) for kk, vv in v.items() if kk != "effort"})
     print("   ", {kk: round(vv, 1) for kk, vv in v["effort"].items()})

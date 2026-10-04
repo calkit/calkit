@@ -53,6 +53,11 @@
       "pi_hours_full": 1.0,
       "pi_hours_partial": 0.25,
       "review_interval": 5.0,
+      "learn_days": 0.0,
+      "ramp_half_life": 0.0,
+      "translate_fixed": 0.0,
+      "translate_item": 0.0,
+      "pi_learn_hours": 0.0,
       "max_days": 5000.0
     },
     "tooling": {
@@ -121,12 +126,14 @@
       "days_to_finding_mean": 377.95833333333337,
       "days_to_first_finding_mean": 363.525,
       "effort": {
+        "learning": 0.0,
         "work": 185.72224660413332,
         "rework": 53.62797402029826,
         "wasted": 0.0,
         "handoff": 13.554375,
         "setup": 16.033908428401364,
-        "prep": 60.0946875
+        "prep": 60.0946875,
+        "translate": 0.0
       },
       "effort_total": 329.03319155283293,
       "pi_hours_mean": 34.6365625,
@@ -144,12 +151,14 @@
       "days_to_finding_mean": 215.6575313923438,
       "days_to_first_finding_mean": 58.393710436963666,
       "effort": {
+        "learning": 0.0,
         "work": 184.56287372243185,
         "rework": 36.42031764349636,
         "wasted": 4.194769124699954,
         "handoff": 18.9075,
         "setup": 64.70483793208179,
-        "prep": 74.1859375
+        "prep": 74.1859375,
+        "translate": 0.0
       },
       "effort_total": 382.9762359227099,
       "pi_hours_mean": 20.185,
@@ -167,12 +176,14 @@
       "days_to_finding_mean": 306.03125,
       "days_to_first_finding_mean": 294.0875,
       "effort": {
+        "learning": 0.0,
         "work": 184.53938225341346,
         "rework": 37.660649757790026,
         "wasted": 0.0,
         "handoff": 0.522,
         "setup": 5.829179788262767,
-        "prep": 0.9507500000000003
+        "prep": 0.9507500000000003,
+        "translate": 0.0
       },
       "effort_total": 229.50196179946624,
       "pi_hours_mean": 34.66875,
@@ -190,12 +201,14 @@
       "days_to_finding_mean": 136.93899972040484,
       "days_to_first_finding_mean": 42.214046573010464,
       "effort": {
+        "learning": 0.0,
         "work": 183.7927054438144,
         "rework": 25.779205504157776,
         "wasted": 5.68151144704227,
         "handoff": 0.7773000000000004,
         "setup": 20.181746858020738,
-        "prep": 1.7908750000000009
+        "prep": 1.7908750000000009,
+        "translate": 0.0
       },
       "effort_total": 238.0033442530352,
       "pi_hours_mean": 17.88859375,
@@ -280,6 +293,268 @@
         272.35759825012855,
         307.6507346990469
       ]
+    }
+  },
+  "adoption": {
+    "diy/word": {
+      "first": {
+        "days_mean": 339.7690548797715,
+        "days_median": 335.84276930479336,
+        "days_p10": 295.86789203942095,
+        "days_p90": 390.82265625,
+        "idle_mean": 4.328721017094479,
+        "student_days_mean": 337.60469437122424,
+        "days_to_finding_mean": 214.57043881684885,
+        "days_to_first_finding_mean": 90.17899720249196,
+        "effort": {
+          "learning": 30.0,
+          "work": 183.0248286638876,
+          "rework": 31.36224229794095,
+          "wasted": 5.12472777238478,
+          "handoff": 5.028950654353405,
+          "setup": 31.692919070876894,
+          "prep": 17.427602903233407,
+          "translate": 31.7790625
+        },
+        "effort_total": 335.44033386267705,
+        "pi_hours_mean": 19.34484375,
+        "findings_mean": 8.155,
+        "flawed_findings_mean": 0.1775,
+        "unfinished": 0,
+        "days_ratio": 1.4704473312815074,
+        "student_days_ratio": 1.22724254930186
+      },
+      "later": {
+        "days_mean": 280.3226843839795,
+        "days_median": 270.8,
+        "days_p10": 230.0,
+        "days_p90": 345.08000000000004,
+        "idle_mean": 4.351122830374892,
+        "student_days_mean": 278.147122968792,
+        "days_to_finding_mean": 158.59047888529187,
+        "days_to_first_finding_mean": 47.02444591375749,
+        "effort": {
+          "learning": 0.0,
+          "work": 184.77516375198726,
+          "rework": 30.50962080493223,
+          "wasted": 5.688191300072744,
+          "handoff": 0.8059000000000003,
+          "setup": 22.479623196612383,
+          "prep": 1.9283750000000006,
+          "translate": 29.7846875
+        },
+        "effort_total": 275.9715615536046,
+        "pi_hours_mean": 18.74046875,
+        "findings_mean": 8.1475,
+        "flawed_findings_mean": 0.1925,
+        "unfinished": 0,
+        "days_ratio": 1.7822763830116668,
+        "student_days_ratio": 1.4895816334684984
+      }
+    },
+    "diy/adopts": {
+      "first": {
+        "days_mean": 311.10126658562854,
+        "days_median": 307.8308756877294,
+        "days_p10": 265.1460138429263,
+        "days_p90": 360.58186094496494,
+        "idle_mean": 4.728569003198802,
+        "student_days_mean": 308.73698208402914,
+        "days_to_finding_mean": 203.23891264270108,
+        "days_to_first_finding_mean": 115.7626127315909,
+        "effort": {
+          "learning": 30.0,
+          "work": 182.20202920485661,
+          "rework": 34.295592607526125,
+          "wasted": 4.994933580712123,
+          "handoff": 5.570622924371328,
+          "setup": 30.99390080180844,
+          "prep": 18.31561846315511,
+          "translate": 0.0
+        },
+        "effort_total": 306.37269758242974,
+        "pi_hours_mean": 39.2315625,
+        "findings_mean": 8.0425,
+        "flawed_findings_mean": 0.2125,
+        "unfinished": 0,
+        "days_ratio": 1.605948138634418,
+        "student_days_ratio": 1.341992925433371
+      },
+      "later": {
+        "days_mean": 245.2445035273674,
+        "days_median": 240.05,
+        "days_p10": 200.05,
+        "days_p90": 295.05,
+        "idle_mean": 4.994659487454198,
+        "student_days_mean": 242.7471737836403,
+        "days_to_finding_mean": 138.57561155600123,
+        "days_to_first_finding_mean": 41.884987174255194,
+        "effort": {
+          "learning": 0.0,
+          "work": 183.50909120060965,
+          "rework": 27.80192783219711,
+          "wasted": 5.949812078392107,
+          "handoff": 0.7897500000000005,
+          "setup": 20.39863792871432,
+          "prep": 1.8006250000000008,
+          "translate": 0.0
+        },
+        "effort_total": 240.24984403991317,
+        "pi_hours_mean": 18.0753125,
+        "findings_mean": 8.105,
+        "flawed_findings_mean": 0.185,
+        "unfinished": 0,
+        "days_ratio": 2.037201620480954,
+        "student_days_ratio": 1.7068081136371993
+      }
+    },
+    "calkit/word": {
+      "first": {
+        "days_mean": 256.0673001967165,
+        "days_median": 250.1200000532019,
+        "days_p10": 210.09450056797613,
+        "days_p90": 305.1200000011756,
+        "idle_mean": 5.2241015070397285,
+        "student_days_mean": 253.4552494431966,
+        "days_to_finding_mean": 148.67061417958502,
+        "days_to_first_finding_mean": 49.94580009838011,
+        "effort": {
+          "learning": 3.0,
+          "work": 183.59631770870286,
+          "rework": 28.24162511414183,
+          "wasted": 6.065848092680776,
+          "handoff": 1.2921918351005426,
+          "setup": 21.802100985813567,
+          "prep": 4.2069774532372035,
+          "translate": 2.6381375000000005
+        },
+        "effort_total": 250.84319868967677,
+        "pi_hours_mean": 18.16703125,
+        "findings_mean": 8.0625,
+        "flawed_findings_mean": 0.19,
+        "unfinished": 0,
+        "days_ratio": 1.9510984011476156,
+        "student_days_ratio": 1.6346982226117708
+      },
+      "later": {
+        "days_mean": 249.83319507672093,
+        "days_median": 245.12,
+        "days_p10": 205.119,
+        "days_p90": 300.12,
+        "idle_mean": 5.112684483441548,
+        "student_days_mean": 247.27685283500014,
+        "days_to_finding_mean": 141.20881323480765,
+        "days_to_first_finding_mean": 43.40326492531438,
+        "effort": {
+          "learning": 0.0,
+          "work": 184.10145596742404,
+          "rework": 28.647084719150353,
+          "wasted": 6.00207965886286,
+          "handoff": 0.7913000000000003,
+          "setup": 20.729177747842122,
+          "prep": 1.8213750000000006,
+          "translate": 2.6280375000000005
+        },
+        "effort_total": 244.72051059327939,
+        "pi_hours_mean": 18.218125,
+        "findings_mean": 8.0875,
+        "flawed_findings_mean": 0.1625,
+        "unfinished": 0,
+        "days_ratio": 1.9997842954639182,
+        "student_days_ratio": 1.6755423770007327
+      }
+    },
+    "calkit/browser": {
+      "first": {
+        "days_mean": 255.1366207460769,
+        "days_median": 250.0500000532019,
+        "days_p10": 210.05000063108457,
+        "days_p90": 310.0,
+        "idle_mean": 5.11952145670003,
+        "student_days_mean": 252.57686001772686,
+        "days_to_finding_mean": 147.72090576731546,
+        "days_to_first_finding_mean": 48.56987558366696,
+        "effort": {
+          "learning": 3.0,
+          "work": 185.82484497060415,
+          "rework": 28.201322045246314,
+          "wasted": 5.776801590840282,
+          "handoff": 1.2979254055385818,
+          "setup": 21.710728148919674,
+          "prep": 4.205477128227838,
+          "translate": 0.0
+        },
+        "effort_total": 250.01709928937683,
+        "pi_hours_mean": 18.49484375,
+        "findings_mean": 8.09,
+        "flawed_findings_mean": 0.2275,
+        "unfinished": 0,
+        "days_ratio": 1.958215557370873,
+        "student_days_ratio": 1.6403832312561715
+      },
+      "later": {
+        "days_mean": 250.62818783198978,
+        "days_median": 245.05,
+        "days_p10": 205.05,
+        "days_p90": 300.05,
+        "idle_mean": 5.399819396094159,
+        "student_days_mean": 247.92827813394268,
+        "days_to_finding_mean": 142.42322186575822,
+        "days_to_first_finding_mean": 41.71514752515984,
+        "effort": {
+          "learning": 0.0,
+          "work": 185.46332023338462,
+          "rework": 29.814146809686186,
+          "wasted": 6.445896611928249,
+          "handoff": 0.8052000000000004,
+          "setup": 20.867554780896533,
+          "prep": 1.8322500000000008,
+          "translate": 0.0
+        },
+        "effort_total": 245.2283684358956,
+        "pi_hours_mean": 18.42453125,
+        "findings_mean": 8.18,
+        "flawed_findings_mean": 0.2425,
+        "unfinished": 0,
+        "days_ratio": 1.9934409785339806,
+        "student_days_ratio": 1.6711399316562814
+      }
+    }
+  },
+  "learn_sweep": {
+    "learn_days": [
+      0.0,
+      10.0,
+      30.0,
+      60.0,
+      100.0,
+      150.0
+    ],
+    "days_ratio": {
+      "word": [
+        1.8105200582056846,
+        1.6992817919290786,
+        1.4972338385683452,
+        1.263791737410893,
+        1.1098752930107565,
+        0.9612578326993558
+      ],
+      "none": [
+        2.0371011316199277,
+        1.892816594575254,
+        1.628325921428299,
+        1.3686685761660187,
+        1.1920901738898024,
+        1.0322265653963396
+      ]
+    },
+    "days_to_2x": {
+      "word": null,
+      "none": 2.571386538007211
+    },
+    "days_to_1x": {
+      "word": 136.96580899058998,
+      "none": null
     }
   },
   "ratio_grid": {

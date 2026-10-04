@@ -11583,6 +11583,18 @@ export const WorkspaceSchema = {
         },
       ],
     },
+    in_use_by: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 2048,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "In Use By",
+    },
     operator_id: {
       type: "string",
       format: "uuid",
@@ -11748,6 +11760,18 @@ export const WorkspaceInfoSchema = {
           type: "null",
         },
       ],
+    },
+    in_use_by: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 2048,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "In Use By",
     },
   },
   type: "object",

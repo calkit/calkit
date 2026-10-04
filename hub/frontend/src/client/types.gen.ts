@@ -6567,6 +6567,10 @@ export type Workspace = {
   running_since?: string | null
   last_run?: LastRun | null
   /**
+   * In Use By
+   */
+  in_use_by?: string | null
+  /**
    * Operator Id
    */
   operator_id: string
@@ -6643,6 +6647,10 @@ export type WorkspaceInfo = {
    */
   running_since?: string | null
   last_run?: LastRun | null
+  /**
+   * In Use By
+   */
+  in_use_by?: string | null
 }
 
 /**

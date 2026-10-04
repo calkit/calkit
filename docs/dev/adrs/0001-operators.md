@@ -134,7 +134,8 @@ By default, only the Operator's owner can use it, and only inside
 allowlisted workspaces:
 discovered or registered personal workspaces and managed workspaces.
 Within those, the owner can open shells and edit files.
-The allowlist and other settings live in `~/.calkit/operator.yaml`.
+The allowlist and other settings live in
+`~/.calkit/operators/<hub>/config.yaml`.
 Sharing with collaborators is out of scope for the MVP.
 
 The Operator effectively gives the hub a shell on the machine, and
@@ -228,6 +229,20 @@ There are two kinds:
   `~/.calkit/workspaces`, checked out with `--force` and used for running
   stages.
   They are shown in the hub but not edited there.
+
+A machine can have an Operator for each hub it's connected to, e.g., the
+public hub, an institution's, and one running locally for development,
+each with its own config, service, lock, and log, named by the hub's key,
+e.g., `calkit.io`, which is also how managed workspaces are filed.
+`--hub` picks which one a command acts on, and without it, `install`
+uses the user's default hub and other commands the only one installed.
+A workspace can be seen by more than one of them, e.g., one under
+`~/calkit`, but is used by one at a time: an Operator takes a lock in
+the workspace itself, `.calkit/local/operator.lock`, while a session or
+an action that changes it is running, and the others refuse to change it
+and report it as in use from that hub until it's released.
+A lock left by an Operator that's no longer running is stale and can be
+taken.
 
 The hub presents itself as a workspace too: the default one, and the
 project's source of truth, which can be viewed and edited but runs

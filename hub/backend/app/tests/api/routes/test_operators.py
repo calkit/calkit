@@ -142,6 +142,7 @@ def test_operators(
                     "running_stages": ["train"],
                     "running_since": "2026-09-29T12:05:00+00:00",
                     "last_run": last_run,
+                    "in_use_by": "http://localhost",
                 },
                 {"path": "/home/me/calkit/b", "project": "someone/other"},
                 {"path": "/home/me/misc"},
@@ -161,6 +162,8 @@ def test_operators(
     assert mine[0]["running"] and mine[0]["running_stages"] == ["train"]
     assert mine[0]["running_since"] == "2026-09-29T12:05:00+00:00"
     assert mine[0]["last_run"] == last_run
+    assert mine[0]["in_use_by"] == "http://localhost"
+    assert mine[1]["in_use_by"] is None
     assert mine[1]["running_stages"] == [] and mine[1]["last_run"] is None
     # Workspaces are listed per project, matched case-insensitively
     owner, name = project.split("/")

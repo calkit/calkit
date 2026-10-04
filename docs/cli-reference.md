@@ -448,6 +448,7 @@ Options:
 | `--cron`       | boolean | no       | False   | For the operator, have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
 | `--ssh`        | str     | no       |         | For the operator, install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
 | `--no-service` | boolean | no       | False   | For the operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
+| `--hub`        | str     | no       |         | For the operator, the URL of the hub it's for, e.g., https://calkit.io; a machine can have one per hub.                                                     |
 
 <a id="top-command-xproc-runproc"></a>
 
@@ -4106,7 +4107,7 @@ Manage this machine's Operator, which lets the hub use it.
 | ----------------------------------------------------- | ------------------------------------------------------------- |
 | [`install`](#subcommand-operator-install)             | Register this machine as an Operator and run it as a service. |
 | [`start`](#subcommand-operator-start)                 | Run the Operator in the foreground, e.g., inside tmux.        |
-| [`status`](#subcommand-operator-status)               | Show this machine's Operator and the workspaces it allows.    |
+| [`status`](#subcommand-operator-status)               | Show this machine's Operators and the workspaces they allow.  |
 | [`stop`](#subcommand-operator-stop)                   | Stop the Operator's service until it's restarted.             |
 | [`restart`](#subcommand-operator-restart)             | Restart the Operator's service, e.g., after updating Calkit.  |
 | [`logs`](#subcommand-operator-logs)                   | Show the Operator service's logs.                             |
@@ -4129,12 +4130,13 @@ calkit operator install [OPTIONS]
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                                                               |
-| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `--boot`       | boolean | no       | False   | On macOS, start at boot rather than at login (needs sudo).                                                                                |
-| `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
-| `--ssh`        | str     | no       |         | Install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
-| `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
+| Option         | Type    | Required | Default | Description                                                                                                                                                      |
+| -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`        | str     | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
+| `--boot`       | boolean | no       | False   | On macOS, start at boot rather than at login (needs sudo).                                                                                                       |
+| `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                                       |
+| `--ssh`        | str     | no       |         | Install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed.                        |
+| `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                                         |
 
 <a id="subcommand-operator-start"></a>
 
@@ -4150,21 +4152,28 @@ calkit operator start [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description         |
-| ----------------- | ------- | -------- | ------- | ------------------- |
-| `--verbose`, `-v` | boolean | no       | False   | Log in more detail. |
+| Option            | Type    | Required | Default | Description                                                                                                                                                      |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Log in more detail.                                                                                                                                              |
+| `--hub`           | str     | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
 
 <a id="subcommand-operator-status"></a>
 
 #### `calkit operator status`
 
-Show this machine's Operator and the workspaces it allows.
+Show this machine's Operators and the workspaces they allow.
 
 Usage:
 
 ```text
-calkit operator status
+calkit operator status [OPTIONS]
 ```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
 
 <a id="subcommand-operator-stop"></a>
 
@@ -4175,8 +4184,14 @@ Stop the Operator's service until it's restarted.
 Usage:
 
 ```text
-calkit operator stop
+calkit operator stop [OPTIONS]
 ```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
 
 <a id="subcommand-operator-restart"></a>
 
@@ -4187,8 +4202,14 @@ Restart the Operator's service, e.g., after updating Calkit.
 Usage:
 
 ```text
-calkit operator restart
+calkit operator restart [OPTIONS]
 ```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
 
 <a id="subcommand-operator-logs"></a>
 
@@ -4204,9 +4225,10 @@ calkit operator logs [OPTIONS]
 
 Options:
 
-| Option           | Type    | Required | Default | Description              |
-| ---------------- | ------- | -------- | ------- | ------------------------ |
-| `--follow`, `-f` | boolean | no       | False   | Keep printing new lines. |
+| Option           | Type    | Required | Default | Description                                                                                                                                                      |
+| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--follow`, `-f` | boolean | no       | False   | Keep printing new lines.                                                                                                                                         |
+| `--hub`          | str     | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
 
 <a id="subcommand-operator-add-workspace"></a>
 
@@ -4217,7 +4239,7 @@ Let the hub use a project outside ~/calkit as a workspace.
 Usage:
 
 ```text
-calkit operator add-workspace [PATH]
+calkit operator add-workspace [OPTIONS] [PATH]
 ```
 
 Arguments:
@@ -4225,6 +4247,12 @@ Arguments:
 | Argument | Type | Required | Default | Description               |
 | -------- | ---- | -------- | ------- | ------------------------- |
 | `path`   | str  | no       | .       | Path to a Calkit project. |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
 
 <a id="subcommand-operator-uninstall"></a>
 
@@ -4235,5 +4263,11 @@ Revoke this machine's Operator on the hub and remove it here.
 Usage:
 
 ```text
-calkit operator uninstall
+calkit operator uninstall [OPTIONS]
 ```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |

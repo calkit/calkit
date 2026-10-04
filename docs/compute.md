@@ -102,6 +102,20 @@ On the Hub, if you go to your settings, you'll see an "Operators"
 tab that lists your installed Operators and their status.
 You can revoke them from there if desired.
 
+To install the Operator for a hub other than your default one, e.g., one
+run by your institution, pass its URL with `--hub`:
+
+```sh
+calkit operator install --hub https://hub.example.edu
+```
+
+A machine can have an Operator for each hub you use,
+and the other `calkit operator` commands take `--hub` to choose which one
+to act on.
+A project folder can be used from one hub at a time:
+while one hub has a session open in it or is changing it,
+the others show it as in use and wait.
+
 On Windows, the Operator starts at login and can do everything except
 open shell sessions, which aren't supported there yet.
 

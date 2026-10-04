@@ -46,19 +46,124 @@ MAX_INPUT_BUFFER_BYTES = 1024 * 1024
 # In cron mode, the Operator exits after this long with no sessions or
 # browsers, and cron starts it again when the hub asks
 CRON_IDLE_EXIT_SECONDS = 900
-CRON_MARKER = "# calkit-operator"
+
+# The hub the Operator commands in this process act on, by its web URL.
+# Each hub's Operator has its own config, service, lock, and log, named by
+# the hub's key, so Operators for several hubs can run side by side.
+_hub_url: str | None = None
 
 
 class OperatorRevoked(Exception):
     pass
 
 
-def get_config_path() -> str:
+def select_hub(hub_url: str | None = None) -> str:
+    """Choose the hub the Operator commands act on, or the user's own hub
+    if not given, returning its key.
+    """
+    global _hub_url
+    if hub_url is None:
+        from calkit import hub
+
+        use_own_hub()
+        hub_url = hub.get_hub_url()
+    else:
+        hub_url = config.normalize_hub_url(hub_url)
+        # So hub requests go to it too
+        os.environ["CALKIT_HUB"] = hub_url
+    _hub_url = hub_url
+    return hub_key()
+
+
+def get_hub_url() -> str:
+    if _hub_url is None:
+        select_hub()
+    assert _hub_url is not None
+    return _hub_url
+
+
+def hub_key(hub_url: str | None = None) -> str:
+    """A short name for a hub, e.g., "calkit.io", which is also what its
+    managed workspaces are filed under.
+    """
+    from calkit.workspace import _path_segment
+
+    url = hub_url or get_hub_url()
+    return _path_segment(re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*://", "", url))
+
+
+def hub_url_from_api_url(api_url: str) -> str:
+    """The web URL of the hub serving an API, which is on its ``api``
+    subdomain.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(api_url)
+    netloc = parsed.netloc
+    if netloc.startswith("api."):
+        netloc = netloc[len("api.") :]
+    return f"{parsed.scheme}://{netloc}"
+
+
+def operator_dir() -> str:
     return os.path.join(
-        config.get_user_home(),
-        ".calkit",
-        f"operator{config.get_env_suffix()}.yaml",
+        config.get_user_home(), ".calkit", "operators", hub_key()
     )
+
+
+def get_config_path() -> str:
+    return os.path.join(operator_dir(), "config.yaml")
+
+
+def _legacy_config_path() -> str:
+    return os.path.join(config.get_user_home(), ".calkit", "operator.yaml")
+
+
+def list_configured_hubs() -> list[str]:
+    """The web URLs of the hubs this machine has Operators for."""
+    import yaml
+
+    # One from before Operators were kept per hub moves to its hub's place
+    legacy = _legacy_config_path()
+    if os.path.isfile(legacy):
+        with open(legacy) as f:
+            cfg = yaml.safe_load(f) or {}
+        if cfg.get("api_url"):
+            cfg.setdefault("hub_url", hub_url_from_api_url(cfg["api_url"]))
+            fpath = os.path.join(
+                config.get_user_home(),
+                ".calkit",
+                "operators",
+                hub_key(cfg["hub_url"]),
+                "config.yaml",
+            )
+            if not os.path.exists(fpath):
+                _write_private(fpath, yaml.safe_dump(cfg, sort_keys=False))
+        os.remove(legacy)
+    root = os.path.join(config.get_user_home(), ".calkit", "operators")
+    hubs = []
+    for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        fpath = os.path.join(root, name, "config.yaml")
+        if not os.path.isfile(fpath):
+            continue
+        with open(fpath) as f:
+            cfg = yaml.safe_load(f) or {}
+        if cfg.get("hub_url"):
+            hubs.append(cfg["hub_url"])
+        elif cfg.get("api_url"):
+            hubs.append(hub_url_from_api_url(cfg["api_url"]))
+    return hubs
+
+
+def _write_private(fpath: str, text: str) -> None:
+    """Write a file only the user can read, e.g., one holding a token."""
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    fd = os.open(fpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # A file that already existed keeps its mode otherwise
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
 
 
 def load_config() -> dict | None:
@@ -79,14 +184,7 @@ def save_config(cfg: dict) -> None:
     """
     import yaml
 
-    fpath = get_config_path()
-    os.makedirs(os.path.dirname(fpath), exist_ok=True)
-    fd = os.open(fpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    # A file that already existed keeps its mode otherwise
-    if hasattr(os, "fchmod"):
-        os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
+    _write_private(get_config_path(), yaml.safe_dump(cfg, sort_keys=False))
 
 
 def check_secure_url(url: str) -> None:
@@ -157,6 +255,7 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
     )
     cfg = dict(
         api_url=hub.get_base_url(),
+        hub_url=get_hub_url(),
         id=resp["id"],
         name=resp["name"],
         user_id=resp["user_id"],
@@ -188,6 +287,9 @@ def install_remote(
     from calkit import workspace as ws
 
     use_own_hub()
+    # Where the other machine keeps this hub's Operator
+    remote_dir = f"~/.calkit/operators/{hub_key()}"
+    remote_config = f"{remote_dir}/config.yaml"
     # Otherwise ssh would take it as an option
     if host.startswith("-"):
         raise ValueError(f"Invalid host '{host}'")
@@ -197,7 +299,7 @@ def install_remote(
     # Reinstalling, e.g., to change mode, keeps the Operator it already has
     # rather than leaving that one behind on the hub
     existing = subprocess.run(
-        target.login_argv("cat ~/.calkit/operator.yaml 2>/dev/null || true"),
+        target.login_argv(f"cat {remote_config} 2>/dev/null || true"),
         capture_output=True,
         text=True,
     ).stdout
@@ -219,6 +321,7 @@ def install_remote(
         )
         cfg = dict(
             api_url=hub.get_base_url(),
+            hub_url=get_hub_url(),
             id=resp["id"],
             name=resp["name"],
             user_id=resp["user_id"],
@@ -233,15 +336,16 @@ def install_remote(
             # Only the user can read it there either, since it holds the
             # token
             subprocess.run(
+                # The key is a plain path segment, so needs no quoting
                 target.login_argv(
-                    "umask 077 && mkdir -p ~/.calkit "
-                    "&& cat > ~/.calkit/operator.yaml"
+                    f"umask 077 && mkdir -p {remote_dir} "
+                    f"&& cat > {remote_config}"
                 ),
                 input=yaml.safe_dump(cfg, sort_keys=False),
                 text=True,
                 check=True,
             )
-        args = ["calkit", "operator", "install"]
+        args = ["calkit", "operator", "install", "--hub", get_hub_url()]
         if cron:
             args.append("--cron")
         if no_service:
@@ -253,6 +357,85 @@ def install_remote(
             hub._request("delete", f"/operators/{cfg['id']}")
         raise
     return dict(cfg)
+
+
+def _workspace_lock_path(wdir: str) -> str:
+    return os.path.join(wdir, ".calkit", "local", "operator.lock")
+
+
+def workspace_lock_holder(wdir: str) -> dict | None:
+    """Who's using a workspace, if anyone: the hub whose Operator holds its
+    lock, as long as that Operator is still running.
+
+    The lock lives in the workspace, so Operators for different hubs on
+    the same machine see each other's.
+    """
+    import psutil
+
+    try:
+        with open(_workspace_lock_path(wdir)) as f:
+            holder = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(holder, dict):
+        return None
+    pid = holder.get("pid")
+    if not isinstance(pid, int):
+        return None
+    if pid == os.getpid():
+        return holder
+    # One that's gone left a stale lock, as did one whose ID has since been
+    # reused by something else
+    try:
+        if "operator" not in " ".join(psutil.Process(pid).cmdline()):
+            return None
+    except psutil.Error:
+        return None
+    return holder
+
+
+def claim_workspace(wdir: str) -> None:
+    """Take a workspace for this hub's Operator, refusing if another hub's
+    is using it, since two hubs changing one checkout would step on each
+    other.
+    """
+    holder = workspace_lock_holder(wdir)
+    if holder is not None:
+        if holder.get("pid") == os.getpid():
+            return
+        raise ValueError(
+            "This workspace is in use by the Operator for "
+            f"{holder.get('hub', 'another hub')}"
+        )
+    fpath = _workspace_lock_path(wdir)
+    # Which keeps it out of Git
+    calkit.ensure_local_dir(wdir)
+    tmp = f"{fpath}.{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(
+            {
+                "hub": get_hub_url(),
+                "pid": os.getpid(),
+                "since": calkit.utcnow().isoformat(),
+            },
+            f,
+        )
+    os.replace(tmp, fpath)
+    # Another Operator may have claimed it at the same moment, in which
+    # case only one of the writes stands
+    holder = workspace_lock_holder(wdir)
+    if holder is None or holder.get("pid") != os.getpid():
+        raise ValueError("This workspace is in use by another Operator")
+
+
+def release_workspace(wdir: str) -> None:
+    """Let other hubs' Operators use a workspace this one was using."""
+    holder = workspace_lock_holder(wdir)
+    if holder is not None and holder.get("pid") == os.getpid():
+        try:
+            os.remove(_workspace_lock_path(wdir))
+        except OSError:
+            pass
 
 
 def discover_workspaces(cfg: dict) -> list[dict]:
@@ -299,21 +482,16 @@ def discover_workspaces(cfg: dict) -> list[dict]:
             candidates.append((os.path.join(root, name), "personal"))
     for path in cfg.get("workspaces", []):
         candidates.append((os.path.expanduser(path), "personal"))
-    # Managed workspaces are laid out as <hub>/<owner>/<name>
-    managed_root = os.path.join(home, ".calkit", "workspaces")
-    if os.path.isdir(managed_root):
-        for hub_dir in sorted(os.listdir(managed_root)):
-            hub_path = os.path.join(managed_root, hub_dir)
-            if not os.path.isdir(hub_path):
+    # Managed workspaces are laid out as <hub>/<owner>/<name>, and only
+    # this hub's are its business
+    hub_path = os.path.join(home, ".calkit", "workspaces", hub_key())
+    if os.path.isdir(hub_path):
+        for owner in sorted(os.listdir(hub_path)):
+            owner_path = os.path.join(hub_path, owner)
+            if not os.path.isdir(owner_path):
                 continue
-            for owner in sorted(os.listdir(hub_path)):
-                owner_path = os.path.join(hub_path, owner)
-                if not os.path.isdir(owner_path):
-                    continue
-                for name in sorted(os.listdir(owner_path)):
-                    candidates.append(
-                        (os.path.join(owner_path, name), "managed")
-                    )
+            for name in sorted(os.listdir(owner_path)):
+                candidates.append((os.path.join(owner_path, name), "managed"))
     workspaces = []
     seen = set()
     for path, kind in candidates:
@@ -327,11 +505,17 @@ def discover_workspaces(cfg: dict) -> list[dict]:
             project = calkit.detect_project_name(wdir=path)
         except Exception:
             project = None
+        # Another hub's Operator using it, which this one has to wait for
+        holder = workspace_lock_holder(path)
+        in_use_by = None
+        if holder is not None and holder.get("hub") != get_hub_url():
+            in_use_by = holder.get("hub")
         workspaces.append(
             dict(
                 path=path,
                 kind=kind,
                 project=project,
+                in_use_by=in_use_by,
             )
             | _git_status(path)
             | get_run_state(path)
@@ -849,6 +1033,8 @@ class Operator:
         # One Git or DVC operation at a time per workspace, and which
         self.workspace_locks: dict[str, asyncio.Lock] = {}
         self.workspace_actions: dict[str, str] = {}
+        # Workspaces this Operator holds the lock for, against other hubs'
+        self.claimed: set[str] = set()
 
     async def send(self, ch: str, msg: dict) -> None:
         ws = self.ws
@@ -889,6 +1075,8 @@ class Operator:
         import pty
 
         workspace = self.get_workspace(workspace)
+        claim_workspace(workspace)
+        self.claimed.add(workspace)
         # Everything the child needs is prepared here, since it's forked
         # from a process with threads: between fork and exec it may only
         # make system calls, not run code that could wait on a lock held
@@ -1014,6 +1202,7 @@ class Operator:
         except ChildProcessError:
             pass
         self.sessions.pop(session.id, None)
+        self._release_if_unused(session.workspace)
         for ch in session.channels:
             self.send_soon(
                 ch,
@@ -1046,6 +1235,19 @@ class Operator:
     def close_all(self) -> None:
         for session in list(self.sessions.values()):
             self.close_session(session)
+        # Stopping, so nothing here is being used any more
+        for wdir in list(self.claimed):
+            release_workspace(wdir)
+        self.claimed.clear()
+
+    def _release_if_unused(self, wdir: str) -> None:
+        """Release a workspace once no session or action is using it."""
+        if wdir not in self.claimed or wdir in self.workspace_actions:
+            return
+        if any(s.workspace == wdir for s in self.sessions.values()):
+            return
+        release_workspace(wdir)
+        self.claimed.discard(wdir)
 
     def _get_session(self, msg: dict) -> Session:
         session = self.sessions.get(msg.get("session", ""))
@@ -1175,6 +1377,11 @@ class Operator:
                     result = await asyncio.to_thread(action, wdir, **kwargs)
                 else:
                     async with lock:
+                        # Reading status changes nothing, but anything else
+                        # takes the workspace from other hubs' Operators
+                        if kind != "workspace.status":
+                            claim_workspace(wdir)
+                            self.claimed.add(wdir)
                         self.workspace_actions[wdir] = kind
                         try:
                             result = await asyncio.to_thread(
@@ -1182,6 +1389,7 @@ class Operator:
                             )
                         finally:
                             self.workspace_actions.pop(wdir, None)
+                            self._release_if_unused(wdir)
         except Exception as e:
             logger.warning(f"{kind} failed: {e}")
             if req_id is not None:
@@ -1306,13 +1514,13 @@ class Operator:
 
 
 def acquire_lock() -> Any:
-    """Take the lock that keeps one Operator running per machine and user,
-    returning its file, or None if another Operator holds it.
+    """Take the lock that keeps one Operator running per machine, user, and
+    hub, returning its file, or None if another Operator holds it.
 
     Two would each replace the other's relay connection, and in cron mode
     cron starts one every few minutes regardless.
     """
-    fpath = os.path.join(config.get_user_home(), ".calkit", "operator.lock")
+    fpath = os.path.join(operator_dir(), "operator.lock")
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     f = open(fpath, "w")
     try:
@@ -1334,7 +1542,7 @@ def acquire_lock() -> Any:
 
 
 def _pid_path() -> str:
-    return os.path.join(config.get_user_home(), ".calkit", "operator.pid")
+    return os.path.join(operator_dir(), "operator.pid")
 
 
 def get_running_pid() -> int | None:
@@ -1389,12 +1597,32 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
     return True
 
 
-SERVICE_LABEL = "io.calkit.operator"
-SYSTEMD_UNIT = "calkit-operator.service"
+# The service names below take a hub key, defaulting to the selected
+# hub's; an empty one gives the names used before Operators were kept per
+# hub, so an old install can be found and removed
+
+
+def _key(key: str | None) -> str:
+    return hub_key() if key is None else key
+
+
+def service_label(key: str | None = None) -> str:
+    k = _key(key)
+    return "io.calkit.operator" + (f".{k}" if k else "")
+
+
+def systemd_unit(key: str | None = None) -> str:
+    k = _key(key)
+    return "calkit-operator" + (f"-{k}" if k else "") + ".service"
+
+
+def cron_marker(key: str | None = None) -> str:
+    k = _key(key)
+    return "# calkit-operator" + (f" {k}" if k else "")
 
 
 def get_log_path() -> str:
-    return os.path.join(config.get_user_home(), ".calkit", "operator.log")
+    return os.path.join(operator_dir(), "operator.log")
 
 
 def _service_command(mode: str = "service") -> list[str]:
@@ -1405,6 +1633,8 @@ def _service_command(mode: str = "service") -> list[str]:
         "calkit",
         "operator",
         "start",
+        "--hub",
+        get_hub_url(),
         "--mode",
         mode,
     ]
@@ -1434,26 +1664,28 @@ def install_cron() -> None:
     os.makedirs(os.path.dirname(get_log_path()), exist_ok=True)
     command = shlex.join(_service_command("cron"))
     log = shlex.quote(get_log_path())
-    lines = [line for line in _read_crontab() if CRON_MARKER not in line]
+    lines = [
+        line for line in _read_crontab() if not line.endswith(cron_marker())
+    ]
     for schedule in ["*/5 * * * *", "@reboot"]:
-        lines.append(f"{schedule} {command} >> {log} 2>&1 {CRON_MARKER}")
+        lines.append(f"{schedule} {command} >> {log} 2>&1 {cron_marker()}")
     _write_crontab(lines)
 
 
-def _cron_installed() -> bool:
+def _cron_installed(key: str | None = None) -> bool:
     if shutil.which("crontab") is None:
         return False
-    return any(CRON_MARKER in line for line in _read_crontab())
+    return any(line.endswith(cron_marker(key)) for line in _read_crontab())
 
 
-def _launchd_plist_path(at_boot: bool) -> str:
+def _launchd_plist_path(at_boot: bool, key: str | None = None) -> str:
     if at_boot:
-        return f"/Library/LaunchDaemons/{SERVICE_LABEL}.plist"
+        return f"/Library/LaunchDaemons/{service_label(key)}.plist"
     return os.path.join(
         config.get_user_home(),
         "Library",
         "LaunchAgents",
-        f"{SERVICE_LABEL}.plist",
+        f"{service_label(key)}.plist",
     )
 
 
@@ -1461,7 +1693,7 @@ def _launchd_plist(at_boot: bool) -> bytes:
     import plistlib
 
     plist: dict[str, Any] = {
-        "Label": SERVICE_LABEL,
+        "Label": service_label(),
         "ProgramArguments": _service_command(),
         "RunAtLoad": True,
         # Restarted if it fails, but not after it exits cleanly because it
@@ -1480,7 +1712,7 @@ def _launchd_plist(at_boot: bool) -> bytes:
     return plistlib.dumps(plist)
 
 
-def _windows_startup_path() -> str:
+def _windows_startup_path(key: str | None = None) -> str:
     return os.path.join(
         os.environ.get("APPDATA", ""),
         "Microsoft",
@@ -1488,7 +1720,7 @@ def _windows_startup_path() -> str:
         "Start Menu",
         "Programs",
         "Startup",
-        "calkit-operator.vbs",
+        "calkit-operator" + (f"-{_key(key)}" if _key(key) else "") + ".vbs",
     )
 
 
@@ -1509,9 +1741,9 @@ def _windows_startup_script() -> str:
     )
 
 
-def _systemd_unit_path() -> str:
+def _systemd_unit_path(key: str | None = None) -> str:
     return os.path.join(
-        config.get_user_home(), ".config", "systemd", "user", SYSTEMD_UNIT
+        config.get_user_home(), ".config", "systemd", "user", systemd_unit(key)
     )
 
 
@@ -1565,8 +1797,8 @@ def install_service(at_boot: bool = False) -> list[str]:
             f.write(_systemd_unit())
         for args in [
             ["daemon-reload"],
-            ["enable", "--now", SYSTEMD_UNIT],
-            ["restart", SYSTEMD_UNIT],
+            ["enable", "--now", systemd_unit()],
+            ["restart", systemd_unit()],
         ]:
             subprocess.run(["systemctl", "--user", *args], check=True)
         # Without lingering, user services stop at logout and don't start
@@ -1592,7 +1824,7 @@ def install_service(at_boot: bool = False) -> list[str]:
         domain = "system" if at_boot else f"gui/{os.getuid()}"
         sudo = ["sudo"] if at_boot else []
         subprocess.run(
-            [*sudo, "launchctl", "bootout", f"{domain}/{SERVICE_LABEL}"],
+            [*sudo, "launchctl", "bootout", f"{domain}/{service_label()}"],
             capture_output=True,
         )
         if at_boot:
@@ -1640,41 +1872,55 @@ def _stop_running_operator() -> None:
         psutil.Process(pid).terminate()
 
 
-def uninstall_service() -> None:
+def uninstall_service(key: str | None = None) -> None:
+    """Remove the selected hub's Operator service, or the one for the hub
+    with this key, where an empty key means one installed before Operators
+    were kept per hub.
+    """
     if platform.system() == "Windows":
-        if os.path.isfile(_windows_startup_path()):
-            os.remove(_windows_startup_path())
-        _stop_running_operator()
+        if os.path.isfile(_windows_startup_path(key)):
+            os.remove(_windows_startup_path(key))
+        if key is None:
+            _stop_running_operator()
         return
-    if _cron_installed():
+    if _cron_installed(key):
         _write_crontab(
-            [line for line in _read_crontab() if CRON_MARKER not in line]
+            [
+                line
+                for line in _read_crontab()
+                if not line.endswith(cron_marker(key))
+            ]
         )
     system = platform.system()
     if system == "Linux":
-        fpath = _systemd_unit_path()
+        fpath = _systemd_unit_path(key)
         if os.path.isfile(fpath):
             subprocess.run(
-                ["systemctl", "--user", "disable", "--now", SYSTEMD_UNIT]
+                ["systemctl", "--user", "disable", "--now", systemd_unit(key)]
             )
             os.remove(fpath)
             subprocess.run(["systemctl", "--user", "daemon-reload"])
     elif system == "Darwin":
-        agent = _launchd_plist_path(at_boot=False)
+        agent = _launchd_plist_path(at_boot=False, key=key)
         if os.path.isfile(agent):
             subprocess.run(
                 [
                     "launchctl",
                     "bootout",
-                    f"gui/{os.getuid()}/{SERVICE_LABEL}",
+                    f"gui/{os.getuid()}/{service_label(key)}",
                 ],
                 capture_output=True,
             )
             os.remove(agent)
-        daemon = _launchd_plist_path(at_boot=True)
+        daemon = _launchd_plist_path(at_boot=True, key=key)
         if os.path.isfile(daemon):
             subprocess.run(
-                ["sudo", "launchctl", "bootout", f"system/{SERVICE_LABEL}"],
+                [
+                    "sudo",
+                    "launchctl",
+                    "bootout",
+                    f"system/{service_label(key)}",
+                ],
                 capture_output=True,
             )
             subprocess.run(["sudo", "rm", daemon])
@@ -1691,7 +1937,7 @@ def get_service_status() -> str | None:
     system = platform.system()
     if system == "Linux" and os.path.isfile(_systemd_unit_path()):
         state = subprocess.run(
-            ["systemctl", "--user", "is-active", SYSTEMD_UNIT],
+            ["systemctl", "--user", "is-active", systemd_unit()],
             capture_output=True,
             text=True,
         ).stdout.strip()
@@ -1714,7 +1960,7 @@ def get_service_status() -> str | None:
                 continue
             domain = "system" if at_boot else f"gui/{os.getuid()}"
             out = subprocess.run(
-                ["launchctl", "print", f"{domain}/{SERVICE_LABEL}"],
+                ["launchctl", "print", f"{domain}/{service_label()}"],
                 capture_output=True,
                 text=True,
             ).stdout
@@ -1744,7 +1990,7 @@ def set_service_running(running: bool) -> None:
     if system == "Linux" and os.path.isfile(_systemd_unit_path()):
         action = "start" if running else "stop"
         subprocess.run(
-            ["systemctl", "--user", action, SYSTEMD_UNIT], check=True
+            ["systemctl", "--user", action, systemd_unit()], check=True
         )
         return
     if system == "Darwin":
@@ -1765,7 +2011,7 @@ def set_service_running(running: bool) -> None:
                         *sudo,
                         "launchctl",
                         "bootout",
-                        f"{domain}/{SERVICE_LABEL}",
+                        f"{domain}/{service_label()}",
                     ],
                     check=True,
                 )

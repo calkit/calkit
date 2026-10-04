@@ -4131,6 +4131,16 @@ def install_app(
             ),
         ),
     ] = False,
+    hub: Annotated[
+        str | None,
+        typer.Option(
+            "--hub",
+            help=(
+                "For the operator, the URL of the hub it's for, e.g., "
+                "https://calkit.io; a machine can have one per hub."
+            ),
+        ),
+    ] = None,
 ) -> None:
     from calkit import install as _install
 
@@ -4138,7 +4148,7 @@ def install_app(
         from calkit.cli.operator import install as install_operator
 
         install_operator(
-            at_boot=at_boot, cron=cron, ssh=ssh, no_service=no_service
+            hub=hub, at_boot=at_boot, cron=cron, ssh=ssh, no_service=no_service
         )
         return
     # Surface a platform-specific "use X instead" message before the

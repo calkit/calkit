@@ -1108,6 +1108,15 @@ function Compute() {
                         </Badge>
                       </Tooltip>
                     ) : null}
+                    {ws.in_use_by && (
+                      <Tooltip
+                        label={`The Operator for ${ws.in_use_by} on this machine is using it, so this one can't until it's done`}
+                      >
+                        <Badge ml={2} colorScheme="orange" fontSize="2xs">
+                          in use from {ws.in_use_by.replace(/^https?:\/\//, "")}
+                        </Badge>
+                      </Tooltip>
+                    )}
                     {ws.dirty && (
                       <Badge ml={2} colorScheme="yellow" fontSize="2xs">
                         uncommitted

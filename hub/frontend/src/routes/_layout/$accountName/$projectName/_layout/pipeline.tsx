@@ -408,7 +408,11 @@ function ProjectPipeline() {
   )
   // Machines this can run on: the user's own checkouts, while online
   const runTargets = (workspacesQuery.data ?? []).filter(
-    (ws) => ws.kind === "personal" && ws.operator_online && !ws.running,
+    (ws) =>
+      ws.kind === "personal" &&
+      ws.operator_online &&
+      !ws.running &&
+      !ws.in_use_by,
   )
   // Runs wait for a click on the compute page, so a link can't start one
   const runOn = (ws: (typeof runTargets)[number]) =>

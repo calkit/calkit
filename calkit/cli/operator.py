@@ -11,6 +11,37 @@ from calkit.cli import AliasGroup, raise_error
 
 operator_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
+HubOption = Annotated[
+    str | None,
+    typer.Option(
+        "--hub",
+        help=(
+            "URL of the hub the Operator is for, e.g., https://calkit.io; "
+            "a machine can have one per hub. Defaults to the only one here, "
+            "or for install, to your default hub."
+        ),
+    ),
+]
+
+
+def _select_hub(hub: str | None, installing: bool = False) -> None:
+    """Choose which hub's Operator a command acts on."""
+    from calkit import operator
+
+    if hub is not None:
+        if hub in ["test", "local", "staging", "production"]:
+            raise_error("--hub takes a hub URL, e.g., https://calkit.io")
+        operator.select_hub(hub)
+        return
+    hubs = [] if installing else operator.list_configured_hubs()
+    if len(hubs) > 1:
+        raise_error(
+            "This machine has Operators for more than one hub ("
+            + ", ".join(hubs)
+            + "); choose one with --hub"
+        )
+    operator.select_hub(hubs[0] if hubs else None)
+
 
 def _require_config() -> dict:
     from calkit import operator
@@ -18,7 +49,7 @@ def _require_config() -> dict:
     cfg = operator.load_config()
     if cfg is None:
         raise_error(
-            "No Operator is installed on this machine; "
+            "No Operator for this hub is installed on this machine; "
             "run 'calkit operator install' first"
         )
     assert cfg is not None
@@ -27,6 +58,7 @@ def _require_config() -> dict:
 
 @operator_app.command(name="install")
 def install(
+    hub: HubOption = None,
     at_boot: Annotated[
         bool,
         typer.Option(
@@ -89,6 +121,7 @@ def install(
     if os.name == "posix" and os.geteuid() == 0 and os.getenv("SUDO_USER"):
         raise_error("Run this without sudo")
     try:
+        _select_hub(hub, installing=True)
         hub_url = operator.use_own_hub()
     except ValueError as e:
         raise_error(str(e))
@@ -124,8 +157,10 @@ def install(
     else:
         typer.echo(f"Operator '{cfg['name']}' is already registered")
     # Whatever ran it before is replaced, e.g., a service when switching to
-    # cron mode, so the two don't both run it
+    # cron mode, or one installed before Operators were kept per hub, so
+    # the two don't both run it
     operator.uninstall_service()
+    operator.uninstall_service(key="")
     if no_service:
         typer.echo("Run 'calkit operator start' to connect it")
         return
@@ -156,12 +191,14 @@ def start(
     # How it's being run, which the service and crontab entries set: in
     # cron mode it only connects when the hub asks and stops when idle
     mode: Annotated[str, typer.Option("--mode", hidden=True)] = "foreground",
+    hub: HubOption = None,
 ) -> None:
     """Run the Operator in the foreground, e.g., inside tmux."""
     import logging
 
     from calkit import operator
 
+    _select_hub(hub)
     cfg = _require_config()
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
@@ -184,28 +221,38 @@ def start(
 
 
 @operator_app.command(name="status")
-def status() -> None:
-    """Show this machine's Operator and the workspaces it allows."""
+def status(hub: HubOption = None) -> None:
+    """Show this machine's Operators and the workspaces they allow."""
     from calkit import operator
 
-    cfg = _require_config()
-    typer.echo(f"Name: {cfg['name']}")
-    typer.echo(f"Hub API: {cfg['api_url']}")
-    service = operator.get_service_status()
-    typer.echo(f"Installed as: {service or 'nothing; run it with start'}")
-    pid = operator.get_running_pid()
-    typer.echo(f"Running: {f'yes (PID {pid})' if pid else 'no'}")
-    typer.echo("Workspaces:")
-    for ws in operator.discover_workspaces(cfg):
-        project = ws.get("project") or "unknown project"
-        typer.echo(f"  {ws['path']} ({ws['kind']}, {project})")
+    # Each hub's Operator, unless one was asked for
+    hubs = [hub] if hub is not None else operator.list_configured_hubs()
+    if not hubs:
+        _select_hub(None)
+        _require_config()
+    for i, hub_url in enumerate(hubs):
+        if i:
+            typer.echo()
+        _select_hub(hub_url)
+        cfg = _require_config()
+        typer.echo(f"Name: {cfg['name']}")
+        typer.echo(f"Hub: {operator.get_hub_url()}")
+        service = operator.get_service_status()
+        typer.echo(f"Installed as: {service or 'nothing; run it with start'}")
+        pid = operator.get_running_pid()
+        typer.echo(f"Running: {f'yes (PID {pid})' if pid else 'no'}")
+        typer.echo("Workspaces:")
+        for ws in operator.discover_workspaces(cfg):
+            project = ws.get("project") or "unknown project"
+            typer.echo(f"  {ws['path']} ({ws['kind']}, {project})")
 
 
 @operator_app.command(name="stop")
-def stop() -> None:
+def stop(hub: HubOption = None) -> None:
     """Stop the Operator's service until it's restarted."""
     from calkit import operator
 
+    _select_hub(hub)
     _require_config()
     try:
         operator.set_service_running(False)
@@ -215,10 +262,11 @@ def stop() -> None:
 
 
 @operator_app.command(name="restart")
-def restart() -> None:
+def restart(hub: HubOption = None) -> None:
     """Restart the Operator's service, e.g., after updating Calkit."""
     from calkit import operator
 
+    _select_hub(hub)
     _require_config()
     try:
         operator.set_service_running(False)
@@ -236,6 +284,7 @@ def logs(
     follow: Annotated[
         bool, typer.Option("--follow", "-f", help="Keep printing new lines.")
     ] = False,
+    hub: HubOption = None,
 ) -> None:
     """Show the Operator service's logs."""
     import platform
@@ -243,13 +292,14 @@ def logs(
 
     from calkit import operator
 
+    _select_hub(hub)
     _require_config()
     # Only a systemd service logs to the journal; cron and the others log
     # to a file
     if platform.system() == "Linux" and os.path.isfile(
         operator._systemd_unit_path()
     ):
-        cmd = ["journalctl", "--user", "-u", operator.SYSTEMD_UNIT]
+        cmd = ["journalctl", "--user", "-u", operator.systemd_unit()]
         cmd += ["-f"] if follow else ["-n", "100", "--no-pager"]
     else:
         cmd = ["tail", "-n", "100"] + (["-f"] if follow else [])
@@ -265,10 +315,12 @@ def add_workspace(
     path: Annotated[
         str, typer.Argument(help="Path to a Calkit project.")
     ] = ".",
+    hub: HubOption = None,
 ) -> None:
     """Let the hub use a project outside ~/calkit as a workspace."""
     from calkit import operator
 
+    _select_hub(hub)
     cfg = _require_config()
     path = os.path.realpath(path)
     if not os.path.isfile(os.path.join(path, "calkit.yaml")):
@@ -283,14 +335,16 @@ def add_workspace(
 
 
 @operator_app.command(name="uninstall")
-def uninstall() -> None:
+def uninstall(hub: HubOption = None) -> None:
     """Revoke this machine's Operator on the hub and remove it here."""
-    from calkit import hub, operator
+    from calkit import hub as hub_api
+    from calkit import operator
 
+    _select_hub(hub)
     cfg = _require_config()
     operator.uninstall_service()
     try:
-        hub._request(
+        hub_api._request(
             "delete", f"/operators/{cfg['id']}", base_url=cfg["api_url"]
         )
     except Exception as e:

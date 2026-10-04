@@ -83,7 +83,7 @@ cluster's login node, cron runs `calkit operator start --mode cron` every
 It checks in with `connected` false and exits unless `connect` is true.
 If it is, it runs as usual until it has had no sessions and no browsers
 for 15 minutes.
-A lock file keeps one Operator running per machine and user.
+A lock file keeps one Operator running per machine, user, and hub.
 
 ## Relay
 

@@ -16,6 +16,12 @@ import pytest
 from calkit import operator
 
 
+@pytest.fixture(autouse=True)
+def _hub(monkeypatch):
+    # Each test acts on one hub's Operator unless it chooses another
+    monkeypatch.setattr(operator, "_hub_url", "https://calkit.io")
+
+
 def _init_project(path, owner="alice", name="demo"):
     os.makedirs(path)
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
@@ -105,11 +111,15 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     # Registered projects elsewhere are found, but only once
     elsewhere = os.path.join(home, "src", "other")
     _init_project(elsewhere, name="other")
-    # Managed workspaces are found under <hub>/<owner>/<name>
+    # Managed workspaces are found under <hub>/<owner>/<name>, only for
+    # this Operator's hub
     managed = os.path.join(
         home, ".calkit", "workspaces", "calkit.io", "alice", "demo"
     )
     _init_project(managed)
+    _init_project(
+        os.path.join(home, ".calkit", "workspaces", "other.hub", "bob", "x")
+    )
     cfg = {"workspaces": [elsewhere, elsewhere + "/"]}
     workspaces = {
         Path(os.path.relpath(w["path"], os.path.realpath(home))).as_posix(): w
@@ -259,6 +269,8 @@ async def test_sessions(tmp_path, monkeypatch):
     message("a", {"type": "sessions.open", "id": 3, "workspace": workspace})
     await wait_for(lambda: reply(3))
     sid = reply(3)["result"]["session"]
+    # Opening a session takes the workspace from other hubs' Operators
+    assert operator.workspace_lock_holder(workspace)["pid"] == os.getpid()
     message(
         "a",
         {
@@ -310,6 +322,8 @@ def test_service_files(tmp_path, monkeypatch):
         "calkit",
         "operator",
         "start",
+        "--hub",
+        "https://calkit.io",
         "--mode",
         "service",
     ]
@@ -365,7 +379,7 @@ def test_cron_and_lock(tmp_path, monkeypatch):
     operator.install_cron()
     lines = table.read_text().splitlines()
     assert lines[0] == "0 * * * * echo mine"
-    ours = [line for line in lines if operator.CRON_MARKER in line]
+    ours = [line for line in lines if line.endswith(operator.cron_marker())]
     assert [line.split()[0] for line in ours] == ["*/5", "@reboot"]
     assert all("--mode cron" in line for line in ours)
     assert all(operator.get_log_path() in line for line in ours)
@@ -681,7 +695,7 @@ def test_install_remote(monkeypatch):
 
     def run(argv, **kwargs):
         runs.append((argv, kwargs.get("input")))
-        if "cat ~/.calkit/operator.yaml 2>" in argv[-1]:
+        if "cat ~/.calkit/operators/calkit.io/config.yaml 2>" in argv[-1]:
             return SimpleNamespace(stdout=remote_config["text"])
         if fail_install and "operator install" in argv[-1]:
             raise subprocess.CalledProcessError(1, argv)
@@ -701,7 +715,12 @@ def test_install_remote(monkeypatch):
     assert "umask 077" in write_argv[-1]
     assert yaml.safe_load(config_text) == cfg
     assert cfg["token"] == "cko_secret" and cfg["api_url"] == "https://api.hub"
-    assert "calkit operator install --cron" in install_argv[-1]
+    assert (
+        "calkit operator install --hub https://calkit.io --cron"
+        in install_argv[-1]
+    )
+    # It goes where the other machine keeps this hub's Operator
+    assert "~/.calkit/operators/calkit.io/config.yaml" in write_argv[-1]
     # Reinstalling keeps the Operator already there
     remote_config["text"] = config_text
     posted.clear()
@@ -732,3 +751,106 @@ def test_install_remote(monkeypatch):
     with pytest.raises(subprocess.CalledProcessError):
         operator.install_remote("cluster")
     assert deleted == ["/operators/op1"]
+
+
+def test_hubs(tmp_path, monkeypatch):
+    import yaml
+
+    home = str(tmp_path)
+    monkeypatch.setenv("CALKIT_USER_HOME", home)
+    # A config from before Operators were kept per hub moves to its hub's
+    # place
+    legacy = tmp_path / ".calkit" / "operator.yaml"
+    legacy.parent.mkdir()
+    legacy.write_text(
+        yaml.safe_dump({"name": "box", "api_url": "https://api.calkit.io"})
+    )
+    assert operator.list_configured_hubs() == ["https://calkit.io"]
+    assert not legacy.exists()
+    assert operator.load_config()["name"] == "box"
+    # Each hub's Operator has its own config, service, lock, and log, keyed
+    # like its managed workspaces, so they can run side by side
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    keys = {}
+    for url in ["https://calkit.io", "localhost", "http://localhost:5173"]:
+        keys[url] = operator.select_hub(url)
+        operator.save_config({"name": url, "hub_url": operator.get_hub_url()})
+    assert keys == {
+        "https://calkit.io": "calkit.io",
+        "localhost": "localhost",
+        "http://localhost:5173": "localhost-5173",
+    }
+    assert sorted(operator.list_configured_hubs()) == [
+        "http://localhost",
+        "http://localhost:5173",
+        "https://calkit.io",
+    ]
+    names = set()
+    for url in keys:
+        operator.select_hub(url)
+        assert operator.load_config()["name"] == url
+        names.add(
+            (
+                operator.get_config_path(),
+                operator.get_log_path(),
+                operator._pid_path(),
+                operator.service_label(),
+                operator.systemd_unit(),
+                operator.cron_marker(),
+                operator._windows_startup_path(),
+            )
+        )
+    assert len(names) == 3
+    assert len({n for group in names for n in group}) == 21
+    # One hub's cron entries are never taken for another's, even when one
+    # key starts with the other
+    operator.select_hub("localhost")
+    lines = [f"* * * * * x {operator.cron_marker(k)}" for k in keys.values()]
+    lines.append(f"* * * * * x {operator.cron_marker('')}")
+    assert [
+        line for line in lines if line.endswith(operator.cron_marker())
+    ] == ["* * * * * x # calkit-operator localhost"]
+    # The empty key gives the names used before, for removing them
+    assert operator.service_label("") == "io.calkit.operator"
+    assert operator.systemd_unit("") == "calkit-operator.service"
+
+
+def test_workspace_lock(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    wdir = os.path.join(tmp_path, "calkit", "demo")
+    _init_project(wdir)
+    # An Operator takes a workspace while using it, in a lock inside the
+    # workspace that Git ignores, and can take it again
+    operator.claim_workspace(wdir)
+    operator.claim_workspace(wdir)
+    holder = operator.workspace_lock_holder(wdir)
+    assert holder["pid"] == os.getpid()
+    assert holder["hub"] == "https://calkit.io"
+    with open(os.path.join(wdir, ".calkit", "local", ".gitignore")) as f:
+        assert f.read() == "*\n"
+    operator.release_workspace(wdir)
+    assert operator.workspace_lock_holder(wdir) is None
+    # Another hub's Operator using it keeps this one out, and shows on the
+    # hub, until it stops, which leaves a stale lock anyone can take
+    other = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)", "operator"]
+    )
+    try:
+        with open(
+            os.path.join(wdir, ".calkit", "local", "operator.lock"), "w"
+        ) as f:
+            json.dump({"hub": "http://localhost", "pid": other.pid}, f)
+        with pytest.raises(ValueError, match="http://localhost"):
+            operator.claim_workspace(wdir)
+        (ws,) = [
+            w
+            for w in operator.discover_workspaces({})
+            if w["path"] == os.path.realpath(wdir)
+        ]
+        assert ws["in_use_by"] == "http://localhost"
+    finally:
+        other.kill()
+        other.wait()
+    operator.claim_workspace(wdir)
+    assert operator.workspace_lock_holder(wdir)["pid"] == os.getpid()
+    operator.release_workspace(wdir)

@@ -259,6 +259,9 @@ class WorkspaceInfo(BaseModel):
     )
     running_since: str | None = Field(default=None, max_length=64)
     last_run: LastRun | None = None
+    # Another hub whose Operator on the same machine is using it, which
+    # keeps this one out until it's done
+    in_use_by: str | None = Field(default=None, max_length=2048)
 
 
 class CheckIn(BaseModel):
@@ -310,7 +313,12 @@ def _update_workspaces(
         ws.running = info.running
         ws.run_state = info.model_dump(
             mode="json",
-            include={"running_stages", "running_since", "last_run"},
+            include={
+                "running_stages",
+                "running_since",
+                "last_run",
+                "in_use_by",
+            },
         )
         ws.updated = now
         session.add(ws)
@@ -459,6 +467,7 @@ def _list_workspaces(
                 running_stages=ws.run_state.get("running_stages") or [],
                 running_since=ws.run_state.get("running_since"),
                 last_run=ws.run_state.get("last_run"),
+                in_use_by=ws.run_state.get("in_use_by"),
                 updated=ws.updated.isoformat(),
                 operator_id=operator.id,
                 operator_name=operator.name,

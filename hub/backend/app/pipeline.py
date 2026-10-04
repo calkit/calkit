@@ -30,9 +30,9 @@ from pydantic import BaseModel, Field, ValidationError
 
 import calkit.notebooks
 from app import cache
-from app.dvc import get_data_fpath_for_md5
+from app.dvc import _MD5_RE, get_data_fpath_for_md5
 from app.git import RepoTree
-from app.storage import get_data_prefix_for_owner
+from app.storage import make_data_fpath
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +44,20 @@ StatusLiteral = Literal[
 OverallStatusLiteral = Literal["up-to-date", "stale", "unknown"]
 
 # Object-storage existence checks are the dominant cost in
-# compute_stage_statuses (one+ network round-trip per dep/out md5). We both
-# parallelize them within a computation and cache the whole result keyed by a
-# content token (the tree/commit SHA) so repeat reads of the same ref are free.
+# compute_stage_statuses. We both parallelize them within a computation and
+# cache the whole result keyed by a content token (the tree/commit SHA) so
+# repeat reads of the same ref only re-check outputs that were missing.
 _STORAGE_CHECK_MAX_WORKERS = 16
 _STAGE_STATUS_CACHE_MAX = 64
-# TTL bounds the one non-deterministic dimension: objects uploaded after a
-# cache entry was written (the SHA pins everything in the tree itself).
+# TTL bounds the one non-deterministic dimension left after re-checking
+# missing outputs: objects deleted from storage after an entry was written
+# (the SHA pins everything in the tree itself).
 _STAGE_STATUS_CACHE_TTL_S = 600
-_stage_status_cache: "OrderedDict[str, tuple[float, dict[str, StageStatus]]]" = OrderedDict()
+# Statuses, plus the md5s of the outputs they found missing from storage
+_CachedStatuses = tuple[dict[str, "StageStatus"], list[str]]
+_stage_status_cache: "OrderedDict[str, tuple[float, _CachedStatuses]]" = (
+    OrderedDict()
+)
 # Sync endpoints run in a threadpool, so cache reads/evictions/writes can happen
 # concurrently. Guard every mutation with this lock to keep the OrderedDict and
 # its LRU order consistent.
@@ -147,92 +152,89 @@ def _md5_in_object_storage(
         return False
 
 
-def _list_stored_md5s(
-    owner_name: str, project_name: str, fs
-) -> set[str] | None:
-    """Every md5 stored for a project, gathered by listing rather than probing.
+def _check_storage_presence(
+    md5s: set[str], owner_name: str, project_name: str, fs
+) -> dict[str, bool]:
+    """Whether each of ``md5s`` is in object storage.
 
-    A project's objects all live under one prefix per layout, so a single
-    paginated listing names all of them at once. That beats asking about each
-    md5 individually by a wide margin: on a project with ~6k lock entries,
-    listing takes well under a second where the per-md5 checks take ~12,
-    because the cost stops scaling with the number of artifacts.
-
-    Returns None if a listing fails, so the caller can fall back to probing.
+    Both layouts `make_data_fpath` writes put an object at
+    ``<project prefix>/<idx>/<rest>``, with ``idx`` its md5's first two
+    characters, so listing only the directories these md5s fall in answers
+    for all of them. That is at most 256 small listings, run in parallel,
+    however much history the project has pushed, where listing the whole
+    project grows with every object ever stored.
     """
-    # Mirrors the two layouts `make_data_fpath` writes: the current
-    # `<owner>/<project>/files/md5/<idx>/<rest>` and the legacy
-    # `<owner>/<project>/<idx>/<rest>`.
-    markers = [
-        (
-            f"{get_data_prefix_for_owner(owner_name)}/"
-            f"{project_name.lower()}/files/md5",
-            f"/{project_name.lower()}/files/md5/",
-        ),
-        (
-            f"{get_data_prefix_for_owner(owner_name, lowercase=False)}/"
-            f"{project_name}",
-            f"/{project_name}/",
-        ),
-    ]
-    md5s: set[str] = set()
-    for prefix, marker in markers:
-        try:
-            keys = fs.find(prefix)
-        except FileNotFoundError:
-            # A project that has never pushed under this layout.
-            continue
-        except Exception as e:
-            logger.warning(f"Failed to list object storage at {prefix}: {e}")
-            return None
-        for key in keys:
-            # Split on the marker rather than the prefix: `fs.find` returns
-            # keys without the scheme the prefix carries.
-            _, sep, rel = key.partition(marker)
-            if not sep:
+    by_idx: dict[str, set[str]] = {}
+    for m in md5s:
+        # The hash comes from the project's own dvc.lock, so it is checked to
+        # be one before it goes into a storage path
+        if _MD5_RE.fullmatch(m):
+            by_idx.setdefault(m[:2], set()).add(m)
+
+    def check_idx(idx: str, group: set[str]) -> set[str]:
+        found: set[str] = set()
+        for legacy in (False, True):
+            remaining = group - found
+            if not remaining:
+                break
+            dir_path = make_data_fpath(
+                owner_name=owner_name,
+                project_name=project_name,
+                idx=idx,
+                md5="",
+                legacy=legacy,
+            ).rstrip("/")
+            try:
+                keys = fs.find(dir_path)
+            except FileNotFoundError:
                 continue
-            parts = rel.strip("/").split("/")
-            # Exactly <idx>/<rest>. Anything deeper is the current layout
-            # showing up underneath the legacy prefix, which the first marker
-            # already covered.
-            if len(parts) == 2:
-                md5s.add(parts[0] + parts[1])
-    return md5s
+            except Exception as e:
+                logger.warning(
+                    f"Failed to list object storage {dir_path}: {e}"
+                )
+                # Probing checks both layouts, so nothing is left after it
+                found |= {
+                    m
+                    for m in remaining
+                    if _md5_in_object_storage(m, owner_name, project_name, fs)
+                }
+                break
+            # Keys come back without the scheme `dir_path` carries, so match
+            # on the trailing <idx>/<rest> only
+            for key in keys:
+                parts = key.rsplit("/", 2)
+                if len(parts) == 3 and parts[1] == idx:
+                    found.add(idx + parts[2])
+        return found & group
+
+    present: set[str] = set()
+    if by_idx:
+        workers = min(_STORAGE_CHECK_MAX_WORKERS, len(by_idx))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for found in ex.map(lambda item: check_idx(*item), by_idx.items()):
+                present |= found
+    return {m: m in present for m in md5s}
 
 
 def _precompute_storage_presence(
     dvc_lock: dict, owner_name: str, project_name: str, fs
 ) -> dict[str, bool]:
-    """Existence in object storage for every dep/out md5.
+    """Existence in object storage for every out md5.
 
-    Returns a ``{md5: present}`` map; md5s absent from the map are treated as
-    not present by callers.
+    Only outs: a dep's current hash comes from the tree or the out that
+    produces it, so its own presence in storage is never consulted.
+    Returns a ``{md5: present}`` map; md5s absent from the map are treated
+    as not present by callers.
     """
     md5s: set[str] = set()
     for stage in (dvc_lock.get("stages") or {}).values():
-        for entry in (stage.get("deps") or []) + (stage.get("outs") or []):
+        for entry in stage.get("outs") or []:
             m = entry.get("md5") or entry.get("hash")
             if m:
                 md5s.add(m)
     if not md5s:
         return {}
-    stored = _list_stored_md5s(owner_name, project_name, fs)
-    if stored is not None:
-        return {m: m in stored for m in md5s}
-    # Listing failed; fall back to probing each md5 concurrently.
-    presence: dict[str, bool] = {}
-    workers = min(_STORAGE_CHECK_MAX_WORKERS, len(md5s))
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        results = ex.map(
-            lambda m: (
-                m,
-                _md5_in_object_storage(m, owner_name, project_name, fs),
-            ),
-            md5s,
-        )
-        for m, present in results:
-            presence[m] = present
-    return presence
+    return _check_storage_presence(md5s, owner_name, project_name, fs)
 
 
 def _build_stage_status_cache_key(
@@ -249,7 +251,7 @@ def _build_stage_status_cache_key(
     return h.hexdigest()
 
 
-def _stage_status_cache_get(cache_key: str) -> dict[str, StageStatus] | None:
+def _stage_status_cache_get(cache_key: str) -> _CachedStatuses | None:
     with _stage_status_cache_lock:
         cached = _stage_status_cache.get(cache_key)
         if cached is not None:
@@ -261,13 +263,19 @@ def _stage_status_cache_get(cache_key: str) -> dict[str, StageStatus] | None:
     # Missing from this worker's memory doesn't mean nobody has computed it:
     # with several workers, the odds are it was another one. Fall through to
     # the shared cache before paying for the object-storage checks again.
-    shared_key = cache.make_key("stage-status", cache_key)
+    shared_key = cache.make_key("stage-statuses", cache_key)
     shared = cache.get_json(shared_key)
     if shared is None:
         return None
     try:
-        value = {k: StageStatus.model_validate(v) for k, v in shared.items()}
-    except (ValidationError, AttributeError) as e:
+        value = (
+            {
+                k: StageStatus.model_validate(v)
+                for k, v in shared["statuses"].items()
+            },
+            [str(m) for m in shared["missing_md5s"]],
+        )
+    except (ValidationError, AttributeError, KeyError, TypeError) as e:
         # Written by an older shape of StageStatus. Drop it rather than
         # step over it: leaving it means warning and recomputing on every
         # request until it expires.
@@ -282,17 +290,19 @@ def _stage_status_cache_get(cache_key: str) -> dict[str, StageStatus] | None:
     return value
 
 
-def _stage_status_cache_put(
-    cache_key: str, value: dict[str, StageStatus]
-) -> None:
+def _stage_status_cache_put(cache_key: str, value: _CachedStatuses) -> None:
     with _stage_status_cache_lock:
         _stage_status_cache[cache_key] = (time.monotonic(), value)
         _stage_status_cache.move_to_end(cache_key)
         if len(_stage_status_cache) > _STAGE_STATUS_CACHE_MAX:
             _stage_status_cache.popitem(last=False)
+    statuses, missing_md5s = value
     cache.set_json(
-        cache.make_key("stage-status", cache_key),
-        {k: v.model_dump() for k, v in value.items()},
+        cache.make_key("stage-statuses", cache_key),
+        {
+            "statuses": {k: v.model_dump() for k, v in statuses.items()},
+            "missing_md5s": missing_md5s,
+        },
         ttl=_STAGE_STATUS_CACHE_TTL_S,
     )
 
@@ -505,25 +515,59 @@ def compute_stage_statuses(
 
     When ``cache_token`` is given (a content-identifying token such as the
     tree/commit SHA the inputs were read from), the result is cached so repeat
-    calls for the same ref skip the object-storage round-trips entirely. The
-    token must change whenever any tracked file does -- a commit/tree SHA does,
-    the ``dvc.lock`` bytes alone do NOT (a dep can change while the lock stays
-    the same, which is exactly what staleness detects).
+    calls for the same ref only re-check the outputs it found missing from
+    object storage, so a push shows up on the next call. The token must change
+    whenever any tracked file does -- a commit/tree SHA does, the ``dvc.lock``
+    bytes alone do NOT (a dep can change while the lock stays the same, which
+    is exactly what staleness detects).
 
     ``fs`` is the object-storage filesystem used to check output presence;
     when omitted it defaults to ``get_object_fs()``.
     """
+
+    def log_timing(
+        cache_outcome: str, storage_s: float, **fields: int
+    ) -> None:
+        # Structured so Grafana can chart it from Loki by cache outcome
+        logger.info(
+            f"Stage statuses for {owner_name}/{project_name}: {cache_outcome}",
+            extra={
+                "pipeline_status_cache": cache_outcome,
+                "owner_name": owner_name,
+                "project_name": project_name,
+                "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+                "storage_ms": round(storage_s * 1000, 2),
+                **fields,
+            },
+        )
+
+    start = time.perf_counter()
     cache_key = _build_stage_status_cache_key(
         owner_name, project_name, cache_token
     )
-    if cache_key is not None:
-        hit = _stage_status_cache_get(cache_key)
-        if hit is not None:
-            return hit
+    hit = _stage_status_cache_get(cache_key) if cache_key else None
+    if hit is not None and not hit[1]:
+        log_timing("hit", 0)
+        return hit[0]
     if fs is None:
         from app.storage import get_object_fs
 
         fs = get_object_fs()
+    cache_outcome = "uncached" if cache_key is None else "miss"
+    if hit is not None:
+        # Pushing a missing output makes its stage current without changing
+        # the token, so look for just those before trusting the cached result
+        storage_start = time.perf_counter()
+        pushed = _check_storage_presence(
+            set(hit[1]), owner_name, project_name, fs
+        )
+        storage_s = time.perf_counter() - storage_start
+        if not any(pushed.values()):
+            log_timing(
+                "hit-missing-rechecked", storage_s, md5s_checked=len(hit[1])
+            )
+            return hit[0]
+        cache_outcome = "hit-missing-pushed"
     lock_stages = dvc_lock.get("stages") or {}
     yaml_stages = dvc_yaml.get("stages") or {}
     current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
@@ -531,9 +575,11 @@ def compute_stage_statuses(
         lock_stages, yaml_stages, current_expansions
     )
     outs_index = _build_outs_index(live_lock_stages)
+    storage_start = time.perf_counter()
     presence = _precompute_storage_presence(
         {"stages": live_lock_stages}, owner_name, project_name, fs
     )
+    storage_s = time.perf_counter() - storage_start
     # DVC outputs that calkit stores as a zip live under .calkit/zip/, not at
     # the standard files/md5 object path, so the md5 presence check above can't
     # find them. Treat any output whose workspace path is zip-mapped as present
@@ -555,6 +601,8 @@ def compute_stage_statuses(
             continue
         if stage_name not in locked_bases:
             result[stage_name] = StageStatus(status="not-run")
+    # What a later call has to look for in storage to trust a cached result
+    missing_md5s: set[str] = set()
     for stage_name, lock_stage in live_lock_stages.items():
         base = _get_base_stage_name(stage_name)
         yaml_stage = yaml_stages[base]
@@ -628,6 +676,7 @@ def compute_stage_statuses(
                     continue
                 if not tree.exists(out_path) and not cache_false:
                     missing_outputs.append(out_path)
+                    missing_md5s.add(lock_md5)
                 continue
             available_md5: str | None = None
             if tree.is_file(out_path):
@@ -640,6 +689,8 @@ def compute_stage_statuses(
                 if presence.get(lock_md5, False) or zip_stored or cache_false:
                     continue
                 missing_outputs.append(out_path)
+                if lock_md5:
+                    missing_md5s.add(lock_md5)
             elif lock_md5 is not None and available_md5 != lock_md5:
                 modified_outputs.append(out_path)
         is_stale = bool(
@@ -678,15 +729,14 @@ def compute_stage_statuses(
             missing_outputs=missing_outputs,
         )
     if cache_key is not None:
-        # Don't cache a result whose staleness comes from outputs missing in
-        # object storage. Pushing that content makes the stage up-to-date
-        # without changing the cache_token (the commit/tree SHA), so a cached
-        # "stale" would otherwise linger for the full TTL after the artifact is
-        # pushed -- blocking a release the user just made reproducible. Results
-        # with no missing outputs are pinned by the SHA and safe to cache.
-        storage_dependent = any(s.missing_outputs for s in result.values())
-        if not storage_dependent:
-            _stage_status_cache_put(cache_key, result)
+        _stage_status_cache_put(cache_key, (result, sorted(missing_md5s)))
+    log_timing(
+        cache_outcome,
+        storage_s,
+        md5s_checked=len(presence),
+        md5s_missing=len(missing_md5s),
+        stages=len(live_lock_stages),
+    )
     return result
 
 

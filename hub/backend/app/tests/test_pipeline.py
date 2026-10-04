@@ -18,8 +18,8 @@ class FakeFS:
     """Minimal fsspec-like FS recording which md5s exist in object storage.
 
     Implements both access patterns the presence check uses: `find` for the
-    listing path it normally takes, and `exists` for the per-md5 fallback.
-    `find_error` forces the fallback.
+    per-directory listings it normally takes, and `exists` for the per-md5
+    fallback. `find_error` forces the fallback.
     """
 
     def __init__(
@@ -42,8 +42,13 @@ class FakeFS:
         self.find_calls += 1
         if self._find_error is not None:
             raise self._find_error
-        # Both layouts put objects at <prefix>/<idx>/<rest>.
-        return [f"{path}/{md5[:2]}/{md5[2:]}" for md5 in self._existing]
+        # Both layouts put objects at <prefix>/<idx>/<rest>, and the presence
+        # check lists one <prefix>/<idx> directory at a time
+        return [
+            f"{path}/{md5[2:]}"
+            for md5 in self._existing
+            if path.endswith(f"/{md5[:2]}")
+        ]
 
 
 def _init_repo(repo_dir) -> git.Repo:
@@ -827,22 +832,28 @@ def test_without_cache_token_always_recomputes(tmp_path):
 def test_precompute_storage_presence_lists_then_falls_back() -> None:
     present = "a" * 32
     absent = "b" * 32
+    dep_only = "c" * 32
     dvc_lock = {
         "stages": {
             "train": {
-                "deps": [{"path": "in.csv", "md5": present}],
-                "outs": [{"path": "out.pkl", "md5": absent}],
+                "deps": [{"path": "in.csv", "md5": dep_only}],
+                "outs": [
+                    {"path": "model.pkl", "md5": present},
+                    {"path": "out.pkl", "md5": absent},
+                ],
             }
         }
     }
-    # Normal path: one listing per layout, and no per-md5 probing at all.
-    fs = FakeFS(existing_md5s={present})
+    # Normal path: only outs are looked up, by listing the directory each
+    # md5 falls in, with the legacy layout tried only for what's still
+    # missing, and no per-md5 probing at all
+    fs = FakeFS(existing_md5s={present, dep_only})
     presence = _precompute_storage_presence(dvc_lock, "owner", "proj", fs)
     assert presence == {present: True, absent: False}
-    assert fs.find_calls == 2
+    assert fs.find_calls == 3
     assert fs.exists_calls == 0
     # When listing fails, fall back to probing each md5 and get the same
-    # answer rather than reporting everything as missing.
+    # answer rather than reporting everything as missing
     fallback_fs = FakeFS(
         existing_md5s={present}, find_error=OSError("listing unavailable")
     )
@@ -851,9 +862,74 @@ def test_precompute_storage_presence_lists_then_falls_back() -> None:
     )
     assert fallback == presence
     assert fallback_fs.exists_calls > 0
-    # A project that has pushed nothing reports everything missing.
+    # A project that has pushed nothing reports everything missing
     empty = _precompute_storage_presence(dvc_lock, "owner", "proj", FakeFS())
     assert empty == {present: False, absent: False}
+    # Something that isn't an md5 never makes it into a storage path
+    bad_lock = {"stages": {"s": {"outs": [{"path": "x", "md5": "../.."}]}}}
+    bad_fs = FakeFS()
+    assert _precompute_storage_presence(bad_lock, "o", "p", bad_fs) == {
+        "../..": False
+    }
+    assert bad_fs.find_calls == 0
+
+
+def test_cached_missing_outputs_are_rechecked(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    script = "print('hi')\n"
+    _commit(repo, {"script.py": script}, "init")
+    tree = get_repo_tree_for_ref(repo, None)
+    out_md5 = _md5("result\n")
+    dvc_yaml = {
+        "stages": {
+            "run": {
+                "cmd": "python script.py",
+                "deps": ["script.py"],
+                "outs": ["out.txt"],
+            }
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            "run": {
+                "cmd": "python script.py",
+                "deps": [{"path": "script.py", "md5": _md5(script)}],
+                "outs": [{"path": "out.txt", "md5": out_md5}],
+            }
+        }
+    }
+    token = "tok-missing-recheck"
+    first = compute_stage_statuses(
+        dvc_yaml, dvc_lock, tree, "o", "p", FakeFS(), cache_token=token
+    )
+    assert first["run"].status == "stale"
+    assert first["run"].missing_outputs == ["out.txt"]
+    # A repeat call is served from the cache after looking only for the
+    # missing output, even when the inputs it would recompute from changed
+    fs = FakeFS()
+    cached = compute_stage_statuses(
+        dvc_yaml, {"stages": {}}, tree, "o", "p", fs, cache_token=token
+    )
+    assert cached["run"].missing_outputs == ["out.txt"]
+    assert fs.find_calls == 2
+    # Once the output is pushed, the next call sees it without a new token
+    pushed = compute_stage_statuses(
+        dvc_yaml,
+        dvc_lock,
+        tree,
+        "o",
+        "p",
+        FakeFS(existing_md5s={out_md5}),
+        cache_token=token,
+    )
+    assert pushed["run"].status == "up-to-date"
+    # And that result is cached outright, with nothing left to look for
+    fs = FakeFS()
+    again = compute_stage_statuses(
+        dvc_yaml, {"stages": {}}, tree, "o", "p", fs, cache_token=token
+    )
+    assert again["run"].status == "up-to-date"
+    assert fs.find_calls == 0
 
 
 def test_find_stage_for_path_prefers_current_stages():

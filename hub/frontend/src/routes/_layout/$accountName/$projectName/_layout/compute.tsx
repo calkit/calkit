@@ -1178,6 +1178,13 @@ function Compute() {
               const wsSessions = (sessions[ws.operator_id] ?? []).filter(
                 (s) => s.workspace === ws.path,
               )
+              // Listed over the relay once it connects, which takes a moment
+              const sessionsLoading =
+                ws.operator_online &&
+                ws.kind === "personal" &&
+                ws.operator_platform !== "windows" &&
+                !conn?.error &&
+                sessions[ws.operator_id] === undefined
               return (
                 <Tr key={`${ws.operator_id}:${ws.path}`}>
                   <Td>
@@ -1282,7 +1289,12 @@ function Compute() {
                     )}
                   </Td>
                   <Td>
-                    <Flex gap={1} wrap="wrap">
+                    <Flex gap={1} wrap="wrap" align="center">
+                      {sessionsLoading && (
+                        <Tooltip label="Loading sessions">
+                          <Spinner size="xs" color="ui.dim" />
+                        </Tooltip>
+                      )}
                       {wsSessions.map((s) => (
                         <Button
                           key={s.id}

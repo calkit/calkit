@@ -8,6 +8,7 @@ import {
   Flex,
   Heading,
   IconButton,
+  Grid,
   Input,
   SimpleGrid,
   Spinner,
@@ -406,6 +407,7 @@ function WorkspacePanel({
   onChanged,
   confirmRun,
   clearConfirmRun,
+  narrow,
 }: {
   ws: Workspace
   conn: OperatorConnection
@@ -416,6 +418,8 @@ function WorkspacePanel({
   onChanged: () => void
   confirmRun: string | undefined
   clearConfirmRun: () => void
+  // Shown with sessions, which it sits beside on wide screens
+  narrow?: boolean
 }) {
   const showToast = useCustomToast()
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
@@ -670,7 +674,13 @@ function WorkspacePanel({
         </Alert>
       ) : (
         <>
-          <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3} mt={3}>
+          <SimpleGrid
+            // Stacked above the sessions on smaller screens, beside them on
+            // larger ones
+            columns={narrow ? { base: 1, lg: 2, xl: 1 } : { base: 1, lg: 2 }}
+            spacing={3}
+            mt={3}
+          >
             <PanelSection
               title="Sync"
               actions={
@@ -1388,24 +1398,6 @@ function Compute() {
           </Tbody>
         </Table>
       )}
-      {selected && (
-        <WorkspacePanel
-          key={workspaceKey(selected)}
-          ws={selected}
-          conn={getConnection(selected.operator_id)}
-          connected={getConnection(selected.operator_id).connected}
-          modal={search.modal}
-          setModal={setModal}
-          runInSession={(command) => newSession(selected, command)}
-          onChanged={() => workspacesQuery.refetch()}
-          confirmRun={search.confirm_run}
-          clearConfirmRun={() =>
-            navigate({
-              search: (prev) => ({ ...prev, confirm_run: undefined }),
-            })
-          }
-        />
-      )}
       {project?.git_repo_url && cloneTargets.length > 0 && (
         <Flex align="center" gap={2} mb={6} wrap="wrap">
           <Text>Clone this project onto</Text>
@@ -1423,20 +1415,57 @@ function Compute() {
           ))}
         </Flex>
       )}
-      {panes.map((pane) => {
-        const conn = getConnection(pane.operatorId)
-        return (
-          <TerminalPane
-            key={pane.session}
-            conn={conn}
-            pane={pane}
-            label={getLabel(pane)}
-            connected={conn.connected}
-            onClose={() => closePane(pane, true)}
-            onDetach={() => closePane(pane, false)}
-          />
-        )
-      })}
+      {/* The summary on the left and sessions on the right, side by side
+          when there's room for both */}
+      <Grid
+        templateColumns={
+          selected && panes.length
+            ? { base: "minmax(0, 1fr)", xl: "minmax(0, 2fr) minmax(0, 3fr)" }
+            : "minmax(0, 1fr)"
+        }
+        gap={4}
+        alignItems="start"
+      >
+        {selected && (
+          <Box minW={0}>
+            <WorkspacePanel
+              key={workspaceKey(selected)}
+              ws={selected}
+              conn={getConnection(selected.operator_id)}
+              connected={getConnection(selected.operator_id).connected}
+              modal={search.modal}
+              setModal={setModal}
+              runInSession={(command) => newSession(selected, command)}
+              narrow={panes.length > 0}
+              onChanged={() => workspacesQuery.refetch()}
+              confirmRun={search.confirm_run}
+              clearConfirmRun={() =>
+                navigate({
+                  search: (prev) => ({ ...prev, confirm_run: undefined }),
+                })
+              }
+            />
+          </Box>
+        )}
+        {panes.length > 0 && (
+          <Box minW={0}>
+            {panes.map((pane) => {
+              const conn = getConnection(pane.operatorId)
+              return (
+                <TerminalPane
+                  key={pane.session}
+                  conn={conn}
+                  pane={pane}
+                  label={getLabel(pane)}
+                  connected={conn.connected}
+                  onClose={() => closePane(pane, true)}
+                  onDetach={() => closePane(pane, false)}
+                />
+              )
+            })}
+          </Box>
+        )}
+      </Grid>
     </Box>
   )
 }

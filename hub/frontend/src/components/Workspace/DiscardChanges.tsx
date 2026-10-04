@@ -7,6 +7,7 @@ import {
   AlertDialogHeader,
   AlertDialogOverlay,
   Button,
+  Code,
 } from "@chakra-ui/react"
 import { useMutation } from "@tanstack/react-query"
 import { useRef } from "react"
@@ -31,8 +32,16 @@ const DiscardChanges = ({
     mutationFn: () => {
       return request("workspace.discard")
     },
-    onSuccess: () => {
-      showToast("Success!", "Changes discarded.", "success")
+    onSuccess: (result: { stashed?: boolean; moved_to?: string | null }) => {
+      const kept = [
+        result?.stashed ? "Git changes are in the stash" : "",
+        result?.moved_to ? `changed data is in ${result.moved_to}` : "",
+      ].filter(Boolean)
+      showToast(
+        "Changes discarded",
+        kept.length ? `To get them back: ${kept.join("; ")}.` : "",
+        "success",
+      )
       onClose()
     },
     onError: (err: Error) => {
@@ -58,7 +67,10 @@ const DiscardChanges = ({
             </AlertDialogHeader>
             <AlertDialogCloseButton />
             <AlertDialogBody>
-              Are you sure? You can't undo this action afterwards.
+              This puts the workspace back to its last commit. Changes to files
+              tracked with Git are stashed, so <Code>git stash pop</Code> brings
+              them back, and changed data tracked with DVC is moved to{" "}
+              <Code>.calkit/local/discarded</Code>. New files are left alone.
             </AlertDialogBody>
             <AlertDialogFooter gap={3}>
               <Button

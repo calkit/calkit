@@ -1,8 +1,7 @@
 schema: '2.0'
 stages:
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python
-      scripts/latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -70,8 +69,7 @@ stages:
       md5: 969c595282061daaf37dabdc10f550d3
       size: 121899
   latex-word-round-trip-figure:
-    cmd: calkit xenv -n dev --no-check -- python
-      scripts/plot-latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -103,8 +101,7 @@ stages:
       md5: 8877dc6f1216c3684b416fc388192a28
       size: 206930
   latex-image-readme/sizes:
-    cmd: calkit xenv -n dev --no-check -- python
-      .calkit/markdown/images/latex/README.md/sizes.py
+    cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
     deps:
     - path: .calkit/markdown/images/latex/README.md/sizes.py
       hash: md5
@@ -127,3 +124,47 @@ stages:
       hash: md5
       md5: f6cec74dbaa8c56bbb2c59e9b3aaee8c
       size: 382
+  research-flow:
+    cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/research-flow.py
+      hash: md5
+      md5: b548c4339274f21dfc26b642f9b45984
+      size: 15767
+    - path: uv.lock
+      hash: md5
+      md5: 252c68ccae32923f843aa23a43371454
+      size: 1725871
+    outs:
+    - path: results/research-flow.json
+      hash: md5
+      md5: 74477e442197ec5387f72b560d040b8f
+      size: 5711
+  research-flow-figure:
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: results/research-flow.json
+      hash: md5
+      md5: 74477e442197ec5387f72b560d040b8f
+      size: 5711
+    - path: scripts/plot-research-flow.py
+      hash: md5
+      md5: 73ee12397ad4fbaaef7362e748892518
+      size: 3712
+    - path: uv.lock
+      hash: md5
+      md5: 252c68ccae32923f843aa23a43371454
+      size: 1725871
+    outs:
+    - path: docs/img/research-flow.png
+      hash: md5
+      md5: 57c79456a948e7744749f206586e51c5
+      size: 140188

@@ -13,6 +13,30 @@ questions:
       small steps, akin to one piece flow in lean manufacturing,
       versus a more waterfall, stage gate style?
     hypothesis: An agile, lean approach is ~10x more efficient.
+    answer:
+      if r_combined >= 10: >-
+        Yes, in a simulation of a six-finding paper: working in small steps
+        with automated tooling reached an approved paper {r_combined:.1f}x
+        sooner than working stage by stage with manual tooling.
+      else: >-
+        Not in a simulation of a six-finding paper, where working in small
+        steps reached an approved paper {r_manual:.1f}x sooner than working
+        stage by stage with manual tooling and {r_auto:.1f}x with automated
+        tooling, and an approved finding {f_manual:.1f}x and {f_auto:.1f}x
+        sooner. Across the handoff costs and flaw rates swept, its advantage
+        peaked at {r_max:.1f}x.
+    evidence:
+      - kind: figure
+        path: docs/img/research-flow.png
+      - kind: result
+        path: results/research-flow.json
+        values:
+          r_manual: ratio.days_manual
+          r_auto: ratio.days_automated
+          r_combined: ratio.days_combined
+          f_manual: ratio.days_to_finding_manual
+          f_auto: ratio.days_to_finding_automated
+          r_max: ratio_grid.max
   - question: >-
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?
@@ -91,7 +115,25 @@ pipeline:
       outputs:
         - path: docs/img/latex-word-round-trip.png
           storage: git
-
+    research-flow:
+      kind: python-script
+      script_path: scripts/research-flow.py
+      environment: dev
+      description: >-
+        Simulate a paper worked in small steps versus stage by stage, with
+        manual and automated tooling.
+      outputs:
+        - path: results/research-flow.json
+          storage: git
+    research-flow-figure:
+      kind: python-script
+      script_path: scripts/plot-research-flow.py
+      environment: dev
+      inputs:
+        - results/research-flow.json
+      outputs:
+        - path: docs/img/research-flow.png
+          storage: git
     latex-image-readme:
       kind: markdown
       target_path: images/latex/README.md
@@ -104,3 +146,12 @@ figures:
       A page of the LaTeX/Word example as built from LaTeX, as exported to
       Word, and as built again after merging the Word copy back.
     stage: latex-word-round-trip-figure
+  - path: docs/img/research-flow.png
+    title: Research flow simulation
+    description: >-
+      Time to an approved paper worked in small steps versus stage by
+      stage, by how often reviews happen, and by handoff cost and flaw rate.
+    stage: research-flow-figure
+
+references:
+  - path: references.bib

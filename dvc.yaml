@@ -38,6 +38,31 @@ stages:
           persist: false
     desc: Automatically generated from the 'latex-word-round-trip-figure' stage in
       calkit.yaml. Changes made here will be overwritten.
+  research-flow:
+    cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
+    deps:
+      - scripts/research-flow.py
+      - uv.lock
+      - .python-version
+    outs:
+      - results/research-flow.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'research-flow' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  research-flow-figure:
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
+    deps:
+      - scripts/plot-research-flow.py
+      - results/research-flow.json
+      - uv.lock
+      - .python-version
+    outs:
+      - docs/img/research-flow.png:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'research-flow-figure' stage in calkit.yaml.
+      Changes made here will be overwritten.
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
     deps:

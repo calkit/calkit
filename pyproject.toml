@@ -107,6 +107,7 @@ dev = [
   "pypandoc-binary>=1.13",
   "matplotlib>=3.10.8",
   "pypdfium2>=5.13.0",
+  "simpy>=4.1.1",
 ]
 
 [project.urls]
@@ -202,6 +203,7 @@ module = [
     "requests",
     "pypdfium2",
     "psutil",
+    "simpy",
 ]
 ignore_missing_imports = true
 

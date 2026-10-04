@@ -136,7 +136,7 @@ labels = {
     "diy/word": "DIY, PI on Word",
     "diy/adopts": "DIY, PI adopts",
     "calkit/word": "Calkit, PI on Word",
-    "calkit/browser": "Calkit, PI in browser",
+    "calkit/browser": "Calkit, PI adopts (browser)",
 }
 y = np.arange(len(labels))[::-1]
 for k, (paper, color) in enumerate(
@@ -185,3 +185,47 @@ ax6.grid(color=GRID)
 ax6.legend(frameon=False, loc="upper right")
 fig.tight_layout()
 fig.savefig("docs/img/research-flow.png", dpi=150)
+# What Calkit would need to deliver, one goal at a time, on a first paper
+goals = r["goals"]
+alternatives = {
+    "diy tooling": "DIY in place of Calkit's tooling",
+    "all goals, no agents": "every goal, without agents",
+}
+rows = [(g["step"], g) for g in goals["steps"]] + [
+    (alternatives[name], g) for name, g in goals["alternatives"].items()
+]
+names = [
+    name if k == 0 or k >= len(goals["steps"]) else f"+ {name}"
+    for k, (name, _) in enumerate(rows)
+]
+fig, ax = plt.subplots(figsize=(9, 6))
+# A gap between the steps and the alternatives to them
+y = np.array(
+    [
+        len(rows) - 1 - k - (0.6 if k >= len(goals["steps"]) else 0.0)
+        for k in range(len(rows))
+    ]
+)
+for k, (key, color, label) in enumerate(
+    [
+        ("days_ratio", COLORS["lean"], "time to an approved paper"),
+        ("student_days_ratio", "#1baf7a", "papers per PhD"),
+    ]
+):
+    vals = [g[key] for _, g in rows]
+    pos = y + (0.5 - k) * 0.38
+    ax.barh(pos, vals, 0.36, color=color, label=label, zorder=2)
+    for p_, v in zip(pos, vals):
+        ax.text(v + 0.03, p_, f"{v:.2f}×", ha="left", va="center", fontsize=9)
+ax.axvline(1, color=MUTED, lw=1)
+ax.axvline(2, color=MUTED, lw=1, ls="--")
+ax.set_yticks(y, names)
+for tick in ax.get_yticklabels()[len(goals["steps"]) :]:
+    tick.set_fontstyle("italic")
+ax.set_xlim(0, 3.1)
+ax.set_xlabel("Improvement over the status quo, first paper")
+ax.set_title("Lean research with Calkit and agents, goal by goal", loc="left")
+ax.grid(axis="x", color=GRID, zorder=0)
+ax.legend(frameon=False, loc="upper right")
+fig.tight_layout()
+fig.savefig("docs/img/research-flow-goals.png", dpi=150)

@@ -135,6 +135,8 @@ pipeline:
       outputs:
         - path: docs/img/research-flow.png
           storage: git
+        - path: docs/img/research-flow-goals.png
+          storage: git
     latex-image-readme:
       kind: markdown
       target_path: images/latex/README.md
@@ -152,6 +154,13 @@ figures:
     description: >-
       Time to an approved paper worked in small steps versus stage by
       stage, by how often reviews happen, and by handoff cost and flaw rate.
+    stage: research-flow-figure
+  - path: docs/img/research-flow-goals.png
+    title: Research productivity, goal by goal
+    description: >-
+      Improvement over working stage by stage with manual tooling on a first
+      paper, as agents, small steps, Calkit's tooling, faster collaboration,
+      faster verification, and agent-assisted PI review are added in turn.
     stage: research-flow-figure
 
 references:

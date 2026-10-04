@@ -20,6 +20,12 @@ finding done that way until a review, or the student working downstream,
 catches it, at which point all of them are redone from that stage. Reviews of
 finished findings also prompt new ones. Time is in working days.
 
+Automated tooling also has to be adopted: learned and set up, by the student
+and, unless they keep reviewing in Word or Overleaf, by the PI, whether it's
+built by hand or Calkit's. Agents speed up the mechanics of the work and add
+flaws of their own. Calkit's goals are then added one at a time, from today's
+status quo, to see what each is worth.
+
 Writes the results to results/research-flow.json.
 """
 
@@ -84,6 +90,11 @@ BASE: dict[str, Any] = {
     "translate_fixed": 0.0,
     "translate_item": 0.0,
     "pi_learn_hours": 0.0,
+    # Bespoke tooling: how far it gets from manual tooling's costs to
+    # automated tooling's, and the days spent keeping it working every two
+    # weeks
+    "automation_level": 1.0,
+    "upkeep_days": 0.0,
     "max_days": 5000.0,
 }
 TOOLING: dict[str, dict[str, Any]] = {
@@ -109,31 +120,35 @@ TOOLING: dict[str, dict[str, Any]] = {
     },
 }
 POLICIES = ["stage-gate", "lean"]
-# Ways of adopting automated tooling for lean, which end at the same costs
-# and differ in getting there, and in how the PI reviews
-ADOPTION: dict[str, dict[str, float]] = {
-    "diy/word": {
-        "learn_days": 30.0,
-        "ramp_half_life": 60.0,
-        "translate_fixed": 0.5,
-        "translate_item": 0.25,
-    },
-    "diy/adopts": {
-        "learn_days": 30.0,
-        "ramp_half_life": 60.0,
-        "pi_learn_hours": 20.0,
-    },
-    "calkit/word": {
-        "learn_days": 3.0,
-        "ramp_half_life": 10.0,
-        "translate_fixed": 0.05,
-        "translate_item": 0.02,
-    },
-    "calkit/browser": {
-        "learn_days": 3.0,
-        "ramp_half_life": 10.0,
-        "pi_learn_hours": 0.25,
-    },
+# Building it yourself, and reviewing in Word with the PI's edits merged
+# back by hand, or with Calkit's round trip
+DIY = {
+    "learn_days": 60.0,
+    "ramp_half_life": 120.0,
+    "automation_level": 0.75,
+    "upkeep_days": 0.5,
+}
+CALKIT = {"learn_days": 3.0, "ramp_half_life": 10.0}
+BY_HAND = {"translate_fixed": 0.5, "translate_item": 0.25}
+ROUND_TRIP = {"translate_fixed": 0.05, "translate_item": 0.02}
+# Ways of adopting automated tooling for lean, which differ in getting
+# there, how far they get, and how the PI reviews
+ADOPTION: dict[str, dict[str, Any]] = {
+    "diy/word": DIY | BY_HAND,
+    "diy/adopts": DIY | {"pi_learn_hours": 20.0},
+    "calkit/word": CALKIT | ROUND_TRIP,
+    "calkit/browser": CALKIT | {"pi_learn_hours": 0.25},
+}
+# What agents change: hands-on work, which is faster except where it's
+# thinking or physical, flaws in the stages they work in, mechanics done by
+# hand, i.e., handoffs, review prep, translation, and redoing downstream
+# work, and how much there is to learn about the tooling
+AGENTS: dict[str, Any] = {
+    "work": [0.6, 0.9, 1.0, 0.4, 0.6, 0.4, 0.7],
+    "flaw_prob": [1.0, 1.0, 1.0, 1.25, 1.25, 1.25, 1.25],
+    "mechanics": 0.5,
+    "manual_redo": [1.0, 1.0, 1.0, 0.6, 0.6, 0.6, 0.6],
+    "learn_days": {"diy": 0.5, "calkit": 0.3},
 }
 # What's learned once, so later papers don't pay it again
 LEARNED = ["learn_days", "ramp_half_life", "pi_learn_hours"]
@@ -185,17 +200,27 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         return all(i.stage == NS and i.approved for i in items)
 
     def tool(key: str) -> Any:
-        # Tooling being learned costs what manual tooling does at first,
-        # closing the gap by half every half-life after setup
-        value = p[key]
-        if not p["ramp_half_life"]:
-            return value
-        since = max(env.now - p["learn_days"], 0.0)
-        w = 0.5 ** (since / p["ramp_half_life"])
-        start = TOOLING["manual"][key]
+        # Tooling gets as far from manual tooling's costs as it's automated,
+        # and while it's being learned it closes that gap by half every
+        # half-life after setup
+        def blend(start: float, end: float) -> float:
+            end = start + (end - start) * p["automation_level"]
+            return end + (start - end) * w
+
+        w = 0.0
+        if p["ramp_half_life"]:
+            since = max(env.now - p["learn_days"], 0.0)
+            w = 0.5 ** (since / p["ramp_half_life"])
+        start, value = p["ramp_from"][key], p[key]
         if isinstance(value, list):
-            return [v + (m - v) * w for v, m in zip(value, start)]
-        return value + (start - value) * w
+            return [blend(a, b) for a, b in zip(start, value)]
+        return blend(start, value)
+
+    def upkeep() -> Generator:
+        # Bespoke tooling breaking, and being fixed, every two weeks
+        while not done():
+            yield env.timeout(10.0)
+            yield from spend("upkeep", p["upkeep_days"])
 
     def spend(kind: str, days: float, priority: int = 1) -> Generator:
         # Student time, in chunks of at most a day so a meeting can come
@@ -450,6 +475,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             "setup",
             "prep",
             "translate",
+            "upkeep",
         ],
         0.0,
     )
@@ -461,6 +487,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     finished = env.event()
     env.process(lean_student() if policy == "lean" else gated_student())
     env.process(pi())
+    if p["upkeep_days"]:
+        env.process(upkeep())
     env.run(until=finished | env.timeout(p["max_days"]))
     approved = [i.approved_at for i in items[:n_original] if i.approved_at]
     return {
@@ -510,8 +538,30 @@ def summarize(runs: list[dict]) -> dict:
     }
 
 
-def params_for(tooling: str, **overrides: Any) -> dict:
-    return {**BASE, **TOOLING[tooling], **overrides}
+def params_for(
+    tooling: str, *, agents: bool = False, **overrides: Any
+) -> dict:
+    manual = dict(TOOLING["manual"])
+    p = {**BASE, **TOOLING[tooling], **overrides}
+    if agents:
+        a = AGENTS
+        manual["redo_factor"] = [
+            r * m for r, m in zip(manual["redo_factor"], a["manual_redo"])
+        ]
+        for k in ["handoff_fixed", "handoff_item", "prep_fixed", "prep_item"]:
+            manual[k] *= a["mechanics"]
+        if tooling == "manual":
+            p.update(manual)
+        for k in ["translate_fixed", "translate_item"]:
+            p[k] *= a["mechanics"]
+        p["work"] = [w * m for w, m in zip(p["work"], a["work"])]
+        p["flaw_prob"] = [
+            min(f * m, 1.0) for f, m in zip(p["flaw_prob"], a["flaw_prob"])
+        ]
+        kind = "diy" if p["automation_level"] < 1 else "calkit"
+        p["learn_days"] *= a["learn_days"][kind]
+        p["ramp_half_life"] *= a["learn_days"][kind]
+    return p | {"ramp_from": manual}
 
 
 # The four combinations of working style and tooling
@@ -622,22 +672,85 @@ for j, (name, opts) in enumerate(ADOPTION.items()):
 # PI reviewing in Word by hand or not needing a translation at all
 learn_days = [0.0, 10.0, 30.0, 60.0, 100.0, 150.0]
 learn_sweep: dict[str, list[float]] = {}
-for name, translate in [
-    ("word", ADOPTION["diy/word"]),
-    ("none", {}),
-]:
+for name, translate in [("word", BY_HAND), ("none", {})]:
     learn_sweep[name] = []
     for j, d in enumerate(learn_days):
-        over = {
+        learning: dict[str, Any] = {
             "learn_days": d,
             "ramp_half_life": 2 * d,
-            "translate_fixed": translate.get("translate_fixed", 0.0),
-            "translate_item": translate.get("translate_item", 0.0),
+            **translate,
         }
         days = summarize(
-            simulate("lean", params_for("automated", **over), 200, 300 + j)
+            simulate("lean", params_for("automated", **learning), 200, 300 + j)
         )["days_mean"]
         learn_sweep[name].append(status_quo["days_mean"] / days)
+
+# What Calkit would need to deliver, on a first paper, going from today's
+# status quo to lean with automated tooling and agents one step at a time,
+# each on top of the ones before it
+COLLABORATION = {"pi_learn_hours": 0.25}
+VERIFICATION = {"detect_self": 0.2}
+PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}
+GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
+    ("status quo", "stage-gate", "manual", False, {}),
+    ("agents", "stage-gate", "manual", True, {}),
+    ("small steps", "lean", "manual", True, {}),
+    ("automated tooling", "lean", "automated", True, CALKIT | BY_HAND),
+    (
+        "faster collaboration",
+        "lean",
+        "automated",
+        True,
+        CALKIT | COLLABORATION,
+    ),
+    (
+        "faster verification",
+        "lean",
+        "automated",
+        True,
+        CALKIT | COLLABORATION | VERIFICATION,
+    ),
+    (
+        "agent-assisted PI review",
+        "lean",
+        "automated",
+        True,
+        CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST,
+    ),
+]
+# For comparison: building the tooling yourself in place of Calkit's, and
+# every Calkit goal met but without agents
+GOAL_ALTERNATIVES: dict[str, tuple[str, str, bool, dict[str, Any]]] = {
+    "diy tooling": ("lean", "automated", True, DIY | BY_HAND),
+    "all goals, no agents": (
+        "lean",
+        "automated",
+        False,
+        CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST,
+    ),
+}
+
+
+def goal_summary(
+    policy: str, tooling: str, agents: bool, over: dict, seed: int
+) -> dict:
+    p = params_for(tooling, agents=agents, **over)
+    return summarize(simulate(policy, p, REPS, seed))
+
+
+goal_steps = [
+    {"step": name} | goal_summary(policy, tooling, agents, over, 400 + j)
+    for j, (name, policy, tooling, agents, over) in enumerate(GOALS)
+]
+goal_alternatives = {
+    name: goal_summary(*spec, seed=450 + j)
+    for j, (name, spec) in enumerate(GOAL_ALTERNATIVES.items())
+}
+for summary in [*goal_steps, *goal_alternatives.values()]:
+    summary["days_ratio"] = goal_steps[0]["days_mean"] / summary["days_mean"]
+    summary["student_days_ratio"] = (
+        goal_steps[0]["student_days_mean"] / summary["student_days_mean"]
+    )
 
 
 def crossing(xs: list[float], ys: list[float], level: float) -> float | None:
@@ -673,6 +786,12 @@ results = {
             k: crossing(learn_days, v, 1.0) for k, v in learn_sweep.items()
         },
     },
+    "goals": {
+        "steps": goal_steps,
+        "alternatives": goal_alternatives,
+        "days_ratio": goal_steps[-1]["days_ratio"],
+        "student_days_ratio": goal_steps[-1]["student_days_ratio"],
+    },
     "ratio_grid": {
         "cost_scales": cost_scales,
         "flaw_scales": flaw_scales,
@@ -687,6 +806,13 @@ print(json.dumps(results["ratio"], indent=2))
 for k, v in adoption.items():
     print(k, {pp: round(vv["days_ratio"], 2) for pp, vv in v.items()})
 print(json.dumps(results["learn_sweep"], indent=2))
+for g in [*goal_steps, *goal_alternatives.values()]:
+    print(
+        g.get("step", "alt"),
+        round(g["days_mean"]),
+        round(g["days_ratio"], 2),
+        round(g["student_days_ratio"], 2),
+    )
 for k, v in scenarios.items():
     print(k, {kk: round(vv, 1) for kk, vv in v.items() if kk != "effort"})
     print("   ", {kk: round(vv, 1) for kk, vv in v["effort"].items()})

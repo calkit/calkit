@@ -61,6 +61,9 @@ stages:
       - docs/img/research-flow.png:
           cache: false
           persist: false
+      - docs/img/research-flow-goals.png:
+          cache: false
+          persist: false
     desc: Automatically generated from the 'research-flow-figure' stage in calkit.yaml.
       Changes made here will be overwritten.
   latex-image-readme/sizes:

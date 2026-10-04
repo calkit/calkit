@@ -633,27 +633,24 @@ def test_workspace_actions(tmp_path, monkeypatch):
         assert f.read() == "hi"
     with open(os.path.join(wdir, "big.csv")) as f:
         assert f.read() == "1,2\n"
-    # What was discarded can be got back: Git changes from the stash, and
-    # changed data from where it was moved, which Git ignores
-    assert result["stashed"]
+    # What was discarded can be got back from the stash, data included,
+    # since it was committed to DVC's cache before being stashed
+    assert result == {"stashed": True}
     subprocess.run(["git", "stash", "pop", "-q"], cwd=wdir, check=True)
+    subprocess.run(
+        [sys.executable, "-m", "dvc", "checkout", "-q", "big.csv"],
+        cwd=wdir,
+        check=True,
+    )
     with open(os.path.join(wdir, "notes.txt")) as f:
         assert f.read() == "changed"
-    subprocess.run(
-        ["git", "checkout", "--", "notes.txt"], cwd=wdir, check=True
-    )
-    assert result["moved_to"].startswith(
-        os.path.join(".calkit", "local", "discarded")
-    )
-    with open(os.path.join(wdir, result["moved_to"], "big.csv")) as f:
+    with open(os.path.join(wdir, "big.csv")) as f:
         assert f.read() == "3,4\n"
-    status = operator.get_workspace_status(wdir, fetch=False)
-    assert status["status"]["git"]["untracked_files"] == []
-    # With nothing to discard, nothing is kept
-    assert operator.discard_changes(wdir) == {
-        "stashed": False,
-        "moved_to": None,
-    }
+    # Discarding again, and with nothing to discard, nothing is stashed
+    assert operator.discard_changes(wdir) == {"stashed": True}
+    with open(os.path.join(wdir, "big.csv")) as f:
+        assert f.read() == "1,2\n"
+    assert operator.discard_changes(wdir) == {"stashed": False}
     # Cloning puts a project under ~/calkit, where it's a workspace, and
     # won't clone over anything or outside it
     calls = []

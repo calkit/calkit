@@ -817,12 +817,12 @@ def ignore_path(
 
 
 def discard_changes(wdir: str) -> dict:
-    """Put a workspace back to its last commit, keeping what was discarded
-    so it can be got back, and returning where.
+    """Put a workspace back to its last commit, stashing what was
+    discarded so ``git stash pop`` and ``dvc checkout`` bring it back.
 
-    Git changes are stashed, and DVC-tracked data that changed is moved
-    aside before DVC checks out the committed version, since that data was
-    never cached and would otherwise be lost. New files are left alone.
+    DVC-tracked data that changed is committed to DVC's cache first, so the
+    stash holds pointers to it, rather than it being lost when DVC checks
+    out the committed version. New files are left alone.
     """
 
     def _dvc_json(args: list[str], wdir: str) -> dict:
@@ -846,29 +846,27 @@ def discard_changes(wdir: str) -> dict:
         out: dict = json.loads(result.stdout or "{}")
         return out
 
-    stamp = calkit.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+    uses_dvc = os.path.isdir(os.path.join(wdir, ".dvc"))
+
+    def changed_data() -> list[str]:
+        # DVC-tracked data that doesn't match what its pointers say
+        if not uses_dvc:
+            return []
+        data = _dvc_json(["data", "status", "--no-remote-refresh"], wdir)
+        return data.get("uncommitted", {}).get("modified", [])
+
+    modified = changed_data()
+    if modified:
+        _calkit(["dvc", "commit", "--force", *modified], wdir)
+    stamp = calkit.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     out = calkit.git.get_repo(wdir).git.stash(
         "push", "-m", f"Discarded from the hub at {stamp}"
     )
-    result: dict = {"stashed": "Saved" in out, "moved_to": None}
-    if not os.path.isdir(os.path.join(wdir, ".dvc")):
-        return result
-    data = _dvc_json(["data", "status", "--no-remote-refresh"], wdir)
-    modified = data.get("uncommitted", {}).get("modified", [])
-    if modified:
-        # Ignored by Git, like everything under .calkit/local
-        dest = os.path.join(calkit.ensure_local_dir(wdir), "discarded", stamp)
-        for path in modified:
-            src = os.path.join(wdir, path)
-            if os.path.lexists(src):
-                os.makedirs(
-                    os.path.dirname(os.path.join(dest, path)), exist_ok=True
-                )
-                shutil.move(src, os.path.join(dest, path))
-        result["moved_to"] = os.path.relpath(dest, wdir)
-    for path in modified:
+    # Including data whose pointers the stash took back, e.g., data that
+    # was committed to DVC but not to Git
+    for path in changed_data():
         _calkit(["dvc", "checkout", path, "--force"], wdir)
-    return result
+    return {"stashed": "Saved" in out}
 
 
 def add_stage(

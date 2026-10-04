@@ -547,13 +547,14 @@ def compute_stage_statuses(
     )
     hit = _stage_status_cache_get(cache_key) if cache_key else None
     if hit is not None and not hit[1]:
-        log_timing("hit", 0)
+        log_timing("hit", 0, md5s_checked=0, md5s_missing=0)
         return hit[0]
     if fs is None:
         from app.storage import get_object_fs
 
         fs = get_object_fs()
     cache_outcome = "uncached" if cache_key is None else "miss"
+    storage_s = 0.0
     if hit is not None:
         # Pushing a missing output makes its stage current without changing
         # the token, so look for just those before trusting the cached result
@@ -561,10 +562,13 @@ def compute_stage_statuses(
         pushed = _check_storage_presence(
             set(hit[1]), owner_name, project_name, fs
         )
-        storage_s = time.perf_counter() - storage_start
+        storage_s += time.perf_counter() - storage_start
         if not any(pushed.values()):
             log_timing(
-                "hit-missing-rechecked", storage_s, md5s_checked=len(hit[1])
+                "hit-missing-rechecked",
+                storage_s,
+                md5s_checked=len(hit[1]),
+                md5s_missing=len(hit[1]),
             )
             return hit[0]
         cache_outcome = "hit-missing-pushed"
@@ -579,7 +583,7 @@ def compute_stage_statuses(
     presence = _precompute_storage_presence(
         {"stages": live_lock_stages}, owner_name, project_name, fs
     )
-    storage_s = time.perf_counter() - storage_start
+    storage_s += time.perf_counter() - storage_start
     # DVC outputs that calkit stores as a zip live under .calkit/zip/, not at
     # the standard files/md5 object path, so the md5 presence check above can't
     # find them. Treat any output whose workspace path is zip-mapped as present

@@ -208,15 +208,19 @@
     "days_manual": 1.2946158045189744,
     "days_automated": 1.672840293139778,
     "days_combined": 2.0563356505152632,
+    "days_tooling": 1.2292480393664462,
     "student_days_manual": 1.0777141838474307,
     "student_days_automated": 1.3222132872061902,
     "student_days_combined": 1.72287837061889,
+    "student_days_tooling": 1.3030260603864425,
     "days_to_finding_manual": 1.7525858285269769,
     "days_to_finding_automated": 2.2347998059343155,
     "days_to_finding_combined": 2.760048883846309,
+    "days_to_finding_tooling": 1.2350318254535553,
     "days_to_first_finding_manual": 6.225413615263021,
     "days_to_first_finding_automated": 6.966579228346821,
-    "days_to_first_finding_combined": 8.611470103233826
+    "days_to_first_finding_combined": 8.611470103233826,
+    "days_to_first_finding_tooling": 1.2361117014493985
   },
   "wait_sweep": {
     "fractions": [
@@ -240,6 +244,13 @@
         1.3222132872061902,
         1.144174279163999,
         0.9642804075705315
+      ],
+      "combined": [
+        2.0563356505152632,
+        1.890462161125754,
+        1.72287837061889,
+        1.5535576898597965,
+        1.382472975686504
       ]
     }
   },

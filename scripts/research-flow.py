@@ -468,13 +468,21 @@ for key, name in [
     ratios[f"{name}_combined"] = ratio(
         key, "stage-gate/manual", "lean/automated"
     )
+    # What the tooling alone does, without changing how the work flows
+    ratios[f"{name}_tooling"] = ratio(
+        key, "stage-gate/manual", "stage-gate/automated"
+    )
 # Student-days per paper as more of the time spent waiting on reviews goes
 # to other useful work
 fractions = [0.0, 0.25, 0.5, 0.75, 1.0]
 wait_sweep = {}
-for t in TOOLING:
-    sg, ln = scenarios[f"stage-gate/{t}"], scenarios[f"lean/{t}"]
-    wait_sweep[t] = [
+for name, slow, fast in [
+    ("manual", "stage-gate/manual", "lean/manual"),
+    ("automated", "stage-gate/automated", "lean/automated"),
+    ("combined", "stage-gate/manual", "lean/automated"),
+]:
+    sg, ln = scenarios[slow], scenarios[fast]
+    wait_sweep[name] = [
         (sg["days_mean"] - f * sg["idle_mean"])
         / (ln["days_mean"] - f * ln["idle_mean"])
         for f in fractions

@@ -46,16 +46,20 @@ ax1.legend(frameon=False, loc="upper right")
 # Student-days per paper, as more of the wait on reviews is put to use
 ws = r["wait_sweep"]
 pct = [100 * f for f in ws["fractions"]]
-for t, style in STYLES.items():
+for name, style, color, label in [
+    ("combined", "-", COLORS["lean"], "lean automated vs. stage-gate manual"),
+    ("automated", "-", MUTED, "both automated"),
+    ("manual", "--", MUTED, "both manual"),
+]:
     ax2.plot(
         pct,
-        ws["student_days_ratio"][t],
+        ws["student_days_ratio"][name],
         style,
-        color=INK,
+        color=color,
         lw=2,
         marker="o",
         ms=6,
-        label=f"{t} tooling",
+        label=label,
     )
 ax2.axhline(1, color=MUTED, lw=1)
 ax2.set_xticks(pct)
@@ -91,7 +95,8 @@ ax3.set_xlabel("Days between lean reviews")
 ax3.set_ylabel("Working days to an approved paper")
 ax3.set_title("Review interval", loc="left")
 ax3.grid(color=GRID)
-ax3.legend(frameon=False, fontsize=9, loc="center left")
+ax3.set_ylim(top=ax3.get_ylim()[1] * 1.12)
+ax3.legend(frameon=False, fontsize=9, loc="upper center", ncol=2)
 # Lean's advantage as handoffs get costlier and flaws more common
 grid = np.array(r["ratio_grid"]["days_ratio"])
 cmap = LinearSegmentedColormap.from_list(

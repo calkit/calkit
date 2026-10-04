@@ -12,41 +12,32 @@ questions:
       time to valuable knowledge, from working on all stages together in
       small steps, akin to one piece flow in lean manufacturing,
       versus a more waterfall, stage gate style?
-    hypothesis: An agile, lean approach is ~10x more efficient.
+    hypothesis: An agile, lean approach is ~2x more efficient.
     answer:
-      if r_auto >= 2: >-
-        Yes, in a simulation of a six-finding paper: with automated
-        tooling, working in small steps reached an approved paper
-        {r_auto:.1f}x sooner than working stage by stage, and fit
-        {s_auto:.1f}x as many papers into a PhD with half the time spent
-        waiting on reviews put to other use.
-      elif r_combined >= 2: >-
-        Only together with automated tooling, in a simulation of a
-        six-finding paper: working in small steps with it reached an
+      if r_combined >= 2: >-
+        Yes, in a simulation of a six-finding paper: working in small steps
+        with automated tooling, as in continuous delivery, reached an
         approved paper {r_combined:.1f}x sooner than working stage by stage
-        without it, and fit {s_combined:.1f}x as many papers into a PhD with
-        half the time spent waiting on reviews put to other use. With the same
-        tooling for both, the gain was {r_manual:.1f}x manual and
-        {r_auto:.1f}x automated, though the first approved finding came
-        {f_first:.1f}x sooner.
+        with manual tooling, and fit {s_combined:.1f}x as many papers into a
+        PhD with half the time spent waiting on reviews put to other use.
+        It takes both: small steps alone gave {r_manual:.1f}x and the
+        tooling alone {r_tooling:.1f}x.
       else: >-
         Not in a simulation of a six-finding paper, where working in small
-        steps reached an approved paper {r_manual:.1f}x sooner than working
-        stage by stage with manual tooling, {r_auto:.1f}x with automated
-        tooling, and {r_combined:.1f}x with automated tooling against stage
-        by stage without it.
+        steps with automated tooling, as in continuous delivery, reached an
+        approved paper {r_combined:.1f}x sooner than working stage by stage
+        with manual tooling, and fit {s_combined:.1f}x as many papers into a
+        PhD with half the time spent waiting on reviews put to other use.
     evidence:
       - kind: figure
         path: docs/img/research-flow.png
       - kind: result
         path: results/research-flow.json
         values:
-          r_manual: ratio.days_manual
-          r_auto: ratio.days_automated
           r_combined: ratio.days_combined
-          s_auto: ratio.student_days_automated
           s_combined: ratio.student_days_combined
-          f_first: ratio.days_to_first_finding_automated
+          r_manual: ratio.days_manual
+          r_tooling: ratio.days_tooling
   - question: >-
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?

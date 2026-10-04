@@ -4,7 +4,7 @@
 \usepackage[T1]{fontenc}
 \usepackage{tgheros}
 \renewcommand{\familydefault}{\sfdefault}
-\usepackage[final]{microtype}
+\usepackage[final,stretch=12,shrink=12]{microtype}
 \usepackage{xcolor}
 \definecolor{ckteal}{HTML}{3F8F80}
 \definecolor{ckpale}{HTML}{EAF4F1}
@@ -80,6 +80,9 @@ $endif$
 \par\vspace{6pt}
 \begin{multicols}{2}
 \fontsize{10.6}{14}\selectfont
+% Justified, breaking words only now and then, and never names, e.g.,
+% MATLAB
+\uchyph=0\hyphenpenalty=500\tolerance=1000\emergencystretch=0.8em
 $body$
 \end{multicols}
 \end{document}

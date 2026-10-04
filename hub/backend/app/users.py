@@ -1099,14 +1099,14 @@ def start_totp_setup(session: Session, user: User) -> str:
     if not user.email_verified:
         raise HTTPException(403, "Verify your email first")
     now = utcnow()
+    # Starting again right away, e.g., after a reload, carries on with the
+    # setup in progress rather than emailing another code
     if (
         totp is not None
         and (now - totp.created).total_seconds()
         < EMAIL_VERIFICATION_RESEND_SECONDS
     ):
-        raise HTTPException(
-            429, "A code was just sent. Wait a minute before asking again."
-        )
+        return decrypt_secret(totp.secret)
     secret = generate_totp_secret()
     email_code = f"{secrets.randbelow(10**6):06d}"
     if totp is None:

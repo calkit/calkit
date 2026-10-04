@@ -1546,8 +1546,12 @@ def test_totp(
     assert email_code is not None
     email_code = email_code.group(1)
     assert send.call_args.kwargs["email_to"] == user.email
-    with patch("app.users.send_email"):
-        assert client.post("/user/totp", headers=h).status_code == 429
+    # Starting again right away carries on with the same setup, without
+    # emailing another code
+    with patch("app.users.send_email") as send:
+        r = client.post("/user/totp", headers=h)
+    assert r.status_code == 200 and r.json()["secret"] == secret
+    send.assert_not_called()
     step = int(time.time() // TOTP_PERIOD_SECONDS)
     code = get_totp_code(secret, step)
     r = client.post(

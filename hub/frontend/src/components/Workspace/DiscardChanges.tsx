@@ -35,9 +35,7 @@ const DiscardChanges = ({
     onSuccess: (result: { stashed?: boolean }) => {
       showToast(
         "Changes discarded",
-        result?.stashed
-          ? "To get them back, run git stash pop, then calkit dvc checkout."
-          : "",
+        result?.stashed ? "To get them back, run calkit stash pop." : "",
         "success",
       )
       onClose()
@@ -67,8 +65,8 @@ const DiscardChanges = ({
             <AlertDialogBody>
               This puts the workspace back to its last commit. Changes are
               stashed, including data tracked with DVC, so{" "}
-              <Code>git stash pop</Code> then <Code>calkit dvc checkout</Code>{" "}
-              brings them back. New files are left alone.
+              <Code>calkit stash pop</Code> brings them back. New files are left
+              alone.
             </AlertDialogBody>
             <AlertDialogFooter gap={3}>
               <Button

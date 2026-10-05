@@ -1059,6 +1059,26 @@ def breakdown(summary: dict) -> dict[str, float]:
 
 
 waste_breakdown = {name: breakdown(s) for name, s in waste_baselines.items()}
+waste_share = {
+    name: {k: v / sum(parts.values()) for k, v in parts.items()}
+    for name, parts in waste_breakdown.items()
+}
+# What the answer cites, by names that don't depend on the scenarios'
+small = waste["small steps, manual"]["tool hopping"]
+waste_headline = {
+    "status_quo_waiting_share": waste_share["status quo"]["waiting on the PI"],
+    "agents_waiting_share": waste_share["status quo, agents"][
+        "waiting on the PI"
+    ],
+    "batches_loops_gain": waste["status quo"]["big batches"]["loops_gain"],
+    "small_steps_hopping_share": waste_share["small steps, manual"][
+        "tool hopping"
+    ],
+    "small_steps_hopping_gain": small["days_ratio"],
+    "small_steps_hopping_flaw_cut": 1
+    - small["flawed_per_finding_mean"]
+    / waste_baselines["small steps, manual"]["flawed_per_finding_mean"],
+}
 
 
 def crossing(xs: list[float], ys: list[float], level: float) -> float | None:
@@ -1096,6 +1116,8 @@ results = {
     },
     "waste": {
         "breakdown": waste_breakdown,
+        "share": waste_share,
+        "headline": waste_headline,
         "baselines": waste_baselines,
         "removed": waste,
     },

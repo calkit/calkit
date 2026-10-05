@@ -39,6 +39,32 @@ questions:
           r_manual: ratio.days_manual
           r_tooling: ratio.days_tooling
   - question: >-
+      What most slows research and limits iteration in the status quo, and
+      how do agents change that?
+    answer: >-
+      In a simulation of a six-finding paper worked stage by stage with
+      manual tooling, waiting on the PI to review big batches takes
+      {sq_wait:.0%} of the time to a published paper, more than anything
+      else, and breaking the batches up gives {batch_loops:.1f}x as many
+      feedback loops. The batches are big because tool hopping and review
+      prep cost something on every iteration: worked in small steps with
+      today's tools, tool hopping is the largest waste, at {hop:.0%} of the
+      time, and taking it away publishes {hop_gain:.2f}x sooner with
+      {hop_flaws:.0%} fewer flaws. Agents shrink the hands-on work, so
+      waiting on the PI grows to {agents_wait:.0%}.
+    evidence:
+      - kind: figure
+        path: docs/img/research-flow-waste.png
+      - kind: result
+        path: results/research-flow.json
+        values:
+          sq_wait: waste.headline.status_quo_waiting_share
+          agents_wait: waste.headline.agents_waiting_share
+          batch_loops: waste.headline.batches_loops_gain
+          hop: waste.headline.small_steps_hopping_share
+          hop_gain: waste.headline.small_steps_hopping_gain
+          hop_flaws: waste.headline.small_steps_hopping_flaw_cut
+  - question: >-
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?
     answer:

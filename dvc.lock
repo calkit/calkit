@@ -133,8 +133,8 @@ stages:
       size: 5
     - path: scripts/research-flow.py
       hash: md5
-      md5: ac940ab931d38224732e9d7c25d27606
-      size: 42032
+      md5: 730152e2217fcfc9aa636c5cbee36875
+      size: 42928
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -142,8 +142,8 @@ stages:
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: 9529e6d065f05ab39aefe39fe6856e00
-      size: 70223
+      md5: 22cd7480f5fc01cad15fe8a43578d3c4
+      size: 72078
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -153,8 +153,8 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: 9529e6d065f05ab39aefe39fe6856e00
-      size: 70223
+      md5: 22cd7480f5fc01cad15fe8a43578d3c4
+      size: 72078
     - path: scripts/plot-research-flow.py
       hash: md5
       md5: fc8849c6c10e026ae15a0817b13b43f1
@@ -185,8 +185,8 @@ stages:
       size: 5
     - path: calkit.yaml
       hash: md5
-      md5: fb590f9577d42e03fba5dc9f2807d0b7
-      size: 8374
+      md5: 8779e0cdc87aa70208958bbd47b837a0
+      size: 9731
     - path: docs/one-pager/main.md
       hash: md5
       md5: ffc2d1344bf9aa855b9ae4d38241e573
@@ -205,8 +205,8 @@ stages:
       size: 1649
     - path: results/research-flow.json
       hash: md5
-      md5: 9529e6d065f05ab39aefe39fe6856e00
-      size: 70223
+      md5: 22cd7480f5fc01cad15fe8a43578d3c4
+      size: 72078
     - path: scripts/one-pager-to-latex.py
       hash: md5
       md5: e73c08678ba3867ff3b30feefa72bb9e
@@ -218,7 +218,7 @@ stages:
     outs:
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 6122d6ef58b8132068da9d63d277f3e6
+      md5: ed7580e3a89983eba53daea7faed82bb
       size: 7796
   one-pager:
     cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
@@ -234,16 +234,16 @@ stages:
       size: 50359
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 6122d6ef58b8132068da9d63d277f3e6
+      md5: ed7580e3a89983eba53daea7faed82bb
       size: 7796
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 6122d6ef58b8132068da9d63d277f3e6
+      md5: ed7580e3a89983eba53daea7faed82bb
       size: 7796
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: bf2eac8975fb86d2bf2364ccf05b8230
+      md5: db55fc424930fcd0fc34187c54dd7e16
       size: 136006
   budget-2027:
     cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25

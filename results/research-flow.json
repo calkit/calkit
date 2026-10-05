@@ -734,6 +734,52 @@
         "waiting on the journal": 63.075
       }
     },
+    "share": {
+      "status quo": {
+        "hands-on work": 0.3124630427116738,
+        "rework": 0.09402371611240001,
+        "review prep": 0.10833429546387521,
+        "tool hopping": 0.05209425120986705,
+        "submitting and revising": 0.006841817186644773,
+        "waiting on the PI": 0.32002366549287903,
+        "waiting on the journal": 0.1062192118226601
+      },
+      "small steps, manual": {
+        "hands-on work": 0.3546079787076252,
+        "rework": 0.08979381872191865,
+        "review prep": 0.16323515994890855,
+        "tool hopping": 0.1683062310780754,
+        "submitting and revising": 0.007711736629308442,
+        "waiting on the PI": 0.09677954436012882,
+        "waiting on the journal": 0.11956553055403497
+      },
+      "status quo, agents": {
+        "hands-on work": 0.2740988048570059,
+        "rework": 0.08478568881247533,
+        "review prep": 0.06709951413671429,
+        "tool hopping": 0.04797033464618492,
+        "submitting and revising": 0.006033137080704501,
+        "waiting on the PI": 0.3933768727579512,
+        "waiting on the journal": 0.12663564770896388
+      },
+      "small steps, manual, agents": {
+        "hands-on work": 0.34479361844960527,
+        "rework": 0.08589775331188677,
+        "review prep": 0.08613696195448273,
+        "tool hopping": 0.17012679052859903,
+        "submitting and revising": 0.007643441710808285,
+        "waiting on the PI": 0.14496546535602142,
+        "waiting on the journal": 0.16043596868859653
+      }
+    },
+    "headline": {
+      "status_quo_waiting_share": 0.32002366549287903,
+      "agents_waiting_share": 0.3933768727579512,
+      "batches_loops_gain": 3.3594937897650072,
+      "small_steps_hopping_share": 0.1683062310780754,
+      "small_steps_hopping_gain": 1.2059552487723524,
+      "small_steps_hopping_flaw_cut": 0.77895709018493
+    },
     "baselines": {
       "status quo": {
         "days_mean": 584.64,

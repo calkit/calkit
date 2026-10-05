@@ -110,6 +110,11 @@ BASE: dict[str, Any] = {
     "rereview_days": 30.0,
     "detect_reviewer": 0.5,
     "minor_revision_days": 2.0,
+    # Whether the paper is shared openly with what's needed to reproduce
+    # it, and the chance that rerunning everything to put that together
+    # catches each flaw left
+    "shared": False,
+    "curate_detect": 0.3,
     "max_days": 5000.0,
 }
 TOOLING: dict[str, dict[str, Any]] = {
@@ -126,6 +131,10 @@ TOOLING: dict[str, dict[str, Any]] = {
         "handoff_error": 0.05,
         # Getting a submission together, e.g., formatting and gathering files
         "submit_prep": 2.0,
+        # Putting a reproducibility package together after the fact, for a
+        # paper shared openly
+        "curate_fixed": 5.0,
+        "curate_item": 1.0,
         "prep_fixed": 1.0,
         "prep_item": 0.5,
     },
@@ -137,6 +146,9 @@ TOOLING: dict[str, dict[str, Any]] = {
         "handoff_item": 0.01,
         "handoff_error": 0.005,
         "submit_prep": 0.5,
+        # The project is the package
+        "curate_fixed": 0.5,
+        "curate_item": 0.0,
         "prep_fixed": 0.05,
         "prep_item": 0.0,
     },
@@ -481,11 +493,32 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             i.changed = True
 
     def publish() -> Generator:
-        nonlocal under_review, published_at, submitted_at, rejections
+        nonlocal under_review, published_at, submitted_at, rejections, loops
         wait, resubmit = p["review_days"], True
         while True:
             while not ready():
                 yield env.timeout(1.0)
+            if resubmit and p["shared"]:
+                # Rerunning everything to package it up can show up flaws
+                size = sum(i.size for i in items)
+                cost = tool("curate_fixed") + tool("curate_item") * size
+                yield from spend("curate", cost, priority=0)
+                loops += 1
+                flaws = {
+                    id(f): f
+                    for i in items
+                    for f in i.taints.values()
+                    if not f.detected
+                }
+                found = [
+                    f
+                    for f in flaws.values()
+                    if rng.random() < p["curate_detect"]
+                ]
+                if found:
+                    catch(found)
+                    notify()
+                    continue
             if resubmit:
                 yield from spend("submit", tool("submit_prep"), priority=0)
             if submitted_at is None:
@@ -633,6 +666,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             "upkeep",
             "submit",
             "revise",
+            "curate",
         ],
         0.0,
     )
@@ -875,7 +909,7 @@ COLLABORATION = {"pi_learn_hours": 0.25}
 VERIFICATION = {"detect_self": 0.2, "reverify": 0.3}
 PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}
 # The project shipped with the paper, so reviewers can check the work itself
-TRANSPARENCY = {"detect_reviewer": 0.8}
+TRANSPARENCY = {"detect_reviewer": 0.8, "shared": True}
 ALL_GOALS = CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST | TRANSPARENCY
 GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
     ("status quo", "stage-gate", "manual", False, {}),

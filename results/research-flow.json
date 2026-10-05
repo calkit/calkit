@@ -66,6 +66,8 @@
       "rereview_days": 30.0,
       "detect_reviewer": 0.5,
       "minor_revision_days": 2.0,
+      "shared": false,
+      "curate_detect": 0.3,
       "max_days": 5000.0
     },
     "tooling": {
@@ -93,6 +95,8 @@
         "handoff_item": 0.25,
         "handoff_error": 0.05,
         "submit_prep": 2.0,
+        "curate_fixed": 5.0,
+        "curate_item": 1.0,
         "prep_fixed": 1.0,
         "prep_item": 0.5
       },
@@ -120,6 +124,8 @@
         "handoff_item": 0.01,
         "handoff_error": 0.005,
         "submit_prep": 0.5,
+        "curate_fixed": 0.5,
+        "curate_item": 0.0,
         "prep_fixed": 0.05,
         "prep_item": 0.0
       }
@@ -148,7 +154,8 @@
         "translate": 0.0,
         "upkeep": 0.0,
         "submit": 2.01,
-        "revise": 2.0
+        "revise": 2.0,
+        "curate": 0.0
       },
       "effort_total": 343.5030535278423,
       "pi_hours_mean": 38.37390625,
@@ -181,7 +188,8 @@
         "translate": 0.0,
         "upkeep": 0.0,
         "submit": 2.0,
-        "revise": 2.0
+        "revise": 2.0,
+        "curate": 0.0
       },
       "effort_total": 403.512711512197,
       "pi_hours_mean": 31.8271875,
@@ -214,7 +222,8 @@
         "translate": 0.0,
         "upkeep": 0.0,
         "submit": 0.5,
-        "revise": 2.0
+        "revise": 2.0,
+        "curate": 0.0
       },
       "effort_total": 233.3181325711079,
       "pi_hours_mean": 34.67640625,
@@ -247,7 +256,8 @@
         "translate": 0.0,
         "upkeep": 0.0,
         "submit": 0.5,
-        "revise": 2.0
+        "revise": 2.0,
+        "curate": 0.0
       },
       "effort_total": 243.8894168868358,
       "pi_hours_mean": 27.471875,
@@ -361,7 +371,8 @@
           "translate": 40.6471875,
           "upkeep": 26.3425,
           "submit": 0.9813946364239231,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 453.60208635752986,
         "pi_hours_mean": 36.18234375,
@@ -396,7 +407,8 @@
           "translate": 38.38578125,
           "upkeep": 21.32,
           "submit": 0.888125,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 346.29771534992864,
         "pi_hours_mean": 34.860625,
@@ -433,7 +445,8 @@
           "translate": 0.0,
           "upkeep": 23.78125,
           "submit": 0.9977907488033049,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 415.2714293355429,
         "pi_hours_mean": 50.80765625,
@@ -468,7 +481,8 @@
           "translate": 0.0,
           "upkeep": 18.52,
           "submit": 0.875,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 300.8077930741761,
         "pi_hours_mean": 28.95375,
@@ -505,7 +519,8 @@
           "translate": 2.930075,
           "upkeep": 0.0,
           "submit": 0.5037500219240144,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 256.00441503280814,
         "pi_hours_mean": 28.3509375,
@@ -540,7 +555,8 @@
           "translate": 2.87775,
           "upkeep": 0.0,
           "submit": 0.50125,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 247.17845060600737,
         "pi_hours_mean": 27.56171875,
@@ -577,7 +593,8 @@
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 0.5000000330714254,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 253.64591270229622,
         "pi_hours_mean": 27.7940625,
@@ -612,7 +629,8 @@
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 0.5,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 244.9466193971415,
         "pi_hours_mean": 27.1971875,
@@ -688,7 +706,8 @@
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 2.005,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 338.46912088990075,
         "pi_hours_mean": 38.52265625,
@@ -725,7 +744,8 @@
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 1.0025,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 244.61282325590102,
         "pi_hours_mean": 40.2140625,
@@ -762,7 +782,8 @@
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 1.0,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 277.65278302257985,
         "pi_hours_mean": 32.23984375,
@@ -799,7 +820,8 @@
           "translate": 14.054140625,
           "upkeep": 0.0,
           "submit": 0.505,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 206.59018817983065,
         "pi_hours_mean": 32.84640625,
@@ -836,7 +858,8 @@
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 0.5,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 189.86918462146625,
         "pi_hours_mean": 27.9071875,
@@ -873,7 +896,8 @@
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 0.5,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 186.15857164138595,
         "pi_hours_mean": 25.31390625,
@@ -910,7 +934,8 @@
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 0.5000000000000001,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 186.18190733173586,
         "pi_hours_mean": 12.846875,
@@ -928,40 +953,41 @@
       },
       {
         "step": "transparent submission",
-        "days_mean": 276.7625,
-        "days_median": 272.5,
-        "days_p10": 237.5,
-        "days_p90": 317.5,
-        "idle_mean": 88.3322583446535,
-        "student_days_mean": 232.59637082767324,
-        "days_to_finding_mean": 108.24894717850148,
+        "days_mean": 277.2725,
+        "days_median": 273.0,
+        "days_p10": 238.0,
+        "days_p90": 318.5000000000001,
+        "idle_mean": 88.31093923143322,
+        "student_days_mean": 233.11703038428337,
+        "days_to_finding_mean": 108.27799586091008,
         "days_to_first_finding_mean": 33.698990379348835,
         "effort": {
           "learning": 0.9000000000000002,
           "work": 136.17574421881264,
-          "rework": 26.18213565219011,
+          "rework": 26.198008946750942,
           "wasted": 3.40387083752974,
-          "handoff": 0.83823616530419,
-          "setup": 16.69187386348163,
-          "prep": 1.7383809180281753,
+          "handoff": 0.8386861653041902,
+          "setup": 16.703994682141083,
+          "prep": 1.7387559180281755,
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 0.5,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.5025000000000012
         },
-        "effort_total": 188.4302416553465,
-        "pi_hours_mean": 12.8790625,
+        "effort_total": 188.96156076856678,
+        "pi_hours_mean": 12.895625,
         "findings_mean": 8.03,
-        "flawed_findings_mean": 0.005,
-        "flawed_per_finding_mean": 0.0007738095238095238,
-        "days_to_submission_mean": 213.7125,
+        "flawed_findings_mean": 0.0,
+        "flawed_per_finding_mean": 0.0,
+        "days_to_submission_mean": 214.34,
         "rejections_mean": 0.0,
-        "loops_per_month_mean": 5.390925517853134,
-        "correct_per_year_mean": 7.283376092960887,
+        "loops_per_month_mean": 5.4611737479392835,
+        "correct_per_year_mean": 7.273783483736165,
         "unfinished": 0,
-        "days_ratio": 2.1342577119371304,
-        "student_days_ratio": 1.9973476318301924,
-        "correct_ratio": 2.1245938255493626
+        "days_ratio": 2.1303320740426837,
+        "student_days_ratio": 1.9928866187044216,
+        "correct_ratio": 2.1217956179503554
       }
     ],
     "alternatives": {
@@ -985,7 +1011,8 @@
           "translate": 16.97515625,
           "upkeep": 20.2725,
           "submit": 0.6404716771456559,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.0
         },
         "effort_total": 296.83928651681674,
         "pi_hours_mean": 37.2303125,
@@ -1002,117 +1029,120 @@
         "correct_ratio": 1.3275863995598811
       },
       "all goals, no agents": {
-        "days_mean": 333.6875001657473,
-        "days_median": 330.00000001660874,
-        "days_p10": 287.5000003113331,
-        "days_p90": 382.50000000042996,
-        "idle_mean": 87.41351095574807,
-        "student_days_mean": 289.98074468787325,
+        "days_mean": 333.9712513763986,
+        "days_median": 328.0000001841912,
+        "days_p10": 288.0000027395042,
+        "days_p90": 383.0000000040056,
+        "idle_mean": 87.19798536646029,
+        "student_days_mean": 290.3722586931684,
         "days_to_finding_mean": 140.61521781407038,
         "days_to_first_finding_mean": 45.68158723237659,
         "effort": {
           "learning": 3.0,
           "work": 182.13170755943835,
-          "rework": 27.422481135288436,
+          "rework": 27.421702118053126,
           "wasted": 4.510436195786179,
           "handoff": 1.260050234361035,
-          "setup": 21.217004047817092,
-          "prep": 4.232309871560823,
+          "setup": 21.216058652163394,
+          "prep": 4.232059873737587,
           "translate": 0.0,
           "upkeep": 0.0,
-          "submit": 0.5000001657472828,
-          "revise": 2.0
+          "submit": 0.5000001592194657,
+          "revise": 2.0,
+          "curate": 0.5012512171791397
         },
-        "effort_total": 246.2739892099992,
-        "pi_hours_mean": 13.178671875,
+        "effort_total": 246.77326600993828,
+        "pi_hours_mean": 13.169296875,
         "findings_mean": 7.9925,
-        "flawed_findings_mean": 0.0,
-        "flawed_per_finding_mean": 0.0,
-        "days_to_submission_mean": 271.13750016574727,
+        "flawed_findings_mean": 0.0025,
+        "flawed_per_finding_mean": 0.0003125,
+        "days_to_submission_mean": 271.7012513763986,
         "rejections_mean": 0.0,
-        "loops_per_month_mean": 5.520967733886519,
-        "correct_per_year_mean": 6.003640657433325,
+        "loops_per_month_mean": 5.578369296263606,
+        "correct_per_year_mean": 5.996623319583372,
         "unfinished": 0,
-        "days_ratio": 1.770166697004232,
-        "student_days_ratio": 1.602091928362368,
-        "correct_ratio": 1.7512891973170908
+        "days_ratio": 1.7686627144271105,
+        "student_days_ratio": 1.5999317997380045,
+        "correct_ratio": 1.7492422080531127
       },
       "faster review": {
-        "days_mean": 262.5,
-        "days_median": 257.5,
-        "days_p10": 222.5,
-        "days_p90": 302.5,
-        "idle_mean": 73.64728907319393,
-        "student_days_mean": 225.67635546340304,
-        "days_to_finding_mean": 107.43342176432954,
+        "days_mean": 262.49,
+        "days_median": 258.0,
+        "days_p10": 223.0,
+        "days_p90": 303.0,
+        "idle_mean": 73.18371322497343,
+        "student_days_mean": 225.8981433875133,
+        "days_to_finding_mean": 107.35633843099622,
         "days_to_first_finding_mean": 32.780999940791524,
         "effort": {
           "learning": 0.9000000000000002,
           "work": 137.15470896978314,
-          "rework": 25.406708266193686,
+          "rework": 25.374136405328656,
           "wasted": 3.406394101285621,
-          "handoff": 0.8469367846436279,
-          "setup": 16.88349560734417,
-          "prep": 1.7544671975558241,
+          "handoff": 0.8467367846436278,
+          "setup": 16.862718316429692,
+          "prep": 1.7540921975558246,
           "translate": 0.0,
           "upkeep": 0.0,
           "submit": 0.5,
-          "revise": 2.0
+          "revise": 2.0,
+          "curate": 0.5075000000000002
         },
-        "effort_total": 188.85271092680608,
-        "pi_hours_mean": 12.94984375,
+        "effort_total": 189.30628677502656,
+        "pi_hours_mean": 12.93671875,
         "findings_mean": 8.2325,
-        "flawed_findings_mean": 0.0,
-        "flawed_per_finding_mean": 0.0,
-        "days_to_submission_mean": 214.1125,
+        "flawed_findings_mean": 0.0025,
+        "flawed_per_finding_mean": 0.00025,
+        "days_to_submission_mean": 215.1575,
         "rejections_mean": 0.0,
-        "loops_per_month_mean": 5.736145964998744,
-        "correct_per_year_mean": 7.867088487982525,
+        "loops_per_month_mean": 5.8138396751558465,
+        "correct_per_year_mean": 7.860775441008531,
         "unfinished": 0,
-        "days_ratio": 2.250219047619048,
-        "student_days_ratio": 2.058593198613971,
-        "correct_ratio": 2.2948653774410968
+        "days_ratio": 2.2503047735151815,
+        "student_days_ratio": 2.0565720615419196,
+        "correct_ratio": 2.2930238330185433
       },
       "status quo, shared": {
-        "days_mean": 602.575,
-        "days_median": 594.0,
-        "days_p10": 464.0,
-        "days_p90": 759.5000000000001,
-        "idle_mean": 260.0521965881496,
-        "student_days_mean": 472.54890170592523,
-        "days_to_finding_mean": 393.58333333333326,
+        "days_mean": 616.09,
+        "days_median": 607.25,
+        "days_p10": 476.25,
+        "days_p90": 774.4000000000001,
+        "idle_mean": 259.6797686012671,
+        "student_days_mean": 486.25011569936646,
+        "days_to_finding_mean": 393.6395833333333,
         "days_to_first_finding_mean": 364.0625,
         "effort": {
           "learning": 0.0,
           "work": 185.24194688959705,
-          "rework": 55.89440761301792,
+          "rework": 55.96590234826395,
           "wasted": 0.0,
-          "handoff": 14.43125,
-          "setup": 17.510198909235378,
-          "prep": 65.42,
+          "handoff": 14.4425,
+          "setup": 17.555819660871908,
+          "prep": 65.5665625,
           "translate": 0.0,
           "upkeep": 0.0,
-          "submit": 2.025,
-          "revise": 2.0
+          "submit": 2.02,
+          "revise": 2.0,
+          "curate": 13.6175
         },
-        "effort_total": 342.52280341185036,
-        "pi_hours_mean": 39.48390625,
+        "effort_total": 356.4102313987329,
+        "pi_hours_mean": 39.66703125,
         "findings_mean": 8.2125,
-        "flawed_findings_mean": 0.0275,
-        "flawed_per_finding_mean": 0.0036954365079365074,
-        "days_to_submission_mean": 528.6375,
-        "rejections_mean": 0.0125,
-        "loops_per_month_mean": 0.780281267464158,
-        "correct_per_year_mean": 3.4530175869719835,
+        "flawed_findings_mean": 0.0175,
+        "flawed_per_finding_mean": 0.0023908730158730155,
+        "days_to_submission_mean": 545.416875,
+        "rejections_mean": 0.01,
+        "loops_per_month_mean": 0.8020380667235222,
+        "correct_per_year_mean": 3.3790595809926685,
         "unfinished": 0,
-        "days_ratio": 0.9802638675683524,
-        "student_days_ratio": 0.9831274790139357,
-        "correct_ratio": 1.0072608843973139
+        "days_ratio": 0.9587600837539969,
+        "student_days_ratio": 0.9554256039132407,
+        "correct_ratio": 0.9856869987640489
       }
     },
-    "days_ratio": 2.1342577119371304,
-    "student_days_ratio": 1.9973476318301924,
-    "correct_ratio": 2.1245938255493626
+    "days_ratio": 2.1303320740426837,
+    "student_days_ratio": 1.9928866187044216,
+    "correct_ratio": 2.1217956179503554
   },
   "ratio_grid": {
     "cost_scales": [

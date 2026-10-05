@@ -197,8 +197,8 @@ stages:
       size: 3043
     - path: results/research-flow.json
       hash: md5
-      md5: 12bcde617c4b0a7c55ce31809d931984
-      size: 32742
+      md5: 0455dda2dae24aff67aa49a77036797b
+      size: 36619
     - path: scripts/one-pager-to-latex.py
       hash: md5
       md5: 95d5353b43457bde611665223e1c3337
@@ -210,7 +210,7 @@ stages:
     outs:
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 7ff5fde4f4ae2d10e9f96e9a744af909
+      md5: 3060623fb248aaebe8e64efdcadc6656
       size: 7083
   one-pager:
     cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
@@ -226,14 +226,14 @@ stages:
       size: 50359
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 7ff5fde4f4ae2d10e9f96e9a744af909
+      md5: 3060623fb248aaebe8e64efdcadc6656
       size: 7083
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 7ff5fde4f4ae2d10e9f96e9a744af909
+      md5: 3060623fb248aaebe8e64efdcadc6656
       size: 7083
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 34cdf3a468d7438902206ceeab292ebc
-      size: 143082
+      md5: 923dfa4400174edce32643ad2af67980
+      size: 143178

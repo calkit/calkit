@@ -98,4 +98,5 @@ what to build next.
 
 To learn more about Calkit, check out the docs at
 [docs.calkit.org](https://docs.calkit.org) and the web platform at
-[calkit.io](https://calkit.io).
+[calkit.io](https://calkit.io), or email Pete Bachant at
+[pete@calkit.org](mailto:pete@calkit.org).

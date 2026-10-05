@@ -245,6 +245,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     published_at: float | None
     submitted_at: float | None
     rejections: int
+    journal_wait: float
 
     def done() -> bool:
         return published_at is not None
@@ -494,6 +495,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
 
     def publish() -> Generator:
         nonlocal under_review, published_at, submitted_at, rejections, loops
+        nonlocal journal_wait
         wait, resubmit = p["review_days"], True
         while True:
             while not ready():
@@ -525,6 +527,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                 submitted_at = env.now
             under_review = True
             yield env.timeout(wait)
+            journal_wait += wait
             under_review = False
             # Reviewers catch each flaw left in what was submitted
             flaws = {
@@ -676,6 +679,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     final_left: set[int] = set()
     published_at = submitted_at = None
     rejections = 0
+    journal_wait = 0.0
     queue: list[list] = []
     gate_items = None
     gate = env.event()
@@ -699,6 +703,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         "findings": len(items),
         "days_to_submission": submitted_at or env.now,
         "rejections": rejections,
+        "journal_wait": journal_wait,
         "flawed_findings": sum(bool(i.taints) for i in items),
         "flawed_per_finding": sum(bool(i.taints) for i in items) / len(items),
         # Reviews, re-checks and catches of one's own, per month of 21
@@ -743,6 +748,7 @@ def summarize(runs: list[dict]) -> dict:
         "flawed_per_finding_mean": stat("flawed_per_finding"),
         "days_to_submission_mean": stat("days_to_submission"),
         "rejections_mean": stat("rejections"),
+        "journal_wait_mean": stat("journal_wait"),
         "loops_per_month_mean": stat("loops_per_month"),
         "correct_per_year_mean": stat("correct_per_year"),
         "unfinished": sum(not r["finished"] for r in runs),
@@ -768,7 +774,9 @@ def params_for(
         ]:
             manual[k] *= a["mechanics"]
         if tooling == "manual":
-            p.update(manual)
+            # Agents make manual tooling cheaper, except where it's been
+            # set outright
+            p.update({k: v for k, v in manual.items() if k not in overrides})
         for k in ["translate_fixed", "translate_item"]:
             p[k] *= a["mechanics"]
         p["work"] = [w * m for w, m in zip(p["work"], a["work"])]
@@ -985,6 +993,74 @@ for summary in [*goal_steps, *goal_alternatives.values()]:
     summary["correct_gain"] = summary["correct_ratio"] - 1
 
 
+# Where the status quo's time goes, and what holds it back: each of manual
+# tooling's costs taken away on its own, i.e., set to automated tooling's,
+# for the status quo and for working in small steps with today's tools
+WASTE: dict[str, dict[str, Any]] = {
+    "tool hopping": {
+        k: TOOLING["automated"][k]
+        for k in [
+            "handoff_fixed",
+            "handoff_item",
+            "handoff_error",
+            "switch_cost",
+            "forget_cost",
+        ]
+    },
+    "review prep": {
+        k: TOOLING["automated"][k] for k in ["prep_fixed", "prep_item"]
+    },
+    "redoing work by hand": {
+        "redo_factor": TOOLING["automated"]["redo_factor"]
+    },
+    "waiting on the PI": PI_ASSIST,
+}
+WASTE_BASELINES = [
+    ("status quo", "stage-gate", False),
+    ("small steps, manual", "lean", False),
+    ("status quo, agents", "stage-gate", True),
+    ("small steps, manual, agents", "lean", True),
+]
+waste_baselines: dict[str, dict] = {}
+waste: dict[str, dict[str, dict]] = {}
+for b, (baseline, policy, agents) in enumerate(WASTE_BASELINES):
+    base = summarize(
+        simulate(policy, params_for("manual", agents=agents), REPS, 600 + b)
+    )
+    waste_baselines[baseline] = base
+    removed = dict(WASTE)
+    if policy == "stage-gate":
+        removed = removed | {"big batches": {}}
+    waste[baseline] = {}
+    for j, (name, over) in enumerate(removed.items()):
+        run_policy = "lean" if name == "big batches" else policy
+        p = params_for("manual", agents=agents, **over)
+        summary = summarize(simulate(run_policy, p, REPS, 610 + 10 * b + j))
+        waste[baseline][name] = summary | {
+            "days_ratio": base["days_mean"] / summary["days_mean"],
+            "loops_gain": summary["loops_per_month_mean"]
+            / base["loops_per_month_mean"],
+        }
+
+
+def breakdown(summary: dict) -> dict[str, float]:
+    # A scenario's calendar, by what it's spent on
+    e = summary["effort"]
+    return {
+        "hands-on work": e["work"],
+        "rework": e["rework"] + e["wasted"],
+        "review prep": e["prep"],
+        "tool hopping": e["handoff"] + e["setup"],
+        "submitting and revising": e["submit"] + e["revise"],
+        "waiting on the PI": summary["idle_mean"]
+        - summary["journal_wait_mean"],
+        "waiting on the journal": summary["journal_wait_mean"],
+    }
+
+
+waste_breakdown = {name: breakdown(s) for name, s in waste_baselines.items()}
+
+
 def crossing(xs: list[float], ys: list[float], level: float) -> float | None:
     # Where a falling curve first drops below a level, interpolated
     for x0, x1, y0, y1 in zip(xs, xs[1:], ys, ys[1:]):
@@ -1017,6 +1093,11 @@ results = {
         "days_to_1x": {
             k: crossing(learn_days, v, 1.0) for k, v in learn_sweep.items()
         },
+    },
+    "waste": {
+        "breakdown": waste_breakdown,
+        "baselines": waste_baselines,
+        "removed": waste,
     },
     "goals": {
         "steps": goal_steps,

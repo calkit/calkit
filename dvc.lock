@@ -133,8 +133,8 @@ stages:
       size: 5
     - path: scripts/research-flow.py
       hash: md5
-      md5: af2c1a623ec0ee1284829b812e5faec1
-      size: 39126
+      md5: ac940ab931d38224732e9d7c25d27606
+      size: 42032
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -142,8 +142,8 @@ stages:
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: 6156bf8378a3f15d4d2c9f33c4e77650
-      size: 38619
+      md5: 9529e6d065f05ab39aefe39fe6856e00
+      size: 70223
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -153,12 +153,12 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: 6156bf8378a3f15d4d2c9f33c4e77650
-      size: 38619
+      md5: 9529e6d065f05ab39aefe39fe6856e00
+      size: 70223
     - path: scripts/plot-research-flow.py
       hash: md5
-      md5: b3450bae4fd59fa24721607c75aa9717
-      size: 9629
+      md5: fc8849c6c10e026ae15a0817b13b43f1
+      size: 12102
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -168,6 +168,10 @@ stages:
       hash: md5
       md5: d508d1c7d0b708fcb604a06129a962ba
       size: 172719
+    - path: docs/img/research-flow-waste.png
+      hash: md5
+      md5: 6069a0b1d553fd8d9d547b495d09ff48
+      size: 104255
     - path: docs/img/research-flow.png
       hash: md5
       md5: 71f44fdc41af72964a78bf736a426a59
@@ -181,8 +185,8 @@ stages:
       size: 5
     - path: calkit.yaml
       hash: md5
-      md5: 28249e6b8897ef7a27a9958f533e06de
-      size: 8021
+      md5: fb590f9577d42e03fba5dc9f2807d0b7
+      size: 8374
     - path: docs/one-pager/main.md
       hash: md5
       md5: ffc2d1344bf9aa855b9ae4d38241e573
@@ -201,8 +205,8 @@ stages:
       size: 1649
     - path: results/research-flow.json
       hash: md5
-      md5: 6156bf8378a3f15d4d2c9f33c4e77650
-      size: 38619
+      md5: 9529e6d065f05ab39aefe39fe6856e00
+      size: 70223
     - path: scripts/one-pager-to-latex.py
       hash: md5
       md5: e73c08678ba3867ff3b30feefa72bb9e
@@ -214,7 +218,7 @@ stages:
     outs:
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 50f3f22f0ff15d6eed03ea6ffac67570
+      md5: 6122d6ef58b8132068da9d63d277f3e6
       size: 7796
   one-pager:
     cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
@@ -230,16 +234,16 @@ stages:
       size: 50359
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 50f3f22f0ff15d6eed03ea6ffac67570
+      md5: 6122d6ef58b8132068da9d63d277f3e6
       size: 7796
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 50f3f22f0ff15d6eed03ea6ffac67570
+      md5: 6122d6ef58b8132068da9d63d277f3e6
       size: 7796
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 3ae8eca3adefee0f1bad6b300a025b36
+      md5: bf2eac8975fb86d2bf2364ccf05b8230
       size: 136006
   budget-2027:
     cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25

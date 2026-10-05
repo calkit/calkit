@@ -278,3 +278,81 @@ fig.suptitle(
 )
 fig.tight_layout()
 fig.savefig("docs/img/research-flow-goals.png", dpi=150)
+# Where each starting point's time goes, and what removing each kind of
+# waste on its own is worth
+waste = r["waste"]
+baselines = list(waste["breakdown"])
+parts = [
+    ("hands-on work", "#2a78d6"),
+    ("rework", "#e34948"),
+    ("review prep", "#eda100"),
+    ("tool hopping", "#e87ba4"),
+    ("submitting and revising", "#008300"),
+    ("waiting on the PI", "#4a3aa7"),
+    ("waiting on the journal", "#1baf7a"),
+]
+fig, (ax_time, ax_gain) = plt.subplots(
+    1, 2, figsize=(15, 5.5), gridspec_kw={"width_ratios": [1.3, 1]}
+)
+y = np.arange(len(baselines))[::-1]
+left = np.zeros(len(baselines))
+for part, color in parts:
+    spent = np.array([waste["breakdown"][b][part] for b in baselines])
+    ax_time.barh(y, spent, 0.6, left=left, color=color, label=part, zorder=2)
+    for yi, start, d in zip(y, left, spent):
+        if d > 40:
+            ax_time.text(
+                start + d / 2,
+                yi,
+                f"{d:.0f}",
+                ha="center",
+                va="center",
+                color="white",
+                fontsize=8,
+            )
+    left += spent
+ax_time.set_yticks(y, baselines)
+ax_time.set_xlabel("Working days to a published paper")
+ax_time.set_title("Where the time goes", loc="left")
+ax_time.grid(axis="x", color=GRID, zorder=0)
+ax_time.legend(
+    frameon=False,
+    fontsize=8,
+    ncol=4,
+    loc="upper center",
+    bbox_to_anchor=(0.5, -0.13),
+)
+removed = ["big batches", "waiting on the PI", "review prep", "tool hopping"]
+gains = np.array(
+    [
+        [
+            waste["removed"][b][w]["days_ratio"]
+            if w in waste["removed"][b]
+            else np.nan
+            for b in baselines
+        ]
+        for w in removed
+    ]
+)
+ax_gain.imshow(
+    gains,
+    cmap=LinearSegmentedColormap.from_list("seq", ["#f0efec", COLORS["lean"]]),
+    vmin=1.0,
+    vmax=np.nanmax(gains),
+    aspect="auto",
+)
+for i in range(gains.shape[0]):
+    for j in range(gains.shape[1]):
+        text = "n/a" if np.isnan(gains[i, j]) else f"{gains[i, j]:.2f}×"
+        ax_gain.text(j, i, text, ha="center", va="center", fontsize=9)
+ax_gain.set_xticks(
+    range(len(baselines)),
+    [b.replace(", ", ",\n") for b in baselines],
+    fontsize=8,
+)
+ax_gain.set_yticks(range(len(removed)), [f"without {w}" for w in removed])
+ax_gain.set_title("Faster to a published paper", loc="left")
+for spine in ax_gain.spines.values():
+    spine.set_visible(False)
+fig.tight_layout()
+fig.savefig("docs/img/research-flow-waste.png", dpi=150)

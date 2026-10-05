@@ -139,6 +139,7 @@ pipeline:
       outputs:
         - docs/img/research-flow.png
         - docs/img/research-flow-goals.png
+        - docs/img/research-flow-waste.png
     budget-2027:
       kind: python-script
       script_path: scripts/budget.py
@@ -204,6 +205,13 @@ figures:
       Improvement over working stage by stage with manual tooling on a first
       paper, as agents, small steps, Calkit's tooling, faster collaboration,
       faster verification, and agent-assisted PI review are added in turn.
+    stage: research-flow-figure
+  - path: docs/img/research-flow-waste.png
+    title: Waste in the research workflow
+    description: >-
+      Where the time to a published paper goes, with and without agents and
+      small steps, and how much faster it gets with each kind of waste
+      removed on its own.
     stage: research-flow-figure
 
 tables:

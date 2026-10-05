@@ -60,6 +60,7 @@ stages:
     outs:
       - docs/img/research-flow.png
       - docs/img/research-flow-goals.png
+      - docs/img/research-flow-waste.png
     desc: Automatically generated from the 'research-flow-figure' stage in calkit.yaml.
       Changes made here will be overwritten.
   budget-2027:

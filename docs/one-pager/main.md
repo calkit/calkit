@@ -31,9 +31,9 @@ calculations.
 
 ## By the numbers
 
-- **<!-- calkit value key=goals.steps.1.student_days_gain format="{:.0%}" -->24%<!-- /calkit value -->**
-  more papers in a PhD with agents alone
-- **<!-- calkit value key=goals.student_days_gain format="{:.0%}" -->99%<!-- /calkit value -->**
+- **<!-- calkit value key=goals.steps.1.correct_gain format="{:.0%}" -->18%<!-- /calkit value -->**
+  more error-free findings published per year with agents alone
+- **<!-- calkit value key=goals.correct_gain format="{:.0%}" -->112%<!-- /calkit value -->**
   more with agents and Calkit
 
 Simulated in

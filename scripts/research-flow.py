@@ -980,8 +980,9 @@ for summary in [*goal_steps, *goal_alternatives.values()]:
         summary["correct_per_year_mean"]
         / goal_steps[0]["correct_per_year_mean"]
     )
-    # The same as a gain, e.g., 0.2 for 20% more papers
+    # The same as gains, e.g., 0.2 for 20% more
     summary["student_days_gain"] = summary["student_days_ratio"] - 1
+    summary["correct_gain"] = summary["correct_ratio"] - 1
 
 
 def crossing(xs: list[float], ys: list[float], level: float) -> float | None:
@@ -1024,6 +1025,7 @@ results = {
         "student_days_ratio": goal_steps[-1]["student_days_ratio"],
         "correct_ratio": goal_steps[-1]["correct_ratio"],
         "student_days_gain": goal_steps[-1]["student_days_gain"],
+        "correct_gain": goal_steps[-1]["correct_gain"],
     },
     "ratio_grid": {
         "cost_scales": cost_scales,

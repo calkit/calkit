@@ -722,7 +722,8 @@
         "days_ratio": 1.0,
         "student_days_ratio": 1.0,
         "correct_ratio": 1.0,
-        "student_days_gain": 0.0
+        "student_days_gain": 0.0,
+        "correct_gain": 0.0
       },
       {
         "step": "agents",
@@ -761,7 +762,8 @@
         "days_ratio": 1.1703635823261345,
         "student_days_ratio": 1.2400049646188722,
         "correct_ratio": 1.1773773068287614,
-        "student_days_gain": 0.24000496461887222
+        "student_days_gain": 0.24000496461887222,
+        "correct_gain": 0.1773773068287614
       },
       {
         "step": "small steps",
@@ -800,7 +802,8 @@
         "days_ratio": 1.4859282924651116,
         "student_days_ratio": 1.3761737509096308,
         "correct_ratio": 1.4864607727172143,
-        "student_days_gain": 0.3761737509096308
+        "student_days_gain": 0.3761737509096308,
+        "correct_gain": 0.48646077271721433
       },
       {
         "step": "automated tooling",
@@ -839,7 +842,8 @@
         "days_ratio": 1.6947945284088057,
         "student_days_ratio": 1.6737921357478016,
         "correct_ratio": 1.6947293382088386,
-        "student_days_gain": 0.6737921357478016
+        "student_days_gain": 0.6737921357478016,
+        "correct_gain": 0.6947293382088386
       },
       {
         "step": "faster collaboration",
@@ -878,7 +882,8 @@
         "days_ratio": 1.9270287904738603,
         "student_days_ratio": 1.8718019865571975,
         "correct_ratio": 1.9130222776381456,
-        "student_days_gain": 0.8718019865571975
+        "student_days_gain": 0.8718019865571975,
+        "correct_gain": 0.9130222776381456
       },
       {
         "step": "faster verification",
@@ -917,7 +922,8 @@
         "days_ratio": 1.9859046018071023,
         "student_days_ratio": 1.9213382311734732,
         "correct_ratio": 1.9846933481107247,
-        "student_days_gain": 0.9213382311734732
+        "student_days_gain": 0.9213382311734732,
+        "correct_gain": 0.9846933481107247
       },
       {
         "step": "agent-assisted PI review",
@@ -956,7 +962,8 @@
         "days_ratio": 2.1505757065489464,
         "student_days_ratio": 2.0161937654177864,
         "correct_ratio": 2.160598088357366,
-        "student_days_gain": 1.0161937654177864
+        "student_days_gain": 1.0161937654177864,
+        "correct_gain": 1.160598088357366
       },
       {
         "step": "transparent submission",
@@ -995,7 +1002,8 @@
         "days_ratio": 2.1303320740426837,
         "student_days_ratio": 1.9928866187044216,
         "correct_ratio": 2.1217956179503554,
-        "student_days_gain": 0.9928866187044216
+        "student_days_gain": 0.9928866187044216,
+        "correct_gain": 1.1217956179503554
       }
     ],
     "alternatives": {
@@ -1035,7 +1043,8 @@
         "days_ratio": 1.3282878722170128,
         "student_days_ratio": 1.2530129573001305,
         "correct_ratio": 1.3275863995598811,
-        "student_days_gain": 0.2530129573001305
+        "student_days_gain": 0.2530129573001305,
+        "correct_gain": 0.3275863995598811
       },
       "all goals, no agents": {
         "days_mean": 333.9712513763986,
@@ -1073,7 +1082,8 @@
         "days_ratio": 1.7686627144271105,
         "student_days_ratio": 1.5999317997380045,
         "correct_ratio": 1.7492422080531127,
-        "student_days_gain": 0.5999317997380045
+        "student_days_gain": 0.5999317997380045,
+        "correct_gain": 0.7492422080531127
       },
       "faster review": {
         "days_mean": 262.49,
@@ -1111,7 +1121,8 @@
         "days_ratio": 2.2503047735151815,
         "student_days_ratio": 2.0565720615419196,
         "correct_ratio": 2.2930238330185433,
-        "student_days_gain": 1.0565720615419196
+        "student_days_gain": 1.0565720615419196,
+        "correct_gain": 1.2930238330185433
       },
       "status quo, shared": {
         "days_mean": 616.09,
@@ -1149,13 +1160,15 @@
         "days_ratio": 0.9587600837539969,
         "student_days_ratio": 0.9554256039132407,
         "correct_ratio": 0.9856869987640489,
-        "student_days_gain": -0.04457439608675928
+        "student_days_gain": -0.04457439608675928,
+        "correct_gain": -0.01431300123595114
       }
     },
     "days_ratio": 2.1303320740426837,
     "student_days_ratio": 1.9928866187044216,
     "correct_ratio": 2.1217956179503554,
-    "student_days_gain": 0.9928866187044216
+    "student_days_gain": 0.9928866187044216,
+    "correct_gain": 1.1217956179503554
   },
   "ratio_grid": {
     "cost_scales": [

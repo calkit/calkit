@@ -52,7 +52,7 @@ Simulated in
 Rebecca McCabe recently finished her PhD in Mechanical Engineering at Cornell,
 developing advanced computational methods for multi-disciplinary
 optimization of
-wave energy converters her
+wave energy converters in her
 [MDOcean](https://github.com/symbiotic-engineering/MDOcean) and
 [OpenFLASH](https://github.com/symbiotic-engineering/OpenFLASH) projects.
 She used Calkit to create single button reproducible pipelines that integrated

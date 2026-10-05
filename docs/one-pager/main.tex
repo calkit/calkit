@@ -46,7 +46,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \renewcommand{\headrulewidth}{0pt}
-\fancyfoot[C]{\color{ckmuted}\scriptsize Built by Calkit v0.48.1.dev42 from \href{https://calkit.io/calkit/calkit?ref=28d47ba8762e92a206cc5483187e36465c5343be}{calkit.io/calkit/calkit} at rev \texttt{28d47ba}.}
+\fancyfoot[C]{\color{ckmuted}\scriptsize Built by Calkit v0.48.1.dev43 from \href{https://calkit.io/calkit/calkit?ref=1eee4a7740aadf6d96f79714d993c0372170b093}{calkit.io/calkit/calkit} at rev \texttt{1eee4a7} with uncommitted changes.}
 % It's a one-pager, so spilling onto a second page is an error, not a
 % layout to live with
 \AtEndDocument{\ifnum\value{page}>1
@@ -69,10 +69,10 @@ agentic AI};
   \begin{tcolorbox}[colback=ckpale,colframe=ckpale,boxrule=0pt,arc=4pt,
     left=8pt,right=8pt,top=6pt,bottom=4pt]
     {\color{ckteal}\bfseries\small BY THE NUMBERS}\par\vspace{4pt}
-    \cknumber{\href{https://calkit.io/calkit/calkit/questions/1?ref=28d47ba8762e92a206cc5483187e36465c5343be}{\ckvalue{goals.steps.1.correct\_gain}{18\%}{results/research-flow.json}{research-flow}}}{more error-free findings published per year with agents alone}
-    \cknumber{\href{https://calkit.io/calkit/calkit/questions/1?ref=28d47ba8762e92a206cc5483187e36465c5343be}{\ckvalue{goals.correct\_gain}{112\%}{results/research-flow.json}{research-flow}}}{more with agents and Calkit}
+    \cknumber{\href{https://calkit.io/calkit/calkit/questions/1?ref=1eee4a7740aadf6d96f79714d993c0372170b093}{\ckvalue{goals.steps.1.correct\_gain}{18\%}{results/research-flow.json}{research-flow}}}{more error-free findings published per year with agents alone}
+    \cknumber{\href{https://calkit.io/calkit/calkit/questions/1?ref=1eee4a7740aadf6d96f79714d993c0372170b093}{\ckvalue{goals.correct\_gain}{112\%}{results/research-flow.json}{research-flow}}}{more with agents and Calkit together}
         {\scriptsize\color{ckmuted}Simulated in
-\href{https://calkit.io/calkit/calkit/pipeline?stage=research-flow&ref=28d47ba8762e92a206cc5483187e36465c5343be}{Calkit's
+\href{https://calkit.io/calkit/calkit/pipeline?stage=research-flow&ref=1eee4a7740aadf6d96f79714d993c0372170b093}{Calkit's
 own pipeline}.}
       \end{tcolorbox}
 \end{minipage}
@@ -93,54 +93,58 @@ for humans and AI agents.
 
 Rather than assuming we should simply teach scientists software
 development tools and platforms and leave them to assemble their own
-workflows (the status quo, which seems to have saturated), Calkit
-provides a vertically-integrated, research-focused experience right out
-of the box: reference management, version control (including large data
-files), computational environments, pipeline automation, and a
-web-based, self-hostable collaboration platform.
+workflows, Calkit provides a turnkey, vertically integrated,
+research-focused experience right out of the box: reference management,
+version control (including large data files), computational
+environments, pipeline automation, and a self-hostable collaboration
+platform.
 
 Calkit is designed to help individuals work more efficiently by allowing
 all stages of research---from asking questions, to data collection and
 analysis, to publication---to live together in the same project,
-breaking down silos that slow down iteration while allowing more
-inclusive collaboration, i.e., from those who don't want to or need to
-learn complex tools like Git. A Calkit project includes the research
-article, not only supplements it, and is intended to be shipped whole,
-providing full context and lighting fast verifiability, by linking all
-evidence for answers to research questions back to reproducible
-calculations.
+breaking down silos that slow down iteration (inspired by the Agile,
+Lean, and DevOps movements) while allowing more inclusive collaboration,
+e.g., from those who don't want to learn complex tools like Git.
+
+A Calkit project \emph{includes} the research article, not only
+supplements it, and is intended to be shipped whole, providing full
+context and fast verifiability, by linking all evidence for answers to
+research questions back to reproducible calculations. See
+\href{https://doi.org/10.1088/1538-3873/ae6fef}{this published article}
+for an example.
 
 \section{A success story}\label{a-success-story}
 
 Rebecca McCabe recently finished her PhD in Mechanical Engineering at
-Cornell. She used Calkit to create a single-button reproducible pipeline
+Cornell, developing advanced computational methods for
+multi-disciplinary optimization of wave energy converters her
+\href{https://github.com/symbiotic-engineering/MDOcean}{MDOcean} and
+\href{https://github.com/symbiotic-engineering/OpenFLASH}{OpenFLASH}
+projects. She used Calkit to create single button reproducible pipelines
 that integrated MATLAB, Python, Julia, LaTeX, and more. She used
 Calkit's Overleaf integration to allow collaborators to contribute
-without learning Git.
+without learning Git, producing TODO journal articles and TODO
+conference papers.
 
 \section{Where we're heading and what support we
 need}\label{where-were-heading-and-what-support-we-need}
 
 Calkit is developed and operated in a very lean and efficient manner.
-We're currently supported with 25\% of a Sr.~Research Software
-Engineer's capacity provided by the Schmidt Academy for Software
-Engineering at Caltech. Google Cloud has generously provided credits to
-run the cloud infrastructure for a year, and we need \$5k to stay
-running for another.
+Current support includes 25\% of a Research Software Engineer's capacity
+provided by the Schmidt Academy for Software Engineering at Caltech and
+academic research credits from Google Cloud to host our instance of the
+web platform.
 
-With an MVP in place serving a handful of users, we now need to do some
-training and community building by hosting workshops, starting around
-Southern California and Boston. These will be focused on computational
-reproducibility principles, with Calkit positioned as one, not the only
-way to achieve them. Through these efforts we're looking to 10x our user
-base and continue to evolve the software to increase the number of
-comprehensive, transparent, single-button reproducible research projects
-released alongside papers. To do this, we're seeking \$75k for 2027.
+With an MVP in place serving a handful of users, we want to ramp up
+training and community building by hosting workshops focused on agile
+reproducible research workflows in the age of agentic AI. Through these
+efforts we're looking to 10x our user base and continue to evolve the
+software to increase the number of transparent, single button
+reproducible research compendiums released alongside papers. To achieve
+this, we're seeking \$75k funding for 2027.
 
-\section{Learn more}\label{learn-more}
-
-To learn more about Calkit, you can check out
-\href{http://docs.calkit.org}{the docs} and try out the web platform at
+To learn more about Calkit, check out the docs at
+\href{http://docs.calkit.org}{docs.calkit.org} and the web platform at
 \href{http://calkit.io}{calkit.io}.
 \end{multicols}
 \end{document}

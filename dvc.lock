@@ -1,8 +1,7 @@
 schema: '2.0'
 stages:
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -70,8 +69,7 @@ stages:
       md5: 9521ff97f424019b13e51c64a463ee06
       size: 121897
   latex-word-round-trip-figure:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/plot-latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -103,8 +101,7 @@ stages:
       md5: f45d8d91f4fde2eb20f14b192f4d6e62
       size: 206974
   latex-image-readme/sizes:
-    cmd: calkit xenv -n dev --no-check -- python 
-      .calkit/markdown/images/latex/README.md/sizes.py
+    cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
     deps:
     - path: .calkit/markdown/images/latex/README.md/sizes.py
       hash: md5
@@ -188,8 +185,8 @@ stages:
       size: 7293
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 44fb6d37730ea4d2748f94bb1be0fbc1
-      size: 3870
+      md5: 33e59bc7f723d1f4ea32942332349704
+      size: 3931
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 161bbc0cccd2e991cdc03924cedaef55
@@ -204,8 +201,8 @@ stages:
       size: 38619
     - path: scripts/one-pager-to-latex.py
       hash: md5
-      md5: 95d5353b43457bde611665223e1c3337
-      size: 3965
+      md5: e73c08678ba3867ff3b30feefa72bb9e
+      size: 2899
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -213,8 +210,8 @@ stages:
     outs:
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 38c0305201d08c5c3b301d0d5b318845
-      size: 7314
+      md5: f13ae91af856a643ba66fef2337ac635
+      size: 7146
   one-pager:
     cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
     deps:
@@ -229,14 +226,14 @@ stages:
       size: 50359
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 38c0305201d08c5c3b301d0d5b318845
-      size: 7314
+      md5: f13ae91af856a643ba66fef2337ac635
+      size: 7146
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: 38c0305201d08c5c3b301d0d5b318845
-      size: 7314
+      md5: f13ae91af856a643ba66fef2337ac635
+      size: 7146
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 399397cda3a56436c344248f0545d3c3
-      size: 157086
+      md5: 3d84a38f22347ed6976f705b6fbfff76
+      size: 135653

@@ -3,9 +3,10 @@
 ![Calkit system](../img/pipeline.png)
 
 Generative AI is making it much cheaper to produce research outputs, while the
-reproducibility crisis remains unsolved ([only 12% of studies share
-code](https://doi.org/10.1371/journal.pone.0311493), and even fewer share code
-that is quick to verify).
+reproducibility crisis remains unsolved.
+For example, the open-access publisher PLOS found
+[only 12% of articles sharing code openly](https://doi.org/10.1371/journal.pone.0311493),
+and even fewer share code that is quick to verify.
 As the bottleneck is shifting from producing outputs
 to checking that those outputs are trustworthy, it's now more important than
 ever to make it intuitive and enjoyable to work transparently and reproducibly,
@@ -50,12 +51,12 @@ Simulated in
 ## A success story
 
 Rebecca McCabe recently finished her PhD in Mechanical Engineering at Cornell,
-developing advanced computational methods for multi-disciplinary
+developing advanced computational methods for multidisciplinary
 optimization of
 wave energy converters in her
 [MDOcean](https://github.com/symbiotic-engineering/MDOcean) and
 [OpenFLASH](https://github.com/symbiotic-engineering/OpenFLASH) projects.
-She used Calkit to create single button reproducible pipelines that integrated
+She used Calkit to create single-button reproducible pipelines that integrated
 MATLAB, Python, Julia, LaTeX, and more.
 She used Calkit's Overleaf integration
 to allow collaborators to contribute without learning Git,
@@ -79,7 +80,7 @@ agile reproducible research workflows in the age of
 agentic AI.
 Through these efforts we're looking to 10x our user base and continue to evolve
 the software to increase the number of transparent,
-single button reproducible research compendiums released alongside papers.
+single-button reproducible research compendia released alongside papers.
 To achieve this, we're seeking \$75k funding for 2027\.
 
 <!-- ## Learn more -->

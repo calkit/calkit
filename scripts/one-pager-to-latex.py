@@ -1,15 +1,14 @@
 """Convert the one-pager's Markdown into LaTeX for its PDF.
 
 Each value marker becomes the value its results file holds now, linked to
-the question on the project's hub whose evidence cites that file, as of the
-commit it's built from, and the footer says what built it from where. The
-values are written as calkit.sty's ``\\ckvalue``, which the template prints
-as is until that package is used.
+the question on the project's hub whose evidence cites that file, and the
+footer says what built it from where. No commit is named, since a file can't
+name the commit it's committed in; that belongs to a release. The values are
+written as calkit.sty's ``\\ckvalue``, which the template prints as is until
+that package is used.
 """
 
-import re
-import subprocess
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import urlparse
 
 import pypandoc
 
@@ -20,17 +19,6 @@ import calkit.pipeline
 DIR = "docs/one-pager"
 SRC = f"{DIR}/main.md"
 OUT = f"{DIR}/main.tex"
-INPUTS = [
-    SRC,
-    f"{DIR}/template.tex",
-    f"{DIR}/one-pager.lua",
-    "scripts/one-pager-to-latex.py",
-    "calkit.yaml",
-]
-
-
-def git(*args: str) -> str:
-    return subprocess.check_output(["git", *args], text=True).strip()
 
 
 def escape_tex(text: str) -> str:
@@ -52,7 +40,6 @@ ck_info = calkit.load_calkit_info()
 hub = urlparse(ck_info.get("hub") or "https://calkit.io")
 project = f"{hub.netloc or hub.path}/{ck_info['owner']}/{ck_info['name']}"
 project_url = f"{hub.scheme or 'https'}://{project}"
-rev = git("rev-parse", "HEAD")
 with open(SRC, encoding="utf-8") as f:
     text = f.read()
 # The values as the results files hold them now, then where each comes from
@@ -75,34 +62,15 @@ for v in reversed(values):
     )
     number = question_for_path.get(v.path)
     if number is not None:
-        tex = rf"\href{{{project_url}/questions/{number}?ref={rev}}}{{{tex}}}"
+        tex = rf"\href{{{project_url}/questions/{number}}}{{{tex}}}"
     raw = "`" + tex + "`{=latex}"
     # Markers on a line are replaced last to first, so offsets hold
     lines[v.line - 1] = line[: marker.start()] + raw + line[marker.end() :]
 text = "".join(lines)
 
-
-def pin(match: re.Match) -> str:
-    # A link into the project on the hub shows it as it was built from
-    url = urlparse(match.group(1))
-    query = parse_qsl(url.query)
-    if not any(k == "ref" for k, _ in query):
-        query.append(("ref", rev))
-    return f"]({urlunparse(url._replace(query=urlencode(query)))})"
-
-
-text = re.sub(rf"\]\(({re.escape(project_url)}[^)\s]*)\)", pin, text)
-# A local version's commit is the rev, which the footer gives already
 version = calkit.__version__.split("+")[0]
-dirty = git("status", "--porcelain", "--", *INPUTS, *{v.path for v in values})
-# The project links to its state at the full rev, which the hub can fetch
-# even before it has the commit, and reads with the short one
 footer = (
-    rf"Built by Calkit v{version} from "
-    rf"\href{{{project_url}?ref={rev}}}{{{project}}} at rev "
-    rf"\texttt{{{rev[:7]}}}"
-    + (" with uncommitted changes" if dirty else "")
-    + "."
+    rf"Built by Calkit v{version} from \href{{{project_url}}}{{{project}}}."
 )
 pypandoc.convert_text(
     text,

@@ -4439,31 +4439,67 @@ def switch_branch(
 
 @app.command(name="stash")
 def stash(
+    action: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "'push' to stash changes, which is the default, or 'pop' to "
+                "bring back the most recent stash."
+            )
+        ),
+    ] = "push",
+    message: Annotated[
+        str | None,
+        typer.Option(
+            "--message", "-m", help="A message to stash the changes with."
+        ),
+    ] = None,
     pop: Annotated[
-        bool, typer.Option("--pop", help="Pop the most recent stash.")
+        bool, typer.Option("--pop", help="Same as 'calkit stash pop'.")
     ] = False,
 ) -> None:
-    """Stash or restore workspace changes including dvc-zip tracked dirs.
+    """Stash workspace changes, including DVC-tracked data, or bring them
+    back.
 
-    Without --pop: zips any modified workspace dirs into the DVC cache, then
-    git-stashes (saving the updated .dvc files), checks out the committed DVC
-    state, and unzips it to the workspace.
-
-    With --pop: pops the git stash (restoring the saved .dvc files), checks
-    out the stashed DVC state, and unzips it to the workspace.
+    Stashing commits changed DVC-tracked data to the DVC cache, including
+    zipped folders, so the Git stash holds pointers to it, then checks out
+    the committed data. Popping restores the stash and checks out the data
+    it points to.
     """
     if pop:
+        action = "pop"
+    if action not in ("push", "pop"):
+        raise_error(f"Unknown action '{action}'; use 'push' or 'pop'")
+
+    def changed_data() -> list[str]:
+        # DVC-tracked data that doesn't match what its pointers say
+        if not os.path.isdir(".dvc"):
+            return []
+        status = calkit.dvc.get_dvc_repo().data_status()
+        return list(status.get("uncommitted", {}).get("modified", []))
+
+    def check_out_changed_data() -> None:
+        for path in changed_data():
+            if calkit.dvc.run_dvc_command(["checkout", path, "--force"]):
+                raise_error(f"Failed to check out {path}")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+
+    if action == "pop":
         subprocess.check_call(["git", "stash", "pop"])
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
-    else:
-        # Zip any modified workspace dirs so their current state is in the DVC
-        # cache (the updated .dvc file will be captured by git stash)
-        calkit.dvc.zip.sync_all(direction="to-zip")
-        subprocess.check_call(["git", "stash"])
-        # Restore the committed zip versions and unzip them
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
+        check_out_changed_data()
+        return
+    # Zipped folders go into their zips, and changed data into the cache, so
+    # the stash can point at both
+    calkit.dvc.zip.sync_all(direction="to-zip")
+    modified = changed_data()
+    if modified and calkit.dvc.run_dvc_command(
+        ["commit", "--force", *modified]
+    ):
+        raise_error("Failed to commit changed data to the DVC cache")
+    subprocess.check_call(
+        ["git", "stash", "push"] + (["-m", message] if message else [])
+    )
+    check_out_changed_data()
 
 
 @app.command(

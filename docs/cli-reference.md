@@ -28,7 +28,7 @@
 | [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                                                                           |
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                                                                             |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                                                               |
-| [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                                                                          |
+| [`stash`](#top-command-stash)                    | Stash workspace changes, including DVC-tracked data, or bring them back.                                                                                    |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                                                                             |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                                                                         |
 | [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                                                                     |
@@ -560,23 +560,28 @@ Arguments:
 
 ### `calkit stash`
 
-Stash or restore workspace changes including dvc-zip tracked dirs.
+Stash workspace changes, including DVC-tracked data, or bring them back.
 
-Without --pop: zips any modified workspace dirs into the DVC cache, then git-stashes (saving the updated .dvc files), checks out the committed DVC state, and unzips it to the workspace.
-
-With --pop: pops the git stash (restoring the saved .dvc files), checks out the stashed DVC state, and unzips it to the workspace.
+Stashing commits changed DVC-tracked data to the DVC cache, including zipped folders, so the Git stash holds pointers to it, then checks out the committed data. Popping restores the stash and checks out the data it points to.
 
 Usage:
 
 ```text
-calkit stash [OPTIONS]
+calkit stash [OPTIONS] [ACTION]
 ```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                  |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `action` | str  | no       | push    | 'push' to stash changes, which is the default, or 'pop' to bring back the most recent stash. |
 
 Options:
 
-| Option  | Type    | Required | Default | Description                |
-| ------- | ------- | -------- | ------- | -------------------------- |
-| `--pop` | boolean | no       | False   | Pop the most recent stash. |
+| Option            | Type    | Required | Default | Description                          |
+| ----------------- | ------- | -------- | ------- | ------------------------------------ |
+| `--message`, `-m` | str     | no       |         | A message to stash the changes with. |
+| `--pop`           | boolean | no       | False   | Same as 'calkit stash pop'.          |
 
 <a id="top-command-dvc"></a>
 

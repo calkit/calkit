@@ -170,16 +170,20 @@ def post_org(
         },
         timeout=15,
     )
-    if install_resp.status_code != 200:
-        logger.info(
-            f"Calkit GitHub App is not installed for org {req.github_name} "
-            f"({install_resp.status_code})"
-        )
+    if install_resp.status_code == 404:
         raise HTTPException(
             400,
             "The Calkit GitHub App is not installed for this org; "
             "install it by visiting "
             "https://github.com/apps/calkit/installations/select_target",
+        )
+    if install_resp.status_code != 200:
+        logger.warning(
+            f"Could not look up the app installation for {req.github_name}: "
+            f"{install_resp.status_code} ({install_resp.text[:200]})"
+        )
+        raise HTTPException(
+            502, "Could not verify the GitHub App installation; try again"
         )
     membership_resp = requests.get(
         (
@@ -203,7 +207,11 @@ def post_org(
         )
     # An invitation not yet accepted is not membership
     if membership_resp.json().get("state") != "active":
-        raise HTTPException(400, "Must be a member of the GitHub org to add")
+        raise HTTPException(
+            400,
+            "Must be an active member of the GitHub org to add it; "
+            "accept any pending invitation first",
+        )
     # Figure out the display name
     display_name = req.display_name
     if display_name is None:

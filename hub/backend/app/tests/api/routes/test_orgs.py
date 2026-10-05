@@ -12,7 +12,7 @@ def test_post_org(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     github_name = f"Org-{uuid.uuid4().hex[:8]}"
-    installed = False
+    install_status = 404
     membership: tuple[int, dict[str, str]] = (404, {})
 
     def fake_get(
@@ -21,8 +21,9 @@ def test_post_org(
         timeout: int | None = None,
     ) -> SimpleNamespace:
         if url.endswith("/installation"):
-            code = 200 if installed else 404
-            return SimpleNamespace(status_code=code, json=lambda: {"id": 1})
+            return SimpleNamespace(
+                status_code=install_status, json=lambda: {"id": 1}, text=""
+            )
         if "/memberships/" in url:
             code, body = membership
             return SimpleNamespace(status_code=code, json=lambda: body)
@@ -45,13 +46,18 @@ def test_post_org(
     resp = post()
     assert resp.status_code == 400
     assert "not installed" in resp.json()["detail"]
+    # A failed lookup isn't reported as a missing installation
+    install_status = 500
+    assert post().status_code == 502
     # Someone outside the org can't add it
-    installed = True
+    install_status = 200
     membership = (404, {})
     assert post().status_code == 404
     # Nor can someone only invited to it
     membership = (200, {"role": "member", "state": "pending"})
-    assert post().status_code == 400
+    resp = post()
+    assert resp.status_code == 400
+    assert "pending invitation" in resp.json()["detail"]
     # A plain member can, and becomes the owner in Calkit
     membership = (200, {"role": "member", "state": "active"})
     resp = post()

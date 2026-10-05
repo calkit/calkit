@@ -626,8 +626,8 @@ class NewPassword(SQLModel):
 
 
 class ProjectBase(SQLModel):
-    name: str = Field(min_length=4, max_length=255)
-    title: str = Field(min_length=4, max_length=255)
+    name: str = Field(min_length=3, max_length=255)
+    title: str = Field(min_length=3, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )
@@ -761,10 +761,10 @@ class ProjectsPublic(SQLModel):
 
 
 class ProjectPost(ProjectBase):
-    name: str = Field(min_length=4, max_length=255)
+    name: str = Field(min_length=3, max_length=255)
     # Optional only when an Overleaf project is named below, since the title
     # is then read from its main document
-    title: str | None = Field(default=None, min_length=4, max_length=255)
+    title: str | None = Field(default=None, min_length=3, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )

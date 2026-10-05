@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import DataError
 from sqlmodel import Field, SQLModel, select
 
+import app.github
 import app.stripe
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.config import settings
@@ -158,8 +159,28 @@ def post_org(
             f"GitHub ({org_resp.status_code})"
         )
         raise HTTPException(400, "Could not fetch org from GitHub")
-    # Org doesn't exist, so we can create it an give this user
-    # ownership, but only if they have ownership on GitHub
+    # Installing the app takes a GitHub org owner, so that stands in for
+    # their approval, and any member can then add the org here as its owner;
+    # roles in Calkit are managed separately from those on GitHub
+    install_resp = requests.get(
+        f"https://api.github.com/orgs/{req.github_name}/installation",
+        headers={
+            "Authorization": f"Bearer {app.github.create_app_token()}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=15,
+    )
+    if install_resp.status_code != 200:
+        logger.info(
+            f"Calkit GitHub App is not installed for org {req.github_name} "
+            f"({install_resp.status_code})"
+        )
+        raise HTTPException(
+            400,
+            "The Calkit GitHub App is not installed for this org; "
+            "install it by visiting "
+            "https://github.com/apps/calkit/installations/select_target",
+        )
     membership_resp = requests.get(
         (
             f"https://api.github.com/orgs/{req.github_name}/"
@@ -180,10 +201,9 @@ def post_org(
             "Ensure the app is installed by visiting "
             "https://github.com/apps/calkit/installations/select_target",
         )
-    role = membership_resp.json()["role"]
-    if role != "admin":
-        raise HTTPException(400, "Must be admin of GitHub org to create")
-    # If the role is admin, we can make this user an owner here
+    # An invitation not yet accepted is not membership
+    if membership_resp.json().get("state") != "active":
+        raise HTTPException(400, "Must be a member of the GitHub org to add")
     # Figure out the display name
     display_name = req.display_name
     if display_name is None:

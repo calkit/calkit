@@ -16,16 +16,16 @@ questions:
     answer:
       if r_combined >= 2: >-
         Yes, in a simulation of a six-finding paper: working in small steps
-        with automated tooling, as in continuous delivery, reached an
-        approved paper {r_combined:.1f}x sooner than working stage by stage
+        with automated tooling, as in continuous delivery, reached a
+        published paper {r_combined:.1f}x sooner than working stage by stage
         with manual tooling, and fit {s_combined:.1f}x as many papers into a
         PhD with half the time spent waiting on reviews put to other use.
         It takes both: small steps alone gave {r_manual:.1f}x and the
         tooling alone {r_tooling:.1f}x.
       else: >-
         Not in a simulation of a six-finding paper, where working in small
-        steps with automated tooling, as in continuous delivery, reached an
-        approved paper {r_combined:.1f}x sooner than working stage by stage
+        steps with automated tooling, as in continuous delivery, reached a
+        published paper {r_combined:.1f}x sooner than working stage by stage
         with manual tooling, and fit {s_combined:.1f}x as many papers into a
         PhD with half the time spent waiting on reviews put to other use.
     evidence:
@@ -178,7 +178,7 @@ figures:
   - path: docs/img/research-flow.png
     title: Research flow simulation
     description: >-
-      Time to an approved paper worked in small steps versus stage by
+      Time to a published paper worked in small steps versus stage by
       stage, by how often reviews happen, and by handoff cost and flaw rate.
     stage: research-flow-figure
   - path: docs/img/research-flow-goals.png

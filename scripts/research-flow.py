@@ -18,7 +18,9 @@ project and the paper current, so they take much less.
 Working at a stage can introduce a flaw into its method, which taints every
 finding done that way until a review, or the student working downstream,
 catches it, at which point all of them are redone from that stage. Reviews of
-finished findings also prompt new ones. Time is in working days.
+finished findings also prompt new ones. Once the PI has read the whole
+paper through, it goes to peer review, where reviewers catch some of what's
+left and send it back, or reject it outright. Time is in working days.
 
 Automated tooling also has to be adopted: learned and set up, by the student
 and, unless they keep reviewing in Word or Overleaf, by the PI, whether it's
@@ -100,6 +102,14 @@ BASE: dict[str, Any] = {
     # weeks
     "automation_level": 1.0,
     "upkeep_days": 0.0,
+    # Peer review: working days per round, and per re-review after a
+    # major revision, the chance reviewers catch each flaw left in what's
+    # submitted, and the work a minor revision takes. Two or more caught
+    # means rejection and resubmitting elsewhere, one a major revision
+    "review_days": 60.0,
+    "rereview_days": 30.0,
+    "detect_reviewer": 0.5,
+    "minor_revision_days": 2.0,
     "max_days": 5000.0,
 }
 TOOLING: dict[str, dict[str, Any]] = {
@@ -114,6 +124,8 @@ TOOLING: dict[str, dict[str, Any]] = {
         # Chance a stage working from something copied over by hand gets it
         # wrong, e.g., a mistyped number or a stale figure
         "handoff_error": 0.05,
+        # Getting a submission together, e.g., formatting and gathering files
+        "submit_prep": 2.0,
         "prep_fixed": 1.0,
         "prep_item": 0.5,
     },
@@ -124,6 +136,7 @@ TOOLING: dict[str, dict[str, Any]] = {
         "handoff_fixed": 0.01,
         "handoff_item": 0.01,
         "handoff_error": 0.005,
+        "submit_prep": 0.5,
         "prep_fixed": 0.05,
         "prep_item": 0.0,
     },
@@ -213,9 +226,23 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     gate: Any
     reviewed: Any
     loops: int
+    final_pending: bool
+    final_ok: bool
+    final_caught: bool
+    under_review: bool
+    published_at: float | None
+    submitted_at: float | None
+    rejections: int
 
     def done() -> bool:
+        return published_at is not None
+
+    def approved() -> bool:
         return all(i.stage == NS and i.approved for i in items)
+
+    def ready() -> bool:
+        # Stage-gate's last gate reads the whole paper; lean needs one too
+        return approved() and (policy != "lean" or final_ok)
 
     def tool(key: str) -> Any:
         # Tooling gets as far from manual tooling's costs as it's automated,
@@ -266,6 +293,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         yield from spend("setup", cost)
 
     def catch(flaws: list[Flaw]) -> None:
+        nonlocal final_ok, final_caught
         # Send everything built on a caught flaw back to that stage
         for flaw in flaws:
             flaw.detected = True
@@ -280,6 +308,9 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             i.pos = min(i.pos, i.path.index(min(caught)))
             i.version += 1
             i.approved = False
+            # The paper needs reading again
+            final_ok = False
+            final_caught = final_caught or final_pending
 
     def process(item: Item) -> Generator:
         nonlocal loops
@@ -391,7 +422,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             notify()
 
     def review(reviewed_items: list[Item]) -> None:
-        nonlocal loops
+        nonlocal loops, final_pending, final_ok
         loops += 1
         # A flaw is caught if any of the findings it shows up in reveals it
         flaws = {
@@ -433,9 +464,62 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                     work={0: 1.0, 6: 0.5},
                 )
             items.append(new)
+        if final_pending:
+            for i in reviewed_items:
+                final_left.discard(id(i))
+            if not final_left:
+                final_pending = False
+                final_ok = not final_caught
         notify()
-        if done():
-            finished.succeed()
+
+    def final_read() -> None:
+        nonlocal final_pending, final_caught
+        # The whole paper, read through by the PI before it's submitted
+        final_pending, final_caught = True, False
+        final_left.update(id(i) for i in items)
+        for i in items:
+            i.changed = True
+
+    def publish() -> Generator:
+        nonlocal under_review, published_at, submitted_at, rejections
+        wait, resubmit = p["review_days"], True
+        while True:
+            while not ready():
+                yield env.timeout(1.0)
+            if resubmit:
+                yield from spend("submit", tool("submit_prep"), priority=0)
+            if submitted_at is None:
+                submitted_at = env.now
+            under_review = True
+            yield env.timeout(wait)
+            under_review = False
+            # Reviewers catch each flaw left in what was submitted
+            flaws = {
+                id(f): f
+                for i in items
+                for f in i.taints.values()
+                if not f.detected
+            }
+            found = [
+                f
+                for f in flaws.values()
+                if rng.random() < p["detect_reviewer"]
+            ]
+            if not found:
+                yield from spend(
+                    "revise", p["minor_revision_days"], priority=0
+                )
+                published_at = env.now
+                finished.succeed()
+                return
+            catch(found)
+            notify()
+            if len(found) >= 2:
+                # Rejected, so fixed and sent somewhere else
+                rejections += 1
+                wait, resubmit = p["review_days"], True
+            else:
+                wait, resubmit = p["rereview_days"], False
 
     def pi() -> Generator:
         nonlocal pi_hours, gate_items, gate
@@ -450,7 +534,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             yield env.timeout(max(0.0, k * interval - env.now))
             # Ahead of the PI's reviews, so a paper isn't approved and then
             # sent back in the same session
-            if p["reverify"]:
+            if p["reverify"] and not under_review:
                 reverify()
             if policy == "lean":
                 changed = [i for i in items if i.changed]
@@ -483,8 +567,11 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         while not done():
             todo = [i for i in items if i.stage < NS]
             if not todo:
-                # Everything is written up, so wait for the PI
-                yield reviewed | finished
+                # Everything is written up: once it's all approved the PI
+                # reads it through, and otherwise it's a wait for the PI
+                if approved() and not (final_ok or final_pending):
+                    final_read()
+                yield reviewed | finished | env.timeout(5.0)
                 continue
             # Finish what's started, furthest along first, before new work
             item = min(
@@ -514,6 +601,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                     if s < NS - 1
                     else [i for i in items if i.stage == NS]
                 )
+            elif approved():
+                # Read through and submitted, so a wait for the reviewers
+                yield reviewed | finished | env.timeout(5.0)
+                continue
             else:
                 to_review = [i for i in items if i.stage == NS]
             yield from submit(to_review)
@@ -540,11 +631,17 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             "prep",
             "translate",
             "upkeep",
+            "submit",
+            "revise",
         ],
         0.0,
     )
     pi_hours = 0.0
     loops = 0
+    final_pending = final_ok = final_caught = under_review = False
+    final_left: set[int] = set()
+    published_at = submitted_at = None
+    rejections = 0
     queue: list[list] = []
     gate_items = None
     gate = env.event()
@@ -552,19 +649,22 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     finished = env.event()
     env.process(lean_student() if policy == "lean" else gated_student())
     env.process(pi())
+    env.process(publish())
     if p["upkeep_days"]:
         env.process(upkeep())
     env.run(until=finished | env.timeout(p["max_days"]))
-    approved = [i.approved_at for i in items[:n_original] if i.approved_at]
+    approved_at = [i.approved_at for i in items[:n_original] if i.approved_at]
     return {
         "days": env.now,
         "idle": env.now - sum(effort.values()),
         "finished": done(),
-        "mean_days_to_finding": float(np.mean(approved)),
-        "days_to_first_finding": float(min(approved)),
+        "mean_days_to_finding": float(np.mean(approved_at)),
+        "days_to_first_finding": float(min(approved_at)),
         "effort": dict(effort),
         "pi_hours": pi_hours,
         "findings": len(items),
+        "days_to_submission": submitted_at or env.now,
+        "rejections": rejections,
         "flawed_findings": sum(bool(i.taints) for i in items),
         "flawed_per_finding": sum(bool(i.taints) for i in items) / len(items),
         # Reviews, re-checks and catches of one's own, per month of 21
@@ -607,6 +707,8 @@ def summarize(runs: list[dict]) -> dict:
         "findings_mean": stat("findings"),
         "flawed_findings_mean": stat("flawed_findings"),
         "flawed_per_finding_mean": stat("flawed_per_finding"),
+        "days_to_submission_mean": stat("days_to_submission"),
+        "rejections_mean": stat("rejections"),
         "loops_per_month_mean": stat("loops_per_month"),
         "correct_per_year_mean": stat("correct_per_year"),
         "unfinished": sum(not r["finished"] for r in runs),
@@ -623,7 +725,13 @@ def params_for(
         manual["redo_factor"] = [
             r * m for r, m in zip(manual["redo_factor"], a["manual_redo"])
         ]
-        for k in ["handoff_fixed", "handoff_item", "prep_fixed", "prep_item"]:
+        for k in [
+            "handoff_fixed",
+            "handoff_item",
+            "prep_fixed",
+            "prep_item",
+            "submit_prep",
+        ]:
             manual[k] *= a["mechanics"]
         if tooling == "manual":
             p.update(manual)

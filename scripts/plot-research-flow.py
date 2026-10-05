@@ -25,7 +25,7 @@ plt.rcParams.update(
 fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(
     3, 2, figsize=(12, 13.5)
 )
-# Days to an approved paper for each style and tooling
+# Days to a published paper for each style and tooling
 x = np.arange(2)
 width = 0.36
 for k, pol in enumerate(["stage-gate", "lean"]):
@@ -41,8 +41,8 @@ for k, pol in enumerate(["stage-gate", "lean"]):
     for p, m in zip(pos, mean):
         ax1.text(p, 10, f"{m:.0f}", ha="center", va="bottom", color="white")
 ax1.set_xticks(x, ["Manual tooling", "Automated tooling"])
-ax1.set_ylabel("Working days to an approved paper")
-ax1.set_title("Time to an approved paper", loc="left")
+ax1.set_ylabel("Working days to a published paper")
+ax1.set_title("Time to a published paper", loc="left")
 ax1.grid(axis="y", color=GRID, zorder=0)
 ax1.legend(frameon=False, loc="upper right")
 # Student-days per paper, as more of the wait on reviews is put to use
@@ -94,7 +94,7 @@ ax3.set_xscale("log")
 ax3.set_xticks(sweep["intervals"], [str(i) for i in sweep["intervals"]])
 ax3.minorticks_off()
 ax3.set_xlabel("Days between lean reviews")
-ax3.set_ylabel("Working days to an approved paper")
+ax3.set_ylabel("Working days to a published paper")
 ax3.set_title("Review interval", loc="left")
 ax3.grid(color=GRID)
 ax3.set_ylim(top=ax3.get_ylim()[1] * 1.12)
@@ -214,7 +214,7 @@ y = np.array(
 )
 for k, (key, color, label) in enumerate(
     [
-        ("days_ratio", COLORS["lean"], "time to an approved paper"),
+        ("days_ratio", COLORS["lean"], "time to a published paper"),
         ("student_days_ratio", "#1baf7a", "papers per PhD"),
         ("correct_ratio", "#eda100", "correct findings per year"),
     ]
@@ -239,7 +239,7 @@ for axis, key, title, label, fmt in [
     (
         ax_flaws,
         "flawed_per_finding_mean",
-        "Errors reaching an approved paper",
+        "Errors reaching a published paper",
         "Flawed findings per finding",
         "{:.3f}",
     ),

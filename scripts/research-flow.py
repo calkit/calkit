@@ -874,6 +874,9 @@ for name, translate in [("word", BY_HAND), ("none", {})]:
 COLLABORATION = {"pi_learn_hours": 0.25}
 VERIFICATION = {"detect_self": 0.2, "reverify": 0.3}
 PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}
+# The project shipped with the paper, so reviewers can check the work itself
+TRANSPARENCY = {"detect_reviewer": 0.8}
+ALL_GOALS = CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST | TRANSPARENCY
 GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
     ("status quo", "stage-gate", "manual", False, {}),
     ("agents", "stage-gate", "manual", True, {}),
@@ -900,17 +903,22 @@ GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
         True,
         CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST,
     ),
+    ("transparent submission", "lean", "automated", True, ALL_GOALS),
 ]
 # For comparison: building the tooling yourself in place of Calkit's, and
 # every Calkit goal met but without agents
 GOAL_ALTERNATIVES: dict[str, tuple[str, str, bool, dict[str, Any]]] = {
     "diy tooling": ("lean", "automated", True, DIY | BY_HAND),
-    "all goals, no agents": (
+    "all goals, no agents": ("lean", "automated", False, ALL_GOALS),
+    # If reviewers could check a transparent submission faster
+    "faster review": (
         "lean",
         "automated",
-        False,
-        CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST,
+        True,
+        ALL_GOALS | {"review_days": 45.0, "rereview_days": 22.0},
     ),
+    # The other edge: today's work, shared openly
+    "status quo, shared": ("stage-gate", "manual", False, TRANSPARENCY),
 }
 
 

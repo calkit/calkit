@@ -190,6 +190,8 @@ goals = r["goals"]
 alternatives = {
     "diy tooling": "DIY in place of Calkit's tooling",
     "all goals, no agents": "every goal, without agents",
+    "faster review": "every goal, with 45-day reviews",
+    "status quo, shared": "status quo, shared openly",
 }
 rows = [(g["step"], g) for g in goals["steps"]] + [
     (alternatives[name], g) for name, g in goals["alternatives"].items()
@@ -201,7 +203,7 @@ names = [
 fig, (ax, ax_flaws, ax_loops) = plt.subplots(
     1,
     3,
-    figsize=(15, 6.5),
+    figsize=(15, 7.5),
     sharey=True,
     gridspec_kw={"width_ratios": [1.6, 1, 1]},
 )

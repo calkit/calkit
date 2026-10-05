@@ -633,14 +633,11 @@ def test_workspace_actions(tmp_path, monkeypatch):
         assert f.read() == "hi"
     with open(os.path.join(wdir, "big.csv")) as f:
         assert f.read() == "1,2\n"
-    # What was discarded can be got back from the stash, data included,
+    # What was discarded comes back with calkit stash pop, data included,
     # since it was committed to DVC's cache before being stashed
     assert result == {"stashed": True}
-    subprocess.run(["git", "stash", "pop", "-q"], cwd=wdir, check=True)
     subprocess.run(
-        [sys.executable, "-m", "dvc", "checkout", "-q", "big.csv"],
-        cwd=wdir,
-        check=True,
+        [sys.executable, "-m", "calkit", "stash", "pop"], cwd=wdir, check=True
     )
     with open(os.path.join(wdir, "notes.txt")) as f:
         assert f.read() == "changed"

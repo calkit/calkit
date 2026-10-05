@@ -817,56 +817,19 @@ def ignore_path(
 
 
 def discard_changes(wdir: str) -> dict:
-    """Put a workspace back to its last commit, stashing what was
-    discarded so ``git stash pop`` and ``dvc checkout`` bring it back.
-
-    DVC-tracked data that changed is committed to DVC's cache first, so the
-    stash holds pointers to it, rather than it being lost when DVC checks
-    out the committed version. New files are left alone.
+    """Put a workspace back to its last commit with ``calkit stash``, so
+    ``calkit stash pop`` brings back what was discarded, DVC-tracked data
+    included. New files are left alone.
     """
+    repo = calkit.git.get_repo(wdir)
 
-    def _dvc_json(args: list[str], wdir: str) -> dict:
-        """Run a DVC command with JSON output in a workspace.
+    def stash_count() -> int:
+        return len(repo.git.stash("list").splitlines())
 
-        It's a subprocess rather than DVC's Python API, which resolves paths
-        against the process's working directory: that isn't the workspace, may
-        be on another drive on Windows, and can't be changed safely while other
-        actions run in threads.
-        """
-        result = subprocess.run(
-            [sys.executable, "-m", "dvc", *args, "--json"],
-            cwd=wdir,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                (result.stderr or result.stdout).strip() or "DVC failed"
-            )
-        out: dict = json.loads(result.stdout or "{}")
-        return out
-
-    uses_dvc = os.path.isdir(os.path.join(wdir, ".dvc"))
-
-    def changed_data() -> list[str]:
-        # DVC-tracked data that doesn't match what its pointers say
-        if not uses_dvc:
-            return []
-        data = _dvc_json(["data", "status", "--no-remote-refresh"], wdir)
-        return data.get("uncommitted", {}).get("modified", [])
-
-    modified = changed_data()
-    if modified:
-        _calkit(["dvc", "commit", "--force", *modified], wdir)
+    before = stash_count()
     stamp = calkit.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    out = calkit.git.get_repo(wdir).git.stash(
-        "push", "-m", f"Discarded from the hub at {stamp}"
-    )
-    # Including data whose pointers the stash took back, e.g., data that
-    # was committed to DVC but not to Git
-    for path in changed_data():
-        _calkit(["dvc", "checkout", path, "--force"], wdir)
-    return {"stashed": "Saved" in out}
+    _calkit(["stash", "-m", f"Discarded from the hub at {stamp}"], wdir)
+    return {"stashed": stash_count() > before}
 
 
 def add_stage(

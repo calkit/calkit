@@ -66,7 +66,7 @@ journal articles and
 TODO
 conference papers.
 
-## Where we're heading and what support we need
+## Where we're heading
 
 Calkit is developed and operated in a very lean and efficient manner.
 Current support includes 25% of a Research Software Engineer's capacity
@@ -74,14 +74,25 @@ provided by the Schmidt Academy for Software Engineering at Caltech
 and academic research credits from Google Cloud to host our instance of
 the web platform.
 
-With an MVP in place serving a handful of users, we want to ramp up
-training and community building by hosting workshops focused on
-agile reproducible research workflows in the age of
-agentic AI.
-Through these efforts we're looking to 10x our user base and continue to evolve
-the software to increase the number of transparent,
-single-button reproducible research compendia released alongside papers.
-To achieve this, we're seeking \$75k funding for 2027\.
+<!-- calkit values path=results/2027-budget.json -->
+
+With an MVP serving a handful of users, Calkit now needs more encounters
+with reality to test its value.
+We're seeking
+\$<!-- calkit value key=total format="{:,.0f}" -->29,000<!-- /calkit value -->
+for a six-month pilot in 2027:
+\$<!-- calkit value key=by_category.fellow format="{:,.0f}" -->19,500<!-- /calkit value -->
+to pay experienced Calkit users like Rebecca to run workshops around Boston
+and help about <!-- calkit value key=projects_supported -->20<!-- /calkit value --> researchers
+convert their own active projects,
+\$<!-- calkit value key=by_category.workshops format="{:,.0f}" -->4,500<!-- /calkit value -->
+for <!-- calkit value key=workshops -->4<!-- /calkit value --> workshops,
+including ours at Caltech, and
+\$<!-- calkit value key=by_category.hosting format="{:,.0f}" -->5,000<!-- /calkit value -->
+for hosting if our cloud credits aren't renewed.
+We'll measure how many get a real project running, how many still use Calkit
+three months later, and how many papers ship with a Calkit project, to decide
+what to build next.
 
 <!-- ## Learn more -->
 

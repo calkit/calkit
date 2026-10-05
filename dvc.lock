@@ -181,12 +181,12 @@ stages:
       size: 5
     - path: calkit.yaml
       hash: md5
-      md5: 37dc73eec7442e7df2e7d9ff20b7ed15
-      size: 7293
+      md5: 28249e6b8897ef7a27a9958f533e06de
+      size: 8021
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 33e59bc7f723d1f4ea32942332349704
-      size: 3931
+      md5: e0511c7dea403a158133f2303624e1c5
+      size: 4546
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 161bbc0cccd2e991cdc03924cedaef55
@@ -195,6 +195,10 @@ stages:
       hash: md5
       md5: f553a680051417ffc02cc699e31ce9f7
       size: 3043
+    - path: results/2027-budget.json
+      hash: md5
+      md5: d223d73c9ad60723f06e3c13496fd205
+      size: 1649
     - path: results/research-flow.json
       hash: md5
       md5: 6156bf8378a3f15d4d2c9f33c4e77650
@@ -210,8 +214,8 @@ stages:
     outs:
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: f13ae91af856a643ba66fef2337ac635
-      size: 7146
+      md5: a46d7ada8684079583e3c583bf22e1e3
+      size: 7637
   one-pager:
     cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
     deps:
@@ -226,14 +230,39 @@ stages:
       size: 50359
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: f13ae91af856a643ba66fef2337ac635
-      size: 7146
+      md5: a46d7ada8684079583e3c583bf22e1e3
+      size: 7637
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: f13ae91af856a643ba66fef2337ac635
-      size: 7146
+      md5: a46d7ada8684079583e3c583bf22e1e3
+      size: 7637
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 3d84a38f22347ed6976f705b6fbfff76
-      size: 135653
+      md5: b0d01d854a8ae3cc73987fe900e9ddf2
+      size: 135674
+  budget-2027:
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25
+      --supported=20 --indirect-rate=0
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: docs/one-pager/2027-budget.csv
+      hash: md5
+      md5: a2efb5e9cdafb7988328c2061c19e0f6
+      size: 474
+    - path: scripts/budget.py
+      hash: md5
+      md5: 45d8bfb1d9dfa0353bb26647692a1764
+      size: 1861
+    - path: uv.lock
+      hash: md5
+      md5: 252c68ccae32923f843aa23a43371454
+      size: 1725871
+    outs:
+    - path: results/2027-budget.json
+      hash: md5
+      md5: d223d73c9ad60723f06e3c13496fd205
+      size: 1649

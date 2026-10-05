@@ -62,6 +62,20 @@ stages:
       - docs/img/research-flow-goals.png
     desc: Automatically generated from the 'research-flow-figure' stage in calkit.yaml.
       Changes made here will be overwritten.
+  budget-2027:
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25
+      --supported=20 --indirect-rate=0
+    deps:
+      - scripts/budget.py
+      - docs/one-pager/2027-budget.csv
+      - uv.lock
+      - .python-version
+    outs:
+      - results/2027-budget.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'budget-2027' stage in calkit.yaml. Changes
+      made here will be overwritten.
   one-pager-latex:
     cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
     deps:
@@ -71,6 +85,7 @@ stages:
       - docs/one-pager/template.tex
       - docs/one-pager/one-pager.lua
       - results/research-flow.json
+      - results/2027-budget.json
       - uv.lock
       - .python-version
     outs:

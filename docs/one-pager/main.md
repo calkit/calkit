@@ -31,10 +31,10 @@ calculations.
 
 ## By the numbers
 
-- **<!-- calkit value key=goals.steps.1.student_days_ratio format="{:.1f}×" -->1.3×<!-- /calkit value -->**
-  as many papers in a PhD with agents alone
-- **<!-- calkit value key=goals.student_days_ratio format="{:.1f}×" -->2.2×<!-- /calkit value -->**
-  as many with agents and Calkit
+- **<!-- calkit value key=goals.steps.1.student_days_gain format="{:.0%}" -->24%<!-- /calkit value -->**
+  more papers in a PhD with agents alone
+- **<!-- calkit value key=goals.student_days_gain format="{:.0%}" -->99%<!-- /calkit value -->**
+  more with agents and Calkit
 
 Simulated in
 [Calkit's own pipeline](https://calkit.io/calkit/calkit/pipeline?stage=research-flow).

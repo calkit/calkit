@@ -67,6 +67,10 @@ BASE: dict[str, Any] = {
     "detect_full": 0.6,
     "detect_partial": 0.3,
     "detect_self": 0.1,
+    # Chance each PI session's automated re-check of every approved finding
+    # against its evidence catches a flaw in one, which needs the evidence
+    # linked, as Calkit does
+    "reverify": 0.0,
     # Chance an approved finding prompts something new, halving each
     # generation, and how that splits into a new analysis, an addition to the
     # experiment, and an additional reference
@@ -89,6 +93,7 @@ BASE: dict[str, Any] = {
     "ramp_half_life": 0.0,
     "translate_fixed": 0.0,
     "translate_item": 0.0,
+    "translate_error": 0.0,
     "pi_learn_hours": 0.0,
     # Bespoke tooling: how far it gets from manual tooling's costs to
     # automated tooling's, and the days spent keeping it working every two
@@ -106,6 +111,9 @@ TOOLING: dict[str, dict[str, Any]] = {
         "switch_cost": 0.25,
         "handoff_fixed": 0.25,
         "handoff_item": 0.25,
+        # Chance a stage working from something copied over by hand gets it
+        # wrong, e.g., a mistyped number or a stale figure
+        "handoff_error": 0.05,
         "prep_fixed": 1.0,
         "prep_item": 0.5,
     },
@@ -115,6 +123,7 @@ TOOLING: dict[str, dict[str, Any]] = {
         "switch_cost": 0.05,
         "handoff_fixed": 0.01,
         "handoff_item": 0.01,
+        "handoff_error": 0.005,
         "prep_fixed": 0.05,
         "prep_item": 0.0,
     },
@@ -129,8 +138,16 @@ DIY = {
     "upkeep_days": 0.5,
 }
 CALKIT = {"learn_days": 3.0, "ramp_half_life": 10.0}
-BY_HAND = {"translate_fixed": 0.5, "translate_item": 0.25}
-ROUND_TRIP = {"translate_fixed": 0.05, "translate_item": 0.02}
+BY_HAND = {
+    "translate_fixed": 0.5,
+    "translate_item": 0.25,
+    "translate_error": 0.05,
+}
+ROUND_TRIP = {
+    "translate_fixed": 0.05,
+    "translate_item": 0.02,
+    "translate_error": 0.005,
+}
 # Ways of adopting automated tooling for lean, which differ in getting
 # there, how far they get, and how the PI reviews
 ADOPTION: dict[str, dict[str, Any]] = {
@@ -195,6 +212,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     gate_items: list[Item] | None
     gate: Any
     reviewed: Any
+    loops: int
 
     def done() -> bool:
         return all(i.stage == NS and i.approved for i in items)
@@ -264,6 +282,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             i.approved = False
 
     def process(item: Item) -> Generator:
+        nonlocal loops
         s = item.stage
         yield from setup(s)
         flaw = item.fixes.get(s)
@@ -300,6 +319,12 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                 active_flaws[s] = Flaw(s)
         if (new := active_flaws[s]) is not None:
             item.taints[s] = new
+        # Working from something copied over by hand can get it wrong, in
+        # this finding alone
+        copied = item.pos > 0 and item.path[item.pos - 1] in HANDOFF_FROM
+        if copied and s not in item.taints:
+            if rng.random() < tool("handoff_error"):
+                item.taints[s] = Flaw(s)
         item.done_stages.add(s)
         item.pos += 1
         item.changed = True
@@ -310,6 +335,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             if j < s and not f.detected and rng.random() < p["detect_self"]
         ]
         if noticed:
+            loops += 1
             catch(noticed)
 
     def handoff(n: float) -> Generator:
@@ -324,14 +350,49 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         # Out to the PI's Word or Overleaf copy and their edits back in
         cost = p["translate_fixed"] + p["translate_item"] * size
         yield from spend("translate", cost, priority=priority)
+        if p["translate_error"]:
+            # Merging their edits back by hand can get one wrong
+            for i in to_review:
+                written = i.stage == NS and NS - 1 not in i.taints
+                if written and rng.random() < p["translate_error"]:
+                    i.taints[NS - 1] = Flaw(NS - 1)
         for i in to_review:
             i.changed = False
             full = i.stage == NS
             hours = p["pi_hours_full" if full else "pi_hours_partial"]
             queue.append([i, hours * i.size])
 
-    def review(reviewed_items: list[Item]) -> None:
+    def notify() -> None:
         nonlocal reviewed
+        reviewed.succeed()
+        reviewed = env.event()
+
+    def reverify() -> None:
+        nonlocal loops
+        # Every approved finding re-checked against its evidence, without
+        # the PI
+        approved_items = [i for i in items if i.approved]
+        if not approved_items:
+            return
+        loops += 1
+        flaws = {
+            id(f): f
+            for i in approved_items
+            for f in i.taints.values()
+            if not f.detected
+        }
+        caught = []
+        for flaw in flaws.values():
+            n = sum(i.taints.get(flaw.stage) is flaw for i in approved_items)
+            if rng.random() < 1 - (1 - p["reverify"]) ** n:
+                caught.append(flaw)
+        if caught:
+            catch(caught)
+            notify()
+
+    def review(reviewed_items: list[Item]) -> None:
+        nonlocal loops
+        loops += 1
         # A flaw is caught if any of the findings it shows up in reveals it
         flaws = {
             id(f): f
@@ -372,8 +433,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                     work={0: 1.0, 6: 0.5},
                 )
             items.append(new)
-        reviewed.succeed()
-        reviewed = env.event()
+        notify()
         if done():
             finished.succeed()
 
@@ -388,6 +448,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         while not done():
             k += 1
             yield env.timeout(max(0.0, k * interval - env.now))
+            # Ahead of the PI's reviews, so a paper isn't approved and then
+            # sent back in the same session
+            if p["reverify"]:
+                reverify()
             if policy == "lean":
                 changed = [i for i in items if i.changed]
                 if changed:
@@ -480,6 +544,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         0.0,
     )
     pi_hours = 0.0
+    loops = 0
     queue: list[list] = []
     gate_items = None
     gate = env.event()
@@ -501,6 +566,13 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         "pi_hours": pi_hours,
         "findings": len(items),
         "flawed_findings": sum(bool(i.taints) for i in items),
+        "flawed_per_finding": sum(bool(i.taints) for i in items) / len(items),
+        # Reviews, re-checks and catches of one's own, per month of 21
+        # working days
+        "loops_per_month": loops / env.now * 21,
+        # Value, as best it can be counted here: findings that are right,
+        # per year of 250 working days
+        "correct_per_year": sum(not i.taints for i in items) / env.now * 250,
     }
 
 
@@ -534,6 +606,9 @@ def summarize(runs: list[dict]) -> dict:
         "pi_hours_mean": stat("pi_hours"),
         "findings_mean": stat("findings"),
         "flawed_findings_mean": stat("flawed_findings"),
+        "flawed_per_finding_mean": stat("flawed_per_finding"),
+        "loops_per_month_mean": stat("loops_per_month"),
+        "correct_per_year_mean": stat("correct_per_year"),
         "unfinished": sum(not r["finished"] for r in runs),
     }
 
@@ -689,7 +764,7 @@ for name, translate in [("word", BY_HAND), ("none", {})]:
 # status quo to lean with automated tooling and agents one step at a time,
 # each on top of the ones before it
 COLLABORATION = {"pi_learn_hours": 0.25}
-VERIFICATION = {"detect_self": 0.2}
+VERIFICATION = {"detect_self": 0.2, "reverify": 0.3}
 PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}
 GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
     ("status quo", "stage-gate", "manual", False, {}),
@@ -751,6 +826,10 @@ for summary in [*goal_steps, *goal_alternatives.values()]:
     summary["student_days_ratio"] = (
         goal_steps[0]["student_days_mean"] / summary["student_days_mean"]
     )
+    summary["correct_ratio"] = (
+        summary["correct_per_year_mean"]
+        / goal_steps[0]["correct_per_year_mean"]
+    )
 
 
 def crossing(xs: list[float], ys: list[float], level: float) -> float | None:
@@ -791,6 +870,7 @@ results = {
         "alternatives": goal_alternatives,
         "days_ratio": goal_steps[-1]["days_ratio"],
         "student_days_ratio": goal_steps[-1]["student_days_ratio"],
+        "correct_ratio": goal_steps[-1]["correct_ratio"],
     },
     "ratio_grid": {
         "cost_scales": cost_scales,

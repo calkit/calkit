@@ -198,7 +198,13 @@ names = [
     name if k == 0 or k >= len(goals["steps"]) else f"+ {name}"
     for k, (name, _) in enumerate(rows)
 ]
-fig, ax = plt.subplots(figsize=(9, 6))
+fig, (ax, ax_flaws, ax_loops) = plt.subplots(
+    1,
+    3,
+    figsize=(15, 6.5),
+    sharey=True,
+    gridspec_kw={"width_ratios": [1.6, 1, 1]},
+)
 # A gap between the steps and the alternatives to them
 y = np.array(
     [
@@ -210,22 +216,63 @@ for k, (key, color, label) in enumerate(
     [
         ("days_ratio", COLORS["lean"], "time to an approved paper"),
         ("student_days_ratio", "#1baf7a", "papers per PhD"),
+        ("correct_ratio", "#eda100", "correct findings per year"),
     ]
 ):
     vals = [g[key] for _, g in rows]
-    pos = y + (0.5 - k) * 0.38
-    ax.barh(pos, vals, 0.36, color=color, label=label, zorder=2)
+    pos = y + (1 - k) * 0.27
+    ax.barh(pos, vals, 0.25, color=color, label=label, zorder=2)
     for p_, v in zip(pos, vals):
-        ax.text(v + 0.03, p_, f"{v:.2f}×", ha="left", va="center", fontsize=9)
+        ax.text(v + 0.03, p_, f"{v:.1f}×", ha="left", va="center", fontsize=8)
 ax.axvline(1, color=MUTED, lw=1)
 ax.axvline(2, color=MUTED, lw=1, ls="--")
 ax.set_yticks(y, names)
 for tick in ax.get_yticklabels()[len(goals["steps"]) :]:
     tick.set_fontstyle("italic")
-ax.set_xlim(0, 3.1)
+ax.set_xlim(0, 3.3)
 ax.set_xlabel("Improvement over the status quo, first paper")
-ax.set_title("Lean research with Calkit and agents, goal by goal", loc="left")
+ax.set_title("Productivity and value", loc="left")
 ax.grid(axis="x", color=GRID, zorder=0)
-ax.legend(frameon=False, loc="upper right")
+ax.legend(frameon=False, loc="upper right", fontsize=9)
+# Quality: what gets through, and how often work is checked
+for axis, key, title, label, fmt in [
+    (
+        ax_flaws,
+        "flawed_per_finding_mean",
+        "Errors reaching an approved paper",
+        "Flawed findings per finding",
+        "{:.3f}",
+    ),
+    (
+        ax_loops,
+        "loops_per_month_mean",
+        "Feedback loops",
+        "Reviews, re-checks and self-catches per month",
+        "{:.1f}",
+    ),
+]:
+    vals = [g[key] for _, g in rows]
+    axis.barh(y, vals, 0.6, color=INK, zorder=2)
+    axis.axvline(vals[0], color=MUTED, lw=1, ls="--")
+    for p_, v in zip(y, vals):
+        axis.text(
+            v + max(vals) * 0.02,
+            p_,
+            fmt.format(v),
+            ha="left",
+            va="center",
+            fontsize=8,
+        )
+    axis.set_xlim(0, max(vals) * 1.25)
+    axis.set_xlabel(label)
+    axis.set_title(title, loc="left")
+    axis.grid(axis="x", color=GRID, zorder=0)
+    axis.tick_params(axis="y", length=0)
+fig.suptitle(
+    "Lean research with Calkit and agents, goal by goal",
+    x=0.01,
+    ha="left",
+    fontsize=12,
+)
 fig.tight_layout()
 fig.savefig("docs/img/research-flow-goals.png", dpi=150)

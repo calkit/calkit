@@ -85,5 +85,5 @@ To achieve this, we're seeking \$75k funding for 2027\.
 <!-- ## Learn more -->
 
 To learn more about Calkit, check out the docs at
-[docs.calkit.org](http://docs.calkit.org) and the web platform at
-[calkit.io](http://calkit.io).
+[docs.calkit.org](https://docs.calkit.org) and the web platform at
+[calkit.io](https://calkit.io).

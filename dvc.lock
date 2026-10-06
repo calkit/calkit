@@ -270,3 +270,46 @@ stages:
       hash: md5
       md5: d223d73c9ad60723f06e3c13496fd205
       size: 1649
+  one-pager/pdf:
+    cmd: calkit latex from-markdown docs/one-pager/main.md -o docs/one-pager/main.pdf
+      -e tex --no-check --template docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua
+      --pandoc-arg=--shift-heading-level-by=-1
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: b2d28555a90965646645402d6964aa46.dir
+      size: 2832
+      nfiles: 2
+    - path: calkit.yaml
+      hash: md5
+      md5: 0244c25c6f39909755f1c4b057ca77b3
+      size: 9385
+    - path: docs/img/pipeline.png
+      hash: md5
+      md5: 0c09798b4e2fd432f0ca5f0edefb5b38
+      size: 50359
+    - path: docs/one-pager/main.md
+      hash: md5
+      md5: 5cd8fbf6f5bc6ad0804d6b64c527e016
+      size: 4878
+    - path: docs/one-pager/one-pager.lua
+      hash: md5
+      md5: 161bbc0cccd2e991cdc03924cedaef55
+      size: 2101
+    - path: docs/one-pager/template.tex
+      hash: md5
+      md5: 7213db0f2b114d68c68ee71e7035c1b9
+      size: 3170
+    - path: results/2027-budget.json
+      hash: md5
+      md5: d223d73c9ad60723f06e3c13496fd205
+      size: 1649
+    - path: results/research-flow.json
+      hash: md5
+      md5: 22cd7480f5fc01cad15fe8a43578d3c4
+      size: 72078
+    outs:
+    - path: docs/one-pager/main.pdf
+      hash: md5
+      md5: 955b07b70e0f4690ed578eb9dd9ed1e8
+      size: 136119

@@ -266,7 +266,7 @@ function NewProjectForm({
     }
   }
   // A repo under an organization needs two things a personal repo doesn't:
-  // the org in Calkit (created on the way, which takes an admin of it on
+  // the org in Calkit (created on the way, which takes a member of it on
   // GitHub) and the Calkit GitHub App installed for that org. Both are
   // checked here so the person finds out before the submit fails.
   // The template registry lives in the calkit package, so the list comes
@@ -503,7 +503,7 @@ function NewProjectForm({
           </Text>
           <Text color="ui.dim" mb={2}>
             Calkit will add {repoOwner} as an organization here, which needs you
-            to be one of its admins on GitHub, and the Calkit GitHub App has to
+            to be one of its members on GitHub, and the Calkit GitHub App has to
             be installed for it so Calkit can work with its repos.
           </Text>
           {installationsQuery.isPending ? (

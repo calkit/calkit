@@ -5923,13 +5923,13 @@ export const ProjectOptionalExtendedSchema = {
     name: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Name",
     },
     title: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Title",
     },
     description: {
@@ -6147,7 +6147,7 @@ export const ProjectPostSchema = {
     name: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Name",
     },
     title: {
@@ -6155,7 +6155,7 @@ export const ProjectPostSchema = {
         {
           type: "string",
           maxLength: 255,
-          minLength: 4,
+          minLength: 3,
         },
         {
           type: "null",
@@ -6321,13 +6321,13 @@ export const ProjectPublicSchema = {
     name: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Name",
     },
     title: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Title",
     },
     description: {

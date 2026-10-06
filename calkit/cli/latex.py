@@ -2156,7 +2156,26 @@ def to_docx(
             ):
                 if para.element is not None and para.element in unit.iter(w_p):
                     doc.move_out(para.element, unit, after=end)
-            doc.insert_equations(gap[0], rows, bid)
+            # The conversion's own bookmarks on the equations, which
+            # references in the text link to, wholly inside what's replaced
+            w_name = calkit.docx._tag(calkit.docx.W, "name")
+            w_id = calkit.docx._tag(calkit.docx.W, "id")
+            ended = {
+                e.get(w_id)
+                for el in gap
+                for e in el.iter(
+                    calkit.docx._tag(calkit.docx.W, "bookmarkEnd")
+                )
+            }
+            keep = [
+                (b.get(w_name, ""), b.get(w_id, ""))
+                for el in gap
+                for b in el.iter(
+                    calkit.docx._tag(calkit.docx.W, "bookmarkStart")
+                )
+                if b.get(w_name) not in original and b.get(w_id) in ended
+            ]
+            doc.insert_equations(gap[0], rows, bid, keep=keep)
             bid += len(rows)
             for el in gap:
                 doc.remove(el)

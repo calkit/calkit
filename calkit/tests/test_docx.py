@@ -604,6 +604,13 @@ def test_docx_round_trip(
         assert lo_sent is not None and len(lo_sent.equations) == 1
         assert len(lo_sent.paragraphs) >= 15
         assert any(p.text == "(1)" for p in lo.paragraphs)
+        # A reference to an equation links to it inside the document, not
+        # to TeX4ht's build directory
+        body = lo.parts["word/document.xml"].decode("utf-8")
+        anchors = re.findall(r'w:anchor="([^"]+)"', body)
+        marks = set(re.findall(r'w:bookmarkStart [^>]*w:name="([^"]+)"', body))
+        assert anchors and set(anchors) <= marks
+        assert "HYPERLINK" not in body and ".4om" not in body
         main = Path("paper/main.tex").read_text(encoding="utf-8")
         methods = Path("paper/methods.tex").read_text(encoding="utf-8")
         res = subprocess.run(
@@ -615,3 +622,30 @@ def test_docx_round_trip(
         assert "Applied 0 edits" in res.stdout
         assert Path("paper/main.tex").read_text(encoding="utf-8") == main
         assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods
+
+
+def test_link_into_objects() -> None:
+    content = (
+        "<text:p>See (<text:a xlink:href='main-m7.4om#x7-3001r2' "
+        "xlink:type='simple'>2</text:a>), "
+        '<text:a xlink:href="main-m7.4om#x7-3001r3">3</text:a>, '
+        "<text:a xlink:href='#Xsmith2020'>Smith</text:a>, "
+        "<text:a xlink:href='https://calkit.io/a.html#b'>web</text:a> and "
+        "<text:a xlink:href='other.4om#x9'>gone</text:a>.</text:p>"
+        "<text:p><draw:frame draw:name='obj-7'><draw:object "
+        "xlink:href='./main-m7' xlink:show='embed'/></draw:frame></text:p>"
+    )
+    out = calkit.docx._link_into_objects(content)
+    # Links into an object point at bookmarks beside it
+    assert "xlink:href='#x7-3001r2'" in out
+    assert 'xlink:href="#x7-3001r3"' in out
+    assert (
+        "<text:p><text:bookmark text:name='x7-3001r2'/>"
+        "<text:bookmark text:name='x7-3001r3'/><draw:frame" in out
+    )
+    # Links within the document or out of it, or to an object that isn't
+    # there, are left alone
+    assert "xlink:href='#Xsmith2020'" in out
+    assert "xlink:href='https://calkit.io/a.html#b'" in out
+    assert "xlink:href='other.4om#x9'" in out
+    assert calkit.docx._link_into_objects(out) == out

@@ -633,10 +633,13 @@ class Document:
         before: ET.Element,
         rows: list[tuple[ET.Element, str | None, str]],
         first_bid: int,
+        keep: list[tuple[str, str]] | None = None,
     ) -> None:
         """Insert display equations before a body element as a borderless
         table of (math, number, bookmark name) rows, which Word and
         LibreOffice both lay out like LaTeX: centered, numbered at right.
+        ``keep`` is bookmarks, as (name, ID), from what the equations
+        replace, which go on the first row so links to them still land.
         """
         width = self.column_width(before)
         side = width // 8
@@ -677,16 +680,20 @@ class Document:
                     )
                     # The bookmark spans the equation, since Word drops an
                     # empty one beside it
-                    bid = str(first_bid + i)
-                    ET.SubElement(
-                        p,
-                        _tag(W, "bookmarkStart"),
-                        {_tag(W, "id"): bid, _tag(W, "name"): name},
-                    )
+                    marks = [(name, str(first_bid + i))]
+                    if i == 0:
+                        marks += keep or []
+                    for mark, bid in marks:
+                        ET.SubElement(
+                            p,
+                            _tag(W, "bookmarkStart"),
+                            {_tag(W, "id"): bid, _tag(W, "name"): mark},
+                        )
                     ET.SubElement(p, _tag(M, "oMathPara")).append(math)
-                    ET.SubElement(
-                        p, _tag(W, "bookmarkEnd"), {_tag(W, "id"): bid}
-                    )
+                    for _, bid in marks:
+                        ET.SubElement(
+                            p, _tag(W, "bookmarkEnd"), {_tag(W, "id"): bid}
+                        )
                 elif j == 2 and number:
                     ET.SubElement(
                         ppr, _tag(W, "jc"), {_tag(W, "val"): "right"}
@@ -1120,6 +1127,45 @@ def find_soffice() -> str | None:
     return next((c for c in candidates if os.path.isfile(c)), None)
 
 
+def _link_into_objects(content: str) -> str:
+    """Point links into embedded objects at the objects themselves.
+
+    TeX4ht puts each equation in an object of its own and links a
+    reference to it to an anchor inside, e.g., ``main-m7.4om#x7-3001r2``,
+    which Word can't follow, so LibreOffice writes it out as a path to a
+    file in the build directory. A bookmark of that name beside the object
+    in the main text makes it an ordinary link within the document.
+    """
+    frame_re = re.compile(
+        r"<draw:frame\b(?:(?!</draw:frame>).)*?<draw:object\b[^>]*?"
+        r"xlink:href=['\"]\./(?P<name>[^'\"/]+)['\"]",
+        flags=re.S,
+    )
+    objects = {m.group("name") for m in frame_re.finditer(content)}
+    anchors: dict[str, set[str]] = {}
+
+    def relink(m: re.Match) -> str:
+        name, anchor = m.group("name"), m.group("anchor")
+        if name not in objects:
+            return str(m.group(0))
+        anchors.setdefault(name, set()).add(anchor)
+        return f"{m.group('attr')}{m.group('q')}#{anchor}{m.group('q')}"
+
+    content = re.sub(
+        r"(?P<attr><text:a\b[^>]*?xlink:href=)(?P<q>['\"])"
+        r"(?P<name>[^'\"#/]+)\.[^'\"#./]+#(?P<anchor>[^'\"]+)(?P=q)",
+        relink,
+        content,
+    )
+
+    def mark(m: re.Match) -> str:
+        names = sorted(anchors.get(m.group("name"), ()))
+        marks = "".join(f"<text:bookmark text:name='{a}'/>" for a in names)
+        return marks + str(m.group(0))
+
+    return frame_re.sub(mark, content)
+
+
 def odt_to_docx(odt_path: str, docx_path: str) -> None:
     """Convert an OpenDocument text to .docx with LibreOffice."""
     import shutil
@@ -1130,6 +1176,21 @@ def odt_to_docx(odt_path: str, docx_path: str) -> None:
     if soffice is None:
         raise RuntimeError("Converting to Word requires LibreOffice")
     with tempfile.TemporaryDirectory() as tmp:
+        # A copy with its links fixed up, leaving the original as made
+        src = os.path.join(tmp, "src", Path(odt_path).name)
+        os.makedirs(os.path.dirname(src))
+        with (
+            zipfile.ZipFile(odt_path) as zin,
+            zipfile.ZipFile(src, "w") as zout,
+        ):
+            for item in zin.infolist():
+                data = zin.read(item)
+                if item.filename == "content.xml":
+                    data = _link_into_objects(data.decode("utf-8")).encode(
+                        "utf-8"
+                    )
+                zout.writestr(item, data)
+        odt_path = src
         # A profile of its own, since a LibreOffice already open would take
         # the job and exit without doing it
         res = subprocess.run(

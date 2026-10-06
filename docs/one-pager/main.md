@@ -1,9 +1,9 @@
-# _Calkit_: Continuously integrated, transparent, reproducible science in the age of agentic AI
+# _Calkit_: Agile, reproducible science in the age of agentic AI
 
 ![Calkit system](../img/pipeline.png)
 
-Generative AI is making it much cheaper to produce research outputs, while the
-reproducibility crisis remains unsolved.
+Generative AI is making it much cheaper to produce research outputs,
+while the reproducibility crisis remains unsolved.
 For example, the open-access publisher PLOS found
 [only 12% of articles sharing code openly](https://doi.org/10.1371/journal.pone.0311493),
 and even fewer share code that is quick to verify.
@@ -13,11 +13,14 @@ ever to make it intuitive and enjoyable to work transparently and reproducibly,
 both for humans and AI agents.
 
 Rather than assuming we should simply teach scientists software development
-tools and platforms and leave them to assemble their own workflows,
+tools and platforms and leave them to assemble their own systems and workflows,
 Calkit provides a turnkey, vertically integrated,
 research-focused experience right out of the box: reference management, version
 control (including large data files), computational environments, pipeline
-automation, and a self-hostable collaboration platform.
+automation, and a (self-hostable) collaboration platform.
+The extra discipline of working this way, much like a software engineer,
+speeds research up rather than slowing it down, and with the learning curve
+kept short, it's almost always worth switching from manual, ad hoc workflows.
 
 Calkit is designed to help individuals work more efficiently by allowing all
 stages of research—from asking questions, to data collection and analysis, to
@@ -45,8 +48,9 @@ for an example.
 - **<!-- calkit value key=goals.correct_gain format="{:.0%}" -->112%<!-- /calkit value -->**
   more with agents and Calkit together
 
-Simulated in
-[Calkit's own pipeline](https://calkit.io/calkit/calkit/pipeline?stage=research-flow).
+From a simulation
+in Calkit's own pipeline
+([view source](https://calkit.io/calkit/calkit/pipeline?stage=research-flow)).
 
 ## A success story
 
@@ -76,8 +80,9 @@ the web platform.
 
 <!-- calkit values path=results/2027-budget.json -->
 
-With an MVP serving a handful of users, Calkit now needs more encounters
-with reality to test its value.
+With an MVP serving a handful of users,
+Calkit now needs more encounters
+with more diverse research problems to test and enhance its value.
 We're seeking
 \$<!-- calkit value key=total format="{:,.0f}" -->29,000<!-- /calkit value -->
 for a six-month pilot in 2027:
@@ -90,13 +95,15 @@ for <!-- calkit value key=workshops -->4<!-- /calkit value --> workshops,
 including ours at Caltech, and
 \$<!-- calkit value key=by_category.hosting format="{:,.0f}" -->5,000<!-- /calkit value -->
 for hosting if our cloud credits aren't renewed.
-We'll measure how many get a real project running, how many still use Calkit
-three months later, and how many papers ship with a Calkit project, to decide
-what to build next.
+We'll measure how many get a real project running,
+how many still use Calkit
+three months later,
+and how many papers ship with a Calkit project,
+to decide what to build next.
 
 <!-- ## Learn more -->
 
 To learn more about Calkit, check out the docs at
-[docs.calkit.org](https://docs.calkit.org) and the web platform at
+[docs.calkit.org](https://docs.calkit.org), the web platform at
 [calkit.io](https://calkit.io), or email Pete Bachant at
 [pete@calkit.org](mailto:pete@calkit.org).

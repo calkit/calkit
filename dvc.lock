@@ -1,7 +1,8 @@
 schema: '2.0'
 stages:
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python 
+      scripts/latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -69,7 +70,8 @@ stages:
       md5: 9521ff97f424019b13e51c64a463ee06
       size: 121897
   latex-word-round-trip-figure:
-    cmd: calkit xenv -n dev --no-check -- python scripts/plot-latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python 
+      scripts/plot-latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -101,7 +103,8 @@ stages:
       md5: f45d8d91f4fde2eb20f14b192f4d6e62
       size: 206974
   latex-image-readme/sizes:
-    cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
+    cmd: calkit xenv -n dev --no-check -- python 
+      .calkit/markdown/images/latex/README.md/sizes.py
     deps:
     - path: .calkit/markdown/images/latex/README.md/sizes.py
       hash: md5
@@ -189,16 +192,16 @@ stages:
       size: 9731
     - path: docs/one-pager/main.md
       hash: md5
-      md5: ffc2d1344bf9aa855b9ae4d38241e573
-      size: 4614
+      md5: 5cd8fbf6f5bc6ad0804d6b64c527e016
+      size: 4878
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 161bbc0cccd2e991cdc03924cedaef55
       size: 2101
     - path: docs/one-pager/template.tex
       hash: md5
-      md5: f3f904632ca067fbb117aa1b73edd249
-      size: 3117
+      md5: 4955559c1e551988f2738cb2ac98880e
+      size: 3243
     - path: results/2027-budget.json
       hash: md5
       md5: d223d73c9ad60723f06e3c13496fd205
@@ -218,8 +221,8 @@ stages:
     outs:
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: ed7580e3a89983eba53daea7faed82bb
-      size: 7796
+      md5: 8835e721da8192d0c2102133b690b937
+      size: 8153
   one-pager:
     cmd: calkit latex build -e tex --no-check docs/one-pager/main.tex
     deps:
@@ -234,20 +237,20 @@ stages:
       size: 50359
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: ed7580e3a89983eba53daea7faed82bb
-      size: 7796
+      md5: 8835e721da8192d0c2102133b690b937
+      size: 8153
     - path: docs/one-pager/main.tex
       hash: md5
-      md5: ed7580e3a89983eba53daea7faed82bb
-      size: 7796
+      md5: 8835e721da8192d0c2102133b690b937
+      size: 8153
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: db55fc424930fcd0fc34187c54dd7e16
-      size: 136006
+      md5: 4960953114330139033d7281122861de
+      size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25
-      --supported=20 --indirect-rate=0
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4
+      --attendees=25 --supported=20 --indirect-rate=0
     deps:
     - path: .python-version
       hash: md5

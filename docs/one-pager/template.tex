@@ -1,5 +1,5 @@
 \documentclass[10pt]{article}
-\usepackage[letterpaper,left=0.6in,right=0.6in,top=1.36in,bottom=0.65in,
+\usepackage[letterpaper,left=0.6in,right=0.6in,top=1.08in,bottom=0.65in,
   footskip=0.3in]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage{tgheros}
@@ -50,16 +50,17 @@
 \renewcommand{\headrulewidth}{0pt}
 \fancyfoot[C]{\color{ckmuted}\scriptsize $footer$}
 % It's a one-pager, so spilling onto a second page is an error, not a
-% layout to live with
-\AtEndDocument{\ifnum\value{page}>1
-  \GenericError{}{The one-pager runs to \arabic{page} pages}{}{}\fi}
+% layout to live with. The last page is finished first, since a page that's
+% exactly full leaves the counter on an empty page that's never output
+\AtEndDocument{\clearpage\ifnum\value{page}>2
+  \GenericError{}{The one-pager runs past one page}{}{}\fi}
 \begin{document}
 \begin{tikzpicture}[remember picture,overlay]
   \fill[ckteal] (current page.north west)
-    rectangle ([yshift=-1.18in]current page.north east);
+    rectangle ([yshift=-0.9in]current page.north east);
   \node[anchor=west,text width=7.3in,align=left,text=white,
     font=\bfseries\fontsize{18}{22}\selectfont]
-    at ([xshift=0.6in,yshift=-0.6in]current page.north west) {$title$};
+    at ([xshift=0.6in,yshift=-0.45in]current page.north west) {$title$};
 \end{tikzpicture}
 \noindent
 $if(hero)$

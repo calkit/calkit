@@ -1,11 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import {
-  extractLatexImageRefs,
-  extractMarkdownImageRefs,
-  resolveFigureRefStage,
-  resolveImageRefToRepoRelative,
-} from "./core";
+import {} from "./core";
 import type { FigureEntry } from "../types";
 
 // Open the figures gallery/carousel webview. The caller supplies the figure
@@ -403,72 +398,4 @@ ${plotlyScript}
 </script>
 </body>
 </html>`;
-}
-
-// Dependencies the CodeLens provider needs from the extension host, injected so
-// this module stays decoupled from extension-global state.
-export interface FigureSourceCodeLensDeps {
-  getWorkspaceRoot: () => string | undefined;
-  buildOutputToStageMap: (
-    workspaceRoot: string,
-  ) => Promise<Map<string, string>>;
-  goToFigureSourceCommand: string;
-}
-
-// Shows a "Source: <stage>" CodeLens above each figure reference in a Quarto/
-// Markdown document whose target is produced by a pipeline stage, linking to
-// the producing stage's source via the goToFigureSource command.
-export class FigureSourceCodeLensProvider implements vscode.CodeLensProvider {
-  private readonly _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
-  readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
-
-  constructor(private readonly deps: FigureSourceCodeLensDeps) {}
-
-  refresh(): void {
-    this._onDidChangeCodeLenses.fire();
-  }
-
-  async provideCodeLenses(
-    document: vscode.TextDocument,
-  ): Promise<vscode.CodeLens[]> {
-    const workspaceRoot = this.deps.getWorkspaceRoot();
-    if (!workspaceRoot) {
-      return [];
-    }
-    // LaTeX docs use \includegraphics; Markdown/Quarto use ![](...).
-    const isLatex =
-      document.languageId === "latex" ||
-      document.uri.fsPath.toLowerCase().endsWith(".tex");
-    const text = document.getText();
-    const refs = isLatex
-      ? extractLatexImageRefs(text)
-      : extractMarkdownImageRefs(text);
-    if (refs.length === 0) {
-      return [];
-    }
-    const outputToStage = await this.deps.buildOutputToStageMap(workspaceRoot);
-    const lenses: vscode.CodeLens[] = [];
-    for (const ref of refs) {
-      const relPath = resolveImageRefToRepoRelative(
-        document.uri.fsPath,
-        ref.target,
-        workspaceRoot,
-      );
-      if (!relPath) {
-        continue;
-      }
-      const stageName = resolveFigureRefStage(relPath, outputToStage);
-      if (!stageName) {
-        continue;
-      }
-      lenses.push(
-        new vscode.CodeLens(new vscode.Range(ref.line, 0, ref.line, 0), {
-          title: `$(go-to-file) Source: ${stageName}`,
-          command: this.deps.goToFigureSourceCommand,
-          arguments: [relPath],
-        }),
-      );
-    }
-    return lenses;
-  }
 }

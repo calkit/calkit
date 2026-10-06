@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   run:
-    name: Run
+    name: run
     # A fork's branch can't be pushed to with this repo's token
     if: >-
       github.event_name == 'workflow_dispatch'

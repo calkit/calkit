@@ -8,6 +8,11 @@ description: >-
   pipeline so they stay true.
 
 questions:
+  - question: What is the difference in research productivity, in terms of
+      time to valuable knowledge, from working on all stages together in
+      small steps, akin to one piece flow in lean manufacturing,
+      versus a more waterfall, stage gate style?
+    hypothesis: An agile, lean approach is 10x more efficient.
   - question: >-
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?

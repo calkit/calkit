@@ -234,7 +234,9 @@ def get_project(
     if current_user is None and project.is_public:
         project.current_user_access = "read"
     elif current_user is not None:
-        # Compute access
+        # Compute access, not keeping one worked out for whoever this
+        # instance was last fetched for in the same session
+        project.current_user_access = None
         if project.owner == current_user:
             project.current_user_access = "owner"
         elif isinstance(project.owner, Org):
@@ -249,12 +251,11 @@ def get_project(
                         else "read"
                     )
                     break
-            if project.current_user_access is None and project.is_public:
-                project.current_user_access = "read"
-        else:
+        if project.current_user_access is None:
             # Non-owner: a native Calkit grant (role_id, e.g., from an invite)
             # takes precedence over GitHub-derived access, and is the only
-            # access path for GitHub-less collaborators.
+            # access path for GitHub-less collaborators. This includes
+            # collaborators on an org's repo who aren't in the org.
             access_row = session.exec(
                 select(UserProjectAccess)
                 .where(UserProjectAccess.project_id == project.id)
@@ -290,6 +291,9 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
     Two sources: dvc.lock, which covers anything a pipeline stage
     produces, and the standalone ``.dvc`` pointer files that ``dvc add``
     leaves next to a tracked file, which the lock knows nothing about.
+    The lock also lists stage outputs stored in Git, e.g., with Calkit's
+    ``storage: git``, which are left out since they're in the tree itself
+    and were never pushed to object storage.
     """
     outs: dict[str, dict] = dict(
         get_ck_info_and_dvc_outs_from_tree(
@@ -327,7 +331,7 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
             else pointer_path[: -len(".dvc")]
         )
         outs.setdefault(path, out)
-    return outs
+    return {path: out for path, out in outs.items() if not tree.exists(path)}
 
 
 def read_project_file(

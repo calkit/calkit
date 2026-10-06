@@ -167,6 +167,80 @@ def test_get_project_logged_in_without_min_access_level(db: Session) -> None:
         db.commit()
 
 
+def test_get_project_org_owned(db: Session) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from fastapi import HTTPException
+
+    from app import users
+    from app.models import ROLE_IDS, Org, UserCreate, UserOrgMembership
+
+    suffix = uuid.uuid4().hex[:8]
+    org = Org(
+        account=Account(
+            name=f"org{suffix}",
+            display_name="Org",
+            github_name=f"Org{suffix}",
+        )
+    )
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    project = Project(
+        name=f"org-proj-{suffix}",
+        title="Org Project",
+        git_repo_url=f"https://github.com/Org{suffix}/org-proj-{suffix}",
+        owner_account_id=org.account.id,
+    )
+    db.add(project)
+    db.commit()
+    github_permission = "write"
+
+    def make_user(name: str):
+        return users.create_user(
+            session=db,
+            user_create=UserCreate(
+                email=f"{name}{suffix}@example.com",
+                password="UserPassword123",
+                account_name=f"{name}{suffix}",
+                github_username=f"{name}{suffix}",
+            ),
+        )
+
+    def access(user) -> str | None:
+        with (
+            patch("app.users.get_github_token", return_value="t"),
+            patch(
+                "app.projects.requests.get",
+                return_value=SimpleNamespace(
+                    status_code=200,
+                    json=lambda: {"permission": github_permission},
+                ),
+            ),
+        ):
+            return app.projects.get_project(
+                session=db,
+                owner_name=f"org{suffix}",
+                project_name=f"org-proj-{suffix}",
+                current_user=user,
+            ).current_user_access
+
+    # A member of the org gets access from their role in it
+    member = make_user("member")
+    db.add(UserOrgMembership(user=member, org=org, role_id=ROLE_IDS["read"]))
+    db.commit()
+    db.refresh(member)
+    assert access(member) == "read"
+    # A collaborator on the repo outside the org gets it from GitHub
+    assert access(make_user("collab")) == "write"
+    # And someone with no access on GitHub gets none
+    github_permission = "none"
+    with pytest.raises(HTTPException) as e:
+        access(make_user("stranger"))
+    assert e.value.status_code == 403
+
+
 def test_get_project_survives_a_concurrent_access_insert(db: Session) -> None:
     # Two requests resolving the same user's access don't 500 one of them.
     # Regression: the unique violation was caught, but the handler logged
@@ -829,6 +903,37 @@ def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
             app.projects.get_repo_tree_for_ref(repo, None)
         )
     )
+
+
+def test_dvc_outputs_from_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from app.git import WorkingTree
+
+    # A stage output stored in Git is a file in the tree; one stored with
+    # DVC is ignored by Git, so it isn't, and a `dvc add` pointer is
+    (tmp_path / "figures").mkdir()
+    (tmp_path / "figures" / "plot.png").write_bytes(b"png")
+    (tmp_path / "data.csv.dvc").write_text(
+        "outs:\n- md5: c3\n  path: data.csv\n"
+    )
+    lock_outs = {
+        "figures/plot.png": {"md5": "a1", "type": "file"},
+        "results/big.h5": {"md5": "b2", "type": "file"},
+    }
+    monkeypatch.setattr(
+        app.projects,
+        "get_ck_info_and_dvc_outs_from_tree",
+        lambda project, tree: SimpleNamespace(dvc_lock_outs=lock_outs),
+    )
+    outs = app.projects.dvc_outputs_from_tree(
+        project=None,  # type: ignore[arg-type]
+        tree=WorkingTree(str(tmp_path)),
+    )
+    assert set(outs) == {"results/big.h5", "data.csv"}
+    assert outs["data.csv"]["md5"] == "c3"
 
 
 def test_drop_stale_lock_stages() -> None:

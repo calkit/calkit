@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    name: Build and smoke test
+    name: build and smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -61,6 +61,7 @@ jobs:
             set -eux
             latexmk --version
             latexdiff --version
+            pandoc --version
           '
           # As a non-root user, which is how Calkit runs it so output
           # isn't owned by root. TinyTeX under /root would be unreadable
@@ -69,6 +70,7 @@ jobs:
             set -eux
             latexmk --version
             latexdiff --version
+            pandoc --version
           '
           # A document that needs the curated set and the packages papers
           # load most, built the way the docs say to build it: with a

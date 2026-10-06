@@ -145,7 +145,13 @@ def post_org(
         raise HTTPException(422, "Invalid account name")
     if not account_name_is_valid(org_name):
         raise HTTPException(422, ACCOUNT_NAME_RULE)
-    if get_org_from_db(org_name=org_name, session=session) is not None:
+    # One added along with a repo by an outside collaborator has no members,
+    # and can be claimed by one from GitHub
+    existing = get_org_from_db(org_name=org_name, session=session)
+    if existing is not None and (
+        existing.user_memberships
+        or existing.github_name.lower() != req.github_name.lower()
+    ):
         raise HTTPException(400, "This org already exists")
     token = get_github_token(session=session, user=current_user)
     headers = {"Authorization": f"Bearer {token}"}
@@ -211,6 +217,20 @@ def post_org(
             400,
             "Must be an active member of the GitHub org to add it; "
             "accept any pending invitation first",
+        )
+    if existing is not None:
+        session.add(
+            UserOrgMembership(
+                user=current_user, org=existing, role_id=ROLE_IDS["owner"]
+            )
+        )
+        session.commit()
+        return OrgPublic(
+            id=existing.id,
+            name=existing.account.name,
+            display_name=existing.display_name,
+            github_name=existing.github_name,
+            role="owner",
         )
     # Figure out the display name
     display_name = req.display_name

@@ -6,10 +6,13 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from httpx import Response
+from sqlmodel import Session
+
+from app.models import Account, Org
 
 
 def test_post_org(
-    client: TestClient, normal_user_token_headers: dict[str, str]
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
     github_name = f"Org-{uuid.uuid4().hex[:8]}"
     install_status = 404
@@ -68,6 +71,30 @@ def test_post_org(
     assert org["display_name"] == github_name
     assert org["role"] == "owner"
     # And it can only be added once
+    resp = post()
+    assert resp.status_code == 400
+    assert "already exists" in resp.json()["detail"]
+    # One added along with a repo by an outside collaborator has no members,
+    # so a member from GitHub can still claim it
+    github_name = f"Org-{uuid.uuid4().hex[:8]}"
+    org = Org(
+        account=Account(
+            name=github_name.lower(),
+            display_name="Unclaimed",
+            github_name=github_name,
+        )
+    )
+    db.add(org)
+    db.commit()
+    membership = (200, {"role": "member", "state": "pending"})
+    assert post().status_code == 400
+    membership = (200, {"role": "member", "state": "active"})
+    resp = post()
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["id"] == str(org.id)
+    assert resp.json()["display_name"] == "Unclaimed"
+    assert resp.json()["role"] == "owner"
+    # After which it's taken
     resp = post()
     assert resp.status_code == 400
     assert "already exists" in resp.json()["detail"]

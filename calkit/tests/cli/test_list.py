@@ -268,6 +268,16 @@ def test_list_questions(tmp_dir):
             ],
         }
     )
+    ck_info["pipeline"] = {
+        "stages": {
+            "metrics": {
+                "kind": "python-script",
+                "environment": "py",
+                "script_path": "metrics.py",
+                "outputs": ["results/metrics.json"],
+            }
+        }
+    }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     out = subprocess.check_output(
@@ -275,6 +285,11 @@ def test_list_questions(tmp_dir):
     )
     questions = json.loads(out)
     assert questions[0] == "Does it work?"
+    # The stages behind the evidence are derived, ahead of the answer
+    assert questions[1]["stages"] == ["metrics"]
+    assert list(questions[1]).index("stages") < list(questions[1]).index(
+        "answer"
+    )
     assert questions[1]["question"] == "What is the effect?"
     assert questions[1]["hypothesis"] == "It improves performance."
     assert questions[1]["evidence"][2]["kind"] == "publication"
@@ -283,6 +298,7 @@ def test_list_questions(tmp_dir):
     assert "1. Does it work?" in out
     assert "2. question: What is the effect?" in out
     assert "hypothesis: It improves performance." in out
+    assert "    stages:\n        - metrics\n    answer:" in out
     assert "answer: It improves performance by 10%." in out
     assert "evidence:" in out
     assert "- kind: figure" in out

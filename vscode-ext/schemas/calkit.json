@@ -5695,7 +5695,7 @@
       "type": "object"
     },
     "Question": {
-      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports a question as stale when any of its evidence has changed since\nthat commit, so editing the question after re-reading it against the\nnew evidence is how to say it still holds.",
+      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports evidence that has changed since that commit. A person saying\nthe answer still holds is recorded as a review, which goes stale in\nturn when the evidence or the question changes after it.",
       "properties": {
         "answer": {
           "anyOf": [
@@ -5715,6 +5715,19 @@
           "default": null,
           "description": "The claim the evidence supports. A mapping keyed by 'if <condition>', 'elif <condition>' and 'else' picks its wording from the evidence, so an answer resting on a threshold states the other outcome instead of going stale when a value moves.",
           "title": "Answer"
+        },
+        "approach": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One sentence on how the question is answered, e.g., the method the pipeline implements. The stages themselves aren't listed here, since they follow from the evidence the pipeline produces.",
+          "title": "Approach"
         },
         "evidence": {
           "anyOf": [
@@ -5791,6 +5804,22 @@
         "question": {
           "title": "Question",
           "type": "string"
+        },
+        "reviews": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Review"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sign-offs that the answer follows from the evidence, one per reviewer; reviewing again replaces that reviewer's entry, and Git keeps the earlier ones.",
+          "title": "Reviews"
         }
       },
       "required": [
@@ -6861,6 +6890,41 @@
         "path"
       ],
       "title": "ResultsEvidence",
+      "type": "object"
+    },
+    "Review": {
+      "additionalProperties": false,
+      "description": "A person's sign-off that a question's answer follows from its evidence.\n\nIt applies to the question and evidence as they were at the commit that\nadded it, which is read from Git rather than written here. Evidence\nchanging after that commit, or the question being edited, makes it\nstale, so a sign-off can't quietly carry over to results nobody read.",
+      "properties": {
+        "by": {
+          "$ref": "#/$defs/_Person",
+          "description": "Who signed off. Generative AI tools used in reviewing are disclosed with their ``with_ai``."
+        },
+        "date": {
+          "description": "When they signed off.",
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What they checked, or anything they want on record.",
+          "title": "Notes"
+        }
+      },
+      "required": [
+        "by",
+        "date"
+      ],
+      "title": "Review",
       "type": "object"
     },
     "SBatchStage": {

@@ -244,13 +244,29 @@ def list_questions(
 
     Placeholders in the text, such as ``{improvement:.1f}``, are filled from
     the question's value evidence, so numbers shown are read from the
-    results files rather than retyped into ``calkit.yaml``.
+    results files rather than retyped into ``calkit.yaml``. The pipeline
+    stages behind each question's evidence are shown too, upstream first.
     """
     from calkit.questions import (
         TEMPLATED_FIELDS,
         placeholders,
+        question_stages,
         render_question,
     )
+
+    def _with_stages(question: str | dict) -> str | dict:
+        # Derived from the evidence, so shown ahead of the answer but never
+        # written back
+        stages = question_stages(question, ck_info)
+        if isinstance(question, str) or not stages:
+            return question
+        out: dict = {}
+        for k, v in question.items():
+            if k == "answer":
+                out["stages"] = stages
+            out[k] = v
+        out.setdefault("stages", stages)
+        return out
 
     def _texts(question: dict) -> list[str | dict]:
         evidence = question.get("evidence") or []
@@ -285,7 +301,7 @@ def list_questions(
                 "the results files are not here yet.",
                 err=json_output,
             )
-        questions = rendered
+        questions = [_with_stages(q) for q in rendered]
     if json_output:
         echo_json(questions)
         return

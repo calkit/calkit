@@ -11,6 +11,8 @@ Take this example:
 questions:
   - question: How does the system respond to increasing $x$?
     hypothesis: The value of $y$ increases linearly with $x$.
+    approach: Measure $y$ at ten values of $x$ and fit linear and quadratic
+      models to it.
     answer: $y$ increases quadratically with $x$, not linearly
       ($R^2 = {r2:.3f}$ for the quadratic fit).
     evidence:
@@ -27,12 +29,18 @@ questions:
 ```
 
 Early on in the project, we may start with a question,
-then add a hypothesis, then an answer with some evidence.
+then add a hypothesis and the approach we'll take to answer it,
+then an answer with some evidence.
+The approach is one sentence on how the question is answered.
 The evidence references artifacts created by the project pipeline,
 so each answer can be traced back to the raw data and code behind it,
 as long as the pipeline is up to date.
+`calkit list questions` shows the pipeline stages behind each question's
+evidence, worked out from the pipeline itself, so they never need to be
+written down.
 Together, the questions form a structured summary of the project's
-findings.
+findings,
+and the natural place to start when reviewing a project.
 
 ## Evidence
 
@@ -166,6 +174,19 @@ When the pipeline runs again, the answer updates to match the new result.
 `calkit check questions` checks every branch, so a mistake in one that
 doesn't currently apply still shows up.
 
+## Declaring before answering
+
+Write the question, hypothesis, and approach down before running the
+analysis that answers them.
+The project's history then shows that they came first.
+This matters most when an AI agent does the analysis:
+it can try many variations in seconds, and the code left behind shows only
+the one it kept.
+With the approach declared up front, a reviewer can check the code against
+it, rather than against the agent's account of what it did.
+Conditional answers work the same way:
+writing the branches first makes the threshold part of the claim.
+
 ## Checking questions
 
 ```sh
@@ -193,13 +214,48 @@ last edited in `calkit.yaml`, according to Git history, or `dvc.lock` for
 DVC-tracked files.
 This doesn't fail the check, since the answer may still be correct,
 but it's a sign the answer should be read again.
-If it still holds, edit the question, e.g., by adding to its `notes`,
-to mark it as reviewed.
-This mechanism is being replaced with an explicit review record; see
-[issue #1606](https://github.com/calkit/calkit/issues/1606).
+If it still holds, [review it](#reviewing-answers) to record that.
 
 Checking questions is separate from `calkit status` because it needs to
 read the history of `calkit.yaml`.
+
+## Reviewing answers
+
+Once someone has read an answer against its evidence, and the code behind
+it against the approach, they can sign off on it:
+
+```sh
+calkit update question 1 --review "Read the fit against the figure."
+```
+
+This adds a review to the question, with the reviewer's name and email from
+Git and today's date, replacing any earlier review of theirs:
+
+```yaml
+questions:
+  - question: How does the system respond to increasing $x$?
+    # ...
+    reviews:
+      - by:
+          name: Ada Lovelace
+          email: ada@example.org
+        date: 2026-10-05
+        notes: Read the fit against the figure.
+```
+
+Add `--with-ai` to note any AI tools used in reviewing,
+e.g., `--with-ai "Claude Opus 5.5"`.
+
+A review covers the question and its evidence as they were when it was
+added.
+If the evidence changes afterward, or the question is edited,
+the review goes stale and `calkit check questions` fails until someone
+reviews it again.
+A question nobody has reviewed doesn't fail the check.
+
+Because every answer leads to its evidence and the stages behind it,
+a project can be reviewed a little at a time as the work goes,
+rather than all at once at the end.
 
 ## Quoting questions and answers in a LaTeX document
 

@@ -29,11 +29,18 @@ changed after the commit that last edited the question, the report says so
 and what it was, since that is worth a reader's attention. It is not a
 failure -- prose can stay true while a number moves, and a templated number
 updates itself.
+
+Whether the prose still holds is a person's call, recorded as a review. A
+review applies to the question and its evidence as of the commit that added
+it, so evidence changing after that commit, or the question being edited,
+makes it stale, and that does fail the check: someone signed off on
+something that is no longer there.
 """
 
 from __future__ import annotations
 
 import ast
+import datetime
 import glob
 import io
 import json
@@ -88,6 +95,18 @@ class EvidenceCheck(BaseModel):
     git_ref: str | None = None
 
 
+class ReviewCheck(BaseModel):
+    """The result of checking one review of a question."""
+
+    #: The reviewer's name, or their email if no name is given
+    by: str
+    date: str | None = None
+    status: Literal["current", "stale", "unchecked"]
+    #: Commit that added the review, if committed
+    commit: str | None = None
+    message: str | None = None
+
+
 class QuestionCheck(BaseModel):
     """The result of checking one question."""
 
@@ -100,6 +119,19 @@ class QuestionCheck(BaseModel):
     commit: str | None = None
     message: str | None = None
     evidence: list[EvidenceCheck] = Field(default_factory=list)
+    #: Stages behind the evidence, upstream first
+    stages: list[str] = Field(default_factory=list)
+    reviews: list[ReviewCheck] = Field(default_factory=list)
+
+    @property
+    def review_status(self) -> Literal["none", "current", "stale"]:
+        """Stale if any reviewer's sign-off is, since each one vouches for
+        what they read."""
+        if not self.reviews:
+            return "none"
+        if any(r.status == "stale" for r in self.reviews):
+            return "stale"
+        return "current"
 
 
 class QuestionsStatus(BaseModel):
@@ -127,6 +159,11 @@ class QuestionsStatus(BaseModel):
         return [q for q in self.questions if q.status == "error"]
 
     @property
+    def stale_reviews(self) -> list[QuestionCheck]:
+        """Answers signed off on evidence or text that has since changed."""
+        return [q for q in self.questions if q.review_status == "stale"]
+
+    @property
     def answered(self) -> list[QuestionCheck]:
         return [q for q in self.questions if q.answered]
 
@@ -146,12 +183,19 @@ class QuestionsStatus(BaseModel):
 
     @property
     def ok(self) -> bool:
-        """True if no answered question is missing, stale, or broken.
+        """True if no answered question is missing, stale, broken, or signed
+        off on something that has since changed.
 
         Frozen evidence doesn't fail the check: nothing can be re-run to fix
-        it, and whether a pin is wanted is the author's call.
+        it, and whether a pin is wanted is the author's call. Nor does a
+        question nobody has reviewed, since reviewing is opt-in.
         """
-        return not self.missing and not self.stale and not self.errors
+        return (
+            not self.missing
+            and not self.stale
+            and not self.errors
+            and not self.stale_reviews
+        )
 
     @property
     def unattributed(self) -> list[EvidenceCheck]:
@@ -510,7 +554,7 @@ def named_keys(ev: dict) -> dict[str, str]:
     return {}
 
 
-TEMPLATED_FIELDS = ("hypothesis", "answer", "notes")
+TEMPLATED_FIELDS = ("hypothesis", "approach", "answer", "notes")
 
 
 def render_question(
@@ -573,7 +617,7 @@ def render_question(
 
 
 #: The parts of a question a document can quote.
-LATEX_FIELDS = ("question", "hypothesis", "answer", "notes")
+LATEX_FIELDS = ("question", "hypothesis", "approach", "answer", "notes")
 
 
 def latex_values(ck_info: dict, wdir: str | None = None) -> dict[str, str]:
@@ -673,6 +717,67 @@ def expand_questions_stages(ck_info: dict) -> dict:
     out = dict(ck_info)
     out["pipeline"] = {**ck_info["pipeline"], "stages": expanded}
     return out
+
+
+def stage_for_path(path: str, ck_info: dict) -> str | None:
+    """The stage that produces ``path``, counting a Markdown stage's target,
+    which it declares as its target rather than an output."""
+    from calkit.pipeline import get_stage_for_output
+
+    stage = get_stage_for_output(path, ck_info)
+    if stage is not None:
+        return stage
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    return next(
+        (
+            name
+            for name, st in stages.items()
+            if isinstance(st, dict)
+            and st.get("kind") == "markdown"
+            and st.get("target_path") == path
+        ),
+        None,
+    )
+
+
+def question_stages(question: str | dict, ck_info: dict) -> list[str]:
+    """The pipeline stages behind a question's evidence, upstream first.
+
+    Read from ``calkit.yaml`` alone, following each stage's inputs to the
+    stages that produce them, so it costs nothing to show alongside the
+    question and can't disagree with the pipeline it's derived from.
+    """
+
+    def visit(name: str, seen: set[str]) -> None:
+        if name in order or name in seen or name not in stages:
+            return
+        seen.add(name)
+        for i in stages[name].get("inputs") or []:
+            if isinstance(i, dict) and i.get("from_stage_outputs"):
+                upstream = i["from_stage_outputs"]
+            else:
+                path = i if isinstance(i, str) else (i or {}).get("path")
+                upstream = stage_for_path(path, ck_info) if path else None
+            if upstream:
+                visit(upstream, seen)
+        order.append(name)
+
+    if isinstance(question, str):
+        return []
+    stages = {
+        name: st
+        for name, st in (
+            (ck_info.get("pipeline") or {}).get("stages") or {}
+        ).items()
+        if isinstance(st, dict)
+    }
+    order: list[str] = []
+    for ev in question.get("evidence") or []:
+        path = ev.get("path") if isinstance(ev, dict) else None
+        stage = stage_for_path(path, ck_info) if path else None
+        if stage:
+            visit(stage, set())
+    return order
 
 
 # -- history -------------------------------------------------------------
@@ -800,6 +905,10 @@ def _plain(value: Any) -> Any:
         return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain(v) for v in value]
+    # One loader reads a date as a date and another, or a quoted one, as a
+    # string, and a review written either way is the same review
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
     return value
 
 
@@ -832,6 +941,38 @@ def question_commit(
         if old_q is None or _plain(old_q) != current:
             break
         found = sha
+    return found
+
+
+def _without_reviews(question: dict) -> dict:
+    return {k: v for k, v in _plain(question).items() if k != "reviews"}
+
+
+def review_commit(
+    review: dict, history: CalkitYamlHistory
+) -> tuple[str | None, dict | None]:
+    """The commit that added ``review``, and the question as it was then.
+
+    The question is found by the review it carries rather than by its text,
+    so an edit to the question after the review still finds the version
+    that was reviewed. None means the review isn't committed yet.
+    """
+    target = _plain(review)
+    found: tuple[str | None, dict | None] = (None, None)
+    for sha in history.shas:
+        old = history.at(sha)
+        reviewed = next(
+            (
+                q
+                for q in (old or {}).get("questions") or []
+                if isinstance(q, dict)
+                and target in _plain(q.get("reviews") or [])
+            ),
+            None,
+        )
+        if reviewed is None:
+            break
+        found = (sha, reviewed)
     return found
 
 
@@ -1143,6 +1284,34 @@ def check_pinned_evidence(
     return out
 
 
+def change_since(
+    ev: dict, check: EvidenceCheck, since: str, repo: Any, wdir: str
+) -> str | None:
+    """How a checked evidence entry has changed since commit ``since``."""
+    if check.values is not None:
+        # Each value is compared on its own, as a value entry would be
+        changes = [
+            evidence_change(
+                check.path,
+                since,
+                repo,
+                wdir,
+                key=value_key,
+                current=check.values[name],
+            )
+            for name, value_key in named_keys(ev).items()
+        ]
+        return "; ".join(dict.fromkeys(c for c in changes if c)) or None
+    return evidence_change(
+        check.path,
+        since,
+        repo,
+        wdir,
+        key=check.key if is_value_evidence(ev) else None,
+        current=check.current,
+    )
+
+
 def check_evidence(
     ev: dict,
     ck_info: dict,
@@ -1158,8 +1327,6 @@ def check_evidence(
     pipeline: the ones DVC would re-run, and the ones it never will because
     they're frozen or downstream of a freeze.
     """
-    from calkit.pipeline import get_stage_for_output
-
     kind = ev.get("kind", "result")
     path = ev.get("path", "")
     key = ev.get("key")
@@ -1169,7 +1336,8 @@ def check_evidence(
         key=key,
         name=evidence_name(ev) if is_value_evidence(ev) else None,
         status="ok",
-        stage=get_stage_for_output(path, ck_info) if path else None,
+        # A document may also be a Markdown stage's target
+        stage=stage_for_path(path, ck_info) if path else None,
         git_ref=_declared_git_ref(ev),
     )
     if not path:
@@ -1185,21 +1353,6 @@ def check_evidence(
     if kind == "publication":
         out.status, out.message = _check_publication_label(ev, ck_info, wdir)
         return out
-    # A document may be written by hand or built by a stage, e.g., a
-    # Markdown stage, which declares it as its target rather than an output
-    if kind == "document" and out.stage is None:
-        out.stage = next(
-            (
-                name
-                for name, stage in (
-                    ck_info.get("pipeline", {}).get("stages") or {}
-                ).items()
-                if isinstance(stage, dict)
-                and stage.get("kind") == "markdown"
-                and stage.get("target_path") == path
-            ),
-            None,
-        )
     if kind == "value" and not key:
         out.status = "error"
         out.message = "value evidence needs a key"
@@ -1248,29 +1401,7 @@ def check_evidence(
             )
             return out
     if since is not None and repo is not None:
-        if out.values is not None:
-            # Each value is compared on its own, as a value entry would be
-            changes = [
-                evidence_change(
-                    path,
-                    since,
-                    repo,
-                    wdir,
-                    key=value_key,
-                    current=out.values[name],
-                )
-                for name, value_key in named_keys(ev).items()
-            ]
-            change = "; ".join(dict.fromkeys(c for c in changes if c)) or None
-        else:
-            change = evidence_change(
-                path,
-                since,
-                repo,
-                wdir,
-                key=key if is_value_evidence(ev) else None,
-                current=out.current,
-            )
+        change = change_since(ev, out, since, repo, wdir)
         if change:
             out.status = "changed"
             # Not overwritten: a deprecated entry that also changed is
@@ -1372,6 +1503,41 @@ def check_question(
     check_history: bool = True,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
+
+    def check_review(review: dict, entry: dict) -> ReviewCheck:
+        # Against the question and evidence as of the commit that added it
+        by = review.get("by") or {}
+        out = ReviewCheck(
+            by=str(by.get("name") or by.get("email") or "unknown"),
+            date=str(review["date"]) if review.get("date") else None,
+            status="unchecked",
+        )
+        if repo is None or not check_history:
+            return out
+        sha, reviewed = review_commit(
+            review, history or CalkitYamlHistory(repo, wdir)
+        )
+        out.status = "current"
+        out.commit = sha
+        if sha is None or reviewed is None:
+            out.message = "not yet committed, so it covers the working tree"
+            return out
+        reasons = []
+        if _without_reviews(reviewed) != _without_reviews(entry):
+            reasons.append("the question was edited after it")
+        for ev, c in zip(evidence, checks):
+            # Missing or broken evidence fails on its own, and a pinned
+            # version can't move
+            if c.status in ("missing", "error") or c.git_ref is not None:
+                continue
+            change = change_since(ev, c, sha, repo, wdir)
+            if change:
+                reasons.append(f"{c.path}: {change}")
+        if reasons:
+            out.status = "stale"
+            out.message = "; ".join(reasons)
+        return out
+
     if isinstance(question, str):
         return QuestionCheck(
             index=index, question=question, answered=False, status="unanswered"
@@ -1383,9 +1549,17 @@ def check_question(
         return QuestionCheck(
             index=index, question=text, answered=False, status="unanswered"
         )
+    checks: list[EvidenceCheck] = []
     if not evidence:
         return QuestionCheck(
-            index=index, question=text, answered=True, status="no-evidence"
+            index=index,
+            question=text,
+            answered=True,
+            status="no-evidence",
+            reviews=[
+                check_review(r, question)
+                for r in question.get("reviews") or []
+            ],
         )
     since = (
         question_commit(question, repo, wdir, history)
@@ -1435,12 +1609,16 @@ def check_question(
         status = "stale"
     elif "frozen" in statuses:
         status = "frozen"
-    if "changed" in statuses:
+    reviews = [
+        check_review(r, question) for r in question.get("reviews") or []
+    ]
+    if "changed" in statuses and not reviews:
         # Said either way, since it is the one thing here that asks for a
-        # reader rather than a command.
+        # reader rather than a command. A reviewed question says it per
+        # review instead.
         messages.append(
             "evidence changed since the answer was last edited; worth "
-            "re-reading, and editing the question if it no longer holds"
+            "re-reading, then editing the answer or reviewing the question"
         )
     if since is None and repo is not None and check_history:
         messages.append("not yet committed, so history cannot be checked")
@@ -1452,6 +1630,8 @@ def check_question(
         commit=since,
         message="; ".join(messages) or None,
         evidence=checks,
+        stages=question_stages(question, ck_info),
+        reviews=reviews,
     )
 
 
@@ -1557,17 +1737,27 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     for q in status.questions:
         # An unattributed entry is advisory rather than a failure, but it
         # is only ever said here, so it earns the question a block
-        needs_attention = q.status in (
-            "missing",
-            "error",
-            "stale",
-            "frozen",
-        ) or any(ev.status in ("unattributed", "changed") for ev in q.evidence)
+        needs_attention = (
+            q.status in ("missing", "error", "stale", "frozen")
+            or q.review_status == "stale"
+            or any(
+                ev.status in ("unattributed", "changed") for ev in q.evidence
+            )
+        )
         if not verbose and not needs_attention:
             continue
-        lines.append(f"{q.index}. [{q.status}] {q.question}")
+        review = f", review {q.review_status}" if q.reviews else ""
+        lines.append(f"{q.index}. [{q.status}{review}] {q.question}")
         if q.message:
             lines.append(f"     {q.message}")
+        if verbose and q.stages:
+            lines.append(f"     stages: {' -> '.join(q.stages)}")
+        for r in q.reviews:
+            if not verbose and r.status != "stale":
+                continue
+            when = f" on {r.date}" if r.date else ""
+            detail = f" -- {r.message}" if r.message else ""
+            lines.append(f"     review by {r.by}{when} [{r.status}]{detail}")
         for ev in q.evidence:
             if not verbose and ev.status in ("ok", "skipped"):
                 continue
@@ -1597,6 +1787,15 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
             f"Answers whose evidence the pipeline would rebuild: "
             f"{len(status.stale)} {calkit.check_or_x(not status.stale)}"
         )
+        reviewed = [q for q in answered if q.reviews]
+        if reviewed:
+            lines.append(
+                f"Answers signed off on something that has since changed: "
+                f"{len(status.stale_reviews)} "
+                f"{calkit.check_or_x(not status.stale_reviews)}"
+            )
+        # No mark: reviewing is opt-in
+        lines.append(f"Answers reviewed: {len(reviewed)}/{len(answered)}")
     # No check mark either way on the rest: worth a look, not a verdict
     if status.frozen:
         lines.append(
@@ -1638,6 +1837,7 @@ def format_summary(status: QuestionsStatus) -> str:
         (len(status.missing), "with missing evidence"),
         (len(status.errors), "with broken references"),
         (len(status.frozen), "resting on a frozen stage"),
+        (len(status.stale_reviews), "with a stale review"),
         (
             sum(1 for q in status.answered if q.status == "no-evidence"),
             "with no evidence",

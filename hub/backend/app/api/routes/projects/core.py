@@ -1227,19 +1227,16 @@ def post_project(
             for membership in current_user.org_memberships:
                 if org is not None and membership.org_id == org.id:
                     role = membership.role_name
-            # A collaborator outside the org can be the one who maintains
-            # the repo, so that is enough to add it too
+            # A collaborator outside the org can be the one working in the
+            # repo, and adding it writes nothing they couldn't push themselves
             permissions = repo.get("permissions") or {}
-            manages_repo = permissions.get("admin") or permissions.get(
-                "maintain"
-            )
-            if role not in ["owner", "admin"] and not manages_repo:
-                logger.info("User can't manage this org or repo")
+            if role not in ["owner", "admin"] and not permissions.get("push"):
+                logger.info("User can't write to this org or repo")
                 raise HTTPException(
                     403,
                     (
-                        "Must be an owner or admin of an org, or an admin or "
-                        "maintainer of the repo, to create projects for it"
+                        "Must be an owner or admin of an org, or have write "
+                        "access to the repo, to create projects for it"
                     ),
                 )
             if org is None:

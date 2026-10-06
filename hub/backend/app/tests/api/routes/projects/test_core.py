@@ -4927,7 +4927,7 @@ def test_post_project_org_repo_collaborator(
         client=client, email=user.email, db=db
     )
     org_github_name = f"Org-{suffix}"
-    permissions = {"admin": False, "maintain": False, "push": True}
+    permissions = {"admin": False, "maintain": False, "push": False}
     install_status = 404
 
     def fake_get(url: str, headers: dict, timeout: int | None = None):
@@ -4977,12 +4977,12 @@ def test_post_project_org_repo_collaborator(
     resp = post(f"new-{suffix}", git_repo_exists=False)
     assert resp.status_code == 403
     assert "Can only create" in resp.json()["detail"]
-    # Nor can an existing one be added with only push access
+    # Nor can an existing one be added with only read access
     resp = post(f"push-{suffix}")
     assert resp.status_code == 403
-    assert "maintainer of the repo" in resp.json()["detail"]
-    # A maintainer can, once the app is installed on the repo
-    permissions = {"admin": False, "maintain": True, "push": True}
+    assert "write access" in resp.json()["detail"]
+    # Someone with write access can, once the app is installed on the repo
+    permissions = {"admin": False, "maintain": False, "push": True}
     resp = post(f"noapp-{suffix}")
     assert resp.status_code == 400
     assert "not installed" in resp.json()["detail"]

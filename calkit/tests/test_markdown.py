@@ -497,6 +497,82 @@ def test_expand_ck_info(tmp_path, monkeypatch):
     assert "numpy" in spec and "3.12" in spec
 
 
+def test_markdown_pdf(tmp_path, monkeypatch):
+    from calkit.markdown import expand_ck_info, prepare_for_pdf
+    from calkit.models.pipeline import Pipeline
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "docs/doc").mkdir(parents=True)
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results/r.json").write_text('{"gain": 2.0}')
+    text = (
+        "# Title\n\n"
+        "![A figure](../img/p.png)\n\n"
+        "<!-- calkit values path=results/r.json -->\n"
+        "It's <!-- calkit value key=gain -->1.0<!-- /calkit value -->x"
+        " faster, see ![remote](https://example.org/a.png).\n\n"
+        "```md\n"
+        "<!-- calkit value key=gain -->1.0<!-- /calkit value -->\n"
+        "```\n"
+    )
+    (tmp_path / "docs/doc/main.md").write_text(text)
+    pdf = {
+        "environment": "tex",
+        "template": "docs/doc/template.tex",
+        "filters": ["docs/doc/f.lua"],
+        "args": ["--shift-heading-level-by=-1"],
+    }
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "doc": {
+                    "kind": "markdown",
+                    "target_path": "docs/doc/main.md",
+                    "pdf": pdf,
+                }
+            }
+        }
+    }
+    # A file that only builds a PDF needs no code blocks, and becomes one
+    # stage depending on what it shows
+    stages = expand_ck_info(ck_info).ck_info["pipeline"]["stages"]
+    assert list(stages) == ["doc/pdf"]
+    stage = stages["doc/pdf"]
+    assert stage["kind"] == "markdown-pdf"
+    assert stage["environment"] == "tex"
+    assert stage["pdf_path"] == "docs/doc/main.pdf"
+    assert stage["inputs"] == [
+        "results/r.json",
+        "docs/img/p.png",
+        "calkit.yaml",
+    ]
+    compiled = Pipeline.model_validate({"stages": stages}).stages["doc/pdf"]
+    assert compiled.dvc_cmd.startswith(
+        "calkit latex from-markdown docs/doc/main.md -o docs/doc/main.pdf"
+        " -e tex --no-check --template docs/doc/template.tex"
+        " --filter docs/doc/f.lua"
+    )
+    assert "docs/doc/template.tex" in compiled.dvc_deps
+    assert compiled.dvc_outs == [{"docs/doc/main.pdf": {"cache": True}}]
+    # Without one, a file declaring no stages is still a mistake
+    del ck_info["pipeline"]["stages"]["doc"]["pdf"]
+    with pytest.raises(ValueError, match="declares no stages"):
+        expand_ck_info(ck_info)
+    # Markers become their values, linked where there's somewhere to link
+    # to, but not in code; local images are pointed at from the build
+    prepared = prepare_for_pdf(
+        text,
+        "docs/doc/main.md",
+        ".calkit/markdown/docs/doc/main.md/pdf",
+        link=lambda v: f"https://hub/{v.key}",
+    )
+    assert "It's [1.0](https://hub/gain)x faster" in prepared
+    assert "](../../../../../../docs/img/p.png)" in prepared
+    assert "](https://example.org/a.png)" in prepared
+    assert "```md\n<!-- calkit value key=gain -->1.0" in prepared
+    assert "It's 1.0x" in prepare_for_pdf(text, "docs/doc/main.md", "x")
+
+
 def test_expand_ck_info_env_conflict(tmp_path, monkeypatch):
     from calkit.markdown import expand_ck_info
 

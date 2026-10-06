@@ -1377,11 +1377,11 @@ def expand_ck_info(
         blocks = parse_markdown_file(read_path)
         envs = extract_environments(blocks, md_path)
         specs = extract_stages(blocks, md_path)
-        if not specs:
+        if not specs and md_stage.pdf is None:
             raise ValueError(
                 f"Markdown stage '{stage_name}' declares no stages; "
                 "annotate a code block with 'calkit stage name=<name>' "
-                "to define one"
+                "to define one, or build the file into a PDF with 'pdf'"
             )
         # A file declaring exactly one environment shouldn't have to name
         # it on every block.
@@ -1477,6 +1477,40 @@ def expand_ck_info(
             if spec.stage_kind == "shell-script" and "shell" not in sub:
                 sub["shell"] = "sh" if spec.language == "sh" else spec.language
             out_stages[sub_name] = sub
+        if md_stage.pdf is not None:
+            pdf_name = stage_name + STAGE_NAME_SEPARATOR + "pdf"
+            if pdf_name in out_stages:
+                raise ValueError(
+                    f"Stage '{pdf_name}' from '{md_path}' conflicts with an "
+                    "existing pipeline stage"
+                )
+            pdf = md_stage.pdf
+            with open(read_path, encoding="utf-8") as f:
+                text = f.read()
+            # What it shows, and calkit.yaml for the questions its values
+            # link to
+            inputs = (
+                list(md_cfg.get("inputs") or [])
+                + pdf_inputs(text, md_path)
+                + ["calkit.yaml"]
+            )
+            sub = {
+                "kind": "markdown-pdf",
+                "environment": pdf.environment,
+                "target_path": md_path,
+                "pdf_path": pdf.path
+                or Path(md_path).with_suffix(".pdf").as_posix(),
+                "filters": pdf.filters,
+                "pandoc_args": pdf.args,
+                "pdf_storage": pdf.storage,
+                "inputs": inputs,
+            }
+            if pdf.template is not None:
+                sub["template"] = pdf.template
+            for key in ("always_run", "frozen"):
+                if md_cfg.get(key) is not None:
+                    sub[key] = md_cfg[key]
+            out_stages[pdf_name] = sub
     return result
 
 
@@ -2718,3 +2752,82 @@ def set_values(
         n += len(matches)
         lines[i] = bare + line[len(line.rstrip("\r\n")) :]
     return "".join(lines), changed
+
+
+# An image in Markdown, and the path it shows, which may be followed by a
+# quoted title
+_IMAGE_RE = re.compile(r"(!\[[^\]]*\]\()(?P<path>[^)\s]+)")
+
+
+def _is_local_path(path: str) -> bool:
+    return not (
+        "://" in path
+        or path.startswith(("/", "#", "data:", "mailto:"))
+        or os.path.isabs(path)
+    )
+
+
+def pdf_inputs(text: str, markdown_path: str) -> list[str]:
+    """What building a Markdown file into a PDF reads besides the file:
+    the results files its values come from and the images it shows, as
+    paths from the project root."""
+    md_dir = os.path.dirname(markdown_path)
+    paths = [v.path for v in extract_values(text, markdown_path)]
+    for m in _IMAGE_RE.finditer(text):
+        if _is_local_path(m.group("path")):
+            joined = os.path.normpath(os.path.join(md_dir, m.group("path")))
+            paths.append(Path(joined).as_posix())
+    return list(dict.fromkeys(paths))
+
+
+def prepare_for_pdf(
+    text: str,
+    markdown_path: str,
+    build_dir: str,
+    link: Any = None,
+) -> str:
+    """Markdown as pandoc should see it when it's built from ``build_dir``.
+
+    Each value marker becomes the value it shows, which ``set_values`` will
+    have brought up to date, as a link where ``link`` gives a URL for it.
+    Images are pointed at from ``build_dir``, where the LaTeX is built.
+    """
+    values = extract_values(text, markdown_path)
+    lines = text.splitlines(keepends=True)
+    n = 0
+    fence: str | None = None
+    for i, line in enumerate(lines):
+        bare = line.rstrip("\r\n")
+        fm = _FENCE_RE.match(bare)
+        if fence is not None:
+            if (
+                fm is not None
+                and fm.group("fence")[0] == fence[0]
+                and len(fm.group("fence")) >= len(fence)
+                and not fm.group("info").strip()
+            ):
+                fence = None
+            continue
+        if fm is not None:
+            fence = fm.group("fence")
+            continue
+        matches = list(_VALUE_RE.finditer(bare))
+        for m in reversed(matches):
+            value = values[n + matches.index(m)]
+            url = link(value) if link is not None else None
+            shown = f"[{value.text}]({url})" if url else value.text
+            bare = bare[: m.start()] + shown + bare[m.end() :]
+        n += len(matches)
+        lines[i] = bare + line[len(line.rstrip("\r\n")) :]
+    text = "".join(lines)
+    md_dir = os.path.dirname(markdown_path) or "."
+    prefix = Path(os.path.relpath(md_dir, build_dir)).as_posix()
+
+    def repoint(m: re.Match) -> str:
+        path = str(m.group("path"))
+        if not _is_local_path(path):
+            return str(m.group(0))
+        repointed = os.path.normpath(os.path.join(prefix, path))
+        return f"{m.group(1)}{Path(repointed).as_posix()}"
+
+    return _IMAGE_RE.sub(repoint, text)

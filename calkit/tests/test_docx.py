@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pytest
 
@@ -624,7 +625,7 @@ def test_docx_round_trip(
         assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods
 
 
-def test_link_into_objects() -> None:
+def test_equation_links() -> None:
     content = (
         "<text:p>See (<text:a xlink:href='main-m7.4om#x7-3001r2' "
         "xlink:type='simple'>2</text:a>), "
@@ -649,3 +650,21 @@ def test_link_into_objects() -> None:
     assert "xlink:href='https://calkit.io/a.html#b'" in out
     assert "xlink:href='other.4om#x9'" in out
     assert calkit.docx._link_into_objects(out) == out
+    # A kept bookmark goes on the row it's for, not just the first
+    doc = calkit.docx.Document(str(FIXTURES / "export.docx"))
+    w, m = calkit.docx.W, calkit.docx.M
+    before = next(doc.doc.iter(calkit.docx._tag(w, "p")))
+    rows = [
+        (ET.Element(calkit.docx._tag(m, "oMath")), "4", "ck_a"),
+        (ET.Element(calkit.docx._tag(m, "oMath")), "5", "ck_a_r2"),
+    ]
+    doc.insert_equations(before, rows, 100, keep={1: [("x13-3004r5", "7")]})
+    tbl = next(doc.doc.iter(calkit.docx._tag(w, "tbl")))
+    names = [
+        [
+            b.get(calkit.docx._tag(w, "name"))
+            for b in tr.iter(calkit.docx._tag(w, "bookmarkStart"))
+        ]
+        for tr in tbl.iter(calkit.docx._tag(w, "tr"))
+    ]
+    assert names == [["ck_a"], ["ck_a_r2", "x13-3004r5"]]

@@ -633,13 +633,13 @@ class Document:
         before: ET.Element,
         rows: list[tuple[ET.Element, str | None, str]],
         first_bid: int,
-        keep: list[tuple[str, str]] | None = None,
+        keep: dict[int, list[tuple[str, str]]] | None = None,
     ) -> None:
         """Insert display equations before a body element as a borderless
         table of (math, number, bookmark name) rows, which Word and
         LibreOffice both lay out like LaTeX: centered, numbered at right.
-        ``keep`` is bookmarks, as (name, ID), from what the equations
-        replace, which go on the first row so links to them still land.
+        ``keep`` is bookmarks, as (name, ID) by row, from what the
+        equations replace, so links to them still land.
         """
         width = self.column_width(before)
         side = width // 8
@@ -681,8 +681,7 @@ class Document:
                     # The bookmark spans the equation, since Word drops an
                     # empty one beside it
                     marks = [(name, str(first_bid + i))]
-                    if i == 0:
-                        marks += keep or []
+                    marks += (keep or {}).get(i, [])
                     for mark, bid in marks:
                         ET.SubElement(
                             p,
@@ -1136,13 +1135,6 @@ def _link_into_objects(content: str) -> str:
     file in the build directory. A bookmark of that name beside the object
     in the main text makes it an ordinary link within the document.
     """
-    frame_re = re.compile(
-        r"<draw:frame\b(?:(?!</draw:frame>).)*?<draw:object\b[^>]*?"
-        r"xlink:href=['\"]\./(?P<name>[^'\"/]+)['\"]",
-        flags=re.S,
-    )
-    objects = {m.group("name") for m in frame_re.finditer(content)}
-    anchors: dict[str, set[str]] = {}
 
     def relink(m: re.Match) -> str:
         name, anchor = m.group("name"), m.group("anchor")
@@ -1151,18 +1143,24 @@ def _link_into_objects(content: str) -> str:
         anchors.setdefault(name, set()).add(anchor)
         return f"{m.group('attr')}{m.group('q')}#{anchor}{m.group('q')}"
 
+    def mark(m: re.Match) -> str:
+        names = sorted(anchors.get(m.group("name"), ()))
+        marks = "".join(f"<text:bookmark text:name='{a}'/>" for a in names)
+        return marks + str(m.group(0))
+
+    frame_re = re.compile(
+        r"<draw:frame\b(?:(?!</draw:frame>).)*?<draw:object\b[^>]*?"
+        r"xlink:href=['\"]\./(?P<name>[^'\"/]+)['\"]",
+        flags=re.S,
+    )
+    objects = {m.group("name") for m in frame_re.finditer(content)}
+    anchors: dict[str, set[str]] = {}
     content = re.sub(
         r"(?P<attr><text:a\b[^>]*?xlink:href=)(?P<q>['\"])"
         r"(?P<name>[^'\"#/]+)\.[^'\"#./]+#(?P<anchor>[^'\"]+)(?P=q)",
         relink,
         content,
     )
-
-    def mark(m: re.Match) -> str:
-        names = sorted(anchors.get(m.group("name"), ()))
-        marks = "".join(f"<text:bookmark text:name='{a}'/>" for a in names)
-        return marks + str(m.group(0))
-
     return frame_re.sub(mark, content)
 
 

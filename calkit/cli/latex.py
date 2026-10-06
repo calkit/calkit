@@ -2121,6 +2121,15 @@ def to_docx(
         )
         maths = calkit.docx.latex_to_omml([p[2] for p in pieces], preamble)
         converted = dict(zip([(id(p[0]), p[1]) for p in pieces], maths))
+        # What each link within the document shows, e.g., an equation's
+        # number, by the bookmark it goes to
+        link_text = {
+            h.get(calkit.docx._tag(calkit.docx.W, "anchor"), ""): "".join(
+                t.text or ""
+                for t in h.iter(calkit.docx._tag(calkit.docx.W, "t"))
+            ).strip()
+            for h in doc.doc.iter(calkit.docx._tag(calkit.docx.W, "hyperlink"))
+        }
         bid = 100000
         last_number: str | None = None
         for group, gap, numbers, lead, before_para, after_para in plans:
@@ -2157,7 +2166,8 @@ def to_docx(
                 if para.element is not None and para.element in unit.iter(w_p):
                     doc.move_out(para.element, unit, after=end)
             # The conversion's own bookmarks on the equations, which
-            # references in the text link to, wholly inside what's replaced
+            # references in the text link to, wholly inside what's replaced,
+            # each on the row whose number the references show
             w_name = calkit.docx._tag(calkit.docx.W, "name")
             w_id = calkit.docx._tag(calkit.docx.W, "id")
             ended = {
@@ -2167,14 +2177,17 @@ def to_docx(
                     calkit.docx._tag(calkit.docx.W, "bookmarkEnd")
                 )
             }
-            keep = [
-                (b.get(w_name, ""), b.get(w_id, ""))
-                for el in gap
+            row_of = {num: i for i, (_, num, _) in enumerate(rows) if num}
+            keep: dict[int, list[tuple[str, str]]] = {}
+            for el in gap:
                 for b in el.iter(
                     calkit.docx._tag(calkit.docx.W, "bookmarkStart")
-                )
-                if b.get(w_name) not in original and b.get(w_id) in ended
-            ]
+                ):
+                    name = b.get(w_name, "")
+                    if name in original or b.get(w_id) not in ended:
+                        continue
+                    row = row_of.get(link_text.get(name, ""), 0)
+                    keep.setdefault(row, []).append((name, b.get(w_id, "")))
             doc.insert_equations(gap[0], rows, bid, keep=keep)
             bid += len(rows)
             for el in gap:

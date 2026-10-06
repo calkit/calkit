@@ -364,6 +364,56 @@ def test_ryaml_dump_keeps_significant_trailing_whitespace():
         assert calkit.ryaml.load(buf.getvalue()) == {"k": value}
 
 
+@pytest.mark.usefixtures("tmp_dir")
+def test_ryaml_keeps_how_prose_was_wrapped() -> None:
+    import copy
+    import io
+    from pathlib import Path
+
+    import calkit
+
+    def dumped(data: dict) -> str:
+        buf = io.StringIO()
+        calkit.ryaml.dump(data, buf)
+        return buf.getvalue()
+
+    # Wrapped narrower than ruamel's width, which used to re-fold it all
+    text = (
+        "title: A project\n"
+        "questions:\n"
+        "  - question: What is the best optimization strategy for a real\n"
+        "      engineering design problem?\n"
+        "    notes: This is the question the others decompose, so its\n"
+        "      answer is assembled from their evidence rather than from a\n"
+        "      stage of its own.\n"
+    )
+    with open("calkit.yaml", "w") as f:
+        f.write(text)
+
+    # However it's loaded, an untouched file is written back as it was
+    with open("calkit.yaml") as f:
+        from_file = calkit.ryaml.load(f)
+    for data in [
+        calkit.ryaml.load(text),
+        from_file,
+        calkit.ryaml.load(Path("calkit.yaml")),
+        copy.deepcopy(from_file),
+    ]:
+        assert dumped(data) == text
+    info = calkit.load_calkit_info()
+    info["owner"] = "someone"
+    calkit.save_calkit_info(info)
+    with open("calkit.yaml") as f:
+        assert f.read() == text + "owner: someone\n"
+    # A value that's changed is wrapped at the width like any other
+    data = calkit.ryaml.load(text)
+    data["questions"][0]["notes"] += " And one more sentence to fold."
+    out = dumped(data)
+    assert "decompose, so its\n" not in out
+    assert calkit.ryaml.load(out) == data
+    assert "      engineering design problem?\n" in out
+
+
 def test_update_readme_content():
     import calkit
 

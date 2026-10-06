@@ -381,11 +381,11 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     text = (
         "title: A project\n"
         "questions:\n"
-        "  - question: What is the best optimization strategy for a real\n"
-        "      engineering design problem?\n"
-        "    notes: This is the question the others decompose, so its\n"
-        "      answer is assembled from their evidence rather than from a\n"
-        "      stage of its own.\n"
+        "  - question: Does the new mesh change the drag coefficient by\n"
+        "      more than the measurement uncertainty?\n"
+        "    notes: The coarse and fine meshes agree to within two\n"
+        "      percent, so the remaining difference comes from the\n"
+        "      turbulence model rather than the resolution.\n"
     )
     with open("calkit.yaml", "w") as f:
         f.write(text)
@@ -409,9 +409,9 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     data = calkit.ryaml.load(text)
     data["questions"][0]["notes"] += " And one more sentence to fold."
     out = dumped(data)
-    assert "decompose, so its\n" not in out
+    assert "agree to within two\n" not in out
     assert calkit.ryaml.load(out) == data
-    assert "      engineering design problem?\n" in out
+    assert "      more than the measurement uncertainty?\n" in out
 
 
 def test_update_readme_content():

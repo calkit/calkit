@@ -4988,7 +4988,7 @@ def test_post_project_org_repo_collaborator(
     assert "not installed" in resp.json()["detail"]
     assert get_org_by_github_name(db, org_github_name) is None
     install_status = 200
-    name = f"xfo-{suffix}"
+    name = f"widget-{suffix}"
     resp = post(name)
     assert resp.status_code == 200, resp.text
     assert resp.json()["is_public"] is False

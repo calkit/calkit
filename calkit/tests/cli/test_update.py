@@ -643,32 +643,32 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert calkit.load_calkit_info()["hub"] == "https://hub.test"
     # An org's repo already on the hub is found by its URL, and the remote
     # is named for the account that owns it there, which is lowercase
-    on_hub["xflow-energy/xfo"] = {
-        "owner_account_name": "xflow-energy",
-        "name": "xfo",
+    on_hub["acme-lab/widget"] = {
+        "owner_account_name": "acme-lab",
+        "name": "widget",
     }
-    git("remote", "set-url", "origin", "git@github.com:XFlow-Energy/xfo.git")
+    git("remote", "set-url", "origin", "git@github.com:Acme-Lab/widget.git")
     with open("calkit.yaml", "w") as f:
-        f.write("title: XFO\n")
+        f.write("title: Widget\n")
     result = runner.invoke(
         update_app, ["hub", "https://hub.test", "--no-commit"]
     )
     assert result.exit_code == 0, result.output
     assert len(posted) == n_posted
-    assert remote_names[-1] == "xflow-energy/xfo"
+    assert remote_names[-1] == "acme-lab/widget"
     ck_info = calkit.load_calkit_info()
-    assert ck_info["owner"] == "xflow-energy"
-    assert ck_info["name"] == "xfo"
-    assert "https://hub.test/xflow-energy/xfo" in result.output
+    assert ck_info["owner"] == "acme-lab"
+    assert ck_info["name"] == "widget"
+    assert "https://hub.test/acme-lab/widget" in result.output
     # One the client creates takes the owner the hub gave it
     on_hub.clear()
     with open("calkit.yaml", "w") as f:
-        f.write("name: xfo\ntitle: XFO\n")
-    posted_resp["owner_account_name"] = "xflow-energy"
+        f.write("name: widget\ntitle: Widget\n")
+    posted_resp["owner_account_name"] = "acme-lab"
     result = runner.invoke(
         update_app, ["hub", "https://hub.test", "--no-commit"]
     )
     assert result.exit_code == 0, result.output
-    assert posted[-1]["git_repo_url"] == "https://github.com/XFlow-Energy/xfo"
-    assert remote_names[-1] == "xflow-energy/xfo"
-    assert calkit.load_calkit_info()["owner"] == "xflow-energy"
+    assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
+    assert remote_names[-1] == "acme-lab/widget"
+    assert calkit.load_calkit_info()["owner"] == "acme-lab"

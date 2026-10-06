@@ -923,7 +923,9 @@ def post_project(
             ) and membership.role_name in ["owner", "admin", "write"]:
                 is_user_org = True
                 break
-        if not is_user_org:
+        # Adding an existing repo can instead rest on managing that repo on
+        # GitHub, which is checked once it's fetched below
+        if not is_user_org and not project_in.git_repo_exists:
             raise HTTPException(
                 403,
                 "Can only create projects for yourself or organizations you "
@@ -1218,27 +1220,81 @@ def post_project(
             # be able to import
             if repo["owner"]["type"] != "Organization":
                 raise HTTPException(400, "Non-user repos must be from an org")
-            # This org must exist in Calkit and the user must have access to it
-            # First check if this org exists in Calkit and try to create it
-            # if it doesn't
             org = orgs.get_org_by_github_name(
                 session=session, github_name=owner_name
             )
+            role = None
+            for membership in current_user.org_memberships:
+                if org is not None and membership.org_id == org.id:
+                    role = membership.role_name
+            # A collaborator outside the org can be the one who maintains
+            # the repo, so that is enough to add it too
+            permissions = repo.get("permissions") or {}
+            manages_repo = permissions.get("admin") or permissions.get(
+                "maintain"
+            )
+            if role not in ["owner", "admin"] and not manages_repo:
+                logger.info("User can't manage this org or repo")
+                raise HTTPException(
+                    403,
+                    (
+                        "Must be an owner or admin of an org, or an admin or "
+                        "maintainer of the repo, to create projects for it"
+                    ),
+                )
             if org is None:
-                logger.info(f"Org '{owner_name}' does not exist in DB")
-                # Try to create the org
-                post_org(
-                    req=OrgPost(github_name=owner_name),
-                    session=session,
-                    current_user=current_user,
+                # The app installed on the repo stands in for an org owner's
+                # approval; the org has no members here until one claims it
+                install_resp = requests.get(
+                    f"{repo_api_url}/installation",
+                    headers={
+                        "Authorization": (
+                            f"Bearer {github.create_app_token()}"
+                        ),
+                        "Accept": "application/vnd.github+json",
+                    },
+                    timeout=15,
                 )
-                org = orgs.get_org_by_github_name(
-                    session=session, github_name=owner_name
+                if install_resp.status_code == 404:
+                    raise HTTPException(
+                        400,
+                        "The Calkit GitHub App is not installed for this "
+                        "repo; ask an owner of the org to install it by "
+                        "visiting "
+                        "https://github.com/apps/calkit/installations/"
+                        "select_target",
+                    )
+                if install_resp.status_code != 200:
+                    logger.warning(
+                        "Could not look up the app installation for "
+                        f"{owner_name}/{repo_name}: "
+                        f"{install_resp.status_code}"
+                    )
+                    raise HTTPException(
+                        502,
+                        "Could not verify the GitHub App installation; "
+                        "try again",
+                    )
+                logger.info(f"Adding org '{owner_name}' with no members")
+                github_name = repo["owner"]["login"]
+                org = Org(
+                    account=Account(
+                        name=github_name.lower(),
+                        display_name=github_name,
+                        github_name=github_name,
+                    ),
+                    subscription=OrgSubscription(
+                        plan_id=0,
+                        n_users=1,
+                        price=0.0,
+                        period_months=1,
+                        subscriber_user_id=current_user.id,
+                    ),
                 )
-            assert isinstance(org, Org)
-            account_id = org.account.id
-            subscription = org.subscription
-            if subscription is None:
+                session.add(org)
+                session.commit()
+                session.refresh(org)
+            if org.subscription is None:
                 logger.info(f"Org '{owner_name}' does not have a subscription")
                 # Give the org a free subscription
                 org.subscription = OrgSubscription(
@@ -1252,22 +1308,6 @@ def post_project(
                 session.add(org.subscription)
                 session.commit()
                 session.refresh(org.subscription)
-                subscription = org.subscription
-            # Check access to the org
-            role = None
-            for membership in current_user.org_memberships:
-                if membership.org.account.name.lower() == owner_name.lower():
-                    role = membership.role_name
-            # TODO: If we have no role defined, check on GitHub
-            if role not in ["owner", "admin"]:
-                logger.info("User is not an admin or owner of this org")
-                raise HTTPException(
-                    403,
-                    (
-                        "Must be an owner or admin of an org to create "
-                        "projects for it"
-                    ),
-                )
             owner_account_id = org.account.id
         else:
             owner_account_id = current_user.account.id

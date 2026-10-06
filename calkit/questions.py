@@ -41,6 +41,7 @@ import operator
 import os
 import re
 import string
+from collections.abc import Callable
 from typing import Any, Literal, TypeGuard
 
 from pydantic import BaseModel, Field
@@ -517,6 +518,7 @@ def render_question(
     question: str | dict,
     ck_info: dict | None = None,
     wdir: str | None = None,
+    read_evidence: Callable[[str], Any] | None = None,
     strict: bool = False,
 ) -> str | dict:
     """A copy of a question with its templates filled from the evidence.
@@ -526,6 +528,13 @@ def render_question(
     broken template is an error. With ``strict``, an unreadable value or
     an unfillable placeholder raises instead, for output such as a paper
     where a literal ``{name}`` would be printed as though it were prose.
+
+    ``read_evidence`` loads a results file given its project-relative
+    path, for a caller whose project is not a directory on a disk --- the
+    hub reads a Git tree at a ref. Without one the path is read from
+    ``wdir``, which is what the CLI wants. Injecting the reading rather
+    than reimplementing the rendering is what keeps the hub and the CLI
+    from filling the same sentence two different ways.
     """
     if isinstance(question, str):
         return question
@@ -536,7 +545,10 @@ def render_question(
         if not keys:
             continue
         try:
-            data = read_evidence_file(os.path.join(wdir, ev["path"]))
+            if read_evidence is not None:
+                data = read_evidence(ev["path"])
+            else:
+                data = read_evidence_file(os.path.join(wdir, ev["path"]))
         except Exception as e:
             if strict:
                 raise ValueError(f"Can't read {ev['path']}: {e}") from e
@@ -749,11 +761,15 @@ class CalkitYamlHistory:
     checking a handful of questions take double-digit seconds.
     """
 
-    def __init__(self, repo: Any, wdir: str) -> None:
+    def __init__(self, repo: Any, wdir: str, ref: str | None = None) -> None:
         self.repo = repo
         self.rel = os.path.relpath(
             os.path.join(wdir, CALKIT_YAML), str(repo.working_dir)
         ).replace(os.sep, "/")
+        # Where the walk starts. None means the checkout's own HEAD, which
+        # is what the CLI wants; a server browsing a ref has to say so,
+        # since its clone sits on whatever branch it last happened to.
+        self.ref = ref
         self._shas: list[str] | None = None
         self._parsed: dict[str, dict | None] = {}
 
@@ -761,9 +777,10 @@ class CalkitYamlHistory:
     def shas(self) -> list[str]:
         """Commits that touched the file, newest first."""
         if self._shas is None:
+            args = ["--format=%H"] + ([self.ref] if self.ref else [])
             try:
                 self._shas = str(
-                    self.repo.git.log("--format=%H", "--", self.rel)
+                    self.repo.git.log(*args, "--", self.rel)
                 ).split()
             except Exception:
                 self._shas = []
@@ -835,7 +852,7 @@ def question_commit(
     return found
 
 
-def _lock_hash(lock_text: str, path: str) -> str | None:
+def lock_hash(lock_text: str, path: str) -> str | None:
     """The hash ``dvc.lock`` records for an output path, if any."""
     try:
         lock = _load_calkit_yaml_text(lock_text)
@@ -879,6 +896,7 @@ def evidence_change(
     wdir: str,
     key: str | None = None,
     current: Any = None,
+    ref: str | None = None,
 ) -> str | None:
     """How ``path`` has changed since commit ``since``, or None if it has
     not.
@@ -890,12 +908,25 @@ def evidence_change(
     are asked directly. DVC-tracked ones are compared by the hash
     ``dvc.lock`` (or the path's ``.dvc`` file) recorded at that commit and
     now, which is the only record there is of a file Git does not hold.
+
+    ``ref`` is what "now" means. None is the checkout: its HEAD, plus
+    anything modified in the working tree, which is what someone running
+    this on their own project is asking about. A server browsing a ref
+    passes it, and the working tree --- which belongs to whatever branch
+    its clone happens to sit on --- is left out of the comparison.
     """
     root = str(repo.working_dir)
     rel = os.path.relpath(os.path.join(wdir, path), root).replace(os.sep, "/")
     short = since[:7]
+    head = ref or "HEAD"
     try:
-        tracked = bool(str(repo.git.ls_files("--", rel)).strip())
+        tracked = bool(
+            str(
+                repo.git.ls_tree(head, "--", rel)
+                if ref
+                else repo.git.ls_files("--", rel)
+            ).strip()
+        )
     except Exception:
         tracked = False
     if tracked and key is not None:
@@ -919,17 +950,24 @@ def evidence_change(
             return None
         return f"{key} was {_fmt(old)} at {short}, now {_fmt(current)}"
     if tracked:
-        commits = str(repo.git.rev_list(f"{since}..HEAD", "--", rel)).split()
+        commits = str(repo.git.rev_list(f"{since}..{head}", "--", rel)).split()
         if commits:
             return f"changed in {len(commits)} commit(s) since {short}"
-        if str(repo.git.diff("HEAD", "--name-only", "--", rel)).strip():
+        if (
+            ref is None
+            and str(repo.git.diff("HEAD", "--name-only", "--", rel)).strip()
+        ):
             return "modified in the working tree"
         return None
     pointer = rel + ".dvc"
     try:
-        if str(repo.git.ls_files("--", pointer)).strip():
+        if str(
+            repo.git.ls_tree(head, "--", pointer)
+            if ref
+            else repo.git.ls_files("--", pointer)
+        ).strip():
             commits = str(
-                repo.git.rev_list(f"{since}..HEAD", "--", pointer)
+                repo.git.rev_list(f"{since}..{head}", "--", pointer)
             ).split()
             if commits:
                 return f"{pointer} changed since {short}"
@@ -940,13 +978,16 @@ def evidence_change(
         os.sep, "/"
     )
     try:
-        old = _lock_hash(str(repo.git.show(f"{since}:{lock_rel}")), rel)
+        old = lock_hash(str(repo.git.show(f"{since}:{lock_rel}")), rel)
     except Exception:
         old = None
     try:
-        with open(os.path.join(wdir, "dvc.lock"), encoding="utf-8") as f:
-            new = _lock_hash(f.read(), rel)
-    except OSError:
+        if ref:
+            new = lock_hash(str(repo.git.show(f"{ref}:{lock_rel}")), rel)
+        else:
+            with open(os.path.join(wdir, "dvc.lock"), encoding="utf-8") as f:
+                new = lock_hash(f.read(), rel)
+    except Exception:
         new = None
     if old != new and (old or new):
         return f"hash in dvc.lock changed since {short}"
@@ -954,6 +995,90 @@ def evidence_change(
 
 
 # -- checks --------------------------------------------------------------
+
+
+class QuestionsView:
+    """What checking a question against its evidence needs of a project.
+
+    Everything written down in ``calkit.yaml`` is answered from it, so
+    what counts as evidence having moved stays in one place. Reaching the
+    project's files is left to a subclass, because where they are differs:
+    the CLI has a working directory, and a server has a Git tree at some
+    ref.
+
+    None of this reads the prose. Whether an answer follows from what it
+    cites is a question about the sentence, and no amount of history
+    answers it; see the module docstring.
+
+    This is the same split :class:`calkit.components.ProjectView` makes,
+    for the same reason --- two implementations of the judgment would
+    eventually give two answers.
+    """
+
+    #: What "now" means to Git. None is the checkout: its HEAD, plus
+    #: anything modified in the working tree.
+    ref: str | None = None
+    #: Where the project sits inside the repo, for turning its paths into
+    #: repo-relative ones. A server reading a tree is already at the root.
+    wdir: str = "."
+
+    def exists(self, path: str) -> bool:
+        """Whether the project still has this file."""
+        raise NotImplementedError
+
+    def read_results(self, path: str) -> Any:
+        """A results file, loaded. Raises if it cannot be read."""
+        raise NotImplementedError
+
+    def in_dvc_lock(self, path: str) -> bool:
+        """Whether ``dvc.lock`` records this path as an output.
+
+        A stage Calkit did not compile still leaves its outputs here, so a
+        path with no Calkit stage can still be accounted for.
+        """
+        return False
+
+    def latex_sources(self, pdf_path: str, ck_info: dict) -> list[str] | None:
+        """Sources that could carry a label for a built PDF.
+
+        None means labels cannot be checked here at all, which reads as
+        skipped rather than as a label that is missing --- the difference
+        between not looking and not finding.
+        """
+        return None
+
+    def read_text(self, path: str) -> str:
+        """A source file's text. Raises if it cannot be read."""
+        raise NotImplementedError
+
+
+class LocalQuestions(QuestionsView):
+    """A project as a working directory, which is what the CLI has."""
+
+    def __init__(self, wdir: str) -> None:
+        self.wdir = wdir
+
+    def exists(self, path: str) -> bool:
+        return os.path.exists(os.path.join(self.wdir, path))
+
+    def read_results(self, path: str) -> Any:
+        return read_evidence_file(os.path.join(self.wdir, path))
+
+    def in_dvc_lock(self, path: str) -> bool:
+        try:
+            with open(
+                os.path.join(self.wdir, "dvc.lock"), encoding="utf-8"
+            ) as f:
+                return lock_hash(f.read(), path) is not None
+        except OSError:
+            return False
+
+    def latex_sources(self, pdf_path: str, ck_info: dict) -> list[str] | None:
+        return _find_latex_sources(pdf_path, ck_info, self.wdir)
+
+    def read_text(self, path: str) -> str:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
 
 
 def _find_latex_sources(pdf_path: str, ck_info: dict, wdir: str) -> list[str]:
@@ -978,21 +1103,26 @@ def _find_latex_sources(pdf_path: str, ck_info: dict, wdir: str) -> list[str]:
 
 
 def _check_publication_label(
-    ev: dict, ck_info: dict, wdir: str
+    ev: dict, ck_info: dict, view: QuestionsView
 ) -> tuple[EvidenceStatus, str | None]:
     label = ev.get("label")
     if not label:
         return "ok", None
-    sources = _find_latex_sources(ev["path"], ck_info, wdir)
+    sources = view.latex_sources(ev["path"], ck_info)
+    if sources is None:
+        return "skipped", f"label {label!r} not checked here"
     if not sources:
         return "skipped", (
             f"label {label!r} not checked: no LaTeX stage produces {ev['path']}"
         )
     pattern = re.compile(r"\\label\{" + re.escape(label) + r"\}")
     for src in sources:
-        with open(src, encoding="utf-8", errors="replace") as f:
-            if pattern.search(f.read()):
-                return "ok", None
+        try:
+            text = view.read_text(src)
+        except Exception:
+            continue
+        if pattern.search(text):
+            return "ok", None
     return "error", (
         f"label {label!r} not found in {len(sources)} LaTeX source file(s) "
         f"under {os.path.dirname(sources[0])}"
@@ -1003,7 +1133,7 @@ def _is_attributed(
     path: str,
     stage: str | None,
     ck_info: dict,
-    wdir: str,
+    view: QuestionsView,
     computed: bool = False,
 ) -> bool:
     """Whether the project says where an evidence path came from.
@@ -1021,12 +1151,8 @@ def _is_attributed(
 
     if stage is not None:
         return True
-    try:
-        with open(os.path.join(wdir, "dvc.lock"), encoding="utf-8") as f:
-            if _lock_hash(f.read(), path) is not None:
-                return True
-    except OSError:
-        pass
+    if view.in_dvc_lock(path):
+        return True
     for artifacts in ck_info.values():
         if not isinstance(artifacts, list):
             continue
@@ -1090,7 +1216,7 @@ def check_pinned_evidence(
     text = _read_at_ref(repo, git_ref, out.path)
     if text is None:
         lock = _read_at_ref(repo, git_ref, "dvc.lock")
-        if lock is not None and _lock_hash(lock, out.path) is not None:
+        if lock is not None and lock_hash(lock, out.path) is not None:
             # Tracked by DVC at that commit: present, but its content lives
             # in storage, so a cited value can't be read from here.
             if named_keys(ev):
@@ -1146,13 +1272,13 @@ def check_pinned_evidence(
 def check_evidence(
     ev: dict,
     ck_info: dict,
-    wdir: str,
+    view: QuestionsView | str,
     repo: Any,
     since: str | None,
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
 ) -> EvidenceCheck:
-    """Check one evidence entry against the working tree and history.
+    """Check one evidence entry against the project and its history.
 
     ``stale_stages`` and ``frozen_stages`` are base stage names from the
     pipeline: the ones DVC would re-run, and the ones it never will because
@@ -1160,6 +1286,9 @@ def check_evidence(
     """
     from calkit.pipeline import get_stage_for_output
 
+    # A plain directory is the CLI's view, and what older callers pass
+    if isinstance(view, str):
+        view = LocalQuestions(view)
     kind = ev.get("kind", "result")
     path = ev.get("path", "")
     key = ev.get("key")
@@ -1177,13 +1306,13 @@ def check_evidence(
         out.message = "evidence has no path"
         return out
     if out.git_ref is not None:
-        return check_pinned_evidence(out, ev, repo, wdir)
-    if not os.path.exists(os.path.join(wdir, path)):
+        return check_pinned_evidence(out, ev, repo, view.wdir)
+    if not view.exists(path):
         out.status = "missing"
         out.message = "path does not exist; run the pipeline or pull"
         return out
     if kind == "publication":
-        out.status, out.message = _check_publication_label(ev, ck_info, wdir)
+        out.status, out.message = _check_publication_label(ev, ck_info, view)
         return out
     # A document may be written by hand or built by a stage, e.g., a
     # Markdown stage, which declares it as its target rather than an output
@@ -1210,9 +1339,7 @@ def check_evidence(
         return out
     if is_value_evidence(ev):
         try:
-            out.current = resolve_key(
-                read_evidence_file(os.path.join(wdir, path)), key or ""
-            )
+            out.current = resolve_key(view.read_results(path), key or "")
         except KeyError:
             out.status = "error"
             out.message = f"key {key!r} not found in {path}"
@@ -1229,7 +1356,7 @@ def check_evidence(
             out.message = "values must map each name to a key"
             return out
         try:
-            data = read_evidence_file(os.path.join(wdir, path))
+            data = view.read_results(path)
         except Exception as e:
             out.status = "error"
             out.message = f"cannot read {path}: {e.__class__.__name__}: {e}"
@@ -1255,9 +1382,10 @@ def check_evidence(
                     path,
                     since,
                     repo,
-                    wdir,
+                    view.wdir,
                     key=value_key,
                     current=out.values[name],
+                    ref=view.ref,
                 )
                 for name, value_key in named_keys(ev).items()
             ]
@@ -1267,9 +1395,10 @@ def check_evidence(
                 path,
                 since,
                 repo,
-                wdir,
+                view.wdir,
                 key=key if is_value_evidence(ev) else None,
                 current=out.current,
+                ref=view.ref,
             )
         if change:
             out.status = "changed"
@@ -1315,7 +1444,7 @@ def check_evidence(
             or out.values is not None
             or kind == "document"
         )
-        and not _is_attributed(path, out.stage, ck_info, wdir, computed=True)
+        and not _is_attributed(path, out.stage, ck_info, view, computed=True)
     ):
         out.status = "error"
         out.message = (
@@ -1349,7 +1478,7 @@ def check_evidence(
                     + (f", e.g., {rendered[0]}" if rendered else "")
                 )
     elif out.status == "ok" and not _is_attributed(
-        path, out.stage, ck_info, wdir
+        path, out.stage, ck_info, view
     ):
         out.status = "unattributed"
         out.message = (
@@ -1364,7 +1493,7 @@ def check_question(
     index: int,
     question: str | dict,
     ck_info: dict,
-    wdir: str,
+    view: QuestionsView | str,
     repo: Any = None,
     history: CalkitYamlHistory | None = None,
     stale_stages: set[str] | None = None,
@@ -1372,6 +1501,8 @@ def check_question(
     check_history: bool = True,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
+    if isinstance(view, str):
+        view = LocalQuestions(view)
     if isinstance(question, str):
         return QuestionCheck(
             index=index, question=question, answered=False, status="unanswered"
@@ -1388,7 +1519,7 @@ def check_question(
             index=index, question=text, answered=True, status="no-evidence"
         )
     since = (
-        question_commit(question, repo, wdir, history)
+        question_commit(question, repo, view.wdir, history)
         if repo is not None and check_history
         else None
     )
@@ -1396,7 +1527,7 @@ def check_question(
         check_evidence(
             ev,
             ck_info,
-            wdir,
+            view,
             repo,
             since,
             stale_stages=stale_stages,
@@ -1492,6 +1623,8 @@ def check_questions(
     ck_info: dict | None = None,
     wdir: str | None = None,
     check_pipeline: bool = True,
+    view: QuestionsView | None = None,
+    repo: Any = None,
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
     check_history: bool = True,
@@ -1507,19 +1640,28 @@ def check_questions(
     changed after an answer was last edited, which is most of what the
     check costs once the pipeline is known; turning it off leaves every
     other check as it is.
+
+    ``view`` says how to reach the project's files, and ``repo`` how to
+    reach its history. Without either, both are taken from ``wdir``, which
+    is the checkout the CLI runs in. A server passes a view over a Git
+    tree at the ref it is serving, and the same judgment answers for it;
+    it has no pipeline to ask, so it passes ``check_pipeline=False``.
     """
     wdir = wdir or os.getcwd()
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
-    try:
-        repo = _MemoizedRepo(calkit.git.get_repo(wdir))
-    except Exception:
-        repo = None
+    if view is None:
+        view = LocalQuestions(wdir)
+    if repo is None:
+        try:
+            repo = _MemoizedRepo(calkit.git.get_repo(wdir))
+        except Exception:
+            repo = None
     questions = ck_info.get("questions", []) or []
     # One reading of calkit.yaml's history, and one of the pipeline, for all
     # of them
     history = (
-        CalkitYamlHistory(repo, wdir)
+        CalkitYamlHistory(repo, view.wdir, ref=view.ref)
         if repo is not None and check_history
         else None
     )
@@ -1533,7 +1675,7 @@ def check_questions(
                 n,
                 q,
                 ck_info,
-                wdir,
+                view,
                 repo,
                 history,
                 stale_stages=stale_stages,

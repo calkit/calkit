@@ -1070,6 +1070,16 @@ class LatexStage(Stage):
         description="Extra arguments passed straight through to latexmk, for "
         "control Calkit does not model.",
     )
+    provenance: bool = Field(
+        default=False,
+        description=(
+            "Mark and record where injected content came from: install "
+            "calkit.sty beside the document, generate its artifact table "
+            "before each build, and write <document>.provenance.json "
+            "afterwards listing every value, figure and text block the "
+            "document took from the project, with the stage that made it."
+        ),
+    )
     latexdiff_args: list[str] = Field(
         default=[],
         description="Extra arguments passed straight through to latexdiff "
@@ -1300,6 +1310,8 @@ class LatexStage(Stage):
             cmd += " --no-synctex"
         for arg in self.latexmk_args:
             cmd += f" --latexmk-arg {shlex.quote(arg)}"
+        if self.provenance:
+            cmd += " --provenance"
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
@@ -1327,6 +1339,10 @@ class LatexStage(Stage):
                 outs.append({out_path: {"cache": False}})
             else:
                 outs.append(out_path)
+        if self.provenance:
+            sidecar = calkit.latex.provenance_sidecar_path(self.target_path)
+            if sidecar not in out_paths:
+                outs.append({sidecar: {"cache": False}})
         return outs
 
 
@@ -1458,6 +1474,16 @@ class QuestionsToLatexStage(Stage):
         description="Not supported; the stage reads the project's "
         "calkit.yaml and evidence from the project root.",
     )
+    provenance: bool = Field(
+        default=False,
+        description=(
+            "Write calkit.sty's provenance-marked commands instead: "
+            "\\ckquestion[n], \\ckanswer[n], \\ckevidence[n] and friends, "
+            "plus \\ckfindings for every answered question, with each "
+            "value marked with where it came from. 'command_name' does not "
+            "apply."
+        ),
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -1465,6 +1491,8 @@ class QuestionsToLatexStage(Stage):
         for out in self.outputs:
             out_path = out if isinstance(out, str) else out.path
             cmd += f" --output {shlex.quote(out_path)}"
+        if self.provenance:
+            return cmd + " --provenance"
         return cmd + f" --command {shlex.quote(self.command_name)}"
 
     @property

@@ -86,8 +86,9 @@ repos:
         # long 'desc:' value goes, so formatting it here just means the two
         # take turns reformatting the same file.
         # Likewise the example projects' results files, which are stage
-        # outputs and have to match what the stage wrote byte for byte.
-        exclude: calkit|^hub/|(^|/)dvc\.yaml$|^examples/.*/results/
+        # outputs and have to match what the stage wrote byte for byte,
+        # and the published JSON schemas, which 'make schema' writes.
+        exclude: calkit|^hub/|(^|/)dvc\.yaml$|^examples/.*/results/|^docs/schemas/
 
   - repo: local
     hooks:

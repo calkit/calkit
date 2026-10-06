@@ -28,6 +28,23 @@ format: ## Automatically format files and regenerate what's generated.
 	@echo "🚀 Linting code with pre-commit"
 	@uv run pre-commit run -a
 
+.PHONY: pr
+pr: ## Get a pull request ready to pass: format, and run the pipeline.
+	@echo "🚀 Formatting, then checking it's done"
+	@uv run pre-commit run -a > /dev/null || uv run pre-commit run -a
+	@echo "🚀 Pulling the pipeline's outputs, so only what changed reruns"
+	@uv run calkit dvc pull || true
+	@echo "🚀 Running the pipeline"
+	@uv run calkit run
+	@echo "🚀 Pushing the pipeline's outputs"
+	@uv run calkit dvc push
+	@echo "🚀 Checking the run left nothing to format or rerun"
+	@files="$$(git diff --name-only)"; \
+		[ -z "$$files" ] || uv run pre-commit run --files $$files
+	@uv run calkit status --json | uv run python -c \
+		"import json, sys; sys.exit(json.load(sys.stdin)['pipeline']['is_stale'])" \
+		|| (echo "The pipeline is stale; see 'calkit status'" && exit 1)
+
 .PHONY: check
 check: format ## Run code quality tools.
 	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"

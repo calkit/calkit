@@ -4908,6 +4908,112 @@ def test_post_project_empty_repo(client: TestClient, db: Session) -> None:
     assert resp.status_code == 400
 
 
+def test_post_project_org_repo_collaborator(
+    client: TestClient, db: Session
+) -> None:
+    from app.orgs import get_org_by_github_name
+
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"collab-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"collab{suffix}",
+            github_username=f"collab{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    org_github_name = f"Org-{suffix}"
+    permissions = {"admin": False, "maintain": False, "push": False}
+    install_status = 404
+
+    def fake_get(url: str, headers: dict, timeout: int | None = None):
+        if url.endswith("/installation"):
+            return SimpleNamespace(
+                status_code=install_status, json=lambda: {}, text=""
+            )
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "owner": {"login": org_github_name, "type": "Organization"},
+                "private": True,
+                "description": "An org's repo",
+                "permissions": permissions,
+            },
+        )
+
+    def post(name: str, git_repo_exists: bool = True):
+        with (
+            patch(
+                "app.api.routes.projects.core.users.get_github_token",
+                return_value="gh-token",
+            ),
+            patch(
+                "app.api.routes.projects.core.github.create_app_token",
+                return_value="jwt",
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.get",
+                side_effect=fake_get,
+            ),
+        ):
+            return client.post(
+                "/projects",
+                headers=headers,
+                json={
+                    "name": name,
+                    "title": "An org's project",
+                    "git_repo_url": (
+                        f"https://github.com/{org_github_name}/{name}"
+                    ),
+                    "git_repo_exists": git_repo_exists,
+                },
+            )
+
+    # Without belonging to the org, a new repo can't be made in it
+    resp = post(f"new-{suffix}", git_repo_exists=False)
+    assert resp.status_code == 403
+    assert "Can only create" in resp.json()["detail"]
+    # Nor can an existing one be added with only read access
+    resp = post(f"push-{suffix}")
+    assert resp.status_code == 403
+    assert "write access" in resp.json()["detail"]
+    # Someone with write access can, once the app is installed on the repo
+    permissions = {"admin": False, "maintain": False, "push": True}
+    resp = post(f"noapp-{suffix}")
+    assert resp.status_code == 400
+    assert "not installed" in resp.json()["detail"]
+    assert get_org_by_github_name(db, org_github_name) is None
+    install_status = 200
+    name = f"xfo-{suffix}"
+    resp = post(name)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["is_public"] is False
+    # The org is added with nobody in it, and owns the project
+    db.expire_all()
+    org = get_org_by_github_name(db, org_github_name)
+    assert org is not None
+    assert org.github_name == org_github_name
+    assert org.user_memberships == []
+    project = db.exec(select(Project).where(Project.name == name)).one()
+    assert project.owner_account_id == org.account.id
+    # Its creator can open it and sees it listed without asking GitHub again
+    resp = client.get(
+        f"/projects/{org_github_name.lower()}/{name}", headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["current_user_access"] == "write"
+    resp = client.get("/projects", headers=headers)
+    assert name in [p["name"] for p in resp.json()["data"]]
+    # A second repo of the org goes to the same org
+    resp = post(f"second-{suffix}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["owner_account_id"] == str(org.account.id)
+
+
 def test_post_project_dataset_provenance(
     client: TestClient, db: Session
 ) -> None:

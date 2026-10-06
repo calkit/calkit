@@ -179,6 +179,9 @@ def test_execute_notebook(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+# Both install and build IJulia in the shared depot, and one precompiling it
+# while the other builds it fails with "IJulia not properly installed"
+@pytest.mark.xdist_group("ijulia")
 def test_execute_notebook_julia(tmp_dir):
     subprocess.check_call(
         [
@@ -218,6 +221,9 @@ def test_execute_notebook_julia(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+# Both install and build IJulia in the shared depot, and one precompiling it
+# while the other builds it fails with "IJulia not properly installed"
+@pytest.mark.xdist_group("ijulia")
 def test_check_env_kernel_julia(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(

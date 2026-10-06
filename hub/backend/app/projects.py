@@ -234,7 +234,9 @@ def get_project(
     if current_user is None and project.is_public:
         project.current_user_access = "read"
     elif current_user is not None:
-        # Compute access
+        # Compute access, not keeping one worked out for whoever this
+        # instance was last fetched for in the same session
+        project.current_user_access = None
         if project.owner == current_user:
             project.current_user_access = "owner"
         elif isinstance(project.owner, Org):
@@ -249,12 +251,11 @@ def get_project(
                         else "read"
                     )
                     break
-            if project.current_user_access is None and project.is_public:
-                project.current_user_access = "read"
-        else:
+        if project.current_user_access is None:
             # Non-owner: a native Calkit grant (role_id, e.g., from an invite)
             # takes precedence over GitHub-derived access, and is the only
-            # access path for GitHub-less collaborators.
+            # access path for GitHub-less collaborators. This includes
+            # collaborators on an org's repo who aren't in the org.
             access_row = session.exec(
                 select(UserProjectAccess)
                 .where(UserProjectAccess.project_id == project.id)

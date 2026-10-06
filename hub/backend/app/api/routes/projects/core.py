@@ -1215,6 +1215,7 @@ def post_project(
                 400, "Templates can only be used with new repos"
             )
         repo = resp.json()
+        github_access: str | None = None
         if owner_name != current_user.github_username:
             # This is either an org repo, or someone else's that we shouldn't
             # be able to import
@@ -1238,6 +1239,10 @@ def post_project(
                         "Must be an owner or admin of an org, or have write "
                         "access to the repo, to create projects for it"
                     ),
+                )
+            if role not in ["owner", "admin"]:
+                github_access = (
+                    "admin" if permissions.get("admin") else "write"
                 )
             if org is None:
                 # The app installed on the repo stands in for an org owner's
@@ -1319,6 +1324,16 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
+        # Recorded up front so a collaborator outside the org sees it listed
+        if github_access is not None:
+            session.add(
+                UserProjectAccess(
+                    project_id=project.id,
+                    user_id=current_user.id,
+                    github_access=github_access,
+                )
+            )
+            session.commit()
     return project  # type: ignore
 
 

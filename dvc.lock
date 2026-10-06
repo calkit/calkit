@@ -1,8 +1,7 @@
 schema: '2.0'
 stages:
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -10,8 +9,8 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 1217b34a1a3cc42493c56ce42eaa48f1
-      size: 110414
+      md5: 64bf6a60ff03f7db5a92b89d8cf7838e
+      size: 116205
     - path: calkit/docx.py
       hash: md5
       md5: ae55ff8e67201dc37855878e6f5c8235
@@ -42,8 +41,8 @@ stages:
       size: 500
     - path: scripts/latex-word-round-trip.py
       hash: md5
-      md5: 7d94d72d661fffd189ac06584c1ab7a5
-      size: 4924
+      md5: a12fe2fedab33ecb8aba9a91329a0878
+      size: 5515
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -55,23 +54,22 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: f5eb0f701c66b5f61e4c081174b114cd
-      size: 173509
+      md5: aac6dcb0a4fe5ea44486d1830a2329b5
+      size: 173958
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: f5eb0f701c66b5f61e4c081174b114cd
-      size: 173509
+      md5: aac6dcb0a4fe5ea44486d1830a2329b5
+      size: 173958
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: f780926ceb60ae2f71b12b2ea6f2b894
-      size: 36244
+      md5: 1e57567d01a00461b5bda7a8a1b806de
+      size: 36243
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 9521ff97f424019b13e51c64a463ee06
-      size: 121897
+      md5: a7e657dc80b84005e7ab715be0d0bd93
+      size: 121902
   latex-word-round-trip-figure:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/plot-latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -79,16 +77,16 @@ stages:
       size: 5
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: f5eb0f701c66b5f61e4c081174b114cd
-      size: 173509
+      md5: aac6dcb0a4fe5ea44486d1830a2329b5
+      size: 173958
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: f5eb0f701c66b5f61e4c081174b114cd
-      size: 173509
+      md5: aac6dcb0a4fe5ea44486d1830a2329b5
+      size: 173958
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 9521ff97f424019b13e51c64a463ee06
-      size: 121897
+      md5: a7e657dc80b84005e7ab715be0d0bd93
+      size: 121902
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: d9d7b45c12044f5ae8f54491c383ecd4
@@ -100,11 +98,10 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: f45d8d91f4fde2eb20f14b192f4d6e62
-      size: 206974
+      md5: d9b65fca434b17fa627f91efd8b86a0f
+      size: 207261
   latex-image-readme/sizes:
-    cmd: calkit xenv -n dev --no-check -- python 
-      .calkit/markdown/images/latex/README.md/sizes.py
+    cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
     deps:
     - path: .calkit/markdown/images/latex/README.md/sizes.py
       hash: md5
@@ -249,8 +246,8 @@ stages:
       md5: 4960953114330139033d7281122861de
       size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4
-      --attendees=25 --supported=20 --indirect-rate=0
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25
+      --supported=20 --indirect-rate=0
     deps:
     - path: .python-version
       hash: md5

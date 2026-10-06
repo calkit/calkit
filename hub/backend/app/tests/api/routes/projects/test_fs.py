@@ -1,6 +1,7 @@
 """Tests for app.api.routes.projects.fs endpoints."""
 
 import base64
+import threading
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
@@ -202,8 +203,13 @@ def test_list_returns_empty_for_missing_prefix(client: TestClient):
 def test_batch_op_answers_every_path(client: TestClient):
     stored = {f"s3://data/{OWNER}/{PROJECT}/f{i}": b"x" * i for i in range(50)}
     stored[f"s3://data/{OWNER}/{PROJECT}/big"] = b""
+    # Paths answered one at a time would never all reach this together
+    overlapping = {f"s3://data/{OWNER}/{PROJECT}/f{i}" for i in range(4)}
+    barrier = threading.Barrier(len(overlapping), timeout=10)
 
     def info(path):
+        if path in overlapping:
+            barrier.wait()
         if path not in stored:
             raise FileNotFoundError(path)
         size = 2_000_000 if path.endswith("/big") else len(stored[path])

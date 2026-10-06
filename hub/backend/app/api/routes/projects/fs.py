@@ -24,7 +24,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 RETURN_CONTENT_SIZE_LIMIT = 1_000_000
-BATCH_OP_WORKERS = 32
+# Shared by every batch request, so concurrent requests can't multiply the
+# threads and storage connections a worker holds
+_batch_op_pool = ThreadPoolExecutor(
+    max_workers=32, thread_name_prefix="fs-batch-op"
+)
 
 
 class PresignedUrlAccess(BaseModel):
@@ -501,6 +505,5 @@ def post_project_fs_batch_op(
         fs.makedir(data_prefix)
     # Each path is a round trip to object storage, and a DVC push asks
     # about hundreds of them, so they're made concurrently
-    with ThreadPoolExecutor(max_workers=BATCH_OP_WORKERS) as pool:
-        results = dict(zip(paths, pool.map(get_result, paths)))
+    results = dict(zip(paths, _batch_op_pool.map(get_result, paths)))
     return FsOpBatchResponse(backend=backend, results=results)

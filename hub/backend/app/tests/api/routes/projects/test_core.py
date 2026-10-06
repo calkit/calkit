@@ -5000,6 +5000,14 @@ def test_post_project_org_repo_collaborator(
     assert org.user_memberships == []
     project = db.exec(select(Project).where(Project.name == name)).one()
     assert project.owner_account_id == org.account.id
+    # Its creator can open it and sees it listed without asking GitHub again
+    resp = client.get(
+        f"/projects/{org_github_name.lower()}/{name}", headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["current_user_access"] == "write"
+    resp = client.get("/projects", headers=headers)
+    assert name in [p["name"] for p in resp.json()["data"]]
     # A second repo of the org goes to the same org
     resp = post(f"second-{suffix}")
     assert resp.status_code == 200, resp.text

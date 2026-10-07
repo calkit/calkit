@@ -372,18 +372,17 @@ def get_projects(
             where_clause,
             Project.owner_account.has(Account.name == owner_name.lower()),  # type: ignore
         )
+    repo_clause = None
     if github_repo is not None:
         # An exact repo lookup, e.g. for resolving the project behind a
         # GitHub page. The repo URL is stored with or without the .git
         # suffix depending on how the project was created.
         repo_url = f"https://github.com/{github_repo.strip('/')}"
-        where_clause = and_(
-            where_clause,
-            or_(
-                func.lower(Project.git_repo_url) == repo_url.lower(),
-                func.lower(Project.git_repo_url) == f"{repo_url.lower()}.git",
-            ),
+        repo_clause = or_(
+            func.lower(Project.git_repo_url) == repo_url.lower(),
+            func.lower(Project.git_repo_url) == f"{repo_url.lower()}.git",
         )
+        where_clause = and_(where_clause, repo_clause)
     if search_for is not None:
         search_for = f"%{search_for}%"
         where_clause = and_(
@@ -418,6 +417,24 @@ def get_projects(
         .offset(offset)
     )
     projects = session.exec(select_query).all()
+    if repo_clause is not None and current_user is not None and not projects:
+        # GitHub-derived access is only in the clause above once it's been
+        # cached, so a collaborator who has never opened the project has it
+        # resolved here rather than being told the repo has no project
+        project = session.exec(select(Project).where(repo_clause)).first()
+        if project is not None:
+            try:
+                project = app.projects.get_project(
+                    session=session,
+                    owner_name=project.owner_account_name,
+                    project_name=project.name,
+                    current_user=current_user,
+                    min_access_level=min_access_level,
+                )
+                projects = [project]
+                count = 1
+            except HTTPException:
+                pass
     return ProjectsPublic(data=projects, count=count)  # type: ignore
 
 

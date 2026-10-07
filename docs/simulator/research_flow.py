@@ -202,6 +202,14 @@ COLLABORATION = {"pi_learn_hours": 0.25}
 VERIFICATION = {"detect_self": 0.2, "reverify": 0.3}
 PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}
 TRANSPARENCY = {"detect_reviewer": 0.8, "shared": True}
+# Reviewing one answer at a time with its evidence and the code behind it,
+# which takes the PI less time and catches more
+FOCUSED_REVIEW = {
+    "pi_hours_full": 0.75,
+    "pi_hours_partial": 0.2,
+    "detect_full": 0.75,
+    "detect_partial": 0.45,
+}
 # What agents change: hands-on work, which is faster except where it's
 # thinking or physical, flaws in the stages they work in, mechanics done by
 # hand, i.e., handoffs, review prep, translation, and redoing downstream

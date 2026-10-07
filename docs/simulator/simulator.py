@@ -20,6 +20,7 @@ from research_flow import (
     BASE,
     CALKIT,
     COLLABORATION,
+    FOCUSED_REVIEW,
     HANDOFF_FROM,
     LEARNED,
     ROUND_TRIP,
@@ -175,7 +176,7 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
     policy = inputs["policy"]
     browser = inputs["pi_reviews_in"] == "browser"
     review = COLLABORATION if browser else ROUND_TRIP
-    calkit = CALKIT | review | VERIFICATION | TRANSPARENCY
+    calkit = CALKIT | review | VERIFICATION | FOCUSED_REVIEW | TRANSPARENCY
     # Calkit's curation, for sharing the project with the paper
     curate = {k: automated[k] for k in ["curate_fixed", "curate_item"]}
     out = {"today": (policy, params("manual"))}
@@ -216,6 +217,10 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
     out["Answers checked against their evidence"] = (
         policy,
         params("manual", VERIFICATION),
+    )
+    out["Focused reviews of each answer, with its evidence and code"] = (
+        policy,
+        params("manual", FOCUSED_REVIEW),
     )
     out["The project shared with the paper"] = (
         policy,

@@ -629,6 +629,11 @@ so it follows the pipeline integration phase.
    reach the machine without a VPN.
    A setting could then turn off web sessions, leaving an Operator
    reachable only that way and for things like LaTeX builds.
+   Also keeping the machine awake while a session or run is active, as
+   `code tunnel --no-sleep` does, e.g., with `caffeinate` on macOS, so a
+   long run isn't lost to sleep, and forwarding a workspace's ports
+   through the relay, e.g., to open its Jupyter server from the hub,
+   within the relay's traffic budget.
    Upgrading Calkit and restarting an Operator from the hub,
    loops and fleet rollouts (#90), parallel `group` stages (#185),
    a startup command for sessions, agent notifications, and an ACP chat
@@ -669,6 +674,17 @@ so it follows the pipeline integration phase.
   friction the owner-only allowlist mostly removes.
 - **Embed openvscode-server.** Full-featured immediately, but heavy and
   hard to integrate with hub pages.
+- **VS Code Remote Tunnels instead of Operators.** The same idea, an
+  outbound connection through a cloud relay from a machine the user owns
+  to a browser, and ahead of Operators as an IDE: a full editor,
+  extensions, and port forwarding, with SSH inside the tunnel, so the
+  relay can't read sessions. But it knows nothing about projects, so
+  pipeline state, runs on a chosen machine, and official outputs from the
+  hub's editors aren't possible through it, and it runs through
+  Microsoft's relay, with a limit of 10 tunnels per account, a server
+  meant for one client at a time, and a process that has to keep
+  running, which cluster login nodes often don't allow.
+  It can still be used alongside, by running `code tunnel` in a session.
 - **Launching agents directly as sessions.** Saves typing a command, but
   skips the user's shell startup files, so agents may not be found, and
   the session ends when the agent exits.

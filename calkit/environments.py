@@ -43,6 +43,23 @@ CONDA_VENV_ARCHS = [
     "linux-64",
     "win-64",
 ]
+# What ``uv pip compile --python-platform`` calls each of the platforms a
+# venv or conda environment is locked for. A platform missing here is one
+# uv cannot resolve for, so it is simply not locked ahead of time and is
+# written the first time a machine of that kind checks the environment.
+UV_PLATFORM_TARGETS = {
+    "osx-arm64": "aarch64-apple-darwin",
+    "osx-64": "x86_64-apple-darwin",
+    "linux-aarch64": "aarch64-unknown-linux-gnu",
+    "linux-64": "x86_64-unknown-linux-gnu",
+    "win-64": "x86_64-pc-windows-msvc",
+}
+# Written as the first line of a venv or conda lock file, recording the
+# spec it was resolved from. The lock is otherwise indistinguishable from
+# one resolved from a different spec, and telling those apart is what says
+# whether a lock is out of date (the project changed) or merely from
+# another machine (it did not).
+LOCK_SPEC_COMMENT = "# calkit-spec-md5:"
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
 # Scheduler environment keys that govern how a job is dispatched rather than
 # what it computes. They are excluded from the environment lock file, so
@@ -1040,6 +1057,128 @@ def write_system_env_lock(
     with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
     return lock_fpath
+
+
+def spec_fingerprint(spec_fpath: str) -> str:
+    """Hash the spec a lock file was resolved from."""
+    with open(spec_fpath, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+
+def read_lock_spec_fingerprint(lock_fpath: str) -> str | None:
+    """Read the spec hash a lock file records, if it records one.
+
+    None means the lock predates this being written down, so nothing can
+    be concluded about whether it matches the spec, and the caller
+    resolves again rather than trusting it.
+    """
+    try:
+        with open(lock_fpath) as f:
+            first = f.readline().strip()
+    except OSError:
+        return None
+    if not first.startswith(LOCK_SPEC_COMMENT):
+        return None
+    return first[len(LOCK_SPEC_COMMENT) :].strip() or None
+
+
+def stamp_lock_with_spec(lock_fpath: str, spec_fpath: str) -> None:
+    """Record in a lock file which spec it was resolved from."""
+    fingerprint = spec_fingerprint(spec_fpath)
+    with open(lock_fpath) as f:
+        body = f.read()
+    if body.startswith(LOCK_SPEC_COMMENT):
+        body = body.split("\n", 1)[1] if "\n" in body else ""
+    with open(lock_fpath, "w", newline="\n") as f:
+        f.write(f"{LOCK_SPEC_COMMENT} {fingerprint}\n{body}")
+
+
+def lock_matches_spec(lock_fpath: str, spec_fpath: str) -> bool:
+    """Whether a lock file was resolved from the spec as it is now.
+
+    False when the lock records no spec, since a lock that cannot say what
+    it came from cannot be taken as current.
+    """
+    if not os.path.isfile(lock_fpath) or not os.path.isfile(spec_fpath):
+        return False
+    recorded = read_lock_spec_fingerprint(lock_fpath)
+    return recorded is not None and recorded == spec_fingerprint(spec_fpath)
+
+
+def write_cross_platform_venv_locks(
+    spec_fpath: str,
+    lock_fpath: str,
+    python: str | None = None,
+    wdir: str | None = None,
+    verbose: bool = False,
+) -> list[str]:
+    """Resolve a venv's lock for every platform uv can resolve for.
+
+    Stages depend on the directory holding these, not on the one file the
+    current machine reads, so a platform locked later changes that
+    directory and invalidates every stage using the environment---even
+    though the lock that was already there was right about everything. The
+    way out is to write them all the first time, which is what Docker
+    environments already do with their architectures.
+
+    Best effort: a platform uv cannot resolve, or no network to resolve
+    over, leaves that platform unlocked rather than failing the check. The
+    machine that needs it writes it then, and pays the invalidation.
+
+    Returns the paths written, which excludes ``lock_fpath`` itself: the
+    current platform's lock comes from the environment that was actually
+    built, not from resolving for it.
+    """
+    import typer
+
+    from calkit.cli import warn
+
+    lock_dir, lock_name = os.path.split(lock_fpath)
+    ext = os.path.splitext(lock_name)[1]
+    here = _conda_venv_platform()
+    written = []
+    for arch in CONDA_VENV_ARCHS:
+        target = UV_PLATFORM_TARGETS.get(arch)
+        if target is None or arch == here:
+            continue
+        out_fpath = os.path.join(lock_dir, arch + ext)
+        # Resolved again when the spec has moved under it, not only when
+        # it is absent: a lock left behind from an older spec is wrong
+        # about the environment, and the machine reading it would never
+        # find out, since it is the one file that machine doesn't build
+        if lock_matches_spec(
+            os.path.join(wdir or "", out_fpath),
+            os.path.join(wdir or "", spec_fpath),
+        ):
+            continue
+        cmd = [
+            "uv",
+            "pip",
+            "compile",
+            "--quiet",
+            "--python-platform",
+            target,
+            "--output-file",
+            out_fpath,
+        ]
+        if python is not None:
+            cmd += ["--python-version", python]
+        cmd.append(spec_fpath)
+        if verbose:
+            typer.echo(f"Running command: {' '.join(cmd)}")
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            # Not fatal: an unlocked platform costs an invalidation later,
+            # where a failed check costs the user their run now
+            if verbose:
+                warn(f"Could not lock {spec_fpath} for {arch}: {e}")
+            if os.path.isfile(out_fpath):
+                os.remove(out_fpath)
+            continue
+        stamp_lock_with_spec(out_fpath, spec_fpath)
+        written.append(out_fpath)
+    return written
 
 
 def get_cache_db(name="cache") -> SqliteDict:

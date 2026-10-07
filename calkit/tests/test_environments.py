@@ -1739,3 +1739,82 @@ def test_env_inputs_must_be_inside_the_project():
     assert envs.get_env_input_paths(
         {"kind": "docker", "inputs": ["../outside.C"]}
     ) == ["../outside.C"]
+
+
+def test_lock_records_the_spec_it_came_from(tmp_dir):
+    import calkit.environments as envs
+
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    with open("requirements-lock.txt", "w") as f:
+        f.write("idna==3.10\n")
+    # A lock that cannot say what it was resolved from cannot be taken as
+    # current, since the spec may have moved under it
+    assert envs.read_lock_spec_fingerprint("requirements-lock.txt") is None
+    assert not envs.lock_matches_spec(
+        "requirements-lock.txt", "requirements.txt"
+    )
+    envs.stamp_lock_with_spec("requirements-lock.txt", "requirements.txt")
+    assert envs.lock_matches_spec("requirements-lock.txt", "requirements.txt")
+    with open("requirements-lock.txt") as f:
+        assert f.readline().startswith(envs.LOCK_SPEC_COMMENT)
+        # The pins survive the stamp, since the file is still installed from
+        assert "idna==3.10" in f.read()
+    # Changing the spec is what makes a lock out of date. Running on a
+    # different machine is not, which is the distinction the stamp exists
+    # to draw.
+    with open("requirements.txt", "w") as f:
+        f.write("idna\ncertifi\n")
+    assert not envs.lock_matches_spec(
+        "requirements-lock.txt", "requirements.txt"
+    )
+    # Stamping twice replaces the record rather than stacking comments
+    envs.stamp_lock_with_spec("requirements-lock.txt", "requirements.txt")
+    with open("requirements-lock.txt") as f:
+        body = f.read()
+    assert body.count(envs.LOCK_SPEC_COMMENT) == 1
+    assert "idna==3.10" in body
+    # A missing file on either side is not a match, and does not raise
+    assert not envs.lock_matches_spec("nope-lock.txt", "requirements.txt")
+    assert not envs.lock_matches_spec("requirements-lock.txt", "nope.txt")
+
+
+def test_cross_platform_venv_locks(tmp_dir):
+    import calkit.environments as envs
+
+    # Every platform uv can resolve for is locked up front, because stages
+    # depend on the directory these sit in: a platform locked later changes
+    # that directory and invalidates every stage using the environment,
+    # even though the lock already there was right.
+    assert set(envs.UV_PLATFORM_TARGETS) <= set(envs.CONDA_VENV_ARCHS)
+    os.makedirs(os.path.join(".calkit", "env-locks", "py"), exist_ok=True)
+    spec = "requirements.txt"
+    with open(spec, "w") as f:
+        f.write("idna\n")
+    here = envs._conda_venv_platform()
+    lock_fpath = os.path.join(".calkit", "env-locks", "py", here + ".txt")
+    with open(lock_fpath, "w") as f:
+        f.write("idna==3.10\n")
+    envs.stamp_lock_with_spec(lock_fpath, spec)
+    written = envs.write_cross_platform_venv_locks(
+        spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
+    )
+    # The current platform is not among them: its lock comes from the
+    # environment that was actually built, not from resolving for it
+    assert lock_fpath not in written
+    for fpath in written:
+        assert envs.lock_matches_spec(fpath, spec)
+    # Nothing is redone when every platform already matches the spec
+    assert not envs.write_cross_platform_venv_locks(
+        spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
+    )
+    # A moved spec is resolved again, rather than left behind wrong
+    if written:
+        with open(spec, "w") as f:
+            f.write("idna\ncertifi\n")
+        again = envs.write_cross_platform_venv_locks(
+            spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
+        )
+        assert set(again) == set(written)
+        for fpath in again:
+            assert envs.lock_matches_spec(fpath, spec)

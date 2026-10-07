@@ -1840,16 +1840,45 @@ def check_venv(
                 break
     activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
 
+    # A lock that says which spec it came from, and says this one, is an
+    # input to this check rather than something it produces: re-resolving
+    # it here would rewrite it from whatever machine happens to be running,
+    # and stages depend on the directory it sits in. A lock from a changed
+    # spec is a different matter -- the project moved, so the lock is
+    # genuinely out of date and resolving again is the point.
+    # Asked of this platform's own lock rather than of whatever file the
+    # install reads: with that one missing, the fallback above may hand us
+    # another platform's lock, and installing from it is fine while
+    # treating it as ours would leave this platform unlocked forever.
+    lock_is_current = calkit.environments.lock_matches_spec(
+        os.path.join(wdir or "", lock_fpath), os.path.join(wdir or "", path)
+    )
+
     def pip_install_and_freeze(reqs_arg: str) -> None:
-        check_cmd = (
-            f"{activate_cmd} "
-            f"&& {pip_cmd} install {pip_install_args} {reqs_arg} "
-            f"&& {pip_freeze_cmd} > {lock_fpath} "
-            "&& deactivate"
-        )
+        check_cmd = f"{activate_cmd} && {pip_cmd} install {pip_install_args} {reqs_arg}"
+        if not lock_is_current:
+            check_cmd += f" && {pip_freeze_cmd} > {lock_fpath}"
+        check_cmd += " && deactivate"
         if verbose:
             typer.echo(f"Running command: {check_cmd}")
         subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
+        if lock_is_current:
+            return
+        calkit.environments.stamp_lock_with_spec(
+            os.path.join(wdir or "", lock_fpath),
+            os.path.join(wdir or "", path),
+        )
+        if kind == "uv-venv":
+            # Written now, while the spec is known good, so that a machine
+            # of another kind reads a lock instead of adding one and
+            # invalidating every stage in the environment
+            calkit.environments.write_cross_platform_venv_locks(
+                spec_fpath=path,
+                lock_fpath=lock_fpath,
+                python=python,
+                wdir=wdir,
+                verbose=verbose,
+            )
         # Delete legacy lock file after use
         if used_legacy_lock:
             try:

@@ -129,6 +129,14 @@ function stageRows() {
                 ${s.hop ? "" : "disabled"} aria-label="Hours per move">`
             : ""
         }</td>
+        <td>${
+          i < last
+            ? `<input type="number" data-stage="${i}" data-field="hop_error"
+                value="${+(s.hop_error * 100).toFixed(2)}" min="0" max="100"
+                step="any" ${s.hop ? "" : "disabled"}
+                aria-label="Percent of moves that get something wrong">`
+            : ""
+        }</td>
         <td><button type="button" class="sim-remove" data-remove="${i}"
           ${state.stages.length <= 3 ? "disabled" : ""}
           aria-label="Remove stage">✕</button></td>
@@ -145,7 +153,8 @@ function renderForm() {
         <thead><tr>
           <th>Stage</th><th>Days of work per finding</th>
           <th>Moved to the next stage's tools by hand</th>
-          <th>Hours per move</th><th></th>
+          <th>Hours per move</th>
+          <th>Moves that get something wrong (%)</th><th></th>
         </tr></thead>
         <tbody>${stageRows()}</tbody>
       </table></div>
@@ -170,10 +179,14 @@ function renderForm() {
       const f = t.dataset.field;
       stage[f] =
         t.type === "checkbox" ? t.checked : f === "name" ? t.value : +t.value;
+      // Entered as a percentage
+      if (f === "hop_error") stage[f] /= 100;
       if (f === "hop") {
-        form.querySelector(
-          `[data-stage="${t.dataset.stage}"][data-field="hop_hours"]`,
-        ).disabled = !t.checked;
+        for (const g of ["hop_hours", "hop_error"]) {
+          form.querySelector(
+            `[data-stage="${t.dataset.stage}"][data-field="${g}"]`,
+          ).disabled = !t.checked;
+        }
       }
     }
   });

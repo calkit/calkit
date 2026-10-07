@@ -1614,6 +1614,24 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
     # The machine agreeing is not a mismatch, and neither is a lock file
     # that doesn't exist yet: the first needs nothing, the second a write
     assert not envs.system_env_lock_mismatch(env_name="never-locked", env=env)
+    # A lock nobody can read is not the same as no lock. Treating it as
+    # missing would overwrite it from here, which is the thing this exists
+    # to stop, so it is an error that names the way out
+    with open(lock_fpath, "w") as f:
+        f.write("{not json")
+    with pytest.raises(ValueError, match="cannot be read"):
+        envs.read_system_env_lock(env_name="bench", env=env)
+    with pytest.raises(ValueError, match="cannot be read"):
+        envs.write_system_env_lock(env_name="bench", env=env)
+    with open(lock_fpath, "w") as f:
+        f.write("[1, 2]")
+    with pytest.raises(ValueError, match="does not contain an object"):
+        envs.system_env_lock_mismatch(env_name="bench", env=env)
+    # Relocking is the way out, so it must not read the broken file first
+    envs.write_system_env_lock(env_name="bench", env=env, relock=True)
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["cpu-count", "os"])
 
 
 def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):

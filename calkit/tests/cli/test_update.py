@@ -721,3 +721,21 @@ def test_update_env_lock(tmp_dir):
     assert result.exit_code != 0
     result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
     assert result.exit_code != 0
+    # The two operations apply to disjoint kinds, so asking for both is a
+    # mistake worth naming rather than quietly doing one of them
+    result = runner.invoke(
+        update_app, ["env", "-n", "bench", "--lock", "--add", "numpy"]
+    )
+    assert result.exit_code != 0
+    assert "not both" in result.output
+    # A lock nobody can read is one of the reasons to relock, so reading
+    # the old one must not be what stops it
+    with open(
+        os.path.join(".calkit", "env-locks", "bench", "info.json"), "w"
+    ) as f:
+        f.write("{not json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])

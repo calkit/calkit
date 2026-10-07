@@ -1086,6 +1086,13 @@ def update_environment(
     if env_name not in envs:
         raise_error(f"Environment '{env_name}' does not exist")
     if lock:
+        if add_packages:
+            raise_error(
+                "Use --lock or --add, not both: re-locking records this "
+                "machine for a system environment, and --add changes the "
+                "spec of an environment that has packages, which no system "
+                "environment does"
+            )
         env = envs[env_name]
         if env.get("kind") != "system":
             raise_error(
@@ -1099,9 +1106,15 @@ def update_environment(
                 "there is nothing to re-lock; add them under 'lock' in "
                 "calkit.yaml"
             )
-        before = calkit.environments.read_system_env_lock(
-            env_name=env_name, env=env
-        )
+        # A lock that can't be read is one of the reasons to run this, so
+        # reading it must not be what stops it: there is simply nothing to
+        # report as the previous value.
+        try:
+            before = calkit.environments.read_system_env_lock(
+                env_name=env_name, env=env
+            )
+        except ValueError:
+            before = None
         try:
             lock_fpath = calkit.environments.write_system_env_lock(
                 env_name=env_name, env=env, relock=True

@@ -1237,8 +1237,8 @@ class SystemEnvironment(Environment):
     is somewhere else. What it does not get to do is add to them -- a
     stage that actually needs to run fails there, naming the properties
     that disagree, since its result would not be comparable with the ones
-    already in hand. ``calkit update env --lock`` is how a project says
-    this machine takes over, and invalidates the dependent stages the
+    already in hand. ``calkit update env -n NAME --lock`` is how a project
+    says this machine takes over, and invalidates the dependent stages the
     ordinary way.
 
     ``requirements`` is the other half, and answers a different question.

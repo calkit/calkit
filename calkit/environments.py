@@ -890,9 +890,22 @@ def read_system_env_lock(
     try:
         with open(lock_fpath) as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError) as e:
+        raise ValueError(
+            f"Lock file '{lock_fpath}' cannot be read: {e}. It records which "
+            "machine the project's results came from, so it is not replaced "
+            "automatically; restore it from version control, or write this "
+            f"machine's properties over it with 'calkit update env -n "
+            f"{env_name} --lock'"
+        ) from e
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Lock file '{lock_fpath}' does not contain an object, so the "
+            "machine it names cannot be read. Restore it from version "
+            "control, or write this machine's properties over it with "
+            f"'calkit update env -n {env_name} --lock'"
+        )
+    return data
 
 
 def system_env_lock_mismatch(

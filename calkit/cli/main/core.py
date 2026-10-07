@@ -3878,6 +3878,25 @@ def run_in_env(
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
+        # Gated like the local branch, and for the same reason: a compiled
+        # stage passes --no-check, so without this a far end that no longer
+        # matches the lock would be dispatched to anyway. The properties
+        # come from that machine, since it is the one whose result is being
+        # compared with the ones already recorded.
+        if calkit.environments.system_env_locks_anything(env):
+            try:
+                remote_info = workspace.remote_system_info(ws)
+                mismatch = calkit.environments.system_env_lock_mismatch(
+                    env_name=env_name, env=env, system_info=remote_info
+                )
+            except (ValueError, subprocess.CalledProcessError) as e:
+                raise_error(str(e))
+            if mismatch:
+                raise_error(
+                    calkit.environments.describe_system_env_lock_mismatch(
+                        env_name, mismatch
+                    )
+                )
         repo = calkit.git.get_repo()
         remote_shell_cmd = _to_shell_cmd(cmd)
         if (
@@ -4049,9 +4068,12 @@ def run_in_env(
         # to date never gets here, so results that came with the clone
         # are kept; one that needs to run stops, because its result would
         # be put beside results from a machine it is not comparable with.
-        mismatch = calkit.environments.system_env_lock_mismatch(
-            env_name=env_name, env=env
-        )
+        try:
+            mismatch = calkit.environments.system_env_lock_mismatch(
+                env_name=env_name, env=env
+            )
+        except ValueError as e:
+            raise_error(f"Environment '{env_name}': {e}")
         if mismatch:
             raise_error(
                 calkit.environments.describe_system_env_lock_mismatch(

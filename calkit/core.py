@@ -41,6 +41,82 @@ logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
 
+class _FoldedPlainStr(str):
+    """A plain scalar read from several lines, remembering where they broke.
+
+    ``fold_pos`` holds the index of each space that was a line break, so
+    the value can be written back the way it was wrapped rather than
+    re-folded at whatever width ruamel is set to, which rewrote every
+    paragraph of a file wrapped any other way.
+    """
+
+    fold_pos: list[int]
+
+
+class _FoldPreservingConstructor(ruamel.yaml.constructor.RoundTripConstructor):
+    def construct_scalar(self, node: Any) -> Any:
+        value = super().construct_scalar(node)
+        if (
+            type(value) is not str
+            or node.style is not None
+            or node.start_mark.line == node.end_mark.line
+        ):
+            return value
+        # Only text loaded from a string has its source in the marks
+        buffer = getattr(node.start_mark, "buffer", None)
+        if buffer is None:
+            return value
+        source = buffer[node.start_mark.index : node.end_mark.index]
+        lines = [line.strip() for line in source.split("\n")]
+        # Blank lines are newlines in the value, which the emitter handles
+        if "" in lines or " ".join(lines) != value:
+            return value
+        out = _FoldedPlainStr(value)
+        out.fold_pos = []
+        pos = -1
+        for line in lines[:-1]:
+            pos += len(line) + 1
+            out.fold_pos.append(pos)
+        return out
+
+
+class _FoldPreservingRepresenter(ruamel.yaml.representer.RoundTripRepresenter):
+    pass
+
+
+_FoldPreservingRepresenter.add_representer(
+    _FoldedPlainStr, ruamel.yaml.representer.RoundTripRepresenter.represent_str
+)
+
+
+class _FoldPreservingEmitter(ruamel.yaml.emitter.Emitter):
+    def write_plain(self, text: Any, split: Any = True) -> None:
+        fold_pos = getattr(text, "fold_pos", None)
+        if not fold_pos or not split or self.root_context:
+            return super().write_plain(text, split)
+
+        def write(data: str) -> None:
+            self.column += len(data)
+            self.stream.write(
+                data.encode(self.encoding) if self.encoding else data
+            )
+
+        # The same bookkeeping as the parent's, breaking where the source
+        # did instead of where the width says to
+        if not self.whitespace:
+            write(" ")
+        self.whitespace = False
+        self.indention = False
+        start = 0
+        for pos in fold_pos:
+            write(text[start:pos])
+            self.write_indent()
+            self.whitespace = False
+            self.indention = False
+            start = pos + 1
+        write(text[start:])
+
+
 class _ThreadLocalYAML(threading.local):
     """Holds one configured ruamel ``YAML`` per thread.
 
@@ -65,6 +141,10 @@ class _ThreadLocalYAML(threading.local):
         # 79-80 columns is written back as it was; at 70, lines of 71-80
         # characters were re-folded with a stray word on the next line
         self.yaml.width = 80
+        # Prose wrapped some other way is still written back as it was
+        self.yaml.Constructor = _FoldPreservingConstructor
+        self.yaml.Representer = _FoldPreservingRepresenter
+        self.yaml.Emitter = _FoldPreservingEmitter
 
 
 _yaml_local = _ThreadLocalYAML()
@@ -82,6 +162,20 @@ class _ThreadLocalYAMLProxy:
 
     def __setattr__(self, name: str, value: Any) -> None:
         setattr(_yaml_local.yaml, name, value)
+
+    def load(self, stream: Any) -> Any:
+        """Load YAML, reading it to a string first.
+
+        Only a string load leaves the source in the marks, which is how
+        multi-line values remember where they were wrapped.
+        """
+        from pathlib import Path
+
+        if isinstance(stream, Path):
+            stream = stream.read_text(encoding="utf-8")
+        elif hasattr(stream, "read"):
+            stream = stream.read()
+        return _yaml_local.yaml.load(stream)
 
     def dump(self, data: Any, stream: Any = None, **kwargs: Any) -> Any:
         """Dump YAML, dropping the space ruamel leaves before a fold.

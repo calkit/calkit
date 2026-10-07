@@ -40,6 +40,13 @@ _REFRESH_BUFFER_SECONDS = 60
 # they don't recurse into the auth-retry paths in ``_request``.
 _device_login_lock = threading.Lock()
 
+# Reused so each request after the first skips the TLS handshake, which
+# was most of the time of a small request. The pool is sized for DVC's
+# concurrent transfers.
+_session = requests.Session()
+_session.mount("https://", requests.adapters.HTTPAdapter(pool_maxsize=64))
+_session.mount("http://", requests.adapters.HTTPAdapter(pool_maxsize=64))
+
 
 class DeviceLoginError(RuntimeError):
     """Raised when the OAuth device login flow cannot complete."""
@@ -381,7 +388,7 @@ def _request(
     # Bound how long a single attempt can hang so stalled connections become
     # retryable timeouts rather than blocking forever. Callers can override.
     kwargs.setdefault("timeout", (10, 120))
-    func = getattr(requests, kind)
+    func = getattr(_session, kind)
     if base_url is None:
         base_url = get_base_url()
     refresh_attempted = False

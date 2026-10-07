@@ -328,7 +328,11 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     def process(item: Item) -> Generator:
         nonlocal loops
         s = item.stage
+        # A review can send the finding back while switching to its stage
+        version = item.version
         yield from setup(s)
+        if item.version != version:
+            return
         flaw = item.fixes.get(s)
         if s not in item.done_stages:
             factor = 1.0
@@ -339,7 +343,6 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         mean = item.work.get(s, p["work"][s]) * factor
         sigma2 = math.log(1 + p["work_cv"] ** 2)
         days = rng.lognormal(math.log(mean) - sigma2 / 2, sigma2**0.5)
-        version = item.version
         item.started = True
         kind = "work" if factor == 1.0 else "rework"
         spent = 0.0

@@ -647,7 +647,22 @@ def check_environment(
                 calkit.check_requirements(
                     requirements=env.get("requirements", [])
                 )
+                # Writes only if the env has never been locked here. A
+                # lock that disagrees with this machine is reported, not
+                # replaced: the stages depending on it are up to date
+                # against the machine that made them, and overwriting it
+                # would throw that away without anyone saying to. The
+                # stages that do need to run fail on their way in.
                 write_system_env_lock(env_name=env_name, env=env)
+                mismatch = calkit.environments.system_env_lock_mismatch(
+                    env_name=env_name, env=env
+                )
+                if mismatch:
+                    warn(
+                        calkit.environments.describe_system_env_lock_mismatch(
+                            env_name, mismatch
+                        )
+                    )
             except ValueError as e:
                 # A requirement that isn't met, or a property that can't be
                 # locked -- a misspelled one, or a tool that isn't
@@ -728,12 +743,23 @@ def check_environment(
                     verbose=verbose,
                 )
                 # Returns None when the env locks nothing, so nothing is
-                # written for an env with nothing to record
+                # written for an env with nothing to record, and nothing
+                # when it is already locked to a machine other than this
+                # one -- see the local branch above
                 write_system_env_lock(
                     env_name=env_name,
                     env=env,
                     system_info=system_info,
                 )
+                mismatch = calkit.environments.system_env_lock_mismatch(
+                    env_name=env_name, env=env, system_info=system_info
+                )
+                if mismatch:
+                    warn(
+                        calkit.environments.describe_system_env_lock_mismatch(
+                            env_name, mismatch
+                        )
+                    )
             except ValueError as e:
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":

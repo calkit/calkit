@@ -870,19 +870,104 @@ def get_system_lock_data(
     return data
 
 
+def read_system_env_lock(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+) -> dict | None:
+    """Read a ``system`` environment's lock file, or None if there is none.
+
+    None means the environment has not been locked here yet, which is a
+    different thing from a lock that disagrees with the machine: the first
+    is answered by writing one, the second only by a person deciding the
+    old results no longer apply.
+    """
+    lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, wdir=wdir, as_posix=True
+    )
+    if lock_fpath is None or not os.path.isfile(lock_fpath):
+        return None
+    try:
+        with open(lock_fpath) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def system_env_lock_mismatch(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+    system_info: dict | None = None,
+) -> dict[str, dict]:
+    """Compare a ``system`` environment's lock against the machine.
+
+    Returns the locked properties whose recorded value isn't this
+    machine's, as ``{property: {"locked": ..., "actual": ...}}``, and an
+    empty mapping when the lock agrees, when there is no lock to disagree
+    with, or when the environment locks nothing.
+
+    A property the lock doesn't carry is not a mismatch. It means the
+    environment started locking it after the lock was written, which the
+    project can resolve by locking again without any claim that the
+    machine changed.
+    """
+    locked = read_system_env_lock(env_name=env_name, env=env, wdir=wdir)
+    if not locked:
+        return {}
+    actual = get_system_lock_data(
+        env.get("lock") or [], system_info=system_info
+    )
+    return {
+        prop: {"locked": locked[prop], "actual": value}
+        for prop, value in actual.items()
+        if prop in locked and locked[prop] != value
+    }
+
+
+def describe_system_env_lock_mismatch(
+    env_name: str, mismatch: dict[str, dict]
+) -> str:
+    """Say which locked properties disagree, and how to accept the move."""
+    lines = [
+        f"  {prop}: locked as {d['locked']!r}, this machine has "
+        f"{d['actual']!r}"
+        for prop, d in sorted(mismatch.items())
+    ]
+    return (
+        f"Environment '{env_name}' is locked to a different machine:\n"
+        + "\n".join(lines)
+        + "\n\nResults already computed on the locked machine are kept, "
+        "and a stage that needs to run cannot, since its result would not "
+        "be comparable with them. If this machine should take over, lock "
+        f"it again with:\n\n  calkit update env -n {env_name} --lock"
+        "\n\nwhich invalidates every stage that depends on the lock."
+    )
+
+
 def write_system_env_lock(
     env_name: str,
     env: dict,
     wdir: str | None = None,
     system_info: dict | None = None,
+    relock: bool = False,
 ) -> str | None:
     """Write a JSON lock file for a ``system`` environment.
 
     Unlike the other lock files, this one describes the machine rather than
-    a spec the project controls, so it changes when the project moves to a
-    different machine. That is the intent: a stage that declared it depends
-    on, say, the Julia version should not reuse a cached result from a box
-    with a different one.
+    a spec the project controls. Writing it is therefore a claim that
+    results computed from here belong to this machine, and it is made once
+    -- when the environment has no lock yet -- rather than every time the
+    environment is checked.
+
+    On a machine that disagrees with an existing lock, nothing is written
+    unless ``relock``. Rewriting it there would invalidate every stage that
+    depends on it, so a clone on a second machine would recompute a whole
+    pipeline it was given the results of, and silently, which is the worst
+    way to find out. ``relock`` is that decision made deliberately, by
+    ``calkit update env --lock``; until then the lock stands and a stage
+    that actually needs to run reports the mismatch instead.
 
     A non-default ``shell`` is recorded alongside the machine properties.
     It isn't a property of the machine, but it feeds the same question: a
@@ -906,6 +991,21 @@ def write_system_env_lock(
     lock_data = get_system_lock_data(
         env.get("lock") or [], system_info=system_info
     )
+    existing = (
+        None
+        if relock
+        else read_system_env_lock(env_name=env_name, env=env, wdir=wdir)
+    )
+    if existing:
+        # Machine properties already recorded stand, so a clone on a
+        # second machine leaves the lock alone and keeps the results that
+        # came with it. A property only just added to ``lock`` was never
+        # recorded, so it is read from here: that is the project deciding
+        # to depend on something new, not the machine changing.
+        lock_data = {
+            prop: existing.get(prop, value)
+            for prop, value in lock_data.items()
+        }
     # Named so it can't collide with a locked property, now or when the set
     # of them grows. The setup commands themselves are not recorded: they
     # go into the stage's command when the pipeline is compiled, so DVC

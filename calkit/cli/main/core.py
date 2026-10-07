@@ -4043,6 +4043,21 @@ def run_in_env(
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
+        # Checked even with --no-check, which a pipeline stage always
+        # passes: this is not an environment check but the one place a
+        # move between machines can be caught. A stage DVC considers up
+        # to date never gets here, so results that came with the clone
+        # are kept; one that needs to run stops, because its result would
+        # be put beside results from a machine it is not comparable with.
+        mismatch = calkit.environments.system_env_lock_mismatch(
+            env_name=env_name, env=env
+        )
+        if mismatch:
+            raise_error(
+                calkit.environments.describe_system_env_lock_mismatch(
+                    env_name, mismatch
+                )
+            )
         # The env's 'wdir' is deliberately ignored here. It says where to
         # put the project when it has to be sent to another machine; we are
         # already on that machine, in a checkout of the project, and that

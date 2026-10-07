@@ -1564,6 +1564,86 @@ def test_system_lock_can_describe_another_machine(tmp_dir):
         assert json.load(f) == {"cpu-count": 64}
 
 
+def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
+    import calkit.environments as envs
+
+    env = {"kind": "system", "lock": ["cpu-count", "os"]}
+    lock_fpath = envs.write_system_env_lock(env_name="bench", env=env)
+    assert lock_fpath is not None
+    with open(lock_fpath) as f:
+        locked = json.load(f)
+    # A clone on a machine that disagrees keeps the lock it arrived with,
+    # since every stage depending on it is up to date against the machine
+    # that produced those results. Rewriting it here would recompute a
+    # whole pipeline for no reason anyone asked for.
+    elsewhere = {
+        "cpu_count": locked["cpu-count"] + 1,
+        "os": "SomeOtherOS",
+    }
+    envs.write_system_env_lock(
+        env_name="bench", env=env, system_info=elsewhere
+    )
+    with open(lock_fpath) as f:
+        assert json.load(f) == locked
+    mismatch = envs.system_env_lock_mismatch(
+        env_name="bench", env=env, system_info=elsewhere
+    )
+    assert set(mismatch) == {"cpu-count", "os"}
+    assert mismatch["os"] == {
+        "locked": locked["os"],
+        "actual": "SomeOtherOS",
+    }
+    described = envs.describe_system_env_lock_mismatch("bench", mismatch)
+    # The way out has to be in the message, since this is the only place
+    # the user is told the move was noticed
+    assert "calkit update env -n bench --lock" in described
+    assert "SomeOtherOS" in described
+    # Relocking is that decision made deliberately, and is the one thing
+    # that moves the recorded properties
+    envs.write_system_env_lock(
+        env_name="bench", env=env, system_info=elsewhere, relock=True
+    )
+    with open(lock_fpath) as f:
+        assert json.load(f) == {
+            "cpu-count": elsewhere["cpu_count"],
+            "os": "SomeOtherOS",
+        }
+    assert not envs.system_env_lock_mismatch(
+        env_name="bench", env=env, system_info=elsewhere
+    )
+    # The machine agreeing is not a mismatch, and neither is a lock file
+    # that doesn't exist yet: the first needs nothing, the second a write
+    assert not envs.system_env_lock_mismatch(env_name="never-locked", env=env)
+
+
+def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):
+    import calkit.environments as envs
+
+    # The shell is the project's own setting rather than a property of the
+    # machine, so changing it must still update the lock and rerun the
+    # stages whose setup commands run in it -- the machine properties are
+    # what a second machine is not allowed to overwrite, not the whole
+    # file.
+    env = {"kind": "system", "lock": ["os"], "shell": "zsh"}
+    lock_fpath = envs.write_system_env_lock(env_name="shell", env=env)
+    assert lock_fpath is not None
+    with open(lock_fpath) as f:
+        assert json.load(f)["shell"] == "zsh"
+    env["shell"] = "fish"
+    envs.write_system_env_lock(env_name="shell", env=env)
+    with open(lock_fpath) as f:
+        data = json.load(f)
+    assert data["shell"] == "fish"
+    # A property added to 'lock' later was never recorded, so it is read
+    # from this machine: that is the project choosing to depend on
+    # something new, not a claim that the machine changed
+    env["lock"] = ["os", "cpu-count"]
+    envs.write_system_env_lock(env_name="shell", env=env)
+    with open(lock_fpath) as f:
+        data = json.load(f)
+    assert data["cpu-count"] == calkit.get_system_info()["cpu_count"]
+
+
 def test_system_env_checks_are_not_cached():
     import calkit.environments as envs
 

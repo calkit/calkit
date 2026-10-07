@@ -672,3 +672,52 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
     assert remote_names[-1] == "acme-lab/widget"
     assert calkit.load_calkit_info()["owner"] == "acme-lab"
+
+
+def test_update_env_lock(tmp_dir):
+    import calkit.environments as envs
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "bench": {"kind": "system", "lock": ["os", "cpu-count"]},
+        "plain": {"kind": "system"},
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = ck_info["environments"]["bench"]
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    locked = envs.read_system_env_lock(env_name="bench", env=env)
+    assert locked == envs.get_system_lock_data(["os", "cpu-count"])
+    # Running it again changes nothing, so it says so rather than claiming
+    # stages are about to rerun
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "already locked" in result.output
+    # Pretend the lock came from somewhere else, as a clone would, and
+    # check the command reports what it moved
+    with open(
+        os.path.join(".calkit", "env-locks", "bench", "info.json"), "w"
+    ) as f:
+        json.dump({"os": "SomeOtherOS", "cpu-count": 1}, f)
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "SomeOtherOS" in result.output
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])
+    # An env with no machine properties has nothing to re-lock, and one of
+    # another kind has no machine at all; both are worth saying plainly
+    # rather than writing a file nothing depends on
+    result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
+    assert result.exit_code != 0

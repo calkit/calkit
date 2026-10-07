@@ -1061,10 +1061,23 @@ def update_environment(
             ),
         ),
     ] = None,
+    lock: Annotated[
+        bool,
+        typer.Option(
+            "--lock",
+            "--relock",
+            help=(
+                "Record this machine's properties in a system "
+                "environment's lock file, replacing the machine it is "
+                "locked to. Invalidates every stage that depends on it."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Update an environment.
 
-    Currently supports adding packages to Julia and Nix (flake) envs.
+    Currently supports adding packages to Julia and Nix (flake) envs, and
+    re-locking a system environment to this machine.
     """
     from calkit.cli.main import run_in_env
 
@@ -1072,9 +1085,53 @@ def update_environment(
     envs = ck_info.get("environments", {})
     if env_name not in envs:
         raise_error(f"Environment '{env_name}' does not exist")
+    if lock:
+        env = envs[env_name]
+        if env.get("kind") != "system":
+            raise_error(
+                f"Environment '{env_name}' is not a system environment, so "
+                "it has no machine to lock; its lock file is derived from "
+                "its spec"
+            )
+        if not calkit.environments.system_env_locks_anything(env):
+            raise_error(
+                f"Environment '{env_name}' locks no machine properties, so "
+                "there is nothing to re-lock; add them under 'lock' in "
+                "calkit.yaml"
+            )
+        before = calkit.environments.read_system_env_lock(
+            env_name=env_name, env=env
+        )
+        try:
+            lock_fpath = calkit.environments.write_system_env_lock(
+                env_name=env_name, env=env, relock=True
+            )
+        except ValueError as e:
+            raise_error(f"Environment '{env_name}': {e}")
+        after = calkit.environments.read_system_env_lock(
+            env_name=env_name, env=env
+        )
+        if before == after:
+            typer.echo(
+                f"Environment '{env_name}' was already locked to this "
+                "machine; nothing changed"
+            )
+            return
+        typer.echo(f"Locked environment '{env_name}' to this machine")
+        for prop in sorted(after or {}):
+            was = (before or {}).get(prop)
+            now = (after or {})[prop]
+            if was != now:
+                typer.echo(f"  {prop}: {was!r} -> {now!r}")
+        typer.echo(
+            f"\nStages depending on {lock_fpath} will rerun. Commit it so "
+            "the project records which machine its results came from."
+        )
+        return
     if add_packages is None:
         raise_error(
-            "No updates specified. Use --add to specify packages to add."
+            "No updates specified. Use --add to specify packages to add, or "
+            "--lock to re-lock a system environment to this machine."
         )
     env = envs[env_name]
     assert isinstance(add_packages, list)

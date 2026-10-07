@@ -2857,7 +2857,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs.
+Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
 
 Usage:
 
@@ -2867,10 +2867,11 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option                   | Type | Required | Default | Description                                                               |
-| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `--name`, `-n`           | str  | yes      |         | Name of the environment to update                                         |
-| `--add`, `--add-package` | str  | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                              |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
+| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -2878,7 +2879,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs.
+Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
 
 Usage:
 
@@ -2888,10 +2889,11 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option                   | Type | Required | Default | Description                                                               |
-| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `--name`, `-n`           | str  | yes      |         | Name of the environment to update                                         |
-| `--add`, `--add-package` | str  | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                              |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
+| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
 
 <a id="subcommand-update-stage"></a>
 

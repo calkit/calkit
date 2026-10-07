@@ -1230,8 +1230,16 @@ class SystemEnvironment(Environment):
     results actually depend on.
 
     Locked properties are written to the environment's lock file, which
-    stages depend on, so moving to a machine where one of them differs
-    invalidates the cached result rather than silently reusing it.
+    stages depend on, and they are written once: the first check that
+    finds no lock records this machine. A later check on a machine where
+    one of them differs leaves the lock alone, so a clone keeps the
+    results it was given rather than recomputing the pipeline because it
+    is somewhere else. What it does not get to do is add to them -- a
+    stage that actually needs to run fails there, naming the properties
+    that disagree, since its result would not be comparable with the ones
+    already in hand. ``calkit update env --lock`` is how a project says
+    this machine takes over, and invalidates the dependent stages the
+    ordinary way.
 
     ``requirements`` is the other half, and answers a different question.
     It says what must be *true* of this machine -- apps that must be

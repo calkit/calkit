@@ -133,8 +133,8 @@ stages:
       size: 5
     - path: docs/simulator/research_flow.py
       hash: md5
-      md5: c276ae4bfb6e2e579b83bdad9846fbf1
-      size: 32234
+      md5: ab005ec8d1af5aa89eb0c0c75f30782c
+      size: 32350
     - path: scripts/research-flow.py
       hash: md5
       md5: 31a7823ec25fe549bb23c8a98ac6f4a8

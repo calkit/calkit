@@ -733,6 +733,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         env.process(upkeep())
     env.run(until=finished | env.timeout(p["max_days"]))
     approved_at = [i.approved_at for i in items[:n_original] if i.approved_at]
+    # A run cut off before anything was approved counts as approved then
+    approved_at = approved_at or [env.now]
     return {
         "days": env.now,
         "idle": env.now - sum(effort.values()),

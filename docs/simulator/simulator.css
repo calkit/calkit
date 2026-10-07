@@ -204,3 +204,119 @@
   font-size: 0.75rem;
   line-height: 2.2;
 }
+
+.sim-field--wide {
+  grid-column: 1 / -1;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sim-field--wide legend {
+  color: var(--sim-muted);
+  padding: 0;
+  margin-bottom: 0.2em;
+}
+
+.sim-radio {
+  display: flex;
+  gap: 0.5em;
+  align-items: baseline;
+  color: var(--sim-ink);
+}
+
+.sim-dag {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 36rem;
+}
+
+.sim-dag-node {
+  fill: var(--md-code-bg-color);
+  stroke: var(--sim-rule);
+}
+
+.sim-dag-label {
+  fill: var(--sim-ink);
+  font-size: 12px;
+}
+
+.sim-dag-note {
+  fill: var(--sim-muted);
+  font-size: 11px;
+}
+
+.sim-dag-note--loop {
+  fill: var(--sim-mark);
+  font-weight: 600;
+}
+
+.sim-dag-edge,
+.sim-dag-review,
+.sim-dag-loop {
+  fill: none;
+  stroke: var(--sim-muted);
+  stroke-width: 1.5;
+}
+
+.sim-dag-edge--hand {
+  stroke-dasharray: 5 4;
+}
+
+.sim-dag-review {
+  stroke-dasharray: 2 3;
+}
+
+.sim-dag-loop {
+  stroke: var(--sim-mark);
+  stroke-width: 2;
+}
+
+.sim-dag-head {
+  fill: var(--sim-muted);
+  fill: context-stroke;
+}
+
+.sim-dag-gate {
+  stroke: var(--sim-ink);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.sim-dag-project {
+  fill: none;
+  stroke: var(--sim-mark);
+  stroke-width: 1.5;
+}
+
+.sim-dag-hit {
+  stroke: transparent;
+  stroke-width: 16;
+  cursor: pointer;
+}
+
+.sim-dag-hit:hover {
+  stroke: var(--sim-mark);
+  stroke-opacity: 0.15;
+}
+
+.sim-diagram {
+  overflow-x: auto;
+}
+
+.sim-cells {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(46rem, 100%), 1fr));
+  gap: 1rem;
+}
+
+.sim-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border: 1px solid var(--sim-rule);
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  min-width: 0;
+}

@@ -10,8 +10,12 @@ const CHUNK = 25;
 // Stage fields entered as percentages
 const PERCENT = ["agent_work", "hop_error"];
 const POLICIES = {
-  "stage-gate": "Stage by stage, reviewed in batches",
-  lean: "In small steps, reviewed at regular meetings",
+  "stage-gate":
+    "All results through each step before the next, e.g., every " +
+    "experiment, then every analysis, with a PI review after each step",
+  lean:
+    "One result at a time, through to a draft, before starting the next, " +
+    "with PI reviews at regular meetings",
 };
 const REVIEWERS = {
   browser: "The browser, with an AI assistant",
@@ -19,12 +23,16 @@ const REVIEWERS = {
 };
 const SETTINGS = [
   ["n_findings", "Results worth writing up in the paper", { min: 1, step: 1 }],
-  ["policy", "How you work today", { options: POLICIES }],
+  ["policy", "How you work through your results today", { radio: POLICIES }],
   ["agents", "You use AI agents", { checkbox: true }],
   ["pi_hours_per_week", "PI hours per week for your work", {}],
-  ["review_interval", "Working days between PI meetings, in small steps", {}],
+  [
+    "review_interval",
+    "Working days between PI reviews, one result at a time",
+    {},
+  ],
   ["prep_fixed", "Days to prepare for a PI review", {}],
-  ["prep_item", "Days more per finding reviewed", {}],
+  ["prep_item", "Days more per result reviewed", {}],
   ["review_days", "Working days per round of peer review", {}],
   ["pi_reviews_in", "With Calkit, your PI reviews in", { options: REVIEWERS }],
   ["reps", "Runs per scenario", { min: 20, max: 2000, step: 1 }],
@@ -90,6 +98,16 @@ function showError(message) {
 
 function field(key, label, opts) {
   const value = state[key];
+  if (opts.radio) {
+    return `<fieldset class="sim-field sim-field--wide">
+      <legend>${label}</legend>${Object.entries(opts.radio)
+        .map(
+          ([v, text]) => `<label class="sim-radio"><input type="radio"
+            name="${key}" data-key="${key}" value="${v}"
+            ${v === value ? "checked" : ""}> ${text}</label>`,
+        )
+        .join("")}</fieldset>`;
+  }
   const input = opts.checkbox
     ? `<input type="checkbox" data-key="${key}" ${value ? "checked" : ""}>`
     : opts.options
@@ -173,10 +191,115 @@ function loopControls() {
     attempts on average`;
 }
 
+function diagram(id, { policy, calkit = false, interactive = false }) {
+  // The workflow as a row of stages: arrows dashed where data is moved
+  // between tools by hand, the repeat loop curving back underneath, and
+  // PI reviews as gates between steps or a loop over the whole row
+  const { stages, attempts, loop_from: from, loop_to: to } = state;
+  const NW = 122;
+  const NH = 34;
+  const GAP = 28;
+  const PAD = 14;
+  // Room above for the review loop or gate labels, and below for the
+  // repeat loop
+  const Y = policy === "lean" ? 46 : 22;
+  const width = PAD * 2 + stages.length * NW + (stages.length - 1) * GAP;
+  const height = Y + NH + (attempts > 1 ? 44 : 6) + 20;
+  const x = (i) => PAD + i * (NW + GAP);
+  const cx = (i) => x(i) + NW / 2;
+  const mid = Y + NH / 2;
+  const bottom = Y + NH;
+  const short = (name) => (name.length > 17 ? `${name.slice(0, 16)}…` : name);
+  const arrow = `url(#${id}-arrow)`;
+  const parts = [];
+  // Click targets go on top of everything else
+  const hits = [];
+  if (calkit) {
+    parts.push(`<rect class="sim-dag-project" x="${PAD - 7}" y="${Y - 9}"
+      width="${width - 2 * PAD + 14}" height="${NH + 18}" rx="9"/>`);
+  }
+  if (policy === "lean") {
+    const top = 16;
+    parts.push(`<path class="sim-dag-review" marker-end="${arrow}"
+      d="M${cx(stages.length - 1)},${Y - 2} C${cx(stages.length - 1)},${top}
+      ${cx(0)},${top} ${cx(0)},${Y - 4}"/>`);
+    parts.push(`<text class="sim-dag-note" x="${width / 2}" y="${top + 4}"
+      text-anchor="middle">PI review every ${days(
+        state.review_interval,
+      )} working days${calkit ? ", in the browser" : ""}, while work goes on
+      </text>`);
+  }
+  stages.forEach((stage, i) => {
+    parts.push(`<g><title>${escape(stage.name)}</title>
+      <rect class="sim-dag-node" x="${x(i)}" y="${Y}" width="${NW}"
+        height="${NH}" rx="5"/>
+      <text class="sim-dag-label" x="${cx(i)}" y="${mid + 4}"
+        text-anchor="middle">${escape(short(stage.name))}</text></g>`);
+    if (i === stages.length - 1) return;
+    const byHand = stage.hop && !calkit;
+    const x1 = x(i) + NW;
+    const x2 = x(i + 1) - 1;
+    parts.push(`<line class="sim-dag-edge${byHand ? " sim-dag-edge--hand" : ""}"
+      x1="${x1}" y1="${mid}" x2="${x2}" y2="${mid}" marker-end="${arrow}"/>`);
+    if (interactive) {
+      hits.push(`<line class="sim-dag-hit" data-edge="${i}" x1="${x1}"
+        y1="${mid}" x2="${x2}" y2="${mid}"><title>${
+          byHand ? "Moved by hand" : "Moves on its own"
+        }: click to change</title></line>`);
+    }
+    if (policy === "stage-gate") {
+      const gx = (x1 + x2) / 2;
+      parts.push(`<line class="sim-dag-gate" x1="${gx}" y1="${mid - 11}"
+        x2="${gx}" y2="${mid + 11}"/><text class="sim-dag-note" x="${gx}"
+        y="${Y - 4}" text-anchor="middle">PI</text>`);
+    }
+  });
+  if (attempts > 1) {
+    const depth = bottom + 34;
+    const label = `×${+attempts.toFixed(1)} attempts`;
+    if (from === to) {
+      parts.push(`<path class="sim-dag-loop" marker-end="${arrow}"
+        d="M${cx(to) + 12},${bottom} C${cx(to) + 28},${depth}
+        ${cx(to) - 28},${depth} ${cx(to) - 12},${bottom + 2}"/>`);
+    } else {
+      parts.push(`<path class="sim-dag-loop" marker-end="${arrow}"
+        d="M${cx(to)},${bottom} C${cx(to)},${depth} ${cx(from)},${depth}
+        ${cx(from)},${bottom + 2}"/>`);
+    }
+    parts.push(`<text class="sim-dag-note sim-dag-note--loop"
+      x="${(cx(from) + cx(to)) / 2}" y="${depth + 9}"
+      text-anchor="middle">${label}</text>`);
+  }
+  const batches =
+    policy === "lean"
+      ? "One result at a time"
+      : `All ${state.n_findings} results through each step together`;
+  const tools = calkit
+    ? "everything in one Calkit project, checked by CI"
+    : "dashed arrows are data moved between tools by hand";
+  parts.push(`<text class="sim-dag-note" x="${PAD}" y="${height - 6}"
+    >${batches}; ${tools}</text>`);
+  return `<svg class="sim-dag" viewBox="0 0 ${width} ${height}" role="img"
+    aria-label="${escape(`${batches}; ${tools}`)}">
+    <defs><marker id="${id}-arrow" viewBox="0 0 8 8" refX="7" refY="4"
+      markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="sim-dag-head" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+    ${parts.join("")}${hits.join("")}</svg>`;
+}
+
 function renderForm() {
+  const redraw = () => {
+    form.querySelector(".sim-diagram").innerHTML = diagram("form", {
+      policy: state.policy,
+      interactive: true,
+    });
+  };
   root.innerHTML = `
     <form class="sim-form" autocomplete="off" data-form-type="other">
-      <h2>Your workflow</h2>
+      <h2>Your workflow today</h2>
+      <div class="sim-diagram"></div>
+      <p class="sim-caption">Click an arrow to switch between data moved
+        by hand and data that moves on its own.</p>
       <div class="sim-table-wrap"><table class="sim-stages">
         <thead><tr>
           <th>Stage</th><th>Days of work each time through</th>
@@ -200,13 +323,15 @@ function renderForm() {
     <div class="sim-results"></div>
     <div class="sim-tip" role="tooltip" hidden></div>`;
   const form = root.querySelector("form");
+  redraw();
   form.addEventListener("input", (event) => {
     const t = event.target;
     if (t.dataset.key) {
       state[t.dataset.key] =
         t.type === "checkbox"
           ? t.checked
-          : t.tagName === "SELECT" && !("index" in t.dataset)
+          : t.type === "radio" ||
+            (t.tagName === "SELECT" && !("index" in t.dataset))
           ? t.value
           : +t.value;
       // The loop can't end before it starts
@@ -233,9 +358,11 @@ function renderForm() {
         }
       }
     }
+    redraw();
   });
   form.addEventListener("click", (event) => {
     const remove = event.target.closest("[data-remove]");
+    const edge = event.target.closest("[data-edge]");
     if (event.target.closest(".sim-add")) {
       state.stages.push({
         ...state.new_stage,
@@ -247,6 +374,9 @@ function renderForm() {
       // The loop keeps its stages when one before them goes
       if (i < state.loop_from) state.loop_from--;
       if (i < state.loop_to) state.loop_to--;
+    } else if (edge) {
+      const stage = state.stages[+edge.dataset.edge];
+      stage.hop = !stage.hop;
     } else {
       return;
     }
@@ -255,6 +385,7 @@ function renderForm() {
     state.loop_to = Math.min(state.loop_to, last);
     form.querySelector("tbody").innerHTML = stageRows();
     form.querySelector(".sim-loop").innerHTML = loopControls();
+    redraw();
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -297,10 +428,9 @@ function bars(rows, [lo, hi] = extent(rows)) {
 
 function renderReport(report) {
   const { today, first, later } = report;
-  const tile = (label, value, note) => `<div class="sim-tile">
-      <span class="sim-tile-label">${label}</span>
-      <span class="sim-tile-value">${days(value)}</span>
-      <span class="sim-tile-note">${note}</span></div>`;
+  const flawed = (c) =>
+    `${c.flawed.toFixed(1)} flawed results published, vs
+    ${today.flawed.toFixed(1)}`;
   const saving = (c, label = c.name) => ({
     label,
     value: c.saved,
@@ -309,16 +439,68 @@ function renderReport(report) {
     tip:
       `${days(c.saved)} working days saved per paper ` +
       `(95% interval ${days(c.low)} to ${days(c.high)}): ` +
-      `${days(c.days)} to a published paper instead of ${days(today.days)}`,
+      `${days(c.days)} to a published paper instead of ` +
+      `${days(today.days)}; ${flawed(c)} today`,
   });
+  const cell = (id, title, policy, calkit, c, note) => `<div class="sim-cell">
+      <span class="sim-tile-label">${title}</span>
+      <div class="sim-diagram">${diagram(id, { policy, calkit })}</div>
+      <span class="sim-tile-value">${days(c.days)}</span>
+      <span class="sim-tile-note">${note}</span></div>`;
+  const faster = (c) =>
+    `${c.ratio.toFixed(2)}× as fast as today; ${flawed(c)} today`;
+  const calkitNote = (c) =>
+    `${faster(c)}; includes ${days(c.learning_days)} days learning Calkit,
+    and later papers take ${days(later.days)}`;
+  const policy = report.small_steps ? "stage-gate" : "lean";
+  const cells = [
+    cell(
+      "today",
+      "Today",
+      policy,
+      false,
+      today,
+      `${months(today.days)} months; 80% of runs
+      ${days(today.p10)}–${days(today.p90)};
+      ${today.flawed.toFixed(1)} flawed results published`,
+    ),
+  ];
+  if (report.your_batches) {
+    cells.push(
+      cell(
+        "repo",
+        "Your batches, in one Calkit project",
+        policy,
+        true,
+        report.your_batches,
+        `${faster(report.your_batches)}; includes
+        ${days(report.your_batches.learning_days)} days learning Calkit`,
+      ),
+      cell(
+        "small",
+        "One result at a time, with today's tools",
+        "lean",
+        false,
+        report.small_steps,
+        faster(report.small_steps),
+      ),
+    );
+  }
+  cells.push(
+    cell(
+      "calkit",
+      report.small_steps
+        ? "One result at a time, in one Calkit project"
+        : "In one Calkit project",
+      "lean",
+      true,
+      first,
+      calkitNote(first),
+    ),
+  );
   const parts = report.parts.map((c) => saving(c));
-  const without = [
-    report.small_steps &&
-      saving(report.small_steps, "Working in small steps, with today's tools"),
-    report.agents && saving(report.agents),
-  ].filter(Boolean);
-  // One scale for both, so Calkit's parts compare with what's possible
-  // without it
+  const without = report.agents ? [saving(report.agents)] : [];
+  // One scale for both, so Calkit's parts compare with what agents do
   const scale = extent([...parts, ...without]);
   const breakdown = Object.entries(today.breakdown).map(([k, v]) => ({
     label: capitalize(k),
@@ -328,26 +510,8 @@ function renderReport(report) {
   const unfinished = today.unfinished + first.unfinished + later.unfinished;
   const agents = report.uses_agents ? ", with AI agents" : "";
   root.querySelector(".sim-results").innerHTML = `
-    <h2>Working days to a published paper</h2>
-    <div class="sim-tiles">
-      ${tile(
-        `Today${agents}`,
-        today.days,
-        `${months(today.days)} months; 80% of runs
-        ${days(today.p10)}–${days(today.p90)}`,
-      )}
-      ${tile(
-        `With Calkit${agents}, first paper`,
-        first.days,
-        `${first.ratio.toFixed(2)}× as fast, including
-        ${days(first.learning_days)} days learning Calkit`,
-      )}
-      ${tile(
-        `With Calkit${agents}, later papers`,
-        later.days,
-        `${later.ratio.toFixed(2)}× as fast`,
-      )}
-    </div>
+    <h2>Working days to a published paper${agents}</h2>
+    <div class="sim-cells">${cells.join("")}</div>
     ${
       unfinished
         ? `<p class="sim-warning">${unfinished} runs hadn't published
@@ -357,16 +521,15 @@ function renderReport(report) {
     <h2>What each part of Calkit saves</h2>
     <p class="sim-caption">Working days saved per paper by each part of
       Calkit added to how you work today on its own, with 95% intervals,
-      from ${report.reps} runs each.</p>
+      from ${report.reps} runs each. Hover for flawed results published.</p>
     ${bars(parts, scale)}
-    <h2>Without Calkit</h2>
-    <p class="sim-caption">Working days saved per paper by each change on
-      its own, on the same scale.</p>
     ${
       without.length
-        ? bars(without, scale)
-        : `<p class="sim-caption">You already work in small steps and use
-            AI agents.</p>`
+        ? `<h2>Without Calkit</h2>
+          <p class="sim-caption">Working days saved per paper by AI agents
+            alone, on the same scale.</p>
+          ${bars(without, scale)}`
+        : ""
     }
     <h2>Where today's time goes</h2>
     <p class="sim-caption">Working days per paper.</p>

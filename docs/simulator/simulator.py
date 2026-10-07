@@ -1,9 +1,11 @@
 """What the simulator page runs in the browser, in Pyodide.
 
-A visitor's workflow is simulated as they work today, in small steps with
-today's tools, and with Calkit, i.e., in small steps with everything Calkit
-does, and with each part of Calkit added to how they work today on its own,
-to show what it's worth to them. AI agents can be used in any of them. Every
+A visitor's workflow is simulated to answer two questions: whether keeping
+everything in one Calkit project is worth it, and whether they can work one
+result at a time, i.e., in smaller batches, once automation and CI take away
+most of the review prep and tool hopping that costs on every review. Each
+part of Calkit is also added to how they work today on its own, to show
+what it's worth to them. AI agents can be used in any of them. Every
 scenario runs the same seeds, so their differences aren't swamped by noise.
 """
 
@@ -52,7 +54,13 @@ NEW_STAGE: dict[str, Any] = {
     "hop_error": 0.05,
 }
 # The scenarios that aren't one part of Calkit on its own
-SCENARIOS = ["today", "small steps", "calkit, first paper", "calkit, later"]
+SCENARIOS = [
+    "today",
+    "small steps",
+    "calkit, your batches",
+    "calkit, first paper",
+    "calkit, later",
+]
 AGENTS_ALONE = "AI agents, without Calkit"
 
 
@@ -173,8 +181,11 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
     # Calkit's curation, for sharing the project with the paper
     curate = {k: automated[k] for k in ["curate_fixed", "curate_item"]}
     out = {"today": (policy, params("manual"))}
+    # The two decisions: one project for everything, with batches as they
+    # are, and one result at a time, with today's tools or Calkit
     if policy == "stage-gate":
         out["small steps"] = ("lean", params("manual"))
+        out["calkit, your batches"] = (policy, params("automated", calkit))
     out["calkit, first paper"] = ("lean", params("automated", calkit))
     out["calkit, later"] = (
         "lean",
@@ -246,7 +257,7 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
             "low": float(np.mean(saved)) - half,
             "high": float(np.mean(saved)) + half,
             "ratio": today["days_mean"] / s["days_mean"],
-            "flawed_per_finding": s["flawed_per_finding_mean"],
+            "flawed": s["flawed_findings_mean"],
             "learning_days": s["effort"]["learning"],
             "unfinished": s["unfinished"],
         }
@@ -259,12 +270,15 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
             "days": today["days_mean"],
             "p10": today["days_p10"],
             "p90": today["days_p90"],
-            "flawed_per_finding": today["flawed_per_finding_mean"],
+            "flawed": today["flawed_findings_mean"],
             "unfinished": today["unfinished"],
             "breakdown": breakdown(today),
         },
         "small_steps": compare("small steps")
         if "small steps" in runs
+        else None,
+        "your_batches": compare("calkit, your batches")
+        if "calkit, your batches" in runs
         else None,
         "first": compare("calkit, first paper"),
         "later": compare("calkit, later"),

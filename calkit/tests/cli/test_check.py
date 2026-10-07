@@ -85,6 +85,35 @@ def test_check_venv(tmp_dir):
             "3.11",
         ]
     )
+    # A lock resolved from the current spec is read, not rewritten
+    with open("lock.txt") as f:
+        lock_txt_4 = f.read()
+    assert lock_txt_4.startswith(calkit.environments.LOCK_SPEC_COMMENT)
+    with open("lock.txt", "a") as f:
+        f.write("# kept\n")
+    check_311 = [
+        "calkit",
+        "check",
+        "venv",
+        "reqs.txt",
+        "-o",
+        "lock.txt",
+        "--python",
+        "3.11",
+    ]
+    subprocess.check_call(check_311)
+    with open("lock.txt") as f:
+        assert f.read() == lock_txt_4 + "# kept\n"
+    # One that can't be installed fails rather than diverging from the env
+    with open("lock.txt", "w") as f:
+        f.write("polars==0.0.0\n")
+    calkit.environments.stamp_lock_with_spec(
+        "lock.txt", "reqs.txt", python="3.11"
+    )
+    result = subprocess.run(check_311, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "out of sync with its lock" in result.stderr + result.stdout
+    assert not [f for f in os.listdir() if f.startswith(("osx-", "linux-"))]
 
 
 def test_check_venv_moved(tmp_dir):

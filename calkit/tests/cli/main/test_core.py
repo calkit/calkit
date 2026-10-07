@@ -586,8 +586,37 @@ def test_run_in_env_system(tmp_dir):
         text=True,
     )
     assert "hi" in out
-    with open(os.path.join(".calkit", "env-locks", "sys", "info.json")) as f:
+    sys_lock = os.path.join(".calkit", "env-locks", "sys", "info.json")
+    with open(sys_lock) as f:
         assert set(json.load(f)) == {"os"}
+    # A lock from another machine stops a run, even with --no-check
+    with open(sys_lock, "w") as f:
+        json.dump({"os": "SomeOtherOS"}, f)
+    for extra in ([], ["--no-check"]):
+        res = subprocess.run(
+            ["calkit", "xenv", "-n", "sys", *extra, "--", "echo", "hi"],
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode != 0
+        assert "locked to a different machine" in res.stdout + res.stderr
+        assert "calkit update env -n sys --lock" in res.stdout + res.stderr
+        with open(sys_lock) as f:
+            assert json.load(f) == {"os": "SomeOtherOS"}
+    # The up-front check only warns, so up-to-date stages can be skipped
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "sys"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "locked to a different machine" in res.stdout + res.stderr
+    subprocess.check_call(["calkit", "update", "env", "-n", "sys", "--lock"])
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "sys", "--", "python", "-c", "print('hi')"],
+        text=True,
+    )
+    assert "hi" in out
     # '--setup' runs its commands in the same shell as the command, so
     # what they set is visible there, and it runs in bash by default so
     # 'source' works---the reason most of these exist. What to run is

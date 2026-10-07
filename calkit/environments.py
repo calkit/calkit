@@ -43,10 +43,7 @@ CONDA_VENV_ARCHS = [
     "linux-64",
     "win-64",
 ]
-# What ``uv pip compile --python-platform`` calls each of the platforms a
-# venv or conda environment is locked for. A platform missing here is one
-# uv cannot resolve for, so it is simply not locked ahead of time and is
-# written the first time a machine of that kind checks the environment.
+# ``uv pip compile --python-platform`` targets for each uv-venv lock platform
 UV_PLATFORM_TARGETS = {
     "osx-arm64": "aarch64-apple-darwin",
     "osx-64": "x86_64-apple-darwin",
@@ -54,11 +51,7 @@ UV_PLATFORM_TARGETS = {
     "linux-64": "x86_64-unknown-linux-gnu",
     "win-64": "x86_64-pc-windows-msvc",
 }
-# Written as the first line of a venv or conda lock file, recording the
-# spec it was resolved from. The lock is otherwise indistinguishable from
-# one resolved from a different spec, and telling those apart is what says
-# whether a lock is out of date (the project changed) or merely from
-# another machine (it did not).
+# First line of a venv lock file, recording the spec it was resolved from
 LOCK_SPEC_COMMENT = "# calkit-spec-md5:"
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
 # Scheduler environment keys that govern how a job is dispatched rather than
@@ -894,10 +887,8 @@ def read_system_env_lock(
 ) -> dict | None:
     """Read a ``system`` environment's lock file, or None if there is none.
 
-    None means the environment has not been locked here yet, which is a
-    different thing from a lock that disagrees with the machine: the first
-    is answered by writing one, the second only by a person deciding the
-    old results no longer apply.
+    Raises ``ValueError`` for a lock that exists but can't be read, so it
+    isn't mistaken for a missing one and overwritten.
     """
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=True
@@ -933,15 +924,9 @@ def system_env_lock_mismatch(
 ) -> dict[str, dict]:
     """Compare a ``system`` environment's lock against the machine.
 
-    Returns the locked properties whose recorded value isn't this
-    machine's, as ``{property: {"locked": ..., "actual": ...}}``, and an
-    empty mapping when the lock agrees, when there is no lock to disagree
-    with, or when the environment locks nothing.
-
-    A property the lock doesn't carry is not a mismatch. It means the
-    environment started locking it after the lock was written, which the
-    project can resolve by locking again without any claim that the
-    machine changed.
+    Returns ``{property: {"locked": ..., "actual": ...}}`` for each locked
+    property that differs. A property the lock doesn't carry yet is not a
+    mismatch.
     """
     locked = read_system_env_lock(env_name=env_name, env=env, wdir=wdir)
     if not locked:
@@ -986,18 +971,9 @@ def write_system_env_lock(
     """Write a JSON lock file for a ``system`` environment.
 
     Unlike the other lock files, this one describes the machine rather than
-    a spec the project controls. Writing it is therefore a claim that
-    results computed from here belong to this machine, and it is made once
-    -- when the environment has no lock yet -- rather than every time the
-    environment is checked.
-
-    On a machine that disagrees with an existing lock, nothing is written
-    unless ``relock``. Rewriting it there would invalidate every stage that
-    depends on it, so a clone on a second machine would recompute a whole
-    pipeline it was given the results of, and silently, which is the worst
-    way to find out. ``relock`` is that decision made deliberately, by
-    ``calkit update env --lock``; until then the lock stands and a stage
-    that actually needs to run reports the mismatch instead.
+    a spec the project controls, so machine properties already recorded
+    are kept unless ``relock``. Otherwise a clone on another machine would
+    rewrite the lock and rerun every stage that depends on it.
 
     A non-default ``shell`` is recorded alongside the machine properties.
     It isn't a property of the machine, but it feeds the same question: a
@@ -1027,11 +1003,7 @@ def write_system_env_lock(
         else read_system_env_lock(env_name=env_name, env=env, wdir=wdir)
     )
     if existing:
-        # Machine properties already recorded stand, so a clone on a
-        # second machine leaves the lock alone and keeps the results that
-        # came with it. A property only just added to ``lock`` was never
-        # recorded, so it is read from here: that is the project deciding
-        # to depend on something new, not the machine changing.
+        # A property newly added to ``lock`` is read from this machine
         lock_data = {
             prop: existing.get(prop, value)
             for prop, value in lock_data.items()
@@ -1059,19 +1031,17 @@ def write_system_env_lock(
     return lock_fpath
 
 
-def spec_fingerprint(spec_fpath: str) -> str:
-    """Hash the spec a lock file was resolved from."""
+def spec_fingerprint(spec_fpath: str, python: str | None = None) -> str:
+    """Hash the spec a lock file was resolved from, and its Python."""
     with open(spec_fpath, "rb") as f:
-        return hashlib.md5(f.read()).hexdigest()
+        content = f.read()
+    if python is not None:
+        content += f"\npython={python}".encode()
+    return hashlib.md5(content).hexdigest()
 
 
 def read_lock_spec_fingerprint(lock_fpath: str) -> str | None:
-    """Read the spec hash a lock file records, if it records one.
-
-    None means the lock predates this being written down, so nothing can
-    be concluded about whether it matches the spec, and the caller
-    resolves again rather than trusting it.
-    """
+    """Read the spec hash a lock file records, if it records one."""
     try:
         with open(lock_fpath) as f:
             first = f.readline().strip()
@@ -1082,9 +1052,11 @@ def read_lock_spec_fingerprint(lock_fpath: str) -> str | None:
     return first[len(LOCK_SPEC_COMMENT) :].strip() or None
 
 
-def stamp_lock_with_spec(lock_fpath: str, spec_fpath: str) -> None:
+def stamp_lock_with_spec(
+    lock_fpath: str, spec_fpath: str, python: str | None = None
+) -> None:
     """Record in a lock file which spec it was resolved from."""
-    fingerprint = spec_fingerprint(spec_fpath)
+    fingerprint = spec_fingerprint(spec_fpath, python=python)
     with open(lock_fpath) as f:
         body = f.read()
     if body.startswith(LOCK_SPEC_COMMENT):
@@ -1093,16 +1065,16 @@ def stamp_lock_with_spec(lock_fpath: str, spec_fpath: str) -> None:
         f.write(f"{LOCK_SPEC_COMMENT} {fingerprint}\n{body}")
 
 
-def lock_matches_spec(lock_fpath: str, spec_fpath: str) -> bool:
-    """Whether a lock file was resolved from the spec as it is now.
-
-    False when the lock records no spec, since a lock that cannot say what
-    it came from cannot be taken as current.
-    """
+def venv_lock_matches_spec(
+    lock_fpath: str, spec_fpath: str, python: str | None = None
+) -> bool:
+    """Whether a venv lock file was resolved from the spec as it is now."""
     if not os.path.isfile(lock_fpath) or not os.path.isfile(spec_fpath):
         return False
     recorded = read_lock_spec_fingerprint(lock_fpath)
-    return recorded is not None and recorded == spec_fingerprint(spec_fpath)
+    return recorded is not None and recorded == spec_fingerprint(
+        spec_fpath, python=python
+    )
 
 
 def write_cross_platform_venv_locks(
@@ -1112,43 +1084,34 @@ def write_cross_platform_venv_locks(
     wdir: str | None = None,
     verbose: bool = False,
 ) -> list[str]:
-    """Resolve a venv's lock for every platform uv can resolve for.
+    """Resolve a venv's lock for every other platform uv can resolve for.
 
-    Stages depend on the directory holding these, not on the one file the
-    current machine reads, so a platform locked later changes that
-    directory and invalidates every stage using the environment---even
-    though the lock that was already there was right about everything. The
-    way out is to write them all the first time, which is what Docker
-    environments already do with their architectures.
+    Stages depend on the lock directory, so a platform locked later would
+    invalidate them. Best effort: a platform that fails to resolve is left
+    for a machine of that kind to lock.
 
-    Best effort: a platform uv cannot resolve, or no network to resolve
-    over, leaves that platform unlocked rather than failing the check. The
-    machine that needs it writes it then, and pays the invalidation.
-
-    Returns the paths written, which excludes ``lock_fpath`` itself: the
-    current platform's lock comes from the environment that was actually
-    built, not from resolving for it.
+    Returns the paths written, relative to ``wdir``.
     """
     import typer
 
     from calkit.cli import warn
 
     lock_dir, lock_name = os.path.split(lock_fpath)
-    ext = os.path.splitext(lock_name)[1]
+    stem, ext = os.path.splitext(lock_name)
     here = _conda_venv_platform()
-    written = []
+    written: list[str] = []
+    # Only a per-platform lock, e.g., from 'calkit check env', has siblings
+    if stem != here:
+        return written
     for arch in CONDA_VENV_ARCHS:
         target = UV_PLATFORM_TARGETS.get(arch)
         if target is None or arch == here:
             continue
         out_fpath = os.path.join(lock_dir, arch + ext)
-        # Resolved again when the spec has moved under it, not only when
-        # it is absent: a lock left behind from an older spec is wrong
-        # about the environment, and the machine reading it would never
-        # find out, since it is the one file that machine doesn't build
-        if lock_matches_spec(
-            os.path.join(wdir or "", out_fpath),
-            os.path.join(wdir or "", spec_fpath),
+        out_fpath_full = os.path.join(wdir or "", out_fpath)
+        spec_fpath_full = os.path.join(wdir or "", spec_fpath)
+        if venv_lock_matches_spec(
+            out_fpath_full, spec_fpath_full, python=python
         ):
             continue
         cmd = [
@@ -1169,14 +1132,12 @@ def write_cross_platform_venv_locks(
         try:
             subprocess.check_call(cmd, cwd=wdir)
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            # Not fatal: an unlocked platform costs an invalidation later,
-            # where a failed check costs the user their run now
             if verbose:
                 warn(f"Could not lock {spec_fpath} for {arch}: {e}")
-            if os.path.isfile(out_fpath):
-                os.remove(out_fpath)
+            if os.path.isfile(out_fpath_full):
+                os.remove(out_fpath_full)
             continue
-        stamp_lock_with_spec(out_fpath, spec_fpath)
+        stamp_lock_with_spec(out_fpath_full, spec_fpath_full, python=python)
         written.append(out_fpath)
     return written
 

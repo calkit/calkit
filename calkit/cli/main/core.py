@@ -3878,11 +3878,7 @@ def run_in_env(
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
-        # Gated like the local branch, and for the same reason: a compiled
-        # stage passes --no-check, so without this a far end that no longer
-        # matches the lock would be dispatched to anyway. The properties
-        # come from that machine, since it is the one whose result is being
-        # compared with the ones already recorded.
+        # Gated like the local branch, using the far end's properties
         if calkit.environments.system_env_locks_anything(env):
             try:
                 remote_info = workspace.remote_system_info(ws)
@@ -4062,12 +4058,8 @@ def run_in_env(
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
-        # Checked even with --no-check, which a pipeline stage always
-        # passes: this is not an environment check but the one place a
-        # move between machines can be caught. A stage DVC considers up
-        # to date never gets here, so results that came with the clone
-        # are kept; one that needs to run stops, because its result would
-        # be put beside results from a machine it is not comparable with.
+        # Checked even with --no-check, since a stage that needs to run on
+        # a machine that doesn't match the lock must not
         try:
             mismatch = calkit.environments.system_env_lock_mismatch(
                 env_name=env_name, env=env

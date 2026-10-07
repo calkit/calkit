@@ -647,12 +647,8 @@ def check_environment(
                 calkit.check_requirements(
                     requirements=env.get("requirements", [])
                 )
-                # Writes only if the env has never been locked here. A
-                # lock that disagrees with this machine is reported, not
-                # replaced: the stages depending on it are up to date
-                # against the machine that made them, and overwriting it
-                # would throw that away without anyone saying to. The
-                # stages that do need to run fail on their way in.
+                # Writes only if unlocked; a mismatch warns, and stages that
+                # need to run fail at the gate in 'calkit xenv'
                 write_system_env_lock(env_name=env_name, env=env)
                 mismatch = calkit.environments.system_env_lock_mismatch(
                     env_name=env_name, env=env
@@ -743,9 +739,7 @@ def check_environment(
                     verbose=verbose,
                 )
                 # Returns None when the env locks nothing, so nothing is
-                # written for an env with nothing to record, and nothing
-                # when it is already locked to a machine other than this
-                # one -- see the local branch above
+                # written for an env with nothing to record
                 write_system_env_lock(
                     env_name=env_name,
                     env=env,
@@ -1840,22 +1834,18 @@ def check_venv(
                 break
     activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
 
-    # A lock that says which spec it came from, and says this one, is an
-    # input to this check rather than something it produces: re-resolving
-    # it here would rewrite it from whatever machine happens to be running,
-    # and stages depend on the directory it sits in. A lock from a changed
-    # spec is a different matter -- the project moved, so the lock is
-    # genuinely out of date and resolving again is the point.
-    # Asked of this platform's own lock rather than of whatever file the
-    # install reads: with that one missing, the fallback above may hand us
-    # another platform's lock, and installing from it is fine while
-    # treating it as ours would leave this platform unlocked forever.
-    lock_is_current = calkit.environments.lock_matches_spec(
-        os.path.join(wdir or "", lock_fpath), os.path.join(wdir or "", path)
+    # A lock resolved from the current spec is an input, not rewritten here
+    lock_is_current = calkit.environments.venv_lock_matches_spec(
+        os.path.join(wdir or "", lock_fpath),
+        os.path.join(wdir or "", path),
+        python=python,
     )
 
     def pip_install_and_freeze(reqs_arg: str) -> None:
-        check_cmd = f"{activate_cmd} && {pip_cmd} install {pip_install_args} {reqs_arg}"
+        check_cmd = (
+            f"{activate_cmd} && {pip_cmd} install {pip_install_args} "
+            f"{reqs_arg}"
+        )
         if not lock_is_current:
             check_cmd += f" && {pip_freeze_cmd} > {lock_fpath}"
         check_cmd += " && deactivate"
@@ -1867,11 +1857,10 @@ def check_venv(
         calkit.environments.stamp_lock_with_spec(
             os.path.join(wdir or "", lock_fpath),
             os.path.join(wdir or "", path),
+            python=python,
         )
         if kind == "uv-venv":
-            # Written now, while the spec is known good, so that a machine
-            # of another kind reads a lock instead of adding one and
-            # invalidating every stage in the environment
+            # So another platform reads a lock rather than adding one
             calkit.environments.write_cross_platform_venv_locks(
                 spec_fpath=path,
                 lock_fpath=lock_fpath,
@@ -1916,6 +1905,14 @@ def check_venv(
             create_venv()
             pip_install_and_freeze(dep_file_txt)
         except (subprocess.CalledProcessError, OSError):
+            if lock_is_current:
+                raise_error(
+                    f"Failed to create {kind} at {prefix} from its lock file "
+                    f"({lock_fpath}), which matches the spec ({path}). "
+                    "Rebuilding from the spec would leave the environment "
+                    "out of sync with its lock; delete the lock file to "
+                    "re-resolve it, which reruns stages that depend on it"
+                )
             warn(
                 f"Failed to create environment from lock file ({reqs_to_use}); "
                 f"attempting rebuild from input file {path}"

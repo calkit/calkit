@@ -1229,24 +1229,22 @@ class SystemEnvironment(Environment):
     ``lock`` is how a project says which properties of the machine its
     results actually depend on.
 
-    Locked properties are written to the environment's lock file, which
-    stages depend on, and they are written once: the first check that
-    finds no lock records this machine. A later check on a machine where
-    one of them differs leaves the lock alone, so a clone keeps the
-    results it was given rather than recomputing the pipeline because it
-    is somewhere else. What it does not get to do is add to them -- a
-    stage that actually needs to run fails there, naming the properties
-    that disagree, since its result would not be comparable with the ones
-    already in hand. ``calkit update env -n NAME --lock`` is how a project
-    says this machine takes over, and invalidates the dependent stages the
-    ordinary way.
+    Locked properties are recorded in the environment's lock file, which
+    stages depend on, the first time the environment is checked. After
+    that, the lock is not rewritten when the project moves to a machine
+    where they differ, so stages that are up to date stay up to date.
+    Checking the environment there warns about the difference, and a stage
+    that needs to run fails, since its result would not be comparable
+    with the existing ones. To make the new machine the one results come
+    from, run ``calkit update env -n NAME --lock``, which updates the lock
+    and invalidates the stages that depend on it.
 
     ``requirements`` is the other half, and answers a different question.
     It says what must be *true* of this machine -- apps that must be
     installed, variables that must be set, at least this many CPUs -- and
     is checked before anything runs, on the machine the environment names.
-    A requirement that fails stops the run and says how to fix it; a locked
-    property that changes silently invalidates a cached result. One gates,
+    A requirement that fails stops the run and says how to fix it, while a
+    locked property records what results were computed with. One gates,
     the other pins, so a property that matters both ways is written in both
     places.
 

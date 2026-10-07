@@ -1106,18 +1106,35 @@ def update_environment(
                 "there is nothing to re-lock; add them under 'lock' in "
                 "calkit.yaml"
             )
-        # A lock that can't be read is one of the reasons to run this, so
-        # reading it must not be what stops it: there is simply nothing to
-        # report as the previous value.
+        # An unreadable lock is a reason to relock, so it must not stop it
         try:
             before = calkit.environments.read_system_env_lock(
                 env_name=env_name, env=env
             )
         except ValueError:
             before = None
+        # A remote env is locked to the far end, which is what the gate
+        # in 'calkit xenv' compares against
+        system_info = None
+        machine = "this machine"
+        if not calkit.environments.env_is_local({"host": "localhost", **env}):
+            import calkit.workspace as workspace
+
+            try:
+                ws = workspace.Workspace.from_env(
+                    env=env, env_name=env_name, ck_info=ck_info
+                )
+                system_info = workspace.remote_system_info(ws)
+                workspace.verify_machine_id(ws, system_info)
+            except ValueError as e:
+                raise_error(str(e))
+            machine = f"'{ws.host}'"
         try:
             lock_fpath = calkit.environments.write_system_env_lock(
-                env_name=env_name, env=env, relock=True
+                env_name=env_name,
+                env=env,
+                system_info=system_info,
+                relock=True,
             )
         except ValueError as e:
             raise_error(f"Environment '{env_name}': {e}")
@@ -1126,11 +1143,11 @@ def update_environment(
         )
         if before == after:
             typer.echo(
-                f"Environment '{env_name}' was already locked to this "
-                "machine; nothing changed"
+                f"Environment '{env_name}' was already locked to {machine}; "
+                "nothing changed"
             )
             return
-        typer.echo(f"Locked environment '{env_name}' to this machine")
+        typer.echo(f"Locked environment '{env_name}' to {machine}")
         for prop in sorted(after or {}):
             was = (before or {}).get(prop)
             now = (after or {})[prop]

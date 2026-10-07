@@ -1572,10 +1572,7 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
     assert lock_fpath is not None
     with open(lock_fpath) as f:
         locked = json.load(f)
-    # A clone on a machine that disagrees keeps the lock it arrived with,
-    # since every stage depending on it is up to date against the machine
-    # that produced those results. Rewriting it here would recompute a
-    # whole pipeline for no reason anyone asked for.
+    # A machine that disagrees keeps the lock and reports the mismatch
     elsewhere = {
         "cpu_count": locked["cpu-count"] + 1,
         "os": "SomeOtherOS",
@@ -1594,12 +1591,9 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
         "actual": "SomeOtherOS",
     }
     described = envs.describe_system_env_lock_mismatch("bench", mismatch)
-    # The way out has to be in the message, since this is the only place
-    # the user is told the move was noticed
     assert "calkit update env -n bench --lock" in described
     assert "SomeOtherOS" in described
-    # Relocking is that decision made deliberately, and is the one thing
-    # that moves the recorded properties
+    # Only relocking moves the recorded properties
     envs.write_system_env_lock(
         env_name="bench", env=env, system_info=elsewhere, relock=True
     )
@@ -1611,12 +1605,9 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
     assert not envs.system_env_lock_mismatch(
         env_name="bench", env=env, system_info=elsewhere
     )
-    # The machine agreeing is not a mismatch, and neither is a lock file
-    # that doesn't exist yet: the first needs nothing, the second a write
+    # No lock yet is not a mismatch
     assert not envs.system_env_lock_mismatch(env_name="never-locked", env=env)
-    # A lock nobody can read is not the same as no lock. Treating it as
-    # missing would overwrite it from here, which is the thing this exists
-    # to stop, so it is an error that names the way out
+    # An unreadable lock is an error rather than treated as missing
     with open(lock_fpath, "w") as f:
         f.write("{not json")
     with pytest.raises(ValueError, match="cannot be read"):
@@ -1627,7 +1618,7 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
         f.write("[1, 2]")
     with pytest.raises(ValueError, match="does not contain an object"):
         envs.system_env_lock_mismatch(env_name="bench", env=env)
-    # Relocking is the way out, so it must not read the broken file first
+    # Relocking doesn't read the broken file
     envs.write_system_env_lock(env_name="bench", env=env, relock=True)
     assert envs.read_system_env_lock(
         env_name="bench", env=env
@@ -1637,11 +1628,7 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
 def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):
     import calkit.environments as envs
 
-    # The shell is the project's own setting rather than a property of the
-    # machine, so changing it must still update the lock and rerun the
-    # stages whose setup commands run in it -- the machine properties are
-    # what a second machine is not allowed to overwrite, not the whole
-    # file.
+    # The shell is a project setting, so changing it still updates the lock
     env = {"kind": "system", "lock": ["os"], "shell": "zsh"}
     lock_fpath = envs.write_system_env_lock(env_name="shell", env=env)
     assert lock_fpath is not None
@@ -1652,9 +1639,7 @@ def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):
     with open(lock_fpath) as f:
         data = json.load(f)
     assert data["shell"] == "fish"
-    # A property added to 'lock' later was never recorded, so it is read
-    # from this machine: that is the project choosing to depend on
-    # something new, not a claim that the machine changed
+    # A property newly added to 'lock' is read from this machine
     env["lock"] = ["os", "cpu-count"]
     envs.write_system_env_lock(env_name="shell", env=env)
     with open(lock_fpath) as f:
@@ -1744,71 +1729,70 @@ def test_env_inputs_must_be_inside_the_project():
 def test_lock_records_the_spec_it_came_from(tmp_dir):
     import calkit.environments as envs
 
-    with open("requirements.txt", "w") as f:
+    spec, lock = "requirements.txt", "requirements-lock.txt"
+    with open(spec, "w") as f:
         f.write("idna\n")
-    with open("requirements-lock.txt", "w") as f:
+    with open(lock, "w") as f:
         f.write("idna==3.10\n")
-    # A lock that cannot say what it was resolved from cannot be taken as
-    # current, since the spec may have moved under it
-    assert envs.read_lock_spec_fingerprint("requirements-lock.txt") is None
-    assert not envs.lock_matches_spec(
-        "requirements-lock.txt", "requirements.txt"
-    )
-    envs.stamp_lock_with_spec("requirements-lock.txt", "requirements.txt")
-    assert envs.lock_matches_spec("requirements-lock.txt", "requirements.txt")
-    with open("requirements-lock.txt") as f:
+    # An unstamped lock isn't taken as current
+    assert envs.read_lock_spec_fingerprint(lock) is None
+    assert not envs.venv_lock_matches_spec(lock, spec)
+    envs.stamp_lock_with_spec(lock, spec)
+    assert envs.venv_lock_matches_spec(lock, spec)
+    with open(lock) as f:
         assert f.readline().startswith(envs.LOCK_SPEC_COMMENT)
-        # The pins survive the stamp, since the file is still installed from
         assert "idna==3.10" in f.read()
-    # Changing the spec is what makes a lock out of date. Running on a
-    # different machine is not, which is the distinction the stamp exists
-    # to draw.
-    with open("requirements.txt", "w") as f:
+    # Changing the Python version or the spec makes it out of date
+    assert not envs.venv_lock_matches_spec(lock, spec, python="3.11")
+    envs.stamp_lock_with_spec(lock, spec, python="3.11")
+    assert envs.venv_lock_matches_spec(lock, spec, python="3.11")
+    assert not envs.venv_lock_matches_spec(lock, spec, python="3.12")
+    with open(spec, "w") as f:
         f.write("idna\ncertifi\n")
-    assert not envs.lock_matches_spec(
-        "requirements-lock.txt", "requirements.txt"
-    )
-    # Stamping twice replaces the record rather than stacking comments
-    envs.stamp_lock_with_spec("requirements-lock.txt", "requirements.txt")
-    with open("requirements-lock.txt") as f:
+    assert not envs.venv_lock_matches_spec(lock, spec, python="3.11")
+    # Stamping again replaces the record rather than stacking comments
+    envs.stamp_lock_with_spec(lock, spec)
+    with open(lock) as f:
         body = f.read()
     assert body.count(envs.LOCK_SPEC_COMMENT) == 1
     assert "idna==3.10" in body
     # A missing file on either side is not a match, and does not raise
-    assert not envs.lock_matches_spec("nope-lock.txt", "requirements.txt")
-    assert not envs.lock_matches_spec("requirements-lock.txt", "nope.txt")
+    assert not envs.venv_lock_matches_spec("nope-lock.txt", spec)
+    assert not envs.venv_lock_matches_spec(lock, "nope.txt")
 
 
 def test_cross_platform_venv_locks(tmp_dir):
     import calkit.environments as envs
 
-    # Every platform uv can resolve for is locked up front, because stages
-    # depend on the directory these sit in: a platform locked later changes
-    # that directory and invalidates every stage using the environment,
-    # even though the lock already there was right.
     assert set(envs.UV_PLATFORM_TARGETS) <= set(envs.CONDA_VENV_ARCHS)
-    os.makedirs(os.path.join(".calkit", "env-locks", "py"), exist_ok=True)
     spec = "requirements.txt"
     with open(spec, "w") as f:
         f.write("idna\n")
+    # A lock that isn't one of a per-platform set gets no siblings
+    with open("lock.txt", "w") as f:
+        f.write("idna==3.10\n")
+    assert not envs.write_cross_platform_venv_locks(
+        spec_fpath=spec, lock_fpath="lock.txt", python="3.12"
+    )
+    assert not set(os.listdir()) & {a + ".txt" for a in envs.CONDA_VENV_ARCHS}
+    # Other platforms are resolved, and this one comes from the built env
+    os.makedirs(os.path.join(".calkit", "env-locks", "py"), exist_ok=True)
     here = envs._conda_venv_platform()
     lock_fpath = os.path.join(".calkit", "env-locks", "py", here + ".txt")
     with open(lock_fpath, "w") as f:
         f.write("idna==3.10\n")
-    envs.stamp_lock_with_spec(lock_fpath, spec)
+    envs.stamp_lock_with_spec(lock_fpath, spec, python="3.12")
     written = envs.write_cross_platform_venv_locks(
         spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
     )
-    # The current platform is not among them: its lock comes from the
-    # environment that was actually built, not from resolving for it
     assert lock_fpath not in written
     for fpath in written:
-        assert envs.lock_matches_spec(fpath, spec)
+        assert envs.venv_lock_matches_spec(fpath, spec, python="3.12")
     # Nothing is redone when every platform already matches the spec
     assert not envs.write_cross_platform_venv_locks(
         spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
     )
-    # A moved spec is resolved again, rather than left behind wrong
+    # A changed spec is resolved again
     if written:
         with open(spec, "w") as f:
             f.write("idna\ncertifi\n")
@@ -1817,4 +1801,4 @@ def test_cross_platform_venv_locks(tmp_dir):
         )
         assert set(again) == set(written)
         for fpath in again:
-            assert envs.lock_matches_spec(fpath, spec)
+            assert envs.venv_lock_matches_spec(fpath, spec, python="3.12")

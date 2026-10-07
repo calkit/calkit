@@ -153,6 +153,8 @@ pipeline:
       description: >-
         Simulate a paper worked in small steps versus stage by stage, with
         manual and automated tooling.
+      inputs:
+        - docs/simulator/research_flow.py
       outputs:
         - path: results/research-flow.json
           storage: git

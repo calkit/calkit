@@ -42,6 +42,7 @@ stages:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
     deps:
       - scripts/research-flow.py
+      - docs/simulator/research_flow.py
       - uv.lock
       - .python-version
     outs:

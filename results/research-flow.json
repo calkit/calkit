@@ -91,9 +91,33 @@
           1.0
         ],
         "switch_cost": 0.25,
-        "handoff_fixed": 0.25,
-        "handoff_item": 0.25,
-        "handoff_error": 0.05,
+        "handoff_fixed": [
+          0.0,
+          0.0,
+          0.25,
+          0.25,
+          0.25,
+          0.25,
+          0.0
+        ],
+        "handoff_item": [
+          0.0,
+          0.0,
+          0.25,
+          0.25,
+          0.25,
+          0.25,
+          0.0
+        ],
+        "handoff_error": [
+          0.0,
+          0.0,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.0
+        ],
         "submit_prep": 2.0,
         "curate_fixed": 5.0,
         "curate_item": 1.0,
@@ -120,9 +144,33 @@
           0.5
         ],
         "switch_cost": 0.05,
-        "handoff_fixed": 0.01,
-        "handoff_item": 0.01,
-        "handoff_error": 0.005,
+        "handoff_fixed": [
+          0.0,
+          0.0,
+          0.01,
+          0.01,
+          0.01,
+          0.01,
+          0.0
+        ],
+        "handoff_item": [
+          0.0,
+          0.0,
+          0.01,
+          0.01,
+          0.01,
+          0.01,
+          0.0
+        ],
+        "handoff_error": [
+          0.0,
+          0.0,
+          0.005,
+          0.005,
+          0.005,
+          0.005,
+          0.0
+        ],
         "submit_prep": 0.5,
         "curate_fixed": 0.5,
         "curate_item": 0.0,

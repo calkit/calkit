@@ -194,12 +194,13 @@ def from_markdown(
     md_path: Annotated[
         str, typer.Argument(help="The Markdown file to build.")
     ],
-    output: Annotated[
-        str,
+    outputs: Annotated[
+        list[str],
         typer.Option(
             "--output",
             "-o",
-            help="Where to write the PDF, or the LaTeX with a .tex extension.",
+            help="Where to write the PDF, or the LaTeX with a .tex "
+            "extension; can be given more than once.",
         ),
     ],
     environment: Annotated[
@@ -211,7 +212,7 @@ def from_markdown(
             "Calkit's LaTeX image, which includes both.",
         ),
     ] = None,
-    template: Annotated[
+    template_path: Annotated[
         str | None, typer.Option("--template", help="Pandoc template.")
     ] = None,
     filters: Annotated[
@@ -263,8 +264,62 @@ def from_markdown(
                 first = first or n
         return f"{project_url}/questions/{first}" if first else None
 
-    if not output.endswith((".pdf", ".tex")):
-        raise_error("Output must be a .pdf or .tex file")
+    def to_latex(tex_path: str) -> None:
+        # Images are pointed at from where the LaTeX is, by a filter that
+        # runs before the others, so they see the paths LaTeX will
+        build_dir = os.path.dirname(tex_path) or "."
+        os.makedirs(build_dir, exist_ok=True)
+        stem = Path(tex_path).stem
+        src_path = f"{build_dir}/{stem}.pandoc.md"
+        with open(src_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(
+                calkit.markdown.prepare_for_pdf(
+                    text, md_path, link=question_url
+                )
+            )
+        prefix = Path(os.path.relpath(md_dir, build_dir)).as_posix()
+        repoint = f"{build_dir}/{stem}.images.lua"
+        with open(repoint, "w", encoding="utf-8", newline="\n") as f:
+            f.write(calkit.markdown.image_prefix_filter(prefix))
+        args = [src_path, "-o", tex_path, "--standalone"]
+        if template_path is not None:
+            args += ["--template", template_path]
+        for path in [repoint, *(filters or [])]:
+            args += ["--lua-filter", path]
+        args += [f"--variable=calkit-version:{version}"]
+        if project_url is not None:
+            args += [
+                f"--variable=project-url:{project_url}",
+                f"--variable=project:{project_url.split('://', 1)[1]}",
+            ]
+        args += pandoc_args or []
+        if environment is not None:
+            cmd = _tex_cmd(
+                ["pandoc", *args], environment, no_check, verbose, dep="pandoc"
+            )
+        else:
+            pandoc = calkit.docx.find_pandoc()
+            if pandoc is None:
+                raise_error(
+                    "Pandoc is needed; name an environment that has it, "
+                    "e.g., one using Calkit's LaTeX image, or install it"
+                )
+            cmd = [pandoc, *args]
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            raise_error(f"Pandoc failed to convert {md_path}")
+
+    for output in outputs:
+        if not output.endswith((".pdf", ".tex")):
+            raise_error("Outputs must be .pdf or .tex files")
+    # Paths go into the build directory's, so they have to be the
+    # project's own
+    rel = os.path.relpath(md_path)
+    if rel == ".." or rel.startswith(".." + os.sep) or os.path.isabs(rel):
+        raise_error(f"{md_path} isn't in this project")
+    md_path = Path(rel).as_posix()
+    md_dir = os.path.dirname(md_path) or "."
     ck_info = calkit.load_calkit_info()
     project_url = None
     if ck_info.get("owner") and ck_info.get("name"):
@@ -272,6 +327,8 @@ def from_markdown(
         if "://" not in hub:
             hub = "https://" + hub
         project_url = f"{hub}/{ck_info['owner']}/{ck_info['name']}"
+    # A local version's commit is the project's own, which isn't Calkit's
+    version = calkit.__version__.split("+")[0]
     with open(md_path, encoding="utf-8") as f:
         text = f.read()
     try:
@@ -281,69 +338,35 @@ def from_markdown(
     if changed:
         with open(md_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-    # A PDF is built where Calkit keeps what it derives from the file; LaTeX
-    # is written where it's asked for
-    to_pdf = output.endswith(".pdf")
-    stem = Path(md_path).stem
-    if to_pdf:
-        build_dir = Path(".calkit", "markdown", md_path, "pdf").as_posix()
-        tex_path = f"{build_dir}/{stem}.tex"
-    else:
-        build_dir = os.path.dirname(output) or "."
-        tex_path = output
-    os.makedirs(build_dir, exist_ok=True)
-    src_path = f"{build_dir}/{stem}.pandoc.md"
-    with open(src_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(
-            calkit.markdown.prepare_for_pdf(
-                text, md_path, build_dir, link=question_url
-            )
-        )
-    args = [src_path, "-o", tex_path, "--standalone"]
-    if template is not None:
-        args += ["--template", template]
-    for path in filters or []:
-        args += ["--lua-filter", path]
-    # A local version's commit is the project's own, which isn't Calkit's
-    version = calkit.__version__.split("+")[0]
-    args += [f"--variable=calkit-version:{version}"]
-    if project_url is not None:
-        args += [
-            f"--variable=project-url:{project_url}",
-            f"--variable=project:{project_url.split('://', 1)[1]}",
-        ]
-    args += pandoc_args or []
-    if environment is not None:
-        cmd = _tex_cmd(
-            ["pandoc", *args], environment, no_check, verbose, dep="pandoc"
-        )
-    else:
-        pandoc = calkit.docx.find_pandoc()
-        if pandoc is None:
-            raise_error(
-                "Pandoc is needed; name an environment that has it, e.g., "
-                "one using Calkit's LaTeX image, or install it"
-            )
-        cmd = [pandoc, *args]
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError:
-        raise_error(f"Pandoc failed to convert {md_path}")
-    if not to_pdf:
+    for output in outputs:
+        if output.endswith(".tex"):
+            to_latex(output)
+    if not any(o.endswith(".pdf") for o in outputs):
         return
+    # A PDF is built where Calkit keeps what it derives from the file, and
+    # dated by the file's last commit rather than the build directory's,
+    # which has none of its own
+    build_dir = Path(".calkit", "markdown", md_path, "pdf").as_posix()
+    tex_path = f"{build_dir}/{Path(md_path).stem}.tex"
+    to_latex(tex_path)
     cmd = [sys.executable, "-m", "calkit", "latex", "build"]
     if environment is not None:
         cmd += ["-e", environment]
     if no_check:
         cmd += ["--no-check"]
+    env = os.environ.copy()
+    epoch = calkit.latex.get_source_date_epoch(md_path)
+    if epoch is not None:
+        env["SOURCE_DATE_EPOCH"] = epoch
     try:
-        subprocess.check_call(cmd + [tex_path])
+        subprocess.check_call(cmd + [tex_path], env=env)
     except subprocess.CalledProcessError:
         raise_error(f"LaTeX failed to build {tex_path}")
-    out_dir = os.path.dirname(output)
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
-    shutil.copyfile(f"{build_dir}/{stem}.pdf", output)
+    for output in outputs:
+        if output.endswith(".pdf"):
+            if os.path.dirname(output):
+                os.makedirs(os.path.dirname(output), exist_ok=True)
+            shutil.copyfile(Path(tex_path).with_suffix(".pdf"), output)
 
 
 def _tex_cmd(

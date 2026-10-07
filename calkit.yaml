@@ -190,7 +190,7 @@ pipeline:
         results and linked to the questions they bear on.
       pdf:
         environment: tex
-        template: docs/one-pager/template.tex
+        template_path: docs/one-pager/template.tex
         filters:
           - docs/one-pager/one-pager.lua
         args:

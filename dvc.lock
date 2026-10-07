@@ -9,16 +9,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 464196e90fed1545fbbfc30f432f83c6
-      size: 117750
+      md5: e86637123cc1b383ceda4c915653fe92
+      size: 119157
     - path: calkit/docx.py
       hash: md5
       md5: 7862d8079e091ea3c6b36208478f377c
       size: 55141
     - path: calkit/latex.py
       hash: md5
-      md5: f6bd959b400a2468d70f2e8dfc28467b
-      size: 45907
+      md5: eea8785d5706549f32c9bba30962d009
+      size: 46100
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -62,12 +62,12 @@ stages:
       size: 173958
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 5abb34630f24710c238e225b83f901f1
+      md5: 1b8a6ecd1502646fa6b16e29e83101a8
       size: 36149
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: e2e208ef15dbdededa523507c77dd111
-      size: 121673
+      md5: 508a147299b9f97f6ae968ef848c89c0
+      size: 121666
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-latex-word-round-trip.py
     deps:
@@ -85,8 +85,8 @@ stages:
       size: 173958
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: e2e208ef15dbdededa523507c77dd111
-      size: 121673
+      md5: 508a147299b9f97f6ae968ef848c89c0
+      size: 121666
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: d9d7b45c12044f5ae8f54491c383ecd4
@@ -98,8 +98,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: d9b65fca434b17fa627f91efd8b86a0f
-      size: 207261
+      md5: d1f5a7e27423bfc4192b49ff5e7c0692
+      size: 207207
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
     deps:
@@ -113,8 +113,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: f6bd959b400a2468d70f2e8dfc28467b
-      size: 45907
+      md5: eea8785d5706549f32c9bba30962d009
+      size: 46100
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -133,8 +133,8 @@ stages:
       size: 5
     - path: scripts/research-flow.py
       hash: md5
-      md5: 730152e2217fcfc9aa636c5cbee36875
-      size: 42928
+      md5: 4dc3033b390742cb7503d83a304d71ca
+      size: 43057
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -142,8 +142,8 @@ stages:
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: 22cd7480f5fc01cad15fe8a43578d3c4
-      size: 72078
+      md5: 129471e3d96a514fc86702e057cbf760
+      size: 72091
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -153,8 +153,8 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: 22cd7480f5fc01cad15fe8a43578d3c4
-      size: 72078
+      md5: 129471e3d96a514fc86702e057cbf760
+      size: 72091
     - path: scripts/plot-research-flow.py
       hash: md5
       md5: fc8849c6c10e026ae15a0817b13b43f1
@@ -166,16 +166,16 @@ stages:
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
-      md5: d508d1c7d0b708fcb604a06129a962ba
-      size: 172719
+      md5: b59f42e52b2f8ad59a46a935b6d2dfad
+      size: 172474
     - path: docs/img/research-flow-waste.png
       hash: md5
-      md5: 6069a0b1d553fd8d9d547b495d09ff48
-      size: 104255
+      md5: f38dca2cc91f70df2a9f765723041c14
+      size: 105111
     - path: docs/img/research-flow.png
       hash: md5
-      md5: 71f44fdc41af72964a78bf736a426a59
-      size: 336906
+      md5: 2e0a2e41a0d4fff00296c9a9ec7d723b
+      size: 341211
   one-pager-latex:
     cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
     deps:
@@ -282,15 +282,15 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 0244c25c6f39909755f1c4b057ca77b3
-      size: 9385
+      md5: e344343ab4105d7a034febb799e814de
+      size: 9390
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 5cd8fbf6f5bc6ad0804d6b64c527e016
+      md5: 26a620dabf53235af7a2c600bc36f0a3
       size: 4878
     - path: docs/one-pager/one-pager.lua
       hash: md5
@@ -306,10 +306,10 @@ stages:
       size: 1649
     - path: results/research-flow.json
       hash: md5
-      md5: 22cd7480f5fc01cad15fe8a43578d3c4
-      size: 72078
+      md5: 129471e3d96a514fc86702e057cbf760
+      size: 72091
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 955b07b70e0f4690ed578eb9dd9ed1e8
-      size: 136119
+      md5: 8eb9bb4875df845cb5e78a39bda65818
+      size: 136029

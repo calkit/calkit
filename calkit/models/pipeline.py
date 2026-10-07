@@ -2177,12 +2177,12 @@ class MarkdownPdf(BaseModel):
     environment: str = Field(
         description="Environment that runs pandoc and LaTeX.",
     )
-    path: RelativeChildPathString | None = Field(
+    output_path: RelativeChildPathString | None = Field(
         default=None,
         description="Where to write the PDF. Defaults to the Markdown "
         "file's path with a .pdf extension.",
     )
-    template: RelativeChildPathString | None = Field(
+    template_path: RelativeChildPathString | None = Field(
         default=None, description="Pandoc template for the LaTeX."
     )
     filters: list[RelativeChildPathString] = Field(
@@ -2214,7 +2214,7 @@ class MarkdownPdfStage(Stage):
     pdf_path: RelativeChildPathString = Field(
         description="Where to write the PDF."
     )
-    template: RelativeChildPathString | None = Field(
+    template_path: RelativeChildPathString | None = Field(
         default=None, description="Pandoc template for the LaTeX."
     )
     filters: list[RelativeChildPathString] = Field(
@@ -2236,8 +2236,8 @@ class MarkdownPdfStage(Stage):
             f"calkit latex from-markdown {q(self.target_path)}"
             f" -o {q(self.pdf_path)} -e {q(self.environment)} --no-check"
         )
-        if self.template is not None:
-            cmd += f" --template {q(self.template)}"
+        if self.template_path is not None:
+            cmd += f" --template {q(self.template_path)}"
         for path in self.filters:
             cmd += f" --filter {q(path)}"
         for arg in self.pandoc_args:
@@ -2247,8 +2247,8 @@ class MarkdownPdfStage(Stage):
     @property
     def dvc_deps(self) -> list[str]:
         deps = [self.target_path, *self.filters] + super().dvc_deps
-        if self.template is not None:
-            deps.append(self.template)
+        if self.template_path is not None:
+            deps.append(self.template_path)
         return _unique_paths(deps)
 
     @property

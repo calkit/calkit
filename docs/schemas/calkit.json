@@ -3321,7 +3321,7 @@
           "title": "Filters",
           "type": "array"
         },
-        "path": {
+        "output_path": {
           "anyOf": [
             {
               "type": "string"
@@ -3332,7 +3332,7 @@
           ],
           "default": null,
           "description": "Where to write the PDF. Defaults to the Markdown file's path with a .pdf extension.",
-          "title": "Path"
+          "title": "Output Path"
         },
         "storage": {
           "default": "dvc",
@@ -3344,7 +3344,7 @@
           "title": "Storage",
           "type": "string"
         },
-        "template": {
+        "template_path": {
           "anyOf": [
             {
               "type": "string"
@@ -3355,7 +3355,7 @@
           ],
           "default": null,
           "description": "Pandoc template for the LaTeX.",
-          "title": "Template"
+          "title": "Template Path"
         }
       },
       "required": [
@@ -3572,7 +3572,7 @@
           "title": "Target Path",
           "type": "string"
         },
-        "template": {
+        "template_path": {
           "anyOf": [
             {
               "type": "string"
@@ -3583,7 +3583,7 @@
           ],
           "default": null,
           "description": "Pandoc template for the LaTeX.",
-          "title": "Template"
+          "title": "Template Path"
         },
         "wdir": {
           "anyOf": [

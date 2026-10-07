@@ -3468,7 +3468,7 @@ Options:
 
 | Option                | Type    | Required | Default | Description                                                                                        |
 | --------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `--output`, `-o`      | str     | yes      |         | Where to write the PDF, or the LaTeX with a .tex extension.                                        |
+| `--output`, `-o`      | str     | yes      |         | Where to write the PDF, or the LaTeX with a .tex extension; can be given more than once.           |
 | `--environment`, `-e` | str     | no       |         | Environment to run pandoc and LaTeX in, e.g., one using Calkit's LaTeX image, which includes both. |
 | `--template`          | str     | no       |         | Pandoc template.                                                                                   |
 | `--filter`            | str     | no       |         | Pandoc Lua filter; can be given more than once.                                                    |

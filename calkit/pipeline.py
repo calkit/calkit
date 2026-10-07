@@ -2539,7 +2539,10 @@ def translate_run_targets(
             if md_path is None:
                 expanded.append(target)
                 continue
-            expanded += calkit.markdown.get_stage_names(md_path, target)
+            cfg = ck_info.get("pipeline", {}).get("stages", {}).get(target)
+            expanded += calkit.markdown.get_stage_names(
+                md_path, target, pdf=bool(cfg.get("pdf"))
+            )
         targets = expanded
     # A latex stage's diffs are separate DVC stages, so a target addressing
     # them all has to become their names

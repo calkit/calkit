@@ -1015,18 +1015,28 @@ def test_from_markdown(tmp_dir):
         )
     with open("template.tex", "w") as f:
         f.write("$body$\nBuilt by $calkit-version$ from $project$.\n")
+    os.makedirs("img")
+    with open("img/p.png", "wb") as f:
+        f.write(b"")
+    with open("main.md", "a") as f:
+        f.write("\n![A plot](img/p.png)\n")
+    # Both LaTeX, with images pointed at from where it's written, and a
+    # second copy of it
     subprocess.check_call(
         [
             "calkit",
             "latex",
             "from-markdown",
-            "main.md",
+            os.path.abspath("main.md"),
             "-o",
             "build/main.tex",
+            "-o",
+            "other/main.tex",
             "--template",
             "template.tex",
         ]
     )
+    assert "{../img/p.png}" in open("other/main.tex").read()
     tex = open("build/main.tex").read()
     # The value is current and links to the question citing it, not just
     # the first to cite its file
@@ -1041,3 +1051,10 @@ def test_from_markdown(tmp_dir):
         capture_output=True,
     )
     assert result.returncode != 0
+    # Nor from outside the project
+    result = subprocess.run(
+        ["calkit", "latex", "from-markdown", "../x.md", "-o", "x.pdf"],
+        capture_output=True,
+        text=True,
+    )
+    assert "isn't in this project" in result.stderr + result.stdout

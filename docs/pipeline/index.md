@@ -523,7 +523,7 @@ template gets the Calkit version and the project's URL as the
 | ----------------------- | --------------------- | -------- | ------- | ------------------------------------- |
 | `target_path`           | str                   | yes      |         | Path to the Markdown file.            |
 | `pdf_path`              | str                   | yes      |         | Where to write the PDF.               |
-| `template`              | str \| None           | no       | null    | Pandoc template for the LaTeX.        |
+| `template_path`         | str \| None           | no       | null    | Pandoc template for the LaTeX.        |
 | `filters`               | list[str]             | no       |         | Pandoc Lua filters, applied in order. |
 | `pandoc_args`           | list[str]             | no       |         | Other pandoc arguments.               |
 | `pdf_storage`           | Literal['git', 'dvc'] | no       | 'dvc'   | Where to store the PDF.               |
@@ -802,14 +802,14 @@ Pandoc turns it into LaTeX and LaTeX builds the PDF, both in one
 environment, e.g., Calkit's LaTeX image, which includes both, so their
 versions are pinned with it.
 
-| Parameter     | Type                  | Required | Default | Description                                                                         |
-| ------------- | --------------------- | -------- | ------- | ----------------------------------------------------------------------------------- |
-| `environment` | str                   | yes      |         | Environment that runs pandoc and LaTeX.                                             |
-| `path`        | str \| None           | no       | null    | Where to write the PDF. Defaults to the Markdown file's path with a .pdf extension. |
-| `template`    | str \| None           | no       | null    | Pandoc template for the LaTeX.                                                      |
-| `filters`     | list[str]             | no       |         | Pandoc Lua filters, applied in order.                                               |
-| `args`        | list[str]             | no       |         | Other pandoc arguments, e.g., '--shift-heading-level-by=-1'.                        |
-| `storage`     | Literal['git', 'dvc'] | no       | 'dvc'   | Where to store the PDF.                                                             |
+| Parameter       | Type                  | Required | Default | Description                                                                         |
+| --------------- | --------------------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `environment`   | str                   | yes      |         | Environment that runs pandoc and LaTeX.                                             |
+| `output_path`   | str \| None           | no       | null    | Where to write the PDF. Defaults to the Markdown file's path with a .pdf extension. |
+| `template_path` | str \| None           | no       | null    | Pandoc template for the LaTeX.                                                      |
+| `filters`       | list[str]             | no       |         | Pandoc Lua filters, applied in order.                                               |
+| `args`          | list[str]             | no       |         | Other pandoc arguments, e.g., '--shift-heading-level-by=-1'.                        |
+| `storage`       | Literal['git', 'dvc'] | no       | 'dvc'   | Where to store the PDF.                                                             |
 
 #### `RangeIteration`
 

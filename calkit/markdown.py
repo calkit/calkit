@@ -738,8 +738,11 @@ def write_stage_scripts(
     return changed
 
 
-def get_stage_names(markdown_path: str, stage_name: str) -> list[str]:
-    """Return the names of the pipeline stages a Markdown file declares.
+def get_stage_names(
+    markdown_path: str, stage_name: str, pdf: bool = False
+) -> list[str]:
+    """Return the names of the pipeline stages a Markdown file declares,
+    and its PDF's if it builds one.
 
     Used to resolve a target naming the file as a whole (``calkit run
     README.md``) into the stages it stands for, since those are what DVC
@@ -747,7 +750,10 @@ def get_stage_names(markdown_path: str, stage_name: str) -> list[str]:
     """
     blocks = parse_markdown_file(markdown_path)
     specs = extract_stages(blocks, Path(markdown_path).as_posix())
-    return [stage_name + STAGE_NAME_SEPARATOR + name for name in specs]
+    names = [stage_name + STAGE_NAME_SEPARATOR + name for name in specs]
+    if pdf:
+        names.append(stage_name + STAGE_NAME_SEPARATOR + "pdf")
+    return names
 
 
 def get_markdown_stages(ck_info: dict) -> dict[str, str]:
@@ -1498,15 +1504,15 @@ def expand_ck_info(
                 "kind": "markdown-pdf",
                 "environment": pdf.environment,
                 "target_path": md_path,
-                "pdf_path": pdf.path
+                "pdf_path": pdf.output_path
                 or Path(md_path).with_suffix(".pdf").as_posix(),
                 "filters": pdf.filters,
                 "pandoc_args": pdf.args,
                 "pdf_storage": pdf.storage,
                 "inputs": inputs,
             }
-            if pdf.template is not None:
-                sub["template"] = pdf.template
+            if pdf.template_path is not None:
+                sub["template_path"] = pdf.template_path
             for key in ("always_run", "frozen"):
                 if md_cfg.get(key) is not None:
                     sub[key] = md_cfg[key]
@@ -2754,9 +2760,16 @@ def set_values(
     return "".join(lines), changed
 
 
-# An image in Markdown, and the path it shows, which may be followed by a
-# quoted title
-_IMAGE_RE = re.compile(r"(!\[[^\]]*\]\()(?P<path>[^)\s]+)")
+# Images in Markdown: inline, by reference, e.g., ``![plot][p]`` or
+# ``![p]``, and the definitions references point at
+_IMAGE_RE = re.compile(r"!\[[^\]]*\]\((?P<path>[^)\s]+)")
+_IMAGE_REF_RE = re.compile(
+    r"!\[(?P<alt>[^\]]*)\](?:\[(?P<ref>[^\]]*)\]|(?![(\[]))"
+)
+_LINK_DEF_RE = re.compile(
+    r"^ {0,3}\[(?P<ref>[^\]]+)\]:\s*<?(?P<path>[^\s>]+)>?", re.M
+)
+_CODE_SPAN_RE = re.compile(r"(`+).+?\1")
 
 
 def _is_local_path(path: str) -> bool:
@@ -2773,25 +2786,61 @@ def pdf_inputs(text: str, markdown_path: str) -> list[str]:
     paths from the project root."""
     md_dir = os.path.dirname(markdown_path)
     paths = [v.path for v in extract_values(text, markdown_path)]
-    for m in _IMAGE_RE.finditer(text):
-        if _is_local_path(m.group("path")):
-            joined = os.path.normpath(os.path.join(md_dir, m.group("path")))
+    # Only what renders: not code, whether fenced or inline
+    prose = []
+    fence: str | None = None
+    for line in text.splitlines():
+        fm = _FENCE_RE.match(line)
+        if fence is not None:
+            if (
+                fm is not None
+                and fm.group("fence")[0] == fence[0]
+                and len(fm.group("fence")) >= len(fence)
+                and not fm.group("info").strip()
+            ):
+                fence = None
+            continue
+        if fm is not None:
+            fence = fm.group("fence")
+            continue
+        prose.append(_CODE_SPAN_RE.sub("", line))
+    body = "\n".join(prose)
+    defs = {
+        m.group("ref").lower(): m.group("path")
+        for m in _LINK_DEF_RE.finditer(body)
+    }
+    images = [m.group("path") for m in _IMAGE_RE.finditer(body)]
+    for m in _IMAGE_REF_RE.finditer(body):
+        ref = (m.group("ref") or m.group("alt")).lower()
+        if ref in defs:
+            images.append(defs[ref])
+    for image in images:
+        if _is_local_path(image):
+            joined = os.path.normpath(os.path.join(md_dir, image))
             paths.append(Path(joined).as_posix())
     return list(dict.fromkeys(paths))
 
 
-def prepare_for_pdf(
-    text: str,
-    markdown_path: str,
-    build_dir: str,
-    link: Any = None,
-) -> str:
-    """Markdown as pandoc should see it when it's built from ``build_dir``.
+def image_prefix_filter(prefix: str) -> str:
+    """A pandoc Lua filter pointing relative image paths at where they are
+    from ``prefix``, e.g., from where the LaTeX is built."""
+    quoted = prefix.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        f'local prefix = "{quoted}"\n'
+        "function Image(el)\n"
+        '  if not el.src:match("^%a[%w+.-]*:") and not el.src:match("^[/#]")'
+        " then\n"
+        '    el.src = prefix .. "/" .. el.src\n'
+        "  end\n"
+        "  return el\n"
+        "end\n"
+    )
 
-    Each value marker becomes the value it shows, which ``set_values`` will
-    have brought up to date, as a link where ``link`` gives a URL for it.
-    Images are pointed at from ``build_dir``, where the LaTeX is built.
-    """
+
+def prepare_for_pdf(text: str, markdown_path: str, link: Any = None) -> str:
+    """Markdown as pandoc should see it: each value marker becomes the value
+    it shows, which ``set_values`` will have brought up to date, as a link
+    where ``link`` gives a URL for it."""
     values = extract_values(text, markdown_path)
     lines = text.splitlines(keepends=True)
     n = 0
@@ -2819,15 +2868,4 @@ def prepare_for_pdf(
             bare = bare[: m.start()] + shown + bare[m.end() :]
         n += len(matches)
         lines[i] = bare + line[len(line.rstrip("\r\n")) :]
-    text = "".join(lines)
-    md_dir = os.path.dirname(markdown_path) or "."
-    prefix = Path(os.path.relpath(md_dir, build_dir)).as_posix()
-
-    def repoint(m: re.Match) -> str:
-        path = str(m.group("path"))
-        if not _is_local_path(path):
-            return str(m.group(0))
-        repointed = os.path.normpath(os.path.join(prefix, path))
-        return f"{m.group(1)}{Path(repointed).as_posix()}"
-
-    return _IMAGE_RE.sub(repoint, text)
+    return "".join(lines)

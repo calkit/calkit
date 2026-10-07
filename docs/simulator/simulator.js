@@ -111,6 +111,8 @@ function stageRows() {
     .map(
       (s, i) => `<tr>
         <td><input type="text" data-stage="${i}" data-field="name"
+          autocomplete="off" data-form-type="other" data-lpignore="true"
+          data-1p-ignore
           value="${escape(s.name)}" aria-label="Stage name"></td>
         <td><input type="number" data-stage="${i}" data-field="work"
           value="${s.work}" min="0.1" step="any"
@@ -147,7 +149,7 @@ function stageRows() {
 
 function renderForm() {
   root.innerHTML = `
-    <form class="sim-form">
+    <form class="sim-form" autocomplete="off" data-form-type="other">
       <h2>Your workflow</h2>
       <div class="sim-table-wrap"><table class="sim-stages">
         <thead><tr>

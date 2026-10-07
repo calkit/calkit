@@ -7,26 +7,26 @@ const POOL_SIZE = Math.max(
 // Runs per message to a worker, small enough to spread a scenario over the
 // pool and show progress
 const CHUNK = 25;
-const LABELS = {
-  "review prep": "Preparing for PI reviews",
-  "getting back into a stage": "Getting back into a stage's tools",
-  "redoing downstream work": "Redoing downstream work by hand",
-  "small steps": "Working in small steps, with today's tools",
-};
+// Stage fields entered as percentages
+const PERCENT = ["agent_work", "hop_error"];
 const POLICIES = {
   "stage-gate": "Stage by stage, reviewed in batches",
   lean: "In small steps, reviewed at regular meetings",
 };
-const REVIEWERS = { word: "Word", browser: "The browser, with Calkit" };
+const REVIEWERS = {
+  browser: "The browser, with an AI assistant",
+  word: "Word, via the round trip",
+};
 const SETTINGS = [
   ["n_findings", "Findings in the paper", { min: 1, step: 1 }],
   ["policy", "How you work today", { options: POLICIES }],
+  ["agents", "You use AI agents", { checkbox: true }],
   ["pi_hours_per_week", "PI hours per week for your work", {}],
   ["review_interval", "Working days between PI meetings, in small steps", {}],
   ["prep_fixed", "Days to prepare for a PI review", {}],
   ["prep_item", "Days more per finding reviewed", {}],
   ["review_days", "Working days per round of peer review", {}],
-  ["pi_reviews_in", "Your PI reviews in", { options: REVIEWERS }],
+  ["pi_reviews_in", "With Calkit, your PI reviews in", { options: REVIEWERS }],
   ["reps", "Runs per scenario", { min: 20, max: 2000, step: 1 }],
 ];
 
@@ -90,7 +90,9 @@ function showError(message) {
 
 function field(key, label, opts) {
   const value = state[key];
-  const input = opts.options
+  const input = opts.checkbox
+    ? `<input type="checkbox" data-key="${key}" ${value ? "checked" : ""}>`
+    : opts.options
     ? `<select data-key="${key}">${Object.entries(opts.options)
         .map(
           ([v, text]) =>
@@ -117,6 +119,9 @@ function stageRows() {
         <td><input type="number" data-stage="${i}" data-field="work"
           value="${s.work}" min="0.1" step="any"
           aria-label="Days of work per finding"></td>
+        <td><input type="number" data-stage="${i}" data-field="agent_work"
+          value="${+(s.agent_work * 100).toFixed(2)}" min="1" step="any"
+          aria-label="Percent of that time it takes with AI agents"></td>
         <td>${
           i < last
             ? `<input type="checkbox" data-stage="${i}" data-field="hop"
@@ -154,6 +159,7 @@ function renderForm() {
       <div class="sim-table-wrap"><table class="sim-stages">
         <thead><tr>
           <th>Stage</th><th>Days of work per finding</th>
+          <th>Time it takes with AI agents (%)</th>
           <th>Moved to the next stage's tools by hand</th>
           <th>Hours per move</th>
           <th>Moves that get something wrong (%)</th><th></th>
@@ -175,14 +181,18 @@ function renderForm() {
   form.addEventListener("input", (event) => {
     const t = event.target;
     if (t.dataset.key) {
-      state[t.dataset.key] = t.tagName === "SELECT" ? t.value : +t.value;
+      state[t.dataset.key] =
+        t.type === "checkbox"
+          ? t.checked
+          : t.tagName === "SELECT"
+          ? t.value
+          : +t.value;
     } else if (t.dataset.stage) {
       const stage = state.stages[+t.dataset.stage];
       const f = t.dataset.field;
       stage[f] =
         t.type === "checkbox" ? t.checked : f === "name" ? t.value : +t.value;
-      // Entered as a percentage
-      if (f === "hop_error") stage[f] /= 100;
+      if (PERCENT.includes(f)) stage[f] /= 100;
       if (f === "hop") {
         for (const g of ["hop_hours", "hop_error"]) {
           form.querySelector(
@@ -212,19 +222,26 @@ function renderForm() {
   });
 }
 
-function bars(rows, { interval = false } = {}) {
+function extent(rows) {
+  // From zero to the furthest bar or interval, which charts compared with
+  // each other share
+  const lo = Math.min(0, ...rows.map((r) => r.low ?? r.value));
+  const hi = Math.max(...rows.map((r) => r.high ?? r.value), 1e-9);
+  return [lo, hi];
+}
+
+function bars(rows, [lo, hi] = extent(rows)) {
   // Horizontal bars from zero, with a whisker for each interval
-  const lo = Math.min(0, ...rows.map((r) => (interval ? r.low : r.value)));
-  const hi = Math.max(...rows.map((r) => (interval ? r.high : r.value)), 1e-9);
   const x = (v) => ((v - lo) / (hi - lo)) * 100;
   return `<div class="sim-bars">${rows
     .map((r) => {
       const left = Math.min(x(0), x(r.value));
       const width = Math.abs(x(r.value) - x(0));
-      const whisker = interval
-        ? `<span class="sim-whisker" style="left:${x(r.low)}%;
+      const whisker =
+        r.low !== undefined
+          ? `<span class="sim-whisker" style="left:${x(r.low)}%;
             width:${x(r.high) - x(r.low)}%"></span>`
-        : "";
+          : "";
       return `<div class="sim-bar-row" data-tip="${escape(r.tip)}">
         <span class="sim-bar-label">${escape(r.label)}</span>
         <span class="sim-bar-plot">
@@ -244,8 +261,8 @@ function renderReport(report) {
       <span class="sim-tile-label">${label}</span>
       <span class="sim-tile-value">${days(value)}</span>
       <span class="sim-tile-note">${note}</span></div>`;
-  const candidates = report.candidates.map((c) => ({
-    label: LABELS[c.name] ?? capitalize(c.name),
+  const saving = (c, label = c.name) => ({
+    label,
     value: c.saved,
     low: c.low,
     high: c.high,
@@ -253,30 +270,40 @@ function renderReport(report) {
       `${days(c.saved)} working days saved per paper ` +
       `(95% interval ${days(c.low)} to ${days(c.high)}): ` +
       `${days(c.days)} to a published paper instead of ${days(today.days)}`,
-  }));
+  });
+  const parts = report.parts.map((c) => saving(c));
+  const without = [
+    report.small_steps &&
+      saving(report.small_steps, "Working in small steps, with today's tools"),
+    report.agents && saving(report.agents),
+  ].filter(Boolean);
+  // One scale for both, so Calkit's parts compare with what's possible
+  // without it
+  const scale = extent([...parts, ...without]);
   const breakdown = Object.entries(today.breakdown).map(([k, v]) => ({
     label: capitalize(k),
     value: v,
     tip: `${days(v)} working days, ${Math.round((v / today.days) * 100)}%`,
   }));
   const unfinished = today.unfinished + first.unfinished + later.unfinished;
+  const agents = report.uses_agents ? ", with AI agents" : "";
   root.querySelector(".sim-results").innerHTML = `
     <h2>Working days to a published paper</h2>
     <div class="sim-tiles">
       ${tile(
-        "Today",
+        `Today${agents}`,
         today.days,
         `${months(today.days)} months; 80% of runs
         ${days(today.p10)}–${days(today.p90)}`,
       )}
       ${tile(
-        "Fully integrated, first paper",
+        `With Calkit${agents}, first paper`,
         first.days,
-        `${first.ratio.toFixed(2)}× as fast, with
-        ${days(first.learning_days)} days learning the tooling`,
+        `${first.ratio.toFixed(2)}× as fast, including
+        ${days(first.learning_days)} days learning Calkit`,
       )}
       ${tile(
-        "Fully integrated, later papers",
+        `With Calkit${agents}, later papers`,
         later.days,
         `${later.ratio.toFixed(2)}× as fast`,
       )}
@@ -287,10 +314,20 @@ function renderReport(report) {
           after 5,000 working days and were cut off there.</p>`
         : ""
     }
-    <h2>What to automate first</h2>
+    <h2>What each part of Calkit saves</h2>
+    <p class="sim-caption">Working days saved per paper by each part of
+      Calkit added to how you work today on its own, with 95% intervals,
+      from ${report.reps} runs each.</p>
+    ${bars(parts, scale)}
+    <h2>Without Calkit</h2>
     <p class="sim-caption">Working days saved per paper by each change on
-      its own, with 95% intervals, from ${report.reps} runs each.</p>
-    ${bars(candidates, { interval: true })}
+      its own, on the same scale.</p>
+    ${
+      without.length
+        ? bars(without, scale)
+        : `<p class="sim-caption">You already work in small steps and use
+            AI agents.</p>`
+    }
     <h2>Where today's time goes</h2>
     <p class="sim-caption">Working days per paper.</p>
     ${bars(breakdown)}`;

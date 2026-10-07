@@ -1,8 +1,9 @@
 """What the simulator page runs in the browser, in Pyodide.
 
-A visitor's workflow is simulated as they work today, fully integrated, i.e.,
-in small steps with automated tooling, and with each of today's manual costs
-automated on its own, to show which is worth automating first. Every
+A visitor's workflow is simulated as they work today, in small steps with
+today's tools, and with Calkit, i.e., in small steps with everything Calkit
+does, and with each part of Calkit added to how they work today on its own,
+to show what it's worth to them. AI agents can be used in any of them. Every
 scenario runs the same seeds, so their differences aren't swamped by noise.
 """
 
@@ -13,12 +14,18 @@ from typing import Any
 
 import numpy as np
 from research_flow import (
-    ADOPTION,
+    AGENTS,
     BASE,
+    CALKIT,
+    COLLABORATION,
     HANDOFF_FROM,
     LEARNED,
+    PI_ASSIST,
+    ROUND_TRIP,
     STAGES,
     TOOLING,
+    TRANSPARENCY,
+    VERIFICATION,
     breakdown,
     params_for,
     run_project,
@@ -37,10 +44,16 @@ NEW_STAGE: dict[str, Any] = {
     "redo_automated": 0.1,
     "forget_manual": 1.0,
     "forget_automated": 0.25,
+    "agent_work": 0.7,
+    "agent_flaw": 1.25,
+    "agent_redo": 0.6,
     "hop": False,
     "hop_hours": 4.0,
     "hop_error": 0.05,
 }
+# The scenarios that aren't one part of Calkit on its own
+SCENARIOS = ["today", "small steps", "calkit, first paper", "calkit, later"]
+AGENTS_ALONE = "AI agents, without Calkit"
 
 
 def defaults() -> dict[str, Any]:
@@ -55,6 +68,9 @@ def defaults() -> dict[str, Any]:
             "redo_automated": automated["redo_factor"][s],
             "forget_manual": manual["forget_cost"][s],
             "forget_automated": automated["forget_cost"][s],
+            "agent_work": AGENTS["work"][s],
+            "agent_flaw": AGENTS["flaw_prob"][s],
+            "agent_redo": AGENTS["manual_redo"][s],
             "hop": s in HANDOFF_FROM,
             "hop_hours": NEW_STAGE["hop_hours"],
             "hop_error": NEW_STAGE["hop_error"],
@@ -71,22 +87,35 @@ def defaults() -> dict[str, Any]:
         "new_stage": NEW_STAGE,
         "n_findings": BASE["n_findings"],
         "policy": "stage-gate",
+        "agents": False,
         "pi_hours_per_week": BASE["pi_hours_per_week"],
         "review_interval": BASE["review_interval"],
         "prep_fixed": manual["prep_fixed"],
         "prep_item": manual["prep_item"],
         "review_days": BASE["review_days"],
-        "pi_reviews_in": "word",
+        "pi_reviews_in": "browser",
         "reps": 200,
     }
 
 
 def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
-    def params(tooling: str, **overrides: Any) -> dict:
-        return params_for(tooling, base=base, toolings=toolings, **overrides)
+    def params(
+        tooling: str,
+        over: dict[str, Any] | None = None,
+        agents: bool | None = None,
+    ) -> dict:
+        return params_for(
+            tooling,
+            agents=uses_agents if agents is None else agents,
+            base=base,
+            toolings=toolings,
+            agent_effects=agent_effects,
+            **(over or {}),
+        )
 
     rows = inputs["stages"]
     names = [r["name"] for r in rows]
+    uses_agents = bool(inputs["agents"])
     # The last stage has nowhere to hop to
     hops = [bool(r["hop"]) and s < len(rows) - 1 for s, r in enumerate(rows)]
     # Half of a hop's cost is moving anything at all, and half is per
@@ -124,39 +153,65 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
     for k in HOP_KEYS:
         automated[k] = [max(TOOLING["automated"][k]) * h for h in hops]
     toolings = {"manual": manual, "automated": automated}
-    policy = inputs["policy"]
-    adopt = ADOPTION[f"calkit/{inputs['pi_reviews_in']}"]
-    out = {
-        "today": (policy, params("manual")),
-        "integrated, first paper": ("lean", params("automated", **adopt)),
-        "integrated, later papers": (
-            "lean",
-            params(
-                "automated",
-                **{k: v for k, v in adopt.items() if k not in LEARNED},
-            ),
-        ),
+    agent_effects = AGENTS | {
+        "work": [float(r["agent_work"]) for r in rows],
+        "flaw_prob": [float(r["agent_flaw"]) for r in rows],
+        "manual_redo": [float(r["agent_redo"]) for r in rows],
     }
-    # Each of today's manual costs automated on its own
+    policy = inputs["policy"]
+    browser = inputs["pi_reviews_in"] == "browser"
+    # Agent-assisted review is for a PI reviewing in the browser
+    review = COLLABORATION | PI_ASSIST if browser else ROUND_TRIP
+    calkit = CALKIT | review | VERIFICATION | TRANSPARENCY
+    # Calkit's curation, for sharing the project with the paper
+    curate = {k: automated[k] for k in ["curate_fixed", "curate_item"]}
+    out = {"today": (policy, params("manual"))}
+    if policy == "stage-gate":
+        out["small steps"] = ("lean", params("manual"))
+    out["calkit, first paper"] = ("lean", params("automated", calkit))
+    out["calkit, later"] = (
+        "lean",
+        params(
+            "automated", {k: v for k, v in calkit.items() if k not in LEARNED}
+        ),
+    )
+    # Each part of Calkit added to how the work is done today on its own,
+    # with today's hop costs, which agents may have already cut
+    today = params("manual")
     for s, hop in enumerate(hops):
         if not hop:
             continue
-        over = {k: list(manual[k]) for k in HOP_KEYS}
+        over = {k: list(today[k]) for k in HOP_KEYS}
         for k in HOP_KEYS:
             over[k][s] = automated[k][s]
-        out[f"{names[s]} → {names[s + 1]}"] = (
-            policy,
-            params("manual", **over),
-        )
-    for name, keys in [
-        ("review prep", ["prep_fixed", "prep_item"]),
-        ("getting back into a stage", ["switch_cost", "forget_cost"]),
-        ("redoing downstream work", ["redo_factor"]),
-    ]:
+        name = f"Pipeline: {names[s]} → {names[s + 1]}"
+        out[name] = (policy, params("manual", over))
+    parts: list[tuple[str, list[str]]] = [
+        ("Pipeline: rerunning only what's stale", ["redo_factor"]),
+        (
+            "A paper that's always ready for review",
+            ["prep_fixed", "prep_item"],
+        ),
+        ("Environments and recorded commands", ["switch_cost", "forget_cost"]),
+    ]
+    for name, keys in parts:
         over = {k: automated[k] for k in keys}
-        out[name] = (policy, params("manual", **over))
-    if policy == "stage-gate":
-        out["small steps"] = ("lean", params("manual"))
+        out[name] = (policy, params("manual", over))
+    out["Answers checked against their evidence"] = (
+        policy,
+        params("manual", VERIFICATION),
+    )
+    if browser:
+        out["Agent-assisted PI review in the browser"] = (
+            policy,
+            params("manual", COLLABORATION | PI_ASSIST),
+        )
+    out["The project shared with the paper"] = (
+        policy,
+        params("manual", TRANSPARENCY | curate),
+    )
+    if not uses_agents:
+        out[AGENTS_ALONE] = (policy, params("manual", agents=True))
     return out
 
 
@@ -191,8 +246,7 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
 
     summaries = {name: summarize(r) for name, r in runs.items()}
     today = summaries["today"]
-    fixed = ["today", "integrated, first paper", "integrated, later papers"]
-    candidates = [compare(name) for name in runs if name not in fixed]
+    parts = [compare(n) for n in runs if n not in SCENARIOS + [AGENTS_ALONE]]
     return {
         "today": {
             "days": today["days_mean"],
@@ -202,9 +256,14 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
             "unfinished": today["unfinished"],
             "breakdown": breakdown(today),
         },
-        "first": compare("integrated, first paper"),
-        "later": compare("integrated, later papers"),
-        "candidates": sorted(candidates, key=lambda c: -c["saved"]),
+        "small_steps": compare("small steps")
+        if "small steps" in runs
+        else None,
+        "first": compare("calkit, first paper"),
+        "later": compare("calkit, later"),
+        "parts": sorted(parts, key=lambda c: -c["saved"]),
+        "agents": compare(AGENTS_ALONE) if AGENTS_ALONE in runs else None,
+        "uses_agents": bool(inputs["agents"]),
         "reps": len(runs["today"]),
     }
 

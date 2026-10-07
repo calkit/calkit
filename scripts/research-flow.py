@@ -21,12 +21,16 @@ from research_flow import (  # noqa: E402
     BASE,
     BY_HAND,
     CALKIT,
+    COLLABORATION,
     DIY,
     LEARNED,
+    PI_ASSIST,
     POLICIES,
     PRODUCTIVE_WAIT,
     STAGES,
     TOOLING,
+    TRANSPARENCY,
+    VERIFICATION,
     breakdown,
     params_for,
     simulate,
@@ -153,14 +157,9 @@ for name, translate in [("word", BY_HAND), ("none", {})]:
         )["days_mean"]
         learn_sweep[name].append(status_quo["days_mean"] / days)
 
-# What Calkit would need to deliver, on a first paper, going from today's
-# status quo to lean with automated tooling and agents one step at a time,
-# each on top of the ones before it
-COLLABORATION = {"pi_learn_hours": 0.25}
-VERIFICATION = {"detect_self": 0.2, "reverify": 0.3}
-PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}
-# The project shipped with the paper, so reviewers can check the work itself
-TRANSPARENCY = {"detect_reviewer": 0.8, "shared": True}
+# What Calkit delivers, on a first paper, going from today's status quo to
+# lean with automated tooling and agents one step at a time, each on top of
+# the ones before it
 ALL_GOALS = CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST | TRANSPARENCY
 GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
     ("status quo", "stage-gate", "manual", False, {}),

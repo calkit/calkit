@@ -194,3 +194,8 @@
   box-shadow: var(--md-shadow-z2);
   pointer-events: none;
 }
+
+.sim-field input[type="checkbox"] {
+  align-self: flex-start;
+  margin: 0.4em 0;
+}

@@ -188,6 +188,13 @@ ADOPTION: dict[str, dict[str, Any]] = {
     "calkit/word": CALKIT | ROUND_TRIP,
     "calkit/browser": CALKIT | {"pi_learn_hours": 0.25},
 }
+# What else Calkit does: the PI reviewing in the browser, answers checked
+# against their evidence, agent-assisted PI review, and the project shipped
+# with the paper, so reviewers can check the work itself
+COLLABORATION = {"pi_learn_hours": 0.25}
+VERIFICATION = {"detect_self": 0.2, "reverify": 0.3}
+PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}
+TRANSPARENCY = {"detect_reviewer": 0.8, "shared": True}
 # What agents change: hands-on work, which is faster except where it's
 # thinking or physical, flaws in the stages they work in, mechanics done by
 # hand, i.e., handoffs, review prep, translation, and redoing downstream
@@ -771,6 +778,7 @@ def params_for(
     agents: bool = False,
     base: dict[str, Any] = BASE,
     toolings: dict[str, dict[str, Any]] = TOOLING,
+    agent_effects: dict[str, Any] = AGENTS,
     **overrides: Any,
 ) -> dict:
     def scale(value: Any, factor: float) -> Any:
@@ -781,7 +789,7 @@ def params_for(
     manual = dict(toolings["manual"])
     p = {**base, **toolings[tooling], **overrides}
     if agents:
-        a = AGENTS
+        a = agent_effects
         manual["redo_factor"] = [
             r * m for r, m in zip(manual["redo_factor"], a["manual_redo"])
         ]

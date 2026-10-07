@@ -1,10 +1,10 @@
 {
   "calkit": {
-    "image": "ghcr.io/calkit/latex:0.1.5",
-    "unpacked_mb": 730.70592,
-    "download_mb": 399.677774,
-    "unpacked_gb": 0.73070592,
-    "download_gb": 0.399677774
+    "image": "ghcr.io/calkit/latex:0.1.6",
+    "unpacked_mb": 896.053248,
+    "download_mb": 432.654288,
+    "unpacked_gb": 0.896053248,
+    "download_gb": 0.432654288
   },
   "texlive_full": {
     "image": "texlive/texlive:latest-full",

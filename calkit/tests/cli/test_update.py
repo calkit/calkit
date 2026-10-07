@@ -23,7 +23,7 @@ def test_update_project_config(tmp_dir, monkeypatch):
 
     import requests
 
-    monkeypatch.setattr(requests, "get", fail)
+    monkeypatch.setattr(requests.Session, "request", fail)
     subprocess.check_call(["calkit", "init"])
     result = runner.invoke(update_app, ["devcontainer"])
     assert result.exit_code == 0

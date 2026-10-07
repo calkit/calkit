@@ -4,8 +4,9 @@ import base64
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -23,6 +24,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 RETURN_CONTENT_SIZE_LIMIT = 1_000_000
+# Shared by every batch request, so concurrent requests can't multiply the
+# threads and storage connections a worker holds
+_batch_op_pool = ThreadPoolExecutor(
+    max_workers=32, thread_name_prefix="fs-batch-op"
+)
 
 
 class PresignedUrlAccess(BaseModel):
@@ -413,6 +419,63 @@ def post_project_fs_batch_op(
     current_user: CurrentUserOptional,
 ) -> FsOpBatchResponse:
     """Endpoint for batch file system operations for multiple paths."""
+
+    def get_result(path: str) -> FsOpBatchResult:
+        full_path = f"{data_prefix}/{owner_name}/{project_name}/{path}"
+        path_result: dict[str, Any] = {}
+        # Handle exists
+        if operation == "exists" or "exists" in include:
+            try:
+                res = fs.ls(full_path, detail=False)
+                exists = len(res) > 0
+            except FileNotFoundError:
+                exists = False
+            path_result["exists"] = exists
+        # Handle info, which content needs for its size check anyway
+        info_dict = None
+        if operation == "info" or "info" in include or "content" in include:
+            try:
+                info_dict = fs.info(full_path)
+            except FileNotFoundError:
+                pass
+        if operation == "info" or "info" in include:
+            path_result["info"] = None
+            if info_dict is not None:
+                path_result["info"] = {
+                    "name": info_dict.get("name", ""),
+                    "size": info_dict.get("size", 0),
+                    "type": info_dict.get("type", "file"),
+                    "time_modified": info_dict.get("time_modified"),
+                }
+        # Handle content (if requested via include)
+        if "content" in include and info_dict is not None:
+            path_result["content_base64"] = None
+            file_size = info_dict.get("size", 0)
+            if file_size > RETURN_CONTENT_SIZE_LIMIT:
+                logger.info(
+                    f"Skipping content for {path} "
+                    f"(size: {file_size} > {RETURN_CONTENT_SIZE_LIMIT})"
+                )
+            else:
+                try:
+                    content_bytes = fs.cat_file(full_path)
+                    if isinstance(content_bytes, str):
+                        content_bytes = content_bytes.encode("utf-8")
+                    path_result["content_base64"] = base64.b64encode(
+                        content_bytes
+                    ).decode("utf-8")
+                except FileNotFoundError:
+                    pass
+                except Exception as exc:
+                    logger.exception(
+                        f"Error while reading file content for {full_path}"
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Error reading file content for path: {path}",
+                    ) from exc
+        return FsOpBatchResult(**path_result)
+
     owner_name = owner_name.lower()
     project_name = project_name.lower()
     operation = req.operation
@@ -440,60 +503,7 @@ def post_project_fs_batch_op(
     data_prefix = storage.get_data_prefix()
     if settings.ENVIRONMENT == "local" and not fs.exists(data_prefix):
         fs.makedir(data_prefix)
-    results = {}
-    for path in paths:
-        full_path = f"{data_prefix}/{owner_name}/{project_name}/{path}"
-        path_result = {}
-        # Handle exists
-        if operation == "exists" or "exists" in include:
-            try:
-                res = fs.ls(full_path, detail=False)
-                exists = len(res) > 0
-            except FileNotFoundError:
-                exists = False
-            path_result["exists"] = exists
-        # Handle info
-        if operation == "info" or "info" in include:
-            try:
-                info_dict = fs.info(full_path)
-                path_result["info"] = {
-                    "name": info_dict.get("name", ""),
-                    "size": info_dict.get("size", 0),
-                    "type": info_dict.get("type", "file"),
-                    "time_modified": info_dict.get("time_modified"),
-                }
-            except FileNotFoundError:
-                path_result["info"] = None
-        # Handle content (if requested via include)
-        if "content" in include:
-            try:
-                # Check file size before reading content
-                info_dict = path_result.get("info")
-                if info_dict is None:
-                    info_dict = fs.info(full_path)
-                file_size = info_dict.get("size", 0)
-                if file_size > RETURN_CONTENT_SIZE_LIMIT:
-                    logger.info(
-                        f"Skipping content for {path} "
-                        f"(size: {file_size} > {RETURN_CONTENT_SIZE_LIMIT})"
-                    )
-                    path_result["content_base64"] = None
-                else:
-                    content_bytes = fs.cat_file(full_path)
-                    if isinstance(content_bytes, str):
-                        content_bytes = content_bytes.encode("utf-8")
-                    path_result["content_base64"] = base64.b64encode(
-                        content_bytes
-                    ).decode("utf-8")
-            except FileNotFoundError:
-                path_result["content_base64"] = None
-            except Exception as exc:
-                logger.exception(
-                    f"Error while reading file content for {full_path}"
-                )
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error reading file content for path: {path}",
-                ) from exc
-        results[path] = FsOpBatchResult(**path_result)
+    # Each path is a round trip to object storage, and a DVC push asks
+    # about hundreds of them, so they're made concurrently
+    results = dict(zip(paths, _batch_op_pool.map(get_result, paths)))
     return FsOpBatchResponse(backend=backend, results=results)

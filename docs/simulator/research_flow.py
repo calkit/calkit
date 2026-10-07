@@ -194,9 +194,10 @@ ADOPTION: dict[str, dict[str, Any]] = {
     "calkit/word": CALKIT | ROUND_TRIP,
     "calkit/browser": CALKIT | {"pi_learn_hours": 0.25},
 }
-# What else Calkit does: the PI reviewing in the browser, answers checked
-# against their evidence, agent-assisted PI review, and the project shipped
-# with the paper, so reviewers can check the work itself
+# Calkit's goals beyond its tooling: the PI reviewing in the browser,
+# answers checked against their evidence, agent-assisted PI review, which
+# Calkit doesn't do, and the project shipped with the paper, so reviewers
+# can check the work itself
 COLLABORATION = {"pi_learn_hours": 0.25}
 VERIFICATION = {"detect_self": 0.2, "reverify": 0.3}
 PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}

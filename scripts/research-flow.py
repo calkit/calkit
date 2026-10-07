@@ -157,9 +157,9 @@ for name, translate in [("word", BY_HAND), ("none", {})]:
         )["days_mean"]
         learn_sweep[name].append(status_quo["days_mean"] / days)
 
-# What Calkit delivers, on a first paper, going from today's status quo to
-# lean with automated tooling and agents one step at a time, each on top of
-# the ones before it
+# What Calkit would need to deliver, on a first paper, going from today's
+# status quo to lean with automated tooling and agents one step at a time,
+# each on top of the ones before it
 ALL_GOALS = CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST | TRANSPARENCY
 GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
     ("status quo", "stage-gate", "manual", False, {}),

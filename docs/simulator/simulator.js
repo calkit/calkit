@@ -18,7 +18,7 @@ const POLICIES = {
     "with PI reviews at regular meetings",
 };
 const REVIEWERS = {
-  browser: "The browser, with an AI assistant",
+  browser: "The browser",
   word: "Word, via the round trip",
 };
 const SETTINGS = [

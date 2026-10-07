@@ -22,7 +22,6 @@ from research_flow import (
     COLLABORATION,
     HANDOFF_FROM,
     LEARNED,
-    PI_ASSIST,
     ROUND_TRIP,
     STAGES,
     TOOLING,
@@ -175,8 +174,7 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
     }
     policy = inputs["policy"]
     browser = inputs["pi_reviews_in"] == "browser"
-    # Agent-assisted review is for a PI reviewing in the browser
-    review = COLLABORATION | PI_ASSIST if browser else ROUND_TRIP
+    review = COLLABORATION if browser else ROUND_TRIP
     calkit = CALKIT | review | VERIFICATION | TRANSPARENCY
     # Calkit's curation, for sharing the project with the paper
     curate = {k: automated[k] for k in ["curate_fixed", "curate_item"]}
@@ -219,11 +217,6 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
         policy,
         params("manual", VERIFICATION),
     )
-    if browser:
-        out["Agent-assisted PI review in the browser"] = (
-            policy,
-            params("manual", COLLABORATION | PI_ASSIST),
-        )
     out["The project shared with the paper"] = (
         policy,
         params("manual", TRANSPARENCY | curate),

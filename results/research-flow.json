@@ -11,6 +11,9 @@
     ],
     "base": {
       "n_findings": 6,
+      "loop_from": 0,
+      "loop_to": 0,
+      "attempts": 1.0,
       "work": [
         3.0,
         2.0,

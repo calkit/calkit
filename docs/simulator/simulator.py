@@ -86,6 +86,10 @@ def defaults() -> dict[str, Any]:
         "stages": stages,
         "new_stage": NEW_STAGE,
         "n_findings": BASE["n_findings"],
+        # Experiment through analysis, once, until set otherwise
+        "loop_from": 2,
+        "loop_to": 4,
+        "attempts": BASE["attempts"],
         "policy": "stage-gate",
         "agents": False,
         "pi_hours_per_week": BASE["pi_hours_per_week"],
@@ -126,6 +130,9 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
     ]
     base = BASE | {
         "n_findings": int(inputs["n_findings"]),
+        "loop_from": int(inputs["loop_from"]),
+        "loop_to": int(inputs["loop_to"]),
+        "attempts": float(inputs["attempts"]),
         "work": [float(r["work"]) for r in rows],
         "fix_factor": [float(r["fix_factor"]) for r in rows],
         "flaw_prob": [float(r["flaw_prob"]) for r in rows],

@@ -18,7 +18,7 @@ const REVIEWERS = {
   word: "Word, via the round trip",
 };
 const SETTINGS = [
-  ["n_findings", "Findings in the paper", { min: 1, step: 1 }],
+  ["n_findings", "Results worth writing up in the paper", { min: 1, step: 1 }],
   ["policy", "How you work today", { options: POLICIES }],
   ["agents", "You use AI agents", { checkbox: true }],
   ["pi_hours_per_week", "PI hours per week for your work", {}],
@@ -118,7 +118,7 @@ function stageRows() {
           value="${escape(s.name)}" aria-label="Stage name"></td>
         <td><input type="number" data-stage="${i}" data-field="work"
           value="${s.work}" min="0.1" step="any"
-          aria-label="Days of work per finding"></td>
+          aria-label="Days of work each time through"></td>
         <td><input type="number" data-stage="${i}" data-field="agent_work"
           value="${+(s.agent_work * 100).toFixed(2)}" min="1" step="any"
           aria-label="Percent of that time it takes with AI agents"></td>
@@ -152,13 +152,34 @@ function stageRows() {
     .join("");
 }
 
+function loopControls() {
+  // The stages repeated until a result is worth writing up
+  const options = (key) =>
+    state.stages
+      .map(
+        (s, i) =>
+          `<option value="${i}"${i === state[key] ? " selected" : ""}>${escape(
+            s.name,
+          )}</option>`,
+      )
+      .join("");
+  return `Until a result is worth writing up, repeat from
+    <select data-key="loop_from" data-index>${options("loop_from")}</select>
+    through
+    <select data-key="loop_to" data-index>${options("loop_to")}</select>,
+    taking
+    <input type="number" data-key="attempts" value="${state.attempts}"
+      min="1" step="any" aria-label="Attempts on average">
+    attempts on average`;
+}
+
 function renderForm() {
   root.innerHTML = `
     <form class="sim-form" autocomplete="off" data-form-type="other">
       <h2>Your workflow</h2>
       <div class="sim-table-wrap"><table class="sim-stages">
         <thead><tr>
-          <th>Stage</th><th>Days of work per finding</th>
+          <th>Stage</th><th>Days of work each time through</th>
           <th>Time it takes with AI agents (%)</th>
           <th>Moved to the next stage's tools by hand</th>
           <th>Hours per move</th>
@@ -167,6 +188,7 @@ function renderForm() {
         <tbody>${stageRows()}</tbody>
       </table></div>
       <button type="button" class="md-button sim-add">Add a stage</button>
+      <p class="sim-loop">${loopControls()}</p>
       <div class="sim-settings">${SETTINGS.map(([k, label, opts]) =>
         field(k, label, opts),
       ).join("")}</div>
@@ -184,15 +206,25 @@ function renderForm() {
       state[t.dataset.key] =
         t.type === "checkbox"
           ? t.checked
-          : t.tagName === "SELECT"
+          : t.tagName === "SELECT" && !("index" in t.dataset)
           ? t.value
           : +t.value;
+      // The loop can't end before it starts
+      if (t.dataset.key === "loop_from" || t.dataset.key === "loop_to") {
+        if (state.loop_to < state.loop_from) {
+          state.loop_from = state.loop_to = +t.value;
+        }
+        form.querySelector(".sim-loop").innerHTML = loopControls();
+      }
     } else if (t.dataset.stage) {
       const stage = state.stages[+t.dataset.stage];
       const f = t.dataset.field;
       stage[f] =
         t.type === "checkbox" ? t.checked : f === "name" ? t.value : +t.value;
       if (PERCENT.includes(f)) stage[f] /= 100;
+      if (f === "name") {
+        form.querySelector(".sim-loop").innerHTML = loopControls();
+      }
       if (f === "hop") {
         for (const g of ["hop_hours", "hop_error"]) {
           form.querySelector(
@@ -210,11 +242,19 @@ function renderForm() {
         name: `stage ${state.stages.length + 1}`,
       });
     } else if (remove) {
-      state.stages.splice(+remove.dataset.remove, 1);
+      const i = +remove.dataset.remove;
+      state.stages.splice(i, 1);
+      // The loop keeps its stages when one before them goes
+      if (i < state.loop_from) state.loop_from--;
+      if (i < state.loop_to) state.loop_to--;
     } else {
       return;
     }
+    const last = state.stages.length - 1;
+    state.loop_from = Math.min(state.loop_from, last);
+    state.loop_to = Math.min(state.loop_to, last);
     form.querySelector("tbody").innerHTML = stageRows();
+    form.querySelector(".sim-loop").innerHTML = loopControls();
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();

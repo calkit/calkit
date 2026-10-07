@@ -61,6 +61,12 @@ def by_hop(cost: float) -> list[float]:
 
 BASE: dict[str, Any] = {
     "n_findings": 6,
+    # Stages repeated until a result is worth writing up: on reaching the
+    # loop's last stage, a finding goes back to its first for another
+    # attempt, as many times on average as this, so one never repeats
+    "loop_from": 0,
+    "loop_to": 0,
+    "attempts": 1.0,
     # Days of hands-on work per finding at each stage, and their spread
     "work": [3.0, 2.0, 10.0, 3.0, 4.0, 2.0, 3.0],
     "work_cv": 0.5,
@@ -232,6 +238,8 @@ class Item:
     changed: bool = False
     approved: bool = False
     approved_at: float | None = None
+    # Its last attempt didn't work, so it went back to try again
+    retried: bool = False
     idea_checked: bool = False
     done_stages: set[int] = field(default_factory=set)
     fixes: dict[int, Flaw] = field(default_factory=dict)
@@ -346,6 +354,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         s = item.stage
         # A review can send the finding back while switching to its stage
         version = item.version
+        item.retried = False
         yield from setup(s)
         if item.version != version:
             return
@@ -400,6 +409,18 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         if noticed:
             loops += 1
             catch(noticed)
+        # An attempt that didn't work, which starts the loop over in full
+        retry = (
+            s == p["loop_to"]
+            and p["attempts"] > 1
+            and item.version == version
+            and p["loop_from"] in item.path
+        )
+        if retry and rng.random() >= 1 / p["attempts"]:
+            start = item.path.index(p["loop_from"])
+            item.done_stages.difference_update(item.path[start : item.pos])
+            item.pos = start
+            item.retried = True
 
     def handoff(s: int, n: float) -> Generator:
         cost = tool("handoff_fixed")[s] + tool("handoff_item")[s] * n
@@ -635,7 +656,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             s, version = item.stage, item.version
             yield from process(item)
             moved = item.version == version and item.stage != s
-            if moved:
+            if moved and not item.retried:
                 yield from handoff(s, item.size)
 
     def gated_student() -> Generator:
@@ -648,7 +669,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                 batch = [i for i in todo if i.stage == s]
                 for item in batch:
                     yield from process(item)
-                yield from handoff(s, sum(i.size for i in batch))
+                # Not the ones going back to try again
+                moved = sum(i.size for i in batch if not i.retried)
+                if moved:
+                    yield from handoff(s, moved)
                 # Gates look at the batch; the last one reads the paper
                 to_review = (
                     batch if s < ns - 1 else [i for i in items if i.done]

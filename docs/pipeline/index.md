@@ -508,26 +508,6 @@ extracted from it are written.
 | `target_path`           | str                 | yes      |            | Path to the Markdown file.                                                                                |
 | `pdf`                   | MarkdownPdf \| None | no       | null       | Also build the file into a PDF with pandoc and LaTeX. A file that only builds a PDF needs no code blocks. |
 
-### `markdown-pdf`
-
-Model class: `MarkdownPdfStage`
-
-A Markdown file built into a PDF with pandoc and LaTeX.
-
-Value markers are filled from their results files, and each is linked
-to the question on the project's hub whose evidence cites it. The
-template gets the Calkit version and the project's URL as the
-`calkit-version`, `project-url`, and `project` variables.
-
-| Kind-specific parameter | Type                  | Required | Default | Description                           |
-| ----------------------- | --------------------- | -------- | ------- | ------------------------------------- |
-| `target_path`           | str                   | yes      |         | Path to the Markdown file.            |
-| `pdf_path`              | str                   | yes      |         | Where to write the PDF.               |
-| `template_path`         | str \| None           | no       | null    | Pandoc template for the LaTeX.        |
-| `filters`               | list[str]             | no       |         | Pandoc Lua filters, applied in order. |
-| `pandoc_args`           | list[str]             | no       |         | Other pandoc arguments.               |
-| `pdf_storage`           | Literal['git', 'dvc'] | no       | 'dvc'   | Where to store the PDF.               |
-
 ### `matlab-command`
 
 Model class: `MatlabCommandStage`

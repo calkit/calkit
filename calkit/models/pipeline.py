@@ -10,7 +10,7 @@ import re
 import shlex
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import (
     AfterValidator,
@@ -24,6 +24,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 from typing_extensions import Annotated
 
 import calkit.latex
@@ -2199,7 +2200,8 @@ class MarkdownPdf(BaseModel):
 
 
 class MarkdownPdfStage(Stage):
-    """A Markdown file built into a PDF with pandoc and LaTeX.
+    """A Markdown file built into a PDF with pandoc and LaTeX: what a
+    Markdown stage's ``pdf`` compiles to, rather than a kind to write.
 
     Value markers are filled from their results files, and each is linked
     to the question on the project's hub whose evidence cites it. The
@@ -2207,6 +2209,8 @@ class MarkdownPdfStage(Stage):
     ``calkit-version``, ``project-url``, and ``project`` variables.
     """
 
+    # Left out of the schema and docs, since no one writes it
+    internal: ClassVar[bool] = True
     kind: Literal["markdown-pdf"] = "markdown-pdf"
     target_path: RelativeChildPathString = Field(
         description="Path to the Markdown file."
@@ -2353,7 +2357,7 @@ class Pipeline(BaseModel):
                 | MapPathsStage
                 | MarimoHtmlWasmStage
                 | MarkdownStage
-                | MarkdownPdfStage
+                | SkipJsonSchema[MarkdownPdfStage]
                 | ProcedureStage
             ),
             Discriminator("kind"),

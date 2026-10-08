@@ -54,7 +54,8 @@ in Calkit's own pipeline
 
 ## A success story
 
-Rebecca McCabe recently finished her PhD in Mechanical Engineering at Cornell,
+[Rebecca McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en)
+recently finished her PhD in Mechanical Engineering at Cornell,
 developing advanced computational methods for multidisciplinary
 optimization of
 wave energy converters in her

@@ -179,7 +179,8 @@ class SystemValueRequirement(BaseModel):
     matches: str | list[str] | None = Field(
         default=None,
         description="Glob the property must match, case-insensitively, "
-        "e.g., `*.cluster.edu` for a hostname. A list means any one of them.",
+        "e.g., `*.cluster.edu` for a hostname. A list means any one of "
+        "them.",
     )
     description: str | None = None
 

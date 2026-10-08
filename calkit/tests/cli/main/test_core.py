@@ -617,6 +617,17 @@ def test_run_in_env_system(tmp_dir):
         text=True,
     )
     assert "hi" in out
+    # With 'relock: auto' a run there rewrites the lock instead of failing
+    with open(sys_lock, "w") as f:
+        json.dump({"os": "SomeOtherOS"}, f)
+    _write_envs_to_ck_info(
+        {"sys": {"kind": "system", "lock": ["os"], "relock": "auto"}}
+    )
+    subprocess.check_call(
+        ["calkit", "xenv", "-n", "sys", "--no-check", "--", "echo", "hi"]
+    )
+    with open(sys_lock) as f:
+        assert json.load(f) != {"os": "SomeOtherOS"}
     # '--setup' runs its commands in the same shell as the command, so
     # what they set is visible there, and it runs in bash by default so
     # 'source' works---the reason most of these exist. What to run is

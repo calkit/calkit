@@ -1058,7 +1058,8 @@ class SystemEnvironment(Environment):
     that needs to run fails, since its result would not be comparable
     with the existing ones. To make the new machine the one results come
     from, run ``calkit update env -n NAME --lock``, which updates the lock
-    and invalidates the stages that depend on it.
+    and invalidates the stages that depend on it. With ``relock: auto``,
+    that happens on its own, for results that should follow the machine.
 
     ``requirements`` is the other half, and answers a different question.
     It says what must be *true* of this machine -- apps that must be
@@ -1191,8 +1192,17 @@ class SystemEnvironment(Environment):
     lock: list[SystemLockProperty] = Field(
         default=[],
         description="Properties of the machine this environment's results "
-        "depend on. Stages rerun when a locked property changes. Empty means "
-        "nothing about the machine is pinned.",
+        "depend on, recorded the first time it is checked. 'relock' says "
+        "what happens on a machine where they differ. Empty means nothing "
+        "about the machine is pinned.",
+    )
+    relock: Literal["manual", "auto"] = Field(
+        default="manual",
+        description="What happens on a machine whose locked properties "
+        "differ from the lock. 'manual' keeps the lock, and a stage that "
+        "needs to run there fails until 'calkit update env --lock' is run. "
+        "'auto' rewrites the lock, rerunning the stages that depend on it, "
+        "for results that should follow the machine, e.g., benchmarks.",
     )
     requirements: list[RequirementType] = Field(
         default=[],
@@ -1245,6 +1255,14 @@ class SwitchEnvironment(Environment):
         description="Properties of the machine the picked environment runs "
         "on that results depend on, recorded the first time the switch is "
         "checked, as for a 'system' environment.",
+    )
+    relock: Literal["manual", "auto"] = Field(
+        default="manual",
+        description="What happens on a machine whose locked properties "
+        "differ from the lock. 'manual' keeps the lock, and a stage that "
+        "needs to run there fails until 'calkit update env --lock' is run. "
+        "'auto' rewrites the lock, rerunning the stages that depend on it, "
+        "for results that should follow the machine, e.g., benchmarks.",
     )
 
     @field_validator("use")

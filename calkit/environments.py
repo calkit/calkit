@@ -869,7 +869,11 @@ def describe_switch_no_match(env_name: str, env: dict) -> str:
 
 def switch_machine_lock_env(env: dict) -> dict:
     """A switch's machine lock, as the system env whose lock it is."""
-    return {"kind": "system", "lock": env.get("lock") or []}
+    return {
+        "kind": "system",
+        "lock": env.get("lock") or [],
+        "relock": env.get("relock", "manual"),
+    }
 
 
 def picked_machine_info(
@@ -1195,6 +1199,7 @@ def write_system_env_lock(
     lock_data = get_system_lock_data(
         env.get("lock") or [], system_info=system_info
     )
+    relock = relock or env.get("relock") == "auto"
     existing = (
         None
         if relock

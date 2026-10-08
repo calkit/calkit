@@ -3968,6 +3968,10 @@ def run_in_env(
         if calkit.environments.system_env_locks_anything(env):
             try:
                 remote_info = workspace.remote_system_info(ws)
+                # Writes only a first lock, or a new one with 'relock: auto'
+                calkit.environments.write_system_env_lock(
+                    env_name=env_name, env=env, system_info=remote_info
+                )
                 mismatch = calkit.environments.system_env_lock_mismatch(
                     env_name=env_name, env=env, system_info=remote_info
                 )
@@ -4149,6 +4153,10 @@ def run_in_env(
         # Checked even with --no-check, since a stage that needs to run on
         # a machine that doesn't match the lock must not
         try:
+            # Writes only a first lock, or a new one with 'relock: auto'
+            calkit.environments.write_system_env_lock(
+                env_name=env_name, env=env
+            )
             mismatch = calkit.environments.system_env_lock_mismatch(
                 env_name=env_name, env=env
             )

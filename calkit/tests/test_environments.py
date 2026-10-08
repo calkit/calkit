@@ -1664,6 +1664,21 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
     assert envs.read_system_env_lock(
         env_name="bench", env=env
     ) == envs.get_system_lock_data(["cpu-count", "os"])
+    # With 'relock: auto' the lock follows the machine instead
+    auto = env | {"relock": "auto"}
+    envs.write_system_env_lock(
+        env_name="bench", env=auto, system_info=elsewhere
+    )
+    assert envs.read_system_env_lock(env_name="bench", env=auto) == {
+        "cpu-count": elsewhere["cpu_count"],
+        "os": "SomeOtherOS",
+    }
+    assert (
+        envs.switch_machine_lock_env({"lock": ["os"], "relock": "auto"})[
+            "relock"
+        ]
+        == "auto"
+    )
 
 
 def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):

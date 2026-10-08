@@ -1226,6 +1226,10 @@ def _gate_switch_machine_lock(
         system_info = calkit.environments.picked_machine_info(
             picked, envs[picked], ck_info
         )
+        # Writes only a first lock, or a new one with 'relock: auto'
+        calkit.environments.write_system_env_lock(
+            env_name=switch_name, env=machine_env, system_info=system_info
+        )
         mismatch = calkit.environments.system_env_lock_mismatch(
             env_name=switch_name, env=machine_env, system_info=system_info
         )

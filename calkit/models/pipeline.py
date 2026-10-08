@@ -34,6 +34,7 @@ from calkit.models.iteration import (
     ParametersType,
     RangeIteration,
 )
+from calkit.models.requirements import RequirementType
 
 
 def check_path_relative_and_child_of_cwd(s: str) -> str:
@@ -339,6 +340,12 @@ class Stage(BaseModel):
         "when the stage names none of its own; 'merge' runs the "
         "environment's first, then the stage's; 'ignore' never runs the "
         "environment's.",
+    )
+    requirements: list[RequirementType] = Field(
+        default=[],
+        description="What must be true where this stage runs, in addition "
+        "to its environments' requirements. On a machine where they aren't "
+        "met, the stage is skipped and keeps its outputs.",
     )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")

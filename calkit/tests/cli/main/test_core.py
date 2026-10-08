@@ -3119,3 +3119,71 @@ def test_run_switch_env(tmp_dir):
         text=True,
     )
     assert "picked" in out
+
+
+def test_run_skips_stages_that_cant_run_here(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "lab": {
+                "kind": "system",
+                "requirements": [{"kind": "env-var", "name": "CK_TEST_TOKEN"}],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": "printenv CK_TEST_TOKEN > data.txt",
+                    "environment": "lab",
+                    "outputs": [{"path": "data.txt", "storage": "git"}],
+                },
+                "use": {
+                    "kind": "shell-command",
+                    "command": "cat data.txt > result.txt",
+                    "environment": "_system",
+                    "inputs": ["data.txt"],
+                    "outputs": [{"path": "result.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ)
+    # Where the requirement is met, everything runs
+    env["CK_TEST_TOKEN"] = "first"
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("result.txt") as f:
+        assert f.read().strip() == "first"
+    # Somewhere it isn't, the stage is skipped and its output kept, and
+    # what depends on that output still runs from it
+    del env["CK_TEST_TOKEN"]
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    ck_info["pipeline"]["stages"]["fetch"]["command"] = (
+        "printenv CK_TEST_TOKEN > data.txt && echo changed"
+    )
+    ck_info["pipeline"]["stages"]["use"]["command"] = (
+        "cat data.txt data.txt > result.txt"
+    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "run"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "can't run on this machine" in res.stdout + res.stderr
+    with open("data.txt") as f:
+        assert f.read().strip() == "first"
+    with open("result.txt") as f:
+        assert f.read().split() == ["first", "first"]
+    runs = sorted(os.listdir(os.path.join(".calkit", "local", "runs")))
+    with open(os.path.join(".calkit", "local", "runs", runs[-1])) as f:
+        run_info = json.load(f)
+    assert "CK_TEST_TOKEN" in run_info["gated"]["fetch"]
+    assert run_info["stages"]["fetch"]["status"] == "gated"
+    # It stays stale, since running it where it can is what updates it
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "fetch" in out
+    assert "can't run on this machine" in out

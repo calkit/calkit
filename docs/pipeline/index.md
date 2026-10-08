@@ -335,20 +335,21 @@ Stage definitions belong in `pipeline.stages` in `calkit.yaml`.
 
 Common stage parameters:
 
-| Parameter           | Type                                             | Required | Default   | Description                                                                                                                                                                                                                                                                                                           |
-| ------------------- | ------------------------------------------------ | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment`       | str                                              | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
-| `wdir`              | str \| None                                      | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
-| `inputs`            | list[str \| PathInput \| InputsFromStageOutputs] | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.                                                                                                                                                                       |
-| `outputs`           | list[str \| PathOutput]                          | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
-| `always_run`        | bool                                             | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
-| `iterate_over`      | list[StageIteration] \| None                     | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
-| `description`       | str \| None                                      | no       | null      | A description of what this stage does.                                                                                                                                                                                                                                                                                |
-| `frozen`            | bool                                             | no       | False     | Never rerun this stage, treating its outputs as up-to-date.                                                                                                                                                                                                                                                           |
-| `scheduler`         | StageSchedulerOptions \| None                    | no       | null      | Options for running this stage on a job scheduler (SLURM or PBS).                                                                                                                                                                                                                                                     |
-| `setup`             | list[str] \| None                                | no       | null      | Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'. |
-| `env_default_setup` | Literal['ignore', 'replace', 'merge']            | no       | 'replace' | How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.                                                                   |
-| `slurm`             | StageSchedulerOptions \| None                    | no       | null      | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                                                                                                                                                                                             |
+| Parameter           | Type                                                                                                                                     | Required | Default   | Description                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`       | str                                                                                                                                      | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
+| `wdir`              | str \| None                                                                                                                              | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
+| `inputs`            | list[str \| PathInput \| InputsFromStageOutputs]                                                                                         | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.                                                                                                                                                                       |
+| `outputs`           | list[str \| PathOutput]                                                                                                                  | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
+| `always_run`        | bool                                                                                                                                     | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
+| `iterate_over`      | list[StageIteration] \| None                                                                                                             | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
+| `description`       | str \| None                                                                                                                              | no       | null      | A description of what this stage does.                                                                                                                                                                                                                                                                                |
+| `frozen`            | bool                                                                                                                                     | no       | False     | Never rerun this stage, treating its outputs as up-to-date.                                                                                                                                                                                                                                                           |
+| `scheduler`         | StageSchedulerOptions \| None                                                                                                            | no       | null      | Options for running this stage on a job scheduler (SLURM or PBS).                                                                                                                                                                                                                                                     |
+| `setup`             | list[str] \| None                                                                                                                        | no       | null      | Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'. |
+| `env_default_setup` | Literal['ignore', 'replace', 'merge']                                                                                                    | no       | 'replace' | How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.                                                                   |
+| `requirements`      | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs \| None]] | no       |           | What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.                                                                                                                                               |
+| `slurm`             | StageSchedulerOptions \| None                                                                                                            | no       | null      | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                                                                                                                                                                                             |
 
 Parameters whose type is a named object, like `PathOutput`, are described under [nested parameter types](#nested-parameter-types).
 
@@ -721,6 +722,125 @@ accepted here and hoisted onto the stage when it loads.
 | `env_default_setup`   | Literal['ignore', 'replace', 'merge'] | no       | 'replace' | Deprecated; set 'env_default_setup' on the stage itself, alongside its 'setup'.                                                                |
 | `log_path`            | str \| None                           | no       | null      | Path at which to write the job log.                                                                                                            |
 | `log_storage`         | Literal['git', 'dvc'] \| None         | no       | 'git'     | Where to store the job log.                                                                                                                    |
+
+#### `SystemNumberRequirement`
+
+A bound on a numeric property of the machine.
+
+A property is not a thing that can be installed, so there is nothing to
+name and nothing to offer to fix: the check either passes on this
+machine or reports what it found against what was asked for.
+
+At least one bound must be given. An entry that constrains nothing says
+nothing -- if the intent is 'results depend on this property', that is
+what a `system` environment's `lock` is for.
+
+| Parameter     | Type                              | Required | Default | Description                                         |
+| ------------- | --------------------------------- | -------- | ------- | --------------------------------------------------- |
+| `kind`        | Literal['cpu-count', 'memory-gb'] | yes      |         | Which numeric property of the machine to constrain. |
+| `min`         | float \| None                     | no       | null    | Smallest acceptable value, inclusive.               |
+| `max`         | float \| None                     | no       | null    | Largest acceptable value, inclusive.                |
+| `description` | str \| None                       | no       | null    |                                                     |
+
+#### `SystemValueRequirement`
+
+A constraint on a string-valued property of the machine.
+
+`equals` matches exactly, case-insensitively, and a list of values
+means any of them will do. `version_spec` compares as a version, for
+properties like `os-version` and `python-version` where '>=' means
+something.
+
+At least one of the two must be given, for the same reason a numeric
+requirement needs a bound.
+
+| Parameter      | Type                                                                                                                                 | Required | Default | Description                                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `kind`         | Literal['os', 'os-version', 'platform', 'machine', 'processor', 'hostname', 'machine-id', 'python-version', 'python-implementation'] | yes      |         | Which property of the machine to constrain.                                                                           |
+| `equals`       | str \| list[str] \| None                                                                                                             | no       | null    | Value the property must have, matched case-insensitively. A list means any one of them is acceptable.                 |
+| `version_spec` | str \| None                                                                                                                          | no       | null    | PEP 440 version specifier the property must satisfy, e.g. '>=3.11'. For properties that are versions.                 |
+| `matches`      | str \| list[str] \| None                                                                                                             | no       | null    | Glob the property must match, case-insensitively, e.g., `*.cluster.edu` for a hostname. A list means any one of them. |
+| `description`  | str \| None                                                                                                                          | no       | null    |                                                                                                                       |
+
+#### `SetupRequirement`
+
+A `setup` requirement, whose `name` may be omitted.
+
+A single anonymous setup step is common enough that requiring a name
+adds friction, so Calkit synthesizes a stable `setup-<hash>` one from
+`check_command`. This is a separate model rather than a loosening of
+`Requirement.name` so the published schema still rejects an `app`
+or `env-var` requirement with no name, where the name is the
+identity.
+
+| Parameter       | Type               | Required | Default | Description                                                                                                          |
+| --------------- | ------------------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['setup']   | no       | 'setup' |                                                                                                                      |
+| `name`          | str \| None        | no       | null    |                                                                                                                      |
+| `check_command` | str \| None        | no       | null    |                                                                                                                      |
+| `setup_command` | str \| None        | no       | null    |                                                                                                                      |
+| `cache_ttl`     | str \| int \| None | no       | null    |                                                                                                                      |
+| `description`   | str \| None        | no       | null    |                                                                                                                      |
+| `default`       | str \| None        | no       | null    |                                                                                                                      |
+| `version_spec`  | str \| None        | no       | null    | Version specifier an 'app' must satisfy, e.g. '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this. |
+| `notes`         | str \| None        | no       | null    |                                                                                                                      |
+
+#### `Requirement`
+
+Something that must be true of a machine before the project runs.
+
+Four kinds are supported:
+
+- `app`: an executable that must be on `PATH`, optionally
+  satisfying a `version_spec`.
+- `env-var`: an environmental variable that must be defined.
+- `setup`: a per-machine precondition that isn't a file -- e.g.,
+  the user must have authenticated a CLI like `gh auth login`.
+  A `setup` requirement declares `check_command` (a shell command
+  whose exit code determines whether it is satisfied) and
+  `setup_command` (run on a TTY when the user agrees, or printed
+  as a fix-it command otherwise). To run either inside a project
+  environment, prefix it with `calkit xenv -n <env> --` explicitly
+  rather than relying on an implicit wrap. `cache_ttl` skips
+  re-probing slow checks.
+- `calkit-config`: a value that must be set in the user's Calkit
+  configuration.
+
+These name a thing that must be present, so each has a `name`. The
+properties of a machine that can't be installed -- how many CPUs it
+has, what OS it runs -- are constrained by
+`SystemNumberRequirement` and `SystemValueRequirement`
+instead, which name a property rather than a thing.
+
+| Parameter       | Type                                                | Required | Default | Description                                                                                                          |
+| --------------- | --------------------------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['app', 'env-var', 'setup', 'calkit-config'] | no       | 'app'   |                                                                                                                      |
+| `name`          | str                                                 | yes      |         |                                                                                                                      |
+| `check_command` | str \| None                                         | no       | null    |                                                                                                                      |
+| `setup_command` | str \| None                                         | no       | null    |                                                                                                                      |
+| `cache_ttl`     | str \| int \| None                                  | no       | null    |                                                                                                                      |
+| `description`   | str \| None                                         | no       | null    |                                                                                                                      |
+| `default`       | str \| None                                         | no       | null    |                                                                                                                      |
+| `version_spec`  | str \| None                                         | no       | null    | Version specifier an 'app' must satisfy, e.g. '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this. |
+| `notes`         | str \| None                                         | no       | null    |                                                                                                                      |
+
+#### `RequirementAttrs`
+
+A requirement's properties, as written under `{name: {...}}`.
+
+`Requirement` is this plus the name; the mapping form supplies the
+name as its key instead.
+
+| Parameter       | Type                                                | Required | Default | Description |
+| --------------- | --------------------------------------------------- | -------- | ------- | ----------- |
+| `kind`          | Literal['app', 'env-var', 'setup', 'calkit-config'] | no       | 'app'   |             |
+| `check_command` | str \| None                                         | no       | null    |             |
+| `setup_command` | str \| None                                         | no       | null    |             |
+| `cache_ttl`     | str \| int \| None                                  | no       | null    |             |
+| `description`   | str \| None                                         | no       | null    |             |
+| `default`       | str \| None                                         | no       | null    |             |
+| `version_spec`  | str \| None                                         | no       | null    |             |
+| `notes`         | str \| None                                         | no       | null    |             |
 
 #### `PythonScriptDiffFilter`
 

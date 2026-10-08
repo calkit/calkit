@@ -154,6 +154,8 @@ class PipelineStatus(BaseModel):
     # What each switch environment the pipeline uses picks on this machine,
     # None where it picks nothing
     switches: dict[str, str | None] = Field(default_factory=dict)
+    # Stages that can't run on this machine, with why
+    gated_stages: dict[str, str] = Field(default_factory=dict)
     # DVC's data status, when asked for, computed alongside the stage status
     # so it reuses that index and those hashes; not part of the output
     dvc_data_status: dict | None = Field(default=None, exclude=True)
@@ -255,6 +257,9 @@ class StaleStage(BaseModel):
     # mechanism, so they should not be advertised as always-run stages of the
     # parent project.
     is_subproject: bool = False
+    # Why the stage can't run on this machine, if it can't; it stays stale
+    # here, since running elsewhere is what brings it up to date
+    cannot_run_here: str | None = None
 
     @staticmethod
     def _as_path_list(paths: object) -> list[str]:
@@ -851,6 +856,121 @@ def _status_target_matches(
     return any(_paths_overlap(norm_target, p) for p in candidate_paths)
 
 
+def get_gated_stages(
+    ck_info: dict,
+    stage_names: list[str] | None = None,
+    interactive: bool | None = None,
+) -> dict[str, str]:
+    """Stages that can't run on this machine, with the reason for each.
+
+    A stage can't run here when a requirement of it or of an environment
+    it uses isn't met where it would run, when a switch it uses picks
+    nothing here, or when the machine it would run on can't be reached.
+    Such a stage is skipped rather than failed, keeping its outputs.
+    """
+    import json
+
+    import calkit.environments as envs_mod
+
+    envs = ck_info.get("environments", {})
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    gated: dict[str, str] = {}
+    problems: dict[str, str | None] = {}
+
+    def problem_with(
+        requirements: list, machine_name: str | None, machine: dict
+    ) -> str | None:
+        """Why these requirements can't be met where the stage runs."""
+        if machine_name is not None:
+            import subprocess
+
+            import calkit.workspace as workspace
+
+            host = machine.get("host")
+            try:
+                ws = workspace.Workspace.from_env(
+                    env=machine, env_name=machine_name, ck_info=ck_info
+                )
+                ws = workspace.ensure_reachable(ws, interactive=False)
+                workspace.check_requirements(ws, requirements)
+            except (ValueError, subprocess.CalledProcessError) as e:
+                return f"can't reach or use host '{host}': {e}"
+            return None
+        if not requirements:
+            return None
+        try:
+            calkit.check_requirements(
+                requirements=requirements, interactive=interactive
+            )
+        except ValueError as e:
+            return str(e)
+        return None
+
+    for name, stage in stages.items():
+        if stage_names is not None and name not in stage_names:
+            continue
+        if stage.get("frozen"):
+            continue
+        env_names = str(stage.get("environment") or "_system").split(
+            envs_mod.COMPOSITE_ENV_SEP
+        )
+        resolved: list[tuple[str, dict]] = []
+        reason = None
+        for env_name in dict.fromkeys(env_names):
+            env = envs.get(env_name)
+            if env is None:
+                continue
+            resolved.append((env_name, env))
+            if env.get("kind") != envs_mod.SWITCH_KIND:
+                continue
+            try:
+                picked = envs_mod.resolve_switch(env_name, envs)
+            except ValueError as e:
+                reason = str(e)
+                break
+            if picked is None:
+                reason = envs_mod.describe_switch_no_match(env_name, env)
+                break
+            resolved.append((picked, envs[picked]))
+        if reason is None:
+            requirements = list(stage.get("requirements") or [])
+            for _, env in resolved:
+                requirements += env.get("requirements") or []
+            # Checked on the machine the stage runs on, which a remote
+            # outer env names
+            machine_name = None
+            machine: dict = {}
+            for env_name, env in resolved:
+                kind = env.get("kind")
+                if kind == "system" and not envs_mod.env_is_local(
+                    {"host": "localhost", **env}
+                ):
+                    machine_name, machine = env_name, env
+                elif kind in ("slurm", "pbs") and not envs_mod.host_is_local(
+                    env.get("host") or "localhost"
+                ):
+                    machine_name, machine = env_name, env
+            key = json.dumps([machine_name, requirements], default=str)
+            if key not in problems:
+                problems[key] = problem_with(
+                    requirements, machine_name, machine
+                )
+            reason = problems[key]
+            local_machines = [
+                n
+                for n, env in resolved
+                if env.get("kind") == "system" and not env.get("host")
+            ]
+            if reason is not None and machine_name is None and local_machines:
+                reason += (
+                    f"; giving environment '{local_machines[0]}' a 'host' "
+                    "would let its stages run there from here over SSH"
+                )
+        if reason is not None:
+            gated[name] = reason
+    return gated
+
+
 def get_status(
     ck_info: dict | None = None,
     targets: list[str] | None = None,
@@ -917,10 +1037,14 @@ def get_status(
                     return PipelineStatus.model_validate(result)
         if check_environments:
             try:
+                result["gated_stages"] = get_gated_stages(
+                    ck_info, interactive=False
+                )
                 env_checks = calkit.environments.check_all_in_pipeline(
                     ck_info=ck_info,
                     targets=targets,
                     force=force_env_check,
+                    skip_stages=list(result["gated_stages"]),
                 )
                 result["environment_checks"] = env_checks
             except Exception as e:
@@ -1334,6 +1458,11 @@ def get_status(
                         annotated = True
             if not annotated:
                 ignored_files_in_inputs.setdefault(name, {})[dep_path] = files
+        gated_stages = result.get("gated_stages", {})
+        for display_name, stale_stage in ordered_stale_stages.items():
+            reason = gated_stages.get(display_name.split("@")[0])
+            if reason is not None:
+                stale_stage.cannot_run_here = reason
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
@@ -1343,6 +1472,7 @@ def get_status(
             errors=result["errors"],
             ignored_files_in_inputs=ignored_files_in_inputs,
             switches=result.get("switches", {}),
+            gated_stages=result.get("gated_stages", {}),
             dvc_data_status=dvc_data_status,
         )
     finally:

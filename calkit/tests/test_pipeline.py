@@ -3845,3 +3845,95 @@ def test_switch_env_compiles(tmp_dir):
                 },
                 write=False,
             )
+
+
+def test_get_gated_stages(tmp_dir, monkeypatch):
+    monkeypatch.delenv("CK_TEST_TOKEN", raising=False)
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "requirements": [{"kind": "hostname", "matches": "*"}],
+            },
+            "cluster-only": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "requirements": [
+                    {"kind": "hostname", "matches": "*.calkit-test.invalid"}
+                ],
+            },
+            "lab": {
+                "kind": "system",
+                "requirements": [{"kind": "env-var", "name": "CK_TEST_TOKEN"}],
+            },
+            "far": {"kind": "system", "host": "calkit-test.invalid"},
+            "nowhere": {
+                "kind": "switch",
+                "use": {"if cpu_count < 0": "lab"},
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "ok": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "py",
+                },
+                "needs-token": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "_system",
+                    "requirements": [
+                        {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+                    ],
+                },
+                "on-cluster": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "cluster-only",
+                },
+                "in-lab": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "lab",
+                },
+                "far-away": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "far",
+                },
+                "no-pick": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "nowhere",
+                },
+                "frozen": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "lab",
+                    "frozen": True,
+                },
+            }
+        },
+    }
+    gated = calkit.pipeline.get_gated_stages(ck_info, interactive=False)
+    assert set(gated) == {
+        "needs-token",
+        "on-cluster",
+        "in-lab",
+        "far-away",
+        "no-pick",
+    }
+    assert "CK_TEST_TOKEN" in gated["needs-token"]
+    assert "*.calkit-test.invalid" in gated["on-cluster"]
+    # A local system env that can't run here could from here with a host
+    assert "giving environment 'lab' a 'host'" in gated["in-lab"]
+    assert "can't reach or use host 'calkit-test.invalid'" in gated["far-away"]
+    assert "picks no environment" in gated["no-pick"]
+    # Meeting the requirement lets the stages run
+    monkeypatch.setenv("CK_TEST_TOKEN", "x")
+    gated = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["needs-token", "in-lab"], interactive=False
+    )
+    assert gated == {}

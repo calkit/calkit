@@ -805,6 +805,12 @@ def get_status(
                 if stale_stage is None:
                     continue
                 typer.echo(f"        {typer.style(stage_name, fg='yellow')}:")
+                if stale_stage.cannot_run_here:
+                    warn(
+                        "          can't run on this machine: "
+                        f"{stale_stage.cannot_run_here}",
+                        prefix="",
+                    )
                 if stale_stage.always_run:
                     typer.echo("          always runs")
                 if stale_stage.modified_command:
@@ -2214,6 +2220,7 @@ def _stage_run_info_from_log_content(
             current_stage_status = "running"
             add_stage_info(current_stage_name, "start_time", timestamp)
         elif message.startswith("Stage ") and "skipping" in message:
+            gated = "can't run on this machine" in message
             if (
                 current_stage_name is not None
                 and current_stage_status == "running"
@@ -2222,7 +2229,7 @@ def _stage_run_info_from_log_content(
                 add_stage_info(current_stage_name, "end_time", timestamp)
                 add_stage_info(current_stage_name, "status", "completed")
             current_stage_name = message.removeprefix("Stage '").split("'")[0]
-            current_stage_status = "skipped"
+            current_stage_status = "gated" if gated else "skipped"
             add_stage_info(current_stage_name, "start_time", timestamp)
             add_stage_info(current_stage_name, "end_time", timestamp)
             add_stage_info(current_stage_name, "status", current_stage_status)
@@ -2456,6 +2463,7 @@ def _concurrent_scheduler_prepass(
     targets: list[str],
     keep_going: bool,
     quiet: bool,
+    skip_stages: list[str] | None = None,
 ) -> None:
     """Submit iterated scheduler-stage jobs concurrently before ``dvc repro``.
 
@@ -2473,6 +2481,7 @@ def _concurrent_scheduler_prepass(
     import calkit.pipeline
 
     eligible = calkit.pipeline.get_concurrent_scheduler_stages(ck_info)
+    eligible = [name for name in eligible if name not in (skip_stages or [])]
     if targets:
         eligible = [name for name in eligible if name in targets]
     if not eligible:
@@ -2803,11 +2812,27 @@ def run(
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(f"Failed to read markdown stages: {e}")
+    # Stages that can't run here are skipped, keeping their outputs, and
+    # their environments aren't checked
+    import calkit.markdown
+
+    try:
+        gated_stages = calkit.pipeline.get_gated_stages(
+            calkit.markdown.expand_ck_info(ck_info).ck_info
+        )
+    except Exception as e:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(f"Failed to check stage requirements: {e}")
+    for stage_name, reason in gated_stages.items():
+        warn(f"Stage '{stage_name}' can't run on this machine: {reason}")
     # Check all environments in the pipeline (with caching)
     # If any failed, warn the user that we might have problems running
     calkit.echo("📦 Checking environments")
     env_check_results = calkit.environments.check_all_in_pipeline(
-        ck_info=ck_info, targets=targets, force=force
+        ck_info=ck_info,
+        targets=targets,
+        force=force,
+        skip_stages=list(gated_stages),
     )
     for env_name, result in env_check_results.items():
         if verbose:
@@ -3077,6 +3102,7 @@ def run(
             targets=targets,
             keep_going=keep_going,
             quiet=quiet,
+            skip_stages=list(gated_stages),
         )
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
@@ -3169,7 +3195,10 @@ def run(
         # releases the repo lock while a stage command runs and re-acquires it
         # the instant it finishes) can all hold it momentarily. Without this,
         # such a collision aborts the whole run with "Unable to acquire lock".
-        with calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT):
+        with (
+            calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT),
+            calkit.dvc.skip_stages(gated_stages),
+        ):
             res = _run_dvc_repro(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
@@ -3291,6 +3320,8 @@ def run(
                 )
             except ValueError:
                 switch_picks[env_name] = None
+    if gated_stages:
+        run_info["gated"] = gated_stages
     if switch_picks:
         run_info["switches"] = switch_picks
         run_stages = ck_info.get("pipeline", {}).get("stages", {})
@@ -3949,7 +3980,9 @@ def run_in_env(
                     )
                 )
         repo = calkit.git.get_repo()
-        remote_shell_cmd = _to_shell_cmd(cmd)
+        remote_shell_cmd = _to_shell_cmd(
+            calkit.environments.check_inner_env_there(cmd)
+        )
         if (
             setup_argv := _with_system_env_setup(remote_shell_cmd)
         ) is not None:

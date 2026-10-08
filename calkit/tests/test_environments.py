@@ -84,6 +84,47 @@ def test_check_all_in_pipeline(tmp_dir):
     print(res)
     assert res["py1"]["success"]
     assert res["py1"]["cached"]
+    # An inner env runs where its outer env does, so one behind another
+    # machine isn't checked here; nor are the envs of stages that are
+    # skipped, and an undefined env is a failure rather than a crash
+    ck_info["environments"]["far"] = {
+        "kind": "system",
+        "host": "calkit-test.invalid",
+    }
+    ck_info["environments"]["py2"] = {
+        "kind": "uv-venv",
+        "path": "requirements.txt",
+        "prefix": ".venv2",
+    }
+    stages = ck_info["pipeline"]["stages"]
+    stages["remote"] = {
+        "kind": "python-script",
+        "script_path": "s.py",
+        "environment": "far:py2",
+    }
+    stages["skipped"] = {
+        "kind": "python-script",
+        "script_path": "s.py",
+        "environment": "py2",
+    }
+    stages["typo"] = {
+        "kind": "python-script",
+        "script_path": "s.py",
+        "environment": "nope",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = calkit.environments.check_all_in_pipeline(skip_stages=["skipped"])
+    assert set(res) == {"py1", "far", "nope"}
+    assert not res["nope"]["success"]
+    assert not os.path.isdir(".venv2")
+    assert calkit.environments.check_inner_env_there(
+        ["calkit", "xenv", "-n", "py2", "--no-check", "--", "a", "--no-check"]
+    ) == ["calkit", "xenv", "-n", "py2", "--", "a", "--no-check"]
+    assert calkit.environments.check_inner_env_there(["echo", "hi"]) == [
+        "echo",
+        "hi",
+    ]
 
 
 def test_cache_uses_dir_signature_for_conda_prefix(tmp_dir, monkeypatch):

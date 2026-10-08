@@ -211,6 +211,56 @@ def dvc_lock_timeout(seconds: float):
         dvc.lock.DEFAULT_TIMEOUT = previous
 
 
+@contextlib.contextmanager
+def skip_stages(reasons: dict[str, str]) -> Iterator[None]:
+    """Skip these stages in ``dvc repro`` while active, keeping their outputs.
+
+    Keyed by Calkit stage name, which also covers the ``<name>@<item>``
+    stages DVC makes from an iterated one. A skipped stage is frozen, so its
+    own inputs aren't reproduced on its account, and isn't run or recorded
+    in ``dvc.lock``, so it stays out of date rather than looking current.
+    """
+    from dvc.stage import Stage
+    from dvc.stage.loader import StageLoader
+
+    def reason_for(stage: Any) -> str | None:
+        name = getattr(stage, "name", None)
+        if not name:
+            return None
+        return reasons.get(name, reasons.get(name.split("@")[0]))
+
+    original_load = StageLoader.__dict__["load_stage"]
+    original_reproduce = Stage.reproduce
+
+    def load_stage(cls: Any, *args: Any, **kwargs: Any) -> Any:
+        stage = original_load.__func__(cls, *args, **kwargs)
+        if reason_for(stage) is not None:
+            stage.frozen = True
+        return stage
+
+    def reproduce(self: Any, *args: Any, **kwargs: Any) -> Any:
+        reason = reason_for(self)
+        if reason is None:
+            return original_reproduce(self, *args, **kwargs)
+        logging.getLogger("dvc").info(
+            "Stage '%s' can't run on this machine, skipping: %s",
+            self.addressing,
+            reason,
+        )
+        return None
+
+    if not reasons:
+        yield
+        return
+    setattr(StageLoader, "load_stage", classmethod(load_stage))
+    setattr(Stage, "reproduce", reproduce)
+    try:
+        yield
+    finally:
+        setattr(StageLoader, "load_stage", original_load)
+        setattr(Stage, "reproduce", original_reproduce)
+
+
 _memoized_hashes_lock = threading.RLock()
 
 

@@ -949,7 +949,9 @@ def run_batch(
             # Re-run this same invocation over there. It terminates rather
             # than bouncing onward, since on the cluster the env's host is
             # local and this branch isn't taken.
-            remote_command = "calkit " + shlex.join(argv)
+            remote_command = "calkit " + shlex.join(
+                calkit.environments.check_inner_env_there(argv)
+            )
             workspace.run_in_workspace(
                 workspace=ws,
                 command=remote_command,

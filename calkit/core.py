@@ -851,12 +851,26 @@ def check_property_requirement(
         return
     equals = req.get("equals")
     spec = req.get("version_spec")
-    if equals is None and spec is None:
+    patterns = req.get("matches")
+    if equals is None and spec is None and patterns is None:
         raise ValueError(
-            f"Requirement on '{prop}' needs an 'equals' or a 'version_spec'; "
-            "to depend on its value rather than constrain it, add it to the "
-            "environment's 'lock'"
+            f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
+            "'version_spec'; to depend on its value rather than constrain "
+            "it, add it to the environment's 'lock'"
         )
+    if patterns is not None:
+        import fnmatch
+
+        globs = [patterns] if isinstance(patterns, str) else list(patterns)
+        if not any(
+            fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
+            for g in globs
+        ):
+            wanted = " or ".join(f"'{g}'" for g in globs)
+            raise ValueError(
+                f"{described_as} has {prop} '{value}', which doesn't match "
+                f"{wanted}"
+            )
     if equals is not None:
         allowed = [equals] if isinstance(equals, str) else list(equals)
         # Matched case-insensitively because the same machine is 'Darwin'

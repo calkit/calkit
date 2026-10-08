@@ -229,6 +229,11 @@ def test_check_property_requirement():
     check({"kind": "os", "equals": ["Darwin", "Linux"]}, info)
     with pytest.raises(ValueError, match="'Darwin' is required"):
         check({"kind": "os", "equals": "Darwin"}, info)
+    # Globs match case-insensitively too, and a list means any of them
+    check({"kind": "os", "matches": "lin*"}, info)
+    check({"kind": "os", "matches": ["darwin", "L?nux"]}, info)
+    with pytest.raises(ValueError, match="doesn't match 'win\\*'"):
+        check({"kind": "os", "matches": "win*"}, info)
     # Versions compare as versions rather than as strings
     check({"kind": "python-version", "version_spec": ">=3.11"}, info)
     with pytest.raises(ValueError, match=">=3.13"):

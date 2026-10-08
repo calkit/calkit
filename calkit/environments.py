@@ -1512,11 +1512,45 @@ def save_cache(
     return data
 
 
+def check_inner_env_there(argv: list[str]) -> list[str]:
+    """Drop ``--no-check`` from an inner ``calkit xenv`` sent elsewhere.
+
+    A compiled stage skips the inner check because it ran up front, but
+    that was here; the machine the command is sent to has to build the
+    environment itself.
+    """
+    for i in range(len(argv) - 1):
+        if argv[i] == "calkit" and argv[i + 1] in ("xenv", "runenv"):
+            rest = argv[i + 2 :]
+            end = rest.index("--") if "--" in rest else len(rest)
+            options = [a for a in rest[:end] if a != "--no-check"]
+            return argv[: i + 2] + options + rest[end:]
+    return argv
+
+
+def _runs_elsewhere(env_name: str, envs: dict) -> bool:
+    """Whether an outer env runs its stages on another machine."""
+    env = envs.get(env_name) or {}
+    kind = env.get("kind")
+    if kind == SWITCH_KIND:
+        try:
+            picked = resolve_switch(env_name, envs)
+        except ValueError:
+            return False
+        return picked is not None and _runs_elsewhere(picked, envs)
+    if kind == "system":
+        return not env_is_local({"host": "localhost", **env})
+    if kind in ("slurm", "pbs"):
+        return not host_is_local(env.get("host") or "localhost")
+    return False
+
+
 def check_all_in_pipeline(
     ck_info: dict | None = None,
     wdir: str | None = None,
     targets: list[str] | None = None,
     force: bool = False,
+    skip_stages: list[str] | None = None,
 ) -> dict:
     """Check all environments in the pipeline, caching for efficiency.
 
@@ -1568,6 +1602,9 @@ def check_all_in_pipeline(
                 for name in calkit.latex.get_diff_stage_names(k, v)
             )
         }
+    # Stages that can't run here don't need their environments
+    stages = {k: v for k, v in stages.items() if k not in (skip_stages or [])}
+    envs = ck_info.get("environments", {})
     envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
     envs_in_pipeline = [
         e for e in envs_in_pipeline if e and not (str(e)).startswith("_")
@@ -1578,13 +1615,22 @@ def check_all_in_pipeline(
     for env_name in envs_in_pipeline:
         if env_name.count(COMPOSITE_ENV_SEP) == 1:
             outer_env_name, sub_env_name = env_name.split(COMPOSITE_ENV_SEP)
-            split_envs += [outer_env_name, sub_env_name]
+            split_envs.append(outer_env_name)
+            # An inner env is built where the stage runs, so one whose
+            # outer env is another machine is checked there, not here
+            if not _runs_elsewhere(outer_env_name, envs):
+                split_envs.append(sub_env_name)
         else:
             split_envs.append(env_name)
-    envs_in_pipeline = list(set(split_envs))
-    envs = ck_info.get("environments", {})
+    envs_in_pipeline = list(dict.fromkeys(split_envs))
     for env_name in envs_in_pipeline:
         env = envs.get(env_name)
+        if env is None:
+            res[env_name] = {
+                "success": False,
+                "error": f"Environment '{env_name}' is not defined",
+            }
+            continue
         if env.get("kind") in KINDS_NO_CHECK:
             continue
         if not force:

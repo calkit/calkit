@@ -81,6 +81,12 @@ BASE: dict[str, Any] = {
     "detect_full": 0.6,
     "detect_partial": 0.3,
     "detect_self": 0.1,
+    # Chance a finding's framing drifts from the question it was meant to
+    # answer, e.g., an analysis that answers something adjacent, and the
+    # chance a review, or the student working downstream, notices, which
+    # takes a written question to check it against
+    "drift_prob": 0.0,
+    "detect_drift": 0.05,
     # Chance each PI session's automated re-check of every approved finding
     # against its evidence catches a flaw in one, which needs the evidence
     # linked, as Calkit does
@@ -202,6 +208,9 @@ COLLABORATION = {"pi_learn_hours": 0.25}
 VERIFICATION = {"detect_self": 0.2, "reverify": 0.3}
 PI_ASSIST = {"pi_hours_full": 0.5, "pi_hours_partial": 0.125}
 TRANSPARENCY = {"detect_reviewer": 0.8, "shared": True}
+# Each finding starting from a written question, and reviewed as an answer
+# to it
+QUESTIONS = {"detect_drift": 0.5}
 # Reviewing one answer at a time with its evidence and the code behind it,
 # which takes the PI less time and catches more
 FOCUSED_REVIEW = {
@@ -229,6 +238,7 @@ PRODUCTIVE_WAIT = 0.5
 
 @dataclass
 class Flaw:
+    # -1 for a finding's framing drifting from its question
     stage: int
     detected: bool = False
     fixed: bool = False
@@ -250,6 +260,8 @@ class Item:
     # Its last attempt didn't work, so it went back to try again
     retried: bool = False
     idea_checked: bool = False
+    # Whether its framing has had its chance to drift
+    framed: bool = False
     done_stages: set[int] = field(default_factory=set)
     fixes: dict[int, Flaw] = field(default_factory=dict)
     taints: dict[int, Flaw] = field(default_factory=dict)
@@ -343,15 +355,20 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         # Send everything built on a caught flaw back to that stage
         for flaw in flaws:
             flaw.detected = True
-            if active_flaws[flaw.stage] is flaw:
+            if flaw.stage >= 0 and active_flaws[flaw.stage] is flaw:
                 active_flaws[flaw.stage] = None
         for i in items:
             caught = [s for s, f in i.taints.items() if f.detected]
             if not caught:
                 continue
             for s in caught:
-                i.fixes[s] = i.taints.pop(s)
-            i.pos = min(i.pos, i.path.index(min(caught)))
+                flaw = i.taints.pop(s)
+                if s >= 0:
+                    i.fixes[s] = flaw
+                else:
+                    # A drifted finding is reframed at its first stage
+                    i.fixes.setdefault(i.path[0], flaw)
+            i.pos = min(i.pos, i.path.index(max(min(caught), i.path[0])))
             i.version += 1
             i.approved = False
             # The paper needs reading again
@@ -406,6 +423,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             error = tool("handoff_error")[item.path[item.pos - 1]]
             if error and rng.random() < error:
                 item.taints[s] = Flaw(s)
+        if not item.framed and p["drift_prob"]:
+            item.framed = True
+            if rng.random() < p["drift_prob"]:
+                item.taints[-1] = Flaw(-1)
         item.done_stages.add(s)
         item.pos += 1
         item.changed = True
@@ -413,7 +434,9 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         noticed = [
             f
             for j, f in item.taints.items()
-            if j < s and not f.detected and rng.random() < p["detect_self"]
+            if j < s
+            and not f.detected
+            and rng.random() < p["detect_drift" if j < 0 else "detect_self"]
         ]
         if noticed:
             loops += 1
@@ -468,11 +491,13 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         if not approved_items:
             return
         loops += 1
+        # Checking answers against their evidence can't show they answer
+        # the wrong question
         flaws = {
             id(f): f
             for i in approved_items
             for f in i.taints.values()
-            if not f.detected
+            if not f.detected and f.stage >= 0
         }
         caught = []
         for flaw in flaws.values():
@@ -498,7 +523,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             p_miss = 1.0
             for i in reviewed_items:
                 if i.taints.get(flaw.stage) is flaw:
-                    d = p["detect_full" if i.done else "detect_partial"]
+                    if flaw.stage < 0:
+                        d = p["detect_drift"]
+                    else:
+                        d = p["detect_full" if i.done else "detect_partial"]
                     p_miss *= 1 - d
             if rng.random() < 1 - p_miss:
                 caught.append(flaw)
@@ -564,7 +592,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                 found = [
                     f
                     for f in flaws.values()
-                    if rng.random() < p["curate_detect"]
+                    if f.stage >= 0 and rng.random() < p["curate_detect"]
                 ]
                 if found:
                     catch(found)

@@ -23,6 +23,7 @@ from research_flow import (
     FOCUSED_REVIEW,
     HANDOFF_FROM,
     LEARNED,
+    QUESTIONS,
     ROUND_TRIP,
     STAGES,
     TOOLING,
@@ -103,6 +104,10 @@ def defaults() -> dict[str, Any]:
         "loop_to": 4,
         "attempts": BASE["attempts"],
         "policy": "stage-gate",
+        # Results whose framing drifts from their question, in percent,
+        # and whether reviews today check results against a written one
+        "drift": 20.0,
+        "focus": "outputs",
         "agents": False,
         "pi_hours_per_week": BASE["pi_hours_per_week"],
         "review_interval": BASE["review_interval"],
@@ -145,6 +150,7 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
         "loop_from": int(inputs["loop_from"]),
         "loop_to": int(inputs["loop_to"]),
         "attempts": float(inputs["attempts"]),
+        "drift_prob": float(inputs["drift"]) / 100,
         "work": [float(r["work"]) for r in rows],
         "fix_factor": [float(r["fix_factor"]) for r in rows],
         "flaw_prob": [float(r["flaw_prob"]) for r in rows],
@@ -180,7 +186,16 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
     policy = inputs["policy"]
     browser = inputs["pi_reviews_in"] == "browser"
     review = COLLABORATION if browser else ROUND_TRIP
-    calkit = CALKIT | review | VERIFICATION | FOCUSED_REVIEW | TRANSPARENCY
+    if inputs["focus"] == "questions":
+        base |= QUESTIONS
+    calkit = (
+        CALKIT
+        | review
+        | VERIFICATION
+        | FOCUSED_REVIEW
+        | QUESTIONS
+        | TRANSPARENCY
+    )
     # Calkit's curation, for sharing the project with the paper
     curate = {k: automated[k] for k in ["curate_fixed", "curate_item"]}
     out = {"today": (policy, params("manual"))}
@@ -221,6 +236,10 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
     out["Answers checked against their evidence"] = (
         policy,
         params("manual", VERIFICATION),
+    )
+    out["Questions written first, with each result reviewed as an answer"] = (
+        policy,
+        params("manual", QUESTIONS),
     )
     out["Focused reviews of each answer, with its evidence and code"] = (
         policy,

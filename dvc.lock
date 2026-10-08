@@ -133,8 +133,8 @@ stages:
       size: 5
     - path: docs/simulator/research_flow.py
       hash: md5
-      md5: e786b83b374306b2a928ab47dee92065
-      size: 32642
+      md5: 5341e8a50649d0502de920070ab8508a
+      size: 33935
     - path: scripts/research-flow.py
       hash: md5
       md5: 34cff412bea09c64c68caf92b42e0f27
@@ -146,8 +146,8 @@ stages:
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: 7c0783d3f615eac5256145acd7536161
-      size: 72849
+      md5: 16251cc3979296693b03f3c946775f33
+      size: 72902
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -157,8 +157,8 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: 7c0783d3f615eac5256145acd7536161
-      size: 72849
+      md5: 16251cc3979296693b03f3c946775f33
+      size: 72902
     - path: scripts/plot-research-flow.py
       hash: md5
       md5: fc8849c6c10e026ae15a0817b13b43f1
@@ -310,10 +310,10 @@ stages:
       size: 1649
     - path: results/research-flow.json
       hash: md5
-      md5: 7c0783d3f615eac5256145acd7536161
-      size: 72849
+      md5: 16251cc3979296693b03f3c946775f33
+      size: 72902
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: d82e304c94d0f161b250e81f30e5845b
-      size: 136295
+      md5: 54560ff3404192c557f0a0284b57ca9c
+      size: 136029

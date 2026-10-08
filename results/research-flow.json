@@ -45,6 +45,8 @@
       "detect_full": 0.6,
       "detect_partial": 0.3,
       "detect_self": 0.1,
+      "drift_prob": 0.0,
+      "detect_drift": 0.05,
       "reverify": 0.0,
       "idea_prob": 0.3,
       "idea_split": [

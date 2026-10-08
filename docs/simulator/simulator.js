@@ -18,6 +18,14 @@ const POLICIES = {
     "One result at a time, through to a draft, before starting the next, " +
     "with PI reviews at regular meetings",
 };
+const FOCUS = {
+  outputs:
+    "Reviews look at the outputs, e.g., figures and tables, with the " +
+    "questions in mind",
+  questions:
+    "Each result starts from a written question, and reviews check that " +
+    "it answers it",
+};
 const REVIEWERS = {
   browser: "The browser",
   word: "Word, via the round trip",
@@ -25,6 +33,16 @@ const REVIEWERS = {
 const SETTINGS = [
   ["n_findings", "Results worth writing up in the paper", { min: 1, step: 1 }],
   ["policy", "How you work through your results today", { radio: POLICIES }],
+  [
+    "focus",
+    "How you check results against your research questions today",
+    { radio: FOCUS },
+  ],
+  [
+    "drift",
+    "Results that end up not answering the question they were meant to (%)",
+    { max: 100 },
+  ],
   ["agents", "You use AI agents", { checkbox: true }],
   ["pi_hours_per_week", "PI hours per week for your work", {}],
   [
@@ -441,7 +459,8 @@ function bars(rows, [lo, hi] = extent(rows)) {
 function renderReport(report) {
   const { today, first, later } = report;
   const flawed = (c) =>
-    `${c.flawed.toFixed(1)} flawed results published, vs
+    `${c.flawed.toFixed(1)} results published flawed or off their
+    question, vs
     ${today.flawed.toFixed(1)}`;
   const saving = (c, label = c.name) => ({
     label,
@@ -463,8 +482,9 @@ function renderReport(report) {
     `${c.ratio.toFixed(2)}× as fast as today; ${flawed(c)} today`;
   const policy = report.split ? "stage-gate" : "lean";
   // Where Calkit's savings come from, which add up only roughly
-  let sources = `All ${days(first.saved)} days saved come from connecting
-    your tools in one project, since you already work in small batches.`;
+  let sources = `All ${days(first.saved)} days saved come from one Calkit
+    project, with connected tools and written questions, since you already
+    work in small batches.`;
   if (report.split) {
     const { batches, project, together } = report.split;
     const extra =
@@ -473,8 +493,9 @@ function renderReport(report) {
         : `${days(-together)} less than they save apart`;
     sources = `Of the ${days(first.saved)} days saved, about
       ${days(batches)} come from smaller batches and ${days(project)} from
-      connecting your tools in one project. Together they save ${extra},
-      which is split evenly between them here.`;
+      one Calkit project, with connected tools and written questions.
+      Together they save ${extra}, which is split evenly between them
+      here.`;
   }
   const cells = [
     cell(
@@ -485,7 +506,8 @@ function renderReport(report) {
       today,
       `${months(today.days)} months; 80% of runs
       ${days(today.p10)}–${days(today.p90)};
-      ${today.flawed.toFixed(1)} flawed results published`,
+      ${today.flawed.toFixed(1)} results published flawed or off
+      their question`,
     ),
     cell(
       "calkit",
@@ -520,7 +542,8 @@ function renderReport(report) {
     <h2>What each part of Calkit saves</h2>
     <p class="sim-caption">Working days saved per paper by each part of
       Calkit added to how you work today on its own, with 95% intervals,
-      from ${report.reps} runs each. Hover for flawed results published.</p>
+      from ${report.reps} runs each. Hover for results published flawed
+      or off their question.</p>
     ${bars(parts, scale)}
     ${
       adding.length
@@ -577,6 +600,8 @@ async function simulate() {
       policy: inputs.policy,
       agents: inputs.agents,
       attempts: inputs.attempts,
+      focus: inputs.focus,
+      drift: inputs.drift,
       seconds: Number(seconds),
     });
     status.textContent = `Ran ${total.toLocaleString()} simulations in

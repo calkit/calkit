@@ -1599,13 +1599,58 @@ class ShellCommandStage(Stage):
     )
 
     @property
+    def command_file_path(self) -> str | None:
+        """Where a command the calling shell would expand is written.
+
+        DVC runs a stage's command through a shell, which on POSIX expands
+        ``$VAR`` and backticks before anything the stage runs in, e.g., a
+        container, a job, or the environment's setup. Run from a file, the
+        command is only read by the shell meant to run it. Iterated stages
+        keep the command inline, since their arguments are filled into it.
+        """
+        if self.iterate_over is not None:
+            return None
+        if "$" not in self.command and "`" not in self.command:
+            return None
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.name or "")
+        return posixpath.join(".calkit", "stage-commands", f"{safe}.sh")
+
+    def write_command_file(self, wdir: str | None = None) -> str | None:
+        """Write the command to its file, if it has one."""
+        rel_path = self.command_file_path
+        if rel_path is None:
+            return None
+        fpath = os.path.join(wdir, rel_path) if wdir else rel_path
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        content = self.command.rstrip("\n") + "\n"
+        if os.path.isfile(fpath):
+            with open(fpath) as f:
+                if f.read() == content:
+                    return rel_path
+        with open(fpath, "w", newline="\n") as f:
+            f.write(content)
+        return rel_path
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = super().dvc_deps
+        command_file = self.command_file_path
+        if command_file is not None:
+            deps = [command_file] + deps
+        return deps
+
+    @property
     def dvc_cmd(self) -> str:
-        shell_cmd = self.command.replace('"', '\\"')
         cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
         else:
             norc_args = "--noprofile --norc"
+        command_file = self.command_file_path
+        if command_file is not None:
+            cmd += f" {self.shell} {norc_args} {command_file}"
+            return cmd.strip()
+        shell_cmd = self.command.replace('"', '\\"')
         cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
         return cmd.strip()
 

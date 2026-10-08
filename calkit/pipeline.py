@@ -19,6 +19,7 @@ from calkit.models.pipeline import (
     LatexStage,
     PathOutput,
     Pipeline,
+    ShellCommandStage,
     Stage,
 )
 
@@ -2256,6 +2257,14 @@ def to_dvc(
                 marker="calkit stage setup",
                 lines=["/.calkit/stage-setup/"],
             )
+        # Committed, unlike the setup files, so a remote workspace gets them
+        # with the rest of the snapshot
+        command_files = [
+            path
+            for stage in pipeline.stages.values()
+            if isinstance(stage, ShellCommandStage)
+            and (path := stage.write_command_file(wdir=wdir)) is not None
+        ]
         # Hashes of this machine's values, so like the setup files they are
         # rewritten by every compile and not committed
         env_var_files = [
@@ -2282,10 +2291,13 @@ def to_dvc(
         # environment that locks under .calkit has nothing whose hash a
         # line-ending rewrite could change, and shouldn't get a
         # .gitattributes it never needed.
-        if manage_gitignore and any(
-            Path(p).as_posix().startswith(".calkit/env-locks/")
-            for paths in env_lock_fpaths.values()
-            for p in paths
+        if manage_gitignore and (
+            command_files
+            or any(
+                Path(p).as_posix().startswith(".calkit/env-locks/")
+                for paths in env_lock_fpaths.values()
+                for p in paths
+            )
         ):
             _ensure_calkit_gitattributes(wdir=wdir)
     # Ensure environment lock files are set as stage inputs if necessary

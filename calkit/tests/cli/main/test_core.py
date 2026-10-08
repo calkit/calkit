@@ -3090,7 +3090,7 @@ def test_run_switch_env(tmp_dir):
             "stages": {
                 "s": {
                     "kind": "shell-command",
-                    "command": "printenv WHERE > out.txt",
+                    "command": "echo $WHERE > out.txt",
                     "environment": "cluster",
                     "outputs": ["out.txt"],
                 }

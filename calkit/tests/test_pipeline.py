@@ -3949,3 +3949,47 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
         ck_info, stage_names=["needs-token", "in-lab"], interactive=False
     )
     assert gated == {}
+
+
+def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
+    tmp_dir,
+):
+    subprocess.check_call(["calkit", "init"])
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "pipeline": {
+                "stages": {
+                    "plain": {
+                        "kind": "shell-command",
+                        "command": "echo hi > a.txt",
+                        "environment": "_system",
+                    },
+                    "var": {
+                        "kind": "shell-command",
+                        "command": 'X=1; echo "$X" `date` > b.txt',
+                        "environment": "_system",
+                    },
+                }
+            }
+        },
+        write=True,
+    )
+    # Nothing to expand, so nothing changes
+    assert (
+        stages["plain"]["cmd"]
+        == 'bash --noprofile --norc -c "echo hi > a.txt"'
+    )
+    # Otherwise the command is read only by the shell meant to run it
+    assert stages["var"]["cmd"] == (
+        "bash --noprofile --norc .calkit/stage-commands/var.sh"
+    )
+    assert ".calkit/stage-commands/var.sh" in stages["var"]["deps"]
+    with open(".calkit/stage-commands/var.sh") as f:
+        assert f.read() == 'X=1; echo "$X" `date` > b.txt\n'
+    with open(".gitattributes") as f:
+        assert ".calkit" in f.read()
+    subprocess.check_call(
+        ["bash", "--noprofile", "--norc", ".calkit/stage-commands/var.sh"]
+    )
+    with open("b.txt") as f:
+        assert f.read().startswith("1 ")

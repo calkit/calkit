@@ -681,7 +681,7 @@ def check_environment(
             machine_env = calkit.environments.switch_machine_lock_env(env)
             try:
                 system_info = calkit.environments.picked_machine_info(
-                    picked, envs[picked], ck_info
+                    picked, envs[picked], ck_info, lock=env.get("lock")
                 )
                 write_system_env_lock(
                     env_name=env_name, env=machine_env, system_info=system_info
@@ -787,7 +787,12 @@ def check_environment(
                 )
                 system_info = None
                 if needs_system_info:
-                    system_info = workspace.remote_system_info(ws)
+                    system_info = workspace.remote_system_info(
+                        ws,
+                        apps=calkit.environments.lock_app_names(
+                            env.get("lock")
+                        ),
+                    )
                     # Before anything else is decided from it, so a
                     # mismatched machine is reported rather than measured
                     # and recorded as what results depend on
@@ -1914,11 +1919,29 @@ def check_venv(
     activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
 
     # A lock resolved from the current spec is an input, not rewritten here
-    lock_is_current = calkit.environments.venv_lock_matches_spec(
+    lock_is_current = calkit.environments.stamped_lock_matches_spec(
         os.path.join(wdir or "", lock_fpath),
         os.path.join(wdir or "", path),
         python=python,
     )
+
+    def venv_python_version() -> str | None:
+        """The Python version a plain venv was created with."""
+        if _platform.system() == "Windows":
+            exe = os.path.join(prefix_full_path, "Scripts", "python.exe")
+        else:
+            exe = os.path.join(prefix_full_path, "bin", "python")
+        try:
+            return subprocess.check_output(
+                [
+                    exe,
+                    "-c",
+                    "import platform; print(platform.python_version())",
+                ],
+                text=True,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
 
     def pip_install_and_freeze(reqs_arg: str) -> None:
         check_cmd = (
@@ -1938,14 +1961,15 @@ def check_venv(
             os.path.join(wdir or "", path),
             python=python,
         )
-        if kind == "uv-venv":
-            # So another platform reads a lock rather than adding one
+        # So another platform reads a lock rather than adding one
+        if kind == "uv-venv" or shutil.which("uv") is not None:
             calkit.environments.write_cross_platform_venv_locks(
                 spec_fpath=path,
                 lock_fpath=lock_fpath,
                 python=python,
                 wdir=wdir,
                 verbose=verbose,
+                python_version=python or venv_python_version(),
             )
         # Delete legacy lock file after use
         if used_legacy_lock:

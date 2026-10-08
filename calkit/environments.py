@@ -53,7 +53,7 @@ UV_PLATFORM_TARGETS = {
     "linux-64": "x86_64-unknown-linux-gnu",
     "win-64": "x86_64-pc-windows-msvc",
 }
-# First line of a venv lock file, recording the spec it was resolved from
+# First line of a venv or conda lock file, recording the spec it came from
 LOCK_SPEC_COMMENT = "# calkit-spec-md5:"
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
 # Scheduler environment keys that govern how a job is dispatched rather than
@@ -877,10 +877,12 @@ def switch_machine_lock_env(env: dict) -> dict:
 
 
 def picked_machine_info(
-    env_name: str, env: dict, ck_info: dict
+    env_name: str, env: dict, ck_info: dict, lock: list[str] | None = None
 ) -> dict | None:
     """The properties of the machine an env runs on, or None for this one."""
     host = env.get("host")
+    if env.get("kind") == SWITCH_KIND:
+        raise ValueError(f"'{env_name}' is a switch, not a machine")
     if env.get("kind") == "system":
         local = env_is_local({"host": "localhost", **env})
     else:
@@ -892,7 +894,7 @@ def picked_machine_info(
     ws = workspace.Workspace.from_env(
         env=env, env_name=env_name, ck_info=ck_info
     )
-    info = workspace.remote_system_info(ws)
+    info = workspace.remote_system_info(ws, apps=lock_app_names(lock))
     workspace.verify_machine_id(ws, info)
     return info
 
@@ -1140,6 +1142,17 @@ def remove_built_env(env_name: str, envs: dict) -> str | None:
     return target
 
 
+def lock_app_names(lock: list[str] | None) -> list[str]:
+    """Apps whose versions a lock names beyond the ones always reported."""
+    return [
+        prop.removesuffix("-version")
+        for prop in lock or []
+        if prop not in SYSTEM_LOCK_PROPERTIES
+        and prop.endswith("-version")
+        and len(prop) > len("-version")
+    ]
+
+
 def get_system_lock_data(
     lock: list[str], system_info: dict | None = None
 ) -> dict:
@@ -1155,14 +1168,19 @@ def get_system_lock_data(
     the machine the stage runs on, so that is what gets pinned.
     """
     if system_info is None:
-        system_info = calkit.get_system_info()
+        system_info = calkit.get_system_info(apps=lock_app_names(lock))
     data = {}
     for prop in lock:
         key = SYSTEM_LOCK_PROPERTIES.get(prop)
+        if key is None and prop in [
+            f"{a}-version" for a in lock_app_names(lock)
+        ]:
+            key = prop.removesuffix("-version") + "_version"
         if key is None:
             raise ValueError(
                 f"Unknown system property to lock: '{prop}'; valid options "
-                f"are {', '.join(sorted(SYSTEM_LOCK_PROPERTIES))}"
+                f"are {', '.join(sorted(SYSTEM_LOCK_PROPERTIES))}, or "
+                "'<app>-version' for any app"
             )
         value = system_info.get(key)
         if value is None:
@@ -1371,10 +1389,10 @@ def stamp_lock_with_spec(
         f.write(f"{LOCK_SPEC_COMMENT} {fingerprint}\n{body}")
 
 
-def venv_lock_matches_spec(
+def stamped_lock_matches_spec(
     lock_fpath: str, spec_fpath: str, python: str | None = None
 ) -> bool:
-    """Whether a venv lock file was resolved from the spec as it is now."""
+    """Whether a lock file was resolved from the spec as it is now."""
     if not os.path.isfile(lock_fpath) or not os.path.isfile(spec_fpath):
         return False
     recorded = read_lock_spec_fingerprint(lock_fpath)
@@ -1389,8 +1407,13 @@ def write_cross_platform_venv_locks(
     python: str | None = None,
     wdir: str | None = None,
     verbose: bool = False,
+    python_version: str | None = None,
 ) -> list[str]:
     """Resolve a venv's lock for every other platform uv can resolve for.
+
+    ``python`` is the env's declared Python, which locks are stamped with
+    as the check stamps this platform's; ``python_version`` is what to
+    resolve for, when it differs, e.g., the version a plain venv has.
 
     Stages depend on the lock directory, so a platform locked later would
     invalidate them. Best effort: a platform that fails to resolve is left
@@ -1416,7 +1439,7 @@ def write_cross_platform_venv_locks(
         out_fpath = os.path.join(lock_dir, arch + ext)
         out_fpath_full = os.path.join(wdir or "", out_fpath)
         spec_fpath_full = os.path.join(wdir or "", spec_fpath)
-        if venv_lock_matches_spec(
+        if stamped_lock_matches_spec(
             out_fpath_full, spec_fpath_full, python=python
         ):
             continue
@@ -1430,8 +1453,8 @@ def write_cross_platform_venv_locks(
             "--output-file",
             out_fpath,
         ]
-        if python is not None:
-            cmd += ["--python-version", python]
+        if (python_version or python) is not None:
+            cmd += ["--python-version", str(python_version or python)]
         cmd.append(spec_fpath)
         if verbose:
             typer.echo(f"Running command: {' '.join(cmd)}")

@@ -725,7 +725,7 @@ def test_update_env_lock(tmp_dir, monkeypatch):
     monkeypatch.setattr(
         calkit.workspace,
         "remote_system_info",
-        lambda ws: {"os": "FarOS", "cpu_count": 128},
+        lambda ws, apps=None: {"os": "FarOS", "cpu_count": 128},
     )
     result = runner.invoke(update_app, ["env", "-n", "far", "--lock"])
     assert result.exit_code == 0, result.output

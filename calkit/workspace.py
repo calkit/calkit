@@ -696,7 +696,9 @@ def check_connection(workspace: Workspace) -> None:
     raise ConnectionProblem(_authorize_hint(workspace))
 
 
-def remote_system_info(workspace: Workspace) -> dict:
+def remote_system_info(
+    workspace: Workspace, apps: list[str] | None = None
+) -> dict:
     """Read the far end's machine properties.
 
     A ``system`` env's lock describes the machine the results depend on,
@@ -705,10 +707,12 @@ def remote_system_info(workspace: Workspace) -> dict:
     activate any inner environment, so it can report them itself rather
     than needing a second, shell-based way to ask the same questions.
     """
+    command = "calkit describe system --json"
+    # Versions of apps beyond the ones always reported, e.g., to lock them
+    for app in apps or []:
+        command += f" --app {shlex.quote(app)}"
     try:
-        out = subprocess.check_output(
-            workspace.login_argv("calkit describe system --json")
-        ).decode()
+        out = subprocess.check_output(workspace.login_argv(command)).decode()
     except (subprocess.CalledProcessError, FileNotFoundError):
         raise ValueError(
             f"Could not read machine properties from '{workspace.host}'. "
@@ -828,7 +832,14 @@ def check_requirements(
         req["kind"] == "app" and req.get("version_spec") for req in reqs
     ):
         if system_info is None:
-            system_info = remote_system_info(workspace)
+            system_info = remote_system_info(
+                workspace,
+                apps=[
+                    r["name"]
+                    for r in reqs
+                    if r["kind"] == "app" and r.get("version_spec")
+                ],
+            )
     for req in properties:
         calkit.check_property_requirement(
             req, system_info or {}, described_as=described_as

@@ -1440,3 +1440,31 @@ def test_check_env_rebuilds(tmp_dir):
         calkit.ryaml.dump(ck_info, f)
     res = subprocess.run(check, capture_output=True, text=True)
     assert res.returncode != 0
+
+
+def test_check_env_locks_every_venv_platform(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    ck_info = {
+        "environments": {
+            "plain": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    lock_dir = os.path.join(".calkit", "env-locks", "plain")
+    # With uv available, a plain venv is locked for other platforms too, and
+    # each is stamped like this platform's so another machine reads it as
+    # current rather than relocking
+    locks = os.listdir(lock_dir)
+    assert len(locks) > 1
+    for fname in locks:
+        assert calkit.environments.stamped_lock_matches_spec(
+            os.path.join(lock_dir, fname), "requirements.txt"
+        )

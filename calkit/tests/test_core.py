@@ -444,3 +444,31 @@ def test_update_readme_content():
     )
     assert calkit.update_readme_content("", "T", "D.") == "# T\n\nD.\n"
     assert calkit.update_readme_content("", "T", None) == "# T\n"
+
+
+def test_get_required_app_names():
+    ck_info = {
+        "requirements": ["git", "calkit>=0.1", {"jq": {"version_spec": ">1"}}],
+        "environments": {
+            "ml": {"kind": "system", "requirements": ["matlab"]},
+            "py": {"kind": "uv-venv", "path": "r.txt", "requirements": ["jq"]},
+        },
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "requirements": [
+                        "ffmpeg",
+                        {"kind": "env-var", "name": "TOKEN"},
+                    ],
+                }
+            }
+        },
+    }
+    assert calkit.get_required_app_names(ck_info) == [
+        "git",
+        "jq",
+        "matlab",
+        "ffmpeg",
+    ]

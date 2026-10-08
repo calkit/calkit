@@ -2777,8 +2777,10 @@ def run(
     calkit.set_env_vars(ck_info=ck_info)
     if not quiet:
         calkit.echo("💻 Getting system information")
-    # Get system information
-    system_info = calkit.get_system_info()
+    # Get system information, with the versions of the apps it requires
+    system_info = calkit.get_system_info(
+        apps=calkit.get_required_app_names(ck_info)
+    )
     # Save the system to .calkit/local/systems unconditionally
     local_sysinfo_fpath = os.path.join(
         calkit.ensure_local_dir(), "systems", system_info["id"] + ".json"
@@ -3967,7 +3969,10 @@ def run_in_env(
         # Gated like the local branch, using the far end's properties
         if calkit.environments.system_env_locks_anything(env):
             try:
-                remote_info = workspace.remote_system_info(ws)
+                remote_info = workspace.remote_system_info(
+                    ws,
+                    apps=calkit.environments.lock_app_names(env.get("lock")),
+                )
                 # Writes only a first lock, or a new one with 'relock: auto'
                 calkit.environments.write_system_env_lock(
                     env_name=env_name, env=env, system_info=remote_info

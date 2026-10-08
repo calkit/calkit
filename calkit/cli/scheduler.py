@@ -1224,7 +1224,7 @@ def _gate_switch_machine_lock(
     machine_env = calkit.environments.switch_machine_lock_env(env)
     try:
         system_info = calkit.environments.picked_machine_info(
-            picked, envs[picked], ck_info
+            picked, envs[picked], ck_info, lock=env.get("lock")
         )
         # Writes only a first lock, or a new one with 'relock: auto'
         calkit.environments.write_system_env_lock(

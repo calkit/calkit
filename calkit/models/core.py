@@ -1048,6 +1048,10 @@ SystemLockProperty = Literal[
     "rscript-version",
     "brew-version",
 ]
+# Any other app's version, as reported by '<app> --version'
+AppVersionLockProperty = Annotated[
+    str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.+-]*-version$")
+]
 
 
 class SystemEnvironment(Environment):
@@ -1198,12 +1202,13 @@ class SystemEnvironment(Environment):
         "this environment, so editing one reruns them. Must be inside the "
         "project: a stage can't depend on something the repo doesn't carry.",
     )
-    lock: list[SystemLockProperty] = Field(
+    lock: list[SystemLockProperty | AppVersionLockProperty] = Field(
         default=[],
         description="Properties of the machine this environment's results "
-        "depend on, recorded the first time it is checked. 'relock' says "
-        "what happens on a machine where they differ. Empty means nothing "
-        "about the machine is pinned.",
+        "depend on, recorded the first time it is checked. Besides those "
+        "listed, any app's version can be locked as '<app>-version'. "
+        "'relock' says what happens on a machine where they differ. Empty "
+        "means nothing about the machine is pinned.",
     )
     relock: Literal["manual", "auto"] = Field(
         default="manual",
@@ -1259,7 +1264,7 @@ class SwitchEnvironment(Environment):
         description="Environment names keyed by 'if <condition>', "
         "'elif <condition>' and 'else', tried in order."
     )
-    lock: list[SystemLockProperty] = Field(
+    lock: list[SystemLockProperty | AppVersionLockProperty] = Field(
         default=[],
         description="Properties of the machine the picked environment runs "
         "on that results depend on, recorded the first time the switch is "

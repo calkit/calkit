@@ -1692,6 +1692,23 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
     )
 
 
+def test_lock_any_app_version(tmp_dir):
+    import calkit.environments as envs
+
+    assert envs.lock_app_names(["os", "git-version", "jq-version"]) == ["jq"]
+    # Any app's version can be locked, read from the machine like the rest
+    data = envs.get_system_lock_data(
+        ["jq-version"], system_info={"jq_version": "jq-1.7.1"}
+    )
+    assert data == {"jq-version": "jq-1.7.1"}
+    data = envs.get_system_lock_data(["calkit-version"])
+    assert data["calkit-version"]
+    with pytest.raises(ValueError, match="not available"):
+        envs.get_system_lock_data(["calkit-test-no-such-app-version"])
+    with pytest.raises(ValueError, match="'<app>-version' for any app"):
+        envs.get_system_lock_data(["bogus"])
+
+
 def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):
     import calkit.environments as envs
 
@@ -1803,20 +1820,20 @@ def test_lock_records_the_spec_it_came_from(tmp_dir):
         f.write("idna==3.10\n")
     # An unstamped lock isn't taken as current
     assert envs.read_lock_spec_fingerprint(lock) is None
-    assert not envs.venv_lock_matches_spec(lock, spec)
+    assert not envs.stamped_lock_matches_spec(lock, spec)
     envs.stamp_lock_with_spec(lock, spec)
-    assert envs.venv_lock_matches_spec(lock, spec)
+    assert envs.stamped_lock_matches_spec(lock, spec)
     with open(lock) as f:
         assert f.readline().startswith(envs.LOCK_SPEC_COMMENT)
         assert "idna==3.10" in f.read()
     # Changing the Python version or the spec makes it out of date
-    assert not envs.venv_lock_matches_spec(lock, spec, python="3.11")
+    assert not envs.stamped_lock_matches_spec(lock, spec, python="3.11")
     envs.stamp_lock_with_spec(lock, spec, python="3.11")
-    assert envs.venv_lock_matches_spec(lock, spec, python="3.11")
-    assert not envs.venv_lock_matches_spec(lock, spec, python="3.12")
+    assert envs.stamped_lock_matches_spec(lock, spec, python="3.11")
+    assert not envs.stamped_lock_matches_spec(lock, spec, python="3.12")
     with open(spec, "w") as f:
         f.write("idna\ncertifi\n")
-    assert not envs.venv_lock_matches_spec(lock, spec, python="3.11")
+    assert not envs.stamped_lock_matches_spec(lock, spec, python="3.11")
     # Stamping again replaces the record rather than stacking comments
     envs.stamp_lock_with_spec(lock, spec)
     with open(lock) as f:
@@ -1824,8 +1841,8 @@ def test_lock_records_the_spec_it_came_from(tmp_dir):
     assert body.count(envs.LOCK_SPEC_COMMENT) == 1
     assert "idna==3.10" in body
     # A missing file on either side is not a match, and does not raise
-    assert not envs.venv_lock_matches_spec("nope-lock.txt", spec)
-    assert not envs.venv_lock_matches_spec(lock, "nope.txt")
+    assert not envs.stamped_lock_matches_spec("nope-lock.txt", spec)
+    assert not envs.stamped_lock_matches_spec(lock, "nope.txt")
 
 
 def test_cross_platform_venv_locks(tmp_dir):
@@ -1854,7 +1871,7 @@ def test_cross_platform_venv_locks(tmp_dir):
     )
     assert lock_fpath not in written
     for fpath in written:
-        assert envs.venv_lock_matches_spec(fpath, spec, python="3.12")
+        assert envs.stamped_lock_matches_spec(fpath, spec, python="3.12")
     # Nothing is redone when every platform already matches the spec
     assert not envs.write_cross_platform_venv_locks(
         spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
@@ -1868,7 +1885,7 @@ def test_cross_platform_venv_locks(tmp_dir):
         )
         assert set(again) == set(written)
         for fpath in again:
-            assert envs.venv_lock_matches_spec(fpath, spec, python="3.12")
+            assert envs.stamped_lock_matches_spec(fpath, spec, python="3.12")
 
 
 def test_switch_env(tmp_dir, monkeypatch):

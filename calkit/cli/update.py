@@ -1131,7 +1131,7 @@ def update_environment(
         # in 'calkit xenv' compares against
         try:
             system_info = calkit.environments.picked_machine_info(
-                machine_name, machine_env, ck_info
+                machine_name, machine_env, ck_info, lock=env.get("lock")
             )
         except ValueError as e:
             raise_error(str(e))

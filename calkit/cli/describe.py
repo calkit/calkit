@@ -46,9 +46,17 @@ def describe_system(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
+    apps: Annotated[
+        list[str],
+        typer.Option(
+            "--app",
+            help="An app whose version to include, beyond the ones always "
+            "reported. Repeat for more.",
+        ),
+    ] = [],
 ):
     """Describe the system."""
-    system_info = calkit.get_system_info()
+    system_info = calkit.get_system_info(apps=apps)
     if json_output:
         echo_json(system_info)
         return

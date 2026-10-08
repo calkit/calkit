@@ -2286,9 +2286,10 @@ calkit describe|desc system [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description            |
-| -------- | ------- | -------- | ------- | ---------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON. |
+| Option   | Type    | Required | Default | Description                                                                        |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON.                                                             |
+| `--app`  | str     | no       |         | An app whose version to include, beyond the ones always reported. Repeat for more. |
 
 <a id="subcommand-describe-desc-environment-env"></a>
 

@@ -41,6 +41,9 @@ from calkit.models.iteration import (
 )
 from calkit.models.requirements import RequirementType
 
+# What a stage's 'inputs' can list
+StageInput = str | EnvVarInput | PathInput | InputsFromStageOutputs
+
 
 def check_path_relative_and_child_of_cwd(s: str) -> str:
     # An empty or blank path is Path('.'), which passes every check below and
@@ -294,14 +297,13 @@ class Stage(BaseModel):
         "to this.",
     )
     # TODO: Support other input types
-    inputs: list[str | EnvVarInput | PathInput | InputsFromStageOutputs] = (
-        Field(
-            default=[],
-            description="Paths this stage depends on, which trigger a rerun when "
-            "they change. Normally plain path strings; an object carrying a "
-            "'path' is also accepted.",
-            json_schema_extra=_allow_null,
-        )
+    inputs: list[StageInput] = Field(
+        default=[],
+        description="Paths this stage depends on, which trigger a rerun when "
+        "they change. Normally plain path strings; an object carrying a "
+        "'path' is also accepted, and an 'env-var' entry makes the stage "
+        "depend on an environment variable's value.",
+        json_schema_extra=_allow_null,
     )
     # TODO: Support database outputs
     outputs: list[str | PathOutput] = Field(
@@ -2251,13 +2253,11 @@ class MarkdownStage(Stage):
         default="_system",
         description="Environment used by blocks that don't name one.",
     )
-    inputs: list[str | EnvVarInput | PathInput | InputsFromStageOutputs] = (
-        Field(
-            default=[],
-            description="Paths every stage declared in the file depends on, in "
-            "addition to any a block declares for itself.",
-            json_schema_extra=_allow_null,
-        )
+    inputs: list[StageInput] = Field(
+        default=[],
+        description="Paths every stage declared in the file depends on, in "
+        "addition to any a block declares for itself.",
+        json_schema_extra=_allow_null,
     )
     # Two stages can't produce the same path, so outputs are declared on
     # the blocks rather than the file; likewise iteration, which would

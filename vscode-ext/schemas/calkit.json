@@ -75,7 +75,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -668,7 +668,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -1644,7 +1644,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -1885,7 +1885,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2225,7 +2225,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2513,7 +2513,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2841,7 +2841,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3358,7 +3358,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3628,7 +3628,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -4130,7 +4130,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -4476,7 +4476,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -5746,7 +5746,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6301,7 +6301,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6547,7 +6547,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6908,7 +6908,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -7244,7 +7244,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8117,7 +8117,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8510,7 +8510,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8761,7 +8761,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -9508,30 +9508,38 @@
           "default": [],
           "description": "Properties of the machine the picked environment runs on that results depend on, recorded the first time the switch is checked, as for a 'system' environment.",
           "items": {
-            "enum": [
-              "os",
-              "os-version",
-              "platform",
-              "machine",
-              "processor",
-              "hostname",
-              "machine-id",
-              "cpu-count",
-              "memory-gb",
-              "python-version",
-              "python-implementation",
-              "git-version",
-              "docker-version",
-              "conda-version",
-              "mamba-version",
-              "uv-version",
-              "pixi-version",
-              "julia-version",
-              "juliaup-version",
-              "rscript-version",
-              "brew-version"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "os",
+                  "os-version",
+                  "platform",
+                  "machine",
+                  "processor",
+                  "hostname",
+                  "machine-id",
+                  "cpu-count",
+                  "memory-gb",
+                  "python-version",
+                  "python-implementation",
+                  "git-version",
+                  "docker-version",
+                  "conda-version",
+                  "mamba-version",
+                  "uv-version",
+                  "pixi-version",
+                  "julia-version",
+                  "juliaup-version",
+                  "rscript-version",
+                  "brew-version"
+                ],
+                "type": "string"
+              },
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]*-version$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Lock",
           "type": "array"
@@ -9668,32 +9676,40 @@
         },
         "lock": {
           "default": [],
-          "description": "Properties of the machine this environment's results depend on, recorded the first time it is checked. 'relock' says what happens on a machine where they differ. Empty means nothing about the machine is pinned.",
+          "description": "Properties of the machine this environment's results depend on, recorded the first time it is checked. Besides those listed, any app's version can be locked as '<app>-version'. 'relock' says what happens on a machine where they differ. Empty means nothing about the machine is pinned.",
           "items": {
-            "enum": [
-              "os",
-              "os-version",
-              "platform",
-              "machine",
-              "processor",
-              "hostname",
-              "machine-id",
-              "cpu-count",
-              "memory-gb",
-              "python-version",
-              "python-implementation",
-              "git-version",
-              "docker-version",
-              "conda-version",
-              "mamba-version",
-              "uv-version",
-              "pixi-version",
-              "julia-version",
-              "juliaup-version",
-              "rscript-version",
-              "brew-version"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "os",
+                  "os-version",
+                  "platform",
+                  "machine",
+                  "processor",
+                  "hostname",
+                  "machine-id",
+                  "cpu-count",
+                  "memory-gb",
+                  "python-version",
+                  "python-implementation",
+                  "git-version",
+                  "docker-version",
+                  "conda-version",
+                  "mamba-version",
+                  "uv-version",
+                  "pixi-version",
+                  "julia-version",
+                  "juliaup-version",
+                  "rscript-version",
+                  "brew-version"
+                ],
+                "type": "string"
+              },
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]*-version$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Lock",
           "type": "array"
@@ -10526,7 +10542,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {

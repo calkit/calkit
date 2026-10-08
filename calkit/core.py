@@ -977,6 +977,21 @@ def check_app_version(
         )
 
 
+def get_required_app_names(ck_info: dict) -> list[str]:
+    """The apps any requirement in a project names, its stages' included."""
+    reqs = list(get_requirements(ck_info))
+    for env in (ck_info.get("environments") or {}).values():
+        reqs += env.get("requirements") or []
+    for stage in (ck_info.get("pipeline") or {}).get("stages", {}).values():
+        reqs += stage.get("requirements") or []
+    names = []
+    for raw in reqs:
+        req = _normalize_requirement(raw)
+        if req["kind"] == "app" and req["name"] != "calkit":
+            names.append(req["name"])
+    return list(dict.fromkeys(names))
+
+
 def check_requirements(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -1548,8 +1563,12 @@ def get_machine_properties() -> dict:
     }
 
 
-def get_system_info() -> dict:
-    """Get information about the system on which we're currently running."""
+def get_system_info(apps: list[str] | None = None) -> dict:
+    """Get information about the system on which we're currently running.
+
+    ``apps`` are reported with a version each, beyond the ones always
+    reported, e.g., the apps a project's requirements name.
+    """
     system_info = get_machine_properties()
     os_name = system_info["os"]
     node_id = uuid.getnode()
@@ -1590,6 +1609,9 @@ def get_system_info() -> dict:
     elif os_name == "Windows":
         for dep in ["choco", "winget"]:
             system_info[f"{dep}_version"] = get_dep_version(dep)
+    for app in apps or []:
+        if f"{app}_version" not in system_info:
+            system_info[f"{app}_version"] = get_dep_version(app)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info

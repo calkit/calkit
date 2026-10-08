@@ -206,6 +206,76 @@ def conda_env_name():
 
 @pytest.mark.xdist_group("conda")
 @skipif_windows_conda
+def test_check_env_locks_every_platform(tmp_dir, conda_env_name):
+    import calkit.environments as envs
+
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "-n",
+            ENV_NAME,
+            "--no-check",
+            "python=3.12",
+            "six",
+            "--pip",
+            "iniconfig",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
+    lock_dir = os.path.join(".calkit", "env-locks", ENV_NAME)
+    here = envs._conda_venv_platform()
+    lock_fpath = os.path.join(lock_dir, here + ".yml")
+    assert envs.stamped_lock_matches_spec(lock_fpath, "environment.yml")
+    # Other platforms are solved up front, so moving to one doesn't add a
+    # lock and invalidate every stage
+    others = [f for f in os.listdir(lock_dir) if f != here + ".yml"]
+    assert others
+    for fname in others:
+        fpath = os.path.join(lock_dir, fname)
+        assert envs.stamped_lock_matches_spec(fpath, "environment.yml")
+        with open(fpath) as f:
+            text = f.read()
+        assert "iniconfig==" in text
+        assert "six=" in text
+    # A machine without the env creates it from the lock, and leaves the
+    # lock as it was
+    with open(lock_fpath) as f:
+        before = f.read()
+    delete_env(conda_env_name)
+    subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
+    with open(lock_fpath) as f:
+        assert f.read() == before
+    # A changed spec is resolved again everywhere
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "--overwrite",
+            "-n",
+            ENV_NAME,
+            "--no-check",
+            "python=3.12",
+            "six",
+            "--pip",
+            "iniconfig",
+            "--pip",
+            "idna",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
+    for fname in os.listdir(lock_dir):
+        fpath = os.path.join(lock_dir, fname)
+        assert envs.stamped_lock_matches_spec(fpath, "environment.yml")
+        with open(fpath) as f:
+            assert "idna" in f.read()
+
+
+@pytest.mark.xdist_group("conda")
+@skipif_windows_conda
 def test_check_env(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
     # Note the specs here use trivial packages, since what matters is that

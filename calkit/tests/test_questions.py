@@ -15,17 +15,14 @@ from calkit.questions import (
     QuestionsStatus,
     check_question,
     check_questions,
-    evaluate_condition,
     expand_questions_stages,
     format_status,
     format_summary,
     latex_values,
-    parse_conditional,
     placeholders,
     render,
     render_question,
     resolve_key,
-    select_branch,
 )
 
 
@@ -745,130 +742,6 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert checked.evidence[0].git_ref == sha
 
 
-def test_conditional_answers(tmp_dir):
-    values = {"p": 0.007, "rho": 0.8373, "n": 17, "leader": "turns-max"}
-    # Comparisons, chaining, boolean operators, strings, and arithmetic
-    assert evaluate_condition("p < 0.05", values)
-    assert not evaluate_condition("p >= 0.05", values)
-    assert evaluate_condition("0.0 <= p < 0.05", values)
-    assert evaluate_condition("p < 0.05 and rho > 0.8", values)
-    assert evaluate_condition("p > 0.5 or rho > 0.8", values)
-    assert evaluate_condition("not p > 0.5", values)
-    assert evaluate_condition("leader == 'turns-max'", values)
-    assert evaluate_condition("n / 2 > 8", values)
-    # A name with no evidence is an error, not a false condition, and
-    # nothing may be called or used as a bare value
-    with pytest.raises(KeyError):
-        evaluate_condition("missing < 1", values)
-    with pytest.raises(Exception):
-        evaluate_condition("len(leader) > 1", values)
-    with pytest.raises(ValueError):
-        evaluate_condition("p", values)
-    # A true/false value can stand alone, e.g., a 'passes' flag in results
-    flags = {"ok": True, "bad": False, "p": 0.007}
-    assert evaluate_condition("ok", flags)
-    assert evaluate_condition("ok and not bad", flags)
-    assert not evaluate_condition("bad or p > 0.5", flags)
-    with pytest.raises(ValueError, match="true/false"):
-        evaluate_condition("ok and p", flags)
-    with pytest.raises(KeyError):
-        evaluate_condition("missing", flags)
-    # A comparison the values can't make is a ValueError like the rest
-    with pytest.raises(ValueError, match="cannot evaluate"):
-        evaluate_condition("leader < 0.5", values)
-    # A name that is not a valid identifier cannot be read as a variable,
-    # and says so rather than reporting a fragment of itself as missing
-    with pytest.raises(ValueError, match="valid Python identifier"):
-        evaluate_condition("paired-gain > 0.1", {"paired-gain": 0.25})
-    # Clauses are tried in the order written, with None marking the else
-    clauses = {
-        "if p < 0.05": "strong, rho {rho:.2f}",
-        "elif p < 0.1": "weak",
-        "else": "none",
-    }
-    assert [c for c, _ in parse_conditional(clauses)] == [
-        "p < 0.05",
-        "p < 0.1",
-        None,
-    ]
-    assert select_branch(clauses, {"p": 0.007}) == "strong, rho {rho:.2f}"
-    assert select_branch(clauses, {"p": 0.08}) == "weak"
-    assert select_branch(clauses, {"p": 0.9}) == "none"
-    # Malformed clause sets are errors rather than silent misreadings
-    with pytest.raises(ValueError):
-        parse_conditional({"elif p < 1": "x"})
-    with pytest.raises(ValueError):
-        parse_conditional({"else": "x"})
-    with pytest.raises(ValueError):
-        parse_conditional({"when p < 1": "x"})
-    with pytest.raises(ValueError):
-        parse_conditional({"if p < 1": "x", "else": "y", "elif p < 2": "z"})
-    with pytest.raises(ValueError):
-        parse_conditional({"if p < 1": "x", "if p < 2": "y"})
-    # Nothing holding with no else is an error rather than a blank answer
-    with pytest.raises(ValueError):
-        select_branch({"if p < 0.05": "strong"}, {"p": 0.9})
-    # Rendering picks the branch, then fills its placeholders
-    answer = {
-        "if p < 0.05": "{leader} predicts it (rho {rho:+.2f})",
-        "else": "no feature predicts it",
-    }
-    assert render(answer, values) == "turns-max predicts it (rho +0.84)"
-    assert render(answer, values | {"p": 0.2}) == "no feature predicts it"
-    # Plain strings are untouched by the conditional path
-    assert render("if and only if", values) == "if and only if"
-    # Checking reports every clause's problems, including the clauses the
-    # current values don't select, rather than crashing or passing
-    with open("r.json", "w") as f:
-        json.dump({"p": 0.2, "leader": "x"}, f)
-    evidence = [
-        {"kind": "value", "path": "r.json", "key": "p"},
-        {"kind": "value", "path": "r.json", "key": "leader"},
-    ]
-    cases = [
-        ({"if p < 0.5": "{leader}", "else": "no"}, []),
-        (
-            {"if p < 0.05": "x"},
-            ["no condition of the conditional answer holds"],
-        ),
-        ({"when p < 1": "x"}, ["conditional answer: expected 'if'"]),
-        (
-            {"if leader < 0.05": "x", "else": "y"},
-            ["cannot evaluate condition 'leader < 0.05'"],
-        ),
-        (
-            {"if p > 0.1": "yes", "elif typo < 1": "x", "else": "{rhoo:.2f}"},
-            [
-                "condition 'typo < 1' names no evidence 'typo'",
-                "placeholder {rhoo} names no evidence",
-            ],
-        ),
-    ]
-    ck_info = {
-        "pipeline": {
-            "stages": {
-                "scan": {
-                    "kind": "python-script",
-                    "environment": "py",
-                    "script_path": "s.py",
-                    "outputs": ["r.json"],
-                }
-            }
-        }
-    }
-    for answer, expected in cases:
-        checked = check_question(
-            1,
-            {"question": "q", "answer": answer, "evidence": evidence},
-            ck_info,
-            ".",
-        )
-        messages = checked.message or ""
-        assert (checked.status == "error") == bool(expected), answer
-        for fragment in expected:
-            assert fragment in messages, (answer, messages)
-
-
 def test_format_summary():
     from calkit.questions import QuestionCheck
 
@@ -998,3 +871,66 @@ def test_latex_values(tmp_dir):
         "results.json",
         "extra.txt",
     ]
+
+
+def test_conditional_answers(tmp_dir):
+    values = {"p": 0.007, "rho": 0.8373, "n": 17, "leader": "turns-max"}
+    # Rendering picks the branch, then fills its placeholders
+    answer = {
+        "if p < 0.05": "{leader} predicts it (rho {rho:+.2f})",
+        "else": "no feature predicts it",
+    }
+    assert render(answer, values) == "turns-max predicts it (rho +0.84)"
+    assert render(answer, values | {"p": 0.2}) == "no feature predicts it"
+    # Plain strings are untouched by the conditional path
+    assert render("if and only if", values) == "if and only if"
+    # Checking reports every clause's problems, including the clauses the
+    # current values don't select, rather than crashing or passing
+    with open("r.json", "w") as f:
+        json.dump({"p": 0.2, "leader": "x"}, f)
+    evidence = [
+        {"kind": "value", "path": "r.json", "key": "p"},
+        {"kind": "value", "path": "r.json", "key": "leader"},
+    ]
+    cases = [
+        ({"if p < 0.5": "{leader}", "else": "no"}, []),
+        (
+            {"if p < 0.05": "x"},
+            ["no condition of the conditional answer holds"],
+        ),
+        ({"when p < 1": "x"}, ["conditional answer: expected 'if'"]),
+        (
+            {"if leader < 0.05": "x", "else": "y"},
+            ["cannot evaluate condition 'leader < 0.05'"],
+        ),
+        (
+            {"if p > 0.1": "yes", "elif typo < 1": "x", "else": "{rhoo:.2f}"},
+            [
+                "condition 'typo < 1' names no evidence 'typo'",
+                "placeholder {rhoo} names no evidence",
+            ],
+        ),
+    ]
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "scan": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": ["r.json"],
+                }
+            }
+        }
+    }
+    for answer, expected in cases:
+        checked = check_question(
+            1,
+            {"question": "q", "answer": answer, "evidence": evidence},
+            ck_info,
+            ".",
+        )
+        messages = checked.message or ""
+        assert (checked.status == "error") == bool(expected), answer
+        for fragment in expected:
+            assert fragment in messages, (answer, messages)

@@ -3,7 +3,7 @@ hide:
   - toc
 ---
 
-# Workflow simulator
+# ROI calculator
 
 <!-- Intro to be written by a human -->
 

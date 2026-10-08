@@ -2740,6 +2740,21 @@ def test_commit(tmp_dir):
     subprocess.check_call(["calkit", "commit", "-m", "Add partial.txt"])
     repo = calkit.git.get_repo()
     assert repo.git.show("HEAD:partial.txt") == "staged"
+    # Saving a tracked path after deleting it, by the path that's now gone
+    Path("gone.txt").write_text("gone\n")
+    subprocess.check_call(
+        ["calkit", "save", "gone.txt", "-m", "Add gone.txt", "--no-push"]
+    )
+    os.remove("gone.txt")
+    subprocess.check_call(
+        ["calkit", "save", "gone.txt", "-m", "Remove gone.txt", "--no-push"]
+    )
+    repo = calkit.git.get_repo()
+    assert repo.head.commit.message.strip() == "Remove gone.txt"
+    assert "D\tgone.txt" in repo.git.show(
+        "--name-status", "--format=", "HEAD"
+    ).split("\n")
+    assert calkit.git.get_staged_files() == []
     # Resolving a merge is still possible, though Git refuses to commit only
     # some paths while one is in progress
     subprocess.check_call(["git", "checkout", "--", "."])

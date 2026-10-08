@@ -1,7 +1,8 @@
 schema: '2.0'
 stages:
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python 
+      scripts/latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -69,7 +70,8 @@ stages:
       md5: 10f7f4683ee823342cac74c314f3b6c8
       size: 121666
   latex-word-round-trip-figure:
-    cmd: calkit xenv -n dev --no-check -- python scripts/plot-latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python 
+      scripts/plot-latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -101,7 +103,8 @@ stages:
       md5: d1f5a7e27423bfc4192b49ff5e7c0692
       size: 207207
   latex-image-readme/sizes:
-    cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
+    cmd: calkit xenv -n dev --no-check -- python 
+      .calkit/markdown/images/latex/README.md/sizes.py
     deps:
     - path: .calkit/markdown/images/latex/README.md/sizes.py
       hash: md5
@@ -250,8 +253,8 @@ stages:
       md5: 4960953114330139033d7281122861de
       size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25
-      --supported=20 --indirect-rate=0
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4
+      --attendees=25 --supported=20 --indirect-rate=0
     deps:
     - path: .python-version
       hash: md5
@@ -275,8 +278,9 @@ stages:
       md5: d223d73c9ad60723f06e3c13496fd205
       size: 1649
   one-pager/pdf:
-    cmd: calkit latex from-markdown docs/one-pager/main.md -o docs/one-pager/main.pdf
-      -e tex --no-check --template docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua
+    cmd: calkit latex from-markdown docs/one-pager/main.md -o 
+      docs/one-pager/main.pdf -e tex --no-check --template 
+      docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua 
       --pandoc-arg=--shift-heading-level-by=-1
     deps:
     - path: .calkit/env-locks/tex
@@ -315,5 +319,5 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 9d47beccc4f2016f46c40f6c41d74d33
-      size: 136287
+      md5: dfd4d71f4428fbc92a4b2a925a4e3729
+      size: 136110

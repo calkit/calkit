@@ -2744,6 +2744,15 @@ def run(
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
+    # Remote machines' properties are read once per run, and not reused
+    # from the last one, since a machine can change between runs
+    import calkit.workspace
+
+    remote_info_dir = os.path.join(
+        calkit.ensure_local_dir(), "remote-system-info"
+    )
+    shutil.rmtree(remote_info_dir, ignore_errors=True)
+    os.environ[calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR] = remote_info_dir
     # Mock the scheduler for this run (and any subprocesses) so SLURM/PBS
     # stages execute locally; child processes inherit it via os.environ
     if mock_scheduler:

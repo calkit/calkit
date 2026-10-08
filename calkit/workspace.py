@@ -696,6 +696,11 @@ def check_connection(workspace: Workspace) -> None:
     raise ConnectionProblem(_authorize_hint(workspace))
 
 
+# Set by 'calkit run' to a directory where each machine's properties are
+# kept for the rest of the run, which its stages inherit
+REMOTE_INFO_CACHE_ENV_VAR = "CALKIT_REMOTE_INFO_CACHE"
+
+
 def remote_system_info(
     workspace: Workspace, apps: list[str] | None = None
 ) -> dict:
@@ -707,34 +712,58 @@ def remote_system_info(
     activate any inner environment, so it can report them itself rather
     than needing a second, shell-based way to ask the same questions.
     """
-    command = "calkit describe system --json"
-    # Versions of apps beyond the ones always reported, e.g., to lock them
-    for app in apps or []:
-        command += f" --app {shlex.quote(app)}"
-    try:
-        out = subprocess.check_output(workspace.login_argv(command)).decode()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        raise ValueError(
-            f"Could not read machine properties from '{workspace.host}'. "
-            "Locking them requires Calkit on that machine; install it "
-            "there, or remove 'lock' from the environment."
-        )
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError:
-        pass
-    # A login shell is what makes Calkit findable at all here, and logging
-    # in is also what prints a MOTD or whatever else the profile echoes.
-    # The description is one JSON object, so take it from where it starts.
-    start = out.find("{")
-    if start != -1:
+
+    def describe() -> dict:
+        command = "calkit describe system --json"
+        # Versions of apps beyond the ones always reported, e.g., to lock them
+        for app in apps or []:
+            command += f" --app {shlex.quote(app)}"
         try:
-            return json.loads(out[start:])
+            out = subprocess.check_output(
+                workspace.login_argv(command)
+            ).decode()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            raise ValueError(
+                f"Could not read machine properties from '{workspace.host}'. "
+                "Locking them requires Calkit on that machine; install it "
+                "there, or remove 'lock' from the environment."
+            )
+        try:
+            return json.loads(out)
         except json.JSONDecodeError:
             pass
-    raise ValueError(
-        f"Got an unreadable system description from '{workspace.host}'"
-    )
+        # A login shell is what makes Calkit findable at all here, and logging
+        # in is also what prints a MOTD or whatever else the profile echoes.
+        # The description is one JSON object, so take it from where it starts.
+        start = out.find("{")
+        if start != -1:
+            try:
+                return json.loads(out[start:])
+            except json.JSONDecodeError:
+                pass
+        raise ValueError(
+            f"Got an unreadable system description from '{workspace.host}'"
+        )
+
+    # One read per machine per 'calkit run', rather than one per stage
+    cache_dir = os.environ.get(REMOTE_INFO_CACHE_ENV_VAR)
+    if not cache_dir:
+        return describe()
+    key = hashlib.sha1(
+        json.dumps(
+            [workspace.host, workspace.user, sorted(apps or [])]
+        ).encode()
+    ).hexdigest()
+    cache_fpath = os.path.join(cache_dir, key + ".json")
+    if os.path.isfile(cache_fpath):
+        with open(cache_fpath) as f:
+            cached: dict = json.load(f)
+        return cached
+    info = describe()
+    os.makedirs(cache_dir, exist_ok=True)
+    with open(cache_fpath, "w") as f:
+        json.dump(info, f)
+    return info
 
 
 class MachineMismatch(ConnectionProblem):

@@ -45,7 +45,7 @@ for an example.
 
 - **<!-- calkit value key=goals.steps.1.correct_gain format="{:.0%}" -->18%<!-- /calkit value -->**
   more error-free findings published per year with agents alone
-- **<!-- calkit value key=goals.correct_gain format="{:.0%}" -->113%<!-- /calkit value -->**
+- **<!-- calkit value key=goals.correct_gain format="{:.0%}" -->145%<!-- /calkit value -->**
   more with agents and Calkit together
 
 From a simulation

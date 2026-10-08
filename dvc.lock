@@ -133,12 +133,12 @@ stages:
       size: 5
     - path: docs/simulator/research_flow.py
       hash: md5
-      md5: 5341e8a50649d0502de920070ab8508a
-      size: 33935
+      md5: e02a6c63e77602368ce3f7d4d93bf163
+      size: 34092
     - path: scripts/research-flow.py
       hash: md5
-      md5: 34cff412bea09c64c68caf92b42e0f27
-      size: 13484
+      md5: 3aac70e53e59e4770181594a35640c41
+      size: 13746
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -146,8 +146,8 @@ stages:
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: 16251cc3979296693b03f3c946775f33
-      size: 72902
+      md5: f0d4a3527bead51f26d4e60600595ff1
+      size: 79875
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -157,12 +157,12 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: 16251cc3979296693b03f3c946775f33
-      size: 72902
+      md5: f0d4a3527bead51f26d4e60600595ff1
+      size: 79875
     - path: scripts/plot-research-flow.py
       hash: md5
-      md5: fc8849c6c10e026ae15a0817b13b43f1
-      size: 12102
+      md5: 19f5cc7b755ecf4c3c11b1bf734ee1e6
+      size: 12155
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -170,16 +170,16 @@ stages:
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
-      md5: b59f42e52b2f8ad59a46a935b6d2dfad
-      size: 172474
+      md5: f1e685c7ef201bbb1fb3dfcb64a13618
+      size: 181763
     - path: docs/img/research-flow-waste.png
       hash: md5
-      md5: f38dca2cc91f70df2a9f765723041c14
-      size: 105111
+      md5: 3fbf55c165d258d8493936d8ed73ef78
+      size: 116220
     - path: docs/img/research-flow.png
       hash: md5
-      md5: 2e0a2e41a0d4fff00296c9a9ec7d723b
-      size: 341211
+      md5: d1448b62e37ee7b408243ab772278a2f
+      size: 330067
   one-pager-latex:
     cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
     deps:
@@ -294,7 +294,7 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 26a620dabf53235af7a2c600bc36f0a3
+      md5: 46573ba9c21b89b370ed9c04a0c54a56
       size: 4878
     - path: docs/one-pager/one-pager.lua
       hash: md5
@@ -310,10 +310,10 @@ stages:
       size: 1649
     - path: results/research-flow.json
       hash: md5
-      md5: 16251cc3979296693b03f3c946775f33
-      size: 72902
+      md5: f0d4a3527bead51f26d4e60600595ff1
+      size: 79875
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 54560ff3404192c557f0a0284b57ca9c
-      size: 136029
+      md5: b72926623ed4b49150a663586a2ba62c
+      size: 136094

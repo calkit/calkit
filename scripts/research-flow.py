@@ -27,6 +27,7 @@ from research_flow import (  # noqa: E402
     PI_ASSIST,
     POLICIES,
     PRODUCTIVE_WAIT,
+    QUESTIONS,
     STAGES,
     TOOLING,
     TRANSPARENCY,
@@ -160,7 +161,14 @@ for name, translate in [("word", BY_HAND), ("none", {})]:
 # What Calkit would need to deliver, on a first paper, going from today's
 # status quo to lean with automated tooling and agents one step at a time,
 # each on top of the ones before it
-ALL_GOALS = CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST | TRANSPARENCY
+ALL_GOALS = (
+    CALKIT
+    | COLLABORATION
+    | VERIFICATION
+    | QUESTIONS
+    | PI_ASSIST
+    | TRANSPARENCY
+)
 GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
     ("status quo", "stage-gate", "manual", False, {}),
     ("agents", "stage-gate", "manual", True, {}),
@@ -181,11 +189,18 @@ GOALS: list[tuple[str, str, str, bool, dict[str, Any]]] = [
         CALKIT | COLLABORATION | VERIFICATION,
     ),
     (
+        "questions first",
+        "lean",
+        "automated",
+        True,
+        CALKIT | COLLABORATION | VERIFICATION | QUESTIONS,
+    ),
+    (
         "agent-assisted PI review",
         "lean",
         "automated",
         True,
-        CALKIT | COLLABORATION | VERIFICATION | PI_ASSIST,
+        CALKIT | COLLABORATION | VERIFICATION | QUESTIONS | PI_ASSIST,
     ),
     ("transparent submission", "lean", "automated", True, ALL_GOALS),
 ]
@@ -256,6 +271,7 @@ WASTE: dict[str, dict[str, Any]] = {
         "redo_factor": TOOLING["automated"]["redo_factor"]
     },
     "waiting on the PI": PI_ASSIST,
+    "drifting from the question": QUESTIONS,
 }
 WASTE_BASELINES = [
     ("status quo", "stage-gate", False),

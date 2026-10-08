@@ -322,7 +322,13 @@ ax_time.legend(
     loc="upper center",
     bbox_to_anchor=(0.5, -0.13),
 )
-removed = ["big batches", "waiting on the PI", "review prep", "tool hopping"]
+removed = [
+    "big batches",
+    "waiting on the PI",
+    "review prep",
+    "tool hopping",
+    "drifting from the question",
+]
 gains = np.array(
     [
         [

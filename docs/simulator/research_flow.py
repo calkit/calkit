@@ -17,7 +17,10 @@ project and the paper current, so they take much less.
 
 Working at a stage can introduce a flaw into its method, which taints every
 finding done that way until a review, or the student working downstream,
-catches it, at which point all of them are redone from that stage. Reviews of
+catches it, at which point all of them are redone from that stage. A
+finding's framing can also drift from the question it was meant to answer,
+which is rarely caught unless the question is written down to check it
+against. Reviews of
 finished findings also prompt new ones. Once the PI has read the whole
 paper through, it goes to peer review, where reviewers catch some of what's
 left and send it back, or reject it outright. Time is in working days.
@@ -85,7 +88,7 @@ BASE: dict[str, Any] = {
     # answer, e.g., an analysis that answers something adjacent, and the
     # chance a review, or the student working downstream, notices, which
     # takes a written question to check it against
-    "drift_prob": 0.0,
+    "drift_prob": 0.2,
     "detect_drift": 0.05,
     # Chance each PI session's automated re-check of every approved finding
     # against its evidence catches a flaw in one, which needs the evidence

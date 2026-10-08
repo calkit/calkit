@@ -58,6 +58,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -252,7 +255,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -641,6 +651,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -941,7 +954,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -1177,6 +1197,28 @@
         "path"
       ],
       "title": "DocumentEvidence",
+      "type": "object"
+    },
+    "EnvVarInput": {
+      "description": "An environment variable whose value a stage's results depend on.\n\nThe value is hashed, not stored, into a file the stage depends on, so\nchanging it reruns the stage. A short or guessable value could be\nrecovered from its hash, so this isn't a way to keep one secret.",
+      "properties": {
+        "kind": {
+          "const": "env-var",
+          "description": "Always 'env-var'.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name of the environment variable.",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "EnvVarInput",
       "type": "object"
     },
     "Figure": {
@@ -1585,6 +1627,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -1823,6 +1868,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2017,7 +2065,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -2151,6 +2206,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -2436,6 +2494,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -2761,6 +2822,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -3277,6 +3341,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3542,6 +3609,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -3837,6 +3907,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4040,6 +4113,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4234,7 +4310,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -4374,6 +4457,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -4703,7 +4789,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -5028,7 +5121,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -5296,7 +5396,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -5620,6 +5727,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -6174,6 +6284,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -6415,6 +6528,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -6775,6 +6891,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -6958,7 +7077,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -7099,6 +7225,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -7971,6 +8100,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -8361,6 +8493,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -8607,6 +8742,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"
@@ -8974,7 +9112,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -9334,7 +9479,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -9489,7 +9641,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -9918,7 +10077,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -10005,7 +10171,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -10182,7 +10355,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -10327,6 +10507,9 @@
                 "anyOf": [
                   {
                     "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
                   },
                   {
                     "$ref": "#/$defs/PathInput"

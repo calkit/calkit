@@ -27,7 +27,12 @@ from pydantic import (
 from typing_extensions import Annotated
 
 import calkit.latex
-from calkit.models.io import InputsFromStageOutputs, PathInput, PathOutput
+from calkit.models.io import (
+    EnvVarInput,
+    InputsFromStageOutputs,
+    PathInput,
+    PathOutput,
+)
 from calkit.models.iteration import (
     ExpandedParametersType,
     ParameterIteration,
@@ -289,12 +294,14 @@ class Stage(BaseModel):
         "to this.",
     )
     # TODO: Support other input types
-    inputs: list[str | PathInput | InputsFromStageOutputs] = Field(
-        default=[],
-        description="Paths this stage depends on, which trigger a rerun when "
-        "they change. Normally plain path strings; an object carrying a "
-        "'path' is also accepted.",
-        json_schema_extra=_allow_null,
+    inputs: list[str | EnvVarInput | PathInput | InputsFromStageOutputs] = (
+        Field(
+            default=[],
+            description="Paths this stage depends on, which trigger a rerun when "
+            "they change. Normally plain path strings; an object carrying a "
+            "'path' is also accepted.",
+            json_schema_extra=_allow_null,
+        )
     )
     # TODO: Support database outputs
     outputs: list[str | PathOutput] = Field(
@@ -366,6 +373,9 @@ class Stage(BaseModel):
     # when the pipeline is compiled, so the command in dvc.yaml says
     # everything that runs and DVC reruns the stage when any of it changes.
     _system_env_setup: list[str] = PrivateAttr(default_factory=list)
+    # Env vars whose values this stage depends on, from its own inputs and
+    # its environments', resolved when the pipeline is compiled
+    _env_var_names: list[str] = PrivateAttr(default_factory=list)
 
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
@@ -519,13 +529,57 @@ class Stage(BaseModel):
         return rel_path
 
     @property
+    def env_var_file_path(self) -> str | None:
+        """Where hashes of the env vars this stage depends on are written.
+
+        Rewritten by every compile from this machine's values, and not
+        committed, like the setup file: ``dvc.lock`` records its checksum.
+        """
+        if not self._env_var_names:
+            return None
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.name or "")
+        return posixpath.join(".calkit", "env-vars", f"{safe}.json")
+
+    def write_env_var_file(
+        self, values: dict[str, str | None], wdir: str | None = None
+    ) -> str | None:
+        """Write hashes of the env vars this stage depends on."""
+        import hashlib
+        import json
+
+        rel_path = self.env_var_file_path
+        if rel_path is None:
+            return None
+        hashes = {
+            name: (
+                None
+                if values.get(name) is None
+                else hashlib.sha256(str(values[name]).encode()).hexdigest()
+            )
+            for name in self._env_var_names
+        }
+        fpath = os.path.join(wdir, rel_path) if wdir else rel_path
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        content = json.dumps(hashes, indent=2, sort_keys=True) + "\n"
+        if os.path.isfile(fpath):
+            with open(fpath) as f:
+                if f.read() == content:
+                    return rel_path
+        with open(fpath, "w", newline="\n") as f:
+            f.write(content)
+        return rel_path
+
+    @property
     def dvc_deps(self) -> list[str]:
         deps = []
         setup_file = self.setup_file_path
         if setup_file is not None:
             deps.append(setup_file)
+        env_var_file = self.env_var_file_path
+        if env_var_file is not None:
+            deps.append(env_var_file)
         for i in self.inputs:
-            if isinstance(i, InputsFromStageOutputs):
+            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
                 continue
             path = i if isinstance(i, str) else i.path
             if path not in deps:
@@ -728,7 +782,7 @@ class Stage(BaseModel):
         cmd = self.dvc_cmd
         deps = self.dvc_deps
         for i in self.inputs:
-            if isinstance(i, InputsFromStageOutputs):
+            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
                 continue
             path = i if isinstance(i, str) else i.path
             if path not in deps:
@@ -2197,11 +2251,13 @@ class MarkdownStage(Stage):
         default="_system",
         description="Environment used by blocks that don't name one.",
     )
-    inputs: list[str | PathInput | InputsFromStageOutputs] = Field(
-        default=[],
-        description="Paths every stage declared in the file depends on, in "
-        "addition to any a block declares for itself.",
-        json_schema_extra=_allow_null,
+    inputs: list[str | EnvVarInput | PathInput | InputsFromStageOutputs] = (
+        Field(
+            default=[],
+            description="Paths every stage declared in the file depends on, in "
+            "addition to any a block declares for itself.",
+            json_schema_extra=_allow_null,
+        )
     )
     # Two stages can't produce the same path, so outputs are declared on
     # the blocks rather than the file; likewise iteration, which would

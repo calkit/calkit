@@ -1959,10 +1959,14 @@ def to_dvc(
     import calkit.questions
     from calkit.environments import (
         SWITCH_KIND,
+        get_env_input_env_vars,
         get_env_input_paths,
         get_env_lock_fpath,
+        get_switch_options,
+        resolve_env_var,
         write_switch_env_lock,
     )
+    from calkit.models.io import EnvVarInput
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -2216,6 +2220,18 @@ def to_dvc(
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
+    # Env vars each stage depends on, its own and its environments'
+    for stage in pipeline.stages.values():
+        names = [i.name for i in stage.inputs if isinstance(i, EnvVarInput)]
+        for env_name in dict.fromkeys(
+            [stage.outer_environment, stage.inner_environment]
+        ):
+            env = environments.get(env_name) or {}
+            names += get_env_input_env_vars(env)
+            if env.get("kind") == SWITCH_KIND:
+                for option in get_switch_options(env_name, environments):
+                    names += get_env_input_env_vars(environments[option])
+        stage._env_var_names = sorted(set(names))
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
@@ -2239,6 +2255,28 @@ def to_dvc(
                 os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
                 marker="calkit stage setup",
                 lines=["/.calkit/stage-setup/"],
+            )
+        # Hashes of this machine's values, so like the setup files they are
+        # rewritten by every compile and not committed
+        env_var_files = [
+            path
+            for stage in pipeline.stages.values()
+            if (
+                path := stage.write_env_var_file(
+                    {
+                        name: resolve_env_var(name, ck_info, wdir=wdir)
+                        for name in stage._env_var_names
+                    },
+                    wdir=wdir,
+                )
+            )
+            is not None
+        ]
+        if manage_gitignore and env_var_files:
+            _write_managed_gitignore_block(
+                os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
+                marker="calkit stage env vars",
+                lines=["/.calkit/env-vars/"],
             )
         # Only when there is a lock file to protect. A project with no
         # environment that locks under .calkit has nothing whose hash a

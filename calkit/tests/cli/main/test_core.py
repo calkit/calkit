@@ -3198,3 +3198,49 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
     out = subprocess.check_output(["calkit", "status"], env=env, text=True)
     assert "fetch" in out
     assert "can't run on this machine" in out
+
+
+def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "here": {
+                "kind": "system",
+                "inputs": [{"kind": "env-var", "name": "CK_TEST_SITE"}],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "printenv CK_TEST_MODE > out.txt",
+                    "environment": "here",
+                    "inputs": [{"kind": "env-var", "name": "CK_TEST_MODE"}],
+                    "outputs": [{"path": "out.txt", "storage": "git"}],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ) | {"CK_TEST_MODE": "a", "CK_TEST_SITE": "x"}
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "a"
+    # The values are hashed rather than written down
+    with open(os.path.join(".calkit", "env-vars", "s.json")) as f:
+        hashes = json.load(f)
+    assert set(hashes) == {"CK_TEST_MODE", "CK_TEST_SITE"}
+    assert "a" not in hashes.values()
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Pipeline is up to date" in out
+    # Changing the stage's value, or its environment's, reruns it
+    env["CK_TEST_MODE"] = "b"
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Stale stages" in out
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "b"
+    env["CK_TEST_SITE"] = "y"
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Stale stages" in out

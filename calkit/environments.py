@@ -1020,7 +1020,12 @@ def get_env_input_paths(env: dict, env_name: str | None = None) -> list[str]:
             "which is what it's called now that scheduler and system "
             "environments take one too"
         )
-    paths = list(inputs if inputs is not None else deps or [])
+    # Env-var inputs are read by get_env_input_env_vars instead
+    paths = [
+        p
+        for p in (inputs if inputs is not None else deps or [])
+        if isinstance(p, str)
+    ]
     # Checked here rather than only on the models: every production caller
     # reads a raw environment dict, so a model annotation alone would let
     # '../outside.sh' through to DVC. Docker's list is exempt because it
@@ -1035,6 +1040,36 @@ def get_env_input_paths(env: dict, env_name: str | None = None) -> list[str]:
                 where = f" on environment '{env_name}'" if env_name else ""
                 raise ValueError(f"Environment input{where}: {problem}")
     return paths
+
+
+def get_env_input_env_vars(env: dict) -> list[str]:
+    """Names of the env vars an environment declares as inputs."""
+    return [
+        i["name"]
+        for i in env.get("inputs") or env.get("deps") or []
+        if isinstance(i, dict) and i.get("kind") == "env-var"
+    ]
+
+
+def resolve_env_var(
+    name: str, ck_info: dict, wdir: str | None = None
+) -> str | None:
+    """An env var's value as a run would see it, or None if it's unset.
+
+    The project's own ``env_vars`` win, then the environment, then ``.env``,
+    which is the order ``calkit run`` applies them in.
+    """
+    import dotenv
+
+    project = ck_info.get("env_vars") or {}
+    if name in project:
+        return str(project[name])
+    if name in os.environ:
+        return os.environ[name]
+    dotenv_path = os.path.join(wdir or ".", ".env")
+    if os.path.isfile(dotenv_path):
+        return dotenv.dotenv_values(dotenv_path).get(name)
+    return None
 
 
 def env_inputs_md5(env_name: str, env: dict) -> str | None:

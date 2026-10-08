@@ -339,7 +339,7 @@ Common stage parameters:
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `environment`       | str                                                                                                                                      | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
 | `wdir`              | str \| None                                                                                                                              | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
-| `inputs`            | list[str \| PathInput \| InputsFromStageOutputs]                                                                                         | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.                                                                                                                                                                       |
+| `inputs`            | list[str \| EnvVarInput \| PathInput \| InputsFromStageOutputs]                                                                          | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.                                                                                                                                                                       |
 | `outputs`           | list[str \| PathOutput]                                                                                                                  | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
 | `always_run`        | bool                                                                                                                                     | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
 | `iterate_over`      | list[StageIteration] \| None                                                                                                             | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
@@ -652,6 +652,19 @@ Model class: `WordToPdfStage`
 ### Nested parameter types
 
 Some parameters above take objects rather than plain values. The properties of each are described below.
+
+#### `EnvVarInput`
+
+An environment variable whose value a stage's results depend on.
+
+The value is hashed, not stored, into a file the stage depends on, so
+changing it reruns the stage. A short or guessable value could be
+recovered from its hash, so this isn't a way to keep one secret.
+
+| Parameter | Type               | Required | Default | Description                       |
+| --------- | ------------------ | -------- | ------- | --------------------------------- |
+| `kind`    | Literal['env-var'] | yes      |         | Always 'env-var'.                 |
+| `name`    | str                | yes      |         | Name of the environment variable. |
 
 #### `PathInput`
 

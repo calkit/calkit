@@ -11,6 +11,18 @@ class InputsFromStageOutputs(BaseModel):
     )
 
 
+class EnvVarInput(BaseModel):
+    """An environment variable whose value a stage's results depend on.
+
+    The value is hashed, not stored, into a file the stage depends on, so
+    changing it reruns the stage. A short or guessable value could be
+    recovered from its hash, so this isn't a way to keep one secret.
+    """
+
+    kind: Literal["env-var"] = Field(description="Always 'env-var'.")
+    name: str = Field(description="Name of the environment variable.")
+
+
 class PathInput(BaseModel):
     """An input written as an object carrying a path.
 

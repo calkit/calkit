@@ -24,6 +24,7 @@ from pydantic import (
 from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
+from calkit.models.io import EnvVarInput
 from calkit.models.iteration import ParametersType
 from calkit.models.pipeline import Pipeline, RelativeChildPathString
 from calkit.models.requirements import (  # noqa: F401
@@ -709,7 +710,7 @@ class Environment(BaseModel):
         "property. A stage using it is skipped on a machine where they "
         "aren't met, keeping its outputs.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         validation_alias=AliasChoices("inputs", "deps"),
         description="Files in the project this environment is built from "
@@ -881,7 +882,7 @@ class DockerEnvironment(Environment):
         default=None,
         description="User to run the container as. Defaults to the host user.",
     )
-    inputs: list[str] | None = Field(
+    inputs: list[str | EnvVarInput] | None = Field(
         default=None,
         # See the note on the other environments that take this field
         validation_alias=AliasChoices("inputs", "deps"),
@@ -962,7 +963,7 @@ class SlurmEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -998,7 +999,7 @@ class PBSEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1184,7 +1185,7 @@ class SystemEnvironment(Environment):
         "themselves, the shell isn't in the compiled command -- so stages "
         "that run setup commands rerun when it changes.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather

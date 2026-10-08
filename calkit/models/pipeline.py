@@ -2199,7 +2199,7 @@ class MarkdownPdf(BaseModel):
     )
 
 
-class MarkdownPdfStage(Stage):
+class _MarkdownPdfStage(Stage):
     """A Markdown file built into a PDF with pandoc and LaTeX: what a
     Markdown stage's ``pdf`` compiles to, rather than a kind to write.
 
@@ -2357,7 +2357,7 @@ class Pipeline(BaseModel):
                 | MapPathsStage
                 | MarimoHtmlWasmStage
                 | MarkdownStage
-                | SkipJsonSchema[MarkdownPdfStage]
+                | SkipJsonSchema[_MarkdownPdfStage]
                 | ProcedureStage
             ),
             Discriminator("kind"),

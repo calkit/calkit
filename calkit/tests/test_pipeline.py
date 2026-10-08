@@ -3988,8 +3988,6 @@ def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
         assert f.read() == 'X=1; echo "$X" `date` > b.txt\n'
     with open(".gitattributes") as f:
         assert ".calkit" in f.read()
-    subprocess.check_call(
-        ["bash", "--noprofile", "--norc", ".calkit/stage-commands/var.sh"]
-    )
+    subprocess.run(stages["var"]["cmd"], shell=True, check=True)
     with open("b.txt") as f:
         assert f.read().startswith("1 ")

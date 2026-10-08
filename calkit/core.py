@@ -1508,13 +1508,16 @@ def get_machine_id() -> str | None:
     return _read_platform_machine_id()
 
 
-def get_system_info() -> dict:
-    """Get information about the system on which we're currently running."""
+def get_machine_properties() -> dict:
+    """The properties of this machine that are cheap to read.
+
+    Everything in ``get_system_info`` except what it has to run a program
+    for, e.g., tool versions.
+    """
     import psutil
 
-    os_name = platform.system()
-    system_info = {
-        "os": os_name,
+    return {
+        "os": platform.system(),
         "os_version": platform.release(),
         "python_version": platform.python_version(),
         "calkit_version": calkit.__version__,
@@ -1529,6 +1532,12 @@ def get_system_info() -> dict:
         "memory_gb": psutil.virtual_memory().total / (1024**3),
         "cpu_count": os.cpu_count(),
     }
+
+
+def get_system_info() -> dict:
+    """Get information about the system on which we're currently running."""
+    system_info = get_machine_properties()
+    os_name = system_info["os"]
     node_id = uuid.getnode()
     # The multicast bit is the 40th bit from the right (0-indexed)
     # This corresponds to the least significant bit of the first octet

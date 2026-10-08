@@ -1094,12 +1094,26 @@ def update_environment(
                 "environment does"
             )
         env = envs[env_name]
-        if env.get("kind") != "system":
+        kind = env.get("kind")
+        if kind not in ("system", calkit.environments.SWITCH_KIND):
             raise_error(
-                f"Environment '{env_name}' is not a system environment, so "
-                "it has no machine to lock; its lock file is derived from "
-                "its spec"
+                f"Environment '{env_name}' is not a system or switch "
+                "environment, so it has no machine to lock; its lock file is "
+                "derived from its spec"
             )
+        # A switch's lock describes the machine its pick runs on
+        machine_name, machine_env = env_name, env
+        if kind == calkit.environments.SWITCH_KIND:
+            try:
+                picked = calkit.environments.resolve_switch(env_name, envs)
+            except ValueError as e:
+                raise_error(str(e))
+            if picked is None:
+                raise_error(
+                    calkit.environments.describe_switch_no_match(env_name, env)
+                )
+            machine_name, machine_env = picked, envs[picked]
+            env = calkit.environments.switch_machine_lock_env(env)
         if not calkit.environments.system_env_locks_anything(env):
             raise_error(
                 f"Environment '{env_name}' locks no machine properties, so "
@@ -1115,20 +1129,15 @@ def update_environment(
             before = None
         # A remote env is locked to the far end, which is what the gate
         # in 'calkit xenv' compares against
-        system_info = None
+        try:
+            system_info = calkit.environments.picked_machine_info(
+                machine_name, machine_env, ck_info
+            )
+        except ValueError as e:
+            raise_error(str(e))
         machine = "this machine"
-        if not calkit.environments.env_is_local({"host": "localhost", **env}):
-            import calkit.workspace as workspace
-
-            try:
-                ws = workspace.Workspace.from_env(
-                    env=env, env_name=env_name, ck_info=ck_info
-                )
-                system_info = workspace.remote_system_info(ws)
-                workspace.verify_machine_id(ws, system_info)
-            except ValueError as e:
-                raise_error(str(e))
-            machine = f"'{ws.host}'"
+        if system_info is not None:
+            machine = f"'{machine_env.get('host')}'"
         try:
             lock_fpath = calkit.environments.write_system_env_lock(
                 env_name=env_name,

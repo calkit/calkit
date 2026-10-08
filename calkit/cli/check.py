@@ -637,6 +637,39 @@ def check_environment(
         # env config so DVC stages that depend on the env get invalidated
         # when the config changes.
         write_scheduler_env_lock(env_name=env_name, env=env)
+    elif env["kind"] == calkit.environments.SWITCH_KIND:
+        # Checking a switch means checking what it picks here
+        try:
+            calkit.environments.write_switch_env_lock(env_name, envs)
+            picked = calkit.environments.resolve_switch(env_name, envs)
+        except ValueError as e:
+            raise_error(str(e))
+        if picked is None:
+            warn(calkit.environments.describe_switch_no_match(env_name, env))
+            return None
+        if verbose:
+            typer.echo(f"Environment '{env_name}' picks '{picked}' here")
+        if env.get("lock"):
+            machine_env = calkit.environments.switch_machine_lock_env(env)
+            try:
+                system_info = calkit.environments.picked_machine_info(
+                    picked, envs[picked], ck_info
+                )
+                write_system_env_lock(
+                    env_name=env_name, env=machine_env, system_info=system_info
+                )
+                mismatch = calkit.environments.system_env_lock_mismatch(
+                    env_name=env_name, env=machine_env, system_info=system_info
+                )
+            except ValueError as e:
+                raise_error(f"Environment '{env_name}': {e}")
+            if mismatch:
+                warn(
+                    calkit.environments.describe_system_env_lock_mismatch(
+                        env_name, mismatch
+                    )
+                )
+        return check_environment(env_name=picked, verbose=verbose)
     elif env["kind"] == "system":
         # Nothing is installed or built for a system env; checking it means
         # making sure the machine is as the project requires, then reading

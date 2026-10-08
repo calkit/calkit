@@ -3753,3 +3753,95 @@ def test_table_iteration_names(tmp_dir):
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open("dvc.yaml") as f:
         assert "matrix" in calkit.ryaml.load(f)["stages"]["ev"]
+
+
+def test_switch_env_compiles(tmp_dir):
+    environments = {
+        "cluster": {
+            "kind": "switch",
+            "use": {
+                "if has_app('sbatch')": "slurm-env",
+                "else": "here",
+            },
+        },
+        "slurm-env": {"kind": "slurm"},
+        "here": {"kind": "system", "default_setup": ["export A=1"]},
+        "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        "py-a": {"kind": "uv-venv", "path": "a/requirements.txt"},
+        "rt": {
+            "kind": "switch",
+            "use": {"if os == 'Windows'": "py-a", "else": "py"},
+        },
+    }
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    # A switch of machines compiles like a scheduler stage, resolving where
+    # it runs, and stages depend on its lock directory, not its options'
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": environments,
+            "pipeline": {
+                "stages": {
+                    "train": {
+                        "kind": "python-script",
+                        "script_path": "train.py",
+                        "environment": "cluster:py",
+                        "setup": ["export B=2"],
+                    },
+                    "plain": {
+                        "kind": "shell-command",
+                        "command": "echo hi",
+                        "environment": "cluster",
+                    },
+                    "per-os": {
+                        "kind": "python-script",
+                        "script_path": "s.py",
+                        "environment": "rt",
+                    },
+                }
+            },
+        },
+        write=True,
+    )
+    train = stages["train"]
+    assert train["cmd"].startswith("calkit scheduler batch --name train")
+    assert "--environment cluster" in train["cmd"]
+    assert "--setup 'export B=2'" in train["cmd"]
+    assert "calkit xenv -n py --no-check --" in train["cmd"]
+    assert ".calkit/env-locks/cluster" in train["deps"]
+    assert ".calkit/env-locks/slurm-env" not in train["deps"]
+    assert ".calkit/env-locks/py" in train["deps"]
+    assert os.path.isfile(".calkit/env-locks/cluster/switch.json")
+    assert any(
+        ".calkit/scheduler/logs/train.out" in o
+        for o in train["outs"]
+        if isinstance(o, dict)
+    )
+    assert "--environment cluster" in stages["plain"]["cmd"]
+    # A switch of runtimes is resolved by 'calkit xenv'
+    per_os = stages["per-os"]
+    assert per_os["cmd"].startswith("calkit xenv -n rt --no-check --")
+    assert ".calkit/env-locks/rt" in per_os["deps"]
+    assert ".calkit/env-locks/py" not in per_os["deps"]
+    # ...and so can't wrap another env
+    for env_name, match in [
+        ("rt:py", "switch between runtimes"),
+        ("cluster:here", "must not be a job scheduler"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            calkit.pipeline.to_dvc(
+                ck_info={
+                    "environments": environments,
+                    "pipeline": {
+                        "stages": {
+                            "s": {
+                                "kind": "python-script",
+                                "script_path": "s.py",
+                                "environment": env_name,
+                            }
+                        }
+                    },
+                },
+                write=False,
+            )

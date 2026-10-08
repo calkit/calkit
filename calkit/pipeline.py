@@ -151,6 +151,9 @@ class PipelineStatus(BaseModel):
     ignored_files_in_inputs: dict[str, dict[str, list[str]]] = Field(
         default_factory=dict
     )
+    # What each switch environment the pipeline uses picks on this machine,
+    # None where it picks nothing
+    switches: dict[str, str | None] = Field(default_factory=dict)
     # DVC's data status, when asked for, computed alongside the stage status
     # so it reuses that index and those hashes; not part of the output
     dvc_data_status: dict | None = Field(default=None, exclude=True)
@@ -896,6 +899,22 @@ def get_status(
                 f"Failed to read markdown stages: {e.__class__.__name__}: {e}"
             )
             return PipelineStatus.model_validate(result)
+        environments = ck_info.get("environments", {})
+        for stage in ck_info.get("pipeline", {}).get("stages", {}).values():
+            names = str(stage.get("environment") or "").split(
+                calkit.environments.COMPOSITE_ENV_SEP
+            )
+            for name in names:
+                env = environments.get(name) or {}
+                if env.get("kind") != calkit.environments.SWITCH_KIND:
+                    continue
+                try:
+                    result.setdefault("switches", {})[name] = (
+                        calkit.environments.resolve_switch(name, environments)
+                    )
+                except ValueError as e:
+                    result["errors"].append(str(e))
+                    return PipelineStatus.model_validate(result)
         if check_environments:
             try:
                 env_checks = calkit.environments.check_all_in_pipeline(
@@ -1323,6 +1342,7 @@ def get_status(
             stale_stages=result["stale_stages"],
             errors=result["errors"],
             ignored_files_in_inputs=ignored_files_in_inputs,
+            switches=result.get("switches", {}),
             dvc_data_status=dvc_data_status,
         )
     finally:
@@ -1807,7 +1827,12 @@ def to_dvc(
     import calkit.dvc.zip
     import calkit.markdown
     import calkit.questions
-    from calkit.environments import get_env_input_paths, get_env_lock_fpath
+    from calkit.environments import (
+        SWITCH_KIND,
+        get_env_input_paths,
+        get_env_lock_fpath,
+        write_switch_env_lock,
+    )
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -1987,6 +2012,10 @@ def to_dvc(
                 env_lock_fpaths.setdefault(env_name, []).append(
                     Path(env_input).as_posix()
                 )
+        if env.get("kind") == SWITCH_KIND and write:
+            # The same on every machine, so it is written here rather than
+            # by an environment check, which only runs where stages do
+            write_switch_env_lock(env_name, environments, wdir=wdir)
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=True, for_dvc=True, wdir=wdir
         )

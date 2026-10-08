@@ -689,6 +689,11 @@ def test_update_env_lock(tmp_dir, monkeypatch):
             "lock": ["os", "cpu-count"],
         },
         "plain": {"kind": "system"},
+        "pick": {
+            "kind": "switch",
+            "use": {"if cpu_count > 0": "plain"},
+            "lock": ["os"],
+        },
         "py": {
             "kind": "uv-venv",
             "path": "requirements.txt",
@@ -728,6 +733,11 @@ def test_update_env_lock(tmp_dir, monkeypatch):
     assert envs.read_system_env_lock(
         env_name="far", env=ck_info["environments"]["far"]
     ) == {"os": "FarOS", "cpu-count": 128}
+    # A switch is locked to the machine its pick runs on
+    result = runner.invoke(update_app, ["env", "-n", "pick", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(os.path.join(".calkit", "env-locks", "pick", "info.json")) as f:
+        assert json.load(f) == envs.get_system_lock_data(["os"])
     # Nothing to relock without machine properties or a machine
     result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
     assert result.exit_code != 0

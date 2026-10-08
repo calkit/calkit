@@ -765,6 +765,18 @@ def get_status(
         if running_status is not None:
             _print_running_pipeline_status(running_status)
             return
+        for switch_name, picked in (
+            pipeline_status.switches if pipeline_status else {}
+        ).items():
+            if picked is None:
+                typer.echo(
+                    f"Environment '{switch_name}' picks nothing on this "
+                    "machine"
+                )
+            else:
+                typer.echo(
+                    f"Environment '{switch_name}' picks '{picked}' here"
+                )
         # Nicely format the results from pipeline status
         if pipeline_status and pipeline_status.errors:
             warn("Pipeline status unavailable due to errors:")
@@ -3267,6 +3279,34 @@ def run(
         "dvc_status_after": dvc_status_after,
         "dvc_data_status_after": dvc_data_status_after,
     }
+    # Which environment each switch picked, so where results were made is
+    # recorded even though nothing in the project says
+    run_envs = ck_info.get("environments", {})
+    switch_picks = {}
+    for env_name, env in run_envs.items():
+        if env.get("kind") == calkit.environments.SWITCH_KIND:
+            try:
+                switch_picks[env_name] = calkit.environments.resolve_switch(
+                    env_name, run_envs
+                )
+            except ValueError:
+                switch_picks[env_name] = None
+    if switch_picks:
+        run_info["switches"] = switch_picks
+        run_stages = ck_info.get("pipeline", {}).get("stages", {})
+        for stage_name, info in stage_run_info.items():
+            stage_env = run_stages.get(stage_name.split("@")[0], {}).get(
+                "environment", ""
+            )
+            picks = {
+                n: switch_picks[n]
+                for n in str(stage_env).split(
+                    calkit.environments.COMPOSITE_ENV_SEP
+                )
+                if n in switch_picks
+            }
+            if picks:
+                info["switches"] = picks
     run_info_fname = run_fname_prefix + ".json"
     local_runs_dir = os.path.join(calkit.ensure_local_dir(), "runs")
     local_run_info_fpath = os.path.join(local_runs_dir, run_info_fname)
@@ -3487,6 +3527,21 @@ def run_in_env(
             calkit.ryaml.dump(ck_info, f)
     env_name = res.name
     env = envs[env_name]
+    if env.get("kind") == calkit.environments.SWITCH_KIND:
+        from calkit.cli.scheduler import _gate_switch_machine_lock
+
+        try:
+            picked = calkit.environments.resolve_switch(env_name, envs)
+        except ValueError as e:
+            raise_error(str(e))
+        if picked is None:
+            raise_error(
+                calkit.environments.describe_switch_no_match(env_name, env)
+            )
+        _gate_switch_machine_lock(env_name, env, picked, envs, ck_info)
+        if verbose:
+            typer.echo(f"Environment '{env_name}' picks '{picked}' here")
+        env_name, env = picked, envs[picked]
     # Only a system env runs setup commands here; a scheduler env's go
     # through 'calkit scheduler batch', and the other kinds hand the
     # command to a runtime with no shell of its own to prepare. Refused

@@ -1,5 +1,6 @@
 """Functionality related to environments."""
 
+import fnmatch
 import functools
 import glob
 import hashlib
@@ -7,6 +8,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -169,6 +171,8 @@ COMPOSITE_ENV_SEP = ":"
 # Kinds that say *where* a stage runs rather than what it runs in, so they
 # can wrap an inner runtime env as ``<outer>:<inner>``.
 VALID_OUTER_ENV_KINDS = ["slurm", "pbs", "system"]
+# A switch can be an outer env too, when every option it picks from is one
+SWITCH_KIND = "switch"
 
 
 def host_is_local(host: str | None) -> bool:
@@ -665,6 +669,12 @@ def get_env_lock_fpath(
         # itself even when ``for_dvc``: there's exactly one of them, so
         # there's no reason to make a stage depend on the whole directory.
         lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
+    elif env_kind == SWITCH_KIND:
+        # The definitions file, written when the pipeline is compiled, sits
+        # beside the machine lock a switch with 'lock' records
+        lock_fpath = os.path.join(env_lock_dir, env_name, "switch.json")
+        if for_dvc:
+            lock_fpath = os.path.dirname(lock_fpath)
     elif env_kind in ("slurm", "pbs"):
         # Job-scheduler envs have no external dependency manifest, so the
         # "lock" is just a JSON dump of the env config. The file is
@@ -743,6 +753,194 @@ def write_scheduler_env_lock(
     # everywhere -- and it is written wherever the check runs, not
     # where the scheduler lives, so text mode would let a Windows
     # collaborator flip it to CRLF and back for everyone else.
+    with open(lock_fpath, "w", newline="\n") as f:
+        f.write(content)
+    return lock_fpath
+
+
+def env_can_be_outer(env_name: str, envs: dict) -> bool:
+    """Whether an env says where to run, so it can wrap an inner env."""
+    kind = (envs.get(env_name) or {}).get("kind")
+    if kind == SWITCH_KIND:
+        return switch_is_outer(env_name, envs)
+    return kind in VALID_OUTER_ENV_KINDS
+
+
+def get_switch_options(env_name: str, envs: dict) -> list[str]:
+    """The environments a switch picks from, in the order written.
+
+    Raises ``ValueError`` for an option that isn't defined, is another
+    switch, or mixes machines with runtimes.
+    """
+    from calkit.conditions import parse_conditional
+
+    env = envs.get(env_name) or {}
+    try:
+        clauses = parse_conditional(env.get("use") or {})
+    except ValueError as e:
+        raise ValueError(f"Switch environment '{env_name}': {e}") from e
+    options: list[str] = []
+    for _, option in clauses:
+        option_env = envs.get(option)
+        if option_env is None:
+            raise ValueError(
+                f"Switch environment '{env_name}' uses '{option}', which is "
+                "not defined in environments"
+            )
+        if option_env.get("kind") == SWITCH_KIND:
+            raise ValueError(
+                f"Switch environment '{env_name}' uses '{option}', which is "
+                "another switch; name the environments it picks from instead"
+            )
+        if option not in options:
+            options.append(option)
+    machines = [
+        o for o in options if envs[o].get("kind") in VALID_OUTER_ENV_KINDS
+    ]
+    if machines and len(machines) != len(options):
+        runtimes = [o for o in options if o not in machines]
+        raise ValueError(
+            f"Switch environment '{env_name}' picks from machines "
+            f"({', '.join(machines)}) and runtimes ({', '.join(runtimes)}); "
+            "its options must all be one or the other"
+        )
+    return options
+
+
+def switch_is_outer(env_name: str, envs: dict) -> bool:
+    """Whether a switch picks a machine, so it can wrap an inner env."""
+    options = get_switch_options(env_name, envs)
+    return bool(options) and envs[options[0]].get("kind") in (
+        VALID_OUTER_ENV_KINDS
+    )
+
+
+def switch_condition_scope() -> tuple[dict, dict]:
+    """The values and functions a switch's conditions can use."""
+
+    def matches(value: object, pattern: str) -> bool:
+        if value is None:
+            return False
+        return fnmatch.fnmatchcase(str(value).lower(), str(pattern).lower())
+
+    functions = {
+        "env": lambda name, default=None: os.environ.get(name, default),
+        "has_app": lambda name: shutil.which(name) is not None,
+        "matches": matches,
+    }
+    return calkit.get_machine_properties(), functions
+
+
+def resolve_switch(env_name: str, envs: dict) -> str | None:
+    """The environment a switch picks on this machine, or None."""
+    from calkit.conditions import evaluate_condition, parse_conditional
+
+    get_switch_options(env_name, envs)
+    values, functions = switch_condition_scope()
+    for condition, option in parse_conditional(envs[env_name]["use"]):
+        if condition is None:
+            return option
+        try:
+            if evaluate_condition(condition, values, functions=functions):
+                return option
+        except KeyError as e:
+            raise ValueError(
+                f"Switch environment '{env_name}': condition {condition!r} "
+                f"names {e.args[0]!r}, which is not a machine property; "
+                f"available: {', '.join(sorted(values))}"
+            ) from None
+        except ValueError as e:
+            raise ValueError(f"Switch environment '{env_name}': {e}") from e
+    return None
+
+
+def describe_switch_no_match(env_name: str, env: dict) -> str:
+    """Say that no option of a switch applies here, and what here is."""
+    props = calkit.get_machine_properties()
+    here = ", ".join(
+        f"{k}={props.get(k)!r}" for k in ("hostname", "os", "machine")
+    )
+    conditions = "; ".join(str(k) for k in (env.get("use") or {}))
+    return (
+        f"Switch environment '{env_name}' picks no environment on this "
+        f"machine ({here}) from: {conditions}"
+    )
+
+
+def switch_machine_lock_env(env: dict) -> dict:
+    """A switch's machine lock, as the system env whose lock it is."""
+    return {"kind": "system", "lock": env.get("lock") or []}
+
+
+def picked_machine_info(
+    env_name: str, env: dict, ck_info: dict
+) -> dict | None:
+    """The properties of the machine an env runs on, or None for this one."""
+    host = env.get("host")
+    if env.get("kind") == "system":
+        local = env_is_local({"host": "localhost", **env})
+    else:
+        local = host_is_local(host or "localhost")
+    if local:
+        return None
+    import calkit.workspace as workspace
+
+    ws = workspace.Workspace.from_env(
+        env=env, env_name=env_name, ck_info=ck_info
+    )
+    info = workspace.remote_system_info(ws)
+    workspace.verify_machine_id(ws, info)
+    return info
+
+
+def write_switch_env_lock(
+    env_name: str, envs: dict, wdir: str | None = None
+) -> str:
+    """Write a switch's definition, and its options', for stages to depend on.
+
+    The same on every machine: it records what the switch could pick, not
+    what it picked here. Spec files and inputs of the options are recorded
+    by checksum, so editing one reruns the stages using the switch.
+    """
+    options = get_switch_options(env_name, envs)
+    env = envs[env_name]
+    specs = {}
+    for option in options:
+        option_env = envs[option]
+        paths = get_env_input_paths(option_env, option)
+        if option_env.get("path"):
+            paths = [option_env["path"]] + paths
+        for path in paths:
+            full = os.path.join(wdir, path) if wdir else path
+            if os.path.isfile(full):
+                specs[Path(path).as_posix()] = calkit.get_md5(full)
+    lock_data = {
+        "use": env["use"],
+        "lock": env.get("lock") or [],
+        "options": {
+            o: {
+                k: v
+                for k, v in envs[o].items()
+                if k not in SCHEDULER_DISPATCH_ONLY_KEYS
+            }
+            for o in options
+        },
+        "specs": specs,
+    }
+    from calkit.cli.scheduler import _mock_enabled
+
+    if _mock_enabled() and any(
+        envs[o].get("kind") in ("slurm", "pbs") for o in options
+    ):
+        lock_data["mocked"] = True
+    lock_dir = os.path.join(get_env_lock_dir(wdir=wdir), env_name)
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_fpath = Path(os.path.join(lock_dir, "switch.json")).as_posix()
+    content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
+    if os.path.isfile(lock_fpath):
+        with open(lock_fpath) as f:
+            if f.read() == content:
+                return lock_fpath
     with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
     return lock_fpath
@@ -1608,7 +1806,7 @@ def env_from_name_or_path(
     if name_or_path.count(COMPOSITE_ENV_SEP) == 1 and not path_only:
         outer_env_name, sub_env_name = name_or_path.split(COMPOSITE_ENV_SEP)
         outer_env = envs.get(outer_env_name)
-        if outer_env and outer_env.get("kind") in VALID_OUTER_ENV_KINDS:
+        if outer_env and env_can_be_outer(outer_env_name, envs):
             # Look for an inner environment with the given name and path
             for sub_name, sub_env in envs.items():
                 if (not path_only and sub_name == sub_env_name) or sub_env.get(
@@ -1743,7 +1941,7 @@ def env_from_name_and_or_path(
     if name and name.count(COMPOSITE_ENV_SEP) == 1:
         outer_env_name, sub_env_name = name.split(COMPOSITE_ENV_SEP)
         outer_env = envs.get(outer_env_name)
-        if outer_env and outer_env.get("kind") in VALID_OUTER_ENV_KINDS:
+        if outer_env and env_can_be_outer(outer_env_name, envs):
             # Look for a sub-environment with the given name and path
             for sub_name, sub_env in envs.items():
                 if (sub_name == sub_env_name) or (

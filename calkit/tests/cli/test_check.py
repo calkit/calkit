@@ -1358,3 +1358,42 @@ def test_check_questions(tmp_dir):
         calkit.ryaml.dump({}, f)
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "No questions defined." in out
+
+
+def test_check_switch_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "pick": {
+                "kind": "switch",
+                "use": {"if cpu_count > 0": "here"},
+                "lock": ["os"],
+            },
+            "never": {
+                "kind": "switch",
+                "use": {"if cpu_count < 0": "here"},
+            },
+            "here": {"kind": "system"},
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Checking a switch writes its lock and checks what it picks here
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "pick", "--verbose"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "picks 'here' here" in res.stdout
+    assert os.path.isfile(".calkit/env-locks/pick/switch.json")
+    with open(".calkit/env-locks/pick/info.json") as f:
+        assert json.load(f) == {"os": calkit.get_system_info()["os"]}
+    # One that picks nothing warns rather than failing
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "never"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    assert "picks no environment" in res.stdout + res.stderr

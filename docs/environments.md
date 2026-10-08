@@ -1207,6 +1207,47 @@ Model class: `SlurmEnvironment`
 | max_concurrent_jobs | int              | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit. |
 | description         | str              | no       | A description of the environment.                                                                                                                                                                                                                               |
 
+#### `switch`
+
+Model class: `SwitchEnvironment`
+
+One of several environments, picked by the machine Calkit runs on.
+
+`use` maps `if <condition>`, `elif <condition>` and `else` to
+the names of other environments, tried in order. A condition can use
+the machine properties `calkit describe system` prints, e.g.,
+`hostname`, `machine_id`, `os`, `machine` and `cpu_count`,
+and the functions `env(name, default)`, `has_app(name)` and
+`matches(value, pattern)`, where `pattern` is a case-insensitive
+glob. For example:
+
+```yaml
+cluster:
+  kind: switch
+  use:
+    if matches(hostname, "*.gps.caltech.edu"): clima
+    elif env("NERSC_HOST") == "perlmutter": perlmutter
+    elif has_app("sbatch"): any-slurm
+    else: clima-remote
+```
+
+The options are either all machines (`system`, `slurm` or
+`pbs`), so the switch can be the outer half of a composite
+environment like `cluster:py`, or all runtimes, e.g., one per
+operating system. An option can't be another switch.
+
+Stages depend on the switch's definition and its options', so editing
+them reruns those stages, but not on which option was picked, so
+moving between machines the switch covers doesn't. A stage whose
+switch picks nothing on this machine can't run here, and is skipped.
+
+| Parameter   | Type                                                                                                                                                                                                                                                                                                                                         | Required | Description                                                                                                                                                    |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['switch']                                                                                                                                                                                                                                                                                                                            | yes      | What kind of environment this is.                                                                                                                              |
+| use         | dict[str, str]                                                                                                                                                                                                                                                                                                                               | yes      | Environment names keyed by 'if <condition>', 'elif <condition>' and 'else', tried in order.                                                                    |
+| lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine the picked environment runs on that results depend on, recorded the first time the switch is checked, as for a 'system' environment. |
+| description | str                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                              |
+
 #### `system`
 
 Model class: `SystemEnvironment`

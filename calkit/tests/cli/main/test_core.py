@@ -3055,3 +3055,67 @@ def test_push_carries_annotated_tags(tmp_dir):
     )
     assert "v0.1.0" in tags
     assert "scratch" not in tags
+
+
+@skipif_windows_mock_scheduler
+def test_run_switch_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "cluster": {
+                "kind": "switch",
+                "use": {
+                    "if env('CK_TEST_SITE') == 'cluster'": "slurm-env",
+                    "else": "here",
+                },
+            },
+            "slurm-env": {
+                "kind": "slurm",
+                "default_setup": ["export WHERE=slurm"],
+            },
+            "here": {"kind": "system", "default_setup": ["export WHERE=here"]},
+        },
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "printenv WHERE > out.txt",
+                    "environment": "cluster",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = {k: v for k, v in os.environ.items() if k != "CK_TEST_SITE"}
+    # Off the cluster, the switch picks the system env and runs it here,
+    # writing the log a scheduler stage declares
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "here"
+    assert os.path.isfile(".calkit/scheduler/logs/s.out")
+    runs = sorted(os.listdir(os.path.join(".calkit", "local", "runs")))
+    with open(os.path.join(".calkit", "local", "runs", runs[-1])) as f:
+        run_info = json.load(f)
+    assert run_info["switches"] == {"cluster": "here"}
+    assert run_info["stages"]["s"]["switches"] == {"cluster": "here"}
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Environment 'cluster' picks 'here' here" in out
+    # Moving to the cluster doesn't make the stage stale, since it doesn't
+    # depend on which option was picked
+    env["CK_TEST_SITE"] = "cluster"
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "here"
+    # Rerunning it there goes through the scheduler
+    subprocess.check_call(["calkit", "run", "-K", "-f"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "slurm"
+    # xenv resolves a switch passed by name
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "cluster", "--", "echo", "picked"],
+        env={k: v for k, v in env.items() if k != "CK_TEST_SITE"},
+        text=True,
+    )
+    assert "picked" in out

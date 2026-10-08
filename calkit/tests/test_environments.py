@@ -1802,3 +1802,88 @@ def test_cross_platform_venv_locks(tmp_dir):
         assert set(again) == set(written)
         for fpath in again:
             assert envs.venv_lock_matches_spec(fpath, spec, python="3.12")
+
+
+def test_switch_env(tmp_dir, monkeypatch):
+    import calkit.environments as envs
+
+    envs_def = {
+        "cluster": {
+            "kind": "switch",
+            "use": {
+                "if has_app('calkit-test-no-such-app')": "slurm-env",
+                "elif env('CK_TEST_SITE') == 'lab'": "lab",
+                "elif matches(hostname, '*')": "here",
+            },
+        },
+        "slurm-env": {"kind": "slurm"},
+        "lab": {"kind": "system", "host": "lab.invalid"},
+        "here": {"kind": "system"},
+        "py": {"kind": "uv-venv", "path": "requirements.txt"},
+    }
+    monkeypatch.delenv("CK_TEST_SITE", raising=False)
+    assert envs.get_switch_options("cluster", envs_def) == [
+        "slurm-env",
+        "lab",
+        "here",
+    ]
+    assert envs.switch_is_outer("cluster", envs_def)
+    assert envs.env_can_be_outer("cluster", envs_def)
+    assert not envs.env_can_be_outer("py", envs_def)
+    # First match wins, and conditions see this machine and its env vars
+    assert envs.resolve_switch("cluster", envs_def) == "here"
+    monkeypatch.setenv("CK_TEST_SITE", "lab")
+    assert envs.resolve_switch("cluster", envs_def) == "lab"
+    # Nothing matching and no else picks nothing, rather than guessing
+    envs_def["none"] = {
+        "kind": "switch",
+        "use": {"if env('CK_TEST_SITE') == 'elsewhere'": "here"},
+    }
+    assert envs.resolve_switch("none", envs_def) is None
+    assert "picks no environment" in envs.describe_switch_no_match(
+        "none", envs_def["none"]
+    )
+    # A misspelled property says what is available
+    envs_def["typo"] = {"kind": "switch", "use": {"if hostnme == 'x'": "here"}}
+    with pytest.raises(ValueError, match="not a machine property"):
+        envs.resolve_switch("typo", envs_def)
+    # Options must exist, not be switches, and not mix machines and runtimes
+    for use, match in [
+        ({"if os == 'x'": "nope", "else": "here"}, "not defined"),
+        ({"if os == 'x'": "cluster", "else": "here"}, "another switch"),
+        ({"if os == 'x'": "py", "else": "here"}, "one or the other"),
+        ({"else": "here", "if os == 'x'": "py"}, "no 'if' before"),
+    ]:
+        envs_def["bad"] = {"kind": "switch", "use": use}
+        with pytest.raises(ValueError, match=match):
+            envs.get_switch_options("bad", envs_def)
+    del envs_def["bad"]
+    # A switch of runtimes can't wrap another env
+    envs_def["rt"] = {"kind": "switch", "use": {"if cpu_count > 0": "py"}}
+    assert not envs.switch_is_outer("rt", envs_def)
+    # The definitions lock is the same on every machine, and changes when an
+    # option's definition or spec does
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    lock_fpath = envs.write_switch_env_lock("rt", envs_def)
+    assert lock_fpath == ".calkit/env-locks/rt/switch.json"
+    assert envs.get_env_lock_fpath(
+        env=envs_def["rt"], env_name="rt", for_dvc=True
+    ) == os.path.dirname(lock_fpath)
+    with open(lock_fpath) as f:
+        locked = json.load(f)
+    assert set(locked["options"]) == {"py"}
+    assert "requirements.txt" in locked["specs"]
+    monkeypatch.setenv("CK_TEST_SITE", "elsewhere")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        assert json.load(f) == locked
+    with open("requirements.txt", "w") as f:
+        f.write("idna\ncertifi\n")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        assert json.load(f)["specs"] != locked["specs"]
+    # A switch's machine lock is a system env lock beside the definitions
+    machine_env = envs.switch_machine_lock_env({"lock": ["os"]})
+    envs.write_system_env_lock(env_name="rt", env=machine_env)
+    assert os.path.isfile(".calkit/env-locks/rt/info.json")

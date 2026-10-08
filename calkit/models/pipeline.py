@@ -2301,7 +2301,12 @@ class Pipeline(BaseModel):
         such a stage runs, so the merged chain goes into the command DVC
         records. A scheduler env's is still left to the batch CLI.
         """
-        from calkit.environments import merge_setup_commands
+        from calkit.environments import (
+            SWITCH_KIND,
+            env_can_be_outer,
+            merge_setup_commands,
+            switch_is_outer,
+        )
 
         # Stage kinds that don't require a separate inner runtime, so they
         # can run on a plain (non-composite) scheduler env. Anything else
@@ -2329,6 +2334,17 @@ class Pipeline(BaseModel):
                 )
             env = environments.get(stage.outer_environment, {})
             kind = env.get("kind")
+            # Which option a switch picks is only known where the stage runs
+            is_machine_switch = kind == SWITCH_KIND and switch_is_outer(
+                env_name, environments
+            )
+            if kind == SWITCH_KIND and not is_machine_switch:
+                if stage.inner_environment != stage.outer_environment:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has outer environment "
+                        f"'{env_name}', a switch between runtimes, which "
+                        "can't wrap another environment"
+                    )
             # Setup commands are run by whatever dispatches the stage, and
             # only these kinds dispatch one: the others hand the command to
             # a runtime that has no shell of its own to prepare. Reported
@@ -2338,8 +2354,10 @@ class Pipeline(BaseModel):
             # a bare command with nothing wrapping it, and a project that
             # needs setup is a project that should name its machine.
             if (
-                stage.setup or stage.env_default_setup != "replace"
-            ) and kind not in ("system", "slurm", "pbs"):
+                (stage.setup or stage.env_default_setup != "replace")
+                and kind not in ("system", "slurm", "pbs")
+                and not is_machine_switch
+            ):
                 described = (
                     "the built-in '_system' environment"
                     if env_name == "_system"
@@ -2374,7 +2392,7 @@ class Pipeline(BaseModel):
                         f"'{stage.inner_environment}' that is not "
                         "defined in environments"
                     )
-                if inner_env.get("kind") in set(scheduler_kinds) | {"system"}:
+                if env_can_be_outer(stage.inner_environment, environments):
                     raise ValueError(
                         f"Stage '{stage.name}' has system outer environment "
                         f"'{stage.outer_environment}' and inner environment "
@@ -2384,10 +2402,14 @@ class Pipeline(BaseModel):
                         "scheduler"
                     )
                 continue
-            if kind not in scheduler_kinds:
+            if kind not in scheduler_kinds and not is_machine_switch:
                 continue
-            cli_alias = scheduler_kinds[kind]
-            scheduler_label = kind.upper()
+            # A switch of machines dispatches like a scheduler stage, and
+            # 'calkit scheduler batch' runs it on whichever one it picks
+            cli_alias = "scheduler"
+            scheduler_label = (
+                "machine switch" if is_machine_switch else str(kind).upper()
+            )
             if stage.kind not in plain_ok_kinds:
                 if stage.inner_environment == stage.outer_environment:
                     raise ValueError(
@@ -2404,7 +2426,10 @@ class Pipeline(BaseModel):
                         f"'{stage.inner_environment}' that is not "
                         "defined in environments"
                     )
-                if inner_env.get("kind") in scheduler_kinds:
+                if inner_env.get("kind") in scheduler_kinds or (
+                    is_machine_switch
+                    and env_can_be_outer(stage.inner_environment, environments)
+                ):
                     raise ValueError(
                         f"Stage '{stage.name}' has {scheduler_label} outer "
                         f"environment '{stage.outer_environment}' and "

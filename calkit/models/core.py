@@ -880,6 +880,7 @@ class Environment(BaseModel):
         "venv",
         "uv-venv",
         "renv",
+        "switch",
     ] = Field(description="What kind of environment this is.")
     # Note: ``path`` is declared on the specific subclasses that need it (most
     # of them, required; optional for Docker) rather than here, so subclasses
@@ -1379,6 +1380,59 @@ class SystemEnvironment(Environment):
         "constraints on properties like CPU count. Checked on the machine "
         "this environment names, which is not necessarily this one.",
     )
+
+
+class SwitchEnvironment(Environment):
+    """One of several environments, picked by the machine Calkit runs on.
+
+    ``use`` maps ``if <condition>``, ``elif <condition>`` and ``else`` to
+    the names of other environments, tried in order. A condition can use
+    the machine properties ``calkit describe system`` prints, e.g.,
+    ``hostname``, ``machine_id``, ``os``, ``machine`` and ``cpu_count``,
+    and the functions ``env(name, default)``, ``has_app(name)`` and
+    ``matches(value, pattern)``, where ``pattern`` is a case-insensitive
+    glob. For example:
+
+    ```yaml
+    cluster:
+      kind: switch
+      use:
+        if matches(hostname, "*.gps.caltech.edu"): clima
+        elif env("NERSC_HOST") == "perlmutter": perlmutter
+        elif has_app("sbatch"): any-slurm
+        else: clima-remote
+    ```
+
+    The options are either all machines (``system``, ``slurm`` or
+    ``pbs``), so the switch can be the outer half of a composite
+    environment like ``cluster:py``, or all runtimes, e.g., one per
+    operating system. An option can't be another switch.
+
+    Stages depend on the switch's definition and its options', so editing
+    them reruns those stages, but not on which option was picked, so
+    moving between machines the switch covers doesn't. A stage whose
+    switch picks nothing on this machine can't run here, and is skipped.
+    """
+
+    kind: Literal["switch"] = "switch"
+    use: dict[str, str] = Field(
+        description="Environment names keyed by 'if <condition>', "
+        "'elif <condition>' and 'else', tried in order."
+    )
+    lock: list[SystemLockProperty] = Field(
+        default=[],
+        description="Properties of the machine the picked environment runs "
+        "on that results depend on, recorded the first time the switch is "
+        "checked, as for a 'system' environment.",
+    )
+
+    @field_validator("use")
+    @classmethod
+    def check_use(cls, v: dict[str, str]) -> dict[str, str]:
+        from calkit.conditions import parse_conditional
+
+        parse_conditional(v)
+        return v
 
 
 class Software(BaseModel):
@@ -2075,7 +2129,8 @@ class ProjectInfo(BaseModel):
             | UvEnvironment
             | UvVenvEnvironment
             | NixEnvironment
-            | SystemEnvironment,
+            | SystemEnvironment
+            | SwitchEnvironment,
             Discriminator("kind"),
         ],
     ] = Field(

@@ -58,8 +58,10 @@ Rebecca McCabe recently finished her PhD in Mechanical Engineering at Cornell,
 developing advanced computational methods for multidisciplinary
 optimization of
 wave energy converters in her
-[MDOcean](https://github.com/symbiotic-engineering/MDOcean) and
-[OpenFLASH](https://github.com/symbiotic-engineering/OpenFLASH) projects.
+[MDOcean](https://github.com/symbiotic-engineering/MDOcean),
+[OpenFLASH](https://github.com/symbiotic-engineering/OpenFLASH), and
+[WEC-DECIDER](https://github.com/symbiotic-engineering/WEC-DECIDER)
+projects.
 She used Calkit to create single-button reproducible pipelines that integrated
 MATLAB, Python, Julia, LaTeX, and more.
 She used Calkit's Overleaf integration

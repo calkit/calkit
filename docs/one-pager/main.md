@@ -1,4 +1,4 @@
-# _Calkit_: Agile, reproducible science in the age of agentic AI
+# _Calkit_: Agile, verifiable, reproducible science in the age of AI
 
 ![Calkit system](../img/pipeline.png)
 

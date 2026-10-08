@@ -4,6 +4,7 @@ const POOL_SIZE = Math.max(
   1,
   Math.min(4, (navigator.hardwareConcurrency || 2) - 1),
 );
+const SOURCE = "https://github.com/calkit/calkit";
 // Runs per message to a worker, small enough to spread a scenario over the
 // pool and show progress
 const CHUNK = 25;
@@ -325,6 +326,12 @@ function renderForm() {
         Simulate</button>
       <span class="sim-status"></span>
       <progress class="sim-progress" max="1" value="0" hidden></progress>
+      <p class="sim-caption">Simulations run in your browser, in Python, with
+        Pyodide. Read <a href="${SOURCE}/blob/main/docs/simulator/research_flow.py">the
+        model</a>,
+        which Calkit's own study of research workflows also uses, and
+        <a href="${SOURCE}/tree/main/docs/simulator">the rest of this page's source</a> on
+        GitHub.</p>
     </form>
     <div class="sim-results"></div>
     <div class="sim-tip" role="tooltip" hidden></div>`;
@@ -518,9 +525,11 @@ function renderReport(report) {
     ${bars(parts, scale)}
     ${
       without.length
-        ? `<h2>Without Calkit</h2>
-          <p class="sim-caption">Working days saved per paper by AI agents
-            alone, on the same scale.</p>
+        ? `<h2>If you started using AI agents</h2>
+          <p class="sim-caption">You don't use AI agents today. This is what
+            starting to, without Calkit, would save per paper, on the same
+            scale as Calkit's parts above. Tick "You use AI agents" to see
+            what Calkit saves on top of them.</p>
           ${bars(without, scale)}`
         : ""
     }

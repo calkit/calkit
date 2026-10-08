@@ -61,7 +61,7 @@ SCENARIOS = [
     "calkit, first paper",
     "calkit, later",
 ]
-AGENTS_ALONE = "AI agents, without Calkit"
+AGENTS_ALONE = "Starting to use AI agents, without Calkit"
 
 
 def defaults() -> dict[str, Any]:

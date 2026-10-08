@@ -327,9 +327,8 @@ function renderForm() {
       <span class="sim-status"></span>
       <progress class="sim-progress" max="1" value="0" hidden></progress>
       <p class="sim-caption">Simulations run in your browser, in Python, with
-        Pyodide. Read <a href="${SOURCE}/blob/main/docs/simulator/research_flow.py">the
-        model</a>,
-        which Calkit's own study of research workflows also uses, and
+        Pyodide. See <a href="${SOURCE}/blob/main/docs/simulator/research_flow.py">the
+        model</a> and
         <a href="${SOURCE}/tree/main/docs/simulator">the rest of this page's source</a> on
         GitHub.</p>
     </form>
@@ -480,7 +479,7 @@ function renderReport(report) {
   const cells = [
     cell(
       "today",
-      "Status quo",
+      "Status quo: large batches, manual data transfer between tools",
       policy,
       false,
       today,
@@ -490,7 +489,7 @@ function renderReport(report) {
     ),
     cell(
       "calkit",
-      "Calkit: small batches, with connected tools in one project",
+      "Calkit: small batches, connected tools in one project",
       "lean",
       true,
       first,

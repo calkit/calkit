@@ -131,14 +131,14 @@ stages:
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
-    - path: docs/simulator/research_flow.py
+    - path: docs/roi/research_flow.py
       hash: md5
-      md5: e02a6c63e77602368ce3f7d4d93bf163
+      md5: 46485596b2cdd88a39d23e2243bd157a
       size: 34092
     - path: scripts/research-flow.py
       hash: md5
-      md5: 3aac70e53e59e4770181594a35640c41
-      size: 13746
+      md5: 7116a10dcfefc35ad2336d1a87d8ead1
+      size: 13739
     - path: uv.lock
       hash: md5
       md5: 252c68ccae32923f843aa23a43371454
@@ -286,8 +286,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 057ac83b16f15a95818cf2c18ec81466
-      size: 9446
+      md5: 5db7b68ce6087c3a0a35ae0f0cdb946d
+      size: 9440
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
@@ -315,5 +315,5 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 55b93aad0ffb133da3a168735c544dc3
-      size: 136449
+      md5: 03534913e42ac727afc3887a3e22d2a5
+      size: 136287

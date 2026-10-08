@@ -1,6 +1,6 @@
 """Simulate a paper worked in small steps versus stage by stage.
 
-Runs the model in docs/simulator/research_flow.py, which the docs' simulator
+Runs the model in docs/roi/research_flow.py, which the docs' ROI calculator
 page shares, for the default workflow: both working styles with manual and
 automated tooling, ways of adopting the tooling, where the time goes, and
 Calkit's goals added one at a time from today's status quo to see what each
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, "docs/simulator")
+sys.path.insert(0, "docs/roi")
 
 from research_flow import (  # noqa: E402
     ADOPTION,

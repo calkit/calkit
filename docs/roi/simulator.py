@@ -1,4 +1,4 @@
-"""What the simulator page runs in the browser, in Pyodide.
+"""What the ROI calculator page runs in the browser, in Pyodide.
 
 A visitor's workflow is simulated to answer two questions: whether keeping
 everything in one Calkit project is worth it, and whether they can work one

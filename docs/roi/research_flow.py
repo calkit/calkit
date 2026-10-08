@@ -31,7 +31,7 @@ built by hand or Calkit's. Agents speed up the mechanics of the work and add
 flaws of their own.
 
 The stages and their costs are parameters, so this runs for any workflow:
-scripts/research-flow.py runs it for the default one, and the simulator page
+scripts/research-flow.py runs it for the default one, and the ROI calculator
 in the docs runs it in the browser for one a visitor enters.
 """
 

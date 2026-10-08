@@ -345,9 +345,9 @@ function renderForm() {
       <span class="sim-status"></span>
       <progress class="sim-progress" max="1" value="0" hidden></progress>
       <p class="sim-caption">Simulations run in your browser, in Python, with
-        Pyodide. See <a href="${SOURCE}/blob/main/docs/simulator/research_flow.py">the
+        Pyodide. See <a href="${SOURCE}/blob/main/docs/roi/research_flow.py">the
         model</a> and
-        <a href="${SOURCE}/tree/main/docs/simulator">the rest of this page's source</a> on
+        <a href="${SOURCE}/tree/main/docs/roi">the rest of this page's source</a> on
         GitHub.</p>
     </form>
     <div class="sim-results"></div>

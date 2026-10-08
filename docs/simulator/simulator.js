@@ -455,14 +455,25 @@ function renderReport(report) {
       <span class="sim-tile-note">${note}</span></div>`;
   const faster = (c) =>
     `${c.ratio.toFixed(2)}× as fast as today; ${flawed(c)} today`;
-  const calkitNote = (c) =>
-    `${faster(c)}; includes ${days(c.learning_days)} days learning Calkit,
-    and later papers take ${days(later.days)}`;
-  const policy = report.small_steps ? "stage-gate" : "lean";
+  const policy = report.split ? "stage-gate" : "lean";
+  // Where Calkit's savings come from, which add up only roughly
+  let sources = `All ${days(first.saved)} days saved come from connecting
+    your tools in one project, since you already work in small batches.`;
+  if (report.split) {
+    const { batches, project, together } = report.split;
+    const extra =
+      together >= 0
+        ? `${days(together)} more than they save apart`
+        : `${days(-together)} less than they save apart`;
+    sources = `Of the ${days(first.saved)} days saved, about
+      ${days(batches)} come from smaller batches and ${days(project)} from
+      connecting your tools in one project. Together they save ${extra},
+      which is split evenly between them here.`;
+  }
   const cells = [
     cell(
       "today",
-      "Today",
+      "Status quo",
       policy,
       false,
       today,
@@ -470,40 +481,16 @@ function renderReport(report) {
       ${days(today.p10)}–${days(today.p90)};
       ${today.flawed.toFixed(1)} flawed results published`,
     ),
-  ];
-  if (report.your_batches) {
-    cells.push(
-      cell(
-        "repo",
-        "Your batches, in one Calkit project",
-        policy,
-        true,
-        report.your_batches,
-        `${faster(report.your_batches)}; includes
-        ${days(report.your_batches.learning_days)} days learning Calkit`,
-      ),
-      cell(
-        "small",
-        "One result at a time, with today's tools",
-        "lean",
-        false,
-        report.small_steps,
-        faster(report.small_steps),
-      ),
-    );
-  }
-  cells.push(
     cell(
       "calkit",
-      report.small_steps
-        ? "One result at a time, in one Calkit project"
-        : "In one Calkit project",
+      "Calkit: small batches, with connected tools in one project",
       "lean",
       true,
       first,
-      calkitNote(first),
+      `${faster(first)}; includes ${days(first.learning_days)} days learning
+      Calkit, and later papers take ${days(later.days)}. ${sources}`,
     ),
-  );
+  ];
   const parts = report.parts.map((c) => saving(c));
   const without = report.agents ? [saving(report.agents)] : [];
   // One scale for both, so Calkit's parts compare with what agents do

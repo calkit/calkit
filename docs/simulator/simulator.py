@@ -260,6 +260,28 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
             "unfinished": s["unfinished"],
         }
 
+    def split() -> dict[str, float] | None:
+        # What Calkit saves, split between smaller batches and one project
+        # by what each saves on average over both orders of adopting them,
+        # so the two add up to the whole, along with what they save only
+        # together
+        if "small steps" not in runs:
+            return None
+        t, b, s, p = (
+            summaries[n]["days_mean"]
+            for n in [
+                "today",
+                "calkit, first paper",
+                "small steps",
+                "calkit, your batches",
+            ]
+        )
+        return {
+            "batches": ((t - s) + (p - b)) / 2,
+            "project": ((t - p) + (s - b)) / 2,
+            "together": (t - b) - (t - s) - (t - p),
+        }
+
     summaries = {name: summarize(r) for name, r in runs.items()}
     today = summaries["today"]
     parts = [compare(n) for n in runs if n not in SCENARIOS + [AGENTS_ALONE]]
@@ -272,12 +294,7 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
             "unfinished": today["unfinished"],
             "breakdown": breakdown(today),
         },
-        "small_steps": compare("small steps")
-        if "small steps" in runs
-        else None,
-        "your_batches": compare("calkit, your batches")
-        if "calkit, your batches" in runs
-        else None,
+        "split": split(),
         "first": compare("calkit, first paper"),
         "later": compare("calkit, later"),
         "parts": sorted(parts, key=lambda c: -c["saved"]),

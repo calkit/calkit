@@ -341,6 +341,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
 
     def setup(s: int) -> Generator:
         nonlocal current_stage
+        # Switching to a stage, and getting back into it after time away
         if current_stage == s:
             return
         cost = tool("switch_cost")
@@ -380,6 +381,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
 
     def process(item: Item) -> Generator:
         nonlocal loops
+        # Working a finding through its next stage, which can introduce a
+        # flaw, reveal one upstream, or end an attempt that didn't work
         s = item.stage
         # A review can send the finding back while switching to its stage
         version = item.version
@@ -458,6 +461,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             item.retried = True
 
     def handoff(s: int, n: float) -> Generator:
+        # Moving a stage's outputs into the next stage's tools
         cost = tool("handoff_fixed")[s] + tool("handoff_item")[s] * n
         yield from spend("handoff", cost)
 
@@ -513,6 +517,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
 
     def review(reviewed_items: list[Item]) -> None:
         nonlocal loops, final_pending, final_ok
+        # The PI's review, which catches flaws, approves finished findings,
+        # and can prompt new ones
         loops += 1
         # A flaw is caught if any of the findings it shows up in reveals it
         flaws = {
@@ -576,6 +582,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
     def publish() -> Generator:
         nonlocal under_review, published_at, submitted_at, rejections, loops
         nonlocal journal_wait
+        # Submitting to a journal, through peer review until it's accepted
         wait, resubmit = p["review_days"], True
         while True:
             while not ready():
@@ -679,6 +686,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                 gate.succeed()
 
     def lean_student() -> Generator:
+        # Lean: one finding at a time through every stage, while the PI
+        # reviews what changed each week
         yield from spend("learning", p["learn_days"])
         while not done():
             todo = [i for i in items if not i.done]
@@ -701,6 +710,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
 
     def gated_student() -> Generator:
         nonlocal gate_items, gate
+        # Stage-gate: every finding through a stage, then a PI review of the
+        # batch at a gate
         yield from spend("learning", p["learn_days"])
         while not done():
             todo = [i for i in items if not i.done]

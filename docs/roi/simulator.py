@@ -9,12 +9,15 @@ what it's worth to them. AI agents can be used in any of them. Every
 scenario runs the same seeds, so their differences aren't swamped by noise.
 """
 
+import ast
 import json
 import math
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+import research_flow
 from research_flow import (
     AGENTS,
     BASE,
@@ -332,6 +335,136 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
     }
 
 
+def explain() -> dict[str, Any]:
+    # How the model works, read from its source so it can't drift from it:
+    # docstrings, every assumption with the comment above it, and the
+    # comment opening each step of a simulated project
+    def note(lines: list[str], line: int) -> str:
+        # The comment block right above a line, as one paragraph
+        found: list[str] = []
+        i = line - 2
+        while i >= 0 and lines[i].strip().startswith("#"):
+            found.insert(0, lines[i].strip().lstrip("#").strip())
+            i -= 1
+        return " ".join(found)
+
+    def plain(value: Any) -> Any:
+        if isinstance(value, (set, frozenset)):
+            return sorted(value)
+        if isinstance(value, dict):
+            return {k: plain(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [plain(v) for v in value]
+        return value
+
+    def describe(
+        src: str, name: str, line: int, node: ast.expr, value: Any
+    ) -> dict[str, Any]:
+        lines = src.splitlines()
+        out: dict[str, Any] = {
+            "name": name,
+            "line": line,
+            "note": note(lines, line),
+        }
+        if isinstance(node, ast.Dict):
+            out["entries"] = [
+                describe(src, k.value, k.lineno, v, value[k.value])
+                for k, v in zip(node.keys, node.values)
+                if isinstance(k, ast.Constant)
+            ]
+        elif isinstance(node, (ast.Name, ast.BinOp)):
+            # Built from other assumptions, so it's shown as written
+            out["expr"] = ast.get_source_segment(src, node)
+        else:
+            out["value"] = plain(value)
+        return out
+
+    def blocks(doc: str) -> list[dict[str, Any]]:
+        # A docstring's paragraphs and bulleted lists
+        out: list[dict[str, Any]] = []
+        for block in doc.split("\n\n"):
+            rows = [r.strip() for r in block.splitlines()]
+            if rows[0].startswith("- "):
+                items: list[str] = []
+                for r in rows:
+                    if r.startswith("- "):
+                        items.append(r[2:])
+                    else:
+                        items[-1] += " " + r
+                out.append({"items": items})
+            else:
+                out.append({"text": " ".join(rows)})
+        return out
+
+    def steps(src: str, tree: ast.Module) -> list[dict[str, Any]]:
+        # Each process and event in a project, by the comment opening it
+        lines = src.splitlines()
+        run = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "run_project"
+        )
+        out = []
+        for f in run.body:
+            if not isinstance(f, ast.FunctionDef):
+                continue
+            # The comment above its first statement, past any nonlocal
+            first = next(b for b in f.body if not isinstance(b, ast.Nonlocal))
+            comment = note(lines, first.lineno)
+            if comment:
+                out.append(
+                    {
+                        "name": f.name,
+                        "line": f.lineno,
+                        "note": comment,
+                    }
+                )
+        return out
+
+    src = Path(research_flow.__file__).read_text()
+    tree = ast.parse(src)
+    assumptions = []
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign) and node.value is not None:
+            target: ast.expr = node.target
+            value: ast.expr = node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        else:
+            continue
+        if not (isinstance(target, ast.Name) and target.id.isupper()):
+            continue
+        name = target.id
+        item = describe(
+            src, name, node.lineno, value, getattr(research_flow, name)
+        )
+        # Structure, e.g., the stage names, isn't an assumption, and
+        # assumptions sharing a comment follow the one it's above
+        if item["note"] or "entries" in item:
+            assumptions.append(item)
+    page_src = Path(__file__).read_text()
+    page_tree = ast.parse(page_src)
+    # What Calkit means in this calculator's scenarios
+    calkit = next(
+        n
+        for n in ast.walk(page_tree)
+        if isinstance(n, ast.Assign)
+        and isinstance(n.targets[0], ast.Name)
+        and n.targets[0].id == "calkit"
+    )
+    return {
+        "model": blocks(ast.get_docstring(tree) or ""),
+        "page": blocks(ast.get_docstring(page_tree) or ""),
+        "calkit": {
+            "line": calkit.lineno,
+            "expr": ast.get_source_segment(page_src, calkit.value),
+        },
+        "assumptions": assumptions,
+        "steps": steps(src, tree),
+        "stages": STAGES,
+    }
+
+
 def handle(message: str) -> str:
     # What the page's workers call, in JSON both ways
     m = json.loads(message)
@@ -340,5 +473,6 @@ def handle(message: str) -> str:
         "plan": plan,
         "run": run,
         "report": report,
+        "explain": explain,
     }
     return json.dumps(calls[m["call"]](*m["args"]))

@@ -351,6 +351,7 @@ function renderForm() {
         GitHub.</p>
     </form>
     <div class="sim-results"></div>
+    <div class="sim-explain"></div>
     <div class="sim-tip" role="tooltip" hidden></div>`;
   const form = root.querySelector("form");
   redraw();
@@ -559,6 +560,86 @@ function renderReport(report) {
     ${bars(breakdown)}`;
 }
 
+function renderExplanation(e) {
+  const model = `${SOURCE}/blob/main/docs/roi/research_flow.py`;
+  const page = `${SOURCE}/blob/main/docs/roi/simulator.py`;
+  const line = (url, n) => `<a href="${url}#L${n}">line ${n}</a>`;
+  const blocks = (bs) =>
+    bs
+      .map((b) =>
+        b.items
+          ? `<ul>${b.items.map((i) => `<li>${escape(i)}</li>`).join("")}</ul>`
+          : `<p>${escape(b.text)}</p>`,
+      )
+      .join("");
+  const number = (v) =>
+    typeof v === "number" ? String(+v.toPrecision(3)) : JSON.stringify(v);
+  // Per-stage values are labeled with their stages
+  const value = (v) =>
+    Array.isArray(v) && v.length === e.stages.length
+      ? v.map((x, i) => `${escape(e.stages[i])}: ${number(x)}`).join("; ")
+      : Array.isArray(v)
+      ? v.map((x) => escape(number(x))).join(", ")
+      : escape(number(v));
+  const shown = (a) =>
+    a.expr !== undefined
+      ? `<code>${escape(a.expr)}</code>`
+      : a.value !== undefined
+      ? value(a.value)
+      : "";
+  const rows = (entries) =>
+    entries
+      .map(
+        (a) => `<tr>
+          <td><code>${escape(a.name)}</code></td>
+          <td>${
+            a.entries
+              ? `<table class="sim-assumptions">${rows(a.entries)}</table>`
+              : shown(a)
+          }</td>
+          <td>${escape(a.note)}</td>
+          <td>${line(model, a.line)}</td></tr>`,
+      )
+      .join("");
+  const assumptions = e.assumptions
+    .map(
+      (a) => `<h4><code>${a.name}</code> ${line(model, a.line)}</h4>
+        ${a.note ? `<p>${escape(a.note)}</p>` : ""}
+        ${
+          a.entries
+            ? `<div class="sim-table-wrap"><table class="sim-assumptions">
+                ${rows(a.entries)}</table></div>`
+            : `<p>${shown(a)}</p>`
+        }`,
+    )
+    .join("");
+  const steps = e.steps
+    .map(
+      (s) => `<li><code>${s.name}</code>: ${escape(s.note)}
+        (${line(model, s.line)})</li>`,
+    )
+    .join("");
+  root.querySelector(".sim-explain").innerHTML = `
+    <details>
+      <summary>How the model works</summary>
+      <p class="sim-caption">Everything below is read from the model's source
+        code as this page loads, with a link to each line, so it can't fall
+        out of step with what runs. Values are the model's defaults; the form
+        above replaces many of them with yours.</p>
+      <h3>The model</h3>
+      ${blocks(e.model)}
+      <h3>This calculator</h3>
+      ${blocks(e.page)}
+      <p>Calkit, in this calculator, is
+        <code>${escape(e.calkit.expr.replace(/\s+/g, " "))}</code>
+        (${line(page, e.calkit.line)}).</p>
+      <h3>How a simulated project runs</h3>
+      <ul>${steps}</ul>
+      <h3>Assumptions</h3>
+      ${assumptions}
+    </details>`;
+}
+
 async function simulate() {
   const button = root.querySelector(".sim-run");
   const status = root.querySelector(".sim-status");
@@ -639,5 +720,6 @@ pool
     state = defaults;
     renderForm();
     followTips();
+    return pool.call("explain").then(renderExplanation);
   })
   .catch((error) => showError(error.message));

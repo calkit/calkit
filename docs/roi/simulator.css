@@ -320,3 +320,29 @@
   padding: 0.8rem 1rem;
   min-width: 0;
 }
+
+.sim-explain {
+  margin-top: 2rem;
+  font-size: 0.75rem;
+}
+
+.sim-explain summary {
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sim-assumptions {
+  border-collapse: collapse;
+}
+
+.sim-assumptions td {
+  padding: 0.25em 0.8em 0.25em 0;
+  vertical-align: top;
+  border-top: 1px solid var(--sim-rule);
+}
+
+.sim-assumptions td:first-child,
+.sim-assumptions td:last-child {
+  white-space: nowrap;
+}

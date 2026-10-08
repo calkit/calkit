@@ -90,6 +90,12 @@ const escape = (s) =>
   );
 let state;
 
+// Material's analytics keeps its gtag to itself, so this pushes to its
+// dataLayer the same way, as gtag.js only reads Arguments objects from it
+function track() {
+  window.dataLayer?.push(arguments);
+}
+
 function showError(message) {
   root.querySelector(
     ".sim-status",
@@ -570,6 +576,15 @@ async function simulate() {
     await Promise.all(jobs);
     renderReport(await pool.call("report", inputs, runs));
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
+    // The workflow's shape, never what was typed into it
+    track("event", "simulator_run", {
+      stages: inputs.stages.length,
+      hops_by_hand: inputs.stages.filter((s) => s.hop).length,
+      policy: inputs.policy,
+      agents: inputs.agents,
+      attempts: inputs.attempts,
+      seconds: Number(seconds),
+    });
     status.textContent = `Ran ${total.toLocaleString()} simulations in
       ${seconds} s on ${POOL_SIZE} workers`;
   } catch (error) {

@@ -61,7 +61,11 @@ SCENARIOS = [
     "calkit, first paper",
     "calkit, later",
 ]
-AGENTS_ALONE = "Starting to use AI agents, without Calkit"
+# Adding AI agents, for those who don't use them yet
+ADDING_AGENTS = {
+    "alone": "AI agents alone",
+    "calkit": "Calkit with AI agents",
+}
 
 
 def defaults() -> dict[str, Any]:
@@ -227,7 +231,11 @@ def scenarios(inputs: dict[str, Any]) -> dict[str, tuple[str, dict]]:
         params("manual", TRANSPARENCY | curate),
     )
     if not uses_agents:
-        out[AGENTS_ALONE] = (policy, params("manual", agents=True))
+        out[ADDING_AGENTS["alone"]] = (policy, params("manual", agents=True))
+        out[ADDING_AGENTS["calkit"]] = (
+            "lean",
+            params("automated", calkit, agents=True),
+        )
     return out
 
 
@@ -284,7 +292,8 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
 
     summaries = {name: summarize(r) for name, r in runs.items()}
     today = summaries["today"]
-    parts = [compare(n) for n in runs if n not in SCENARIOS + [AGENTS_ALONE]]
+    others = SCENARIOS + list(ADDING_AGENTS.values())
+    parts = [compare(n) for n in runs if n not in others]
     return {
         "today": {
             "days": today["days_mean"],
@@ -298,7 +307,7 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
         "first": compare("calkit, first paper"),
         "later": compare("calkit, later"),
         "parts": sorted(parts, key=lambda c: -c["saved"]),
-        "agents": compare(AGENTS_ALONE) if AGENTS_ALONE in runs else None,
+        "agents": [compare(n) for n in ADDING_AGENTS.values() if n in runs],
         "uses_agents": bool(inputs["agents"]),
         "reps": len(runs["today"]),
     }

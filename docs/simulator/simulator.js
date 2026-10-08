@@ -499,9 +499,9 @@ function renderReport(report) {
     ),
   ];
   const parts = report.parts.map((c) => saving(c));
-  const without = report.agents ? [saving(report.agents)] : [];
+  const adding = report.agents.map((c) => saving(c));
   // One scale for both, so Calkit's parts compare with what agents do
-  const scale = extent([...parts, ...without]);
+  const scale = extent([...parts, ...adding]);
   const breakdown = Object.entries(today.breakdown).map(([k, v]) => ({
     label: capitalize(k),
     value: v,
@@ -524,13 +524,12 @@ function renderReport(report) {
       from ${report.reps} runs each. Hover for flawed results published.</p>
     ${bars(parts, scale)}
     ${
-      without.length
-        ? `<h2>If you started using AI agents</h2>
-          <p class="sim-caption">You don't use AI agents today. This is what
-            starting to, without Calkit, would save per paper, on the same
-            scale as Calkit's parts above. Tick "You use AI agents" to see
-            what Calkit saves on top of them.</p>
-          ${bars(without, scale)}`
+      adding.length
+        ? `<h2>Adding AI agents</h2>
+          <p class="sim-caption">Working days saved per paper by adding AI
+            agents to how you work today, alone and with Calkit, on the same
+            scale as Calkit's parts above.</p>
+          ${bars(adding, scale)}`
         : ""
     }
     <h2>Where today's time goes</h2>

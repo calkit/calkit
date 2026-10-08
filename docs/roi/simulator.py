@@ -277,6 +277,14 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
             a["days"] - b["days"] for a, b in zip(runs["today"], runs[name])
         ]
         half = 1.96 * float(np.std(saved, ddof=1)) / math.sqrt(len(saved))
+        # And fewer flawed results published, the same way
+        fewer = [
+            a["flawed_findings"] - b["flawed_findings"]
+            for a, b in zip(runs["today"], runs[name])
+        ]
+        fewer_half = (
+            1.96 * float(np.std(fewer, ddof=1)) / math.sqrt(len(fewer))
+        )
         s = summaries[name]
         return {
             "name": name,
@@ -286,6 +294,8 @@ def report(inputs: dict[str, Any], runs: dict[str, list]) -> dict[str, Any]:
             "high": float(np.mean(saved)) + half,
             "ratio": today["days_mean"] / s["days_mean"],
             "flawed": s["flawed_findings_mean"],
+            "fewer_flawed": float(np.mean(fewer)),
+            "fewer_flawed_half": fewer_half,
             "learning_days": s["effort"]["learning"],
             "unfinished": s["unfinished"],
         }

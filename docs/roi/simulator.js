@@ -452,6 +452,7 @@ function bars(rows, [lo, hi] = extent(rows)) {
             style="left:${left}%;width:${width}%"></span>${whisker}
         </span>
         <span class="sim-bar-value">${days(r.value)}</span>
+        <span class="sim-bar-note">${r.note ?? ""}</span>
       </div>`;
     })
     .join("")}</div>`;
@@ -463,9 +464,21 @@ function renderReport(report) {
     `${c.flawed.toFixed(1)} results published flawed or off their
     question, vs
     ${today.flawed.toFixed(1)}`;
+  // The change in quality beside each saving, since catching more flaws
+  // can cost time
+  const quality = (c) => {
+    const fewer = c.fewer_flawed;
+    if (Math.abs(fewer) <= c.fewer_flawed_half) {
+      return "";
+    }
+    return `${Math.abs(fewer).toFixed(2)} ${
+      fewer > 0 ? "fewer" : "more"
+    } flawed`;
+  };
   const saving = (c, label = c.name) => ({
     label,
     value: c.saved,
+    note: quality(c),
     low: c.low,
     high: c.high,
     tip:
@@ -543,8 +556,10 @@ function renderReport(report) {
     <h2>What each part of Calkit saves</h2>
     <p class="sim-caption">Working days saved per paper by each part of
       Calkit added to how you work today on its own, with 95% intervals,
-      from ${report.reps} runs each. Hover for results published flawed
-      or off their question.</p>
+      from ${report.reps} runs each. Beside each, where the runs show one
+      clearly, is the change in results published flawed or off their
+      question per paper, since catching more of them can take more
+      time.</p>
     ${bars(parts, scale)}
     ${
       adding.length

@@ -130,6 +130,9 @@ BASE: dict[str, Any] = {
     "review_days": 60.0,
     "rereview_days": 30.0,
     "detect_reviewer": 0.5,
+    # The chance they catch a finding that doesn't answer its question,
+    # which seeing the code doesn't help with
+    "detect_reviewer_drift": 0.5,
     "minor_revision_days": 2.0,
     # Whether the paper is shared openly with what's needed to reproduce
     # it, and the chance that rerunning everything to put that together
@@ -626,7 +629,12 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             found = [
                 f
                 for f in flaws.values()
-                if rng.random() < p["detect_reviewer"]
+                if rng.random()
+                < p[
+                    "detect_reviewer_drift"
+                    if f.stage < 0
+                    else "detect_reviewer"
+                ]
             ]
             if not found:
                 yield from spend(

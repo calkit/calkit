@@ -135,7 +135,7 @@
 
 .sim-bar-row {
   display: grid;
-  grid-template-columns: minmax(8rem, 2fr) 3fr 3.5em;
+  grid-template-columns: minmax(8rem, 2fr) 3fr 3.5em 7em;
   align-items: center;
   gap: 0.6rem;
   padding: 0.1rem 0;
@@ -345,4 +345,8 @@
 .sim-assumptions td:first-child,
 .sim-assumptions td:last-child {
   white-space: nowrap;
+}
+
+.sim-bar-note {
+  color: var(--sim-muted);
 }

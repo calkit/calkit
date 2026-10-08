@@ -3067,6 +3067,8 @@ Options:
 
 Check that an environment is up-to-date.
 
+An environment is also rebuilt when one of its 'inputs' changes.
+
 Usage:
 
 ```text
@@ -3075,10 +3077,11 @@ calkit check environment [OPTIONS]
 
 Options:
 
-| Option         | Type    | Required | Default | Description                       |
-| -------------- | ------- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | str     | yes      |         | Name of the environment to check. |
-| `--verbose`    | boolean | no       | False   | Print verbose output.             |
+| Option          | Type    | Required | Default | Description                                                                                                |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`  | str     | yes      |         | Name of the environment to check.                                                                          |
+| `--verbose`     | boolean | no       | False   | Print verbose output.                                                                                      |
+| `--force`, `-f` | boolean | no       | False   | Rebuild the environment from scratch, e.g., after something it was built from changed outside the project. |
 
 <a id="subcommand-check-julia-env"></a>
 
@@ -3201,6 +3204,7 @@ Options:
 | `--registry`       | str     | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                           |
 | `--lock-arch`      | str     | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                       |
 | `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                         |
+| `--rebuild`        | boolean | no       | False   | Build the image from scratch, pulling its base image, rather than reusing a cached or locked one.                                                                 |
 
 <a id="subcommand-check-conda-env"></a>
 

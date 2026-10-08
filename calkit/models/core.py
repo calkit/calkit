@@ -709,6 +709,14 @@ class Environment(BaseModel):
         "property. A stage using it is skipped on a machine where they "
         "aren't met, keeping its outputs.",
     )
+    inputs: list[RelativeChildPathString] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project this environment is built from "
+        "that its spec doesn't name, e.g., a local package it installs. "
+        "Editing one rebuilds the environment and reruns the stages using "
+        "it.",
+    )
 
 
 class CondaEnvironment(Environment):

@@ -1397,3 +1397,46 @@ def test_check_switch_env(tmp_dir):
     )
     assert res.returncode == 0
     assert "picks no environment" in res.stdout + res.stderr
+
+
+def test_check_env_rebuilds(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    with open("local.txt", "w") as f:
+        f.write("one\n")
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+                "inputs": ["local.txt"],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check = ["calkit", "check", "env", "-n", "py"]
+    subprocess.check_call(check)
+    marker = os.path.join(".venv", "marker")
+    # Checking again reuses what was built
+    open(marker, "w").close()
+    subprocess.check_call(check)
+    assert os.path.isfile(marker)
+    # --force rebuilds it from scratch
+    subprocess.check_call(check + ["--force"])
+    assert not os.path.isfile(marker)
+    assert os.path.isdir(".venv")
+    # So does an input changing
+    open(marker, "w").close()
+    with open("local.txt", "w") as f:
+        f.write("two\n")
+    subprocess.check_call(check)
+    assert not os.path.isfile(marker)
+    # An input outside the project is refused
+    ck_info["environments"]["py"]["inputs"] = ["../outside.txt"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0

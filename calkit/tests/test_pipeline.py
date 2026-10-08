@@ -956,8 +956,7 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
 
 
 def test_env_inputs_become_stage_inputs(tmp_dir):
-    # Covers env-level 'inputs' on the kinds that run setup commands, and
-    # the 'deps' alias
+    # Covers env-level 'inputs' and the 'deps' alias
     envs = {
         "gpu": {
             "kind": "system",
@@ -981,9 +980,19 @@ def test_env_inputs_become_stage_inputs(tmp_dir):
             "image": "some-image",
             "deps": ["Dockerfile.extra"],
         },
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "inputs": ["pkg/setup.py"],
+        },
     }
     pipeline = {
         "stages": {
+            "in-venv": {
+                "kind": "shell-command",
+                "command": "make venv",
+                "environment": "py",
+            },
             "build": {
                 "kind": "shell-command",
                 "command": "make",
@@ -1028,6 +1037,9 @@ def test_env_inputs_become_stage_inputs(tmp_dir):
     assert "--dep scripts/cluster_setup.sh" in stages["job"]["cmd"]
     # Docker deps are the image's, not the stage's
     assert "Dockerfile.extra" not in stages["containerized"]["deps"]
+    # Any other kind's inputs are what it's built from, so stages depend
+    # on them too
+    assert "pkg/setup.py" in stages["in-venv"]["deps"]
 
 
 def test_slurm_env_validation_rules(tmp_dir):

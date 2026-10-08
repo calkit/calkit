@@ -471,8 +471,20 @@ def check_environment(
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Rebuild the environment from scratch, e.g., after "
+            "something it was built from changed outside the project.",
+        ),
+    ] = False,
 ) -> str | None:
-    """Check that an environment is up-to-date."""
+    """Check that an environment is up-to-date.
+
+    An environment is also rebuilt when one of its 'inputs' changes.
+    """
     from calkit.environments import (
         get_all_conda_lock_fpaths,
         get_all_docker_lock_fpaths,
@@ -494,6 +506,21 @@ def check_environment(
     if env_name not in envs:
         raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
+    # Docker records its inputs in its lock, which rebuilds it already
+    rebuild = force or (
+        env["kind"] != "docker"
+        and calkit.environments.inputs_changed_since_build(env_name, env)
+    )
+    if rebuild and env["kind"] not in (
+        "docker",
+        calkit.environments.SWITCH_KIND,
+    ):
+        try:
+            removed = calkit.environments.remove_built_env(env_name, envs)
+        except (ValueError, OSError, subprocess.CalledProcessError) as e:
+            raise_error(f"Failed to remove environment '{env_name}': {e}")
+        if removed and verbose:
+            typer.echo(f"Removed {removed} to rebuild it")
     if env["kind"] == "docker":
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
@@ -535,6 +562,7 @@ def check_environment(
             registry=env.get("registry"),
             lock_archs=calkit.docker.get_lock_archs(env),
             quiet=not verbose,
+            rebuild=rebuild,
         )
     elif env["kind"] == "conda":
         lock_fpath = get_env_lock_fpath(
@@ -669,7 +697,9 @@ def check_environment(
                         env_name, mismatch
                     )
                 )
-        return check_environment(env_name=picked, verbose=verbose)
+        return check_environment(
+            env_name=picked, verbose=verbose, force=rebuild
+        )
     elif env["kind"] == "system":
         # Nothing is installed or built for a system env; checking it means
         # making sure the machine is as the project requires, then reading
@@ -793,6 +823,7 @@ def check_environment(
         check_nix_env(env=env, verbose=verbose)
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
+    calkit.environments.record_build_inputs(env_name, env)
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
 
 
@@ -1169,6 +1200,14 @@ def check_docker_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
+    rebuild: Annotated[
+        bool,
+        typer.Option(
+            "--rebuild",
+            help="Build the image from scratch, pulling its base image, "
+            "rather than reusing a cached or locked one.",
+        ),
+    ] = False,
 ) -> None:
     """Check that Docker environment is up-to-date."""
     from calkit import docker as ck_docker
@@ -1252,6 +1291,9 @@ def check_docker_env(
         typer.echo(
             "Lock file does not match the current environment", file=outfile
         )
+        lock = None
+        lock_is_current_arch = False
+    if rebuild and fpath is not None:
         lock = None
         lock_is_current_arch = False
     # Work out where this image lives in a registry, so it can be pulled
@@ -1403,10 +1445,14 @@ def check_docker_env(
                     "--push",
                     "-f",
                     dockerfile_name,
-                    ".",
                 ]
+                if rebuild:
+                    cmd += ["--no-cache", "--pull"]
+                cmd.append(".")
             else:
                 cmd = ["docker", "build", "-t", tag, "-f", dockerfile_name]
+                if rebuild:
+                    cmd += ["--no-cache", "--pull"]
                 build_platform = (
                     build_platforms[0] if build_platforms else platform
                 )

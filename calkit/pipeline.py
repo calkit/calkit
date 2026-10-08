@@ -2128,16 +2128,10 @@ def to_dvc(
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
-        # An env that runs setup commands can name the files they read---a
-        # setup script it sources, most often. Those are inputs to every
-        # stage using the env, in the same way its lock file is: editing
-        # how a build is set up changes what the build produces. Declared
-        # rather than parsed out of the commands, since a shell command
-        # doesn't reliably say which of its words is a path. Only the kinds
-        # with a ``default_setup``: a Docker env's ``inputs`` are files
-        # copied into the image, and their checksums already ride along in
-        # its lock file, which stages depend on.
-        if env.get("kind") in ("system", "slurm", "pbs"):
+        # Files an env is built or set up from are inputs to every stage
+        # using it, as its lock file is. Not a Docker env's: those are
+        # copied into the image, and their checksums are in its lock.
+        if env.get("kind") != "docker":
             for env_input in get_env_input_paths(env, env_name):
                 env_lock_fpaths.setdefault(env_name, []).append(
                     Path(env_input).as_posix()

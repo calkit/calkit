@@ -84,6 +84,17 @@ def test_check_all_in_pipeline(tmp_dir):
     print(res)
     assert res["py1"]["success"]
     assert res["py1"]["cached"]
+    # Editing an input's contents, not just its path, invalidates the cache
+    with open("local.txt", "w") as f:
+        f.write("one\n")
+    ck_info["environments"]["py1"]["inputs"] = ["local.txt"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert not calkit.environments.check_all_in_pipeline()["py1"].get("cached")
+    assert calkit.environments.check_all_in_pipeline()["py1"]["cached"]
+    with open("local.txt", "w") as f:
+        f.write("two\n")
+    assert not calkit.environments.check_all_in_pipeline()["py1"].get("cached")
     # An inner env runs where its outer env does, so one behind another
     # machine isn't checked here; nor are the envs of stages that are
     # skipped, and an undefined env is a failure rather than a crash

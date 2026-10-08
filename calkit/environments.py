@@ -1026,7 +1026,7 @@ def get_env_input_paths(env: dict, env_name: str | None = None) -> list[str]:
     # '../outside.sh' through to DVC. Docker's list is exempt because it
     # is the long-published 'deps' under a new name, and tightening it
     # would retroactively invalidate existing projects.
-    if env.get("kind") in ("system", "slurm", "pbs"):
+    if env.get("kind") != "docker":
         from calkit.provenance import check_project_path
 
         for path in paths:
@@ -1035,6 +1035,74 @@ def get_env_input_paths(env: dict, env_name: str | None = None) -> list[str]:
                 where = f" on environment '{env_name}'" if env_name else ""
                 raise ValueError(f"Environment input{where}: {problem}")
     return paths
+
+
+def env_inputs_md5(env_name: str, env: dict) -> str | None:
+    """A checksum of an environment's input files, or None if it has none."""
+    paths = get_env_input_paths(env, env_name)
+    if not paths:
+        return None
+    md5s = {p: calkit.get_md5(p) if os.path.exists(p) else None for p in paths}
+    return hashlib.md5(json.dumps(md5s, sort_keys=True).encode()).hexdigest()
+
+
+def inputs_changed_since_build(env_name: str, env: dict) -> bool:
+    """Whether an env's input files changed since it was last built here."""
+    current = env_inputs_md5(env_name, env)
+    with get_cache_db(name="env-builds") as db:
+        built = db.get(make_cache_key(env_name))
+    return built is not None and built != current
+
+
+def record_build_inputs(env_name: str, env: dict) -> None:
+    """Remember what an env's input files were when it was built here."""
+    with get_cache_db(name="env-builds") as db:
+        db[make_cache_key(env_name)] = env_inputs_md5(env_name, env)
+        db.commit()
+
+
+def remove_built_env(env_name: str, envs: dict) -> str | None:
+    """Remove what was built for an env, so checking it rebuilds it.
+
+    Returns what was removed. Kinds with nothing built here to remove,
+    e.g., a system env, return None, and checking them is all a rebuild is.
+    """
+    env = envs[env_name]
+    kind = env.get("kind")
+    spec_dir = os.path.dirname(env.get("path") or "")
+    target = None
+    if kind in ("venv", "uv-venv"):
+        target = env.get("prefix") or get_default_venv_prefix(
+            envs, env["path"], env_name
+        )
+    elif kind == "uv":
+        target = os.path.join(spec_dir, ".venv")
+    elif kind == "pixi":
+        target = os.path.join(spec_dir, ".pixi", "envs")
+    elif kind == "conda":
+        if env.get("prefix"):
+            target = env["prefix"]
+        else:
+            with open(env["path"]) as f:
+                name = (yaml.safe_load(f) or {}).get("name")
+            if not name:
+                raise ValueError(f"'{env['path']}' names no environment")
+            from calkit.conda import find_conda_exe
+
+            conda_exe = find_conda_exe()
+            if conda_exe is None:
+                raise ValueError("conda not found")
+            subprocess.check_call(
+                [conda_exe, "env", "remove", "-y", "-n", name]
+            )
+            return f"conda environment '{name}'"
+    if target is None:
+        return None
+    target = os.path.expandvars(target)
+    if not os.path.exists(target):
+        return None
+    shutil.rmtree(target)
+    return target
 
 
 def get_system_lock_data(
@@ -1438,6 +1506,13 @@ def calc_data_for_env(
     julia_packages_sig = None
     if env.get("kind") == "julia":
         julia_packages_sig = calc_julia_depot_sig()
+    # Input files' contents, since the env dict above only has their paths
+    env_inputs_hash = None
+    input_paths = get_env_input_paths(env, env_name)
+    if input_paths:
+        env_inputs_hash = hash_dict(
+            {p: get_cached_md5(os.path.join(wdir, p)) for p in input_paths}
+        )
     env_lock_hash = None
     env_lock_fpath = get_env_lock_fpath(env_name=env_name, env=env, wdir=wdir)
     if env_lock_fpath is not None:
@@ -1451,6 +1526,7 @@ def calc_data_for_env(
             "env_prefix_hash": env_prefix_hash,
             "julia_packages_sig": julia_packages_sig,
             "env_lock_hash": env_lock_hash,
+            "env_inputs_hash": env_inputs_hash,
         },
         "checked_at": calkit.utcnow(),
     }

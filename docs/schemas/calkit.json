@@ -248,6 +248,22 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
         "kind": {
           "const": "conda",
           "default": "conda",
@@ -1996,6 +2012,22 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "julia": {
           "description": "Julia version to use.",
@@ -4198,6 +4230,22 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
         "kind": {
           "const": "matlab",
           "default": "matlab",
@@ -4650,6 +4698,22 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "nix",
@@ -5227,6 +5291,22 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "pixi",
@@ -6873,6 +6953,22 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "renv",
@@ -9234,6 +9330,22 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
         "kind": {
           "const": "switch",
           "default": "switch",
@@ -9802,6 +9914,22 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
         "kind": {
           "const": "uv",
           "default": "uv",
@@ -9872,6 +10000,22 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "uv-venv",
@@ -10033,6 +10177,22 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "venv",

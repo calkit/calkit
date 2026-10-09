@@ -78,6 +78,7 @@ interface CommentsPanelProps {
   commentingAsLabel?: string | null
   // Optional "Create GitHub issue" checkbox (member project comments).
   showCreateIssueCheckbox?: boolean
+  defaultCreateIssue?: boolean
   // Called when a comment anchored to a highlight is clicked.
   onHighlightClick?: (comment: PanelComment) => void
   // Mutations -- the caller wires the SDK call and query invalidation.
@@ -119,6 +120,7 @@ export default function CommentsPanel({
   askAuthorName,
   commentingAsLabel,
   showCreateIssueCheckbox,
+  defaultCreateIssue = true,
   onHighlightClick,
   onPostComment,
   postingComment,
@@ -139,7 +141,7 @@ export default function CommentsPanel({
   const [replyDraft, setReplyDraft] = useState("")
   const [addingComment, setAddingComment] = useState(false)
   const [newDraft, setNewDraft] = useState("")
-  const [createIssue, setCreateIssue] = useState(true)
+  const [createIssue, setCreateIssue] = useState(defaultCreateIssue)
   const [authorName, setAuthorName] = useState("")
   const replyEnabled = canReply ?? canComment
   const openCount = comments.filter((c) => !c.resolved).length

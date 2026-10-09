@@ -52,6 +52,9 @@ import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewPublication from "../../../../../components/Publications/NewPublication"
 import PdfAnnotator, {
   commentToHighlight,
+  latexThreadToHighlight,
+  latexThreadToPanelComments,
+  useLatexComments,
   type AnnotationHighlight,
 } from "../../../../../components/Publications/PdfAnnotator"
 import PublicationComponents from "../../../../../components/Publications/PublicationComponents"
@@ -493,6 +496,18 @@ function Publications() {
       </HStack>
     ) : undefined
 
+  // A PDF a latex stage builds keeps its comments in its source
+  const isLatexPub =
+    (selectedPub?.calkit_stage as { kind?: string } | null | undefined)
+      ?.kind === "latex"
+  const latexComments = useLatexComments(
+    accountName,
+    projectName,
+    selectedPub?.path ?? "",
+    ref,
+    !!selectedPub && isLatexPub,
+  )
+  const latexThreads = latexComments.query.data?.threads ?? []
   const commentsQuery = useQuery({
     queryKey: [
       "projects",
@@ -509,7 +524,7 @@ function Publications() {
         artifact_type: "publication",
         artifact_path: selectedPub!.path,
       }).then((response) => response.data),
-    enabled: !!selectedPub,
+    enabled: !!selectedPub && !isLatexPub,
   })
 
   const invalidateComments = () =>
@@ -566,9 +581,11 @@ function Publications() {
   })
 
   const pdfComments = commentsQuery.data ?? []
-  const pdfHighlights: AnnotationHighlight[] = pdfComments
-    .map(commentToHighlight)
-    .filter((h): h is AnnotationHighlight => h !== null)
+  const pdfHighlights: AnnotationHighlight[] = (
+    isLatexPub
+      ? latexThreads.map(latexThreadToHighlight)
+      : pdfComments.map(commentToHighlight)
+  ).filter((h): h is AnnotationHighlight => h !== null)
 
   return (
     <>
@@ -705,6 +722,7 @@ function Publications() {
                       showResolved={showResolved}
                       externalScrollRef={pdfScrollRef}
                       toolbarAction={toolbarAction}
+                      latex={isLatexPub}
                     />
                   </Box>
                 ) : (
@@ -783,46 +801,89 @@ function Publications() {
                 )}
                 {selectedPub && (
                   <CommentsPanel
-                    comments={pdfComments.map(projectCommentToPanelComment)}
-                    isLoading={commentsQuery.isPending}
-                    canComment={!!user}
-                    canResolve={!!user}
+                    comments={
+                      isLatexPub
+                        ? latexThreads.flatMap(latexThreadToPanelComments)
+                        : pdfComments.map(projectCommentToPanelComment)
+                    }
+                    isLoading={
+                      isLatexPub
+                        ? latexComments.query.isPending
+                        : commentsQuery.isPending
+                    }
+                    canComment={
+                      isLatexPub
+                        ? !!latexComments.query.data?.can_comment
+                        : !!user
+                    }
+                    canResolve={
+                      isLatexPub
+                        ? !!latexComments.query.data?.can_comment
+                        : !!user
+                    }
                     showResolved={showResolved}
                     onShowResolvedChange={setShowResolved}
                     showCreateIssueCheckbox
+                    defaultCreateIssue={!isLatexPub}
                     emptyText="Select text in the PDF or use the button below to add a comment."
                     onHighlightClick={(c) => {
                       const h = pdfHighlights.find((x) => x.dbId === c.id)
                       if (h) pdfScrollRef.current(h)
                     }}
                     onPostComment={(body, opts) =>
-                      postCommentMutation.mutateAsync({
-                        body,
-                        createIssue: opts.createIssue,
-                      })
+                      isLatexPub
+                        ? latexComments.post.mutateAsync({
+                            comment: body,
+                            highlight: null,
+                            createIssue: opts.createIssue,
+                          })
+                        : postCommentMutation.mutateAsync({
+                            body,
+                            createIssue: opts.createIssue,
+                          })
                     }
-                    postingComment={postCommentMutation.isPending}
+                    postingComment={
+                      isLatexPub
+                        ? latexComments.post.isPending
+                        : postCommentMutation.isPending
+                    }
                     onPostReply={(parentId, body) =>
-                      replyCommentMutation.mutateAsync({
-                        commentId: parentId,
-                        body,
-                      })
+                      isLatexPub
+                        ? latexComments.reply.mutateAsync({
+                            key: parentId,
+                            body,
+                          })
+                        : replyCommentMutation.mutateAsync({
+                            commentId: parentId,
+                            body,
+                          })
                     }
                     postingReplyForId={
-                      replyCommentMutation.isPending
-                        ? replyCommentMutation.variables?.commentId ?? null
-                        : null
+                      isLatexPub
+                        ? latexComments.reply.isPending
+                          ? latexComments.reply.variables?.key ?? null
+                          : null
+                        : replyCommentMutation.isPending
+                          ? replyCommentMutation.variables?.commentId ?? null
+                          : null
                     }
                     onResolve={(id, resolved) =>
-                      resolvePubCommentMutation.mutate({
-                        commentId: id,
-                        resolved,
-                      })
+                      isLatexPub
+                        ? latexComments.resolve.mutate({ key: id, resolved })
+                        : resolvePubCommentMutation.mutate({
+                            commentId: id,
+                            resolved,
+                          })
                     }
                     resolvingId={
-                      resolvePubCommentMutation.isPending
-                        ? resolvePubCommentMutation.variables?.commentId ?? null
-                        : null
+                      isLatexPub
+                        ? latexComments.resolve.isPending
+                          ? latexComments.resolve.variables?.key ?? null
+                          : null
+                        : resolvePubCommentMutation.isPending
+                          ? resolvePubCommentMutation.variables?.commentId ??
+                            null
+                          : null
                     }
                   />
                 )}

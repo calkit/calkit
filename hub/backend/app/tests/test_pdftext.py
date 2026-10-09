@@ -77,3 +77,72 @@ def test_diff_insertion_and_deletion() -> None:
     assert [(s.kind, s.text) for s in diff.segments if s.kind != "equal"] == [
         ("delete", "beta")
     ]
+
+
+def test_pdf_layout() -> None:
+    from pathlib import Path
+
+    # Built with pdflatex from the sources beside it
+    data = (
+        Path(__file__).parents[4] / "test" / "latex-comments" / "main.pdf"
+    ).read_bytes()
+    layout = pdftext.PdfLayout(data)
+    assert len(layout.pages) == 1
+    # A paragraph is found by runs of its words, though the source's text
+    # has lost its math
+    para = (
+        "The model fits the data reasonably well, and we can see that the "
+        "wake recovers by in all cases considered here, so the wake recovers "
+        "quickly."
+    )
+    span = layout.paragraph(para)
+    assert span is not None
+    start, end = span
+    # Text is found across line breaks, in order, within the paragraph
+    hits = layout.find("the wake recovers", start, end)
+    assert len(hits) == 2 and hits[0][1] < hits[1][1]
+    assert layout.find("the wake recovers", (1, hits[0][2] + 1), end) == [
+        hits[1]
+    ]
+    assert layout.find("absent text") == [] and layout.find("  ") == []
+    # A thread goes on its highlighted text, else its paragraph's first line
+    pos = layout.place(para, "the wake recovers", 1)
+    assert pos is not None and pos["pageNumber"] == 1
+    assert pos == layout.position(*hits[1])
+    first = layout.place(para, None)
+    assert first is not None and len(first["rects"]) == 1
+    assert first["boundingRect"]["y1"] < pos["boundingRect"]["y1"]
+    rect = first["rects"][0]
+    page = layout.pages[0]
+    assert (rect["width"], rect["height"]) == (page.width, page.height)
+    assert (
+        layout.place("Nothing like this is in the document at all.", None)
+        is None
+    )
+    # A selection made in a viewer at another scale gives back where it
+    # starts and the text of its lines
+    scaled = {
+        "boundingRect": {
+            k: v * 2 if k in ("x1", "x2", "y1", "y2", "width", "height") else v
+            for k, v in pos["boundingRect"].items()
+        },
+        "rects": [
+            {
+                k: v * 2
+                if k in ("x1", "x2", "y1", "y2", "width", "height")
+                else v
+                for k, v in r.items()
+            }
+            for r in pos["rects"]
+        ],
+        "pageNumber": 1,
+    }
+    selection = layout.selection(scaled)
+    assert selection is not None
+    (n, i), context = selection
+    assert (n, i) == (1, hits[1][1])
+    assert "so the wake recovers" in context
+    # Hyphenation and line breaks don't survive normalizing a selection
+    assert (
+        pdftext.normalize_selection("re-\ncovers  ﬁne’s") == "recovers fine's"
+    )

@@ -46,6 +46,8 @@ import type {
   DeleteProjectFileLockResponses,
   DeleteProjectInvitationErrors,
   DeleteProjectInvitationResponses,
+  DeleteProjectLatexCommentErrors,
+  DeleteProjectLatexCommentResponses,
   DeleteProjectMapPathsErrors,
   DeleteProjectMapPathsResponses,
   DeleteProjectNativeCollaboratorErrors,
@@ -172,6 +174,8 @@ import type {
   GetProjectInvitationsResponses,
   GetProjectIssuesErrors,
   GetProjectIssuesResponses,
+  GetProjectLatexCommentsErrors,
+  GetProjectLatexCommentsResponses,
   GetProjectNotebooksErrors,
   GetProjectNotebooksResponses,
   GetProjectOverleafSyncStatusErrors,
@@ -253,6 +257,9 @@ import type {
   ImportGithubReleasesResponses,
   IssuePatch,
   IssuePost,
+  LatexCommentPatch,
+  LatexCommentPost,
+  LatexCommentReplyPost,
   ListReleaseSharesErrors,
   ListReleaseSharesResponses,
   LoginAccessTokenErrors,
@@ -289,6 +296,8 @@ import type {
   PatchProjectErrors,
   PatchProjectIssueErrors,
   PatchProjectIssueResponses,
+  PatchProjectLatexCommentErrors,
+  PatchProjectLatexCommentResponses,
   PatchProjectResponses,
   PatchUserTokenErrors,
   PatchUserTokenResponses,
@@ -344,6 +353,10 @@ import type {
   PostProjectInvitationResponses,
   PostProjectIssueErrors,
   PostProjectIssueResponses,
+  PostProjectLatexCommentErrors,
+  PostProjectLatexCommentReplyErrors,
+  PostProjectLatexCommentReplyResponses,
+  PostProjectLatexCommentResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
   PostProjectMiscErrors,
@@ -7681,6 +7694,238 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/activity",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Delete Project Latex Comment
+   *
+   * Delete a thread and its replies from the source.
+   */
+  public static deleteProjectLatexComment<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      key: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteProjectLatexCommentResponses,
+    DeleteProjectLatexCommentErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "key" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteProjectLatexCommentResponses,
+      DeleteProjectLatexCommentErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Latex Comments
+   *
+   * The comment threads in the source of a PDF a latex stage builds.
+   */
+  public static getProjectLatexComments<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectLatexCommentsResponses,
+    GetProjectLatexCommentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectLatexCommentsResponses,
+      GetProjectLatexCommentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Patch Project Latex Comment
+   *
+   * Resolve a thread, or reopen it.
+   */
+  public static patchProjectLatexComment<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      latexCommentPatch: LatexCommentPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PatchProjectLatexCommentResponses,
+    PatchProjectLatexCommentErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "latexCommentPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      PatchProjectLatexCommentResponses,
+      PatchProjectLatexCommentErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Latex Comment
+   *
+   * Start a thread on some text selected in the PDF, in its source above
+   * the paragraph it's in, or on the whole document without a selection.
+   */
+  public static postProjectLatexComment<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      latexCommentPost: LatexCommentPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexCommentResponses,
+    PostProjectLatexCommentErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "latexCommentPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexCommentResponses,
+      PostProjectLatexCommentErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Latex Comment Reply
+   */
+  public static postProjectLatexCommentReply<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      latexCommentReplyPost: LatexCommentReplyPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexCommentReplyResponses,
+    PostProjectLatexCommentReplyErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "latexCommentReplyPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexCommentReplyResponses,
+      PostProjectLatexCommentReplyErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments/replies",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

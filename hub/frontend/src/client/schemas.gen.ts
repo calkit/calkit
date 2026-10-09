@@ -3732,6 +3732,266 @@ export const ItemLockSchema = {
   title: "ItemLock",
 } as const
 
+export const LatexCommentMessageSchema = {
+  properties: {
+    author: {
+      type: "string",
+      title: "Author",
+    },
+    email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email",
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+    text: {
+      type: "string",
+      title: "Text",
+    },
+  },
+  type: "object",
+  required: ["author", "text"],
+  title: "LatexCommentMessage",
+} as const
+
+export const LatexCommentPatchSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ref",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+    },
+  },
+  type: "object",
+  required: ["path", "key", "resolved"],
+  title: "LatexCommentPatch",
+} as const
+
+export const LatexCommentPostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ref",
+    },
+    comment: {
+      type: "string",
+      title: "Comment",
+    },
+    highlight: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/CommentHighlight",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    create_github_issue: {
+      type: "boolean",
+      title: "Create Github Issue",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path", "comment"],
+  title: "LatexCommentPost",
+} as const
+
+export const LatexCommentReplyPostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ref",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    body: {
+      type: "string",
+      title: "Body",
+    },
+  },
+  type: "object",
+  required: ["path", "key", "body"],
+  title: "LatexCommentReplyPost",
+} as const
+
+export const LatexCommentThreadSchema = {
+  properties: {
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Id",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    line: {
+      type: "integer",
+      title: "Line",
+    },
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+    },
+    issue: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Issue",
+    },
+    highlight: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Highlight",
+    },
+    position: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Position",
+    },
+    messages: {
+      items: {
+        $ref: "#/components/schemas/LatexCommentMessage",
+      },
+      type: "array",
+      title: "Messages",
+    },
+  },
+  type: "object",
+  required: ["key", "path", "line", "resolved", "messages"],
+  title: "LatexCommentThread",
+} as const
+
+export const LatexCommentsSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    source: {
+      type: "string",
+      title: "Source",
+    },
+    rev: {
+      type: "string",
+      title: "Rev",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    can_comment: {
+      type: "boolean",
+      title: "Can Comment",
+    },
+    threads: {
+      items: {
+        $ref: "#/components/schemas/LatexCommentThread",
+      },
+      type: "array",
+      title: "Threads",
+    },
+  },
+  type: "object",
+  required: ["path", "source", "rev", "branch", "can_comment", "threads"],
+  title: "LatexComments",
+} as const
+
 export const MapPathEntrySchema = {
   properties: {
     src: {

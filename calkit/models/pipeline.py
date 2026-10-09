@@ -10,7 +10,7 @@ import re
 import shlex
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import (
     AfterValidator,
@@ -24,6 +24,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 from typing_extensions import Annotated
 
 import calkit.latex
@@ -279,6 +280,7 @@ class Stage(BaseModel):
         "map-paths",
         "marimo-html-wasm",
         "markdown",
+        "markdown-pdf",
         "procedure",
         "questions-to-latex",
     ] = Field(description="What kind of stage this is.")
@@ -2300,6 +2302,101 @@ class ProcedureStage(Stage):
         return outs
 
 
+class MarkdownPdf(BaseModel):
+    """How a Markdown stage's file is built into a PDF.
+
+    Pandoc turns it into LaTeX and LaTeX builds the PDF, both in one
+    environment, e.g., Calkit's LaTeX image, which includes both, so their
+    versions are pinned with it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    environment: str = Field(
+        description="Environment that runs pandoc and LaTeX.",
+    )
+    output_path: RelativeChildPathString | None = Field(
+        default=None,
+        description="Where to write the PDF. Defaults to the Markdown "
+        "file's path with a .pdf extension.",
+    )
+    template_path: RelativeChildPathString | None = Field(
+        default=None, description="Pandoc template for the LaTeX."
+    )
+    filters: list[RelativeChildPathString] = Field(
+        default=[], description="Pandoc Lua filters, applied in order."
+    )
+    args: list[str] = Field(
+        default=[],
+        description="Other pandoc arguments, e.g., "
+        "'--shift-heading-level-by=-1'.",
+    )
+    storage: Literal["git", "dvc"] = Field(
+        default="dvc", description="Where to store the PDF."
+    )
+
+
+class _MarkdownPdfStage(Stage):
+    """A Markdown file built into a PDF with pandoc and LaTeX: what a
+    Markdown stage's ``pdf`` compiles to, rather than a kind to write.
+
+    Value markers are filled from their results files, and each is linked
+    to the question on the project's hub whose evidence cites it. The
+    template gets the Calkit version and the project's URL as the
+    ``calkit-version``, ``project-url``, and ``project`` variables.
+    """
+
+    # Left out of the schema and docs, since no one writes it
+    internal: ClassVar[bool] = True
+    kind: Literal["markdown-pdf"] = "markdown-pdf"
+    target_path: RelativeChildPathString = Field(
+        description="Path to the Markdown file."
+    )
+    pdf_path: RelativeChildPathString = Field(
+        description="Where to write the PDF."
+    )
+    template_path: RelativeChildPathString | None = Field(
+        default=None, description="Pandoc template for the LaTeX."
+    )
+    filters: list[RelativeChildPathString] = Field(
+        default=[], description="Pandoc Lua filters, applied in order."
+    )
+    pandoc_args: list[str] = Field(
+        default=[], description="Other pandoc arguments."
+    )
+    pdf_storage: Literal["git", "dvc"] = Field(
+        default="dvc", description="Where to store the PDF."
+    )
+
+    @property
+    def dvc_cmd(self) -> str:
+        # Run by Calkit itself, which fills values and links them before
+        # handing the file to pandoc and LaTeX in the environment
+        q = shlex.quote
+        cmd = (
+            f"calkit latex from-markdown {q(self.target_path)}"
+            f" -o {q(self.pdf_path)} -e {q(self.environment)} --no-check"
+        )
+        if self.template_path is not None:
+            cmd += f" --template {q(self.template_path)}"
+        for path in self.filters:
+            cmd += f" --filter {q(path)}"
+        for arg in self.pandoc_args:
+            cmd += f" --pandoc-arg={q(arg)}"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = [self.target_path, *self.filters] + super().dvc_deps
+        if self.template_path is not None:
+            deps.append(self.template_path)
+        return _unique_paths(deps)
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        cache = self.pdf_storage == "dvc"
+        return super().dvc_outs + [{self.pdf_path: {"cache": cache}}]
+
+
 class MarkdownStage(Stage):
     """A stage sourced from a Markdown file's annotated code blocks.
 
@@ -2348,6 +2445,11 @@ class MarkdownStage(Stage):
         description="Not supported; a Markdown file's stages run in the "
         "project root.",
     )
+    pdf: MarkdownPdf | None = Field(
+        default=None,
+        description="Also build the file into a PDF with pandoc and LaTeX. "
+        "A file that only builds a PDF needs no code blocks.",
+    )
 
     @field_validator("target_path")
     @classmethod
@@ -2391,6 +2493,7 @@ class Pipeline(BaseModel):
                 | MapPathsStage
                 | MarimoHtmlWasmStage
                 | MarkdownStage
+                | SkipJsonSchema[_MarkdownPdfStage]
                 | ProcedureStage
             ),
             Discriminator("kind"),

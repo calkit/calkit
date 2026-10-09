@@ -78,6 +78,10 @@ def get_source_date_epoch(tex_file: str) -> str | None:
     """
     import subprocess
 
+    # Whoever set it knows better, e.g., for LaTeX generated from a source
+    # that has the history
+    if os.environ.get("SOURCE_DATE_EPOCH"):
+        return os.environ["SOURCE_DATE_EPOCH"]
     tex_dir = os.path.dirname(os.path.abspath(tex_file)) or os.getcwd()
     # A commit's date describes what that commit holds, so it can only
     # speak for a document that has been saved. With edits still in the

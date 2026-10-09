@@ -963,3 +963,98 @@ def test_from_questions(tmp_dir):
     ck_info["pipeline"]["stages"]["qa"]["wdir"] = "paper"
     with pytest.raises(Exception, match="wdir"):
         calkit.pipeline.to_dvc(ck_info=ck_info)
+
+
+def test_from_markdown(tmp_dir):
+    import calkit.docx
+
+    if calkit.docx.find_pandoc() is None:
+        pytest.skip("Pandoc isn't available")
+    os.makedirs("results")
+    with open("results/r.json", "w") as f:
+        json.dump({"gain": 2.0, "other": 3}, f)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "owner": "someone",
+                "name": "proj",
+                "questions": [
+                    {
+                        "question": "Other?",
+                        "answer": "{o}",
+                        "evidence": [
+                            {
+                                "kind": "value",
+                                "path": "results/r.json",
+                                "key": "other",
+                                "name": "o",
+                            }
+                        ],
+                    },
+                    {
+                        "question": "Faster?",
+                        "answer": "{g}",
+                        "evidence": [
+                            {
+                                "kind": "value",
+                                "path": "results/r.json",
+                                "key": "gain",
+                                "name": "g",
+                            }
+                        ],
+                    },
+                ],
+            },
+            f,
+        )
+    with open("main.md", "w") as f:
+        f.write(
+            "<!-- calkit values path=results/r.json -->\n"
+            "It's <!-- calkit value key=gain -->1.0<!-- /calkit value -->x"
+            " faster.\n"
+        )
+    with open("template.tex", "w") as f:
+        f.write("$body$\nBuilt by $calkit-version$ from $project$.\n")
+    os.makedirs("img")
+    with open("img/p.png", "wb") as f:
+        f.write(b"")
+    with open("main.md", "a") as f:
+        f.write("\n![A plot](img/p.png)\n")
+    # Both LaTeX, with images pointed at from where it's written, and a
+    # second copy of it
+    subprocess.check_call(
+        [
+            "calkit",
+            "latex",
+            "from-markdown",
+            os.path.abspath("main.md"),
+            "-o",
+            "build/main.tex",
+            "-o",
+            "other/main.tex",
+            "--template",
+            "template.tex",
+        ]
+    )
+    assert "{../img/p.png}" in open("other/main.tex").read()
+    tex = open("build/main.tex").read()
+    # The value is current and links to the question citing it, not just
+    # the first to cite its file
+    assert r"\href{https://calkit.io/someone/proj/questions/2}{2.0}" in tex
+    assert "from calkit.io/someone/proj." in tex
+    assert "Built by " + calkit.__version__.split("+")[0] in tex
+    # The Markdown itself is kept current too
+    assert "-->2.0<!--" in open("main.md").read()
+    # Only PDFs and LaTeX can be written
+    result = subprocess.run(
+        ["calkit", "latex", "from-markdown", "main.md", "-o", "main.html"],
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    # Nor from outside the project
+    result = subprocess.run(
+        ["calkit", "latex", "from-markdown", "../x.md", "-o", "x.pdf"],
+        capture_output=True,
+        text=True,
+    )
+    assert "isn't in this project" in result.stderr + result.stdout

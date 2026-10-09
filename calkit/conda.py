@@ -963,8 +963,11 @@ def write_cross_platform_locks(
     with open(env_fpath, encoding="utf-8") as f:
         env_spec = ryaml.load(f)
     conda_deps, pip_deps = _split_env_dependencies(env_spec["dependencies"])
+    # Git URLs resolve the same anywhere, but local paths may not
     unpinnable = [
-        d for d in pip_deps if d.startswith(("-e", "--editable")) or "://" in d
+        d
+        for d in pip_deps
+        if d.startswith(("-e", "--editable")) or "file:" in d
     ]
     channels = list(env_spec.get("channels") or [])
     # Pin direct dependencies to what's installed here
@@ -979,8 +982,11 @@ def write_cross_platform_locks(
         if len(parts) >= 2:
             local_conda_vers[parts[0].lower()] = parts[1]
     local_pip_vers = {}
+    local_pip_urls = {}
     for dep in local_pip:
-        if "==" in dep and not _GIT_RE.search(dep):
+        if _GIT_RE.search(dep):
+            local_pip_urls[norm_name(_pkg_name_from_dep(dep))] = dep
+        elif "==" in dep:
             name, vers = dep.split("==", 1)
             local_pip_vers[norm_name(name.strip())] = vers.strip()
     pinned_conda_deps = []
@@ -997,7 +1003,11 @@ def write_cross_platform_locks(
     for dep in pip_deps:
         pkg = re.split(r"[=<>!~;@\s]", dep.strip(), maxsplit=1)[0]
         name = norm_name(pkg.split("[")[0])
-        if dep in unpinnable or name not in local_pip_vers:
+        if dep in unpinnable:
+            pinned_pip_deps.append(dep)
+        elif name in local_pip_urls:
+            pinned_pip_deps.append(local_pip_urls[name])
+        elif name not in local_pip_vers:
             pinned_pip_deps.append(dep)
         else:
             pinned_pip_deps.append(f"{pkg}=={local_pip_vers[name]}")

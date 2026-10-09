@@ -288,6 +288,25 @@ def test_check_app_version():
     # A version a system description doesn't carry is still read from the
     # machine, unless the machine in question isn't this one
     check_app_version("git", ">=1", system_info={})
+    # Probes get no stdin and a timeout, and MATLAB is asked its own way
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if cmd[0] == "hangs":
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="25.1.0.2943329 (R2025a)\n"
+        )
+
+    with mock.patch("calkit.core.subprocess.run", fake_run):
+        assert calkit.get_dep_version("matlab") == "25.1.0.2943329 (R2025a)"
+        assert calkit.get_dep_version("hangs") is None
+        check_app_version("matlab", ">=25", system_info={})
+    assert calls[0][0] == ["matlab", "-batch", "disp(version)"]
+    assert calls[1][0] == ["hangs", "--version"]
+    assert all(kw["stdin"] is subprocess.DEVNULL for _, kw in calls)
+    assert all(kw["timeout"] for _, kw in calls)
 
 
 def test_check_dep_exists_conda_off_path(monkeypatch):
@@ -446,7 +465,7 @@ def test_update_readme_content():
     assert calkit.update_readme_content("", "T", None) == "# T\n"
 
 
-def test_get_required_app_names():
+def test_get_version_checked_app_names():
     ck_info = {
         "requirements": ["git", "calkit>=0.1", {"jq": {"version_spec": ">1"}}],
         "environments": {
@@ -459,16 +478,12 @@ def test_get_required_app_names():
                     "kind": "shell-command",
                     "command": "x",
                     "requirements": [
-                        "ffmpeg",
+                        "ffmpeg>=6",
                         {"kind": "env-var", "name": "TOKEN"},
                     ],
                 }
             }
         },
     }
-    assert calkit.get_required_app_names(ck_info) == [
-        "git",
-        "jq",
-        "matlab",
-        "ffmpeg",
-    ]
+    # Apps only required to exist aren't asked their version
+    assert calkit.get_version_checked_app_names(ck_info) == ["jq", "ffmpeg"]

@@ -2787,9 +2787,9 @@ def run(
     calkit.set_env_vars(ck_info=ck_info)
     if not quiet:
         calkit.echo("💻 Getting system information")
-    # Get system information, with the versions of the apps it requires
+    # Get system information, with the app versions requirements check
     system_info = calkit.get_system_info(
-        apps=calkit.get_required_app_names(ck_info)
+        apps=calkit.get_version_checked_app_names(ck_info)
     )
     # Save the system to .calkit/local/systems unconditionally
     local_sysinfo_fpath = os.path.join(

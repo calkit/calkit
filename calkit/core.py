@@ -977,8 +977,12 @@ def check_app_version(
         )
 
 
-def get_required_app_names(ck_info: dict) -> list[str]:
-    """The apps any requirement in a project names, its stages' included."""
+def get_version_checked_app_names(ck_info: dict) -> list[str]:
+    """The apps a requirement in a project gives a version spec for.
+
+    Only these are worth asking for a version up front, since some apps,
+    e.g., MATLAB, take seconds to say.
+    """
     reqs = list(get_requirements(ck_info))
     for env in (ck_info.get("environments") or {}).values():
         reqs += env.get("requirements") or []
@@ -987,7 +991,11 @@ def get_required_app_names(ck_info: dict) -> list[str]:
     names = []
     for raw in reqs:
         req = _normalize_requirement(raw)
-        if req["kind"] == "app" and req["name"] != "calkit":
+        if (
+            req["kind"] == "app"
+            and req["name"] != "calkit"
+            and req.get("version_spec")
+        ):
             names.append(req["name"])
     return list(dict.fromkeys(names))
 
@@ -1400,10 +1408,20 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
 
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
-    try:
+    # MATLAB has no '--version', and starts in full if passed one
+    if dep_name == "matlab":
+        cmd = [dep_name, "-batch", "disp(version)"]
+    else:
         cmd = [dep_name, "--version"]
+    try:
+        # Without stdin, a tool that ignores the flag can't wait on a prompt
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            stdin=subprocess.DEVNULL,
+            timeout=120,
         )
         return result.stdout.strip()
     except Exception:

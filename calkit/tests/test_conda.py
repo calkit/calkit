@@ -420,6 +420,24 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     )
     assert locks() == [os.path.join("locks", "linux-aarch64.yml")]
     assert "CONDA_OVERRIDE_GLIBC" not in solves["linux-aarch64"][1]
+    # A git dependency is pinned to the commit locked here, but an editable
+    # one names a path on this machine
+    git_dep = "pyxdsm @ git+https://github.com/x/pyXDSM.git@fc0b49b"
+    locked_git = git_dep.replace("fc0b49b", "fc0b49b31552f3ed")
+    local["dependencies"][-1] = {"pip": ["iniconfig==2.1.0", locked_git]}
+    with open(os.path.join("locks", "linux-64.yml"), "w") as f:
+        calkit.ryaml.dump(local, f)
+    for pip_deps in (["iniconfig", git_dep], ["iniconfig", "-e ./pkg"]):
+        write_spec(pip_deps)
+        envs.stamp_lock_with_spec(
+            os.path.join("locks", "linux-64.yml"), "environment.yml"
+        )
+        written = locks()
+        if pip_deps[-1] == git_dep:
+            assert written == [os.path.join("locks", "linux-aarch64.yml")]
+            assert compiles[-1] == ["iniconfig==2.1.0", locked_git]
+        else:
+            assert written == []
     # Only a per-platform lock has siblings
     monkeypatch.setattr(envs, "_conda_venv_platform", lambda: "osx-64")
     assert locks() == []

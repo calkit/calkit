@@ -54,6 +54,7 @@ import {
   pipelineLatexDiffs,
   type PipelineLatexDiff,
 } from "./latex/core";
+import { PDF_REVIEW_VIEW_TYPE, PdfReviewProvider } from "./latex/review";
 import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
@@ -101,6 +102,7 @@ const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
 const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
 const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
+const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -383,6 +385,19 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  const pdfReview = new PdfReviewProvider(context, {
+    getWorkspaceRoot,
+    getStages: () => currentCalkitConfig?.pipeline?.stages ?? {},
+    getNonce,
+  });
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      PDF_REVIEW_VIEW_TYPE,
+      pdfReview,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
+
   const activeTabUri = (uri?: vscode.Uri): vscode.Uri | undefined =>
     uri ??
     vscode.window.activeTextEditor?.document.uri ??
@@ -480,15 +495,62 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           return;
         }
-        if (!isLatexWorkshopInstalled()) {
-          await vscode.env.openExternal(pdfUri);
-          return;
-        }
         await swapActiveTab(fileUri, () =>
-          openPdfInLatexWorkshop(context, pdfUri),
+          Promise.resolve(
+            vscode.commands.executeCommand(
+              "vscode.openWith",
+              pdfUri,
+              PDF_REVIEW_VIEW_TYPE,
+              vscode.ViewColumn.Active,
+            ),
+          ),
         );
       },
     ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF, async () => {
+      const editor = vscode.window.activeTextEditor;
+      const workspaceRoot = getWorkspaceRoot();
+      if (!editor || !workspaceRoot) {
+        return;
+      }
+      const texFile = path
+        .relative(workspaceRoot, editor.document.uri.fsPath)
+        .replace(/\\/g, "/");
+      const line = editor.selection.active.line + 1;
+      if (pdfReview.reveal(texFile, line)) {
+        return;
+      }
+      // Not in an open PDF yet, so open the one its stage builds
+      const pdfFile = latexStagePdf(
+        currentCalkitConfig?.pipeline?.stages ?? {},
+        texFile,
+      );
+      const pdfUri = pdfFile
+        ? vscode.Uri.file(path.join(workspaceRoot, pdfFile))
+        : undefined;
+      const built =
+        pdfUri !== undefined &&
+        (await vscode.workspace.fs.stat(pdfUri).then(
+          () => true,
+          () => false,
+        ));
+      if (!built) {
+        void vscode.window.showInformationMessage(
+          "Open the document's PDF first, built with SyncTeX.",
+        );
+        return;
+      }
+      await vscode.commands.executeCommand(
+        "vscode.openWith",
+        pdfUri,
+        PDF_REVIEW_VIEW_TYPE,
+        vscode.ViewColumn.Beside,
+      );
+      pdfReview.reveal(texFile, line);
+    }),
   );
 
   context.subscriptions.push(

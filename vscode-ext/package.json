@@ -70,6 +70,14 @@
         "when": "!calkit-vscode.hasProject"
       }
     ],
+    "keybindings": [
+      {
+        "command": "calkit-vscode.showInPdf",
+        "key": "ctrl+alt+j",
+        "mac": "cmd+alt+j",
+        "when": "editorTextFocus && resourceExtname == .tex && calkit.pdfReviewOpen"
+      }
+    ],
     "customEditors": [
       {
         "viewType": "calkit.plotlyPreview",
@@ -77,6 +85,16 @@
         "selector": [
           {
             "filenamePattern": "*.json"
+          }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "calkit.pdfReview",
+        "displayName": "Calkit PDF Review",
+        "selector": [
+          {
+            "filenamePattern": "*.pdf"
           }
         ],
         "priority": "option"
@@ -175,6 +193,11 @@
         "title": "Show LaTeX Source",
         "category": "Calkit",
         "icon": "$(file-code)"
+      },
+      {
+        "command": "calkit-vscode.showInPdf",
+        "title": "Show in PDF",
+        "category": "Calkit"
       },
       {
         "command": "calkit-vscode.goToFigureSource",
@@ -617,6 +640,11 @@
           "command": "calkit-vscode.diffLatex",
           "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)",
           "group": "calkit@5"
+        },
+        {
+          "command": "calkit-vscode.showInPdf",
+          "when": "resourceExtname == .tex",
+          "group": "calkit@6"
         }
       ],
       "notebook/toolbar": [
@@ -769,6 +797,10 @@
           "when": "calkit-vscode.hasProject && (resourceExtname == .tex || resourceExtname == .pdf && calkit.activeFileHasStage)"
         },
         {
+          "command": "calkit-vscode.showInPdf",
+          "when": "resourceExtname == .tex"
+        },
+        {
           "command": "calkit-vscode.save",
           "when": "calkit-vscode.hasProject"
         },
@@ -865,6 +897,7 @@
     "typescript": "^5.6.2"
   },
   "dependencies": {
+    "pdfjs-dist": "6.3.289",
     "yaml": "^2.5.1"
   },
   "enabledApiProposals": [

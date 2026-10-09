@@ -54,7 +54,7 @@ dependencies = [
   # keep the file from flipping between machines
   "ruamel.yaml>=0.19.1,<0.20",
   "rich",
-  "typer==0.27.2",
+  "typer==0.27.3",
   "uvicorn",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",

@@ -2342,6 +2342,20 @@ export type LatexComments = {
 }
 
 /**
+ * LatexCommentsMove
+ */
+export type LatexCommentsMove = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -3432,6 +3446,10 @@ export type ProjectComment = {
    * Git Rev
    */
   git_rev?: string | null
+  /**
+   * Moved To Source
+   */
+  moved_to_source?: string | null
   /**
    * User Github Username
    */
@@ -6705,6 +6723,10 @@ export type ProjectCommentWritable = {
    * Git Rev
    */
   git_rev?: string | null
+  /**
+   * Moved To Source
+   */
+  moved_to_source?: string | null
 }
 
 /**
@@ -13608,6 +13630,42 @@ export type PostProjectLatexCommentReplyResponses = {
 
 export type PostProjectLatexCommentReplyResponse =
   PostProjectLatexCommentReplyResponses[keyof PostProjectLatexCommentReplyResponses]
+
+export type PostProjectLatexCommentsMoveData = {
+  body: LatexCommentsMove
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments/move"
+}
+
+export type PostProjectLatexCommentsMoveErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexCommentsMoveError =
+  PostProjectLatexCommentsMoveErrors[keyof PostProjectLatexCommentsMoveErrors]
+
+export type PostProjectLatexCommentsMoveResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PostProjectLatexCommentsMoveResponse =
+  PostProjectLatexCommentsMoveResponses[keyof PostProjectLatexCommentsMoveResponses]
 
 export type GetReferencesData = {
   body?: never

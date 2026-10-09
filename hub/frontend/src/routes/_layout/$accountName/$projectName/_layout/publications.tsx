@@ -524,7 +524,7 @@ function Publications() {
         artifact_type: "publication",
         artifact_path: selectedPub!.path,
       }).then((response) => response.data),
-    enabled: !!selectedPub && !isLatexPub,
+    enabled: !!selectedPub,
   })
 
   const invalidateComments = () =>
@@ -581,11 +581,17 @@ function Publications() {
   })
 
   const pdfComments = commentsQuery.data ?? []
-  const pdfHighlights: AnnotationHighlight[] = (
-    isLatexPub
-      ? latexThreads.map(latexThreadToHighlight)
-      : pdfComments.map(commentToHighlight)
-  ).filter((h): h is AnnotationHighlight => h !== null)
+  const pdfHighlights: AnnotationHighlight[] = [
+    ...(isLatexPub ? latexThreads.map(latexThreadToHighlight) : []),
+    ...pdfComments.map(commentToHighlight),
+  ].filter((h): h is AnnotationHighlight => h !== null)
+  // On a PDF built from LaTeX, comments kept here rather than in the source
+  // are from before the source kept them, until they're moved into it
+  const keptHere = new Set(pdfComments.map((c) => c.id))
+  const keptHereThreads = isLatexPub
+    ? pdfComments.filter((c) => !c.parent_id).length
+    : 0
+  const canMove = keptHereThreads > 0 && !!latexComments.query.data?.can_comment
 
   return (
     <>
@@ -799,13 +805,34 @@ function Publications() {
                     />
                   </Box>
                 )}
+                {canMove && (
+                  <Box bg={secBgColor} borderRadius="lg" p={3}>
+                    <Text fontSize="sm" mb={2}>
+                      {keptHereThreads === 1
+                        ? "1 comment is kept on the hub rather than in the LaTeX source."
+                        : `${keptHereThreads} comments are kept on the hub rather than in the LaTeX source.`}
+                    </Text>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      isLoading={latexComments.move.isPending}
+                      onClick={() => latexComments.move.mutate()}
+                    >
+                      Move into the source
+                    </Button>
+                  </Box>
+                )}
                 {selectedPub && (
                   <CommentsPanel
-                    comments={
-                      isLatexPub
+                    comments={[
+                      ...(isLatexPub
                         ? latexThreads.flatMap(latexThreadToPanelComments)
-                        : pdfComments.map(projectCommentToPanelComment)
-                    }
+                        : []),
+                      ...pdfComments.map((c) => ({
+                        ...projectCommentToPanelComment(c),
+                        note: isLatexPub ? "Kept on the hub" : null,
+                      })),
+                    ]}
                     isLoading={
                       isLatexPub
                         ? latexComments.query.isPending
@@ -848,7 +875,7 @@ function Publications() {
                         : postCommentMutation.isPending
                     }
                     onPostReply={(parentId, body) =>
-                      isLatexPub
+                      isLatexPub && !keptHere.has(parentId)
                         ? latexComments.reply.mutateAsync({
                             key: parentId,
                             body,
@@ -859,16 +886,14 @@ function Publications() {
                           })
                     }
                     postingReplyForId={
-                      isLatexPub
-                        ? latexComments.reply.isPending
-                          ? latexComments.reply.variables?.key ?? null
-                          : null
+                      latexComments.reply.isPending
+                        ? latexComments.reply.variables?.key ?? null
                         : replyCommentMutation.isPending
                           ? replyCommentMutation.variables?.commentId ?? null
                           : null
                     }
                     onResolve={(id, resolved) =>
-                      isLatexPub
+                      isLatexPub && !keptHere.has(id)
                         ? latexComments.resolve.mutate({ key: id, resolved })
                         : resolvePubCommentMutation.mutate({
                             commentId: id,
@@ -876,10 +901,8 @@ function Publications() {
                           })
                     }
                     resolvingId={
-                      isLatexPub
-                        ? latexComments.resolve.isPending
-                          ? latexComments.resolve.variables?.key ?? null
-                          : null
+                      latexComments.resolve.isPending
+                        ? latexComments.resolve.variables?.key ?? null
                         : resolvePubCommentMutation.isPending
                           ? resolvePubCommentMutation.variables?.commentId ??
                             null

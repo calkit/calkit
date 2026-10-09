@@ -13,6 +13,7 @@ import logging
 import posixpath
 import re
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -21,7 +22,7 @@ import requests
 from fastapi import APIRouter, HTTPException
 from git.exc import GitCommandError
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, col, select
 
 import app.projects
 import calkit.latex
@@ -45,7 +46,7 @@ from app.git import (
     get_repo_tree_for_ref,
     resolve_commit_sha,
 )
-from app.models import CommentHighlight, Project, User
+from app.models import CommentHighlight, Project, ProjectComment, User
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -196,14 +197,13 @@ def _open_document(
     return _Document(project, repo, path, source, rev, branch)
 
 
-def _read_comments(
+def _read_layout(
     doc: _Document, rev: str, session: Session, current_user: User | None
-) -> LatexComments:
-    read = doc.reader(rev)
-    threads = calkit.latex.list_comments(doc.source, read)
-    layout = None
+) -> pdftext.PdfLayout | None:
+    """Where the text is in the PDF as built at a revision, if it can be
+    read."""
     try:
-        layout = pdftext.PdfLayout(
+        return pdftext.PdfLayout(
             app.projects.read_project_file(
                 doc.project,
                 get_repo_tree_for_ref(doc.repo, rev),
@@ -214,8 +214,44 @@ def _read_comments(
             )
         )
     except Exception as e:
-        # The threads are still worth listing without their places
         logger.info(f"Could not read the text of {doc.path} at {rev}: {e}")
+        return None
+
+
+def _locate_selection(
+    doc: _Document,
+    layout: pdftext.PdfLayout,
+    rev: str,
+    highlight: dict,
+) -> tuple[str, str | None, int] | None:
+    """The source paragraph a selection in the PDF is in, as rendered
+    text, with the selected text and which time it appears in the
+    paragraph, from the highlight a viewer made of it."""
+    content = highlight.get("content") or {}
+    text = pdftext.normalize_selection(str(content.get("text") or "")) or None
+    selection = layout.selection(highlight.get("position") or {})
+    if selection is None:
+        return None
+    start, context = selection
+    blk = calkit.latex.locate_block(
+        doc.source, text=context, read=doc.reader(rev)
+    )
+    if blk is None:
+        return None
+    occ = 0
+    span = layout.paragraph(blk.text)
+    if text and span is not None:
+        occ = len(layout.find(text, span[0], (start[0], start[1] - 1)))
+    return blk.text, text, occ
+
+
+def _read_comments(
+    doc: _Document, rev: str, session: Session, current_user: User | None
+) -> LatexComments:
+    read = doc.reader(rev)
+    threads = calkit.latex.list_comments(doc.source, read)
+    # The threads are still worth listing without their places
+    layout = _read_layout(doc, rev, session, current_user)
     out = []
     for t in threads:
         position = None
@@ -536,38 +572,17 @@ def post_project_latex_comment(
     occ = 0
     paragraph = None
     if req.highlight is not None:
-        content = req.highlight.content or {}
-        highlight_text = (
-            pdftext.normalize_selection(str(content.get("text") or "")) or None
+        layout = _read_layout(doc, doc.rev, session, current_user)
+        located = (
+            _locate_selection(doc, layout, doc.rev, req.highlight.model_dump())
+            if layout is not None
+            else None
         )
-        layout = pdftext.PdfLayout(
-            app.projects.read_project_file(
-                doc.project,
-                get_repo_tree_for_ref(doc.repo, doc.rev),
-                doc.path,
-                pdftext.MAX_PDF_BYTES,
-                session=session,
-                current_user=current_user,
-            )
-        )
-        selection = layout.selection(req.highlight.position)
-        if selection is None:
-            raise HTTPException(422, "Couldn't find that selection in the PDF")
-        start, context = selection
-        blk = calkit.latex.locate_block(
-            doc.source, text=context, read=doc.reader(doc.rev)
-        )
-        if blk is None:
+        if located is None:
             raise HTTPException(
                 422, "Couldn't find where that is in the LaTeX source"
             )
-        paragraph = blk.text
-        # The highlight is the nth time its text appears in the paragraph
-        span = layout.paragraph(paragraph)
-        if highlight_text and span is not None:
-            occ = len(
-                layout.find(highlight_text, span[0], (start[0], start[1] - 1))
-            )
+        paragraph, highlight_text, occ = located
     tc = calkit.latex.TexComment(
         [_new_entry(current_user, req.comment)],
         highlight=highlight_text,
@@ -695,4 +710,138 @@ def delete_project_latex_comment(
     commit = _commit(
         doc, current_user, session, edit, f"Delete a comment on {path}"
     )
+    return _read_comments(doc, commit, session, current_user)
+
+
+class LatexCommentsMove(BaseModel):
+    path: str
+    ref: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/latex-comments/move")
+def post_project_latex_comments_move(
+    owner_name: str,
+    project_name: str,
+    req: LatexCommentsMove,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> LatexComments:
+    """Move the comments on a PDF that are kept here into its LaTeX source,
+    in one commit, so the source holds all of its discussion.
+
+    Each goes above the paragraph it was made on, found from where it was
+    selected in the PDF as built when it was made, with its replies, its
+    authors, whether it's resolved, and its GitHub issue. One whose
+    paragraph is gone goes at the top of the document, quoting what it was
+    about.
+    """
+    doc = _open_document(
+        owner_name,
+        project_name,
+        req.path,
+        req.ref,
+        session,
+        current_user,
+        True,
+    )
+    rows = list(
+        session.exec(
+            select(ProjectComment)
+            .where(ProjectComment.project_id == doc.project.id)
+            .where(ProjectComment.artifact_type == "publication")
+            .where(ProjectComment.artifact_path == req.path)
+            .where(col(ProjectComment.moved_to_source).is_(None))
+        ).all()
+    )
+    roots = sorted(
+        (c for c in rows if c.parent_id is None), key=lambda c: c.created
+    )
+    if not roots:
+        raise HTTPException(400, "There are no comments here to move")
+    layouts: dict[str, pdftext.PdfLayout | None] = {}
+    moving: list[tuple[str | None, str | None, calkit.latex.TexComment]] = []
+    for root in roots:
+        thread = [root] + sorted(
+            (c for c in rows if c.parent_id == root.id),
+            key=lambda c: c.created,
+        )
+        entries = [
+            calkit.latex.Entry(
+                c.user_full_name or c.user_github_username or c.user_email,
+                c.comment,
+                c.user_email,
+                c.created.strftime("%Y-%m-%d %H:%M"),
+            )
+            for c in thread
+        ]
+        located = None
+        if root.highlight:
+            rev = (
+                resolve_commit_sha(doc.repo, root.git_rev)
+                if root.git_rev
+                else None
+            ) or doc.rev
+            if rev not in layouts:
+                layouts[rev] = _read_layout(doc, rev, session, current_user)
+            layout = layouts[rev]
+            if layout is not None:
+                located = _locate_selection(doc, layout, rev, root.highlight)
+        paragraph, text, occ = located or (None, None, 0)
+        quote = ((root.highlight or {}).get("content") or {}).get("text")
+        moving.append(
+            (
+                paragraph,
+                pdftext.normalize_selection(str(quote)) if quote else None,
+                calkit.latex.TexComment(
+                    entries,
+                    highlight=text,
+                    highlight_occ=occ,
+                    resolved=root.resolved is not None,
+                    id=calkit.latex.new_comment_id(),
+                    issue=root.external_url,
+                ),
+            )
+        )
+
+    def edit(read: Read) -> dict[str, str]:
+        placed = []
+        for i, (paragraph, quote, original) in enumerate(moving):
+            tc = deepcopy(original)
+            blk = (
+                calkit.latex.locate_block(
+                    doc.source, text=paragraph, read=read
+                )
+                if paragraph is not None
+                else None
+            )
+            if blk is None and quote:
+                # Keep what it was about, since where can't be found
+                tc.entries[0].text = f'On "{quote}": {tc.entries[0].text}'
+                tc.highlight, tc.highlight_occ = None, 0
+            # Without a place, it's on the whole document, at the top of it
+            path, lineno = (blk.path, blk.lineno) if blk else (doc.source, 1)
+            placed.append((path, lineno, i, tc))
+        files: dict[str, list[str]] = {}
+        # From the bottom up, so the places above don't move, and in order
+        # on one paragraph, since each goes below those already above it
+        for path, lineno, _, tc in sorted(
+            placed, key=lambda x: (x[0], -x[1], x[2])
+        ):
+            if path not in files:
+                files[path] = (read(path) or "").split("\n")
+            calkit.latex.add_comment(files[path], lineno, tc)
+        return {path: "\n".join(lines) for path, lines in files.items()}
+
+    commit = _commit(
+        doc,
+        current_user,
+        session,
+        edit,
+        f"Move {len(roots)} comments on {req.path} into its source",
+    )
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for c in rows:
+        c.moved_to_source = now
+        session.add(c)
+    session.commit()
     return _read_comments(doc, commit, session, current_user)

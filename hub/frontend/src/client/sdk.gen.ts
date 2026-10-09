@@ -260,6 +260,7 @@ import type {
   LatexCommentPatch,
   LatexCommentPost,
   LatexCommentReplyPost,
+  LatexCommentsMove,
   ListReleaseSharesErrors,
   ListReleaseSharesResponses,
   LoginAccessTokenErrors,
@@ -357,6 +358,8 @@ import type {
   PostProjectLatexCommentReplyErrors,
   PostProjectLatexCommentReplyResponses,
   PostProjectLatexCommentResponses,
+  PostProjectLatexCommentsMoveErrors,
+  PostProjectLatexCommentsMoveResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
   PostProjectMiscErrors,
@@ -7919,6 +7922,62 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/latex-comments/replies",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Latex Comments Move
+   *
+   * Move the comments on a PDF that are kept here into its LaTeX source,
+   * in one commit, so the source holds all of its discussion.
+   *
+   * Each goes above the paragraph it was made on, found from where it was
+   * selected in the PDF as built when it was made, with its replies, its
+   * authors, whether it's resolved, and its GitHub issue. One whose
+   * paragraph is gone goes at the top of the document, quoting what it was
+   * about.
+   */
+  public static postProjectLatexCommentsMove<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      latexCommentsMove: LatexCommentsMove
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexCommentsMoveResponses,
+    PostProjectLatexCommentsMoveErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "latexCommentsMove", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexCommentsMoveResponses,
+      PostProjectLatexCommentsMoveErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments/move",
       ...options,
       ...params,
       headers: {

@@ -206,7 +206,23 @@ export function useLatexComments(
       }).then((response) => response.data),
     ...handlers,
   })
-  return { query, post, reply, resolve }
+  // Comments kept on the hub, from before the source kept them, moved into
+  // the source in one commit
+  const move = useMutation({
+    mutationFn: () =>
+      ProjectsService.postProjectLatexCommentsMove({
+        ...ids,
+        latexCommentsMove: { path, ref },
+      }).then((response) => response.data),
+    onSuccess: (data: LatexComments) => {
+      queryClient.setQueryData(queryKey, data)
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "comments"],
+      })
+    },
+    onError: handlers.onError,
+  })
+  return { query, post, reply, resolve, move }
 }
 
 // ---------------------------------------------------------------------------
@@ -458,7 +474,6 @@ export default function PdfAnnotator({
         artifact_type: artifactType,
         artifact_path: publicationPath,
       }).then((response) => response.data),
-    enabled: !latex,
   })
 
   const postMutation = useMutation({
@@ -525,15 +540,15 @@ export default function PdfAnnotator({
   const latexThreads = latexComments.query.data?.threads
   const highlights: AnnotationHighlight[] = useMemo(
     () =>
-      latex
-        ? (latexThreads ?? [])
-            .filter((t) => showResolved || !t.resolved)
-            .map(latexThreadToHighlight)
-            .filter((h): h is AnnotationHighlight => h !== null)
-        : comments
-            .filter((c) => showResolved || !c.resolved)
-            .map(commentToHighlight)
-            .filter((h): h is AnnotationHighlight => h !== null),
+      [
+        // Comments kept on the hub show too until they're moved
+        ...(latex ? latexThreads ?? [] : [])
+          .filter((t) => showResolved || !t.resolved)
+          .map(latexThreadToHighlight),
+        ...comments
+          .filter((c) => showResolved || !c.resolved)
+          .map(commentToHighlight),
+      ].filter((h): h is AnnotationHighlight => h !== null),
     [latex, latexThreads, comments, showResolved],
   )
 
@@ -629,14 +644,13 @@ export default function PdfAnnotator({
               }
               isResolved={annotHL.resolved}
               isResolving={
-                latex
-                  ? latexComments.resolve.isPending &&
-                    latexComments.resolve.variables?.key === annotHL.dbId
-                  : resolveMutation.isPending &&
-                    resolveMutation.variables?.commentId === annotHL.dbId
+                (latexComments.resolve.isPending &&
+                  latexComments.resolve.variables?.key === annotHL.dbId) ||
+                (resolveMutation.isPending &&
+                  resolveMutation.variables?.commentId === annotHL.dbId)
               }
               onResolve={(resolved) => {
-                if (latex) {
+                if (latex && !comments.some((c) => c.id === annotHL.dbId)) {
                   latexComments.resolve.mutate({ key: annotHL.dbId, resolved })
                 } else {
                   resolveMutation.mutate({
@@ -659,6 +673,7 @@ export default function PdfAnnotator({
     [
       user,
       latex,
+      comments,
       latexComments.query.data,
       latexComments.resolve,
       resolveMutation,

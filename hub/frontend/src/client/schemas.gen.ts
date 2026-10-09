@@ -3992,6 +3992,29 @@ export const LatexCommentsSchema = {
   title: "LatexComments",
 } as const
 
+export const LatexCommentsMoveSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ref",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "LatexCommentsMove",
+} as const
+
 export const MapPathEntrySchema = {
   properties: {
     src: {
@@ -5786,6 +5809,18 @@ export const ProjectCommentSchema = {
         },
       ],
       title: "Git Rev",
+    },
+    moved_to_source: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Moved To Source",
     },
     user_github_username: {
       anyOf: [
@@ -11736,6 +11771,18 @@ export const ProjectCommentWritableSchema = {
         },
       ],
       title: "Git Rev",
+    },
+    moved_to_source: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Moved To Source",
     },
   },
   type: "object",

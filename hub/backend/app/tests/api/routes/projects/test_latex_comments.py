@@ -3,29 +3,31 @@
 import os
 import shutil
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import git
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 import calkit.latex
 from app import pdftext
-from app.core import ryaml
+from app.core import ryaml, utcnow
+from app.models import ProjectComment
+from app.tests.api.routes.projects.test_overleaf_links import (
+    _make_owner_with_project,
+)
 
 URL = "/projects/o/p/latex-comments"
 FIXTURES = Path(__file__).parents[7] / "test" / "latex-comments"
 MODULE = "app.api.routes.projects.latex_comments"
 
 
-def test_latex_comments(
-    client: TestClient,
-    normal_user_token_headers: dict[str, str],
-    tmp_path: Path,
-) -> None:
-    # A paper built by a latex stage, with a thread in an input already,
-    # and a bare origin standing in for the remote
+def _make_paper_repo(tmp_path: Path) -> tuple[git.Repo, git.Repo]:
+    """A paper built by a latex stage, with a thread in an input already,
+    and a bare origin standing in for the remote."""
     origin = git.Repo.init(tmp_path / "origin.git", bare=True)
     repo = git.Repo.init(tmp_path / "repo")
     with repo.config_writer() as cw:
@@ -54,6 +56,17 @@ def test_latex_comments(
     branch = repo.active_branch.name
     repo.git.push("origin", branch)
     repo.git.fetch("origin")
+    return repo, origin
+
+
+def test_latex_comments(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    repo, origin = _make_paper_repo(tmp_path)
+    paper = tmp_path / "repo" / "paper"
+    branch = repo.active_branch.name
     first_rev = repo.head.commit.hexsha
     project = SimpleNamespace(
         id=uuid.uuid4(),
@@ -249,3 +262,134 @@ def test_latex_comments(
         assert thread["resolved"]
         assert "resolved=true" in origin_file("paper/intro.tex")
         assert "closed on GitHub" in origin.commit(branch).message
+
+
+def test_post_project_latex_comments_move(
+    client: TestClient, db: Session, tmp_path: Path
+) -> None:
+    # Comments kept on the hub, from before the source kept them
+    project, headers = _make_owner_with_project(db, client)
+    owner = project.owner_account.user
+    assert owner is not None
+    repo, origin = _make_paper_repo(tmp_path)
+    branch = repo.active_branch.name
+    first_rev = repo.head.commit.hexsha
+    layout = pdftext.PdfLayout(
+        (tmp_path / "repo" / "paper" / "main.pdf").read_bytes()
+    )
+
+    def highlight(phrase: str, which: int = 0) -> dict:
+        return {
+            "position": layout.position(*layout.find(phrase)[which]),
+            "content": {"text": phrase},
+        }
+
+    path = "paper/main.pdf"
+    common = dict(
+        project_id=project.id,
+        user_id=owner.id,
+        artifact_type="publication",
+        artifact_path=path,
+        git_rev=first_rev,
+    )
+    t0 = utcnow()
+    on_text = ProjectComment(
+        comment="How quickly?",
+        highlight=highlight("the wake recovers", 1),
+        external_url="https://github.com/o/p/issues/3",
+        created=t0,
+        **common,
+    )
+    gone = ProjectComment(
+        comment="Cut this?",
+        highlight=highlight("A final paragraph"),
+        resolved=t0,
+        created=t0 + timedelta(seconds=2),
+        **common,
+    )
+    whole = ProjectComment(
+        comment="Nice paper.", created=t0 + timedelta(seconds=3), **common
+    )
+    for c in [on_text, gone, whole]:
+        db.add(c)
+    db.commit()
+    db.add(
+        ProjectComment(
+            comment="Within three diameters.",
+            parent_id=on_text.id,
+            created=t0 + timedelta(seconds=1),
+            **common,
+        )
+    )
+    db.commit()
+    # The paragraph one was on is gone by the time they're moved
+    other = git.Repo.clone_from(origin.working_dir, tmp_path / "other")
+    with other.config_writer() as cw:
+        cw.set_value("user", "name", "Other")
+        cw.set_value("user", "email", "other@example.com")
+    main = tmp_path / "other" / "paper" / "main.tex"
+    main.write_text(
+        main.read_text().replace(
+            "A final paragraph about efficient turbine arrays closes the "
+            "paper.\n",
+            "",
+        )
+    )
+    other.git.commit("-am", "Cut the last paragraph")
+    other.git.push("origin", branch)
+    repo.git.fetch("origin")
+    url = f"/projects/{project.owner_account.name}/{project.name}"
+    with patch(f"{MODULE}.get_repo", return_value=repo):
+        resp = client.post(
+            f"{url}/latex-comments/move", json={"path": path}, headers=headers
+        )
+        assert resp.status_code == 200, resp.text
+        # Once moved, there's nothing left to move
+        again = client.post(
+            f"{url}/latex-comments/move", json={"path": path}, headers=headers
+        )
+        assert again.status_code == 400
+    texts = {t["messages"][0]["text"]: t for t in resp.json()["threads"]}
+    # One commit, on the branch, with all three
+    commit = origin.commit(branch)
+    assert commit.message.strip() == (
+        "Move 3 comments on paper/main.pdf into its source"
+    )
+    src = origin.git.show(
+        f"{branch}:paper/main.tex", strip_newline_in_stdout=False
+    ).split("\n")
+    threads = calkit.latex.parse_comments(src)
+    by_text = {tc.text: tc for tc in threads}
+    # On its paragraph and its text, with its reply, authors, and issue
+    tc = by_text["How quickly?"]
+    assert (tc.highlight, tc.highlight_occ) == ("the wake recovers", 1)
+    assert tc.issue == "https://github.com/o/p/issues/3"
+    assert [e.text for e in tc.entries] == [
+        "How quickly?",
+        "Within three diameters.",
+    ]
+    assert tc.entries[0].email == owner.email
+    assert src[tc.lineno - 1 + tc.nlines].startswith("The model fits")
+    assert texts["How quickly?"]["position"] is not None
+    # One whose paragraph is gone goes on the whole document, quoting what
+    # it was about, still resolved
+    tc = next(t for t in threads if t.text.endswith("Cut this?"))
+    assert tc.text == 'On "A final paragraph": Cut this?'
+    assert tc.resolved and tc.highlight is None
+    # Those on the whole document go at the top of its body, in order
+    top = [
+        t.text
+        for t in threads
+        if src[t.lineno - 1 + t.nlines]
+        != (
+            "The model fits the data reasonably well, and we can see that the wake"
+        )
+    ]
+    assert top == ['On "A final paragraph": Cut this?', "Nice paper."]
+    # And they're no longer listed as kept here
+    resp = client.get(
+        f"{url}/comments",
+        params={"artifact_type": "publication", "artifact_path": path},
+        headers=headers,
+    )
+    assert resp.status_code == 200 and resp.json() == []

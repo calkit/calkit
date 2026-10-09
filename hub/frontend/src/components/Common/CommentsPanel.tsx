@@ -41,6 +41,8 @@ export interface PanelComment {
   hasHighlight?: boolean
   // Pre-extracted highlight text to quote in the card, if any.
   highlightText?: string | null
+  // Shown under the author, e.g., where the comment is kept
+  note?: string | null
 }
 
 // Map a ProjectComment (figures, publications, presentations, member releases)
@@ -236,6 +238,11 @@ export default function CommentsPanel({
                 />
               ))}
           </Flex>
+          {c.note && (
+            <Text fontSize="xs" color="gray.500" mb={1}>
+              {c.note}
+            </Text>
+          )}
           {c.highlightText && (
             <Box
               mb={1}

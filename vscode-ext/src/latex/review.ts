@@ -162,7 +162,11 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   // Show a source line in an open viewer of a PDF it's part of, returning
   // whether one was found. Without SyncTeX, the line's paragraph is found
   // in the PDF by its text.
-  async reveal(file: string, line: number): Promise<boolean> {
+  async reveal(
+    file: string,
+    line: number,
+    column?: vscode.ViewColumn,
+  ): Promise<boolean> {
     for (const v of this.viewers) {
       const s = this.loadSynctex(v);
       const tag = s && synctexTag(s, file);
@@ -183,7 +187,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
             : undefined;
       }
       if (msg) {
-        v.panel.reveal(undefined, true);
+        v.panel.reveal(column);
         if (v.ready) {
           void v.panel.webview.postMessage(msg);
         } else {
@@ -392,14 +396,20 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
 
   // Open the source at a line, selecting some rendered text there if it
   // can be found
+  // Open the source in the viewer's group of tabs, or beside it, e.g., where
+  // the source is already showing
   private async openSource(
+    v: Viewer,
     file: string,
     line: number,
     focus?: string,
+    toSide = false,
   ): Promise<void> {
     const uri = vscode.Uri.file(path.join(this.root(), file));
     const visible = vscode.window.visibleTextEditors.find(
-      (e) => e.document.uri.fsPath === uri.fsPath,
+      (e) =>
+        e.document.uri.fsPath === uri.fsPath &&
+        e.viewColumn !== v.panel.viewColumn,
     );
     const lines = fs.readFileSync(uri.fsPath, "utf8").split("\n");
     const found = focus ? findInSource(lines, line, focus) : undefined;
@@ -409,7 +419,9 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     );
     const end = found ? new vscode.Position(found.line - 1, found.end) : start;
     await vscode.window.showTextDocument(uri, {
-      viewColumn: visible?.viewColumn ?? vscode.ViewColumn.Beside,
+      viewColumn: toSide
+        ? visible?.viewColumn ?? vscode.ViewColumn.Beside
+        : v.panel.viewColumn,
       selection: new vscode.Range(start, end),
     });
   }
@@ -443,11 +455,14 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
           at &&
           synctexInputFile(at.input, (f) => fs.existsSync(path.join(root, f)));
         const focus = typeof msg.focus === "string" ? msg.focus : undefined;
+        const toSide = msg.toSide === true;
         if (at && file) {
           await this.openSource(
+            v,
             file,
             this.lines(v, file).toAfter(at.line),
             focus,
+            toSide,
           );
           return;
         }
@@ -478,7 +493,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
             bestScore = score;
           }
         }
-        await this.openSource(para.path, best, focus);
+        await this.openSource(v, para.path, best, focus, toSide);
         return;
       }
       case "locate": {
@@ -580,7 +595,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         break;
       }
       case "openSource":
-        await this.openSource(String(msg.file), Number(msg.line));
+        await this.openSource(v, String(msg.file), Number(msg.line));
         return;
       case "state": {
         const st = (msg.state ?? {}) as Record<string, unknown>;
@@ -658,13 +673,16 @@ function buildHtml(
   #main { position: absolute; top: 37px; left: 0; right: 0; bottom: 0; display: flex; }
   #wrap { position: relative; flex: 1; }
   #viewerContainer { position: absolute; inset: 0; overflow: auto; background: var(--vscode-editorWidget-background, #525659); }
-  #panel { width: var(--panel-width); overflow-y: auto; border-left: 1px solid var(--vscode-panel-border);
-    padding: 8px; box-sizing: border-box; }
+  #side { width: var(--panel-width); flex: none; display: flex; flex-direction: column;
+    border-left: 1px solid var(--vscode-panel-border); box-sizing: border-box; }
+  #side-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 4px 8px;
+    font-weight: 600; }
+  #side-head button { background: none; padding: 0 6px; font-size: 16px; line-height: 1; }
+  #panel { flex: 1; overflow-y: auto; padding: 0 8px 8px; box-sizing: border-box; }
   #resizer { width: 4px; cursor: col-resize; flex: none; }
   #resizer:hover, #resizer.dragging { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); }
-  #panel { flex: none; }
-  body.no-panel #panel, body.no-panel #resizer { display: none; }
-  body.no-comments .ck-layer { display: none; }
+  body.no-panel #side, body.no-panel #resizer,
+  body.no-comments #side, body.no-comments #resizer, body.no-comments .ck-layer { display: none; }
   .ck-layer { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
   .ck-hl { position: absolute; background: rgba(255, 200, 0, 0.35); pointer-events: auto; cursor: pointer;
     mix-blend-mode: multiply; }
@@ -712,8 +730,7 @@ function buildHtml(
   <span class="spacer"></span>
   <span id="status"></span>
   <label title="Show resolved threads"><input type="checkbox" id="show-resolved"> Resolved</label>
-  <button id="toggle-comments" aria-pressed="true" title="Show or hide comments in the PDF">Comments</button>
-  <button id="toggle-panel" aria-pressed="true" title="Show or hide the sidebar with the comment threads">Sidebar</button>
+  <button id="toggle-comments" aria-pressed="true" title="Show or hide comments">Comments</button>
 </div>
 <div id="main">
   <div id="wrap">
@@ -721,10 +738,14 @@ function buildHtml(
     <div id="select-actions">
       <button id="select-comment" class="primary">Comment</button>
       <button id="select-source" title="Open the LaTeX source at this text">Go to source</button>
+      <button id="select-source-side" title="Open the LaTeX source at this text, beside the PDF">To the side</button>
     </div>
   </div>
   <div id="resizer"></div>
-  <aside id="panel"></aside>
+  <aside id="side">
+    <div id="side-head">Comments<button id="close-panel" title="Hide the comment threads, keeping them on the PDF">&times;</button></div>
+    <div id="panel"></div>
+  </aside>
 </div>
 <script nonce="${nonce}" type="module">
 const config = ${JSON.stringify(config)};
@@ -1114,11 +1135,13 @@ async function selection() {
     context: await lineText(n, at.y, atEnd.y),
   };
 }
-document.getElementById("select-source").addEventListener("click", async () => {
-  selectBtn.style.display = "none";
-  const sel = await selection();
-  if (sel) vscode.postMessage({ type: "sourceAt", page: sel.page, x: sel.at.x, y: sel.at.y, context: sel.context, focus: sel.text });
-});
+for (const [id, toSide] of [["select-source", false], ["select-source-side", true]]) {
+  document.getElementById(id).addEventListener("click", async () => {
+    selectBtn.style.display = "none";
+    const sel = await selection();
+    if (sel) vscode.postMessage({ type: "sourceAt", page: sel.page, x: sel.at.x, y: sel.at.y, context: sel.context, focus: sel.text, toSide });
+  });
+}
 document.getElementById("select-comment").addEventListener("click", async () => {
   selectBtn.style.display = "none";
   const sel = await selection();
@@ -1150,7 +1173,7 @@ document.getElementById("select-comment").addEventListener("click", async () => 
     composer.occ = found.length;
   }
 });
-// Ctrl or Cmd-click goes to the source
+// Ctrl or Cmd-click goes to the source, with Alt to open it beside
 container.addEventListener("click", (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const pageDiv = e.target.closest(".page");
@@ -1158,23 +1181,25 @@ container.addEventListener("click", (e) => {
   const n = Number(pageDiv.dataset.pageNumber);
   const box = pageBox(pageDiv);
   const at = fromViewport(n, e.clientX - box.left, e.clientY - box.top);
-  void lineText(n, at.y).then((context) => vscode.postMessage({ type: "sourceAt", page: n, x: at.x, y: at.y, context }));
+  const toSide = e.altKey;
+  void lineText(n, at.y).then((context) => vscode.postMessage({ type: "sourceAt", page: n, x: at.x, y: at.y, context, toSide }));
 });
 function applyState() {
   document.body.classList.toggle("no-comments", !state.showComments);
   document.body.classList.toggle("no-panel", !state.showPanel);
   document.documentElement.style.setProperty("--panel-width", state.panelWidth + "px");
   document.getElementById("toggle-comments").setAttribute("aria-pressed", String(state.showComments));
-  document.getElementById("toggle-panel").setAttribute("aria-pressed", String(state.showPanel));
   document.getElementById("show-resolved").checked = state.showResolved;
   save();
 }
 document.getElementById("toggle-comments").addEventListener("click", () => {
   state.showComments = !state.showComments;
+  // Showing them again brings back the threads too
+  if (state.showComments) state.showPanel = true;
   applyState();
 });
-document.getElementById("toggle-panel").addEventListener("click", () => {
-  state.showPanel = !state.showPanel;
+document.getElementById("close-panel").addEventListener("click", () => {
+  state.showPanel = false;
   applyState();
 });
 // Dragging the sidebar's edge resizes it

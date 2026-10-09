@@ -717,7 +717,16 @@ function buildHtml(
   .badge { font-size: 0.85em; padding: 0 4px; border-radius: 2px; background: var(--vscode-badge-background);
     color: var(--vscode-badge-foreground); }
   a { color: var(--vscode-textLink-foreground); cursor: pointer; }
-  #select-actions { position: absolute; display: none; z-index: 20; gap: 4px; }
+  #select-actions { position: absolute; display: none; z-index: 20; gap: 4px; padding: 3px; border-radius: 4px;
+    background: var(--vscode-editorWidget-background, #252526);
+    border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, #454545));
+    box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
+  /* Secondary buttons are often translucent, which over a page of text is
+     hard to read, so these sit on the widget's own background */
+  #select-actions button:not(.primary) { background: transparent;
+    color: var(--vscode-editorWidget-foreground, var(--vscode-foreground)); }
+  #select-actions button:not(.primary):hover {
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25)); }
   .empty { opacity: 0.7; padding: 4px; }
 </style>
 </head>

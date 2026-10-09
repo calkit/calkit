@@ -136,8 +136,8 @@ stages:
       size: 5
     - path: docs/roi/research_flow.py
       hash: md5
-      md5: bff15972f8518e04ee4f1ebc7cbae5d0
-      size: 35065
+      md5: 2606a35ff9b89cfcb3d5d19721745dfc
+      size: 36026
     - path: scripts/research-flow.py
       hash: md5
       md5: 7116a10dcfefc35ad2336d1a87d8ead1
@@ -149,8 +149,8 @@ stages:
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: 1e0fd53a447fd33770fd3b9caa1fcde3
-      size: 79887
+      md5: f68a8c12af506415f953110d5e1d5e2a
+      size: 79854
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -160,8 +160,8 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: 1e0fd53a447fd33770fd3b9caa1fcde3
-      size: 79887
+      md5: f68a8c12af506415f953110d5e1d5e2a
+      size: 79854
     - path: scripts/plot-research-flow.py
       hash: md5
       md5: 19f5cc7b755ecf4c3c11b1bf734ee1e6
@@ -173,16 +173,16 @@ stages:
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
-      md5: 9073b5db351f69d4ab3378218953ee39
-      size: 182089
+      md5: eae4437e9bff4b1d4e30c240ac129253
+      size: 181088
     - path: docs/img/research-flow-waste.png
       hash: md5
-      md5: 3fbf55c165d258d8493936d8ed73ef78
-      size: 116220
+      md5: a8d262629eb1e6aade04772421f057a6
+      size: 115898
     - path: docs/img/research-flow.png
       hash: md5
-      md5: d1448b62e37ee7b408243ab772278a2f
-      size: 330067
+      md5: ca7da1bd62f56df0a24295159d142ea8
+      size: 335468
   one-pager-latex:
     cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
     deps:
@@ -298,7 +298,7 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 4a60d00a6d670e17ccc6f57b83bdb14c
+      md5: ec37375aea6e4f2bb5e969c9648c7bee
       size: 5016
     - path: docs/one-pager/one-pager.lua
       hash: md5
@@ -314,10 +314,10 @@ stages:
       size: 1649
     - path: results/research-flow.json
       hash: md5
-      md5: 1e0fd53a447fd33770fd3b9caa1fcde3
-      size: 79887
+      md5: f68a8c12af506415f953110d5e1d5e2a
+      size: 79854
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: ce90fac013403bbc543a4d79ae819126
-      size: 136414
+      md5: 2c322664a153e0b34755d4f09654d6e7
+      size: 136496

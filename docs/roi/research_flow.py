@@ -331,6 +331,15 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             yield env.timeout(10.0)
             yield from spend("upkeep", p["upkeep_days"])
 
+    def draw(kind: str, *key: int) -> np.random.Generator:
+        # Each kind of chance, for each finding or stage, has its own
+        # stream, so changing one part of the work doesn't reshuffle the
+        # luck of the rest, and scenarios compare like for like
+        k = (kind, *key)
+        if k not in streams:
+            streams[k] = np.random.default_rng([seed, *kind.encode(), *key])
+        return streams[k]
+
     def spend(kind: str, days: float, priority: int = 1) -> Generator:
         # Student time, in chunks of at most a day so a meeting can come
         # between them
@@ -402,7 +411,9 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             factor = tool("redo_factor")[s]
         mean = item.work.get(s, p["work"][s]) * factor
         sigma2 = math.log(1 + p["work_cv"] ** 2)
-        days = rng.lognormal(math.log(mean) - sigma2 / 2, sigma2**0.5)
+        days = draw("work", items.index(item), s).lognormal(
+            math.log(mean) - sigma2 / 2, sigma2**0.5
+        )
         item.started = True
         kind = "work" if factor == 1.0 else "rework"
         spent = 0.0
@@ -422,7 +433,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             del item.fixes[s]
         item.taints.pop(s, None)
         if active_flaws[s] is None:
-            if rng.random() < p["flaw_prob"][s]:
+            if draw("flaw", s).random() < p["flaw_prob"][s]:
                 active_flaws[s] = Flaw(s)
         if (new := active_flaws[s]) is not None:
             item.taints[s] = new
@@ -430,11 +441,11 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         # this finding alone
         if item.pos > 0 and s not in item.taints:
             error = tool("handoff_error")[item.path[item.pos - 1]]
-            if error and rng.random() < error:
+            if draw("hop", items.index(item), s).random() < error:
                 item.taints[s] = Flaw(s)
         if not item.framed and p["drift_prob"]:
             item.framed = True
-            if rng.random() < p["drift_prob"]:
+            if draw("drift", items.index(item)).random() < p["drift_prob"]:
                 item.taints[-1] = Flaw(-1)
         item.done_stages.add(s)
         item.pos += 1
@@ -445,7 +456,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             for j, f in item.taints.items()
             if j < s
             and not f.detected
-            and rng.random() < p["detect_drift" if j < 0 else "detect_self"]
+            and draw("notice", items.index(item), j + 1).random()
+            < p["detect_drift" if j < 0 else "detect_self"]
         ]
         if noticed:
             loops += 1
@@ -457,7 +469,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             and item.version == version
             and p["loop_from"] in item.path
         )
-        if retry and rng.random() >= 1 / p["attempts"]:
+        if (
+            retry
+            and draw("retry", items.index(item)).random() >= 1 / p["attempts"]
+        ):
             start = item.path.index(p["loop_from"])
             item.done_stages.difference_update(item.path[start : item.pos])
             item.pos = start
@@ -480,7 +495,8 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             # Merging their edits back by hand can get one wrong
             for i in to_review:
                 written = i.done and ns - 1 not in i.taints
-                if written and rng.random() < p["translate_error"]:
+                u = draw("translate", items.index(i)).random()
+                if written and u < p["translate_error"]:
                     i.taints[ns - 1] = Flaw(ns - 1)
         for i in to_review:
             i.changed = False
@@ -512,7 +528,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
         caught = []
         for flaw in flaws.values():
             n = sum(i.taints.get(flaw.stage) is flaw for i in approved_items)
-            if rng.random() < 1 - (1 - p["reverify"]) ** n:
+            if (
+                draw("reverify", flaw.stage + 1).random()
+                < 1 - (1 - p["reverify"]) ** n
+            ):
                 caught.append(flaw)
         if caught:
             catch(caught)
@@ -540,7 +559,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                     else:
                         d = p["detect_full" if i.done else "detect_partial"]
                     p_miss *= 1 - d
-            if rng.random() < 1 - p_miss:
+            if draw("review", flaw.stage + 1).random() < 1 - p_miss:
                 caught.append(flaw)
         catch(caught)
         for i in reviewed_items:
@@ -551,9 +570,10 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             if i.idea_checked:
                 continue
             i.idea_checked = True
-            if rng.random() >= p["idea_prob"] * 0.5**i.gen:
+            idea = draw("idea", items.index(i))
+            if idea.random() >= p["idea_prob"] * 0.5**i.gen:
                 continue
-            kind = rng.choice(3, p=p["idea_split"])
+            kind = idea.choice(3, p=p["idea_split"])
             if kind == 0:
                 new = Item(path=list(range(max(ns - 3, 0), ns)), gen=i.gen + 1)
             elif kind == 1:
@@ -605,7 +625,9 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
                 found = [
                     f
                     for f in flaws.values()
-                    if f.stage >= 0 and rng.random() < p["curate_detect"]
+                    if f.stage >= 0
+                    and draw("curate", f.stage + 1).random()
+                    < p["curate_detect"]
                 ]
                 if found:
                     catch(found)
@@ -629,7 +651,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             found = [
                 f
                 for f in flaws.values()
-                if rng.random()
+                if draw("reviewer", f.stage + 1).random()
                 < p[
                     "detect_reviewer_drift"
                     if f.stage < 0
@@ -748,7 +770,7 @@ def run_project(policy: str, p: dict, seed: int) -> dict:
             gate = env.event()
 
     ns = len(p["work"])
-    rng = np.random.default_rng(seed)
+    streams: dict[tuple, np.random.Generator] = {}
     env = simpy.Environment()
     student = simpy.PriorityResource(env, capacity=1)
     items = [Item(path=list(range(ns))) for _ in range(p["n_findings"])]

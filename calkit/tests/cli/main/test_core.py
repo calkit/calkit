@@ -3090,10 +3090,17 @@ def test_run_switch_env(tmp_dir):
         "environments": {
             "cluster": {
                 "kind": "switch",
-                "use": {
-                    "if env('CK_TEST_SITE') == 'cluster'": "slurm-env",
-                    "else": "here",
-                },
+                "switch": [
+                    {
+                        "when": {
+                            "kind": "env-var-equals",
+                            "env_var": "CK_TEST_SITE",
+                            "equals": "cluster",
+                        },
+                        "environment": "slurm-env",
+                    },
+                    {"environment": "here"},
+                ],
             },
             "slurm-env": {
                 "kind": "slurm",
@@ -3235,8 +3242,8 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
     with open("calkit.yaml") as f:
         ck_info = calkit.ryaml.load(f)
     ck_info["environments"]["broken"] = {
-        "kind": "switch",
-        "use": {"if cpu_count > 'many'": "lab"},
+        "kind": "system",
+        "host": "calkit-test.invalid",
     }
     ck_info["pipeline"]["stages"]["odd"] = {
         "kind": "shell-command",

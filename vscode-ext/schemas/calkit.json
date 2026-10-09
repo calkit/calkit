@@ -1,5 +1,27 @@
 {
   "$defs": {
+    "AppExistsCondition": {
+      "additionalProperties": false,
+      "description": "An app is on ``PATH``.",
+      "properties": {
+        "app": {
+          "description": "Name of the executable, e.g., 'sbatch'.",
+          "title": "App",
+          "type": "string"
+        },
+        "kind": {
+          "const": "app-exists",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "app"
+      ],
+      "title": "AppExistsCondition",
+      "type": "object"
+    },
     "CommandStage": {
       "additionalProperties": false,
       "properties": {
@@ -297,44 +319,6 @@
           "default": null,
           "description": "Path at which to create the environment.",
           "title": "Prefix"
-        },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
         }
       },
       "required": [
@@ -1063,44 +1047,6 @@
           "description": "Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. Images are kept local if this is unset or null.",
           "title": "Registry"
         },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
-        },
         "shell": {
           "default": "sh",
           "description": "Shell used to run commands in the image.",
@@ -1197,6 +1143,66 @@
         "path"
       ],
       "title": "DocumentEvidence",
+      "type": "object"
+    },
+    "EnvVarEqualsCondition": {
+      "additionalProperties": false,
+      "description": "An environmental variable has a given value.",
+      "properties": {
+        "env_var": {
+          "description": "Name of the variable.",
+          "title": "Env Var",
+          "type": "string"
+        },
+        "equals": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Value it must have, exactly. A list means any one of them.",
+          "title": "Equals"
+        },
+        "kind": {
+          "const": "env-var-equals",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "env_var",
+        "equals"
+      ],
+      "title": "EnvVarEqualsCondition",
+      "type": "object"
+    },
+    "EnvVarExistsCondition": {
+      "additionalProperties": false,
+      "description": "An environmental variable is set.",
+      "properties": {
+        "env_var": {
+          "description": "Name of the variable.",
+          "title": "Env Var",
+          "type": "string"
+        },
+        "kind": {
+          "const": "env-var-exists",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "env_var"
+      ],
+      "title": "EnvVarExistsCondition",
       "type": "object"
     },
     "EnvVarInput": {
@@ -1465,6 +1471,38 @@
         "formula"
       ],
       "title": "FormulaParams",
+      "type": "object"
+    },
+    "HostnameMatchesCondition": {
+      "additionalProperties": false,
+      "description": "The machine's hostname matches a glob.",
+      "properties": {
+        "kind": {
+          "const": "hostname-matches",
+          "title": "Kind",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Glob the hostname must match, case-insensitively, e.g., '*.cluster.edu'. A list means any one of them.",
+          "title": "Pattern"
+        }
+      },
+      "required": [
+        "kind",
+        "pattern"
+      ],
+      "title": "HostnameMatchesCondition",
       "type": "object"
     },
     "Input": {
@@ -2100,44 +2138,6 @@
           "description": "Path to the Julia project's Project.toml.",
           "title": "Path",
           "type": "string"
-        },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
         }
       },
       "required": [
@@ -3289,6 +3289,38 @@
       "title": "LookupTableParams",
       "type": "object"
     },
+    "MachineIdEqualsCondition": {
+      "additionalProperties": false,
+      "description": "The machine is a given one, by the ID 'calkit describe system' shows.",
+      "properties": {
+        "kind": {
+          "const": "machine-id-equals",
+          "title": "Kind",
+          "type": "string"
+        },
+        "machine_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Machine ID, ignoring case and dashes. A list means any one of them.",
+          "title": "Machine Id"
+        }
+      },
+      "required": [
+        "kind",
+        "machine_id"
+      ],
+      "title": "MachineIdEqualsCondition",
+      "type": "object"
+    },
     "MapPathsStage": {
       "additionalProperties": false,
       "properties": {
@@ -4352,44 +4384,6 @@
           "description": "MATLAB products (toolboxes) required.",
           "title": "Products"
         },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
-        },
         "version": {
           "anyOf": [
             {
@@ -4820,44 +4814,6 @@
           "title": "Path",
           "type": "string"
         },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
-        },
         "shell": {
           "anyOf": [
             {
@@ -4964,6 +4920,48 @@
         "path"
       ],
       "title": "Notebook",
+      "type": "object"
+    },
+    "OsIsCondition": {
+      "additionalProperties": false,
+      "description": "The machine runs a given operating system.",
+      "properties": {
+        "kind": {
+          "const": "os-is",
+          "title": "Kind",
+          "type": "string"
+        },
+        "os": {
+          "anyOf": [
+            {
+              "enum": [
+                "linux",
+                "macos",
+                "windows"
+              ],
+              "type": "string"
+            },
+            {
+              "items": {
+                "enum": [
+                  "linux",
+                  "macos",
+                  "windows"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Operating system. A list means any one of them.",
+          "title": "Os"
+        }
+      },
+      "required": [
+        "kind",
+        "os"
+      ],
+      "title": "OsIsCondition",
       "type": "object"
     },
     "Output": {
@@ -5163,7 +5161,7 @@
         },
         "requirements": {
           "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
+          "description": "What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.",
           "items": {
             "anyOf": [
               {
@@ -5439,44 +5437,6 @@
           "description": "Path to the Pixi manifest file.",
           "title": "Path",
           "type": "string"
-        },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
         }
       },
       "required": [
@@ -7120,44 +7080,6 @@
           "default": null,
           "description": "Path at which to create the environment.",
           "title": "Prefix"
-        },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
         }
       },
       "required": [
@@ -9154,7 +9076,7 @@
         },
         "requirements": {
           "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
+          "description": "What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.",
           "items": {
             "anyOf": [
               {
@@ -9461,7 +9383,7 @@
       "type": "object"
     },
     "SwitchEnvironment": {
-      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``use`` maps ``if <condition>``, ``elif <condition>`` and ``else`` to\nthe names of other environments, tried in order. A condition can use\nthe machine properties ``calkit describe system`` prints, e.g.,\n``hostname``, ``machine_id``, ``os``, ``machine`` and ``cpu_count``,\nand the functions ``env(name, default)``, ``has_app(name)`` and\n``matches(value, pattern)``, where ``pattern`` is a case-insensitive\nglob. For example:\n\n```yaml\ncluster:\n  kind: switch\n  use:\n    if matches(hostname, \"*.gps.caltech.edu\"): clima\n    elif env(\"NERSC_HOST\") == \"perlmutter\": perlmutter\n    elif has_app(\"sbatch\"): any-slurm\n    else: clima-remote\n```\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.",
+      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\ncondition this machine meets is picked. ``when`` is one condition or a\nlist that must all be met, and the last option can leave it out to be\nthe default. Each condition has a ``kind`` and its own fields:\n\n- ``app-exists``: ``app`` is on ``PATH``.\n- ``env-var-exists``: ``env_var`` is set.\n- ``env-var-equals``: ``env_var`` is set to ``equals``.\n- ``hostname-matches``: the hostname matches the glob ``pattern``,\n  ignoring case.\n- ``os-is``: ``os`` is ``linux``, ``macos`` or ``windows``.\n- ``machine-id-equals``: ``machine_id`` is this machine's, as\n  ``calkit describe system`` shows it.\n\n``equals``, ``pattern``, ``os`` and ``machine_id`` also take a list,\nmeaning any one of them. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        kind: hostname-matches\n        pattern: \"*.gps.caltech.edu\"\n      environment: clima\n    - when:\n        kind: env-var-equals\n        env_var: NERSC_HOST\n        equals: perlmutter\n      environment: perlmutter\n    - when:\n        kind: app-exists\n        app: sbatch\n      environment: any-slurm\n    - environment: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.",
       "properties": {
         "description": {
           "anyOf": [
@@ -9555,57 +9477,116 @@
           "title": "Relock",
           "type": "string"
         },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
+        "switch": {
+          "description": "Environments to pick from, tried in order.",
           "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
+            "$ref": "#/$defs/SwitchOption"
           },
-          "title": "Requirements",
+          "minItems": 1,
+          "title": "Switch",
           "type": "array"
-        },
-        "use": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Environment names keyed by 'if <condition>', 'elif <condition>' and 'else', tried in order.",
-          "title": "Use",
-          "type": "object"
         }
       },
       "required": [
-        "use"
+        "switch"
       ],
       "title": "SwitchEnvironment",
+      "type": "object"
+    },
+    "SwitchOption": {
+      "additionalProperties": false,
+      "description": "An environment a switch picks, and when.",
+      "properties": {
+        "environment": {
+          "description": "Name of the environment to use.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "app-exists": "#/$defs/AppExistsCondition",
+                  "env-var-equals": "#/$defs/EnvVarEqualsCondition",
+                  "env-var-exists": "#/$defs/EnvVarExistsCondition",
+                  "hostname-matches": "#/$defs/HostnameMatchesCondition",
+                  "machine-id-equals": "#/$defs/MachineIdEqualsCondition",
+                  "os-is": "#/$defs/OsIsCondition"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AppExistsCondition"
+                },
+                {
+                  "$ref": "#/$defs/EnvVarExistsCondition"
+                },
+                {
+                  "$ref": "#/$defs/EnvVarEqualsCondition"
+                },
+                {
+                  "$ref": "#/$defs/HostnameMatchesCondition"
+                },
+                {
+                  "$ref": "#/$defs/OsIsCondition"
+                },
+                {
+                  "$ref": "#/$defs/MachineIdEqualsCondition"
+                }
+              ]
+            },
+            {
+              "items": {
+                "discriminator": {
+                  "mapping": {
+                    "app-exists": "#/$defs/AppExistsCondition",
+                    "env-var-equals": "#/$defs/EnvVarEqualsCondition",
+                    "env-var-exists": "#/$defs/EnvVarExistsCondition",
+                    "hostname-matches": "#/$defs/HostnameMatchesCondition",
+                    "machine-id-equals": "#/$defs/MachineIdEqualsCondition",
+                    "os-is": "#/$defs/OsIsCondition"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/AppExistsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarExistsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarEqualsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/HostnameMatchesCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/OsIsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/MachineIdEqualsCondition"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Condition this machine must meet for this option to be picked, or a list of them that must all be met. Only the last option may leave it out, to be picked when no other is.",
+          "title": "When"
+        }
+      },
+      "required": [
+        "environment"
+      ],
+      "title": "SwitchOption",
       "type": "object"
     },
     "SystemEnvironment": {
@@ -10123,44 +10104,6 @@
           "description": "Path to the uv project's pyproject.toml.",
           "title": "Path",
           "type": "string"
-        },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
         }
       },
       "required": [
@@ -10243,44 +10186,6 @@
           "default": null,
           "description": "Python version to use when creating the environment.",
           "title": "Python"
-        },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
         }
       },
       "required": [
@@ -10427,44 +10332,6 @@
           "default": null,
           "description": "Python version to use when creating the environment.",
           "title": "Python"
-        },
-        "requirements": {
-          "default": [],
-          "description": "What must be true where this environment is used, e.g., an app on PATH, an environment variable, or a machine property. A stage using it is skipped on a machine where they aren't met, keeping its outputs.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/SystemNumberRequirement"
-              },
-              {
-                "$ref": "#/$defs/SystemValueRequirement"
-              },
-              {
-                "$ref": "#/$defs/SetupRequirement"
-              },
-              {
-                "$ref": "#/$defs/Requirement"
-              },
-              {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/RequirementAttrs"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "title": "Requirements",
-          "type": "array"
         }
       },
       "required": [

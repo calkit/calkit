@@ -3771,10 +3771,13 @@ def test_switch_env_compiles(tmp_dir):
     environments = {
         "cluster": {
             "kind": "switch",
-            "use": {
-                "if has_app('sbatch')": "slurm-env",
-                "else": "here",
-            },
+            "switch": [
+                {
+                    "when": {"kind": "app-exists", "app": "sbatch"},
+                    "environment": "slurm-env",
+                },
+                {"environment": "here"},
+            ],
         },
         "slurm-env": {"kind": "slurm"},
         "here": {"kind": "system", "default_setup": ["export A=1"]},
@@ -3782,7 +3785,13 @@ def test_switch_env_compiles(tmp_dir):
         "py-a": {"kind": "uv-venv", "path": "a/requirements.txt"},
         "rt": {
             "kind": "switch",
-            "use": {"if os == 'Windows'": "py-a", "else": "py"},
+            "switch": [
+                {
+                    "when": {"kind": "os-is", "os": "windows"},
+                    "environment": "py-a",
+                },
+                {"environment": "py"},
+            ],
         },
     }
     subprocess.check_call(["calkit", "init"])
@@ -3864,13 +3873,11 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
     ck_info = {
         "environments": {
             "py": {
-                "kind": "uv-venv",
-                "path": "requirements.txt",
+                "kind": "system",
                 "requirements": [{"kind": "hostname", "matches": "*"}],
             },
             "cluster-only": {
-                "kind": "uv-venv",
-                "path": "requirements.txt",
+                "kind": "system",
                 "requirements": [
                     {"kind": "hostname", "matches": "*.calkit-test.invalid"}
                 ],
@@ -3882,11 +3889,25 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
             "far": {"kind": "system", "host": "calkit-test.invalid"},
             "nowhere": {
                 "kind": "switch",
-                "use": {"if cpu_count < 0": "lab"},
+                "switch": [
+                    {
+                        "when": {
+                            "kind": "app-exists",
+                            "app": "calkit-test-no-such-app",
+                        },
+                        "environment": "lab",
+                    }
+                ],
             },
             "typo": {
                 "kind": "switch",
-                "use": {"if hostnme == 'x'": "lab", "else": "far"},
+                "switch": [
+                    {
+                        "when": {"kind": "hostname-match", "pattern": "x"},
+                        "environment": "lab",
+                    },
+                    {"environment": "far"},
+                ],
             },
             "here": {"kind": "system"},
             "pinned": {"kind": "system", "lock": ["hostname"]},
@@ -3985,7 +4006,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
     }
     # Something being wrong isn't the project saying the stage can't run
     assert set(errors) == {"far-away", "bad-switch"}
-    assert "hostnme" in errors["bad-switch"]
+    assert "hostname-match" in errors["bad-switch"]
     assert "locked to another machine" in gated["elsewhere"]
     assert "relock: auto" in gated["elsewhere"]
     # A stage's own requirement isn't one a host would help with

@@ -152,7 +152,12 @@ pass---an unanswerable question isn't a satisfied one.
 Requirements in the project's `requirements` section apply to the whole
 project, so a machine that doesn't meet them can't run anything.
 A requirement that only some stages have can go on those stages, or on
-an environment, which applies it to every stage using that environment:
+an environment that describes a machine, i.e., a `system`, `slurm` or
+`pbs` environment, which applies it to every stage using that
+environment.
+Other environments, e.g., `conda` or `uv-venv`, describe what's
+installed rather than the machine, so they can't have requirements;
+pair one with a machine instead, as in `cluster:py`:
 
 ```yaml
 environments:
@@ -160,18 +165,20 @@ environments:
     kind: system
     requirements:
       - matlab
-  cluster-py:
-    kind: uv-venv
-    path: requirements.txt
+  cluster:
+    kind: system
     requirements:
       - kind: hostname
         matches: "*.cluster.edu"
+  py:
+    kind: uv-venv
+    path: requirements.txt
 pipeline:
   stages:
     fetch:
       kind: python-script
       script_path: scripts/fetch.py
-      environment: cluster-py
+      environment: cluster:py
       requirements:
         - kind: env-var
           name: DATA_TOKEN
@@ -193,7 +200,7 @@ Some skips still fail the run, after the stages that can run have run:
   `calkit run fetch`, is out of date and can't run.
 - A stage is out of date and can't run because something is wrong
   rather than because the project says so, e.g., its machine can't be
-  reached or its `switch` condition can't be evaluated.
+  reached.
 
 ## Pinning the Calkit CLI version
 

@@ -13,7 +13,7 @@ import socket
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import toml
 import yaml
@@ -21,6 +21,9 @@ from pydantic import BaseModel
 from sqlitedict import SqliteDict
 
 import calkit
+
+if TYPE_CHECKING:
+    from calkit.models.core import SwitchOption
 
 DOCKER_ARCHS = [
     "amd64",
@@ -772,15 +775,8 @@ def get_switch_options(env_name: str, envs: dict) -> list[str]:
     Raises ``ValueError`` for an option that isn't defined, is another
     switch, or mixes machines with runtimes.
     """
-    from calkit.conditions import parse_conditional
-
-    env = envs.get(env_name) or {}
-    try:
-        clauses = parse_conditional(env.get("use") or {})
-    except ValueError as e:
-        raise ValueError(f"Switch environment '{env_name}': {e}") from e
     options: list[str] = []
-    for _, option in clauses:
+    for option in [o.environment for o in _load_switch(env_name, envs)]:
         option_env = envs.get(option)
         if option_env is None:
             raise ValueError(
@@ -815,42 +811,69 @@ def switch_is_outer(env_name: str, envs: dict) -> bool:
     )
 
 
-def switch_condition_scope() -> tuple[dict, dict]:
-    """The values and functions a switch's conditions can use."""
+def _load_switch(env_name: str, envs: dict) -> list["SwitchOption"]:
+    """A switch's options, validated."""
+    from pydantic import ValidationError
 
-    def matches(value: object, pattern: str) -> bool:
-        if value is None:
-            return False
-        return fnmatch.fnmatchcase(str(value).lower(), str(pattern).lower())
+    from calkit.models.core import SwitchEnvironment
 
-    functions = {
-        "env": lambda name, default=None: os.environ.get(name, default),
-        "has_app": lambda name: shutil.which(name) is not None,
-        "matches": matches,
-    }
-    return calkit.get_machine_properties(), functions
+    try:
+        return SwitchEnvironment.model_validate(envs.get(env_name)).switch
+    except ValidationError as e:
+        raise ValueError(
+            f"Switch environment '{env_name}' is invalid: {e}"
+        ) from None
 
 
 def resolve_switch(env_name: str, envs: dict) -> str | None:
     """The environment a switch picks on this machine, or None."""
-    from calkit.conditions import evaluate_condition, parse_conditional
+    from calkit.models.core import (
+        AppExistsCondition,
+        EnvVarEqualsCondition,
+        EnvVarExistsCondition,
+        HostnameMatchesCondition,
+        MachineIdEqualsCondition,
+        OsIsCondition,
+    )
+
+    def any_of(value: str | list) -> list:
+        return value if isinstance(value, list) else [value]
+
+    def holds(condition: object) -> bool:
+        if isinstance(condition, AppExistsCondition):
+            return shutil.which(condition.app) is not None
+        if isinstance(condition, EnvVarExistsCondition):
+            return condition.env_var in os.environ
+        if isinstance(condition, EnvVarEqualsCondition):
+            return os.environ.get(condition.env_var) in any_of(
+                condition.equals
+            )
+        if isinstance(condition, HostnameMatchesCondition):
+            hostname = socket.gethostname().lower()
+            return any(
+                fnmatch.fnmatchcase(hostname, p.lower())
+                for p in any_of(condition.pattern)
+            )
+        if isinstance(condition, OsIsCondition):
+            names = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
+            return names.get(platform.system()) in any_of(condition.os)
+        if isinstance(condition, MachineIdEqualsCondition):
+            here = calkit.get_machine_id()
+            return any(
+                calkit.machine_ids_match(here, m)
+                for m in any_of(condition.machine_id)
+            )
+        raise TypeError(f"Unknown switch condition: {condition!r}")
 
     get_switch_options(env_name, envs)
-    values, functions = switch_condition_scope()
-    for condition, option in parse_conditional(envs[env_name]["use"]):
-        if condition is None:
-            return option
-        try:
-            if evaluate_condition(condition, values, functions=functions):
-                return option
-        except KeyError as e:
-            raise ValueError(
-                f"Switch environment '{env_name}': condition {condition!r} "
-                f"names {e.args[0]!r}, which is not a machine property; "
-                f"available: {', '.join(sorted(values))}"
-            ) from None
-        except ValueError as e:
-            raise ValueError(f"Switch environment '{env_name}': {e}") from e
+    for option in _load_switch(env_name, envs):
+        if option.when is None or all(
+            holds(c)
+            for c in (
+                option.when if isinstance(option.when, list) else [option.when]
+            )
+        ):
+            return option.environment
     return None
 
 
@@ -860,10 +883,18 @@ def describe_switch_no_match(env_name: str, env: dict) -> str:
     here = ", ".join(
         f"{k}={props.get(k)!r}" for k in ("hostname", "os", "machine")
     )
-    conditions = "; ".join(str(k) for k in (env.get("use") or {}))
+    conditions = []
+    for option in env.get("switch") or []:
+        when = option.get("when") or []
+        for c in when if isinstance(when, list) else [when]:
+            fields = ", ".join(
+                f"{k}={v!r}" for k, v in c.items() if k != "kind"
+            )
+            conditions.append(f"{c.get('kind')}({fields})")
     return (
         f"Switch environment '{env_name}' picks no environment on this "
-        f"machine ({here}) from: {conditions}"
+        f"machine ({here}); none of its conditions hold: "
+        + "; ".join(conditions)
     )
 
 
@@ -950,7 +981,7 @@ def write_switch_env_lock(
             if os.path.exists(full):
                 locks[option] = content_md5(full)
     lock_data = {
-        "use": env["use"],
+        "switch": env["switch"],
         "lock": env.get("lock") or [],
         "options": {
             o: {

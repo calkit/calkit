@@ -1365,12 +1365,20 @@ def test_check_switch_env(tmp_dir):
         "environments": {
             "pick": {
                 "kind": "switch",
-                "use": {"if cpu_count > 0": "here"},
+                "switch": [{"environment": "here"}],
                 "lock": ["os"],
             },
             "never": {
                 "kind": "switch",
-                "use": {"if cpu_count < 0": "here"},
+                "switch": [
+                    {
+                        "when": {
+                            "kind": "app-exists",
+                            "app": "calkit-test-no-such-app",
+                        },
+                        "environment": "here",
+                    }
+                ],
             },
             "here": {"kind": "system"},
         }

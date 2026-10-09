@@ -2,9 +2,8 @@
 mappings that pick a value with them.
 
 A condition is a restricted Python expression: comparisons, ``in``,
-``and``/``or``/``not``, arithmetic, and calls to functions the caller
-allows by name. Nothing else can be called, so a condition read from a
-project cannot run arbitrary code.
+``and``/``or``/``not`` and arithmetic. Nothing can be called, so a
+condition read from a project cannot run arbitrary code.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from __future__ import annotations
 import ast
 import operator
 import re
-from typing import Any, Callable, Iterable, TypeGuard
+from typing import Any, Callable, TypeGuard
 
 _IF_KEY = re.compile(r"^\s*(if|elif)\s+(.+?)\s*$")
 _ELSE_KEY = re.compile(r"^\s*else\s*$")
@@ -23,9 +22,8 @@ _COMPARISONS = {
     ast.GtE: operator.ge,
     ast.Eq: operator.eq,
     ast.NotEq: operator.ne,
-    # Nothing is in None, e.g., an unset 'env("X")'
-    ast.In: lambda a, b: b is not None and a in b,
-    ast.NotIn: lambda a, b: b is None or a not in b,
+    ast.In: lambda a, b: a in b,
+    ast.NotIn: lambda a, b: a not in b,
 }
 _ARITHMETIC: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
     ast.Add: operator.add,
@@ -52,7 +50,6 @@ _ALLOWED_NODES = (
     ast.Constant,
     ast.Name,
     ast.Load,
-    ast.Call,
     ast.List,
     ast.Tuple,
     *_COMPARISONS,
@@ -101,15 +98,8 @@ def parse_conditional(clauses: dict) -> list[tuple[str | None, str]]:
     return parsed
 
 
-def check_condition(
-    expression: str, functions: Iterable[str] = ()
-) -> ast.Expression:
-    """Parse a condition, refusing anything evaluating it would refuse.
-
-    Only the structure is checked, not the names, so this can run where
-    the values aren't known, e.g., when ``calkit.yaml`` is loaded.
-    """
-    functions = set(functions)
+def check_condition(expression: str) -> ast.Expression:
+    """Parse a condition, refusing anything evaluating it would refuse."""
     shown = expression if len(expression) <= 200 else expression[:200] + "..."
     try:
         tree = ast.parse(expression, mode="eval")
@@ -126,25 +116,6 @@ def check_condition(
             else:
                 what = type(node).__name__
             raise refuse(f"{what} is not allowed")
-        if isinstance(node, ast.Call):
-            if (
-                not isinstance(node.func, ast.Name)
-                or node.func.id not in functions
-            ):
-                allowed = ", ".join(sorted(functions)) or "none"
-                raise refuse(
-                    f"'{ast.unparse(node.func)}' cannot be called "
-                    f"(allowed: {allowed})"
-                )
-            if node.keywords:
-                raise refuse("keyword arguments are not supported")
-        if isinstance(node, ast.BinOp) or (
-            isinstance(node, ast.UnaryOp) and not isinstance(node.op, ast.Not)
-        ):
-            if any(isinstance(n, ast.Call) for n in ast.walk(node)):
-                raise refuse(
-                    "a call can be compared, but not used inside arithmetic"
-                )
     return tree
 
 
@@ -179,20 +150,12 @@ def _arithmetic(node: ast.AST, values: dict[str, Any]) -> Any:
     return _ARITHMETIC[op](left, right)
 
 
-def _operand(
-    node: ast.AST,
-    values: dict[str, Any],
-    functions: dict[str, Callable],
-) -> Any:
+def _operand(node: ast.AST, values: dict[str, Any]) -> Any:
     """One side of a comparison, resolved against the values."""
-    if isinstance(node, ast.Call):
-        assert isinstance(node.func, ast.Name)
-        args = [_operand(a, values, functions) for a in node.args]
-        return functions[node.func.id](*args)
     if isinstance(node, ast.List):
-        return [_operand(e, values, functions) for e in node.elts]
+        return [_operand(e, values) for e in node.elts]
     if isinstance(node, ast.Tuple):
-        return tuple(_operand(e, values, functions) for e in node.elts)
+        return tuple(_operand(e, values) for e in node.elts)
     # A missing name is reported before anything else, so a name that
     # isn't an identifier gets the message saying so
     for inner in ast.walk(node):
@@ -201,24 +164,20 @@ def _operand(
     return _arithmetic(node, values)
 
 
-def _truth(
-    node: ast.AST,
-    values: dict[str, Any],
-    functions: dict[str, Callable],
-) -> bool:
+def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
     if isinstance(node, ast.BoolOp):
         # Not short-circuited, so a misspelled name is an error whatever
         # the current values are
-        outcomes = [_truth(v, values, functions) for v in node.values]
+        outcomes = [_truth(v, values) for v in node.values]
         if isinstance(node.op, ast.And):
             return all(outcomes)
         return any(outcomes)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-        return not _truth(node.operand, values, functions)
+        return not _truth(node.operand, values)
     if isinstance(node, ast.Compare):
-        left = _operand(node.left, values, functions)
+        left = _operand(node.left, values)
         for op, comparator in zip(node.ops, node.comparators):
-            right = _operand(comparator, values, functions)
+            right = _operand(comparator, values)
             compare = _COMPARISONS.get(type(op))
             if compare is None:
                 raise ValueError(
@@ -228,8 +187,8 @@ def _truth(
                 return False
             left = right
         return True
-    if isinstance(node, (ast.Name, ast.Call)):
-        value = _operand(node, values, functions)
+    if isinstance(node, ast.Name):
+        value = _operand(node, values)
         # Only a true/false value stands alone, so a number is never
         # silently read as its truthiness
         if isinstance(value, bool):
@@ -240,11 +199,7 @@ def _truth(
     )
 
 
-def evaluate_condition(
-    expression: str,
-    values: dict[str, Any],
-    functions: dict[str, Callable] | None = None,
-) -> bool:
+def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
     """Evaluate one ``if``/``elif`` condition against ``values``.
 
     Raises ``KeyError`` for a name not in ``values`` and ``ValueError``
@@ -268,17 +223,15 @@ def evaluate_condition(
             "valid Python identifier"
         )
 
-    if functions is None:
-        functions = {}
     try:
-        tree = check_condition(expression, functions)
+        tree = check_condition(expression)
     except ValueError:
         error = unusable_name()
         if error is not None:
             raise error from None
         raise
     try:
-        return bool(_truth(tree.body, values, functions))
+        return bool(_truth(tree.body, values))
     except KeyError:
         error = unusable_name()
         if error is not None:
@@ -295,15 +248,9 @@ def evaluate_condition(
         ) from e
 
 
-def select_branch(
-    clauses: dict,
-    values: dict[str, Any],
-    functions: dict[str, Callable] | None = None,
-) -> str:
+def select_branch(clauses: dict, values: dict[str, Any]) -> str:
     """The value whose condition holds first."""
     for condition, wording in parse_conditional(clauses):
-        if condition is None or evaluate_condition(
-            condition, values, functions=functions
-        ):
+        if condition is None or evaluate_condition(condition, values):
             return wording
     raise ValueError("no condition held and there is no 'else' clause")

@@ -252,32 +252,94 @@ def test_env_var_inputs():
     )
 
 
-def test_switch_conditions_are_checked_at_load():
-    from calkit.models.core import SwitchEnvironment
+def test_switch_env_model():
+    from calkit.models.core import (
+        CondaEnvironment,
+        EnvVarEqualsCondition,
+        OsIsCondition,
+        SlurmEnvironment,
+        SwitchEnvironment,
+    )
 
     env = SwitchEnvironment.model_validate(
         {
             "kind": "switch",
-            "use": {
-                "if matches(hostname, '*.edu')": "a",
-                "elif env('SITE', 'x') == 'y' and cpu_count >= 4": "b",
-                "elif has_app('sbatch')": "c",
-                "else": "d",
-            },
+            "switch": [
+                {
+                    "when": {"kind": "hostname-matches", "pattern": "*.edu"},
+                    "environment": "a",
+                },
+                {
+                    "when": [
+                        {"kind": "os-is", "os": ["linux", "macos"]},
+                        {
+                            "kind": "env-var-equals",
+                            "env_var": "SITE",
+                            "equals": "y",
+                        },
+                    ],
+                    "environment": "b",
+                },
+                {
+                    "when": {"kind": "app-exists", "app": "sbatch"},
+                    "environment": "c",
+                },
+                {"environment": "d"},
+            ],
         }
     )
-    assert list(env.use.values()) == ["a", "b", "c", "d"]
-    # Syntax errors and anything evaluation would refuse are caught when
-    # the project loads, naming the condition
-    refused = {
-        "if hostname ==": "cannot parse condition 'hostname =='",
-        "if hostname.lower() == 'x'": "'hostname.lower' cannot be called",
-        "if open('x') == 'y'": "'open' cannot be called",
-        "if hostname[0] == 'x'": "Subscript",
-        "if env(name='X') == 'y'": "keyword",
-    }
-    for key, problem in refused.items():
+    assert [o.environment for o in env.switch] == ["a", "b", "c", "d"]
+    when = env.switch[1].when
+    assert isinstance(when, list)
+    assert isinstance(when[0], OsIsCondition)
+    assert isinstance(when[1], EnvVarEqualsCondition)
+    # Mistakes are caught when the project loads, naming what's wrong
+    refused = [
+        ({"kind": "os-is", "os": "Darwin"}, "'linux', 'macos' or 'windows'"),
+        ({"kind": "hostname-match", "pattern": "x"}, "does not match any"),
+        ({"kind": "app-exists", "name": "x"}, "Extra inputs"),
+        ({"kind": "env-var-equals", "env_var": "X"}, "equals"),
+        ([], "valid dictionary"),
+    ]
+    for when, problem in refused:
         with pytest.raises(ValidationError, match=problem):
             SwitchEnvironment.model_validate(
-                {"kind": "switch", "use": {key: "a", "else": "b"}}
+                {
+                    "kind": "switch",
+                    "switch": [{"when": when, "environment": "a"}],
+                }
             )
+    for switch, problem in [
+        ([], "at least 1"),
+        (
+            [{"environment": "a"}, {"environment": "b"}],
+            "only the last option",
+        ),
+        ([{"env": "a"}], "environment"),
+    ]:
+        with pytest.raises(ValidationError, match=problem):
+            SwitchEnvironment.model_validate(
+                {"kind": "switch", "switch": switch}
+            )
+    with pytest.raises(ValidationError, match="switch"):
+        SwitchEnvironment.model_validate(
+            {"kind": "switch", "use": {"else": "a"}}
+        )
+    # Only environments that describe a machine have requirements
+    reqs = ["sbatch", {"kind": "cpu-count", "min": 4}]
+    slurm = SlurmEnvironment.model_validate(
+        {"kind": "slurm", "requirements": reqs}
+    )
+    assert len(slurm.requirements) == 2
+    with pytest.raises(ValidationError, match="describe a machine"):
+        CondaEnvironment.model_validate(
+            {"kind": "conda", "path": "env.yml", "requirements": reqs}
+        )
+    with pytest.raises(ValidationError, match="describe a machine"):
+        SwitchEnvironment.model_validate(
+            {
+                "kind": "switch",
+                "switch": [{"environment": "a"}],
+                "requirements": reqs,
+            }
+        )

@@ -703,13 +703,6 @@ class Environment(BaseModel):
     description: str | None = Field(
         default=None, description="A description of the environment."
     )
-    requirements: list[RequirementType] = Field(
-        default=[],
-        description="What must be true where this environment is used, "
-        "e.g., an app on PATH, an environment variable, or a machine "
-        "property. A stage using it is skipped on a machine where they "
-        "aren't met, keeping its outputs.",
-    )
     inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         validation_alias=AliasChoices("inputs", "deps"),
@@ -718,6 +711,24 @@ class Environment(BaseModel):
         "Editing one rebuilds the environment and reruns the stages using "
         "it.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_requirements(cls, data: object) -> object:
+        # Extra keys are ignored, so without this a runtime's requirements
+        # would silently gate nothing
+        if (
+            isinstance(data, dict)
+            and "requirements" in data
+            and "requirements" not in cls.model_fields
+        ):
+            raise ValueError(
+                f"A '{data.get('kind')}' environment can't have "
+                "'requirements', since they describe a machine; put them on "
+                "the stages using it, or on a 'system', 'slurm' or 'pbs' "
+                "environment it runs inside"
+            )
+        return data
 
 
 class CondaEnvironment(Environment):
@@ -984,6 +995,13 @@ class SlurmEnvironment(Environment):
         "a slot, so an iterated stage does not flood a shared cluster's queue "
         "with every one of its jobs at the same time. Null means no limit.",
     )
+    requirements: list[RequirementType] = Field(
+        default=[],
+        description="What must be true of this machine before stages run on "
+        "it: apps on PATH, environmental variables, setup steps, and "
+        "constraints on properties like CPU count. Checked on the machine "
+        "this environment names, which is not necessarily this one.",
+    )
 
 
 class PBSEnvironment(Environment):
@@ -1017,6 +1035,13 @@ class PBSEnvironment(Environment):
         ge=1,
         description="How many of this project's jobs may sit in the queue "
         "(running or pending) at once. Null means no limit.",
+    )
+    requirements: list[RequirementType] = Field(
+        default=[],
+        description="What must be true of this machine before stages run on "
+        "it: apps on PATH, environmental variables, setup steps, and "
+        "constraints on properties like CPU count. Checked on the machine "
+        "this environment names, which is not necessarily this one.",
     )
 
 
@@ -1227,26 +1252,138 @@ class SystemEnvironment(Environment):
     )
 
 
+class AppExistsCondition(BaseModel):
+    """An app is on ``PATH``."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["app-exists"]
+    app: str = Field(description="Name of the executable, e.g., 'sbatch'.")
+
+
+class EnvVarExistsCondition(BaseModel):
+    """An environmental variable is set."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["env-var-exists"]
+    env_var: str = Field(description="Name of the variable.")
+
+
+class EnvVarEqualsCondition(BaseModel):
+    """An environmental variable has a given value."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["env-var-equals"]
+    env_var: str = Field(description="Name of the variable.")
+    equals: str | list[str] = Field(
+        description="Value it must have, exactly. A list means any one of "
+        "them."
+    )
+
+
+class HostnameMatchesCondition(BaseModel):
+    """The machine's hostname matches a glob."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["hostname-matches"]
+    pattern: str | list[str] = Field(
+        description="Glob the hostname must match, case-insensitively, "
+        "e.g., '*.cluster.edu'. A list means any one of them."
+    )
+
+
+class OsIsCondition(BaseModel):
+    """The machine runs a given operating system."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["os-is"]
+    os: (
+        Literal["linux", "macos", "windows"]
+        | list[Literal["linux", "macos", "windows"]]
+    ) = Field(description="Operating system. A list means any one of them.")
+
+
+class MachineIdEqualsCondition(BaseModel):
+    """The machine is a given one, by the ID 'calkit describe system' shows."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["machine-id-equals"]
+    machine_id: str | list[str] = Field(
+        description="Machine ID, ignoring case and dashes. A list means any "
+        "one of them."
+    )
+
+
+SwitchCondition = Annotated[
+    AppExistsCondition
+    | EnvVarExistsCondition
+    | EnvVarEqualsCondition
+    | HostnameMatchesCondition
+    | OsIsCondition
+    | MachineIdEqualsCondition,
+    Discriminator("kind"),
+]
+
+
+class SwitchOption(BaseModel):
+    """An environment a switch picks, and when."""
+
+    model_config = ConfigDict(extra="forbid")
+    when: (
+        SwitchCondition
+        | Annotated[list[SwitchCondition], Field(min_length=1)]
+        | None
+    ) = Field(
+        default=None,
+        description="Condition this machine must meet for this option to be "
+        "picked, or a list of them that must all be met. Only the last "
+        "option may leave it out, to be picked when no other is.",
+    )
+    environment: str = Field(description="Name of the environment to use.")
+
+
 class SwitchEnvironment(Environment):
     """One of several environments, picked by the machine Calkit runs on.
 
-    ``use`` maps ``if <condition>``, ``elif <condition>`` and ``else`` to
-    the names of other environments, tried in order. A condition can use
-    the machine properties ``calkit describe system`` prints, e.g.,
-    ``hostname``, ``machine_id``, ``os``, ``machine`` and ``cpu_count``,
-    and the functions ``env(name, default)``, ``has_app(name)`` and
-    ``matches(value, pattern)``, where ``pattern`` is a case-insensitive
-    glob. For example:
+    ``switch`` lists the options in order, and the first whose ``when``
+    condition this machine meets is picked. ``when`` is one condition or a
+    list that must all be met, and the last option can leave it out to be
+    the default. Each condition has a ``kind`` and its own fields:
+
+    - ``app-exists``: ``app`` is on ``PATH``.
+    - ``env-var-exists``: ``env_var`` is set.
+    - ``env-var-equals``: ``env_var`` is set to ``equals``.
+    - ``hostname-matches``: the hostname matches the glob ``pattern``,
+      ignoring case.
+    - ``os-is``: ``os`` is ``linux``, ``macos`` or ``windows``.
+    - ``machine-id-equals``: ``machine_id`` is this machine's, as
+      ``calkit describe system`` shows it.
+
+    ``equals``, ``pattern``, ``os`` and ``machine_id`` also take a list,
+    meaning any one of them. For example:
 
     ```yaml
     cluster:
       kind: switch
-      use:
-        if matches(hostname, "*.gps.caltech.edu"): clima
-        elif env("NERSC_HOST") == "perlmutter": perlmutter
-        elif has_app("sbatch"): any-slurm
-        else: clima-remote
+      switch:
+        - when:
+            kind: hostname-matches
+            pattern: "*.gps.caltech.edu"
+          environment: clima
+        - when:
+            kind: env-var-equals
+            env_var: NERSC_HOST
+            equals: perlmutter
+          environment: perlmutter
+        - when:
+            kind: app-exists
+            app: sbatch
+          environment: any-slurm
+        - environment: clima-remote
     ```
+
+    The conditions are checked on the machine Calkit runs on, which is
+    where the pick is made, even when the option picked is another
+    machine.
 
     The options are either all machines (``system``, ``slurm`` or
     ``pbs``), so the switch can be the outer half of a composite
@@ -1260,9 +1397,9 @@ class SwitchEnvironment(Environment):
     """
 
     kind: Literal["switch"] = "switch"
-    use: dict[str, str] = Field(
-        description="Environment names keyed by 'if <condition>', "
-        "'elif <condition>' and 'else', tried in order."
+    switch: list[SwitchOption] = Field(
+        min_length=1,
+        description="Environments to pick from, tried in order.",
     )
     lock: list[SystemLockProperty | AppVersionLockProperty] = Field(
         default=[],
@@ -1279,17 +1416,18 @@ class SwitchEnvironment(Environment):
         "for results that should follow the machine, e.g., benchmarks.",
     )
 
-    @field_validator("use")
+    @field_validator("switch")
     @classmethod
-    def check_use(cls, v: dict[str, str]) -> dict[str, str]:
-        from calkit.conditions import check_condition, parse_conditional
-
-        # Names aren't checked, since the machine properties are only
-        # known by reading them, which is too slow for loading a project
-        functions = ["env", "has_app", "matches"]
-        for condition, _ in parse_conditional(v):
-            if condition is not None:
-                check_condition(condition, functions)
+    def check_default_is_last(
+        cls, v: list[SwitchOption]
+    ) -> list[SwitchOption]:
+        for option in v[:-1]:
+            if option.when is None:
+                raise ValueError(
+                    f"Option '{option.environment}' has no 'when', so it "
+                    "would always be picked; only the last option may "
+                    "leave it out"
+                )
         return v
 
 

@@ -73,9 +73,25 @@ with tempfile.TemporaryDirectory() as tmp:
         "-c",
         "user.email=calkit@calkit.io",
     ]
+    # Dated as the example's last commit, which the LaTeX build and the
+    # figure's PDF take their date from, so the PDFs only change when the
+    # example does
+    date = subprocess.check_output(
+        ["git", "log", "-1", "--format=%cI", "--", "examples/latex-word"],
+        text=True,
+    ).strip()
+    os.environ["SOURCE_DATE_EPOCH"] = subprocess.check_output(
+        ["git", "log", "-1", "--format=%ct", "--", "examples/latex-word"],
+        text=True,
+    ).strip()
     subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
     subprocess.run(git + ["add", "-A"], cwd=proj, check=True)
-    subprocess.run(git + ["commit", "-q", "-m", "Copy"], cwd=proj, check=True)
+    subprocess.run(
+        git + ["commit", "-q", "-m", "Copy"],
+        cwd=proj,
+        check=True,
+        env=os.environ | {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
+    )
     # LaTeX to PDF
     calkit_cmd(proj, "run")
     shutil.copy(proj / "paper" / "main.pdf", OUT / "original.pdf")

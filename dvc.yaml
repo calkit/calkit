@@ -38,6 +38,64 @@ stages:
           persist: false
     desc: Automatically generated from the 'latex-word-round-trip-figure' stage in
       calkit.yaml. Changes made here will be overwritten.
+  research-flow:
+    cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
+    deps:
+      - scripts/research-flow.py
+      - docs/roi/research_flow.py
+      - uv.lock
+      - .python-version
+    outs:
+      - results/research-flow.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'research-flow' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  research-flow-figure:
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
+    deps:
+      - scripts/plot-research-flow.py
+      - results/research-flow.json
+      - uv.lock
+      - .python-version
+    outs:
+      - docs/img/research-flow.png
+      - docs/img/research-flow-goals.png
+      - docs/img/research-flow-waste.png
+    desc: Automatically generated from the 'research-flow-figure' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  budget-2027:
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25
+      --supported=20 --indirect-rate=0
+    deps:
+      - scripts/budget.py
+      - docs/one-pager/2027-budget.csv
+      - uv.lock
+      - .python-version
+    outs:
+      - results/2027-budget.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'budget-2027' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  one-pager/pdf:
+    cmd: calkit latex from-markdown docs/one-pager/main.md -o docs/one-pager/main.pdf
+      -e tex --no-check --template docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua
+      --pandoc-arg=--shift-heading-level-by=-1
+    deps:
+      - docs/one-pager/main.md
+      - docs/one-pager/one-pager.lua
+      - results/research-flow.json
+      - results/2027-budget.json
+      - docs/img/pipeline.png
+      - calkit.yaml
+      - .calkit/env-locks/tex
+      - docs/one-pager/template.tex
+    outs:
+      - docs/one-pager/main.pdf:
+          cache: true
+    desc: Automatically generated from the 'one-pager/pdf' stage in calkit.yaml. Changes
+      made here will be overwritten.
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
     deps:

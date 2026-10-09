@@ -3,14 +3,14 @@
 ![Calkit system](../img/pipeline.png)
 
 Generative AI is making it much cheaper to produce research outputs,
-while the reproducibility crisis remains unsolved.
+shifting the bottleneck to verification and validation.
+Meanwhile, the reproducibility crisis remains unsolved.
 For example, the open-access publisher PLOS found
 [only 12% of articles sharing code openly](https://doi.org/10.1371/journal.pone.0311493),
 and even fewer share code that is quick to verify.
-As the bottleneck is shifting from producing outputs
-to checking that those outputs are trustworthy, it's now more important than
-ever to make it intuitive and enjoyable to work transparently and reproducibly,
-both for humans and AI agents.
+Thus, it's now more important than
+ever to make it intuitive and enjoyable for both humans and AI agents
+to work transparently and reproducibly.
 
 Rather than assuming we should simply teach scientists software development
 tools and platforms and leave them to assemble their own systems and workflows,
@@ -19,8 +19,9 @@ research-focused experience right out of the box: reference management, version
 control (including large data files), computational environments, pipeline
 automation, and a (self-hostable) collaboration platform.
 The extra discipline of working this way, much like a software engineer,
-speeds research up rather than slowing it down, and with the learning curve
-kept short, it's almost always worth switching from manual, ad hoc workflows.
+increases speed and quality simultaneously,
+and with a gentle learning curve,
+it's almost always worth switching from manual, ad hoc workflows.
 
 Calkit is designed to help individuals work more efficiently by allowing all
 stages of research—from asking questions, to data collection and analysis, to
@@ -67,7 +68,7 @@ She used Calkit to create single-button reproducible pipelines that integrated
 MATLAB, Python, Julia, LaTeX, and more.
 She used Calkit's Overleaf integration
 to allow collaborators to contribute without learning Git,
-producing three first-author journal article submissions,
+producing three journal article submissions,
 including one to the prestigious _Journal of Fluid Mechanics_.
 
 ## Where we're heading

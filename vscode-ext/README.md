@@ -74,6 +74,13 @@ project in a plain folder.
 - Start, stop, and restart notebook server sessions for SLURM- and
   Docker-backed workflows from the notebook toolbar.
 
+## LaTeX PDF review
+
+- Easily jump between source .tex and PDF in the LaTeX Workshop PDF viewer.
+- Comment on sections of text from the PDF viewer and have them show up in
+  the .tex source following the Calkit LaTeX comment schema,
+  which also shows up on the Calkit Hub and can sync to GitHub issues.
+
 ## Figures & artifacts
 
 - Browse figures in a gallery and carousel, including interactive Plotly

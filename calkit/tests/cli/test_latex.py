@@ -1056,11 +1056,41 @@ def test_comments(tmp_dir):
     assert id2 not in [c["id"] for c in listed]
     with open("paper/main.tex") as f:
         assert "Also." not in f.read()
+    # A paragraph is found from rendered text, e.g., a line of the PDF, or
+    # from a line in its source
+    found = json.loads(
+        ck(
+            "locate",
+            "paper/main.tex",
+            "--text",
+            "First paragraph, over two",
+            "--json",
+        )
+    )
+    assert found["path"] == "paper/main.tex"
+    assert found["text"] == "First paragraph, over two lines."
+    assert (found["end_line"] - found["line"]) == 1
+    found = json.loads(
+        ck(
+            "locate",
+            "paper/main.tex",
+            "--path",
+            "paper/intro.tex",
+            "--line",
+            "1",
+            "--json",
+        )
+    )
+    assert found["text"] == "Intro text."
+    assert ck("locate", "paper/main.tex", "--text", "Intro text").startswith(
+        "paper/intro.tex:"
+    )
     # Bad references fail
     for args in [
         ["resolve", "paper/main.tex", "--id", "nope"],
         ["resolve", "paper/main.tex"],
         ["add", "paper/main.tex", "-l", "99", "-m", "x"],
+        ["locate", "paper/main.tex", "--text", "Nothing like this anywhere"],
     ]:
         res = subprocess.run(
             ["calkit", "latex", "comments", *args], capture_output=True

@@ -520,7 +520,7 @@ export function activate(context: vscode.ExtensionContext): void {
         .relative(workspaceRoot, editor.document.uri.fsPath)
         .replace(/\\/g, "/");
       const line = editor.selection.active.line + 1;
-      if (pdfReview.reveal(texFile, line)) {
+      if (await pdfReview.reveal(texFile, line)) {
         return;
       }
       // Not in an open PDF yet, so open the one its stage builds
@@ -549,7 +549,7 @@ export function activate(context: vscode.ExtensionContext): void {
         PDF_REVIEW_VIEW_TYPE,
         vscode.ViewColumn.Beside,
       );
-      pdfReview.reveal(texFile, line);
+      await pdfReview.reveal(texFile, line);
     }),
   );
 

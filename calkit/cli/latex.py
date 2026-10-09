@@ -2994,6 +2994,84 @@ def list_comments(
             typer.echo(f"  {m['author']}: {m['text']}")
 
 
+@comments_app.command(name="locate")
+def locate_paragraph(
+    tex_path: Annotated[
+        str,
+        typer.Argument(help="Document to search, including files it inputs."),
+    ],
+    text: Annotated[
+        str | None,
+        typer.Option(
+            "--text", help="Rendered text, e.g., a line copied from the PDF."
+        ),
+    ] = None,
+    path: Annotated[
+        str | None,
+        typer.Option("--path", help="File with the line to look up."),
+    ] = None,
+    line: Annotated[
+        int | None,
+        typer.Option("--line", "-l", help="Line to look up in --path."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """Find the paragraph some rendered text is in, or a source line is in.
+
+    This is how a place in a PDF built without SyncTeX, or by someone else,
+    can be matched to the source.
+    """
+    if (text is None) == (line is None):
+        raise_error("Specify one of --text or --path and --line")
+    if not os.path.isfile(tex_path):
+        raise_error(f"{tex_path} does not exist")
+    # Each file on its own, as comments are added to them
+    blks = [
+        b
+        for path_ in dict.fromkeys(
+            ln.path for ln in calkit.latex.flatten(tex_path)
+        )
+        for b in calkit.latex.file_blocks(
+            path_, Path(path_).read_text(encoding="utf-8").split("\n")
+        )
+    ]
+    found = None
+    if text is not None:
+        # The best share of its words, then the shortest paragraph, since
+        # a long one shares words with anything
+        scored = [
+            (calkit.latex.similarity(text, b.text), -len(b.text), b)
+            for b in blks
+        ]
+        best = max(scored, key=lambda x: x[:2], default=None)
+        if best is not None and best[0] >= 0.5:
+            found = best[2]
+    else:
+        path = path or tex_path
+        found = next(
+            (
+                b
+                for b in blks
+                if b.path == path and b.lines[-1].lineno >= (line or 0)
+            ),
+            None,
+        )
+    if found is None:
+        raise_error("No matching paragraph found")
+    out = {
+        "path": found.path,
+        "line": found.lineno,
+        "end_line": found.lines[-1].lineno,
+        "text": found.text,
+    }
+    if as_json:
+        typer.echo(json.dumps(out, indent=2))
+    else:
+        typer.echo(f"{out['path']}:{out['line']}")
+
+
 @comments_app.command(name="add")
 def add_comment(
     tex_path: Annotated[str, typer.Argument(help="File to comment in.")],

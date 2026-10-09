@@ -53,7 +53,7 @@ interface Viewer {
   // misplaced until it's rebuilt
   stale?: string[];
   ready: boolean;
-  pendingReveal?: PdfRect;
+  pendingReveal?: object;
 }
 
 // A PDF viewer for LaTeX documents that shows the comment threads in their
@@ -149,26 +149,78 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   // Show a source line in an open viewer of a PDF it's part of, returning
-  // whether one was found.
-  reveal(file: string, line: number): boolean {
+  // whether one was found. Without SyncTeX, the line's paragraph is found
+  // in the PDF by its text.
+  async reveal(file: string, line: number): Promise<boolean> {
     for (const v of this.viewers) {
       const s = this.loadSynctex(v);
       const tag = s && synctexTag(s, file);
-      const rect =
-        s && tag !== undefined
-          ? synctexForward(s, tag, this.lines(v, file).toBefore(line))
-          : undefined;
-      if (rect) {
+      let msg: object | undefined;
+      if (s && tag !== undefined) {
+        const rect = synctexForward(s, tag, this.lines(v, file).toBefore(line));
+        msg = rect && { type: "reveal", rect };
+      } else if (v.tex) {
+        const para = await this.locate(v, [
+          "--path",
+          file,
+          "--line",
+          String(line),
+        ]);
+        msg =
+          para?.path === file
+            ? { type: "revealText", text: para.text }
+            : undefined;
+      }
+      if (msg) {
         v.panel.reveal(undefined, true);
         if (v.ready) {
-          void v.panel.webview.postMessage({ type: "reveal", rect });
+          void v.panel.webview.postMessage(msg);
         } else {
-          v.pendingReveal = rect;
+          v.pendingReveal = msg;
         }
         return true;
       }
     }
     return false;
+  }
+
+  // Run a `calkit latex comments` command in the project
+  private async calkit(args: string[]): Promise<string> {
+    try {
+      const { stdout } = await execFileAsync(
+        "calkit",
+        ["latex", "comments", ...args],
+        { cwd: this.root(), maxBuffer: 64 * 1024 * 1024 },
+      );
+      return stdout;
+    } catch (err) {
+      const stderr = String((err as { stderr?: string }).stderr ?? "");
+      if (/No such command/.test(stderr)) {
+        throw new Error(
+          "The calkit on your PATH is too old for comments. Upgrade it with: calkit upgrade",
+        );
+      }
+      throw new Error(stderr.trim() || String((err as Error).message ?? err));
+    }
+  }
+
+  // The source paragraph for some rendered text or a source line
+  private async locate(
+    v: Viewer,
+    args: string[],
+  ): Promise<
+    { path: string; line: number; end_line: number; text: string } | undefined
+  > {
+    if (!v.tex) {
+      return undefined;
+    }
+    try {
+      return JSON.parse(
+        await this.calkit(["locate", v.tex, ...args, "--json"]),
+      );
+    } catch {
+      return undefined;
+    }
   }
 
   // For the keybinding that goes from source to PDF
@@ -275,19 +327,12 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     }
     let threads: TexThread[];
     try {
-      const { stdout } = await execFileAsync(
-        "calkit",
-        ["latex", "comments", "list", v.tex, "--json"],
-        { cwd: this.root(), maxBuffer: 64 * 1024 * 1024 },
-      );
-      threads = JSON.parse(stdout);
+      threads = JSON.parse(await this.calkit(["list", v.tex, "--json"]));
     } catch (err) {
-      const text = /No such command/.test(
-        String((err as { stderr?: string }).stderr),
-      )
-        ? "Upgrade Calkit to see comments: calkit upgrade"
-        : `Couldn't list comments: ${String((err as Error).message ?? err)}`;
-      void v.panel.webview.postMessage({ type: "status", text });
+      void v.panel.webview.postMessage({
+        type: "status",
+        text: `Couldn't list comments: ${(err as Error).message}`,
+      });
       return;
     }
     const s = this.loadSynctex(v);
@@ -331,12 +376,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         throw new Error("Comment not changed, since the file isn't saved.");
       }
     }
-    const { stdout } = await execFileAsync(
-      "calkit",
-      ["latex", "comments", ...args],
-      { cwd: this.root() },
-    );
-    return stdout.trim();
+    return (await this.calkit(args)).trim();
   }
 
   private async openSource(file: string, line: number): Promise<void> {
@@ -367,10 +407,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         this.sendPdf(v);
         await this.sendThreads(v);
         if (v.pendingReveal) {
-          void v.panel.webview.postMessage({
-            type: "reveal",
-            rect: v.pendingReveal,
-          });
+          void v.panel.webview.postMessage(v.pendingReveal);
           v.pendingReveal = undefined;
         }
         return;
@@ -382,13 +419,38 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         const file =
           at &&
           synctexInputFile(at.input, (f) => fs.existsSync(path.join(root, f)));
-        if (!at || !file) {
-          void vscode.window.showInformationMessage(
-            "No source found there. Is the PDF built with SyncTeX?",
-          );
+        if (at && file) {
+          await this.openSource(file, this.lines(v, file).toAfter(at.line));
           return;
         }
-        await this.openSource(file, this.lines(v, file).toAfter(at.line));
+        // Without SyncTeX, the paragraph with the clicked line's text, at
+        // its line sharing the most words with it
+        const para = await this.locate(v, [
+          "--text",
+          String(msg.context ?? ""),
+        ]);
+        if (!para) {
+          void vscode.window.showInformationMessage("No source found there.");
+          return;
+        }
+        const words = (t: string): Set<string> =>
+          new Set(t.toLowerCase().match(/[a-z]{3,}/g) ?? []);
+        const clicked = words(String(msg.context ?? ""));
+        const lines = fs
+          .readFileSync(path.join(root, para.path), "utf8")
+          .split("\n");
+        let best = para.line;
+        let bestScore = -1;
+        for (let i = para.line; i <= para.end_line; i++) {
+          const score = [...words(lines[i - 1] ?? "")].filter((w) =>
+            clicked.has(w),
+          ).length;
+          if (score > bestScore) {
+            best = i;
+            bestScore = score;
+          }
+        }
+        await this.openSource(para.path, best);
         return;
       }
       case "locate": {
@@ -398,7 +460,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         const at =
           s &&
           synctexReverse(s, Number(msg.page), Number(msg.x), Number(msg.y));
-        const file =
+        let file =
           at &&
           synctexInputFile(at.input, (f) => fs.existsSync(path.join(root, f)));
         let start: PdfRect | undefined;
@@ -416,12 +478,24 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
               ? undefined
               : synctexForward(s, tag, map.toBefore(para.start));
         }
+        let text: string | undefined;
+        if (line === undefined) {
+          // Without SyncTeX, the paragraph with the selected line's text
+          const para = await this.locate(v, [
+            "--text",
+            String(msg.context ?? ""),
+          ]);
+          file = para?.path;
+          line = para?.line;
+          text = para?.text;
+        }
         void v.panel.webview.postMessage({
           type: "located",
           reqId: msg.reqId,
           file,
           line,
           start,
+          text,
         });
         return;
       }
@@ -523,7 +597,7 @@ function buildHtml(
 <title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="${uri("legacy", "web", "pdf_viewer.css")}">
 <style>
-  :root { --open: #e8a317; --resolved: #8a8a8a; --panel-width: 320px; }
+  :root { --open: #e8a317; --resolved: #8a8a8a; --panel-width: 260px; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
     font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
     color: var(--vscode-foreground); background: var(--vscode-editor-background); }
@@ -543,7 +617,10 @@ function buildHtml(
   #viewerContainer { position: absolute; inset: 0; overflow: auto; background: var(--vscode-editorWidget-background, #525659); }
   #panel { width: var(--panel-width); overflow-y: auto; border-left: 1px solid var(--vscode-panel-border);
     padding: 8px; box-sizing: border-box; }
-  body.no-comments #panel { display: none; }
+  #resizer { width: 4px; cursor: col-resize; flex: none; }
+  #resizer:hover, #resizer.dragging { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); }
+  #panel { flex: none; }
+  body.no-panel #panel, body.no-panel #resizer { display: none; }
   body.no-comments .ck-layer { display: none; }
   .ck-layer { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
   .ck-hl { position: absolute; background: rgba(255, 200, 0, 0.35); pointer-events: auto; cursor: pointer;
@@ -592,13 +669,15 @@ function buildHtml(
   <span class="spacer"></span>
   <span id="status"></span>
   <label title="Show resolved threads"><input type="checkbox" id="show-resolved"> Resolved</label>
-  <button id="toggle-comments" aria-pressed="true" title="Show or hide comments">Comments</button>
+  <button id="toggle-comments" aria-pressed="true" title="Show or hide comments in the PDF">Comments</button>
+  <button id="toggle-panel" aria-pressed="true" title="Show or hide the sidebar with the comment threads">Sidebar</button>
 </div>
 <div id="main">
   <div id="wrap">
     <div id="viewerContainer"><div id="viewer" class="pdfViewer"></div></div>
     <button id="select-btn" class="primary">Comment</button>
   </div>
+  <div id="resizer"></div>
   <aside id="panel"></aside>
 </div>
 <script nonce="${nonce}" type="module">
@@ -607,7 +686,7 @@ const LIGATURES = ${JSON.stringify(LIGATURES)};
 ${findText.toString()}
 ${normalizeSelection.toString()}
 const vscode = acquireVsCodeApi();
-const state = Object.assign({ showComments: true, showResolved: false, scale: "page-width" }, vscode.getState() || {});
+const state = Object.assign({ showComments: true, showPanel: true, panelWidth: 260, showResolved: false, scale: "page-width" }, vscode.getState() || {});
 const save = () => vscode.setState(state);
 const pdfjsLib = await import(config.lib);
 const { EventBus, PDFLinkService, PDFViewer } = await import(config.viewer);
@@ -688,6 +767,58 @@ function pageBox(div) {
   const r = div.getBoundingClientRect();
   return { left: r.left + div.clientLeft, top: r.top + div.clientTop };
 }
+// The text of the line nearest each of two heights on a page, and those
+// between, as context for finding its paragraph in the source
+async function lineText(n, y0, y1 = y0) {
+  const items = (await pageText(n)).filter((it) => it.str.trim());
+  const near = (y) => items.reduce((a, it) => (!a || Math.abs(it.top - y - 3) < Math.abs(a.top - y - 3) ? it : a), null);
+  const a = near(y0), b = near(y1);
+  if (!a) return "";
+  return items.filter((it) => it.top >= a.top - 1 && it.top <= b.top + 1).map((it) => it.str).join(" ");
+}
+// Where a paragraph is in the PDF from its text alone, for when there's no
+// SyncTeX: runs of its words, from its start and end, that are found
+const placeCache = new Map();
+function findParagraph(text) {
+  if (!placeCache.has(text)) placeCache.set(text, placeParagraph(text));
+  return placeCache.get(text);
+}
+async function placeParagraph(text) {
+  const words = text.split(/\\s+/).filter(Boolean);
+  const pages = [];
+  for (let n = 1; n <= pdfDoc.numPages; n++) pages.push(await pageText(n));
+  const hitsOf = (needle) => {
+    const hits = [];
+    pages.forEach((items, i) => findText(items, needle).forEach((r) => hits.push({ page: i + 1, items, r })));
+    return hits;
+  };
+  const after = (h, s) => h.page > s.page || (h.page === s.page && h.r.start.item >= s.r.start.item);
+  const rect = (h, item) => {
+    const it = h.items[item];
+    const shown = h.items.filter((x) => x.str.trim());
+    const left = Math.min(...shown.map((x) => x.x));
+    const right = Math.max(...shown.map((x) => x.x + x.width));
+    return { page: h.page, x: left, y: it.top - it.height, width: right - left, height: it.height * 1.25 };
+  };
+  let start = null;
+  let fallback = null;
+  for (const size of [8, 5]) {
+    for (let i = 0; i + size <= words.length && i < 20 && !start; i++) {
+      const hits = hitsOf(words.slice(i, i + size).join(" "));
+      if (hits.length === 1) start = hits[0];
+      else if (hits.length && !fallback) fallback = hits[0];
+    }
+  }
+  start ??= fallback;
+  if (!start) return null;
+  let end = null;
+  for (const size of [8, 5]) {
+    for (let i = words.length - size; i >= 0 && i > words.length - size - 20 && !end; i--) {
+      end = hitsOf(words.slice(i, i + size).join(" ")).find((h) => after(h, start)) ?? null;
+    }
+  }
+  return { start: rect(start, start.r.start.item), end: rect(end ?? start, (end ?? start).r.end.item) };
+}
 function spans(n) {
   return pageView(n)?.div?.querySelectorAll(".textLayer span:not(.markedContent)") ?? [];
 }
@@ -754,7 +885,14 @@ async function draw() {
   }
   const pins = new Map();
   for (const t of threads) {
-    if (!visible(t) || !t.start) continue;
+    if (!visible(t)) continue;
+    if (!t.start && t.anchor) {
+      const place = await findParagraph(t.anchor.text);
+      if (gen !== drawGen) return;
+      if (place) Object.assign(t, place);
+      else if (!t.unplaced) { t.unplaced = true; renderPanel(); }
+    }
+    if (!t.start) continue;
     const startLayer = layer(t.start.page);
     if (!startLayer) continue;
     const end = t.end && t.end.page === t.start.page ? t.end : null;
@@ -802,18 +940,27 @@ function renderPanel() {
     parts.push('<div class="thread' + (t.resolved ? " resolved" : "") + (selected === t.key ? " selected" : "") + '" data-key="' + esc(t.key) + '">' +
       '<div class="meta">' + (t.resolved ? '<span class="badge">Resolved</span>' : "") +
       (t.issue ? '<a data-act="issue" title="' + esc(t.issue) + '">Issue</a>' : "") +
-      (t.start ? "" : '<span title="Not found in the PDF; is it built with SyncTeX?">Not placed</span>') + "</div>" +
+      (!t.unplaced ? "" : '<span title="Its paragraph was not found in the PDF">Not placed</span>') + "</div>" +
       (t.highlight ? '<div class="quote">' + esc(t.highlight.text) + "</div>" : "") + msgs +
       '<div class="actions"><textarea placeholder="Reply"></textarea>' +
       '<button class="primary" data-act="reply">Reply</button>' +
       '<button data-act="resolve">' + (t.resolved ? "Reopen" : "Resolve") + "</button>" +
       '<button data-act="source">Source</button><button data-act="delete">Delete</button></div></div>');
   }
+  // Keep anything typed but not yet sent
+  const typed = new Map([...panel.querySelectorAll("textarea")].map((el) => [el.closest(".thread")?.dataset.key, el.value]));
+  const focused = document.activeElement?.closest?.(".thread")?.dataset.key;
   panel.innerHTML = parts.join("");
-  if (composer) panel.querySelector("#new-text")?.focus();
+  for (const el of panel.querySelectorAll("textarea")) {
+    const key = el.closest(".thread")?.dataset.key;
+    if (typed.get(key)) el.value = typed.get(key);
+    if (key === focused) el.focus();
+  }
+  if (composer && !focused) panel.querySelector("#new-text")?.focus();
 }
 function select(key, scroll) {
   selected = key;
+  if (!state.showPanel) { state.showPanel = true; applyState(); }
   renderPanel();
   void draw();
   const t = threads.find((x) => x.key === key);
@@ -907,21 +1054,27 @@ selectBtn.addEventListener("click", async () => {
   const at = fromViewport(n, first.left - box.left + 1, first.top - box.top + first.height / 2);
   const reqId = ++reqCounter;
   const located = new Promise((resolve) => pending.set(reqId, resolve));
-  vscode.postMessage({ type: "locate", reqId, page: n, x: at.x, y: at.y });
+  const rects = range.getClientRects();
+  const lastRect = rects[rects.length - 1];
+  const atEnd = fromViewport(n, lastRect.left - box.left, lastRect.top - box.top + lastRect.height / 2);
+  const context = await lineText(n, at.y, atEnd.y);
+  vscode.postMessage({ type: "locate", reqId, page: n, x: at.x, y: at.y, context });
   composer = { text, occ: 0 };
   state.showComments = true;
+  state.showPanel = true;
   applyState();
   renderPanel();
   const loc = await located;
   if (!composer || composer.text !== text) return;
   if (!loc.file) {
-    setStatus("Can't find the source of that text. Is the PDF built with SyncTeX?");
+    setStatus("Can't find the source of that text.");
     composer = null;
     renderPanel();
     return;
   }
   composer.file = loc.file;
   composer.line = loc.line;
+  if (!loc.start && loc.text) loc.start = (await findParagraph(loc.text))?.start;
   // The highlight is the nth occurrence of its text in the paragraph
   if (loc.start) {
     const to = selItem >= 0 ? { page: n, item: selItem, offset: selOffset } : { page: n, y: at.y - 6 };
@@ -937,17 +1090,41 @@ container.addEventListener("click", (e) => {
   const n = Number(pageDiv.dataset.pageNumber);
   const box = pageBox(pageDiv);
   const at = fromViewport(n, e.clientX - box.left, e.clientY - box.top);
-  vscode.postMessage({ type: "sourceAt", page: n, x: at.x, y: at.y });
+  void lineText(n, at.y).then((context) => vscode.postMessage({ type: "sourceAt", page: n, x: at.x, y: at.y, context }));
 });
 function applyState() {
   document.body.classList.toggle("no-comments", !state.showComments);
+  document.body.classList.toggle("no-panel", !state.showPanel);
+  document.documentElement.style.setProperty("--panel-width", state.panelWidth + "px");
   document.getElementById("toggle-comments").setAttribute("aria-pressed", String(state.showComments));
+  document.getElementById("toggle-panel").setAttribute("aria-pressed", String(state.showPanel));
   document.getElementById("show-resolved").checked = state.showResolved;
   save();
 }
 document.getElementById("toggle-comments").addEventListener("click", () => {
   state.showComments = !state.showComments;
   applyState();
+});
+document.getElementById("toggle-panel").addEventListener("click", () => {
+  state.showPanel = !state.showPanel;
+  applyState();
+});
+// Dragging the sidebar's edge resizes it
+const resizer = document.getElementById("resizer");
+resizer.addEventListener("pointerdown", (e) => {
+  resizer.setPointerCapture(e.pointerId);
+  resizer.classList.add("dragging");
+  const move = (ev) => {
+    state.panelWidth = Math.round(Math.min(Math.max(window.innerWidth - ev.clientX, 160), window.innerWidth * 0.6));
+    document.documentElement.style.setProperty("--panel-width", state.panelWidth + "px");
+  };
+  const up = () => {
+    resizer.classList.remove("dragging");
+    resizer.removeEventListener("pointermove", move);
+    save();
+  };
+  resizer.addEventListener("pointermove", move);
+  resizer.addEventListener("pointerup", up, { once: true });
 });
 document.getElementById("show-resolved").addEventListener("change", (e) => {
   state.showResolved = e.target.checked;
@@ -992,13 +1169,14 @@ window.addEventListener("message", (e) => {
   else if (msg.type === "threads") {
     threads = msg.threads;
     const open = threads.filter((t) => !t.resolved).length;
-    setStatus(!msg.synctex ? "No SyncTeX file, so comments can't be placed in the PDF"
+    setStatus(!msg.synctex ? open + " open of " + threads.length + " (placed by text, without SyncTeX)"
       : msg.stale.length ? msg.stale.join(", ") + " changed since this PDF was built; rebuild it to place comments exactly"
       : open + " open of " + threads.length);
     renderPanel();
     void draw();
   } else if (msg.type === "status") setStatus(msg.text);
   else if (msg.type === "reveal") reveal(msg.rect);
+  else if (msg.type === "revealText") void findParagraph(msg.text).then((p) => p ? reveal(p.start) : setStatus("Can't find that paragraph in the PDF."));
   else if (msg.type === "located") pending.get(msg.reqId)?.(msg);
 });
 applyState();

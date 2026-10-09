@@ -106,6 +106,7 @@ const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
 const COMMAND_SHOW_IN_PDF_TO_SIDE = "calkit-vscode.showInPdfToSide";
 const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
 const COMMAND_PDF_GO_TO_SOURCE_TO_SIDE = "calkit-vscode.pdfGoToSourceToSide";
+const COMMAND_TOGGLE_PDF_SOURCE = "calkit-vscode.togglePdfSource";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -513,8 +514,11 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // Go from a line of LaTeX to where it is in the PDF, in the same group
-  // of tabs or the one beside it
-  const showInPdf = async (toSide: boolean): Promise<void> => {
+  // of tabs, the one beside it, or where the PDF is showing
+  const showInPdf = async (
+    toSide: boolean,
+    keepShown = false,
+  ): Promise<void> => {
     const editor = vscode.window.activeTextEditor;
     const workspaceRoot = getWorkspaceRoot();
     if (!editor || !workspaceRoot) {
@@ -527,7 +531,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const column = toSide
       ? vscode.ViewColumn.Beside
       : editor.viewColumn ?? vscode.ViewColumn.Active;
-    if (await pdfReview.reveal(texFile, line, column)) {
+    if (await pdfReview.reveal(texFile, line, column, keepShown)) {
       return;
     }
     // Not in an open PDF yet, so open the one its stage builds, or for a
@@ -582,11 +586,16 @@ export function activate(context: vscode.ExtensionContext): void {
       showInPdf(true),
     ),
     vscode.commands.registerCommand(COMMAND_PDF_GO_TO_SOURCE, () =>
-      pdfReview.goToSource(false),
+      pdfReview.goToSource("here", true),
     ),
     vscode.commands.registerCommand(COMMAND_PDF_GO_TO_SOURCE_TO_SIDE, () =>
-      pdfReview.goToSource(true),
+      pdfReview.goToSource("side", true),
     ),
+    vscode.commands.registerCommand(COMMAND_TOGGLE_PDF_SOURCE, async () => {
+      if (!pdfReview.goToSource("shown", false)) {
+        await showInPdf(false, true);
+      }
+    }),
   );
 
   context.subscriptions.push(

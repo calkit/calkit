@@ -72,10 +72,10 @@
     ],
     "keybindings": [
       {
-        "command": "calkit-vscode.showInPdf",
+        "command": "calkit-vscode.togglePdfSource",
         "key": "ctrl+alt+j",
         "mac": "cmd+alt+j",
-        "when": "editorTextFocus && resourceExtname == .tex && calkit.pdfReviewOpen"
+        "when": "editorTextFocus && resourceExtname == .tex && calkit.pdfReviewOpen || activeCustomEditorId == 'calkit.pdfReview'"
       }
     ],
     "customEditors": [
@@ -212,6 +212,11 @@
       {
         "command": "calkit-vscode.pdfGoToSourceToSide",
         "title": "Go to Source to the Side",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.togglePdfSource",
+        "title": "Toggle Between LaTeX Source and PDF",
         "category": "Calkit"
       },
       {
@@ -874,6 +879,10 @@
         {
           "command": "calkit-vscode.pdfGoToSourceToSide",
           "when": "false"
+        },
+        {
+          "command": "calkit-vscode.togglePdfSource",
+          "when": "resourceExtname == .tex && calkit.pdfReviewOpen || activeCustomEditorId == 'calkit.pdfReview'"
         }
       ],
       "webview/context": [

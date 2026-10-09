@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 from calkit.core import LOCAL_DIR, ensure_local_dir
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     # Only ever named in annotations here, which this module's
     # ``from __future__ import annotations`` leaves unevaluated. Importing
     # GitPython for real runs 'git version' twice as a side effect of the
@@ -609,19 +611,30 @@ class Block:
         return [(wrap(r), f) for r, f in zip(rows, flags)]
 
 
-def flatten(main_path: str) -> list[SourceLine]:
-    """Inline \\input and friends, keeping each line's file and number."""
+def read_file(path: str) -> str | None:
+    """A text file's contents, or None if there's no such file."""
+    p = Path(path)
+    return p.read_text(encoding="utf-8") if p.is_file() else None
+
+
+def flatten(
+    main_path: str, read: Callable[[str], str | None] = read_file
+) -> list[SourceLine]:
+    """Inline \\input and friends, keeping each line's file and number.
+
+    Files are read with ``read``, e.g., to read them at a Git revision.
+    """
     main = Path(main_path)
     out: list[SourceLine] = []
     seen: set[str] = set()
 
     def visit(path: Path, base: Path) -> None:
-        key = path.resolve().as_posix()
-        if key in seen or not path.is_file():
+        rel = path.as_posix()
+        key = os.path.normpath(rel)
+        text = None if key in seen else read(rel)
+        if text is None:
             return
         seen.add(key)
-        rel = path.as_posix()
-        text = path.read_text(encoding="utf-8")
         for i, line in enumerate(text.split("\n"), 1):
             m = _INCLUDE_RE.match(line.split("%")[0])
             if m:
@@ -1277,6 +1290,101 @@ def comment_anchor(blks: list[Block], tc: TexComment) -> Block | None:
     """The block a thread is about, from its file's blocks: the first one
     below it."""
     return next((b for b in blks if b.lineno >= tc.lineno + tc.nlines), None)
+
+
+def comment_to_dict(
+    path: str, tc: TexComment, blks: list[Block]
+) -> dict[str, Any]:
+    """A thread as `calkit latex comments list --json` reports it, with the
+    paragraph it's about from its file's blocks."""
+    anchor = comment_anchor(blks, tc)
+    return {
+        "id": tc.id,
+        "path": path,
+        "line": tc.lineno,
+        "nlines": tc.nlines,
+        "resolved": tc.resolved,
+        "issue": tc.issue,
+        "highlight": (
+            {"text": tc.highlight, "occ": tc.highlight_occ}
+            if tc.highlight
+            else None
+        ),
+        "anchor": (
+            {
+                "line": anchor.lineno,
+                "end_line": anchor.lines[-1].lineno,
+                "text": anchor.text,
+            }
+            if anchor is not None
+            else None
+        ),
+        "messages": [
+            {
+                "author": e.author,
+                "email": e.email,
+                "date": e.date,
+                "text": e.text,
+            }
+            for e in tc.entries
+        ],
+        "attrs": tc.attrs,
+    }
+
+
+def list_comments(
+    main_path: str, read: Callable[[str], str | None] = read_file
+) -> list[dict[str, Any]]:
+    """Every thread in a document and the files it inputs, in document
+    order, so threads in an input come where it's input."""
+    order = {
+        (ln.path, ln.lineno): i
+        for i, ln in enumerate(flatten(main_path, read))
+    }
+    out = []
+    for path in dict.fromkeys(p for p, _ in order):
+        lines = (read(path) or "").split("\n")
+        blks = file_blocks(path, lines)
+        out += [
+            comment_to_dict(path, tc, blks) for tc in parse_comments(lines)
+        ]
+    out.sort(key=lambda c: order.get((c["path"], c["line"]), 0))
+    return out
+
+
+def locate_block(
+    main_path: str,
+    text: str | None = None,
+    path: str | None = None,
+    lineno: int | None = None,
+    read: Callable[[str], str | None] = read_file,
+) -> Block | None:
+    """The paragraph some rendered text is in, e.g., a line of a PDF, or
+    the one a source line is in or just above.
+
+    Each file is split into blocks on its own, as comments are added to
+    them.
+    """
+    blks = [
+        b
+        for p in dict.fromkeys(ln.path for ln in flatten(main_path, read))
+        for b in file_blocks(p, (read(p) or "").split("\n"))
+    ]
+    if text is not None:
+        # The best share of its words, then the shortest paragraph, since
+        # a long one shares words with anything
+        scored = [(similarity(text, b.text), -len(b.text), b) for b in blks]
+        best = max(scored, key=lambda x: x[:2], default=None)
+        return best[2] if best is not None and best[0] >= 0.5 else None
+    path = path or main_path
+    return next(
+        (
+            b
+            for b in blks
+            if b.path == path and b.lines[-1].lineno >= (lineno or 0)
+        ),
+        None,
+    )
 
 
 def add_comment(lines: list[str], lineno: int, tc: TexComment) -> None:

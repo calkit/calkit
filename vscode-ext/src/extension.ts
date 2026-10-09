@@ -104,6 +104,8 @@ const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
 const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
 const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
 const COMMAND_SHOW_IN_PDF_TO_SIDE = "calkit-vscode.showInPdfToSide";
+const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
+const COMMAND_PDF_GO_TO_SOURCE_TO_SIDE = "calkit-vscode.pdfGoToSourceToSide";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -578,6 +580,12 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF_TO_SIDE, () =>
       showInPdf(true),
+    ),
+    vscode.commands.registerCommand(COMMAND_PDF_GO_TO_SOURCE, () =>
+      pdfReview.goToSource(false),
+    ),
+    vscode.commands.registerCommand(COMMAND_PDF_GO_TO_SOURCE_TO_SIDE, () =>
+      pdfReview.goToSource(true),
     ),
   );
 

@@ -205,6 +205,16 @@
         "category": "Calkit"
       },
       {
+        "command": "calkit-vscode.pdfGoToSource",
+        "title": "Go to Source",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.pdfGoToSourceToSide",
+        "title": "Go to Source to the Side",
+        "category": "Calkit"
+      },
+      {
         "command": "calkit-vscode.goToFigureSource",
         "title": "Go to Figure Source",
         "category": "Calkit",
@@ -856,6 +866,26 @@
         {
           "command": "calkit-vscode.runMarkdownStage",
           "when": "false"
+        },
+        {
+          "command": "calkit-vscode.pdfGoToSource",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.pdfGoToSourceToSide",
+          "when": "false"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "calkit-vscode.pdfGoToSource",
+          "when": "webviewId == 'calkit.pdfReview'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "calkit-vscode.pdfGoToSourceToSide",
+          "when": "webviewId == 'calkit.pdfReview'",
+          "group": "navigation@2"
         }
       ]
     },

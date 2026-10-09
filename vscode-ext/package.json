@@ -200,6 +200,11 @@
         "category": "Calkit"
       },
       {
+        "command": "calkit-vscode.showInPdfToSide",
+        "title": "Show in PDF to the Side",
+        "category": "Calkit"
+      },
+      {
         "command": "calkit-vscode.goToFigureSource",
         "title": "Go to Figure Source",
         "category": "Calkit",
@@ -644,7 +649,12 @@
         {
           "command": "calkit-vscode.showInPdf",
           "when": "resourceExtname == .tex",
-          "group": "calkit@6"
+          "group": "navigation@100"
+        },
+        {
+          "command": "calkit-vscode.showInPdfToSide",
+          "when": "resourceExtname == .tex",
+          "group": "navigation@101"
         }
       ],
       "notebook/toolbar": [
@@ -798,6 +808,10 @@
         },
         {
           "command": "calkit-vscode.showInPdf",
+          "when": "resourceExtname == .tex"
+        },
+        {
+          "command": "calkit-vscode.showInPdfToSide",
           "when": "resourceExtname == .tex"
         },
         {

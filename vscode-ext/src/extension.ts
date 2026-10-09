@@ -103,6 +103,7 @@ const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
 const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
 const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
 const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
+const COMMAND_SHOW_IN_PDF_TO_SIDE = "calkit-vscode.showInPdfToSide";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -509,48 +510,75 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  // Go from a line of LaTeX to where it is in the PDF, in the same group
+  // of tabs or the one beside it
+  const showInPdf = async (toSide: boolean): Promise<void> => {
+    const editor = vscode.window.activeTextEditor;
+    const workspaceRoot = getWorkspaceRoot();
+    if (!editor || !workspaceRoot) {
+      return;
+    }
+    const texFile = path
+      .relative(workspaceRoot, editor.document.uri.fsPath)
+      .replace(/\\/g, "/");
+    const line = editor.selection.active.line + 1;
+    const column = toSide
+      ? vscode.ViewColumn.Beside
+      : editor.viewColumn ?? vscode.ViewColumn.Active;
+    if (await pdfReview.reveal(texFile, line, column)) {
+      return;
+    }
+    // Not in an open PDF yet, so open the one its stage builds, or for a
+    // file it inputs, the only one there is
+    const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+    const latexPdfs = Object.values(stages)
+      .map((stage) => {
+        const st = stage as {
+          kind?: string;
+          wdir?: string;
+          target_path?: string;
+        };
+        return st?.kind === "latex" && st.target_path
+          ? latexStagePdf(
+              stages,
+              path.posix.join(st.wdir ?? "", st.target_path),
+            )
+          : undefined;
+      })
+      .filter((p): p is string => p !== undefined);
+    const pdfFile =
+      latexStagePdf(stages, texFile) ??
+      (latexPdfs.length === 1 ? latexPdfs[0] : undefined);
+    const pdfUri = pdfFile
+      ? vscode.Uri.file(path.join(workspaceRoot, pdfFile))
+      : undefined;
+    const built =
+      pdfUri !== undefined &&
+      (await vscode.workspace.fs.stat(pdfUri).then(
+        () => true,
+        () => false,
+      ));
+    if (!built) {
+      void vscode.window.showInformationMessage(
+        "No built PDF found for this document. Open its PDF first.",
+      );
+      return;
+    }
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      pdfUri,
+      PDF_REVIEW_VIEW_TYPE,
+      column,
+    );
+    await pdfReview.reveal(texFile, line, column);
+  };
   context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF, async () => {
-      const editor = vscode.window.activeTextEditor;
-      const workspaceRoot = getWorkspaceRoot();
-      if (!editor || !workspaceRoot) {
-        return;
-      }
-      const texFile = path
-        .relative(workspaceRoot, editor.document.uri.fsPath)
-        .replace(/\\/g, "/");
-      const line = editor.selection.active.line + 1;
-      if (await pdfReview.reveal(texFile, line)) {
-        return;
-      }
-      // Not in an open PDF yet, so open the one its stage builds
-      const pdfFile = latexStagePdf(
-        currentCalkitConfig?.pipeline?.stages ?? {},
-        texFile,
-      );
-      const pdfUri = pdfFile
-        ? vscode.Uri.file(path.join(workspaceRoot, pdfFile))
-        : undefined;
-      const built =
-        pdfUri !== undefined &&
-        (await vscode.workspace.fs.stat(pdfUri).then(
-          () => true,
-          () => false,
-        ));
-      if (!built) {
-        void vscode.window.showInformationMessage(
-          "Open the document's PDF first, built with SyncTeX.",
-        );
-        return;
-      }
-      await vscode.commands.executeCommand(
-        "vscode.openWith",
-        pdfUri,
-        PDF_REVIEW_VIEW_TYPE,
-        vscode.ViewColumn.Beside,
-      );
-      await pdfReview.reveal(texFile, line);
-    }),
+    vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF, () =>
+      showInPdf(false),
+    ),
+    vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF_TO_SIDE, () =>
+      showInPdf(true),
+    ),
   );
 
   context.subscriptions.push(

@@ -155,10 +155,10 @@ function stageRows() {
   return state.stages
     .map(
       (s, i) => `<tr>
-        <td><input type="text" data-stage="${i}" data-field="name"
+        <td><input type="text" data-stage="${i}" data-field="label"
           autocomplete="off" data-form-type="other" data-lpignore="true"
-          data-1p-ignore
-          value="${escape(s.name)}" aria-label="Stage name"></td>
+          data-1p-ignore data-bwignore spellcheck="false"
+          value="${escape(s.name)}" aria-label="Stage"></td>
         <td><input type="number" data-stage="${i}" data-field="work"
           value="${s.work}" min="0.1" step="any"
           aria-label="Days of work each time through"></td>
@@ -374,7 +374,9 @@ function renderForm() {
       }
     } else if (t.dataset.stage) {
       const stage = state.stages[+t.dataset.stage];
-      const f = t.dataset.field;
+      // The name's field avoids the word, which password managers take
+      // for a person's name
+      const f = t.dataset.field === "label" ? "name" : t.dataset.field;
       stage[f] =
         t.type === "checkbox" ? t.checked : f === "name" ? t.value : +t.value;
       if (PERCENT.includes(f)) stage[f] /= 100;

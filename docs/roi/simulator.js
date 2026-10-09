@@ -24,7 +24,7 @@ const FOCUS = {
     "questions in mind",
   questions:
     "Each result starts from a written question, and reviews check that " +
-    "it answers it",
+    "the result answers it",
 };
 const REVIEWERS = {
   browser: "The browser",
@@ -40,7 +40,7 @@ const SETTINGS = [
   ],
   [
     "drift",
-    "Results that end up not answering the question they were meant to (%)",
+    "Results that don't answer the question they were supposed to (%)",
     { max: 100 },
   ],
   ["agents", "You use AI agents", { checkbox: true }],

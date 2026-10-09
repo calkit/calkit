@@ -482,13 +482,13 @@ const LatexEditor = ({
 
   // The comment threads in the file being edited, read from it again on
   // every edit
-  // biome-ignore lint/correctness/useExhaustiveDependencies: docVersion and mergeNonce say the buffer changed
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ready, docVersion, and mergeNonce say the buffer was loaded or changed
   const threads = useMemo(
     () =>
       activePath.endsWith(".tex")
         ? parseComments((buffersRef.current.get(activePath) ?? "").split("\n"))
         : [],
-    [activePath, docVersion, mergeNonce],
+    [activePath, ready, docVersion, mergeNonce],
   )
   const panelComments: PanelComment[] = threads.flatMap((t) =>
     t.entries.map((e, i) => ({

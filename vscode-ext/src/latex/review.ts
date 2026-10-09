@@ -238,6 +238,16 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     }
   }
 
+  // For the PDF context menu's Go to Source items, in the viewer it was
+  // opened in
+  goToSource(toSide: boolean): void {
+    for (const v of this.viewers) {
+      if (v.panel.active) {
+        void v.panel.webview.postMessage({ type: "contextSource", toSide });
+      }
+    }
+  }
+
   // For the keybinding that goes from source to PDF
   private setOpenContext(): void {
     void vscode.commands.executeCommand(
@@ -1193,6 +1203,32 @@ container.addEventListener("click", (e) => {
   const toSide = e.altKey;
   void lineText(n, at.y).then((context) => vscode.postMessage({ type: "sourceAt", page: n, x: at.x, y: at.y, context, toSide }));
 });
+// Where the context menu was opened, for its Go to Source items, which use
+// the selection when it was opened on it
+let contextAt = null;
+container.addEventListener("contextmenu", (e) => {
+  const pageDiv = e.target.closest(".page");
+  if (!pageDiv) {
+    contextAt = null;
+    return;
+  }
+  const n = Number(pageDiv.dataset.pageNumber);
+  const box = pageBox(pageDiv);
+  const sel = document.getSelection();
+  const onSelection = !!sel && !sel.isCollapsed && [...sel.getRangeAt(0).getClientRects()].some(
+    (r) => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom);
+  contextAt = { page: n, at: fromViewport(n, e.clientX - box.left, e.clientY - box.top), onSelection };
+});
+async function contextSource(toSide) {
+  if (!contextAt) return;
+  const sel = contextAt.onSelection ? await selection() : null;
+  if (sel) {
+    vscode.postMessage({ type: "sourceAt", page: sel.page, x: sel.at.x, y: sel.at.y, context: sel.context, focus: sel.text, toSide });
+    return;
+  }
+  const { page: n, at } = contextAt;
+  vscode.postMessage({ type: "sourceAt", page: n, x: at.x, y: at.y, context: await lineText(n, at.y), toSide });
+}
 function applyState() {
   document.body.classList.toggle("no-comments", !state.showComments);
   document.body.classList.toggle("no-panel", !state.showPanel);
@@ -1280,6 +1316,7 @@ window.addEventListener("message", (e) => {
   else if (msg.type === "reveal") reveal(msg.rect);
   else if (msg.type === "revealText") void findParagraph(msg.text).then((p) => p ? reveal(p.start) : setStatus("Can't find that paragraph in the PDF."));
   else if (msg.type === "located") pending.get(msg.reqId)?.(msg);
+  else if (msg.type === "contextSource") void contextSource(msg.toSide);
 });
 applyState();
 vscode.postMessage({ type: "ready" });

@@ -1923,30 +1923,18 @@ def test_switch_env(tmp_dir, monkeypatch):
     import calkit.environments as envs
 
     def option(env: str, *when: dict) -> dict:
-        if not when:
-            return {"environment": env}
-        return {
-            "when": when[0] if len(when) == 1 else list(when),
-            "environment": env,
-        }
+        return {"when": list(when), "use": env} if when else {"use": env}
 
     envs_def = {
         "cluster": {
             "kind": "switch",
             "switch": [
-                option(
-                    "slurm-env",
-                    {"kind": "app-exists", "app": "calkit-test-no-such-app"},
-                ),
+                option("slurm-env", {"app_exists": "calkit-test-no-such-app"}),
                 option(
                     "lab",
-                    {
-                        "kind": "env-var-equals",
-                        "env_var": "CK_TEST_SITE",
-                        "equals": ["lab", "lab2"],
-                    },
+                    {"env_var_equals": ["CK_TEST_SITE=lab", "CK_TEST_SITE=b"]},
                 ),
-                option("here", {"kind": "hostname-matches", "pattern": "*"}),
+                option("here", {"hostname_matches": "*"}),
             ],
         },
         "slurm-env": {"kind": "slurm"},
@@ -1965,81 +1953,60 @@ def test_switch_env(tmp_dir, monkeypatch):
     assert not envs.env_can_be_outer("py", envs_def)
     # First match wins, and conditions see this machine and its env vars
     assert envs.resolve_switch("cluster", envs_def) == "here"
-    monkeypatch.setenv("CK_TEST_SITE", "lab2")
+    monkeypatch.setenv("CK_TEST_SITE", "b")
     assert envs.resolve_switch("cluster", envs_def) == "lab"
-    # Each kind of condition, alone and with all of a list required
+    # Each condition, where a list of values means any one, and every
+    # condition of an option must hold
     monkeypatch.setattr(envs.socket, "gethostname", lambda: "N1.Cluster.EDU")
     monkeypatch.setattr(envs.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(calkit, "get_machine_id", lambda: "AB-CD")
-    for when, held in [
-        ({"kind": "app-exists", "app": "git"}, True),
-        ({"kind": "env-var-exists", "env_var": "CK_TEST_SITE"}, True),
-        ({"kind": "env-var-exists", "env_var": "CK_TEST_UNSET"}, False),
-        (
-            {
-                "kind": "env-var-equals",
-                "env_var": "CK_TEST_UNSET",
-                "equals": "",
-            },
-            False,
-        ),
-        ({"kind": "hostname-matches", "pattern": "*.cluster.edu"}, True),
-        ({"kind": "hostname-matches", "pattern": ["x", "n?.*"]}, True),
-        ({"kind": "hostname-matches", "pattern": "cluster.edu"}, False),
-        ({"kind": "os-is", "os": "macos"}, True),
-        ({"kind": "os-is", "os": ["linux", "windows"]}, False),
-        ({"kind": "machine-id-equals", "machine_id": "abcd"}, True),
-        ({"kind": "machine-id-equals", "machine_id": ["ef"]}, False),
-        (
-            [
-                {"kind": "os-is", "os": "macos"},
-                {"kind": "app-exists", "app": "git"},
-            ],
-            True,
-        ),
-        (
-            [
-                {"kind": "os-is", "os": "macos"},
-                {"kind": "os-is", "os": "linux"},
-            ],
-            False,
-        ),
-    ]:
-        envs_def["one"] = {
-            "kind": "switch",
-            "switch": [{"when": when, "environment": "here"}],
-        }
+    monkeypatch.setenv("CK_TEST_EMPTY", "")
+    cases: list[tuple[list[dict], bool]] = [
+        ([{"app_exists": "git"}], True),
+        ([{"app_exists": ["calkit-test-no-such-app", "git"]}], True),
+        ([{"env_var_exists": "CK_TEST_SITE"}], True),
+        ([{"env_var_exists": "CK_TEST_UNSET"}], False),
+        ([{"env_var_equals": "CK_TEST_UNSET="}], False),
+        ([{"env_var_equals": "CK_TEST_EMPTY="}], True),
+        ([{"env_var_equals": "CK_TEST_SITE=b=c"}], False),
+        ([{"hostname_matches": "*.cluster.edu"}], True),
+        ([{"hostname_matches": ["x", "n?.*"]}], True),
+        ([{"hostname_matches": "cluster.edu"}], False),
+        ([{"os_is": "macos"}], True),
+        ([{"os_is": ["linux", "windows"]}], False),
+        ([{"machine_id_equals": "abcd"}], True),
+        ([{"machine_id_equals": ["ef"]}], False),
+        ([{"os_is": "macos"}, {"app_exists": "git"}], True),
+        ([{"os_is": "macos"}, {"os_is": "linux"}], False),
+    ]
+    for when, held in cases:
+        envs_def["one"] = {"kind": "switch", "switch": [option("here", *when)]}
         picked = envs.resolve_switch("one", envs_def)
         assert picked == ("here" if held else None), when
     # Nothing matching and no default picks nothing, rather than guessing,
     # and says which conditions failed
-    monkeypatch.setenv("CK_TEST_SITE", "elsewhere")
     envs_def["none"] = {
         "kind": "switch",
         "switch": [
-            option(
-                "here",
-                {
-                    "kind": "env-var-equals",
-                    "env_var": "CK_TEST_SITE",
-                    "equals": "lab",
-                },
-            )
+            option("here", {"os_is": "linux"}, {"app_exists": "sbatch"}),
+            option("here", {"env_var_equals": "CK_TEST_SITE=lab"}),
         ],
     }
     assert envs.resolve_switch("none", envs_def) is None
     reason = envs.describe_switch_no_match("none", envs_def["none"])
-    assert "picks no environment" in reason
-    assert "env-var-equals(env_var='CK_TEST_SITE', equals='lab')" in reason
+    assert reason.endswith(
+        "none of these hold: os_is: linux and app_exists: sbatch; "
+        "env_var_equals: CK_TEST_SITE=lab"
+    )
     # Options must exist, not be switches, and not mix machines and
     # runtimes, and a definition that doesn't validate says so
-    is_linux = {"kind": "os-is", "os": "linux"}
+    is_linux = {"os_is": "linux"}
     for options, match in [
         ([option("nope", is_linux), option("here")], "not defined"),
         ([option("cluster", is_linux), option("here")], "another switch"),
         ([option("py", is_linux), option("here")], "one or the other"),
         ([option("here"), option("py", is_linux)], "only the last option"),
-        ([option("here", {"kind": "os-is", "os": "Darwin"})], "is invalid"),
+        ([option("here", {"os_is": "Darwin"})], "is invalid"),
     ]:
         envs_def["bad"] = {"kind": "switch", "switch": options}
         with pytest.raises(ValueError, match=match):

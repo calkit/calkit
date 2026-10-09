@@ -1365,18 +1365,15 @@ def test_check_switch_env(tmp_dir):
         "environments": {
             "pick": {
                 "kind": "switch",
-                "switch": [{"environment": "here"}],
+                "switch": [{"use": "here"}],
                 "lock": ["os"],
             },
             "never": {
                 "kind": "switch",
                 "switch": [
                     {
-                        "when": {
-                            "kind": "app-exists",
-                            "app": "calkit-test-no-such-app",
-                        },
-                        "environment": "here",
+                        "when": [{"app_exists": "calkit-test-no-such-app"}],
+                        "use": "here",
                     }
                 ],
             },

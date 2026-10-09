@@ -691,7 +691,7 @@ def test_update_env_lock(tmp_dir, monkeypatch):
         "plain": {"kind": "system"},
         "pick": {
             "kind": "switch",
-            "switch": [{"environment": "plain"}],
+            "switch": [{"use": "plain"}],
             "lock": ["os"],
         },
         "py": {

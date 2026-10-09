@@ -3092,14 +3092,10 @@ def test_run_switch_env(tmp_dir):
                 "kind": "switch",
                 "switch": [
                     {
-                        "when": {
-                            "kind": "env-var-equals",
-                            "env_var": "CK_TEST_SITE",
-                            "equals": "cluster",
-                        },
-                        "environment": "slurm-env",
+                        "when": [{"env_var_equals": "CK_TEST_SITE=cluster"}],
+                        "use": "slurm-env",
                     },
-                    {"environment": "here"},
+                    {"use": "here"},
                 ],
             },
             "slurm-env": {

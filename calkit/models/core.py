@@ -1252,75 +1252,89 @@ class SystemEnvironment(Environment):
     )
 
 
-class AppExistsCondition(BaseModel):
-    """An app is on ``PATH``."""
+_OsName = Literal["linux", "macos", "windows"]
+_EnvVarSetting = Annotated[str, Field(pattern=r"^[^=]+=")]
 
+
+class AppExistsCondition(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["app-exists"]
-    app: str = Field(description="Name of the executable, e.g., 'sbatch'.")
+    app_exists: str | list[str] = Field(
+        description="App that must be on PATH, e.g., 'sbatch'."
+    )
 
 
 class EnvVarExistsCondition(BaseModel):
-    """An environmental variable is set."""
-
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["env-var-exists"]
-    env_var: str = Field(description="Name of the variable.")
+    env_var_exists: str | list[str] = Field(
+        description="Environmental variable that must be set."
+    )
 
 
 class EnvVarEqualsCondition(BaseModel):
-    """An environmental variable has a given value."""
-
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["env-var-equals"]
-    env_var: str = Field(description="Name of the variable.")
-    equals: str | list[str] = Field(
-        description="Value it must have, exactly. A list means any one of "
-        "them."
+    env_var_equals: _EnvVarSetting | list[_EnvVarSetting] = Field(
+        description="'NAME=value' an environmental variable must be set to, "
+        "e.g., 'NERSC_HOST=perlmutter'."
     )
 
 
 class HostnameMatchesCondition(BaseModel):
-    """The machine's hostname matches a glob."""
-
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["hostname-matches"]
-    pattern: str | list[str] = Field(
+    hostname_matches: str | list[str] = Field(
         description="Glob the hostname must match, case-insensitively, "
-        "e.g., '*.cluster.edu'. A list means any one of them."
+        "e.g., '*.cluster.edu'."
     )
 
 
 class OsIsCondition(BaseModel):
-    """The machine runs a given operating system."""
-
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["os-is"]
-    os: (
-        Literal["linux", "macos", "windows"]
-        | list[Literal["linux", "macos", "windows"]]
-    ) = Field(description="Operating system. A list means any one of them.")
-
-
-class MachineIdEqualsCondition(BaseModel):
-    """The machine is a given one, by the ID 'calkit describe system' shows."""
-
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["machine-id-equals"]
-    machine_id: str | list[str] = Field(
-        description="Machine ID, ignoring case and dashes. A list means any "
-        "one of them."
+    os_is: _OsName | list[_OsName] = Field(
+        description="Operating system: 'linux', 'macos' or 'windows'."
     )
 
 
+class MachineIdEqualsCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    machine_id_equals: str | list[str] = Field(
+        description="ID of the machine, as 'calkit describe system' shows "
+        "it, ignoring case and dashes."
+    )
+
+
+_SWITCH_CONDITIONS: list[type[BaseModel]] = [
+    AppExistsCondition,
+    EnvVarExistsCondition,
+    EnvVarEqualsCondition,
+    HostnameMatchesCondition,
+    OsIsCondition,
+    MachineIdEqualsCondition,
+]
+
+
+def _switch_condition_name(value: object) -> str | None:
+    # A condition is a one-key map, and the key says which it is
+    if isinstance(value, BaseModel):
+        return next(iter(type(value).model_fields))
+    if isinstance(value, dict) and len(value) == 1:
+        return str(next(iter(value)))
+    return None
+
+
 SwitchCondition = Annotated[
-    AppExistsCondition
-    | EnvVarExistsCondition
-    | EnvVarEqualsCondition
-    | HostnameMatchesCondition
-    | OsIsCondition
-    | MachineIdEqualsCondition,
-    Discriminator("kind"),
+    Annotated[AppExistsCondition, Tag("app_exists")]
+    | Annotated[EnvVarExistsCondition, Tag("env_var_exists")]
+    | Annotated[EnvVarEqualsCondition, Tag("env_var_equals")]
+    | Annotated[HostnameMatchesCondition, Tag("hostname_matches")]
+    | Annotated[OsIsCondition, Tag("os_is")]
+    | Annotated[MachineIdEqualsCondition, Tag("machine_id_equals")],
+    Discriminator(
+        _switch_condition_name,
+        custom_error_type="switch_condition",
+        custom_error_message="A condition is one 'name: value' pair, "
+        "e.g., 'os_is: linux', named one of: "
+        + ", ".join(next(iter(c.model_fields)) for c in _SWITCH_CONDITIONS)
+        + "; list several to require all of them",
+    ),
 ]
 
 
@@ -1328,57 +1342,49 @@ class SwitchOption(BaseModel):
     """An environment a switch picks, and when."""
 
     model_config = ConfigDict(extra="forbid")
-    when: (
-        SwitchCondition
-        | Annotated[list[SwitchCondition], Field(min_length=1)]
-        | None
-    ) = Field(
+    when: Annotated[list[SwitchCondition], Field(min_length=1)] | None = Field(
         default=None,
-        description="Condition this machine must meet for this option to be "
-        "picked, or a list of them that must all be met. Only the last "
-        "option may leave it out, to be picked when no other is.",
+        description="Conditions this machine must all meet for this "
+        "option to be picked. Only the last option may leave it out, to "
+        "be picked when no other is.",
     )
-    environment: str = Field(description="Name of the environment to use.")
+    use: str = Field(description="Name of the environment to use.")
 
 
 class SwitchEnvironment(Environment):
     """One of several environments, picked by the machine Calkit runs on.
 
     ``switch`` lists the options in order, and the first whose ``when``
-    condition this machine meets is picked. ``when`` is one condition or a
-    list that must all be met, and the last option can leave it out to be
-    the default. Each condition has a ``kind`` and its own fields:
+    conditions this machine all meets is picked. The last option can leave
+    out ``when`` to be the default. Each condition is one ``name: value``
+    pair:
 
-    - ``app-exists``: ``app`` is on ``PATH``.
-    - ``env-var-exists``: ``env_var`` is set.
-    - ``env-var-equals``: ``env_var`` is set to ``equals``.
-    - ``hostname-matches``: the hostname matches the glob ``pattern``,
-      ignoring case.
-    - ``os-is``: ``os`` is ``linux``, ``macos`` or ``windows``.
-    - ``machine-id-equals``: ``machine_id`` is this machine's, as
+    - ``app_exists``: an app on ``PATH``.
+    - ``env_var_exists``: an environmental variable that is set.
+    - ``env_var_equals``: ``NAME=value`` for an environmental variable.
+    - ``hostname_matches``: a glob the hostname matches, ignoring case.
+    - ``os_is``: ``linux``, ``macos`` or ``windows``.
+    - ``machine_id_equals``: this machine's ID, as
       ``calkit describe system`` shows it.
 
-    ``equals``, ``pattern``, ``os`` and ``machine_id`` also take a list,
-    meaning any one of them. For example:
+    A list of values means any one of them. To pick an environment when
+    either of two conditions holds, list it as two options. For example:
 
     ```yaml
     cluster:
       kind: switch
       switch:
         - when:
-            kind: hostname-matches
-            pattern: "*.gps.caltech.edu"
-          environment: clima
+            - os_is: linux
+            - app_exists: sbatch
+          use: any-slurm
         - when:
-            kind: env-var-equals
-            env_var: NERSC_HOST
-            equals: perlmutter
-          environment: perlmutter
+            - env_var_equals: NERSC_HOST=perlmutter
+          use: perlmutter
         - when:
-            kind: app-exists
-            app: sbatch
-          environment: any-slurm
-        - environment: clima-remote
+            - hostname_matches: ["*.gps.caltech.edu", "*.hpc.caltech.edu"]
+          use: clima
+        - use: clima-remote
     ```
 
     The conditions are checked on the machine Calkit runs on, which is
@@ -1424,7 +1430,7 @@ class SwitchEnvironment(Environment):
         for option in v[:-1]:
             if option.when is None:
                 raise ValueError(
-                    f"Option '{option.environment}' has no 'when', so it "
+                    f"Option '{option.use}' has no 'when', so it "
                     "would always be picked; only the last option may "
                     "leave it out"
                 )

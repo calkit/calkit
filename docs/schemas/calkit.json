@@ -2,22 +2,25 @@
   "$defs": {
     "AppExistsCondition": {
       "additionalProperties": false,
-      "description": "An app is on ``PATH``.",
       "properties": {
-        "app": {
-          "description": "Name of the executable, e.g., 'sbatch'.",
-          "title": "App",
-          "type": "string"
-        },
-        "kind": {
-          "const": "app-exists",
-          "title": "Kind",
-          "type": "string"
+        "app_exists": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "App that must be on PATH, e.g., 'sbatch'.",
+          "title": "App Exists"
         }
       },
       "required": [
-        "kind",
-        "app"
+        "app_exists"
       ],
       "title": "AppExistsCondition",
       "type": "object"
@@ -1147,14 +1150,35 @@
     },
     "EnvVarEqualsCondition": {
       "additionalProperties": false,
-      "description": "An environmental variable has a given value.",
       "properties": {
-        "env_var": {
-          "description": "Name of the variable.",
-          "title": "Env Var",
-          "type": "string"
-        },
-        "equals": {
+        "env_var_equals": {
+          "anyOf": [
+            {
+              "pattern": "^[^=]+=",
+              "type": "string"
+            },
+            {
+              "items": {
+                "pattern": "^[^=]+=",
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "'NAME=value' an environmental variable must be set to, e.g., 'NERSC_HOST=perlmutter'.",
+          "title": "Env Var Equals"
+        }
+      },
+      "required": [
+        "env_var_equals"
+      ],
+      "title": "EnvVarEqualsCondition",
+      "type": "object"
+    },
+    "EnvVarExistsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "env_var_exists": {
           "anyOf": [
             {
               "type": "string"
@@ -1166,41 +1190,12 @@
               "type": "array"
             }
           ],
-          "description": "Value it must have, exactly. A list means any one of them.",
-          "title": "Equals"
-        },
-        "kind": {
-          "const": "env-var-equals",
-          "title": "Kind",
-          "type": "string"
+          "description": "Environmental variable that must be set.",
+          "title": "Env Var Exists"
         }
       },
       "required": [
-        "kind",
-        "env_var",
-        "equals"
-      ],
-      "title": "EnvVarEqualsCondition",
-      "type": "object"
-    },
-    "EnvVarExistsCondition": {
-      "additionalProperties": false,
-      "description": "An environmental variable is set.",
-      "properties": {
-        "env_var": {
-          "description": "Name of the variable.",
-          "title": "Env Var",
-          "type": "string"
-        },
-        "kind": {
-          "const": "env-var-exists",
-          "title": "Kind",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "env_var"
+        "env_var_exists"
       ],
       "title": "EnvVarExistsCondition",
       "type": "object"
@@ -1475,14 +1470,8 @@
     },
     "HostnameMatchesCondition": {
       "additionalProperties": false,
-      "description": "The machine's hostname matches a glob.",
       "properties": {
-        "kind": {
-          "const": "hostname-matches",
-          "title": "Kind",
-          "type": "string"
-        },
-        "pattern": {
+        "hostname_matches": {
           "anyOf": [
             {
               "type": "string"
@@ -1494,13 +1483,12 @@
               "type": "array"
             }
           ],
-          "description": "Glob the hostname must match, case-insensitively, e.g., '*.cluster.edu'. A list means any one of them.",
-          "title": "Pattern"
+          "description": "Glob the hostname must match, case-insensitively, e.g., '*.cluster.edu'.",
+          "title": "Hostname Matches"
         }
       },
       "required": [
-        "kind",
-        "pattern"
+        "hostname_matches"
       ],
       "title": "HostnameMatchesCondition",
       "type": "object"
@@ -3291,14 +3279,8 @@
     },
     "MachineIdEqualsCondition": {
       "additionalProperties": false,
-      "description": "The machine is a given one, by the ID 'calkit describe system' shows.",
       "properties": {
-        "kind": {
-          "const": "machine-id-equals",
-          "title": "Kind",
-          "type": "string"
-        },
-        "machine_id": {
+        "machine_id_equals": {
           "anyOf": [
             {
               "type": "string"
@@ -3310,13 +3292,12 @@
               "type": "array"
             }
           ],
-          "description": "Machine ID, ignoring case and dashes. A list means any one of them.",
-          "title": "Machine Id"
+          "description": "ID of the machine, as 'calkit describe system' shows it, ignoring case and dashes.",
+          "title": "Machine Id Equals"
         }
       },
       "required": [
-        "kind",
-        "machine_id"
+        "machine_id_equals"
       ],
       "title": "MachineIdEqualsCondition",
       "type": "object"
@@ -4924,14 +4905,8 @@
     },
     "OsIsCondition": {
       "additionalProperties": false,
-      "description": "The machine runs a given operating system.",
       "properties": {
-        "kind": {
-          "const": "os-is",
-          "title": "Kind",
-          "type": "string"
-        },
-        "os": {
+        "os_is": {
           "anyOf": [
             {
               "enum": [
@@ -4953,13 +4928,12 @@
               "type": "array"
             }
           ],
-          "description": "Operating system. A list means any one of them.",
-          "title": "Os"
+          "description": "Operating system: 'linux', 'macos' or 'windows'.",
+          "title": "Os Is"
         }
       },
       "required": [
-        "kind",
-        "os"
+        "os_is"
       ],
       "title": "OsIsCondition",
       "type": "object"
@@ -9383,7 +9357,7 @@
       "type": "object"
     },
     "SwitchEnvironment": {
-      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\ncondition this machine meets is picked. ``when`` is one condition or a\nlist that must all be met, and the last option can leave it out to be\nthe default. Each condition has a ``kind`` and its own fields:\n\n- ``app-exists``: ``app`` is on ``PATH``.\n- ``env-var-exists``: ``env_var`` is set.\n- ``env-var-equals``: ``env_var`` is set to ``equals``.\n- ``hostname-matches``: the hostname matches the glob ``pattern``,\n  ignoring case.\n- ``os-is``: ``os`` is ``linux``, ``macos`` or ``windows``.\n- ``machine-id-equals``: ``machine_id`` is this machine's, as\n  ``calkit describe system`` shows it.\n\n``equals``, ``pattern``, ``os`` and ``machine_id`` also take a list,\nmeaning any one of them. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        kind: hostname-matches\n        pattern: \"*.gps.caltech.edu\"\n      environment: clima\n    - when:\n        kind: env-var-equals\n        env_var: NERSC_HOST\n        equals: perlmutter\n      environment: perlmutter\n    - when:\n        kind: app-exists\n        app: sbatch\n      environment: any-slurm\n    - environment: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.",
+      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_exists``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.",
       "properties": {
         "description": {
           "anyOf": [
@@ -9497,59 +9471,15 @@
       "additionalProperties": false,
       "description": "An environment a switch picks, and when.",
       "properties": {
-        "environment": {
+        "use": {
           "description": "Name of the environment to use.",
-          "title": "Environment",
+          "title": "Use",
           "type": "string"
         },
         "when": {
           "anyOf": [
             {
-              "discriminator": {
-                "mapping": {
-                  "app-exists": "#/$defs/AppExistsCondition",
-                  "env-var-equals": "#/$defs/EnvVarEqualsCondition",
-                  "env-var-exists": "#/$defs/EnvVarExistsCondition",
-                  "hostname-matches": "#/$defs/HostnameMatchesCondition",
-                  "machine-id-equals": "#/$defs/MachineIdEqualsCondition",
-                  "os-is": "#/$defs/OsIsCondition"
-                },
-                "propertyName": "kind"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/AppExistsCondition"
-                },
-                {
-                  "$ref": "#/$defs/EnvVarExistsCondition"
-                },
-                {
-                  "$ref": "#/$defs/EnvVarEqualsCondition"
-                },
-                {
-                  "$ref": "#/$defs/HostnameMatchesCondition"
-                },
-                {
-                  "$ref": "#/$defs/OsIsCondition"
-                },
-                {
-                  "$ref": "#/$defs/MachineIdEqualsCondition"
-                }
-              ]
-            },
-            {
               "items": {
-                "discriminator": {
-                  "mapping": {
-                    "app-exists": "#/$defs/AppExistsCondition",
-                    "env-var-equals": "#/$defs/EnvVarEqualsCondition",
-                    "env-var-exists": "#/$defs/EnvVarExistsCondition",
-                    "hostname-matches": "#/$defs/HostnameMatchesCondition",
-                    "machine-id-equals": "#/$defs/MachineIdEqualsCondition",
-                    "os-is": "#/$defs/OsIsCondition"
-                  },
-                  "propertyName": "kind"
-                },
                 "oneOf": [
                   {
                     "$ref": "#/$defs/AppExistsCondition"
@@ -9579,12 +9509,12 @@
             }
           ],
           "default": null,
-          "description": "Condition this machine must meet for this option to be picked, or a list of them that must all be met. Only the last option may leave it out, to be picked when no other is.",
+          "description": "Conditions this machine must all meet for this option to be picked. Only the last option may leave it out, to be picked when no other is.",
           "title": "When"
         }
       },
       "required": [
-        "environment"
+        "use"
       ],
       "title": "SwitchOption",
       "type": "object"

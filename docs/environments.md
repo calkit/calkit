@@ -1257,40 +1257,36 @@ Model class: `SwitchEnvironment`
 One of several environments, picked by the machine Calkit runs on.
 
 `switch` lists the options in order, and the first whose `when`
-condition this machine meets is picked. `when` is one condition or a
-list that must all be met, and the last option can leave it out to be
-the default. Each condition has a `kind` and its own fields:
+conditions this machine all meets is picked. The last option can leave
+out `when` to be the default. Each condition is one `name: value`
+pair:
 
-- `app-exists`: `app` is on `PATH`.
-- `env-var-exists`: `env_var` is set.
-- `env-var-equals`: `env_var` is set to `equals`.
-- `hostname-matches`: the hostname matches the glob `pattern`,
-  ignoring case.
-- `os-is`: `os` is `linux`, `macos` or `windows`.
-- `machine-id-equals`: `machine_id` is this machine's, as
+- `app_exists`: an app on `PATH`.
+- `env_var_exists`: an environmental variable that is set.
+- `env_var_equals`: `NAME=value` for an environmental variable.
+- `hostname_matches`: a glob the hostname matches, ignoring case.
+- `os_is`: `linux`, `macos` or `windows`.
+- `machine_id_equals`: this machine's ID, as
   `calkit describe system` shows it.
 
-`equals`, `pattern`, `os` and `machine_id` also take a list,
-meaning any one of them. For example:
+A list of values means any one of them. To pick an environment when
+either of two conditions holds, list it as two options. For example:
 
 ```yaml
 cluster:
   kind: switch
   switch:
     - when:
-        kind: hostname-matches
-        pattern: "*.gps.caltech.edu"
-      environment: clima
+        - os_is: linux
+        - app_exists: sbatch
+      use: any-slurm
     - when:
-        kind: env-var-equals
-        env_var: NERSC_HOST
-        equals: perlmutter
-      environment: perlmutter
+        - env_var_equals: NERSC_HOST=perlmutter
+      use: perlmutter
     - when:
-        kind: app-exists
-        app: sbatch
-      environment: any-slurm
-    - environment: clima-remote
+        - hostname_matches: ["*.gps.caltech.edu", "*.hpc.caltech.edu"]
+      use: clima
+    - use: clima-remote
 ```
 
 The conditions are checked on the machine Calkit runs on, which is

@@ -776,7 +776,7 @@ def get_switch_options(env_name: str, envs: dict) -> list[str]:
     switch, or mixes machines with runtimes.
     """
     options: list[str] = []
-    for option in [o.environment for o in _load_switch(env_name, envs)]:
+    for option in [o.use for o in _load_switch(env_name, envs)]:
         option_env = envs.get(option)
         if option_env is None:
             raise ValueError(
@@ -841,39 +841,40 @@ def resolve_switch(env_name: str, envs: dict) -> str | None:
 
     def holds(condition: object) -> bool:
         if isinstance(condition, AppExistsCondition):
-            return shutil.which(condition.app) is not None
-        if isinstance(condition, EnvVarExistsCondition):
-            return condition.env_var in os.environ
-        if isinstance(condition, EnvVarEqualsCondition):
-            return os.environ.get(condition.env_var) in any_of(
-                condition.equals
+            return any(
+                shutil.which(a) is not None
+                for a in any_of(condition.app_exists)
             )
+        if isinstance(condition, EnvVarExistsCondition):
+            return any(
+                n in os.environ for n in any_of(condition.env_var_exists)
+            )
+        if isinstance(condition, EnvVarEqualsCondition):
+            settings = [
+                s.split("=", 1) for s in any_of(condition.env_var_equals)
+            ]
+            return any(os.environ.get(n) == v for n, v in settings)
         if isinstance(condition, HostnameMatchesCondition):
             hostname = socket.gethostname().lower()
             return any(
                 fnmatch.fnmatchcase(hostname, p.lower())
-                for p in any_of(condition.pattern)
+                for p in any_of(condition.hostname_matches)
             )
         if isinstance(condition, OsIsCondition):
             names = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
-            return names.get(platform.system()) in any_of(condition.os)
+            return names.get(platform.system()) in any_of(condition.os_is)
         if isinstance(condition, MachineIdEqualsCondition):
             here = calkit.get_machine_id()
             return any(
                 calkit.machine_ids_match(here, m)
-                for m in any_of(condition.machine_id)
+                for m in any_of(condition.machine_id_equals)
             )
         raise TypeError(f"Unknown switch condition: {condition!r}")
 
     get_switch_options(env_name, envs)
     for option in _load_switch(env_name, envs):
-        if option.when is None or all(
-            holds(c)
-            for c in (
-                option.when if isinstance(option.when, list) else [option.when]
-            )
-        ):
-            return option.environment
+        if option.when is None or all(holds(c) for c in option.when):
+            return option.use
     return None
 
 
@@ -883,18 +884,15 @@ def describe_switch_no_match(env_name: str, env: dict) -> str:
     here = ", ".join(
         f"{k}={props.get(k)!r}" for k in ("hostname", "os", "machine")
     )
-    conditions = []
-    for option in env.get("switch") or []:
-        when = option.get("when") or []
-        for c in when if isinstance(when, list) else [when]:
-            fields = ", ".join(
-                f"{k}={v!r}" for k, v in c.items() if k != "kind"
-            )
-            conditions.append(f"{c.get('kind')}({fields})")
+    conditions = [
+        " and ".join(
+            f"{k}: {v}" for c in o.get("when") or [] for k, v in c.items()
+        )
+        for o in env.get("switch") or []
+    ]
     return (
         f"Switch environment '{env_name}' picks no environment on this "
-        f"machine ({here}); none of its conditions hold: "
-        + "; ".join(conditions)
+        f"machine ({here}); none of these hold: " + "; ".join(conditions)
     )
 
 

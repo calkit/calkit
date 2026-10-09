@@ -3773,10 +3773,10 @@ def test_switch_env_compiles(tmp_dir):
             "kind": "switch",
             "switch": [
                 {
-                    "when": {"kind": "app-exists", "app": "sbatch"},
-                    "environment": "slurm-env",
+                    "when": [{"app_exists": "sbatch"}],
+                    "use": "slurm-env",
                 },
-                {"environment": "here"},
+                {"use": "here"},
             ],
         },
         "slurm-env": {"kind": "slurm"},
@@ -3787,10 +3787,10 @@ def test_switch_env_compiles(tmp_dir):
             "kind": "switch",
             "switch": [
                 {
-                    "when": {"kind": "os-is", "os": "windows"},
-                    "environment": "py-a",
+                    "when": [{"os_is": "windows"}],
+                    "use": "py-a",
                 },
-                {"environment": "py"},
+                {"use": "py"},
             ],
         },
     }
@@ -3891,11 +3891,8 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
                 "kind": "switch",
                 "switch": [
                     {
-                        "when": {
-                            "kind": "app-exists",
-                            "app": "calkit-test-no-such-app",
-                        },
-                        "environment": "lab",
+                        "when": [{"app_exists": "calkit-test-no-such-app"}],
+                        "use": "lab",
                     }
                 ],
             },
@@ -3903,10 +3900,10 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
                 "kind": "switch",
                 "switch": [
                     {
-                        "when": {"kind": "hostname-match", "pattern": "x"},
-                        "environment": "lab",
+                        "when": [{"hostname_match": "x"}],
+                        "use": "lab",
                     },
-                    {"environment": "far"},
+                    {"use": "far"},
                 ],
             },
             "here": {"kind": "system"},
@@ -4006,7 +4003,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
     }
     # Something being wrong isn't the project saying the stage can't run
     assert set(errors) == {"far-away", "bad-switch"}
-    assert "hostname-match" in errors["bad-switch"]
+    assert "hostname_match" in errors["bad-switch"]
     assert "locked to another machine" in gated["elsewhere"]
     assert "relock: auto" in gated["elsewhere"]
     # A stage's own requirement isn't one a host would help with

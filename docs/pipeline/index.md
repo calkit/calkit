@@ -499,13 +499,14 @@ outputs as a whole, since those belong to the individual stages in
 it, and its stages always run in the project root, where the scripts
 extracted from it are written.
 
-| Kind-specific parameter | Type | Required | Default    | Description                                                      |
-| ----------------------- | ---- | -------- | ---------- | ---------------------------------------------------------------- |
-| `environment`           | str  | no       | '\_system' | Environment used by blocks that don't name one.                  |
-| `wdir`                  | None | no       | null       | Not supported; a Markdown file's stages run in the project root. |
-| `outputs`               | None | no       | null       | Not supported; declare outputs on the file's blocks.             |
-| `iterate_over`          | None | no       | null       | Not supported; markdown stages can't iterate.                    |
-| `target_path`           | str  | yes      |            | Path to the Markdown file.                                       |
+| Kind-specific parameter | Type                | Required | Default    | Description                                                                                               |
+| ----------------------- | ------------------- | -------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `environment`           | str                 | no       | '\_system' | Environment used by blocks that don't name one.                                                           |
+| `wdir`                  | None                | no       | null       | Not supported; a Markdown file's stages run in the project root.                                          |
+| `outputs`               | None                | no       | null       | Not supported; declare outputs on the file's blocks.                                                      |
+| `iterate_over`          | None                | no       | null       | Not supported; markdown stages can't iterate.                                                             |
+| `target_path`           | str                 | yes      |            | Path to the Markdown file.                                                                                |
+| `pdf`                   | MarkdownPdf \| None | no       | null       | Also build the file into a PDF with pandoc and LaTeX. A file that only builds a PDF needs no code blocks. |
 
 ### `matlab-command`
 
@@ -772,6 +773,23 @@ Replace a directory with the contents of another.
 | `kind`    | Literal['dir-to-dir-replace'] | no       | 'dir-to-dir-replace' | Replace the destination directory entirely.               |
 | `src`     | str                           | yes      |                      | Path to the directory to copy from.                       |
 | `dest`    | str                           | yes      |                      | Path to the directory to replace, which is deleted first. |
+
+#### `MarkdownPdf`
+
+How a Markdown stage's file is built into a PDF.
+
+Pandoc turns it into LaTeX and LaTeX builds the PDF, both in one
+environment, e.g., Calkit's LaTeX image, which includes both, so their
+versions are pinned with it.
+
+| Parameter       | Type                  | Required | Default | Description                                                                         |
+| --------------- | --------------------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `environment`   | str                   | yes      |         | Environment that runs pandoc and LaTeX.                                             |
+| `output_path`   | str \| None           | no       | null    | Where to write the PDF. Defaults to the Markdown file's path with a .pdf extension. |
+| `template_path` | str \| None           | no       | null    | Pandoc template for the LaTeX.                                                      |
+| `filters`       | list[str]             | no       |         | Pandoc Lua filters, applied in order.                                               |
+| `args`          | list[str]             | no       |         | Other pandoc arguments, e.g., '--shift-heading-level-by=-1'.                        |
+| `storage`       | Literal['git', 'dvc'] | no       | 'dvc'   | Where to store the PDF.                                                             |
 
 #### `RangeIteration`
 

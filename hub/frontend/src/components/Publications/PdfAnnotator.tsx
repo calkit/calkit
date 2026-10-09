@@ -10,6 +10,7 @@
 import {
   Avatar,
   Box,
+  Portal,
   Button,
   Checkbox,
   Flex,
@@ -216,6 +217,7 @@ export function AddCommentTip({
   onCancel,
   hideIssueCheckbox = false,
   defaultCreateIssue = true,
+  anchor,
 }: {
   onConfirm: (text: string, createIssue: boolean) => void
   onCancel: () => void
@@ -223,13 +225,18 @@ export function AddCommentTip({
   // issue mirroring is handled server-side and isn't a reviewer choice).
   hideIssueCheckbox?: boolean
   defaultCreateIssue?: boolean
+  // Where the selection is on screen, to show the box just below it rather
+  // than in react-pdf-highlighter's tip container, which places it from
+  // measurements of the page that can be stale, leaving it off to the side
+  // or under the page
+  anchor?: DOMRect | null
 }) {
   const [text, setText] = useState("")
   const [createIssue, setCreateIssue] = useState(defaultCreateIssue)
   const bg = useColorModeValue("white", "gray.800")
   const borderColor = useColorModeValue("gray.200", "gray.600")
 
-  return (
+  const box = (
     <Box
       bg={bg}
       borderWidth={1}
@@ -279,6 +286,27 @@ export function AddCommentTip({
         </Button>
       </Flex>
     </Box>
+  )
+  if (!anchor) return box
+  const width = 260
+  const left = Math.min(
+    Math.max(anchor.left + anchor.width / 2 - width / 2, 8),
+    window.innerWidth - width - 8,
+  )
+  // Below the selection if it fits, else above it
+  const below = anchor.bottom + 180 < window.innerHeight
+  return (
+    <Portal>
+      <Box
+        position="fixed"
+        left={`${left}px`}
+        top={below ? `${anchor.bottom + 6}px` : undefined}
+        bottom={below ? undefined : `${window.innerHeight - anchor.top + 6}px`}
+        zIndex="popover"
+      >
+        {box}
+      </Box>
+    </Portal>
   )
 }
 
@@ -538,12 +566,18 @@ export default function PdfAnnotator({
       // selection remains visible while the user types in the comment box
       // (typing clears document.getSelection(), which otherwise makes
       // isCollapsed=true and drops the visual selection).
+      const selection = window.getSelection()
+      const anchor =
+        selection && selection.rangeCount > 0
+          ? selection.getRangeAt(0).getBoundingClientRect()
+          : null
       transformSelection()
       const canComment = latex
         ? !!latexComments.query.data?.can_comment
         : !!user
       return canComment ? (
         <AddCommentTip
+          anchor={anchor}
           defaultCreateIssue={!latex}
           onConfirm={(text, createIssue) => {
             handleAddHighlight(

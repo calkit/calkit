@@ -1,8 +1,11 @@
 """Tests for ``calkit.conditions``."""
 
+import ast
+
 import pytest
 
 from calkit.conditions import (
+    check_condition,
     evaluate_condition,
     parse_conditional,
     select_branch,
@@ -24,7 +27,7 @@ def test_evaluate_condition():
     # nothing may be called or used as a bare value
     with pytest.raises(KeyError):
         evaluate_condition("missing < 1", values)
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="'len' cannot be called"):
         evaluate_condition("len(leader) > 1", values)
     with pytest.raises(ValueError):
         evaluate_condition("p", values)
@@ -92,9 +95,43 @@ def test_evaluate_condition():
         evaluate_condition("len(leader) + 1 > 1", values, {"len": len})
     with pytest.raises(ValueError, match="true/false"):
         evaluate_condition("env('SITE')", {}, functions)
-    # Membership works on strings and lists
+    # Membership works on strings, lists and tuples, and nothing is in
+    # None, e.g., an unset environmental variable
     assert evaluate_condition("'turns' in leader", values)
     assert evaluate_condition("n not in [1, 2]", values)
+    assert evaluate_condition("17 in (n, 1)", values)
+    assert not evaluate_condition("'x' in env('MISSING')", {}, functions)
+    assert evaluate_condition("'x' not in env('MISSING')", {}, functions)
+    # A tuple stays a tuple, so it equals a tuple value but not a list
+    assert evaluate_condition("pair == (1, 2)", {"pair": (1, 2)})
+    assert not evaluate_condition("pair == (1, 2)", {"pair": [1, 2]})
+    # Arithmetic, including negation and powers, within bounds
+    assert evaluate_condition("n * -2 < 0 and 2 ** 10 == 1024", values)
+    assert evaluate_condition("'ab' * 2 == 'abab'", values)
+    # Anything outside comparisons, arithmetic, names, literals and allowed
+    # calls is refused, whether or not it could be evaluated
+    refused = {
+        "'x'.upper() == 'X'": "cannot be called",
+        "leader.__class__ == 1": "Attribute 'leader.__class__'",
+        "leader[0] == 't'": "Subscript",
+        "[c for c in leader] == []": "ListComp",
+        "(lambda: 1)() == 1": "cannot be called",
+        "env(*leader) == 'x'": "Starred",
+        "env(**{'name': 'x'}) == 'x'": "keyword",
+        "n | 1 == 1": "BitOr",
+        "9 ** 9 ** 9 > 1": "too large",
+        "'a' * 10 ** 9 == ''": "too long",
+        "'%0999999999d' % 1 == ''": "string formatting",
+        "-" * 100000 + "1": "cannot parse",
+    }
+    for expression, problem in refused.items():
+        with pytest.raises(ValueError, match=problem):
+            evaluate_condition(expression, values, functions)
+    # The same structure is checked without values, e.g., at load
+    assert isinstance(check_condition("has_app('x')", ["has_app"]), ast.AST)
+    for expression in ("leader.__class__ == 1", "has_app('x')", "p <"):
+        with pytest.raises(ValueError, match="condition"):
+            check_condition(expression)
     assert (
         select_branch(
             {"if has_app('qsub')": "pbs", "elif has_app('sbatch')": "slurm"},

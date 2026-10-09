@@ -179,12 +179,21 @@ pipeline:
 
 On a machine where a stage's requirements, or its environments', aren't
 met, `calkit run` skips that stage rather than failing.
+The same goes for a stage whose `switch` environment picks nothing
+there, or whose `system` environment is locked to another machine.
 Its outputs are kept, so stages that use them still run.
 It stays out of date in `calkit status`, which says why it can't run
-there.
+there, and the run ends by listing the out-of-date stages it skipped.
 Requirements of an environment on another machine, e.g., a `system`
-environment with a `host`, are checked on that machine, and a stage
-whose machine can't be reached is skipped the same way.
+environment with a `host`, are checked on that machine.
+
+Some skips still fail the run, after the stages that can run have run:
+
+- One of the stages named on the command line, e.g.,
+  `calkit run fetch`, is out of date and can't run.
+- A stage is out of date and can't run because something is wrong
+  rather than because the project says so, e.g., its machine can't be
+  reached or its `switch` condition can't be evaluated.
 
 ## Pinning the Calkit CLI version
 

@@ -1464,7 +1464,24 @@ def test_check_env_locks_every_venv_platform(tmp_dir):
     # current rather than relocking
     locks = os.listdir(lock_dir)
     assert len(locks) > 1
+    # With the venv's Python, so a machine with another one relocks
+    venv_python = subprocess.check_output(
+        [
+            os.path.join(
+                ".venv",
+                "Scripts" if sys.platform == "win32" else "bin",
+                "python",
+            ),
+            "-c",
+            "import sys; print('%d.%d' % sys.version_info[:2])",
+        ],
+        text=True,
+    ).strip()
     for fname in locks:
+        fpath = os.path.join(lock_dir, fname)
         assert calkit.environments.stamped_lock_matches_spec(
-            os.path.join(lock_dir, fname), "requirements.txt"
+            fpath, "requirements.txt", python=venv_python
+        )
+        assert not calkit.environments.stamped_lock_matches_spec(
+            fpath, "requirements.txt"
         )

@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import threading
 from collections.abc import Iterator
@@ -212,22 +213,40 @@ def dvc_lock_timeout(seconds: float):
 
 
 @contextlib.contextmanager
-def skip_stages(reasons: dict[str, str]) -> Iterator[None]:
+def skip_stages(
+    reasons: dict[str, str], skipped: dict[str, str] | None = None
+) -> Iterator[None]:
     """Skip these stages in ``dvc repro`` while active, keeping their outputs.
 
     Keyed by Calkit stage name, which also covers the ``<name>@<item>``
-    stages DVC makes from an iterated one. A skipped stage is frozen, so its
-    own inputs aren't reproduced on its account, and isn't run or recorded
-    in ``dvc.lock``, so it stays out of date rather than looking current.
+    stages DVC makes from an iterated one and the stages generated from
+    one, e.g., a LaTeX stage's diffs. Only stages in the root ``dvc.yaml``
+    match, so a subproject's stage of the same name isn't skipped. A
+    skipped stage is frozen, so its own inputs aren't reproduced on its
+    account, and isn't run or recorded in ``dvc.lock``, so it stays out of
+    date rather than looking current. Each skipped stage that was out of
+    date is added to ``skipped`` with its reason.
     """
     from dvc.stage import Stage
     from dvc.stage.loader import StageLoader
 
     def reason_for(stage: Any) -> str | None:
         name = getattr(stage, "name", None)
-        if not name:
+        dvcfile = getattr(stage, "dvcfile", None)
+        if not name or dvcfile is None:
             return None
-        return reasons.get(name, reasons.get(name.split("@")[0]))
+        if os.path.normpath(os.path.relpath(dvcfile.path)) != "dvc.yaml":
+            return None
+        reason = reasons.get(name, reasons.get(name.split("@")[0]))
+        if reason is None:
+            # A stage Calkit generated from another says which one
+            match = re.match(
+                r"Automatically generated from the '([^']+)' stage",
+                getattr(stage, "desc", None) or "",
+            )
+            if match:
+                reason = reasons.get(match.group(1))
+        return reason
 
     original_load = StageLoader.__dict__["load_stage"]
     original_reproduce = Stage.reproduce
@@ -242,11 +261,26 @@ def skip_stages(reasons: dict[str, str]) -> Iterator[None]:
         reason = reason_for(self)
         if reason is None:
             return original_reproduce(self, *args, **kwargs)
+        # Frozen stages never report changed deps, so ask without it
+        self.frozen = False
+        try:
+            stale = kwargs.get("force") or self.changed(
+                kwargs.get("allow_missing", False), kwargs.get("upstream")
+            )
+        finally:
+            self.frozen = True
+        if not stale:
+            logging.getLogger("dvc").info(
+                "Stage '%s' didn't change, skipping", self.addressing
+            )
+            return None
         logging.getLogger("dvc").info(
             "Stage '%s' can't run on this machine, skipping: %s",
             self.addressing,
             reason,
         )
+        if skipped is not None:
+            skipped[self.addressing] = reason
         return None
 
     if not reasons:

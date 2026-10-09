@@ -507,10 +507,13 @@ def check_environment(
         raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
     # Docker records its inputs in its lock, which rebuilds it already
-    rebuild = force or (
-        env["kind"] != "docker"
-        and calkit.environments.inputs_changed_since_build(env_name, env)
-    )
+    try:
+        rebuild = force or (
+            env["kind"] != "docker"
+            and calkit.environments.inputs_changed_since_build(env_name, env)
+        )
+    except ValueError as e:
+        raise_error(f"Environment '{env_name}': {e}")
     if rebuild and env["kind"] not in (
         "docker",
         calkit.environments.SWITCH_KIND,
@@ -710,11 +713,21 @@ def check_environment(
                 calkit.check_requirements(
                     requirements=env.get("requirements", [])
                 )
+                # Read once for both
+                system_info = None
+                if env.get("lock"):
+                    system_info = calkit.get_system_info(
+                        apps=calkit.environments.lock_app_names(
+                            env.get("lock")
+                        )
+                    )
                 # Writes only if unlocked; a mismatch warns, and stages that
-                # need to run fail at the gate in 'calkit xenv'
-                write_system_env_lock(env_name=env_name, env=env)
+                # need to run are skipped, or fail at the gate in 'xenv'
+                write_system_env_lock(
+                    env_name=env_name, env=env, system_info=system_info
+                )
                 mismatch = calkit.environments.system_env_lock_mismatch(
-                    env_name=env_name, env=env
+                    env_name=env_name, env=env, system_info=system_info
                 )
                 if mismatch:
                     warn(
@@ -1298,7 +1311,8 @@ def check_docker_env(
         )
         lock = None
         lock_is_current_arch = False
-    if rebuild and fpath is not None:
+    # Without a Dockerfile, rebuilding means pulling the image again
+    if rebuild:
         lock = None
         lock_is_current_arch = False
     # Work out where this image lives in a registry, so it can be pulled
@@ -1918,13 +1932,6 @@ def check_venv(
                 break
     activate_cmd = calkit.environments.get_venv_activate_cmd(prefix)
 
-    # A lock resolved from the current spec is an input, not rewritten here
-    lock_is_current = calkit.environments.stamped_lock_matches_spec(
-        os.path.join(wdir or "", lock_fpath),
-        os.path.join(wdir or "", path),
-        python=python,
-    )
-
     def venv_python_version() -> str | None:
         """The Python version a plain venv was created with."""
         if _platform.system() == "Windows":
@@ -1943,6 +1950,18 @@ def check_venv(
         except (OSError, subprocess.CalledProcessError):
             return None
 
+    # Stamped with the Python the venv has when none is declared, so a lock
+    # resolved for another version isn't taken as current
+    stamp_python = python
+    if stamp_python is None and (full_version := venv_python_version()):
+        stamp_python = ".".join(full_version.split(".")[:2])
+    # A lock resolved from the current spec is an input, not rewritten here
+    lock_is_current = calkit.environments.stamped_lock_matches_spec(
+        os.path.join(wdir or "", lock_fpath),
+        os.path.join(wdir or "", path),
+        python=stamp_python,
+    )
+
     def pip_install_and_freeze(reqs_arg: str) -> None:
         check_cmd = (
             f"{activate_cmd} && {pip_cmd} install {pip_install_args} "
@@ -1959,14 +1978,14 @@ def check_venv(
         calkit.environments.stamp_lock_with_spec(
             os.path.join(wdir or "", lock_fpath),
             os.path.join(wdir or "", path),
-            python=python,
+            python=stamp_python,
         )
         # So another platform reads a lock rather than adding one
         if kind == "uv-venv" or shutil.which("uv") is not None:
             calkit.environments.write_cross_platform_venv_locks(
                 spec_fpath=path,
                 lock_fpath=lock_fpath,
-                python=python,
+                python=stamp_python,
                 wdir=wdir,
                 verbose=verbose,
                 python_version=python or venv_python_version(),

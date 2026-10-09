@@ -869,6 +869,68 @@ def run_batch(
     iterated stage does not put all of its jobs into a shared cluster's queue
     at once.
     """
+
+    def replace_environment_arg(argv: list[str], env_name: str) -> list[str]:
+        """Return ``argv`` with its ``--environment`` value replaced."""
+        out = list(argv)
+        for i, arg in enumerate(out):
+            if arg in ("--environment", "-e") and i + 1 < len(out):
+                out[i + 1] = env_name
+                return out
+            if arg.startswith("--environment="):
+                out[i] = f"--environment={env_name}"
+                return out
+        return out
+
+    def run_on_system(
+        env_name: str,
+        env: dict,
+        target: str,
+        args: list[str],
+        outs: list[str],
+        setup_cmds: list[str],
+        log_path: str,
+        is_command: bool,
+    ) -> None:
+        """Run a job on a ``system`` env a switch picked, rather than queue it.
+
+        Goes through ``calkit xenv``, which knows how to reach the machine, and
+        writes the log a scheduler would, since the stage declares it.
+        """
+        for out in outs:
+            if os.path.isfile(out):
+                os.remove(out)
+            elif os.path.isdir(out):
+                shutil.rmtree(out)
+        parts = [target] + list(args)
+        if (
+            not is_command
+            and os.path.isfile(target)
+            and not os.access(target, os.X_OK)
+        ):
+            parts = _detect_interpreter(target) + parts
+        cmd = ["calkit", "xenv", "-n", env_name, "--no-check"]
+        for setup_cmd in setup_cmds:
+            cmd += ["--setup", setup_cmd]
+        cmd += ["--", *parts]
+        logs_dir = os.path.dirname(log_path)
+        if logs_dir:
+            os.makedirs(logs_dir, exist_ok=True)
+        with open(log_path, "w") as log_file:
+            p = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            assert p.stdout is not None
+            for line in p.stdout:
+                sys.stdout.write(line)
+                log_file.write(line)
+            returncode = p.wait()
+        if returncode != 0:
+            raise typer.Exit(returncode)
+
     if args is None:
         args = []
     if environment == "_system":
@@ -902,9 +964,9 @@ def run_batch(
         kind = env.get("kind")
         # Resolved once, here, so a far end re-running this doesn't pick
         # again from where it sits
-        argv = _replace_environment_arg(argv, picked)
+        argv = replace_environment_arg(argv, picked)
     if kind == "system":
-        _run_on_system(
+        run_on_system(
             env_name=environment,
             env=env,
             target=target,
@@ -1202,19 +1264,6 @@ def run_batch(
     _finalize_job(name, job_id, exit_code, log_path)
 
 
-def _replace_environment_arg(argv: list[str], env_name: str) -> list[str]:
-    """Return ``argv`` with its ``--environment`` value replaced."""
-    out = list(argv)
-    for i, arg in enumerate(out):
-        if arg in ("--environment", "-e") and i + 1 < len(out):
-            out[i + 1] = env_name
-            return out
-        if arg.startswith("--environment="):
-            out[i] = f"--environment={env_name}"
-            return out
-    return out
-
-
 def _gate_switch_machine_lock(
     switch_name: str, env: dict, picked: str, envs: dict, ck_info: dict
 ) -> None:
@@ -1241,53 +1290,6 @@ def _gate_switch_machine_lock(
                 switch_name, mismatch
             )
         )
-
-
-def _run_on_system(
-    env_name: str,
-    env: dict,
-    target: str,
-    args: list[str],
-    outs: list[str],
-    setup_cmds: list[str],
-    log_path: str,
-    is_command: bool,
-) -> None:
-    """Run a job on a ``system`` env a switch picked, rather than queue it.
-
-    Goes through ``calkit xenv``, which knows how to reach the machine, and
-    writes the log a scheduler would, since the stage declares it.
-    """
-    for out in outs:
-        if os.path.isfile(out):
-            os.remove(out)
-        elif os.path.isdir(out):
-            shutil.rmtree(out)
-    parts = [target] + list(args)
-    if (
-        not is_command
-        and os.path.isfile(target)
-        and not os.access(target, os.X_OK)
-    ):
-        parts = _detect_interpreter(target) + parts
-    cmd = ["calkit", "xenv", "-n", env_name, "--no-check"]
-    for setup_cmd in setup_cmds:
-        cmd += ["--setup", setup_cmd]
-    cmd += ["--", *parts]
-    logs_dir = os.path.dirname(log_path)
-    if logs_dir:
-        os.makedirs(logs_dir, exist_ok=True)
-    with open(log_path, "w") as log_file:
-        p = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-        )
-        assert p.stdout is not None
-        for line in p.stdout:
-            sys.stdout.write(line)
-            log_file.write(line)
-        returncode = p.wait()
-    if returncode != 0:
-        raise typer.Exit(returncode)
 
 
 def _detect_interpreter(target: str) -> list[str]:

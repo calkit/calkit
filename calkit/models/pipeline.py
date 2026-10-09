@@ -485,6 +485,28 @@ class Stage(BaseModel):
     def dvc_cmd(self) -> str:
         raise NotImplementedError
 
+    def path_from_wdir(self, path: str) -> str:
+        """A project-relative path as seen from the stage's ``wdir``.
+
+        DVC resolves a stage's command and deps from its ``wdir``, but the
+        files Calkit generates for it live under the project root.
+        """
+        if self.wdir is None:
+            return path
+        return posixpath.relpath(path, posixpath.normpath(self.wdir))
+
+    @property
+    def file_stem(self) -> str:
+        """The stage's name as a file name, unique among stages."""
+        import hashlib
+
+        name = self.name or ""
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+        if safe != name:
+            # So, e.g., 'a b' and 'a_b' don't share a file
+            safe += "-" + hashlib.md5(name.encode()).hexdigest()[:8]
+        return safe
+
     @property
     def setup_file_path(self) -> str | None:
         """Where this stage's resolved setup commands are written.
@@ -504,10 +526,9 @@ class Stage(BaseModel):
         """
         if not self._system_env_setup:
             return None
-        # Stage names can carry characters a path shouldn't, e.g. the '@'
-        # DVC gives an iterated stage
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.name)
-        return posixpath.join(".calkit", "stage-setup", f"{safe}.json")
+        return posixpath.join(
+            ".calkit", "stage-setup", f"{self.file_stem}.json"
+        )
 
     def write_setup_file(self, wdir: str | None = None) -> str | None:
         """Write the resolved setup commands, returning the path."""
@@ -539,8 +560,7 @@ class Stage(BaseModel):
         """
         if not self._env_var_names:
             return None
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.name or "")
-        return posixpath.join(".calkit", "env-vars", f"{safe}.json")
+        return posixpath.join(".calkit", "env-vars", f"{self.file_stem}.json")
 
     def write_env_var_file(
         self, values: dict[str, str | None], wdir: str | None = None
@@ -576,10 +596,10 @@ class Stage(BaseModel):
         deps = []
         setup_file = self.setup_file_path
         if setup_file is not None:
-            deps.append(setup_file)
+            deps.append(self.path_from_wdir(setup_file))
         env_var_file = self.env_var_file_path
         if env_var_file is not None:
-            deps.append(env_var_file)
+            deps.append(self.path_from_wdir(env_var_file))
         for i in self.inputs:
             if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
                 continue
@@ -649,7 +669,7 @@ class Stage(BaseModel):
             # file is a dep, so editing either list still reruns the stage.
             setup_file = self.setup_file_path
             if setup_file is not None:
-                cmd += f" --setup-file {setup_file}"
+                cmd += f" --setup-file {self.path_from_wdir(setup_file)}"
             if self.inner_environment == self.outer_environment:
                 return cmd + " --"
             # The inner xenv runs in the workspace rather than here
@@ -1612,8 +1632,9 @@ class ShellCommandStage(Stage):
             return None
         if "$" not in self.command and "`" not in self.command:
             return None
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.name or "")
-        return posixpath.join(".calkit", "stage-commands", f"{safe}.sh")
+        return posixpath.join(
+            ".calkit", "stage-commands", f"{self.file_stem}.sh"
+        )
 
     def write_command_file(self, wdir: str | None = None) -> str | None:
         """Write the command to its file, if it has one."""
@@ -1636,7 +1657,7 @@ class ShellCommandStage(Stage):
         deps = super().dvc_deps
         command_file = self.command_file_path
         if command_file is not None:
-            deps = [command_file] + deps
+            deps = [self.path_from_wdir(command_file)] + deps
         return deps
 
     @property
@@ -1648,6 +1669,7 @@ class ShellCommandStage(Stage):
             norc_args = "--noprofile --norc"
         command_file = self.command_file_path
         if command_file is not None:
+            command_file = self.path_from_wdir(command_file)
             cmd += f" {self.shell} {norc_args} {command_file}"
             return cmd.strip()
         shell_cmd = self.command.replace('"', '\\"')
@@ -2677,5 +2699,6 @@ class Pipeline(BaseModel):
                 stage.outer_environment,
             ):
                 for fpath in env_lock_fpaths.get(env_name, []):
+                    fpath = stage.path_from_wdir(fpath)
                     if fpath not in stage.inputs:
                         stage.inputs.append(fpath)

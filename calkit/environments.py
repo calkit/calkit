@@ -905,12 +905,30 @@ def write_switch_env_lock(
     """Write a switch's definition, and its options', for stages to depend on.
 
     The same on every machine: it records what the switch could pick, not
-    what it picked here. Spec files and inputs of the options are recorded
-    by checksum, so editing one reruns the stages using the switch.
+    what it picked here. Spec files, inputs and lock files of the options
+    are recorded by checksum, so changing one reruns the stages using the
+    switch.
     """
+
+    def content_md5(fpath: str) -> str:
+        """Hash a file or directory, with line endings normalized."""
+        if os.path.isdir(fpath):
+            parts = [
+                f"{Path(os.path.relpath(f, fpath)).as_posix()}:"
+                + spec_fingerprint(f)
+                for f in sorted(
+                    os.path.join(root, name)
+                    for root, _, names in os.walk(fpath)
+                    for name in names
+                )
+            ]
+            return hashlib.md5("\n".join(parts).encode()).hexdigest()
+        return spec_fingerprint(fpath)
+
     options = get_switch_options(env_name, envs)
     env = envs[env_name]
     specs = {}
+    locks = {}
     for option in options:
         option_env = envs[option]
         paths = get_env_input_paths(option_env, option)
@@ -919,7 +937,14 @@ def write_switch_env_lock(
         for path in paths:
             full = os.path.join(wdir, path) if wdir else path
             if os.path.isfile(full):
-                specs[Path(path).as_posix()] = calkit.get_md5(full)
+                specs[Path(path).as_posix()] = content_md5(full)
+        lock_fpath = get_env_lock_fpath(
+            env=option_env, env_name=option, as_posix=True, for_dvc=True
+        )
+        if lock_fpath is not None:
+            full = os.path.join(wdir, lock_fpath) if wdir else lock_fpath
+            if os.path.exists(full):
+                locks[option] = content_md5(full)
     lock_data = {
         "use": env["use"],
         "lock": env.get("lock") or [],
@@ -933,6 +958,8 @@ def write_switch_env_lock(
         },
         "specs": specs,
     }
+    if locks:
+        lock_data["locks"] = locks
     from calkit.cli.scheduler import _mock_enabled
 
     if _mock_enabled() and any(
@@ -1084,8 +1111,13 @@ def env_inputs_md5(env_name: str, env: dict) -> str | None:
 
 
 def inputs_changed_since_build(env_name: str, env: dict) -> bool:
-    """Whether an env's input files changed since it was last built here."""
+    """Whether an env's input files changed since it was last built here.
+
+    Removing every input isn't a change worth rebuilding for.
+    """
     current = env_inputs_md5(env_name, env)
+    if current is None:
+        return False
     with get_cache_db(name="env-builds") as db:
         built = db.get(make_cache_key(env_name))
     return built is not None and built != current
@@ -1106,36 +1138,48 @@ def remove_built_env(env_name: str, envs: dict) -> str | None:
     """
     env = envs[env_name]
     kind = env.get("kind")
-    spec_dir = os.path.dirname(env.get("path") or "")
+    path = os.path.expandvars(env.get("path") or "")
+    spec_dir = os.path.dirname(path)
     target = None
     if kind in ("venv", "uv-venv"):
-        target = env.get("prefix") or get_default_venv_prefix(
-            envs, env["path"], env_name
-        )
+        if env.get("prefix"):
+            target = env["prefix"]
+        elif path:
+            target = get_default_venv_prefix(envs, path, env_name)
+        else:
+            raise ValueError(f"Environment '{env_name}' has no 'path'")
     elif kind == "uv":
         target = os.path.join(spec_dir, ".venv")
     elif kind == "pixi":
         target = os.path.join(spec_dir, ".pixi", "envs")
     elif kind == "conda":
-        if env.get("prefix"):
-            target = env["prefix"]
-        else:
-            with open(env["path"]) as f:
-                name = (yaml.safe_load(f) or {}).get("name")
+        with open(path, encoding="utf-8") as f:
+            spec = yaml.safe_load(f) or {}
+        # A prefix in the spec is where conda creates it, too
+        target = env.get("prefix") or spec.get("prefix")
+        if target is None:
+            name = spec.get("name")
             if not name:
-                raise ValueError(f"'{env['path']}' names no environment")
+                raise ValueError(f"'{path}' names no environment")
             from calkit.conda import find_conda_exe
 
             conda_exe = find_conda_exe()
             if conda_exe is None:
                 raise ValueError("conda not found")
+            existing = json.loads(
+                subprocess.check_output(
+                    [conda_exe, "env", "list", "--json"]
+                ).decode()
+            )["envs"]
+            if name not in [os.path.basename(e) for e in existing]:
+                return None
             subprocess.check_call(
                 [conda_exe, "env", "remove", "-y", "-n", name]
             )
             return f"conda environment '{name}'"
     if target is None:
         return None
-    target = os.path.expandvars(target)
+    target = os.path.expandvars(str(target))
     if not os.path.exists(target):
         return None
     shutil.rmtree(target)
@@ -1277,10 +1321,12 @@ def describe_system_env_lock_mismatch(
         f"Environment '{env_name}' is locked to a different machine:\n"
         + "\n".join(lines)
         + "\n\nResults already computed on the locked machine are kept, "
-        "and a stage that needs to run cannot, since its result would not "
-        "be comparable with them. If this machine should take over, lock "
-        f"it again with:\n\n  calkit update env -n {env_name} --lock"
-        "\n\nwhich invalidates every stage that depends on the lock."
+        "and a stage that needs to run can't here, since its result would "
+        "not be comparable with them. If this machine should take over, "
+        f"lock it again with:\n\n  calkit update env -n {env_name} --lock"
+        "\n\nwhich invalidates every stage that depends on the lock. To "
+        "have the lock follow whichever machine runs the stages, e.g., in "
+        "CI, set 'relock: auto' on the environment."
     )
 
 
@@ -1356,9 +1402,13 @@ def write_system_env_lock(
 
 
 def spec_fingerprint(spec_fpath: str, python: str | None = None) -> str:
-    """Hash the spec a lock file was resolved from, and its Python."""
+    """Hash the spec a lock file was resolved from, and its Python.
+
+    Line endings are normalized, since Git may check a spec out with CRLF
+    on Windows and LF elsewhere.
+    """
     with open(spec_fpath, "rb") as f:
-        content = f.read()
+        content = f.read().replace(b"\r\n", b"\n")
     if python is not None:
         content += f"\npython={python}".encode()
     return hashlib.md5(content).hexdigest()
@@ -1367,9 +1417,9 @@ def spec_fingerprint(spec_fpath: str, python: str | None = None) -> str:
 def read_lock_spec_fingerprint(lock_fpath: str) -> str | None:
     """Read the spec hash a lock file records, if it records one."""
     try:
-        with open(lock_fpath) as f:
+        with open(lock_fpath, encoding="utf-8") as f:
             first = f.readline().strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     if not first.startswith(LOCK_SPEC_COMMENT):
         return None
@@ -1381,11 +1431,11 @@ def stamp_lock_with_spec(
 ) -> None:
     """Record in a lock file which spec it was resolved from."""
     fingerprint = spec_fingerprint(spec_fpath, python=python)
-    with open(lock_fpath) as f:
+    with open(lock_fpath, encoding="utf-8") as f:
         body = f.read()
     if body.startswith(LOCK_SPEC_COMMENT):
         body = body.split("\n", 1)[1] if "\n" in body else ""
-    with open(lock_fpath, "w", newline="\n") as f:
+    with open(lock_fpath, "w", newline="\n", encoding="utf-8") as f:
         f.write(f"{LOCK_SPEC_COMMENT} {fingerprint}\n{body}")
 
 
@@ -1461,8 +1511,8 @@ def write_cross_platform_venv_locks(
         try:
             subprocess.check_call(cmd, cwd=wdir)
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            if verbose:
-                warn(f"Could not lock {spec_fpath} for {arch}: {e}")
+            # Only tried when this platform's lock is rewritten
+            warn(f"Could not lock {spec_fpath} for {arch}: {e}")
             if os.path.isfile(out_fpath_full):
                 os.remove(out_fpath_full)
             continue
@@ -1667,6 +1717,24 @@ def check_inner_env_there(argv: list[str]) -> list[str]:
     return argv
 
 
+# Stage kinds whose command is sent to their outer env's machine, rather
+# than run here in their inner env, e.g., a notebook
+STAGE_KINDS_SENT_TO_OUTER_ENV = frozenset(
+    {
+        "command",
+        "julia-command",
+        "julia-script",
+        "matlab-command",
+        "matlab-script",
+        "python-script",
+        "quarto",
+        "r-script",
+        "shell-command",
+        "shell-script",
+    }
+)
+
+
 def _runs_elsewhere(env_name: str, envs: dict) -> bool:
     """Whether an outer env runs its stages on another machine."""
     env = envs.get(env_name) or {}
@@ -1744,20 +1812,22 @@ def check_all_in_pipeline(
     # Stages that can't run here don't need their environments
     stages = {k: v for k, v in stages.items() if k not in (skip_stages or [])}
     envs = ck_info.get("environments", {})
-    envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
-    envs_in_pipeline = [
-        e for e in envs_in_pipeline if e and not (str(e)).startswith("_")
-    ]
     # If any environments are composite environments, we need to split them
     # up into their individual names in the list
     split_envs = []
-    for env_name in envs_in_pipeline:
+    for stage in stages.values():
+        env_name = stage.get("environment")
+        if not env_name or str(env_name).startswith("_"):
+            continue
         if env_name.count(COMPOSITE_ENV_SEP) == 1:
             outer_env_name, sub_env_name = env_name.split(COMPOSITE_ENV_SEP)
             split_envs.append(outer_env_name)
             # An inner env is built where the stage runs, so one whose
             # outer env is another machine is checked there, not here
-            if not _runs_elsewhere(outer_env_name, envs):
+            if not (
+                stage.get("kind") in STAGE_KINDS_SENT_TO_OUTER_ENV
+                and _runs_elsewhere(outer_env_name, envs)
+            ):
                 split_envs.append(sub_env_name)
         else:
             split_envs.append(env_name)

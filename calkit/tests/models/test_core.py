@@ -225,3 +225,59 @@ def test_machine_property_requirements():
     )
     assert len(env.requirements) == 2
     assert env.lock == ["cpu-count", "julia-version"]
+
+
+def test_env_var_inputs():
+    from calkit.models.core import SystemEnvironment
+    from calkit.models.io import EnvVarInput, PathInput
+
+    env = SystemEnvironment.model_validate(
+        {"kind": "system", "inputs": [{"kind": "env-var", "name": "SITE"}]}
+    )
+    assert env.inputs == [EnvVarInput(kind="env-var", name="SITE")]
+    # A misspelled key is refused rather than ignored
+    with pytest.raises(ValidationError):
+        SystemEnvironment.model_validate(
+            {"kind": "system", "inputs": [{"kind": "env-var", "path": "X"}]}
+        )
+    with pytest.raises(ValidationError):
+        EnvVarInput.model_validate(
+            {"kind": "env-var", "name": "SITE", "default": "x"}
+        )
+    # Nor does a malformed env-var input fall through to being a path
+    with pytest.raises(ValidationError, match="not a path"):
+        PathInput.model_validate({"kind": "env-var", "path": "X"})
+    assert (
+        PathInput.model_validate({"path": "a", "storage": "git"}).path == "a"
+    )
+
+
+def test_switch_conditions_are_checked_at_load():
+    from calkit.models.core import SwitchEnvironment
+
+    env = SwitchEnvironment.model_validate(
+        {
+            "kind": "switch",
+            "use": {
+                "if matches(hostname, '*.edu')": "a",
+                "elif env('SITE', 'x') == 'y' and cpu_count >= 4": "b",
+                "elif has_app('sbatch')": "c",
+                "else": "d",
+            },
+        }
+    )
+    assert list(env.use.values()) == ["a", "b", "c", "d"]
+    # Syntax errors and anything evaluation would refuse are caught when
+    # the project loads, naming the condition
+    refused = {
+        "if hostname ==": "cannot parse condition 'hostname =='",
+        "if hostname.lower() == 'x'": "'hostname.lower' cannot be called",
+        "if open('x') == 'y'": "'open' cannot be called",
+        "if hostname[0] == 'x'": "Subscript",
+        "if env(name='X') == 'y'": "keyword",
+    }
+    for key, problem in refused.items():
+        with pytest.raises(ValidationError, match=problem):
+            SwitchEnvironment.model_validate(
+                {"kind": "switch", "use": {key: "a", "else": "b"}}
+            )

@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 import operator
 import re
-from typing import Any, Callable, TypeGuard
+from typing import Any, Callable, Iterable, TypeGuard
 
 _IF_KEY = re.compile(r"^\s*(if|elif)\s+(.+?)\s*$")
 _ELSE_KEY = re.compile(r"^\s*else\s*$")
@@ -23,9 +23,45 @@ _COMPARISONS = {
     ast.GtE: operator.ge,
     ast.Eq: operator.eq,
     ast.NotEq: operator.ne,
-    ast.In: lambda a, b: a in b,
-    ast.NotIn: lambda a, b: a not in b,
+    # Nothing is in None, e.g., an unset 'env("X")'
+    ast.In: lambda a, b: b is not None and a in b,
+    ast.NotIn: lambda a, b: b is None or a not in b,
 }
+_ARITHMETIC: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_UNARY: dict[type[ast.unaryop], Callable[[Any], Any]] = {
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+_ALLOWED_NODES = (
+    ast.Expression,
+    ast.BoolOp,
+    ast.And,
+    ast.Or,
+    ast.UnaryOp,
+    ast.Not,
+    ast.Compare,
+    ast.BinOp,
+    ast.Constant,
+    ast.Name,
+    ast.Load,
+    ast.Call,
+    ast.List,
+    ast.Tuple,
+    *_COMPARISONS,
+    *_ARITHMETIC,
+    *_UNARY,
+)
+# Bounds that keep a condition from exhausting time or memory
+_MAX_INT_BITS = 10_000
+_MAX_LENGTH = 10_000
 
 
 def is_conditional(value: Any) -> TypeGuard[dict]:
@@ -65,21 +101,82 @@ def parse_conditional(clauses: dict) -> list[tuple[str | None, str]]:
     return parsed
 
 
-def _call(
-    node: ast.Call,
-    values: dict[str, Any],
-    functions: dict[str, Callable],
-) -> Any:
-    if not isinstance(node.func, ast.Name) or node.func.id not in functions:
-        name = ast.unparse(node.func)
-        allowed = ", ".join(sorted(functions)) or "none"
-        raise ValueError(
-            f"'{name}' cannot be called in a condition (allowed: {allowed})"
-        )
-    if node.keywords:
-        raise ValueError("keyword arguments are not supported in conditions")
-    args = [_operand(a, values, functions) for a in node.args]
-    return functions[node.func.id](*args)
+def check_condition(
+    expression: str, functions: Iterable[str] = ()
+) -> ast.Expression:
+    """Parse a condition, refusing anything evaluating it would refuse.
+
+    Only the structure is checked, not the names, so this can run where
+    the values aren't known, e.g., when ``calkit.yaml`` is loaded.
+    """
+    functions = set(functions)
+    shown = expression if len(expression) <= 200 else expression[:200] + "..."
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except (SyntaxError, MemoryError, RecursionError) as e:
+        raise ValueError(f"cannot parse condition {shown!r}: {e}") from e
+
+    def refuse(problem: str) -> ValueError:
+        return ValueError(f"condition {shown!r}: {problem}")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, _ALLOWED_NODES):
+            if isinstance(node, ast.expr):
+                what = f"{type(node).__name__} {ast.unparse(node)!r}"
+            else:
+                what = type(node).__name__
+            raise refuse(f"{what} is not allowed")
+        if isinstance(node, ast.Call):
+            if (
+                not isinstance(node.func, ast.Name)
+                or node.func.id not in functions
+            ):
+                allowed = ", ".join(sorted(functions)) or "none"
+                raise refuse(
+                    f"'{ast.unparse(node.func)}' cannot be called "
+                    f"(allowed: {allowed})"
+                )
+            if node.keywords:
+                raise refuse("keyword arguments are not supported")
+        if isinstance(node, ast.BinOp) or (
+            isinstance(node, ast.UnaryOp) and not isinstance(node.op, ast.Not)
+        ):
+            if any(isinstance(n, ast.Call) for n in ast.walk(node)):
+                raise refuse(
+                    "a call can be compared, but not used inside arithmetic"
+                )
+    return tree
+
+
+def _arithmetic(node: ast.AST, values: dict[str, Any]) -> Any:
+    """A value computed from names and literals, within size bounds."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id not in values:
+            raise KeyError(node.id)
+        return values[node.id]
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY:
+        return _UNARY[type(node.op)](_arithmetic(node.operand, values))
+    if not isinstance(node, ast.BinOp) or type(node.op) not in _ARITHMETIC:
+        raise ValueError(f"{ast.unparse(node)!r} is not supported")
+    left = _arithmetic(node.left, values)
+    right = _arithmetic(node.right, values)
+    op = type(node.op)
+    ints = isinstance(left, int) and isinstance(right, int)
+    if op is ast.Pow and ints and right > 0:
+        if abs(left).bit_length() * right > _MAX_INT_BITS:
+            raise ValueError(f"{ast.unparse(node)!r} is too large")
+    if op is ast.Mult:
+        for seq, count in ((left, right), (right, left)):
+            if isinstance(seq, (str, bytes, list, tuple)) and isinstance(
+                count, int
+            ):
+                if len(seq) * count > _MAX_LENGTH:
+                    raise ValueError(f"{ast.unparse(node)!r} is too long")
+    if op is ast.Mod and isinstance(left, (str, bytes)):
+        raise ValueError("string formatting is not supported")
+    return _ARITHMETIC[op](left, right)
 
 
 def _operand(
@@ -87,32 +184,21 @@ def _operand(
     values: dict[str, Any],
     functions: dict[str, Callable],
 ) -> Any:
-    """One side of a comparison, resolved against the values.
-
-    Names, literals and allowed calls are read directly; anything else is
-    arithmetic and goes to the same evaluator the calculations use, so
-    there is one audited path for arithmetic rather than two.
-    """
-    if isinstance(node, ast.Constant):
-        return node.value
-    if isinstance(node, ast.Name):
-        if node.id not in values:
-            raise KeyError(node.id)
-        return values[node.id]
+    """One side of a comparison, resolved against the values."""
     if isinstance(node, ast.Call):
-        return _call(node, values, functions)
-    if isinstance(node, (ast.List, ast.Tuple)):
+        assert isinstance(node.func, ast.Name)
+        args = [_operand(a, values, functions) for a in node.args]
+        return functions[node.func.id](*args)
+    if isinstance(node, ast.List):
         return [_operand(e, values, functions) for e in node.elts]
+    if isinstance(node, ast.Tuple):
+        return tuple(_operand(e, values, functions) for e in node.elts)
+    # A missing name is reported before anything else, so a name that
+    # isn't an identifier gets the message saying so
     for inner in ast.walk(node):
-        if isinstance(inner, ast.Call):
-            raise ValueError(
-                "a call can be compared, but not used inside arithmetic"
-            )
         if isinstance(inner, ast.Name) and inner.id not in values:
             raise KeyError(inner.id)
-    import arithmetic_eval  # type: ignore[import-untyped]
-
-    return arithmetic_eval.evaluate(ast.unparse(node), values)
+    return _arithmetic(node, values)
 
 
 def _truth(
@@ -164,35 +250,46 @@ def evaluate_condition(
     Raises ``KeyError`` for a name not in ``values`` and ``ValueError``
     for anything else wrong with the condition.
     """
-    if functions is None:
-        functions = {}
-    try:
-        tree = ast.parse(expression, mode="eval")
-    except SyntaxError as e:
-        raise ValueError(f"cannot parse condition {expression!r}: {e}") from e
-    try:
-        return bool(_truth(tree.body, values, functions))
-    except KeyError:
+
+    def unusable_name() -> ValueError | None:
         # A name like 'paired-gain.vawt-8' reads as arithmetic and
         # attribute access, so the failure would otherwise name a
-        # fragment of it and look like a missing value
+        # fragment of it or a construct that isn't allowed
         unusable = [
             name
             for name in values
             if not name.isidentifier() and name in expression
         ]
-        if unusable:
-            raise ValueError(
-                f"condition {expression!r} refers to {unusable[0]!r}, which "
-                "cannot be read as a variable; give it a 'name' that is a "
-                "valid Python identifier"
-            ) from None
-        raise
+        if not unusable:
+            return None
+        return ValueError(
+            f"condition {expression!r} refers to {unusable[0]!r}, which "
+            "cannot be read as a variable; give it a 'name' that is a "
+            "valid Python identifier"
+        )
+
+    if functions is None:
+        functions = {}
+    try:
+        tree = check_condition(expression, functions)
     except ValueError:
+        error = unusable_name()
+        if error is not None:
+            raise error from None
         raise
+    try:
+        return bool(_truth(tree.body, values, functions))
+    except KeyError:
+        error = unusable_name()
+        if error is not None:
+            raise error from None
+        raise
+    except ValueError as e:
+        raise ValueError(f"condition {expression!r}: {e}") from e
     except Exception as e:
-        # E.g., comparing a string to a number, or syntax arithmetic_eval
-        # refuses, so callers only have to handle one kind of bad condition
+        # E.g., comparing a string to a number, or a value too deeply nested
+        # to evaluate, so callers only have to handle one kind of bad
+        # condition
         raise ValueError(
             f"cannot evaluate condition {expression!r}: {e}"
         ) from e

@@ -1068,15 +1068,15 @@ class SystemEnvironment(Environment):
     that, the lock is not rewritten when the project moves to a machine
     where they differ, so stages that are up to date stay up to date.
     Checking the environment there warns about the difference, and a stage
-    that needs to run fails, since its result would not be comparable
-    with the existing ones. To make the new machine the one results come
+    that needs to run is skipped by ``calkit run``, since its result would
+    not be comparable with the existing ones. To make the new machine the one results come
     from, run ``calkit update env -n NAME --lock``, which updates the lock
     and invalidates the stages that depend on it. With ``relock: auto``,
     that happens on its own, for results that should follow the machine.
 
     ``requirements`` is the other half, and answers a different question.
-    It says what must be *true* of this machine -- apps that must be
-    installed, variables that must be set, at least this many CPUs -- and
+    It says what must be *true* of this machine---apps that must be
+    installed, variables that must be set, at least this many CPUs---and
     is checked before anything runs, on the machine the environment names.
     A stage whose requirements aren't met there is skipped, keeping its
     outputs, while a locked property records what results were computed
@@ -1088,14 +1088,14 @@ class SystemEnvironment(Environment):
     stage can run: sourcing a site setup script, loading modules, putting a
     hand-built toolchain on the ``PATH``. It runs in the same shell as the
     stage's own command, so a variable it sets or a function it defines is
-    in scope for the stage, whether or not it was exported -- only a child
+    in scope for the stage, whether or not it was exported---only a child
     process needs that. This is why it can't be a ``setup`` requirement:
     those run in a shell of their own and are cached, since they check
     whether something has been done rather than doing it every time.
 
     It is not recorded in the environment's lock file. The pipeline
     compiler merges it with each stage's own ``setup`` and writes the
-    result beside the pipeline, which the stage depends on -- so changing
+    result beside the pipeline, which the stage depends on---so changing
     it reruns exactly the stages that run it, and not the ones whose
     ``env_default_setup`` means they never do.
 
@@ -1111,7 +1111,7 @@ class SystemEnvironment(Environment):
     networks, and are reused; a project that means one particular machine
     can name it here instead and have that survive all of it. It replaces
     the name in deciding whether this is that machine, and is checked again
-    on the far end when it isn't -- so a host that has come to point at a
+    on the far end when it isn't---so a host that has come to point at a
     different box is reported rather than run on. ``host`` is still what
     reaches it, so both are worth declaring for a machine that isn't this
     one. Run ``calkit describe system`` on a machine to read its ID.
@@ -1122,7 +1122,7 @@ class SystemEnvironment(Environment):
     one. Whether it does is left to ``lock``, where ``machine-id`` is
     available for projects whose results really are machine-specific.
 
-    ``wdir`` is the project's workspace on that host -- the directory the
+    ``wdir`` is the project's workspace on that host---the directory the
     stage runs in. It defaults to
     ``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just
     names a host lands somewhere predictable rather than having to spell
@@ -1185,9 +1185,9 @@ class SystemEnvironment(Environment):
         "and sourcing a setup script is the usual reason to have setup "
         "commands. Ignored when neither this environment nor any stage "
         "using it has setup commands. Setting it to anything but 'bash' "
-        "is recorded in the environment's lock file -- unlike the commands "
-        "themselves, the shell isn't in the compiled command -- so stages "
-        "that run setup commands rerun when it changes.",
+        "is recorded in the environment's lock file, since unlike the "
+        "commands themselves the shell isn't in the compiled command, so "
+        "stages that run setup commands rerun when it changes.",
     )
     inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
@@ -1282,9 +1282,14 @@ class SwitchEnvironment(Environment):
     @field_validator("use")
     @classmethod
     def check_use(cls, v: dict[str, str]) -> dict[str, str]:
-        from calkit.conditions import parse_conditional
+        from calkit.conditions import check_condition, parse_conditional
 
-        parse_conditional(v)
+        # Names aren't checked, since the machine properties are only
+        # known by reading them, which is too slow for loading a project
+        functions = ["env", "has_app", "matches"]
+        for condition, _ in parse_conditional(v):
+            if condition is not None:
+                check_condition(condition, functions)
         return v
 
 

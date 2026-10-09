@@ -2748,8 +2748,8 @@ def run(
     # from the last one, since a machine can change between runs
     import calkit.workspace
 
-    remote_info_dir = os.path.join(
-        calkit.ensure_local_dir(), "remote-system-info"
+    remote_info_dir = os.path.abspath(
+        os.path.join(calkit.ensure_local_dir(), "remote-system-info")
     )
     shutil.rmtree(remote_info_dir, ignore_errors=True)
     os.environ[calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR] = remote_info_dir
@@ -2764,6 +2764,7 @@ def run(
     # directory into an unrelated folder.
     if not os.path.isfile("calkit.yaml") and not os.path.isfile("dvc.yaml"):
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(
             f"No calkit.yaml or dvc.yaml in {os.getcwd()}, so there is no "
             "pipeline to run here. Run 'calkit init' to make this a "
@@ -2814,6 +2815,7 @@ def run(
         calkit.check_requirements(ck_info=ck_info, system_info=system_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(str(e))
     # Extract anything the project's Markdown files declare before the
     # environments are checked, since an environment declared there must be
@@ -2822,20 +2824,38 @@ def run(
         calkit.pipeline.sync_markdown(ck_info=ck_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(f"Failed to read markdown stages: {e}")
     # Stages that can't run here are skipped, keeping their outputs, and
     # their environments aren't checked
     import calkit.markdown
 
+    # Only the stages this run can reach, so nothing else is probed or
+    # prompted for
+    gate_stage_names: set[str] | None = None
+    if targets and not (target_inputs or target_outputs):
+        try:
+            gate_stage_names = set()
+            for target in targets:
+                gate_stage_names |= calkit.pipeline.get_upstream_stages(target)
+        except Exception:
+            # E.g., a stage that isn't compiled yet
+            gate_stage_names = None
     try:
-        gated_stages = calkit.pipeline.get_gated_stages(
-            calkit.markdown.expand_ck_info(ck_info).ck_info
+        gated_stages, gate_errors = calkit.pipeline.get_gated_stages(
+            calkit.markdown.expand_ck_info(ck_info).ck_info,
+            stage_names=gate_stage_names,
+            system_info=system_info,
         )
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(f"Failed to check stage requirements: {e}")
-    for stage_name, reason in gated_stages.items():
-        warn(f"Stage '{stage_name}' can't run on this machine: {reason}")
+    for stage_name, reason in gate_errors.items():
+        warn(f"Stage '{stage_name}' can't run: {reason}")
+    gated_stages |= gate_errors
+    # Filled in by the run with the skipped stages that were out of date
+    skipped_stale: dict[str, str] = {}
     # Check all environments in the pipeline (with caching)
     # If any failed, warn the user that we might have problems running
     calkit.echo("📦 Checking environments")
@@ -2926,6 +2946,7 @@ def run(
             dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
     from dvc.exceptions import NotDvcRepoError
@@ -3017,6 +3038,7 @@ def run(
         )
     except ValueError as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(str(e))
     # Extract any boolean args
     for name in [
@@ -3087,6 +3109,7 @@ def run(
             # run, but still report failure the way the parent path does below,
             # else a failing subproject stage would exit zero.
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
             if failed:
                 raise_error("Pipeline failed")
             calkit.echo("Pipeline completed successfully ✅")
@@ -3208,7 +3231,7 @@ def run(
         # such a collision aborts the whole run with "Unable to acquire lock".
         with (
             calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT),
-            calkit.dvc.skip_stages(gated_stages),
+            calkit.dvc.skip_stages(gated_stages, skipped=skipped_stale),
         ):
             res = _run_dvc_repro(["repro"] + args)
     finally:
@@ -3228,6 +3251,18 @@ def run(
         )
     else:
         failed = failed or res != 0
+    # A skip is only fine when the project says the stage can't run here and
+    # nobody asked for it by name
+    targeted = {t.split("@")[0] for t in targets or []}
+    error_reasons = set(gate_errors.values())
+    for addressing, reason in skipped_stale.items():
+        if reason in error_reasons or addressing.split("@")[0] in targeted:
+            typer.echo(
+                f"Stage '{addressing}' is out of date and couldn't run: "
+                f"{reason}",
+                err=True,
+            )
+            failed = True
     # Write what each stage printed back into any 'calkit output' blocks
     # in the Markdown that declared it
     try:
@@ -3331,8 +3366,8 @@ def run(
                 )
             except ValueError:
                 switch_picks[env_name] = None
-    if gated_stages:
-        run_info["gated"] = gated_stages
+    if skipped_stale:
+        run_info["gated"] = skipped_stale
     if switch_picks:
         run_info["switches"] = switch_picks
         run_stages = ck_info.get("pipeline", {}).get("stages", {})
@@ -3373,12 +3408,23 @@ def run(
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+    os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
     if failed:
         try:
             calkit.dvc.restore_output_ignores()
         except Exception as e:
             warn(f"Failed to re-ignore pipeline outputs: {e}")
         raise_error("Pipeline failed")
+    elif skipped_stale:
+        for addressing, reason in skipped_stale.items():
+            warn(
+                f"Stage '{addressing}' is out of date but can't run on this "
+                f"machine: {reason}"
+            )
+        calkit.echo(
+            f"Pipeline completed, skipping {len(skipped_stale)} out-of-date "
+            "stage(s) that can't run on this machine ⚠️"
+        )
     else:
         calkit.echo("Pipeline completed successfully ✅")
     if save_after_run or save_message is not None:
@@ -4167,12 +4213,18 @@ def run_in_env(
         # Checked even with --no-check, since a stage that needs to run on
         # a machine that doesn't match the lock must not
         try:
+            # Read once for both
+            system_info = None
+            if env.get("lock"):
+                system_info = calkit.get_system_info(
+                    apps=calkit.environments.lock_app_names(env.get("lock"))
+                )
             # Writes only a first lock, or a new one with 'relock: auto'
             calkit.environments.write_system_env_lock(
-                env_name=env_name, env=env
+                env_name=env_name, env=env, system_info=system_info
             )
             mismatch = calkit.environments.system_env_lock_mismatch(
-                env_name=env_name, env=env
+                env_name=env_name, env=env, system_info=system_info
             )
         except ValueError as e:
             raise_error(f"Environment '{env_name}': {e}")

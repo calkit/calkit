@@ -751,18 +751,28 @@ def remote_system_info(
         return describe()
     key = hashlib.sha1(
         json.dumps(
-            [workspace.host, workspace.user, sorted(apps or [])]
+            [
+                workspace.host,
+                workspace.user,
+                workspace.ssh_key,
+                sorted(apps or []),
+            ]
         ).encode()
     ).hexdigest()
     cache_fpath = os.path.join(cache_dir, key + ".json")
-    if os.path.isfile(cache_fpath):
+    try:
         with open(cache_fpath) as f:
             cached: dict = json.load(f)
         return cached
+    except (OSError, json.JSONDecodeError):
+        pass
     info = describe()
     os.makedirs(cache_dir, exist_ok=True)
-    with open(cache_fpath, "w") as f:
+    # Replaced whole, so a stage reading it at the same time never sees half
+    tmp_fpath = f"{cache_fpath}.{os.getpid()}.tmp"
+    with open(tmp_fpath, "w") as f:
         json.dump(info, f)
+    os.replace(tmp_fpath, cache_fpath)
     return info
 
 

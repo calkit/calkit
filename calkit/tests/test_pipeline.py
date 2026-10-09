@@ -3884,6 +3884,17 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
                 "kind": "switch",
                 "use": {"if cpu_count < 0": "lab"},
             },
+            "typo": {
+                "kind": "switch",
+                "use": {"if hostnme == 'x'": "lab", "else": "far"},
+            },
+            "here": {"kind": "system"},
+            "pinned": {"kind": "system", "lock": ["hostname"]},
+            "follows": {
+                "kind": "system",
+                "lock": ["hostname"],
+                "relock": "auto",
+            },
         },
         "pipeline": {
             "stages": {
@@ -3926,29 +3937,71 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
                     "environment": "lab",
                     "frozen": True,
                 },
+                "bad-switch": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "typo",
+                },
+                "here-token": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "requirements": [
+                        {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+                    ],
+                },
+                "elsewhere": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "pinned",
+                },
+                "anywhere": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "follows",
+                },
             }
         },
     }
-    gated = calkit.pipeline.get_gated_stages(ck_info, interactive=False)
+    # Locked to another machine
+    for name in ["pinned", "follows"]:
+        lock_fpath = calkit.environments.get_env_lock_fpath(
+            env=ck_info["environments"][name], env_name=name
+        )
+        assert lock_fpath is not None
+        os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+        with open(lock_fpath, "w") as f:
+            json.dump({"hostname": "calkit-test.invalid"}, f)
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, interactive=False
+    )
     assert set(gated) == {
         "needs-token",
         "on-cluster",
         "in-lab",
-        "far-away",
         "no-pick",
+        "here-token",
+        "elsewhere",
     }
+    # Something being wrong isn't the project saying the stage can't run
+    assert set(errors) == {"far-away", "bad-switch"}
+    assert "hostnme" in errors["bad-switch"]
+    assert "locked to another machine" in gated["elsewhere"]
+    assert "relock: auto" in gated["elsewhere"]
+    # A stage's own requirement isn't one a host would help with
+    assert "'host'" not in gated["here-token"]
     assert "CK_TEST_TOKEN" in gated["needs-token"]
     assert "*.calkit-test.invalid" in gated["on-cluster"]
     # A local system env that can't run here could from here with a host
     assert "giving environment 'lab' a 'host'" in gated["in-lab"]
-    assert "can't reach or use host 'calkit-test.invalid'" in gated["far-away"]
+    assert "can't reach host 'calkit-test.invalid'" in errors["far-away"]
     assert "picks no environment" in gated["no-pick"]
     # Meeting the requirement lets the stages run
     monkeypatch.setenv("CK_TEST_TOKEN", "x")
-    gated = calkit.pipeline.get_gated_stages(
+    gated, errors = calkit.pipeline.get_gated_stages(
         ck_info, stage_names=["needs-token", "in-lab"], interactive=False
     )
-    assert gated == {}
+    assert gated == {} and errors == {}
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
@@ -3991,3 +4044,46 @@ def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
     subprocess.run(stages["var"]["cmd"], shell=True, check=True)
     with open("b.txt") as f:
         assert f.read().startswith("1 ")
+    # A stage with a working directory reaches the file from there, names
+    # that sanitize alike get their own files, and a file no stage needs
+    # any more is removed
+    os.makedirs("sub")
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "pipeline": {
+                "stages": {
+                    "in-sub": {
+                        "kind": "shell-command",
+                        "command": 'echo "$HOME" > home.txt',
+                        "environment": "_system",
+                        "wdir": "sub",
+                    },
+                    "a b": {
+                        "kind": "shell-command",
+                        "command": "echo $A",
+                        "environment": "_system",
+                    },
+                    "a_b": {
+                        "kind": "shell-command",
+                        "command": "echo $B",
+                        "environment": "_system",
+                    },
+                }
+            }
+        },
+        write=True,
+    )
+    assert stages["in-sub"]["cmd"] == (
+        "bash --noprofile --norc ../.calkit/stage-commands/in-sub.sh"
+    )
+    assert "../.calkit/stage-commands/in-sub.sh" in stages["in-sub"]["deps"]
+    subprocess.run(stages["in-sub"]["cmd"], shell=True, check=True, cwd="sub")
+    assert os.path.isfile(os.path.join("sub", "home.txt"))
+    assert stages["a b"]["cmd"] != stages["a_b"]["cmd"]
+    assert sorted(os.listdir(".calkit/stage-commands")) == sorted(
+        [
+            "in-sub.sh",
+            "a_b.sh",
+            os.path.basename(stages["a b"]["cmd"].split()[-1]),
+        ]
+    )

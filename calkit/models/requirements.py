@@ -32,23 +32,21 @@ class Requirement(BaseModel):
     - ``app``: an executable that must be on ``PATH``, optionally
       satisfying a ``version_spec``.
     - ``env-var``: an environmental variable that must be defined.
-    - ``setup``: a per-machine precondition that isn't a file -- e.g.,
+    - ``setup``: a per-machine precondition that isn't a file---e.g.,
       the user must have authenticated a CLI like ``gh auth login``.
       A ``setup`` requirement declares ``check_command`` (a shell command
       whose exit code determines whether it is satisfied) and
       ``setup_command`` (run on a TTY when the user agrees, or printed
       as a fix-it command otherwise). To run either inside a project
-      environment, prefix it with ``calkit xenv -n <env> --`` explicitly
-      rather than relying on an implicit wrap. ``cache_ttl`` skips
-      re-probing slow checks.
+      environment, prefix it with ``calkit xenv -n <env> --``.
+      ``cache_ttl`` skips re-probing slow checks.
     - ``calkit-config``: a value that must be set in the user's Calkit
       configuration.
 
     These name a thing that must be present, so each has a ``name``. The
-    properties of a machine that can't be installed -- how many CPUs it
-    has, what OS it runs -- are constrained by
-    ``SystemNumberRequirement`` and ``SystemValueRequirement``
-    instead, which name a property rather than a thing.
+    properties of a machine that can't be installed, e.g., how many CPUs
+    it has or what OS it runs, are constrained by giving the property as
+    the ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.
     """
 
     kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
@@ -75,16 +73,12 @@ class Requirement(BaseModel):
 class SetupRequirement(Requirement):
     """A ``setup`` requirement, whose ``name`` may be omitted.
 
-    A single anonymous setup step is common enough that requiring a name
-    adds friction, so Calkit synthesizes a stable ``setup-<hash>`` one from
-    ``check_command``. This is a separate model rather than a loosening of
-    ``Requirement.name`` so the published schema still rejects an ``app``
-    or ``env-var`` requirement with no name, where the name is the
-    identity.
+    Without a ``name``, Calkit derives a stable ``setup-<hash>`` one from
+    ``check_command``.
     """
 
     kind: Literal["setup"] = "setup"
-    name: str | None = None
+    name: str | None = None  # type: ignore[assignment]
 
 
 # Machine properties whose values are numbers, so they're constrained by
@@ -114,13 +108,13 @@ SystemValueProperty = Literal[
 class SystemNumberRequirement(BaseModel):
     """A bound on a numeric property of the machine.
 
-    A property is not a thing that can be installed, so there is nothing to
-    name and nothing to offer to fix: the check either passes on this
-    machine or reports what it found against what was asked for.
+    A property can't be installed, so there is nothing to name and nothing
+    to fix: the check either passes on this machine or reports what it
+    found against what was asked for.
 
-    At least one bound must be given. An entry that constrains nothing says
-    nothing -- if the intent is 'results depend on this property', that is
-    what a ``system`` environment's ``lock`` is for.
+    At least one of ``min`` and ``max`` must be given. To record a property
+    that results depend on rather than constrain it, add it to a
+    ``system`` environment's ``lock``.
     """
 
     kind: SystemNumberProperty = Field(
@@ -154,13 +148,14 @@ class SystemNumberRequirement(BaseModel):
 class SystemValueRequirement(BaseModel):
     """A constraint on a string-valued property of the machine.
 
-    ``equals`` matches exactly, case-insensitively, and a list of values
-    means any of them will do. ``version_spec`` compares as a version, for
-    properties like ``os-version`` and ``python-version`` where '>=' means
-    something.
+    ``equals`` matches exactly and ``matches`` as a glob, both
+    case-insensitively, and a list of values means any of them will do.
+    ``version_spec`` compares as a version, for properties like
+    ``os-version`` and ``python-version`` where '>=' means something.
 
-    At least one of the two must be given, for the same reason a numeric
-    requirement needs a bound.
+    At least one of ``equals``, ``matches`` and ``version_spec`` must be
+    given. To record a property that results depend on rather than
+    constrain it, add it to a ``system`` environment's ``lock``.
     """
 
     kind: SystemValueProperty = Field(

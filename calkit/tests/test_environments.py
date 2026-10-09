@@ -123,10 +123,19 @@ def test_check_all_in_pipeline(tmp_dir):
         "script_path": "s.py",
         "environment": "nope",
     }
+    # A notebook stage runs here in its inner env whatever its outer one
+    ck_info["environments"]["py3"] = dict(
+        ck_info["environments"]["py2"], prefix=".venv3"
+    )
+    stages["nb"] = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "nb.ipynb",
+        "environment": "far:py3",
+    }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     res = calkit.environments.check_all_in_pipeline(skip_stages=["skipped"])
-    assert set(res) == {"py1", "far", "nope"}
+    assert set(res) == {"py1", "far", "nope", "py3"}
     assert not res["nope"]["success"]
     assert not os.path.isdir(".venv2")
     assert calkit.environments.check_inner_env_there(
@@ -1843,6 +1852,12 @@ def test_lock_records_the_spec_it_came_from(tmp_dir):
     # A missing file on either side is not a match, and does not raise
     assert not envs.stamped_lock_matches_spec("nope-lock.txt", spec)
     assert not envs.stamped_lock_matches_spec(lock, "nope.txt")
+    # A spec checked out with CRLF, e.g., on Windows, is the same spec
+    with open(spec, "rb") as f:
+        lf = f.read()
+    with open(spec, "wb") as f:
+        f.write(lf.replace(b"\n", b"\r\n"))
+    assert envs.stamped_lock_matches_spec(lock, spec)
 
 
 def test_cross_platform_venv_locks(tmp_dir):
@@ -1967,6 +1982,28 @@ def test_switch_env(tmp_dir, monkeypatch):
     envs.write_switch_env_lock("rt", envs_def)
     with open(lock_fpath) as f:
         assert json.load(f)["specs"] != locked["specs"]
+    # So does an option's lock, though not its line endings
+    py_lock = envs.get_env_lock_fpath(
+        env=envs_def["py"], env_name="py", for_dvc=True
+    )
+    assert py_lock is not None
+    os.makedirs(py_lock, exist_ok=True)
+    with open(os.path.join(py_lock, "linux-64.txt"), "w") as f:
+        f.write("idna==3.10\n")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        with_lock = json.load(f)
+    assert "py" in with_lock["locks"]
+    with open(os.path.join(py_lock, "linux-64.txt"), "wb") as f:
+        f.write(b"idna==3.10\r\n")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        assert json.load(f) == with_lock
+    with open(os.path.join(py_lock, "linux-64.txt"), "w") as f:
+        f.write("idna==3.11\n")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        assert json.load(f)["locks"] != with_lock["locks"]
     # A switch's machine lock is a system env lock beside the definitions
     machine_env = envs.switch_machine_lock_env({"lock": ["os"]})
     envs.write_system_env_lock(env_name="rt", env=machine_env)

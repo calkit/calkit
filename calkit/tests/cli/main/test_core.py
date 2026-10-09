@@ -3171,6 +3171,12 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
                     "inputs": ["data.txt"],
                     "outputs": [{"path": "result.txt", "storage": "git"}],
                 },
+                "settled": {
+                    "kind": "shell-command",
+                    "command": "echo done > settled.txt",
+                    "environment": "lab",
+                    "outputs": [{"path": "settled.txt", "storage": "git"}],
+                },
             }
         },
     }
@@ -3200,6 +3206,11 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
     )
     assert res.returncode == 0, res.stdout + res.stderr
     assert "can't run on this machine" in res.stdout + res.stderr
+    assert "skipping 1 out-of-date stage" in res.stdout
+    assert "successfully" not in res.stdout
+    # One that is up to date isn't worth mentioning
+    assert "'settled' can't run" not in res.stdout + res.stderr
+    assert "'settled' is out of date" not in res.stdout + res.stderr
     with open("data.txt") as f:
         assert f.read().strip() == "first"
     with open("result.txt") as f:
@@ -3213,6 +3224,37 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
     out = subprocess.check_output(["calkit", "status"], env=env, text=True)
     assert "fetch" in out
     assert "can't run on this machine" in out
+    # Asking for it by name and not getting it is a failure
+    res = subprocess.run(
+        ["calkit", "run", "fetch"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "out of date and couldn't run" in res.stderr
+    # So is a stage that can't run because something is wrong, though the
+    # rest still runs
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    ck_info["environments"]["broken"] = {
+        "kind": "switch",
+        "use": {"if cpu_count > 'many'": "lab"},
+    }
+    ck_info["pipeline"]["stages"]["odd"] = {
+        "kind": "shell-command",
+        "command": "echo odd > odd.txt",
+        "environment": "broken",
+        "outputs": [{"path": "odd.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env["CK_TEST_TOKEN"] = "second"
+    res = subprocess.run(
+        ["calkit", "run"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "'odd' is out of date and couldn't run" in res.stderr
+    assert not os.path.isfile("odd.txt")
+    with open("result.txt") as f:
+        assert f.read().split() == ["second", "second"]
 
 
 def test_run_reruns_when_an_env_var_input_changes(tmp_dir):

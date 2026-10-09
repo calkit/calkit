@@ -67,11 +67,8 @@ She used Calkit to create single-button reproducible pipelines that integrated
 MATLAB, Python, Julia, LaTeX, and more.
 She used Calkit's Overleaf integration
 to allow collaborators to contribute without learning Git,
-producing
-TODO
-journal articles and
-TODO
-conference papers.
+producing three first-author journal article submissions,
+including one to the prestigious _Journal of Fluid Mechanics_.
 
 ## Where we're heading
 

@@ -298,8 +298,8 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: ec37375aea6e4f2bb5e969c9648c7bee
-      size: 5016
+      md5: efdf8df6313663ecb83ef6964b5e3902
+      size: 5077
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 161bbc0cccd2e991cdc03924cedaef55
@@ -319,5 +319,5 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 2c322664a153e0b34755d4f09654d6e7
-      size: 136496
+      md5: 8957974e7e062db7e5891d94d0f3a79b
+      size: 137636

@@ -739,6 +739,10 @@ function buildHtml(
     border: 1px solid var(--vscode-editorWidget-border, transparent); border-top: none;
     box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
   #find[hidden] { display: none; }
+  .badge { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; box-sizing: border-box;
+    border-radius: 9px; font-size: 11px; line-height: 18px; text-align: center;
+    color: var(--vscode-badge-foreground, #fff); background: var(--vscode-badge-background, #4d4d4d); }
+  .badge[hidden] { display: none; }
   .textLayer .highlight { --highlight-bg-color: var(--vscode-editor-findMatchHighlightBackground, rgb(180 0 170 / 0.25));
     --highlight-selected-bg-color: var(--vscode-editor-findMatchBackground, rgb(0 100 0 / 0.25)); }
   #find input { width: 200px; font: inherit; padding: 3px 6px; outline: none;
@@ -771,7 +775,7 @@ function buildHtml(
   <span class="spacer"></span>
   <span id="status"></span>
   <label title="Show resolved threads"><input type="checkbox" id="show-resolved"> Resolved</label>
-  <button id="toggle-comments" aria-pressed="true" title="Show or hide comments">Comments</button>
+  <button id="toggle-comments" aria-pressed="true" title="Show or hide comments">Comments<span id="comment-count" class="badge" hidden></span></button>
 </div>
 <div id="main">
   <div id="wrap">
@@ -1424,9 +1428,14 @@ window.addEventListener("message", (e) => {
   else if (msg.type === "threads") {
     threads = msg.threads;
     const open = threads.filter((t) => !t.resolved).length;
-    setStatus(!msg.synctex ? open + " open of " + threads.length + " (placed by text, without SyncTeX)"
+    const count = document.getElementById("comment-count");
+    count.textContent = String(open);
+    count.hidden = !open;
+    document.getElementById("toggle-comments").title = "Show or hide comments (" + open + " open, "
+      + (threads.length - open) + " resolved)";
+    setStatus(!msg.synctex ? "Comments placed by text, without SyncTeX"
       : msg.stale.length ? msg.stale.join(", ") + " changed since this PDF was built; rebuild it to place comments exactly"
-      : open + " open of " + threads.length);
+      : "");
     renderPanel();
     void draw();
   } else if (msg.type === "status") setStatus(msg.text);

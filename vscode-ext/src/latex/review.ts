@@ -26,6 +26,9 @@ import {
 const execFileAsync = promisify(execFile);
 
 export const PDF_REVIEW_VIEW_TYPE = "calkit.pdfReview";
+// What's shown in every viewer, and where each PDF was scrolled to
+const PREFS_KEY = "calkit.pdfReview.prefs";
+const VIEW_KEY = "calkit.pdfReview.view";
 
 export interface PdfReviewDeps {
   getWorkspaceRoot: () => string | undefined;
@@ -113,11 +116,18 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.file(root), pdfjs],
     };
+    // How it was last viewed, since a viewer is closed whenever its tab
+    // swaps with the source
+    const saved = {
+      ...this.context.globalState.get<object>(PREFS_KEY),
+      ...this.context.workspaceState.get<object>(`${VIEW_KEY}:${pdf}`),
+    };
     panel.webview.html = buildHtml(
       panel.webview,
       pdfjs,
       this.deps.getNonce(),
       path.basename(pdf),
+      saved,
     );
     // Rebuilding the PDF rewrites its SyncTeX file too
     const watcher = vscode.workspace.createFileSystemWatcher(
@@ -572,6 +582,20 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       case "openSource":
         await this.openSource(String(msg.file), Number(msg.line));
         return;
+      case "state": {
+        const st = (msg.state ?? {}) as Record<string, unknown>;
+        await this.context.globalState.update(PREFS_KEY, {
+          showComments: st.showComments,
+          showPanel: st.showPanel,
+          panelWidth: st.panelWidth,
+          showResolved: st.showResolved,
+        });
+        await this.context.workspaceState.update(`${VIEW_KEY}:${v.pdf}`, {
+          scale: st.scale,
+          scrollTop: st.scrollTop,
+        });
+        return;
+      }
       case "openIssue":
         if (typeof msg.url === "string" && /^https?:\/\//.test(msg.url)) {
           await vscode.env.openExternal(vscode.Uri.parse(msg.url));
@@ -593,6 +617,7 @@ function buildHtml(
   pdfjs: vscode.Uri,
   nonce: string,
   title: string,
+  saved: object,
 ): string {
   const uri = (...p: string[]): string =>
     webview.asWebviewUri(vscode.Uri.joinPath(pdfjs, ...p)).toString();
@@ -707,8 +732,17 @@ const LIGATURES = ${JSON.stringify(LIGATURES)};
 ${findText.toString()}
 ${normalizeSelection.toString()}
 const vscode = acquireVsCodeApi();
-const state = Object.assign({ showComments: true, showPanel: true, panelWidth: 260, showResolved: false, scale: "page-width" }, vscode.getState() || {});
-const save = () => vscode.setState(state);
+const state = Object.assign({ showComments: true, showPanel: true, panelWidth: 260, showResolved: false, scale: "page-width" }, ${JSON.stringify(
+    saved,
+  )}, vscode.getState() || {});
+// Kept by the extension too, since the webview's own state goes when its
+// tab is closed, e.g., swapping to the source and back
+let saveTimer;
+const save = () => {
+  vscode.setState(state);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => vscode.postMessage({ type: "state", state }), 300);
+};
 const pdfjsLib = await import(config.lib);
 const { EventBus, PDFLinkService, PDFViewer } = await import(config.viewer);
 // A worker from another origin is refused, so it's loaded from a blob

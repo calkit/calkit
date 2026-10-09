@@ -79,6 +79,8 @@ const pubSearchSchema = z.object({
   compare_ref: z.string().optional(),
   compare_view: z.enum(["side-by-side", "latex-diff"]).optional(),
   editor_open: z.boolean().optional(),
+  // Whether the editor is showing the comment threads in the source
+  editor_comments: z.boolean().optional(),
   components_open: z.boolean().optional(),
   // Which file of unknown origin is being resolved, and how
   resolve_path: z.string().optional(),
@@ -121,10 +123,20 @@ function PubInfo({
   const queryClient = useQueryClient()
   // Editor open state lives in the URL (editor_open) so a session is shareable
   // and restorable by link, like the compare modal.
-  const { editor_open: editorOpen, diff: diffPath } = Route.useSearch()
+  const {
+    editor_open: editorOpen,
+    editor_comments: editorComments,
+    diff: diffPath,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const closeEditor = () =>
-    navigate({ search: (prev) => ({ ...prev, editor_open: undefined }) })
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        editor_open: undefined,
+        editor_comments: undefined,
+      }),
+    })
   const texPath = getLatexSourcePath(publication)
   // What went into the publication: its stage's concrete inputs in dvc.yaml,
   // sorted against the declared figures, plus any stage that copies files
@@ -251,6 +263,15 @@ function PubInfo({
           texPath={texPath}
           deps={publication.stage_info?.deps ?? undefined}
           stage={publication.stage}
+          commentsOpen={Boolean(editorComments)}
+          onCommentsOpenChange={(open) =>
+            navigate({
+              search: (prev) => ({
+                ...prev,
+                editor_comments: open || undefined,
+              }),
+            })
+          }
         />
       )}
       <Text fontSize="sm" mb={1}>

@@ -100,8 +100,6 @@ jobs:
           # Needed so the example project in examples/basic is checked
           # against the calkit.yaml JSON schema
           submodules: true
-      - uses: ./.github/actions/docker-hub-mirror
-        if: runner.os == 'Linux'
       - name: Configure Git Credentials
         run: |
           git config --global user.name github-actions[bot]

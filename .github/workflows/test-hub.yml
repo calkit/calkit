@@ -78,7 +78,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - uses: ./.github/actions/docker-hub-mirror
       - run: cp .env.example .env
       - run: docker compose build backend
       - run: docker compose down -v --remove-orphans
@@ -146,7 +145,6 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
         working-directory: hub/frontend
-      - uses: ./.github/actions/docker-hub-mirror
       - run: cp .env.example .env
       - run: docker compose build
       - run: docker compose down -v --remove-orphans

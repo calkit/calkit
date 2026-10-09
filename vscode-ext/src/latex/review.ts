@@ -804,7 +804,7 @@ const statusEl = document.getElementById("status");
 const selectBtn = document.getElementById("select-actions");
 const eventBus = new EventBus();
 const linkService = new PDFLinkService({ eventBus });
-const viewer = new PDFViewer({ container, eventBus, linkService, removePageBorders: false });
+const viewer = new PDFViewer({ container, eventBus, linkService, removePageBorders: true });
 linkService.setViewer(viewer);
 let pdfDoc = null;
 let threads = [];

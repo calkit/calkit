@@ -4210,6 +4210,8 @@ def get_project_comments(
         query = query.where(ProjectComment.artifact_type == artifact_type)
     if artifact_path is not None:
         query = query.where(ProjectComment.artifact_path == artifact_path)
+    # Ones moved into a LaTeX document's source are kept there now
+    query = query.where(col(ProjectComment.moved_to_source).is_(None))
     comments = list(session.exec(query).all())
     _sync_github_issue_resolutions(session, comments, current_user)
     return comments

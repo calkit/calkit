@@ -3052,44 +3052,6 @@ _LINE_OPTION = typer.Option(
 )
 
 
-def _comment_json(
-    path: str, tc: calkit.latex.TexComment, blks: list[calkit.latex.Block]
-) -> dict:
-    anchor = calkit.latex.comment_anchor(blks, tc)
-    return {
-        "id": tc.id,
-        "path": path,
-        "line": tc.lineno,
-        "nlines": tc.nlines,
-        "resolved": tc.resolved,
-        "issue": tc.issue,
-        "highlight": (
-            {"text": tc.highlight, "occ": tc.highlight_occ}
-            if tc.highlight
-            else None
-        ),
-        "anchor": (
-            {
-                "line": anchor.lineno,
-                "end_line": anchor.lines[-1].lineno,
-                "text": anchor.text,
-            }
-            if anchor is not None
-            else None
-        ),
-        "messages": [
-            {
-                "author": e.author,
-                "email": e.email,
-                "date": e.date,
-                "text": e.text,
-            }
-            for e in tc.entries
-        ],
-        "attrs": tc.attrs,
-    }
-
-
 def _new_entry(
     text: str, author: str | None, email: str | None
 ) -> calkit.latex.Entry:
@@ -3149,19 +3111,11 @@ def list_comments(
     """List the comment threads in a LaTeX document."""
     if not os.path.isfile(tex_path):
         raise_error(f"{tex_path} does not exist")
-    # In document order, so threads in an input come where it's input
-    order = {
-        (ln.path, ln.lineno): i
-        for i, ln in enumerate(calkit.latex.flatten(tex_path))
-    }
-    out = []
-    for path in dict.fromkeys(p for p, _ in order):
-        lines = Path(path).read_text(encoding="utf-8").split("\n")
-        blks = calkit.latex.file_blocks(path, lines)
-        for tc in calkit.latex.parse_comments(lines):
-            if not (unresolved and tc.resolved):
-                out.append(_comment_json(path, tc, blks))
-    out.sort(key=lambda c: order.get((c["path"], c["line"]), 0))
+    out = [
+        c
+        for c in calkit.latex.list_comments(tex_path)
+        if not (unresolved and c["resolved"])
+    ]
     if as_json:
         typer.echo(json.dumps(out, indent=2))
         return
@@ -3207,44 +3161,14 @@ def locate_paragraph(
         raise_error("Specify one of --text or --path and --line")
     if not os.path.isfile(tex_path):
         raise_error(f"{tex_path} does not exist")
-    # Each file on its own, as comments are added to them
-    blks = [
-        b
-        for path_ in dict.fromkeys(
-            ln.path for ln in calkit.latex.flatten(tex_path)
-        )
-        for b in calkit.latex.file_blocks(
-            path_, Path(path_).read_text(encoding="utf-8").split("\n")
-        )
-    ]
-    found = None
-    if text is not None:
-        # The best share of its words, then the shortest paragraph, since
-        # a long one shares words with anything
-        scored = [
-            (calkit.latex.similarity(text, b.text), -len(b.text), b)
-            for b in blks
-        ]
-        best = max(scored, key=lambda x: x[:2], default=None)
-        if best is not None and best[0] >= 0.5:
-            found = best[2]
-    else:
-        path = path or tex_path
-        found = next(
-            (
-                b
-                for b in blks
-                if b.path == path and b.lines[-1].lineno >= (line or 0)
-            ),
-            None,
-        )
+    found = calkit.latex.locate_block(tex_path, text, path, line)
     if found is None:
         raise_error("No matching paragraph found")
     out = {
         "path": found.path,
         "line": found.lineno,
         "end_line": found.lines[-1].lineno,
-        "text": found.text,
+        "text": found.text or calkit.latex.display_text(found),
     }
     if as_json:
         typer.echo(json.dumps(out, indent=2))
@@ -3305,7 +3229,11 @@ def add_comment(
     Path(tex_path).write_text("\n".join(lines), encoding="utf-8")
     if as_json:
         blks = calkit.latex.file_blocks(tex_path, lines)
-        typer.echo(json.dumps(_comment_json(tex_path, tc, blks), indent=2))
+        typer.echo(
+            json.dumps(
+                calkit.latex.comment_to_dict(tex_path, tc, blks), indent=2
+            )
+        )
     else:
         typer.echo(tc.id)
 

@@ -935,6 +935,56 @@ def push_and_expire(
         _record_remote_head(project, name, head)
 
 
+def commit_to_branch(
+    project: Project,
+    repo: git.Repo,
+    base: str,
+    files: dict[str, str],
+    message: str,
+    author: tuple[str, str],
+    branch: str,
+) -> str:
+    """Commit files on top of a commit and push the result as a branch.
+
+    Nothing is checked out, so this can write to any branch, not only the
+    one a user's clone has out, without disturbing the checkout. The push
+    only moves the branch forward, so if someone else moved it since
+    *base*, Git refuses and this raises ``GitCommandError`` for the caller
+    to start again from the new tip. Returns the new commit's SHA.
+    """
+    from io import BytesIO
+
+    from gitdb import IStream
+
+    refuse_if_shared(repo)
+    name, email = author
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {
+            "GIT_INDEX_FILE": os.path.join(tmp, "index"),
+            "GIT_AUTHOR_NAME": name,
+            "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name,
+            "GIT_COMMITTER_EMAIL": email,
+        }
+        repo.git.read_tree(base, env=env)
+        for path, content in files.items():
+            data = content.encode("utf-8")
+            sha = repo.odb.store(
+                IStream("blob", len(data), BytesIO(data))
+            ).hexsha.decode()
+            # Keep an executable bit, say, if the file had one
+            listed = repo.git.ls_tree(base, "--", path).split(" ", 1)
+            mode = listed[0] if listed[0] else "100644"
+            repo.git.update_index(
+                "--add", "--cacheinfo", f"{mode},{sha},{path}", env=env
+            )
+        tree = repo.git.write_tree(env=env)
+        commit = repo.git.commit_tree(tree, "-p", base, "-m", message, env=env)
+    repo.git.push(["origin", f"{commit}:refs/heads/{branch}"])
+    expire_shared_read_clone(project, branch, head=commit)
+    return commit
+
+
 def record_project_update(
     project: Project, repo: git.Repo, session: Session
 ) -> None:

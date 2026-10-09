@@ -206,6 +206,10 @@ test("findText finds text across a PDF's items, breaks, and ligatures", () => {
   assert.equal(findText(items, '"fits" too').length, 1);
   assert.deepEqual(findText(items, "  "), []);
   assert.deepEqual(findText(items, "absent"), []);
+  // Typeset math reads as the source writes it: a minus sign as a hyphen,
+  // and an increment as a capital delta
+  const math = [{ str: "\u2206u = \u2212\u03b1mc2 (1)" }];
+  assert.equal(findText(math, "\u0394u = -\u03b1mc2").length, 1);
 });
 
 test("lineMap follows lines across comments added and removed", () => {

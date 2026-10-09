@@ -385,6 +385,9 @@ const LIGATURES: Record<string, string> = {
   "’": "'",
   "“": '"',
   "”": '"',
+  // Math as typeset: a minus sign, and an increment for a capital delta
+  "\u2212": "-",
+  "\u2206": "\u0394",
 };
 
 export { LIGATURES };

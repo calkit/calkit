@@ -160,8 +160,6 @@ def _run_pip_freeze(env_prefix: str) -> list[str]:
 
 
 _GIT_RE = re.compile(r"\s*@\s*git\+", re.IGNORECASE)
-# Second line of a conda lock solved for another platform, not exported
-_SOLVED_FOR_COMMENT = "# calkit-solved-for:"
 # Virtual packages to assume when solving for another OS
 _VIRTUAL_PACKAGE_OVERRIDES = {
     "linux": ("CONDA_OVERRIDE_GLIBC", "2.28"),
@@ -441,23 +439,36 @@ def check_env(
     pip category.
     """
     from calkit.environments import (
-        read_lock_spec_fingerprint,
-        stamp_lock_with_spec,
-        stamped_lock_matches_spec,
+        env_spec_hash,
+        read_env_spec_hash,
+        write_env_spec_hash,
     )
 
     def lock_is_stale(fpath: str) -> bool:
-        """Whether a lock records a spec other than the current one."""
-        return read_lock_spec_fingerprint(
-            fpath
-        ) is not None and not stamped_lock_matches_spec(fpath, env_fpath)
+        """Whether a lock was resolved from a spec other than this one."""
+        recorded = read_env_spec_hash(fpath)
+        return recorded is not None and recorded != spec_hash
+
+    def versions(deps: list[str], sep: str) -> dict[str, str]:
+        """Map normalized package names to the versions pinned in deps."""
+        out = {}
+        for dep in deps:
+            parts = str(dep).split("::")[-1].split(sep)
+            if len(parts) >= 2 and not _GIT_RE.search(str(dep)):
+                name = re.sub(r"[-_.]+", "-", parts[0].strip()).lower()
+                out[name] = parts[1].strip()
+        return out
 
     if log_func is None:
         log_func = calkit.logger.info
     log_func(f"Checking conda env defined in {env_fpath}")
+    spec_hash = env_spec_hash(env_fpath)
+    recorded_hash = read_env_spec_hash(lock_fpath) if lock_fpath else None
     # A lock resolved from the current spec is an input, not re-exported
-    lock_is_current = lock_fpath is not None and stamped_lock_matches_spec(
-        lock_fpath, env_fpath
+    lock_is_current = (
+        lock_fpath is not None
+        and os.path.isfile(lock_fpath)
+        and recorded_hash == spec_hash
     )
     # Determine which lock file to use for creating the environment
     lock_to_use_for_creation = None
@@ -719,21 +730,52 @@ def check_env(
                     env_needs_rebuild = True
                     log_func(f"Found missing dependency: {dep}")
                     break
+        # Follow a lock relocked elsewhere, so every platform agrees
+        if not env_needs_rebuild and lock_is_current:
+            assert lock_fpath is not None
+            with open(lock_fpath, encoding="utf-8") as f:
+                lock_conda, lock_pip = _split_env_dependencies(
+                    (ryaml.load(f) or {}).get("dependencies") or []
+                )
+            env_conda, env_pip = _split_env_dependencies(
+                env_check["dependencies"]
+            )
+            have = versions(env_conda, "=") | versions(env_pip, "==")
+            want = versions(lock_conda, "=") | versions(lock_pip, "==")
+            differing = sorted(n for n, v in want.items() if have.get(n) != v)
+            if differing:
+                log_func(
+                    "Environment differs from its lock file in "
+                    f"{', '.join(differing)}"
+                )
+                env_needs_rebuild = True
     if env_needs_rebuild:
         res.env_needs_rebuild = True
-        log_func(f"Rebuilding {env_name} since it does not match spec")
-        # Always rebuild from env spec file, not lock file
+        # From the lock while it matches the spec, else from the spec
+        rebuild_fpath = lock_fpath if lock_is_current else env_fpath
+        assert rebuild_fpath is not None
+        log_func(f"Rebuilding {env_name} from {rebuild_fpath}")
         rebuild_cmd = [
             conda_exe,
             "env",
             "create",
             "-y",
             "-f",
-            env_fpath,
+            rebuild_fpath,
         ]
         if prefix is not None:
             rebuild_cmd += ["--prefix", prefix]
-        subprocess.check_call(rebuild_cmd)
+        try:
+            subprocess.check_call(rebuild_cmd)
+        except subprocess.CalledProcessError:
+            if lock_is_current:
+                raise RuntimeError(
+                    f"Failed to rebuild the environment from its lock file "
+                    f"({lock_fpath}), which matches the spec ({env_fpath}); "
+                    "delete the lock file to re-resolve it, which reruns "
+                    "stages that depend on it"
+                )
+            raise
         env_needs_export = True
         # Delete legacy lock file after successful rebuild from spec
         if used_legacy_lock:
@@ -806,10 +848,13 @@ def check_env(
     if lock_fpath is None:
         fname, ext = os.path.splitext(env_fpath)
         lock_fpath = fname + "-lock" + ext
-    # Whether this platform's lock changes, so its siblings need solving
-    lock_written = False
-    if (
-        (not res.env_exists and not lock_is_current)
+    try:
+        with open(lock_fpath, encoding="utf-8") as f:
+            lock_before: str | None = f.read()
+    except OSError:
+        lock_before = None
+    if not lock_is_current and (
+        not res.env_exists
         or res.env_needs_rebuild
         or not os.path.isfile(lock_fpath)
         or lock_is_stale(lock_fpath)
@@ -874,8 +919,6 @@ def check_env(
             os.makedirs(out_dir, exist_ok=True)
         with open(lock_fpath, "w", encoding="utf-8") as f:
             ryaml.dump(env_export, f)
-        stamp_lock_with_spec(lock_fpath, env_fpath)
-        lock_written = True
     elif pip_freeze and spec_has_git_pip and os.path.isfile(lock_fpath):
         # The env matched the spec so no full re-export was done, but the
         # existing lock file may pre-date pip freeze enrichment. Update its
@@ -892,19 +935,20 @@ def check_env(
                     break
             with open(lock_fpath, "w", encoding="utf-8") as f:
                 ryaml.dump(lock_data, f)
-            stamp_lock_with_spec(lock_fpath, env_fpath)
-            lock_written = True
-    if not stamped_lock_matches_spec(lock_fpath, env_fpath):
-        # The env matches the spec, so its unstamped lock can say so
-        stamp_lock_with_spec(lock_fpath, env_fpath)
-        lock_written = True
-    # So a machine of another kind reads a lock instead of adding one
-    if lock_written:
+    with open(lock_fpath, encoding="utf-8") as f:
+        lock_changed = f.read() != lock_before
+    write_env_spec_hash(lock_fpath, env_fpath)
+    # All platforms are relocked together, so they agree; an existing lock
+    # that matches is adopted as is
+    spec_changed = recorded_hash != spec_hash
+    adopted = recorded_hash is None and not lock_changed
+    if (lock_changed or spec_changed) and not adopted:
         write_cross_platform_locks(
             env_fpath=env_fpath,
             lock_fpath=lock_fpath,
             conda_exe=conda_exe,
             log_func=log_func,
+            relock=spec_changed,
         )
     return res
 
@@ -914,19 +958,21 @@ def write_cross_platform_locks(
     lock_fpath: str,
     conda_exe: str,
     log_func: Callable[[str], object] | None = None,
+    relock: bool = True,
 ) -> list[str]:
     """Solve a conda env's lock for every other platform, best effort.
 
     Stages depend on the lock directory, so a platform locked later would
-    invalidate them. Each platform is solved with a dry run under
-    ``CONDA_SUBDIR``, with the spec's direct dependencies pinned to the
-    versions in this platform's lock, and pip dependencies with
-    ``uv pip compile``; a platform that can't be solved, e.g., with no
-    network, or whose pip dependencies can't be pinned this way, is left
-    for a machine of that kind to lock.
+    invalidate them. With ``relock``, e.g., after the spec changed, every
+    platform is solved again and one that can't be is removed, since it
+    would be stale; otherwise only missing ones are added.
 
-    A sibling lock exported on its own platform is never overwritten. One
-    solved here is marked as such, and solved again if its spec changes.
+    Each platform is solved with a dry run under ``CONDA_SUBDIR``, and pip
+    dependencies with ``uv pip compile``. Versions are kept to this
+    platform's lock where the platform has them, so results agree across
+    machines; otherwise only the spec's direct dependencies are. A platform
+    that can't be solved, e.g., with no network, or whose pip dependencies
+    name local paths, is left for a machine of that kind to lock.
 
     Returns the paths written.
     """
@@ -934,25 +980,40 @@ def write_cross_platform_locks(
         CONDA_VENV_ARCHS,
         UV_PLATFORM_TARGETS,
         _conda_venv_platform,
-        stamp_lock_with_spec,
-        stamped_lock_matches_spec,
     )
 
-    def was_solved_here(fpath: str) -> bool:
-        """Whether a lock came from a dry-run solve rather than an export."""
-        with open(fpath, encoding="utf-8") as f:
-            for line in f:
-                if not line.startswith("#"):
-                    return False
-                if line.startswith(_SOLVED_FOR_COMMENT):
-                    return True
-        return False
+    log = log_func or calkit.logger.info
 
     def norm_name(name: str) -> str:
         return re.sub(r"[-_.]+", "-", name).lower()
 
-    if log_func is None:
-        log_func = calkit.logger.info
+    def solve(arch: str, pins: list[str]) -> list | None:
+        """Solve the conda part for a platform, or None if that fails."""
+        cmd = [conda_exe, "create", "--dry-run", "--json", "-n", "calkit-lock"]
+        if channels:
+            cmd.append("--override-channels")
+        for channel in channels:
+            cmd += ["-c", channel]
+        cmd += pinned_conda_deps
+        # Pins constrain packages the solve needs without adding others
+        solve_env = os.environ | {"CONDA_SUBDIR": arch}
+        if pins:
+            solve_env["CONDA_PINNED_PACKAGES"] = "&".join(pins)
+        # Another OS's virtual packages can't be detected from here
+        arch_os = arch.split("-")[0]
+        if arch_os != here_os and arch_os in _VIRTUAL_PACKAGE_OVERRIDES:
+            var, vers = _VIRTUAL_PACKAGE_OVERRIDES[arch_os]
+            solve_env = {var: vers} | solve_env
+        try:
+            out = subprocess.run(
+                cmd, capture_output=True, text=True, env=solve_env
+            )
+            links: list = json.loads(out.stdout)["actions"]["LINK"]
+            return links
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            log(f"Could not solve {env_fpath} for {arch}: {e}")
+            return None
+
     lock_dir, lock_name = os.path.split(lock_fpath)
     stem, ext = os.path.splitext(lock_name)
     here = _conda_venv_platform()
@@ -989,6 +1050,8 @@ def write_cross_platform_locks(
         elif "==" in dep:
             name, vers = dep.split("==", 1)
             local_pip_vers[norm_name(name.strip())] = vers.strip()
+    conda_pins = [f"{n}=={v}" for n, v in sorted(local_conda_vers.items())]
+    pip_pins = [f"{n}=={v}" for n, v in sorted(local_pip_vers.items())]
     pinned_conda_deps = []
     for dep in conda_deps:
         dep = str(dep)
@@ -1014,66 +1077,58 @@ def write_cross_platform_locks(
     here_os = here.split("-")[0]
     for arch in CONDA_VENV_ARCHS:
         out_fpath = os.path.join(lock_dir, arch + ext)
-        if arch == here:
+        if arch == here or (not relock and os.path.isfile(out_fpath)):
             continue
-        if os.path.isfile(out_fpath) and (
-            not was_solved_here(out_fpath)
-            or stamped_lock_matches_spec(out_fpath, env_fpath)
-        ):
-            continue
-        if pip_deps and (
+        links = None
+        if not pip_deps or not (
             unpinnable
             or shutil.which("uv") is None
             or arch not in UV_PLATFORM_TARGETS
         ):
-            log_func(
+            links = solve(arch, conda_pins)
+            if links is None:
+                links = solve(arch, [])
+        else:
+            log(
                 f"Not locking for {arch}, since its pip dependencies can't "
                 "be pinned from here"
             )
-            continue
-        cmd = [conda_exe, "create", "--dry-run", "--json", "-n", "calkit-lock"]
-        if channels:
-            cmd.append("--override-channels")
-        for channel in channels:
-            cmd += ["-c", channel]
-        cmd += pinned_conda_deps
-        # Another OS's virtual packages can't be detected from here
-        solve_env = os.environ | {"CONDA_SUBDIR": arch}
-        arch_os = arch.split("-")[0]
-        if arch_os != here_os and arch_os in _VIRTUAL_PACKAGE_OVERRIDES:
-            var, vers = _VIRTUAL_PACKAGE_OVERRIDES[arch_os]
-            solve_env = {var: vers} | solve_env
-        try:
-            out = subprocess.run(
-                cmd, capture_output=True, text=True, env=solve_env
+        pinned_pip = None
+        if links is not None and pip_deps:
+            python = next(
+                (p["version"] for p in links if p["name"] == "python"), None
             )
-            solved = json.loads(out.stdout)
-            links = solved["actions"]["LINK"]
-        except (OSError, ValueError, KeyError, TypeError) as e:
-            log_func(f"Could not solve {env_fpath} for {arch}: {e}")
+            target = UV_PLATFORM_TARGETS[arch]
+            pinned_pip = _compile_pip_deps(
+                pinned_pip_deps, target, python, constraints=pip_pins
+            )
+            if pinned_pip is None:
+                pinned_pip = _compile_pip_deps(pinned_pip_deps, target, python)
+            if pinned_pip is None:
+                log(f"Could not pin pip dependencies for {arch}")
+                links = None
+        if links is None:
+            # A lock from an older spec would install the wrong env
+            if relock and os.path.isfile(out_fpath):
+                os.remove(out_fpath)
             continue
         dependencies: list = [
             f"{p['name']}={p['version']}={p['build_string']}"
             for p in sorted(links, key=lambda p: p["name"])
         ]
-        if pip_deps:
-            python = next(
-                (p["version"] for p in links if p["name"] == "python"), None
-            )
-            pinned_pip = _compile_pip_deps(
-                pinned_pip_deps, UV_PLATFORM_TARGETS[arch], python
-            )
-            if pinned_pip is None:
-                log_func(f"Could not pin pip dependencies for {arch}")
-                continue
+        if pinned_pip is not None:
             # Pip leaves alone what conda already installed
             from_conda = {norm_name(p["name"]) for p in links}
-            pinned_pip = [
-                line
-                for line in pinned_pip
-                if norm_name(_pkg_name_from_dep(line)) not in from_conda
-            ]
-            dependencies.append({"pip": pinned_pip})
+            dependencies.append(
+                {
+                    "pip": [
+                        line
+                        for line in pinned_pip
+                        if norm_name(_pkg_name_from_dep(line))
+                        not in from_conda
+                    ]
+                }
+            )
         lock_data: dict = {"channels": channels, "dependencies": dependencies}
         if env_spec.get("prefix") is not None:
             lock_data["prefix"] = env_spec["prefix"]
@@ -1081,15 +1136,16 @@ def write_cross_platform_locks(
             lock_data = {"name": env_spec["name"]} | lock_data
         os.makedirs(lock_dir or ".", exist_ok=True)
         with open(out_fpath, "w", encoding="utf-8", newline="\n") as f:
-            f.write(f"{_SOLVED_FOR_COMMENT} {arch}\n")
             ryaml.dump(lock_data, f)
-        stamp_lock_with_spec(out_fpath, env_fpath)
         written.append(out_fpath)
     return written
 
 
 def _compile_pip_deps(
-    pip_deps: list[str], target: str, python: str | None
+    pip_deps: list[str],
+    target: str,
+    python: str | None,
+    constraints: list[str] | None = None,
 ) -> list[str] | None:
     """Pin pip dependencies for another platform, or None if that fails."""
     import tempfile
@@ -1110,6 +1166,11 @@ def _compile_pip_deps(
         ]
         if python is not None:
             cmd += ["--python-version", python]
+        if constraints:
+            constraints_fpath = os.path.join(tmp, "constraints.txt")
+            with open(constraints_fpath, "w", encoding="utf-8") as f:
+                f.write("\n".join(constraints) + "\n")
+            cmd += ["-c", constraints_fpath]
         try:
             out = subprocess.check_output(cmd + [reqs], text=True)
         except (subprocess.CalledProcessError, OSError):

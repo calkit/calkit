@@ -1106,8 +1106,13 @@ These settings decide what happens where:
   A machine that differs doesn't rerun those stages unless the lock is
   updated, or set to follow the machine with `relock: auto`.
 - Lock files for `uv-venv`, `venv` and `conda` environments are written
-  for every platform at once where possible, so a collaborator on another
+  for every platform at once where possible, with the same package
+  versions where each platform has them, so a collaborator on another
   operating system installs from them rather than relocking.
+  Changing the spec relocks every platform, and a machine updates its
+  environment to match its lock the next time it's checked.
+  Which spec the locks came from is recorded in
+  `.calkit/env-spec-hashes.json`, which is committed along with them.
 
 `calkit status` says which stages can't run on the current machine and
 why.

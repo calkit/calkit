@@ -1819,45 +1819,57 @@ def test_env_inputs_must_be_inside_the_project():
     ) == ["../outside.C"]
 
 
-def test_lock_records_the_spec_it_came_from(tmp_dir):
+def test_env_spec_hashes(tmp_dir):
+    import json
+
     import calkit.environments as envs
 
+    def write(fpath: str, text: str) -> None:
+        with open(fpath, "w", newline="") as f:
+            f.write(text)
+
     spec, lock = "requirements.txt", "requirements-lock.txt"
-    with open(spec, "w") as f:
-        f.write("idna\n")
-    with open(lock, "w") as f:
-        f.write("idna==3.10\n")
-    # An unstamped lock isn't taken as current
-    assert envs.read_lock_spec_fingerprint(lock) is None
-    assert not envs.stamped_lock_matches_spec(lock, spec)
-    envs.stamp_lock_with_spec(lock, spec)
-    assert envs.stamped_lock_matches_spec(lock, spec)
+    write(spec, "idna\n")
+    write(lock, "idna==3.10\n")
+    # Recorded beside the lock, not in it
+    assert envs.read_env_spec_hash(lock) is None
+    envs.write_env_spec_hash(lock, spec)
+    assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
     with open(lock) as f:
-        assert f.readline().startswith(envs.LOCK_SPEC_COMMENT)
-        assert "idna==3.10" in f.read()
-    # Changing the Python version or the spec makes it out of date
-    assert not envs.stamped_lock_matches_spec(lock, spec, python="3.11")
-    envs.stamp_lock_with_spec(lock, spec, python="3.11")
-    assert envs.stamped_lock_matches_spec(lock, spec, python="3.11")
-    assert not envs.stamped_lock_matches_spec(lock, spec, python="3.12")
-    with open(spec, "w") as f:
-        f.write("idna\ncertifi\n")
-    assert not envs.stamped_lock_matches_spec(lock, spec, python="3.11")
-    # Stamping again replaces the record rather than stacking comments
-    envs.stamp_lock_with_spec(lock, spec)
-    with open(lock) as f:
-        body = f.read()
-    assert body.count(envs.LOCK_SPEC_COMMENT) == 1
-    assert "idna==3.10" in body
-    # A missing file on either side is not a match, and does not raise
-    assert not envs.stamped_lock_matches_spec("nope-lock.txt", spec)
-    assert not envs.stamped_lock_matches_spec(lock, "nope.txt")
-    # A spec checked out with CRLF, e.g., on Windows, is the same spec
-    with open(spec, "rb") as f:
-        lf = f.read()
-    with open(spec, "wb") as f:
-        f.write(lf.replace(b"\n", b"\r\n"))
-    assert envs.stamped_lock_matches_spec(lock, spec)
+        assert f.read() == "idna==3.10\n"
+    # Comments, blank lines, spacing and line endings aren't changes
+    base = envs.env_spec_hash(spec)
+    for text in ["# Deps\nidna  # For URLs\n\n", "idna\r\n", "  idna\n"]:
+        write(spec, text)
+        assert envs.env_spec_hash(spec) == base
+    write(spec, "idna\ncertifi\n")
+    assert envs.env_spec_hash(spec) != base
+    assert envs.env_spec_hash(spec, python="3.11") != envs.env_spec_hash(spec)
+    # A YAML spec is hashed as the data it holds, so channel order counts
+    write("a.yml", "name: e\n# Note\nchannels: [conda-forge, bioconda]\n")
+    write("b.yml", "channels:\n  - conda-forge\n  - bioconda\nname: 'e'\n")
+    write("c.yml", "name: e\nchannels: [bioconda, conda-forge]\n")
+    assert envs.env_spec_hash("a.yml") == envs.env_spec_hash("b.yml")
+    assert envs.env_spec_hash("a.yml") != envs.env_spec_hash("c.yml")
+    # Every platform's lock in a directory shares one entry, relative to the
+    # project it's in
+    os.makedirs(os.path.join("sub", ".calkit", "env-locks", "py"))
+    write(os.path.join("sub", spec), "idna\n")
+    envs.write_env_spec_hash(
+        os.path.join(".calkit", "env-locks", "py", "linux-64.txt"),
+        spec,
+        wdir="sub",
+    )
+    assert envs.read_env_spec_hash(
+        os.path.join(".calkit", "env-locks", "py", "win-64.txt"), wdir="sub"
+    ) == envs.env_spec_hash(os.path.join("sub", spec))
+    with open(os.path.join("sub", envs.ENV_SPEC_HASHES_FPATH)) as f:
+        assert list(json.load(f)) == [".calkit/env-locks/py"]
+    # An unreadable file records nothing, and is replaced on the next write
+    write(envs.ENV_SPEC_HASHES_FPATH, "not json")
+    assert envs.read_env_spec_hash(lock) is None
+    envs.write_env_spec_hash(lock, spec)
+    assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
 
 
 def test_cross_platform_venv_locks(tmp_dir):
@@ -1869,38 +1881,42 @@ def test_cross_platform_venv_locks(tmp_dir):
         f.write("idna\n")
     # A lock that isn't one of a per-platform set gets no siblings
     with open("lock.txt", "w") as f:
-        f.write("idna==3.10\n")
+        f.write("idna==3.7\n")
     assert not envs.write_cross_platform_venv_locks(
-        spec_fpath=spec, lock_fpath="lock.txt", python="3.12"
+        spec_fpath=spec, lock_fpath="lock.txt", python_version="3.12"
     )
     assert not set(os.listdir()) & {a + ".txt" for a in envs.CONDA_VENV_ARCHS}
-    # Other platforms are resolved, and this one comes from the built env
+    # Other platforms are resolved to the versions locked here
     os.makedirs(os.path.join(".calkit", "env-locks", "py"), exist_ok=True)
     here = envs._conda_venv_platform()
     lock_fpath = os.path.join(".calkit", "env-locks", "py", here + ".txt")
     with open(lock_fpath, "w") as f:
-        f.write("idna==3.10\n")
-    envs.stamp_lock_with_spec(lock_fpath, spec, python="3.12")
+        f.write("idna==3.7\n")
     written = envs.write_cross_platform_venv_locks(
-        spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
+        spec_fpath=spec, lock_fpath=lock_fpath, python_version="3.12"
     )
     assert lock_fpath not in written
     for fpath in written:
-        assert envs.stamped_lock_matches_spec(fpath, spec, python="3.12")
-    # Nothing is redone when every platform already matches the spec
-    assert not envs.write_cross_platform_venv_locks(
-        spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
+        with open(fpath) as f:
+            assert "idna==3.7" in f.read()
+    if not written:
+        return
+    # Without relocking, only missing platforms are added
+    os.remove(written[0])
+    again = envs.write_cross_platform_venv_locks(
+        spec_fpath=spec,
+        lock_fpath=lock_fpath,
+        python_version="3.12",
+        relock=False,
     )
-    # A changed spec is resolved again
-    if written:
-        with open(spec, "w") as f:
-            f.write("idna\ncertifi\n")
-        again = envs.write_cross_platform_venv_locks(
-            spec_fpath=spec, lock_fpath=lock_fpath, python="3.12"
-        )
-        assert set(again) == set(written)
-        for fpath in again:
-            assert envs.stamped_lock_matches_spec(fpath, spec, python="3.12")
+    assert again == [written[0]]
+    # Relocking removes a platform that can't be resolved, which is stale
+    with open(spec, "w") as f:
+        f.write("idna\ncalkit-no-such-package-anywhere\n")
+    assert not envs.write_cross_platform_venv_locks(
+        spec_fpath=spec, lock_fpath=lock_fpath, python_version="3.12"
+    )
+    assert not any(os.path.isfile(fpath) for fpath in written)
 
 
 def test_switch_env(tmp_dir, monkeypatch):

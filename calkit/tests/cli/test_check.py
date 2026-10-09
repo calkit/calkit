@@ -88,7 +88,9 @@ def test_check_venv(tmp_dir):
     # A lock resolved from the current spec is read, not rewritten
     with open("lock.txt") as f:
         lock_txt_4 = f.read()
-    assert lock_txt_4.startswith(calkit.environments.LOCK_SPEC_COMMENT)
+    assert calkit.environments.read_env_spec_hash(
+        "lock.txt"
+    ) == calkit.environments.env_spec_hash("reqs.txt", python="3.11")
     with open("lock.txt", "a") as f:
         f.write("# kept\n")
     check_311 = [
@@ -107,9 +109,6 @@ def test_check_venv(tmp_dir):
     # One that can't be installed fails rather than diverging from the env
     with open("lock.txt", "w") as f:
         f.write("polars==0.0.0\n")
-    calkit.environments.stamp_lock_with_spec(
-        "lock.txt", "reqs.txt", python="3.11"
-    )
     result = subprocess.run(check_311, capture_output=True, text=True)
     assert result.returncode != 0
     assert "out of sync with its lock" in result.stderr + result.stdout
@@ -1459,9 +1458,8 @@ def test_check_env_locks_every_venv_platform(tmp_dir):
         calkit.ryaml.dump(ck_info, f)
     subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
     lock_dir = os.path.join(".calkit", "env-locks", "plain")
-    # With uv available, a plain venv is locked for other platforms too, and
-    # each is stamped like this platform's so another machine reads it as
-    # current rather than relocking
+    # With uv available, a plain venv is locked for other platforms too, so
+    # another machine reads its lock as current rather than relocking
     locks = os.listdir(lock_dir)
     assert len(locks) > 1
     # With the venv's Python, so a machine with another one relocks
@@ -1477,11 +1475,27 @@ def test_check_env_locks_every_venv_platform(tmp_dir):
         ],
         text=True,
     ).strip()
+    recorded = calkit.environments.read_env_spec_hash(
+        os.path.join(lock_dir, locks[0])
+    )
+    assert recorded == calkit.environments.env_spec_hash(
+        "requirements.txt", python=venv_python
+    )
+    assert recorded != calkit.environments.env_spec_hash("requirements.txt")
+    # A matching lock with no record, e.g., from before records were kept, is
+    # adopted without relocking other platforms
+    here = calkit.environments._conda_venv_platform() + ".txt"
+    sibling = os.path.join(lock_dir, next(f for f in locks if f != here))
+    os.remove(sibling)
+    os.remove(calkit.environments.ENV_SPEC_HASHES_FPATH)
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    assert calkit.environments.read_env_spec_hash(sibling) == recorded
+    assert not os.path.isfile(sibling)
+    # A changed spec relocks every platform together
+    with open("requirements.txt", "a") as f:
+        f.write("certifi\n")
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    assert sorted(os.listdir(lock_dir)) == sorted(locks)
     for fname in locks:
-        fpath = os.path.join(lock_dir, fname)
-        assert calkit.environments.stamped_lock_matches_spec(
-            fpath, "requirements.txt", python=venv_python
-        )
-        assert not calkit.environments.stamped_lock_matches_spec(
-            fpath, "requirements.txt"
-        )
+        with open(os.path.join(lock_dir, fname)) as f:
+            assert "certifi==" in f.read()

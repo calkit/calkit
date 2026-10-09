@@ -1950,16 +1950,19 @@ def check_venv(
         except (OSError, subprocess.CalledProcessError):
             return None
 
-    # Stamped with the Python the venv has when none is declared, so a lock
+    # Hashed with the Python the venv has when none is declared, so a lock
     # resolved for another version isn't taken as current
-    stamp_python = python
-    if stamp_python is None and (full_version := venv_python_version()):
-        stamp_python = ".".join(full_version.split(".")[:2])
+    hash_python = python
+    if hash_python is None and (full_version := venv_python_version()):
+        hash_python = ".".join(full_version.split(".")[:2])
+    lock_fpath_full = os.path.join(wdir or "", lock_fpath)
+    recorded_hash = calkit.environments.read_env_spec_hash(lock_fpath, wdir)
+    spec_hash = calkit.environments.env_spec_hash(
+        os.path.join(wdir or "", path), python=hash_python
+    )
     # A lock resolved from the current spec is an input, not rewritten here
-    lock_is_current = calkit.environments.stamped_lock_matches_spec(
-        os.path.join(wdir or "", lock_fpath),
-        os.path.join(wdir or "", path),
-        python=stamp_python,
+    lock_is_current = (
+        os.path.isfile(lock_fpath_full) and recorded_hash == spec_hash
     )
 
     def pip_install_and_freeze(reqs_arg: str) -> None:
@@ -1972,24 +1975,33 @@ def check_venv(
         check_cmd += " && deactivate"
         if verbose:
             typer.echo(f"Running command: {check_cmd}")
+        try:
+            with open(lock_fpath_full, encoding="utf-8") as f:
+                lock_before = f.read()
+        except OSError:
+            lock_before = None
         subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
         if lock_is_current:
             return
-        calkit.environments.stamp_lock_with_spec(
-            os.path.join(wdir or "", lock_fpath),
-            os.path.join(wdir or "", path),
-            python=stamp_python,
+        with open(lock_fpath_full, encoding="utf-8") as f:
+            lock_changed = f.read() != lock_before
+        calkit.environments.write_env_spec_hash(
+            lock_fpath, path, python=hash_python, wdir=wdir
         )
-        # So another platform reads a lock rather than adding one
-        if kind == "uv-venv" or shutil.which("uv") is not None:
-            calkit.environments.write_cross_platform_venv_locks(
-                spec_fpath=path,
-                lock_fpath=lock_fpath,
-                python=stamp_python,
-                wdir=wdir,
-                verbose=verbose,
-                python_version=python or venv_python_version(),
-            )
+        # All platforms are relocked together, so they agree; an existing
+        # lock that matches is adopted as is
+        spec_changed = recorded_hash != spec_hash
+        adopted = recorded_hash is None and not lock_changed
+        if (lock_changed or spec_changed) and not adopted:
+            if kind == "uv-venv" or shutil.which("uv") is not None:
+                calkit.environments.write_cross_platform_venv_locks(
+                    spec_fpath=path,
+                    lock_fpath=lock_fpath,
+                    python_version=python or venv_python_version(),
+                    wdir=wdir,
+                    verbose=verbose,
+                    relock=spec_changed,
+                )
         # Delete legacy lock file after use
         if used_legacy_lock:
             try:

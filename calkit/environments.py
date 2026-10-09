@@ -53,8 +53,8 @@ UV_PLATFORM_TARGETS = {
     "linux-64": "x86_64-unknown-linux-gnu",
     "win-64": "x86_64-pc-windows-msvc",
 }
-# First line of a venv or conda lock file, recording the spec it came from
-LOCK_SPEC_COMMENT = "# calkit-spec-md5:"
+# Which spec each venv and conda env's locks were resolved from
+ENV_SPEC_HASHES_FPATH = os.path.join(".calkit", "env-spec-hashes.json")
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
 # Scheduler environment keys that govern how a job is dispatched rather than
 # what it computes. They are excluded from the environment lock file, so
@@ -910,12 +910,16 @@ def write_switch_env_lock(
     switch.
     """
 
+    def file_md5(fpath: str) -> str:
+        # Git may check a file out with CRLF on Windows and LF elsewhere
+        with open(fpath, "rb") as f:
+            return hashlib.md5(f.read().replace(b"\r\n", b"\n")).hexdigest()
+
     def content_md5(fpath: str) -> str:
         """Hash a file or directory, with line endings normalized."""
         if os.path.isdir(fpath):
             parts = [
-                f"{Path(os.path.relpath(f, fpath)).as_posix()}:"
-                + spec_fingerprint(f)
+                f"{Path(os.path.relpath(f, fpath)).as_posix()}:" + file_md5(f)
                 for f in sorted(
                     os.path.join(root, name)
                     for root, _, names in os.walk(fpath)
@@ -923,7 +927,7 @@ def write_switch_env_lock(
                 )
             ]
             return hashlib.md5("\n".join(parts).encode()).hexdigest()
-        return spec_fingerprint(fpath)
+        return file_md5(fpath)
 
     options = get_switch_options(env_name, envs)
     env = envs[env_name]
@@ -1401,73 +1405,98 @@ def write_system_env_lock(
     return lock_fpath
 
 
-def spec_fingerprint(spec_fpath: str, python: str | None = None) -> str:
-    """Hash the spec a lock file was resolved from, and its Python.
+def env_spec_hash(spec_fpath: str, python: str | None = None) -> str:
+    """Hash an env spec, ignoring what doesn't change what it resolves to.
 
-    Line endings are normalized, since Git may check a spec out with CRLF
-    on Windows and LF elsewhere.
+    A change means re-resolving, which can pick up newer versions, so a
+    comment or a blank line shouldn't count as one. A YAML spec is hashed
+    as the data it holds; any other is read as a requirements file.
     """
-    with open(spec_fpath, "rb") as f:
-        content = f.read().replace(b"\r\n", b"\n")
+    with open(spec_fpath, encoding="utf-8") as f:
+        text = f.read()
+    if spec_fpath.endswith((".yml", ".yaml")):
+        content = json.dumps(yaml.safe_load(text), sort_keys=True)
+    else:
+        lines = [
+            re.sub(r"(^|\s)#.*", "", ln).strip() for ln in text.splitlines()
+        ]
+        content = "\n".join(ln for ln in lines if ln)
     if python is not None:
-        content += f"\npython={python}".encode()
-    return hashlib.md5(content).hexdigest()
+        content += f"\npython={python}"
+    return hashlib.md5(content.encode()).hexdigest()
 
 
-def read_lock_spec_fingerprint(lock_fpath: str) -> str | None:
-    """Read the spec hash a lock file records, if it records one."""
+def _env_spec_hash_key(lock_fpath: str, wdir: str | None) -> str:
+    """The entry a lock's spec hash is kept under."""
+    lock_dir, name = os.path.split(lock_fpath)
+    # Every platform's lock in a directory is resolved from the same spec
+    if lock_dir and os.path.splitext(name)[0] in CONDA_VENV_ARCHS:
+        lock_fpath = lock_dir
+    if os.path.isabs(lock_fpath):
+        lock_fpath = os.path.relpath(lock_fpath, wdir or ".")
+    return Path(lock_fpath).as_posix()
+
+
+def read_env_spec_hash(lock_fpath: str, wdir: str | None = None) -> str | None:
+    """Read the hash of the spec a lock was resolved from, if recorded."""
     try:
-        with open(lock_fpath, encoding="utf-8") as f:
-            first = f.readline().strip()
-    except (OSError, UnicodeDecodeError):
+        with open(
+            os.path.join(wdir or "", ENV_SPEC_HASHES_FPATH), encoding="utf-8"
+        ) as f:
+            hashes = json.load(f)
+    except (OSError, ValueError):
         return None
-    if not first.startswith(LOCK_SPEC_COMMENT):
+    if not isinstance(hashes, dict):
         return None
-    return first[len(LOCK_SPEC_COMMENT) :].strip() or None
+    return hashes.get(_env_spec_hash_key(lock_fpath, wdir))
 
 
-def stamp_lock_with_spec(
-    lock_fpath: str, spec_fpath: str, python: str | None = None
+def write_env_spec_hash(
+    lock_fpath: str,
+    spec_fpath: str,
+    python: str | None = None,
+    wdir: str | None = None,
 ) -> None:
-    """Record in a lock file which spec it was resolved from."""
-    fingerprint = spec_fingerprint(spec_fpath, python=python)
-    with open(lock_fpath, encoding="utf-8") as f:
-        body = f.read()
-    if body.startswith(LOCK_SPEC_COMMENT):
-        body = body.split("\n", 1)[1] if "\n" in body else ""
-    with open(lock_fpath, "w", newline="\n", encoding="utf-8") as f:
-        f.write(f"{LOCK_SPEC_COMMENT} {fingerprint}\n{body}")
+    """Record that a lock was resolved from the spec as it is now.
 
-
-def stamped_lock_matches_spec(
-    lock_fpath: str, spec_fpath: str, python: str | None = None
-) -> bool:
-    """Whether a lock file was resolved from the spec as it is now."""
-    if not os.path.isfile(lock_fpath) or not os.path.isfile(spec_fpath):
-        return False
-    recorded = read_lock_spec_fingerprint(lock_fpath)
-    return recorded is not None and recorded == spec_fingerprint(
-        spec_fpath, python=python
-    )
+    Kept outside the lock directory, which stages depend on, so recording
+    it for a lock that already matches its spec reruns nothing.
+    """
+    fpath = os.path.join(wdir or "", ENV_SPEC_HASHES_FPATH)
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            hashes = json.load(f)
+    except (OSError, ValueError):
+        hashes = {}
+    if not isinstance(hashes, dict):
+        hashes = {}
+    key = _env_spec_hash_key(lock_fpath, wdir)
+    value = env_spec_hash(os.path.join(wdir or "", spec_fpath), python=python)
+    if hashes.get(key) == value:
+        return
+    hashes[key] = value
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    with open(fpath, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(hashes, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 
 def write_cross_platform_venv_locks(
     spec_fpath: str,
     lock_fpath: str,
-    python: str | None = None,
+    python_version: str | None = None,
     wdir: str | None = None,
     verbose: bool = False,
-    python_version: str | None = None,
+    relock: bool = True,
 ) -> list[str]:
     """Resolve a venv's lock for every other platform uv can resolve for.
 
-    ``python`` is the env's declared Python, which locks are stamped with
-    as the check stamps this platform's; ``python_version`` is what to
-    resolve for, when it differs, e.g., the version a plain venv has.
-
     Stages depend on the lock directory, so a platform locked later would
-    invalidate them. Best effort: a platform that fails to resolve is left
-    for a machine of that kind to lock.
+    invalidate them. With ``relock``, e.g., after the spec changed, every
+    platform is resolved again and one that fails is removed, since it
+    would be stale; otherwise only missing ones are added. Versions are
+    kept to this platform's lock where the platform has them, so results
+    agree across machines.
 
     Returns the paths written, relative to ``wdir``.
     """
@@ -1482,42 +1511,58 @@ def write_cross_platform_venv_locks(
     # Only a per-platform lock, e.g., from 'calkit check env', has siblings
     if stem != here:
         return written
-    for arch in CONDA_VENV_ARCHS:
-        target = UV_PLATFORM_TARGETS.get(arch)
-        if target is None or arch == here:
-            continue
-        out_fpath = os.path.join(lock_dir, arch + ext)
-        out_fpath_full = os.path.join(wdir or "", out_fpath)
-        spec_fpath_full = os.path.join(wdir or "", spec_fpath)
-        if stamped_lock_matches_spec(
-            out_fpath_full, spec_fpath_full, python=python
-        ):
-            continue
-        cmd = [
-            "uv",
-            "pip",
-            "compile",
-            "--quiet",
-            "--python-platform",
-            target,
-            "--output-file",
-            out_fpath,
+    with open(os.path.join(wdir or "", lock_fpath), encoding="utf-8") as f:
+        constraints = [
+            ln.strip()
+            for ln in f
+            if re.match(r"^[A-Za-z0-9][\w.\-\[\],]*==", ln.strip())
         ]
-        if (python_version or python) is not None:
-            cmd += ["--python-version", str(python_version or python)]
-        cmd.append(spec_fpath)
-        if verbose:
-            typer.echo(f"Running command: {' '.join(cmd)}")
-        try:
-            subprocess.check_call(cmd, cwd=wdir)
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            # Only tried when this platform's lock is rewritten
-            warn(f"Could not lock {spec_fpath} for {arch}: {e}")
-            if os.path.isfile(out_fpath_full):
-                os.remove(out_fpath_full)
-            continue
-        stamp_lock_with_spec(out_fpath_full, spec_fpath_full, python=python)
-        written.append(out_fpath)
+    with tempfile.TemporaryDirectory() as tmp:
+        constraints_fpath = os.path.join(tmp, "constraints.txt")
+        with open(constraints_fpath, "w", encoding="utf-8") as f:
+            f.write("\n".join(constraints) + "\n")
+        for arch in CONDA_VENV_ARCHS:
+            target = UV_PLATFORM_TARGETS.get(arch)
+            if target is None or arch == here:
+                continue
+            out_fpath = os.path.join(lock_dir, arch + ext)
+            out_fpath_full = os.path.join(wdir or "", out_fpath)
+            if not relock and os.path.isfile(out_fpath_full):
+                continue
+            cmd = [
+                "uv",
+                "pip",
+                "compile",
+                "--quiet",
+                # Neither changes what's locked, and both name a temp file
+                "--no-header",
+                "--no-annotate",
+                "--python-platform",
+                target,
+                "--output-file",
+                out_fpath,
+            ]
+            if python_version is not None:
+                cmd += ["--python-version", str(python_version)]
+            cmd.append(spec_fpath)
+            # A version this platform lacks falls back to a fresh resolve
+            error = None
+            for extra in (["-c", constraints_fpath], []):
+                if verbose:
+                    typer.echo(f"Running command: {' '.join(cmd + extra)}")
+                try:
+                    subprocess.check_call(cmd + extra, cwd=wdir)
+                    error = None
+                    break
+                except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                    error = e
+            if error is not None:
+                # Only tried when this platform's lock is rewritten
+                warn(f"Could not lock {spec_fpath} for {arch}: {error}")
+                if os.path.isfile(out_fpath_full):
+                    os.remove(out_fpath_full)
+                continue
+            written.append(out_fpath)
     return written
 
 

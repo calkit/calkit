@@ -1422,7 +1422,7 @@ def locate_block(
         )
         if not want:
             return None
-        scored = [
+        math_scored = [
             (
                 difflib.SequenceMatcher(
                     a=want, b=_math_chars(display_text(b)), autojunk=False
@@ -1432,7 +1432,7 @@ def locate_block(
             for b in blks
             if b.display
         ]
-        top = max(scored, key=lambda x: x[0], default=None)
+        top = max(math_scored, key=lambda x: x[0], default=None)
         return top[1] if top is not None and top[0] >= 0.6 else None
     path = path or main_path
     return next(

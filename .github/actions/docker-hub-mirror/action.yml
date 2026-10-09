@@ -1,0 +1,16 @@
+name: Pull from a Docker Hub mirror
+description: >-
+  Point the runner's Docker at Google's Docker Hub mirror, since anonymous
+  pulls from Docker Hub are rate limited per runner IP. Docker falls back to
+  Docker Hub for anything the mirror can't serve.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        f=/etc/docker/daemon.json
+        config=$({ sudo cat "$f" 2>/dev/null || echo '{}'; } \
+          | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}')
+        echo "$config" | sudo tee "$f" > /dev/null
+        sudo systemctl restart docker
+        docker info --format 'Registry mirrors: {{.RegistryConfig.Mirrors}}'

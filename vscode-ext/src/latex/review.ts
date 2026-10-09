@@ -689,7 +689,7 @@ function buildHtml(
   label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
   #main { position: absolute; top: 37px; left: 0; right: 0; bottom: 0; display: flex; }
   #wrap { position: relative; flex: 1; }
-  #viewerContainer { position: absolute; inset: 0; overflow: auto; background: var(--vscode-editorWidget-background, #525659); }
+  #viewerContainer { position: absolute; inset: 0; overflow: auto; outline: none; background: var(--vscode-editorWidget-background, #525659); }
   #side { width: var(--panel-width); flex: none; display: flex; flex-direction: column;
     border-left: 1px solid var(--vscode-panel-border); box-sizing: border-box; }
   #side-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 4px 8px;
@@ -734,6 +734,21 @@ function buildHtml(
   .badge { font-size: 0.85em; padding: 0 4px; border-radius: 2px; background: var(--vscode-badge-background);
     color: var(--vscode-badge-foreground); }
   a { color: var(--vscode-textLink-foreground); cursor: pointer; }
+  #find { position: absolute; top: 0; right: 16px; z-index: 30; display: flex; align-items: center; gap: 2px;
+    padding: 4px; background: var(--vscode-editorWidget-background, #252526);
+    border: 1px solid var(--vscode-editorWidget-border, transparent); border-top: none;
+    box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
+  #find[hidden] { display: none; }
+  .textLayer .highlight { --highlight-bg-color: var(--vscode-editor-findMatchHighlightBackground, rgb(180 0 170 / 0.25));
+    --highlight-selected-bg-color: var(--vscode-editor-findMatchBackground, rgb(0 100 0 / 0.25)); }
+  #find input { width: 200px; font: inherit; padding: 3px 6px; outline: none;
+    color: var(--vscode-input-foreground); background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; }
+  #find input:focus { border-color: var(--vscode-focusBorder); }
+  #find.missing input { border-color: var(--vscode-inputValidation-errorBorder, #be1100); }
+  #find-count { min-width: 64px; padding: 0 6px; white-space: nowrap; opacity: 0.8; }
+  #find button { background: none; padding: 2px 6px; }
+  #find button:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31)); }
   #select-actions { position: absolute; display: none; z-index: 20; gap: 4px; padding: 3px; border-radius: 4px;
     background: var(--vscode-editorWidget-background, #252526);
     border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, #454545));
@@ -760,7 +775,14 @@ function buildHtml(
 </div>
 <div id="main">
   <div id="wrap">
-    <div id="viewerContainer"><div id="viewer" class="pdfViewer"></div></div>
+    <div id="viewerContainer" tabindex="-1"><div id="viewer" class="pdfViewer"></div></div>
+    <div id="find" hidden>
+      <input id="find-input" type="text" placeholder="Find" spellcheck="false" aria-label="Find">
+      <span id="find-count"></span>
+      <button id="find-prev" title="Previous match (Shift+Enter)" aria-label="Previous match">&uarr;</button>
+      <button id="find-next" title="Next match (Enter)" aria-label="Next match">&darr;</button>
+      <button id="find-close" title="Close (Escape)" aria-label="Close">&times;</button>
+    </div>
     <div id="select-actions">
       <button id="select-comment" class="primary">Comment</button>
       <button id="select-source" title="Open the LaTeX source at this text">Go to source</button>
@@ -791,7 +813,7 @@ const save = () => {
   saveTimer = setTimeout(() => vscode.postMessage({ type: "state", state }), 300);
 };
 const pdfjsLib = await import(config.lib);
-const { EventBus, PDFLinkService, PDFViewer } = await import(config.viewer);
+const { EventBus, PDFFindController, PDFLinkService, PDFViewer } = await import(config.viewer);
 // A worker from another origin is refused, so it's loaded from a blob
 const workerCode = await (await fetch(config.worker)).text();
 pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(
@@ -804,7 +826,8 @@ const statusEl = document.getElementById("status");
 const selectBtn = document.getElementById("select-actions");
 const eventBus = new EventBus();
 const linkService = new PDFLinkService({ eventBus });
-const viewer = new PDFViewer({ container, eventBus, linkService, removePageBorders: true });
+const findController = new PDFFindController({ linkService, eventBus });
+const viewer = new PDFViewer({ container, eventBus, linkService, findController, removePageBorders: true });
 linkService.setViewer(viewer);
 let pdfDoc = null;
 let threads = [];
@@ -922,7 +945,7 @@ async function placeParagraph(text) {
   return { start: rect(start, start.r.start.item), end: rect(end ?? start, (end ?? start).r.end.item) };
 }
 function spans(n) {
-  return pageView(n)?.div?.querySelectorAll(".textLayer span:not(.markedContent)") ?? [];
+  return pageView(n)?.div?.querySelectorAll(".textLayer span:not(.markedContent, .highlight)") ?? [];
 }
 // Rectangles around a match, from the text layer where it's rendered, since
 // that has the real glyph widths, otherwise estimated from the text items
@@ -1136,6 +1159,14 @@ container.addEventListener("mouseup", () => {
 });
 container.addEventListener("scroll", () => { selectBtn.style.display = "none"; });
 selectBtn.addEventListener("mousedown", (e) => e.preventDefault());
+// How far into an element's text a point in it is
+function offsetIn(el, node, offset) {
+  if (node.nodeType !== 3) return 0;
+  const r = document.createRange();
+  r.setStart(el, 0);
+  r.setEnd(node, offset);
+  return r.toString().length;
+}
 // The selected text, where it starts on its page, and the lines it's on
 async function selection() {
   const sel = document.getSelection();
@@ -1143,7 +1174,9 @@ async function selection() {
   const range = sel.getRangeAt(0);
   const rects = range.getClientRects();
   const startNode = range.startContainer;
-  const startEl = startNode.nodeType === 3 ? startNode.parentElement : startNode;
+  // Search matches split a text layer span, so it's the one around them
+  let startEl = startNode.nodeType === 3 ? startNode.parentElement : startNode;
+  if (startEl.classList.contains("highlight")) startEl = startEl.parentElement;
   const pageDiv = startEl.closest(".page");
   if (!rects.length || !pageDiv) return null;
   const n = Number(pageDiv.dataset.pageNumber);
@@ -1157,7 +1190,7 @@ async function selection() {
   const atEnd = fromViewport(n, last.left - box.left, last.top - box.top + last.height / 2);
   return {
     text: normalizeSelection(sel.toString()), page: n, at, item,
-    offset: startNode.nodeType === 3 ? range.startOffset : 0,
+    offset: offsetIn(startEl, startNode, range.startOffset),
     context: await lineText(n, at.y, atEnd.y),
   };
 }
@@ -1333,6 +1366,58 @@ async function load(url) {
     setStatus("Couldn't open the PDF: " + (err?.message ?? err));
   }
 }
+// Searching the PDF's text, with Cmd/Ctrl+F, as in an editor
+const findBar = document.getElementById("find");
+const findInput = document.getElementById("find-input");
+const findCount = document.getElementById("find-count");
+function find(type, previous = false) {
+  eventBus.dispatch("find", { source: findBar, type, query: findInput.value, caseSensitive: false,
+    entireWord: false, highlightAll: true, findPrevious: previous, matchDiacritics: false });
+}
+function openFind() {
+  const text = document.getSelection()?.toString().trim();
+  if (text && !text.includes("\\n")) findInput.value = normalizeSelection(text);
+  findBar.hidden = false;
+  findInput.focus();
+  findInput.select();
+  if (findInput.value) find("");
+}
+function closeFind() {
+  findBar.hidden = true;
+  eventBus.dispatch("findbarclose", { source: findBar });
+  container.focus();
+}
+function showCount({ current, total }) {
+  findCount.textContent = !findInput.value ? "" : total ? current + " of " + total : "No results";
+  findBar.classList.toggle("missing", !!findInput.value && !total);
+}
+eventBus.on("updatefindmatchescount", (e) => showCount(e.matchesCount));
+eventBus.on("updatefindcontrolstate", (e) => showCount(e.matchesCount));
+findInput.addEventListener("input", () => find(""));
+findInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    find("again", e.shiftKey);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeFind();
+  }
+});
+document.getElementById("find-prev").addEventListener("click", () => find("again", true));
+document.getElementById("find-next").addEventListener("click", () => find("again"));
+document.getElementById("find-close").addEventListener("click", closeFind);
+window.addEventListener("keydown", (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && !e.altKey && e.key.toLowerCase() === "f") {
+    e.preventDefault();
+    openFind();
+  } else if (((mod && e.key.toLowerCase() === "g") || e.key === "F3") && !findBar.hidden && findInput.value) {
+    e.preventDefault();
+    find("again", e.shiftKey);
+  } else if (e.key === "Escape" && !findBar.hidden && !e.target.closest?.("textarea")) {
+    closeFind();
+  }
+});
 window.addEventListener("message", (e) => {
   const msg = e.data;
   if (msg.type === "load") void load(msg.url);

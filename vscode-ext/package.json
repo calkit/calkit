@@ -73,9 +73,9 @@
     "keybindings": [
       {
         "command": "calkit-vscode.togglePdfSource",
-        "key": "ctrl+alt+j",
-        "mac": "cmd+alt+j",
-        "when": "editorTextFocus && resourceExtname == .tex && calkit.pdfReviewOpen || activeCustomEditorId == 'calkit.pdfReview'"
+        "key": "ctrl+alt+shift+j",
+        "mac": "cmd+alt+shift+j",
+        "when": "editorTextFocus && resourceExtname == .tex || activeCustomEditorId == 'calkit.pdfReview'"
       }
     ],
     "customEditors": [
@@ -882,7 +882,7 @@
         },
         {
           "command": "calkit-vscode.togglePdfSource",
-          "when": "resourceExtname == .tex && calkit.pdfReviewOpen || activeCustomEditorId == 'calkit.pdfReview'"
+          "when": "resourceExtname == .tex || activeCustomEditorId == 'calkit.pdfReview'"
         }
       ],
       "webview/context": [

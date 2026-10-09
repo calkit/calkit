@@ -2988,7 +2988,7 @@ def locate_paragraph(
         "path": found.path,
         "line": found.lineno,
         "end_line": found.lines[-1].lineno,
-        "text": found.text,
+        "text": found.text or calkit.latex.display_text(found),
     }
     if as_json:
         typer.echo(json.dumps(out, indent=2))

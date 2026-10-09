@@ -135,7 +135,15 @@ def diff(
 # source wouldn't have, e.g., hyphens at line breaks and the spacing
 # between glyphs
 _SKIP_RE = re.compile(r"[\s\-­‐-―]")
-_CHAR_MAP = {"‘": "'", "’": "'", "“": '"', "”": '"'}
+_CHAR_MAP = {
+    "‘": "'",
+    "’": "'",
+    "“": '"',
+    "”": '"',
+    # Math as typeset: a minus sign, and an increment for a capital delta
+    "\u2212": "-",
+    "\u2206": "\u0394",
+}
 
 
 def _norm_char(c: str) -> str:
@@ -242,8 +250,12 @@ class PdfLayout:
         start for where it starts and from the end for where it ends.
         """
         words = text.split()
+        if not words:
+            return None
+        # Runs of fewer words for a short paragraph, e.g., an equation
+        sizes = [s for s in (8, 5) if s <= len(words)] or [len(words)]
         start = fallback = None
-        for size in (8, 5):
+        for size in sizes:
             for i in range(min(20, len(words) - size + 1)):
                 hits = self.find(" ".join(words[i : i + size]))
                 if len(hits) == 1:
@@ -257,7 +269,7 @@ class PdfLayout:
         if start is None:
             return None
         begin = (start[0], start[1])
-        for size in (8, 5):
+        for size in sizes:
             for i in range(
                 len(words) - size, max(len(words) - size - 20, -1), -1
             ):

@@ -984,6 +984,9 @@ def test_comments(tmp_dir):
             "over two lines.\n"
             "\n"
             "Second paragraph.\n"
+            "\\begin{equation}\n"
+            "  E = \\alpha m c^2\n"
+            "\\end{equation}\n"
             "\\end{document}\n"
         )
     with open("paper/intro.tex", "w") as f:
@@ -1085,6 +1088,14 @@ def test_comments(tmp_dir):
     assert ck("locate", "paper/main.tex", "--text", "Intro text").startswith(
         "paper/intro.tex:"
     )
+    # An equation has few words or none, so it's found by its symbols, as
+    # typeset, with its number
+    found = json.loads(
+        ck("locate", "paper/main.tex", "--text", "E = \u03b1mc2 (1)", "--json")
+    )
+    assert found["text"] == "E = \u03b1 m c 2"
+    with open("paper/main.tex") as f:
+        assert f.read().split("\n")[found["line"] - 1] == "\\begin{equation}"
     # Bad references fail
     for args in [
         ["resolve", "paper/main.tex", "--id", "nope"],

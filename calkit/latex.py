@@ -1292,6 +1292,44 @@ def comment_anchor(blks: list[Block], tc: TexComment) -> Block | None:
     return next((b for b in blks if b.lineno >= tc.lineno + tc.nlines), None)
 
 
+_GREEK = (
+    "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu "
+    "xi pi rho sigma tau upsilon phi chi psi omega"
+).split()
+
+
+def display_text(block: Block) -> str:
+    """A display's math roughly as it reads in a PDF, e.g., to find it by
+    what was selected there: its symbols, without commands, grouping, or
+    wrappers, and Greek letters as themselves."""
+    import unicodedata
+
+    src = "\n".join(ln.text.split("%")[0] for ln in block.lines)
+    src = re.sub(r"\\(label|tag\*?|begin|end)\{[^}]*\}", " ", src)
+
+    def greek(m: re.Match) -> str:
+        name = m.group(1)
+        case = "CAPITAL" if name[0].isupper() else "SMALL"
+        return unicodedata.lookup(f"GREEK {case} LETTER {name.upper()}")
+
+    src = re.sub(
+        r"\\(" + "|".join(_GREEK + [g.capitalize() for g in _GREEK]) + r")\b",
+        greek,
+        src,
+    )
+    src = re.sub(r"\\[a-zA-Z]+\*?|\\.|[{}^_&$]", " ", src)
+    return " ".join(src.split())
+
+
+def _math_chars(text: str) -> str:
+    """Math text without spacing, and with what typesetting changes, e.g.,
+    a minus sign for a hyphen, undone."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", text).replace("\u2212", "-")
+    return "".join(text.split())
+
+
 def comment_to_dict(
     path: str, tc: TexComment, blks: list[Block]
 ) -> dict[str, Any]:
@@ -1314,7 +1352,7 @@ def comment_to_dict(
             {
                 "line": anchor.lineno,
                 "end_line": anchor.lines[-1].lineno,
-                "text": anchor.text,
+                "text": anchor.text or display_text(anchor),
             }
             if anchor is not None
             else None
@@ -1375,7 +1413,27 @@ def locate_block(
         # a long one shares words with anything
         scored = [(similarity(text, b.text), -len(b.text), b) for b in blks]
         best = max(scored, key=lambda x: x[:2], default=None)
-        return best[2] if best is not None and best[0] >= 0.5 else None
+        if best is not None and best[0] >= 0.5:
+            return best[2]
+        # Math has few words or none, so a display is matched by its
+        # symbols, without its equation number
+        want = _math_chars(
+            re.sub(r"\(\s*([A-Z]\.)?\d+(\.\d+)*\s*\)\s*$", "", text)
+        )
+        if not want:
+            return None
+        scored = [
+            (
+                difflib.SequenceMatcher(
+                    a=want, b=_math_chars(display_text(b)), autojunk=False
+                ).ratio(),
+                b,
+            )
+            for b in blks
+            if b.display
+        ]
+        top = max(scored, key=lambda x: x[0], default=None)
+        return top[1] if top is not None and top[0] >= 0.6 else None
     path = path or main_path
     return next(
         (

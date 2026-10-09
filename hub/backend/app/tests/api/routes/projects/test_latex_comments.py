@@ -198,6 +198,34 @@ def test_latex_comments(
         tc = calkit.latex.parse_comments(main)[0]
         assert tc.text == "Nice paper." and tc.highlight is None
         assert main[tc.lineno - 1 + tc.nlines] == "\\section{Introduction}"
+        # An equation, which has no words to find it by, is found by its
+        # symbols
+        hits = layout.find("\u0394u = \u03b1mc2")
+        resp = client.post(
+            URL,
+            json={
+                "path": "paper/main.pdf",
+                "comment": "Units?",
+                "highlight": {
+                    "position": layout.position(*hits[0]),
+                    "content": {"text": "\u0394u = \u03b1mc2"},
+                },
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        eq = next(
+            t
+            for t in resp.json()["threads"]
+            if t["messages"][0]["text"] == "Units?"
+        )
+        assert eq["highlight"] == "\u0394u = \u03b1mc2"
+        assert eq["position"] == layout.position(*hits[0])
+        main = origin_file("paper/main.tex").split("\n")
+        tc = next(
+            t for t in calkit.latex.parse_comments(main) if t.text == "Units?"
+        )
+        assert main[tc.lineno - 1 + tc.nlines] == "\\begin{equation}"
         # Deleting takes the thread out of the source
         resp = client.delete(
             URL,

@@ -105,6 +105,14 @@ def test_pdf_layout() -> None:
         hits[1]
     ]
     assert layout.find("absent text") == [] and layout.find("  ") == []
+    # A short paragraph is found too, e.g., an equation's math as it reads,
+    # with typeset symbols read as the source writes them
+    eq = layout.paragraph("\u0394 u = \u03b1 m c 2")
+    assert eq is not None and eq[0] < eq[1]
+    assert layout.find("\u2206u = \u03b1mc2") == layout.find(
+        "\u0394u = \u03b1mc2"
+    )
+    assert layout.find("\u0394u = \u03b1mc2") != []
     # A thread goes on its highlighted text, else its paragraph's first line
     pos = layout.place(para, "the wake recovers", 1)
     assert pos is not None and pos["pageNumber"] == 1

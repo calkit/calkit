@@ -238,11 +238,13 @@ def _locate_selection(
     )
     if blk is None:
         return None
+    # A display's text is its math, roughly as it reads
+    paragraph = blk.text or calkit.latex.display_text(blk)
     occ = 0
-    span = layout.paragraph(blk.text)
+    span = layout.paragraph(paragraph)
     if text and span is not None:
         occ = len(layout.find(text, span[0], (start[0], start[1] - 1)))
-    return blk.text, text, occ
+    return paragraph, text, occ
 
 
 def _read_comments(

@@ -2557,7 +2557,29 @@ def _get_subproject_targets_for_run(
     return bool(selected_stages), selected_stages or None
 
 
+def _cleans_up_after_run(func: Any) -> Any:
+    """Undo a run's process-wide state however it ends."""
+    import functools
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        import calkit.workspace
+
+        try:
+            return func(*args, **kwargs)
+        finally:
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            cache_dir = os.environ.pop(
+                calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None
+            )
+            if cache_dir:
+                shutil.rmtree(cache_dir, ignore_errors=True)
+
+    return wrapper
+
+
 @app.command(name="run")
+@_cleans_up_after_run
 def run(
     targets: Annotated[
         list[str] | None,
@@ -2738,18 +2760,37 @@ def run(
 
     import calkit.dvc.zip
     import calkit.environments
+    import calkit.markdown
     import calkit.pipeline
     from calkit.cli.overleaf import sync as overleaf_sync
+
+    def gate(stage_names: set[str] | None) -> None:
+        """Skip the stages that can't run here, of these or all of them."""
+        try:
+            gated, errors = calkit.pipeline.get_gated_stages(
+                calkit.markdown.expand_ck_info(ck_info).ck_info,
+                stage_names=stage_names,
+                system_info=system_info,
+            )
+        except Exception as e:
+            raise_error(f"Failed to check stage requirements: {e}")
+        for stage_name, reason in errors.items():
+            warn(f"Stage '{stage_name}' can't run: {reason}")
+        gate_errors.update(errors)
+        gated_stages.update(gated | errors)
 
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     # Remote machines' properties are read once per run, and not reused
-    # from the last one, since a machine can change between runs
+    # from the last one, since a machine can change between runs, nor
+    # shared with a run going on at the same time
     import calkit.workspace
 
     remote_info_dir = os.path.abspath(
-        os.path.join(calkit.ensure_local_dir(), "remote-system-info")
+        os.path.join(
+            calkit.ensure_local_dir(), "remote-system-info", str(os.getpid())
+        )
     )
     shutil.rmtree(remote_info_dir, ignore_errors=True)
     os.environ[calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR] = remote_info_dir
@@ -2764,7 +2805,6 @@ def run(
     # directory into an unrelated folder.
     if not os.path.isfile("calkit.yaml") and not os.path.isfile("dvc.yaml"):
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(
             f"No calkit.yaml or dvc.yaml in {os.getcwd()}, so there is no "
             "pipeline to run here. Run 'calkit init' to make this a "
@@ -2787,9 +2827,24 @@ def run(
     calkit.set_env_vars(ck_info=ck_info)
     if not quiet:
         calkit.echo("💻 Getting system information")
+    # Only the stages this run can reach are checked, so nothing else is
+    # probed. Running downstream stages or other pipelines reaches further
+    # than the targets' upstream stages.
+    gate_stage_names = None
+    if not (
+        target_inputs
+        or target_outputs
+        or downstream
+        or pipeline
+        or all_pipelines
+        or recursive
+    ):
+        gate_stage_names = calkit.pipeline.get_stages_to_gate(targets)
     # Get system information, with the app versions requirements check
     system_info = calkit.get_system_info(
-        apps=calkit.get_version_checked_app_names(ck_info)
+        apps=calkit.get_version_checked_app_names(
+            ck_info, stage_names=gate_stage_names
+        )
     )
     # Save the system to .calkit/local/systems unconditionally
     local_sysinfo_fpath = os.path.join(
@@ -2815,7 +2870,6 @@ def run(
         calkit.check_requirements(ck_info=ck_info, system_info=system_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(str(e))
     # Extract anything the project's Markdown files declare before the
     # environments are checked, since an environment declared there must be
@@ -2824,36 +2878,13 @@ def run(
         calkit.pipeline.sync_markdown(ck_info=ck_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(f"Failed to read markdown stages: {e}")
     # Stages that can't run here are skipped, keeping their outputs, and
     # their environments aren't checked
-    import calkit.markdown
+    gated_stages: dict[str, str] = {}
+    gate_errors: dict[str, str] = {}
 
-    # Only the stages this run can reach, so nothing else is probed or
-    # prompted for
-    gate_stage_names: set[str] | None = None
-    if targets and not (target_inputs or target_outputs):
-        try:
-            gate_stage_names = set()
-            for target in targets:
-                gate_stage_names |= calkit.pipeline.get_upstream_stages(target)
-        except Exception:
-            # E.g., a stage that isn't compiled yet
-            gate_stage_names = None
-    try:
-        gated_stages, gate_errors = calkit.pipeline.get_gated_stages(
-            calkit.markdown.expand_ck_info(ck_info).ck_info,
-            stage_names=gate_stage_names,
-            system_info=system_info,
-        )
-    except Exception as e:
-        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
-        raise_error(f"Failed to check stage requirements: {e}")
-    for stage_name, reason in gate_errors.items():
-        warn(f"Stage '{stage_name}' can't run: {reason}")
-    gated_stages |= gate_errors
+    gate(gate_stage_names)
     # Filled in by the run with the skipped stages that were out of date
     skipped_stale: dict[str, str] = {}
     # Check all environments in the pipeline (with caching)
@@ -2946,7 +2977,6 @@ def run(
             dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-            os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
     from dvc.exceptions import NotDvcRepoError
@@ -2962,6 +2992,12 @@ def run(
     except Exception as e:
         # E.g., DVC's site cache dir isn't writable, which 'dvc init' can't fix
         raise_error(f"Failed to open DVC repo: {e.__class__.__name__}: {e}")
+    # The pipeline as just compiled can reach stages the last one didn't,
+    # e.g., through an input just added
+    if gate_stage_names is not None:
+        reached = calkit.pipeline.get_stages_to_gate(targets)
+        if reached is None or reached - gate_stage_names:
+            gate(None if reached is None else reached - gate_stage_names)
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:
@@ -3038,7 +3074,6 @@ def run(
         )
     except ValueError as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
         raise_error(str(e))
     # Extract any boolean args
     for name in [
@@ -3109,7 +3144,6 @@ def run(
             # run, but still report failure the way the parent path does below,
             # else a failing subproject stage would exit zero.
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-            os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
             if failed:
                 raise_error("Pipeline failed")
             calkit.echo("Pipeline completed successfully ✅")
@@ -3263,6 +3297,9 @@ def run(
                 err=True,
             )
             failed = True
+        # One found stale only once the run was done was logged as skipped
+        if addressing in stage_run_info:
+            stage_run_info[addressing]["status"] = "gated"
     # Write what each stage printed back into any 'calkit output' blocks
     # in the Markdown that declared it
     try:
@@ -3408,7 +3445,6 @@ def run(
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-    os.environ.pop(calkit.workspace.REMOTE_INFO_CACHE_ENV_VAR, None)
     if failed:
         try:
             calkit.dvc.restore_output_ignores()

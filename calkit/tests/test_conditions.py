@@ -1,11 +1,8 @@
 """Tests for ``calkit.conditions``."""
 
-import ast
-
 import pytest
 
 from calkit.conditions import (
-    check_condition,
     evaluate_condition,
     parse_conditional,
     select_branch,
@@ -102,8 +99,16 @@ def test_evaluate_condition():
     for expression, problem in refused.items():
         with pytest.raises(ValueError, match=problem):
             evaluate_condition(expression, values)
-    # The structure is checked without values
-    assert isinstance(check_condition("p < 1"), ast.AST)
+    # The structure is refused before any name is looked up, and a missing
+    # name is an error even past a comparison that's already false
     for expression in ("leader.__class__ == 1", "len(x) > 1", "p <"):
         with pytest.raises(ValueError, match="condition"):
-            check_condition(expression)
+            evaluate_condition(expression, {})
+    with pytest.raises(KeyError):
+        evaluate_condition("n < 1 < missing", values)
+    # Deep nesting and overflow are reported like any other bad condition
+    deep = "abs(" + "1+" * 1000 + "1) < 0"
+    with pytest.raises(ValueError, match="Call 'abs"):
+        evaluate_condition(deep, {})
+    with pytest.raises(ValueError, match="too large"):
+        evaluate_condition("2.0 ** 10000 > 1", {})

@@ -518,8 +518,11 @@ def test_remote_system_info_reads_the_machine_that_runs_the_stage(
         raise subprocess.CalledProcessError(127, argv)
 
     monkeypatch.setattr(ws.subprocess, "check_output", fail)
-    with pytest.raises(ValueError, match="requires Calkit on that machine"):
+    with pytest.raises(ValueError, match="needs Calkit installed there."):
         ws.remote_system_info(w)
+    # Asking for an app's version needs a Calkit new enough to take '--app'
+    with pytest.raises(ValueError, match="new enough to report app"):
+        ws.remote_system_info(w, apps=["jq"])
     # During a run each machine is asked once, and again only for other apps
     calls = []
 
@@ -532,9 +535,11 @@ def test_remote_system_info_reads_the_machine_that_runs_the_stage(
     assert ws.remote_system_info(w) == {"cpu_count": 64}
     assert ws.remote_system_info(w) == {"cpu_count": 64}
     assert len(calls) == 1
-    ws.remote_system_info(w, apps=["jq"])
+    ws.remote_system_info(w, apps=["jq", "git"])
     assert len(calls) == 2
     assert "--app jq" in " ".join(calls[-1])
+    # Apps it always reports aren't asked for, so an older Calkit can answer
+    assert "--app git" not in " ".join(calls[-1])
 
 
 def test_workspace_from_env_carries_the_machine_id():

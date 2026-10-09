@@ -225,7 +225,9 @@ def skip_stages(
     skipped stage is frozen, so its own inputs aren't reproduced on its
     account, and isn't run or recorded in ``dvc.lock``, so it stays out of
     date rather than looking current. Each skipped stage that was out of
-    date is added to ``skipped`` with its reason.
+    date is added to ``skipped`` with its reason, including one that only
+    went out of date when a stage it depends on ran after it was visited,
+    since a frozen stage has no edges to order it after them.
     """
     from dvc.stage import Stage
     from dvc.stage.loader import StageLoader
@@ -250,6 +252,22 @@ def skip_stages(
 
     original_load = StageLoader.__dict__["load_stage"]
     original_reproduce = Stage.reproduce
+    # Visited while up to date, so checked again whenever a stage runs,
+    # while DVC holds the repo lock that checking needs
+    unchanged: list[tuple[Any, bool]] = []
+
+    def is_stale(stage: Any, **kwargs: Any) -> bool:
+        # Frozen stages never report changed deps, so ask without it
+        stage.frozen = False
+        try:
+            return bool(
+                kwargs.get("force")
+                or stage.changed(
+                    kwargs.get("allow_missing", False), kwargs.get("upstream")
+                )
+            )
+        finally:
+            stage.frozen = True
 
     def load_stage(cls: Any, *args: Any, **kwargs: Any) -> Any:
         stage = original_load.__func__(cls, *args, **kwargs)
@@ -260,19 +278,18 @@ def skip_stages(
     def reproduce(self: Any, *args: Any, **kwargs: Any) -> Any:
         reason = reason_for(self)
         if reason is None:
-            return original_reproduce(self, *args, **kwargs)
-        # Frozen stages never report changed deps, so ask without it
-        self.frozen = False
-        try:
-            stale = kwargs.get("force") or self.changed(
-                kwargs.get("allow_missing", False), kwargs.get("upstream")
-            )
-        finally:
-            self.frozen = True
-        if not stale:
+            result = original_reproduce(self, *args, **kwargs)
+            if result is not None and skipped is not None:
+                for stage, allow_missing in list(unchanged):
+                    if is_stale(stage, allow_missing=allow_missing):
+                        skipped[stage.addressing] = reason_for(stage) or ""
+                        unchanged.remove((stage, allow_missing))
+            return result
+        if not is_stale(self, **kwargs):
             logging.getLogger("dvc").info(
                 "Stage '%s' didn't change, skipping", self.addressing
             )
+            unchanged.append((self, kwargs.get("allow_missing", False)))
             return None
         logging.getLogger("dvc").info(
             "Stage '%s' can't run on this machine, skipping: %s",

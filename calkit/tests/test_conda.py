@@ -455,9 +455,12 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     write_spec(["iniconfig", git_dep])
     assert locks() == [osx, win]
     assert compiles[-1][0] == ["iniconfig==2.1.0", locked_git]
-    write_spec(["iniconfig", "-e ./pkg"])
-    assert locks() == []
-    assert not os.path.isfile(osx) and not os.path.isfile(win)
+    for local in ("-e ./pkg", "./pkg", "pkg @ file:///x", "-r more.txt"):
+        assert locks() == [osx, win]
+        write_spec(["iniconfig", local])
+        assert locks() == []
+        assert not os.path.isfile(osx) and not os.path.isfile(win)
+        write_spec(["iniconfig"])
     # Solving on the same OS assumes nothing about its virtual packages
     write_spec(["iniconfig"])
     monkeypatch.setattr(
@@ -829,6 +832,32 @@ fallback_version = "0+unknown"
     res = check_env(relaxed=True)
     assert res.env_exists
     assert not res.env_needs_rebuild
+    # A local package that isn't editable is locked as its path rather than
+    # its version, so the env can be created from the lock anywhere
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "--overwrite",
+            "-n",
+            ENV_NAME,
+            "--no-check",
+            "python=3.12",
+            "pip",
+            "six",
+            "--pip",
+            ".",
+        ]
+    )
+    check_env(lock_fpath="lock.yml", relaxed=True)
+    with open("lock.yml") as f:
+        pip_deps = calkit.ryaml.load(f)["dependencies"][-1]["pip"]
+    assert "." in pip_deps
+    assert not [d for d in pip_deps if d.startswith("src-thing")]
+    delete_env(conda_env_name)
+    res = check_env(lock_fpath="lock.yml", relaxed=True)
+    assert not res.env_exists
 
 
 def test_find_conda_exe():

@@ -145,6 +145,29 @@ def test_check_venv_moved(tmp_dir):
     else:
         cmd = f". \"{activate_fpath}\" && python -c 'import requests'"
     subprocess.check_call(cmd, shell=True)
+    # A local package is installed from the spec rather than locked, so the
+    # lock still installs once the project has moved
+    os.makedirs(os.path.join("a", "pkg"))
+    with open(os.path.join("a", "pkg", "pyproject.toml"), "w") as f:
+        f.write(
+            '[project]\nname = "calkit-test-pkg"\nversion = "0.1.0"\n'
+            '[build-system]\nrequires = ["setuptools"]\n'
+            'build-backend = "setuptools.build_meta"\n'
+        )
+    with open(os.path.join("a", "pkg", "calkit_test_pkg.py"), "w") as f:
+        f.write("")
+    with open(os.path.join("a", "reqs.txt"), "w") as f:
+        f.write("idna\n-e ./pkg\n")
+    check = ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    subprocess.check_call(check, cwd="a")
+    with open(os.path.join("a", "lock.txt")) as f:
+        lock = f.read()
+    assert "idna==" in lock
+    assert "file:" not in lock and "calkit-test-pkg" not in lock
+    os.rename("a", "b")
+    subprocess.check_call(check, cwd="b")
+    with open(os.path.join("b", "lock.txt")) as f:
+        assert f.read() == lock
 
 
 def test_check_env_vars(tmp_dir):
@@ -1409,7 +1432,7 @@ def test_check_env_rebuilds(tmp_dir):
         f.write("idna\n")
     with open("local.txt", "w") as f:
         f.write("one\n")
-    ck_info = {
+    ck_info: dict = {
         "environments": {
             "py": {
                 "kind": "uv-venv",
@@ -1444,6 +1467,30 @@ def test_check_env_rebuilds(tmp_dir):
         calkit.ryaml.dump(ck_info, f)
     res = subprocess.run(check, capture_output=True, text=True)
     assert res.returncode != 0
+    # A switch's own inputs rebuild what it picks
+    ck_info["environments"]["py"]["inputs"] = []
+    ck_info["environments"]["sw"] = {
+        "kind": "switch",
+        "switch": [{"use": "py"}],
+        "inputs": ["local.txt"],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check_switch = ["calkit", "check", "env", "-n", "sw"]
+    subprocess.check_call(check_switch)
+    open(marker, "w").close()
+    subprocess.check_call(check_switch)
+    assert os.path.isfile(marker)
+    with open("local.txt", "w") as f:
+        f.write("three\n")
+    subprocess.check_call(check_switch)
+    assert not os.path.isfile(marker)
+    # An renv env's library is what a rebuild removes
+    library = os.path.join("r", "renv", "library")
+    os.makedirs(library)
+    envs = {"r": {"kind": "renv", "path": "r/DESCRIPTION"}}
+    assert calkit.environments.remove_built_env("r", envs) == library
+    assert not os.path.exists(library)
 
 
 def test_check_env_locks_every_venv_platform(tmp_dir):
@@ -1467,26 +1514,11 @@ def test_check_env_locks_every_venv_platform(tmp_dir):
     # another machine reads its lock as current rather than relocking
     locks = os.listdir(lock_dir)
     assert len(locks) > 1
-    # With the venv's Python, so a machine with another one relocks
-    venv_python = subprocess.check_output(
-        [
-            os.path.join(
-                ".venv",
-                "Scripts" if sys.platform == "win32" else "bin",
-                "python",
-            ),
-            "-c",
-            "import sys; print('%d.%d' % sys.version_info[:2])",
-        ],
-        text=True,
-    ).strip()
+    # Without a declared Python, so machines with different ones agree
     recorded = calkit.environments.read_env_spec_hash(
         os.path.join(lock_dir, locks[0])
     )
-    assert recorded == calkit.environments.env_spec_hash(
-        "requirements.txt", python=venv_python
-    )
-    assert recorded != calkit.environments.env_spec_hash("requirements.txt")
+    assert recorded == calkit.environments.env_spec_hash("requirements.txt")
     # A matching lock with no record, e.g., from before records were kept, is
     # adopted without relocking other platforms
     here = calkit.environments._conda_venv_platform() + ".txt"

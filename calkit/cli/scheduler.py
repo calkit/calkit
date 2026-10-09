@@ -9,6 +9,7 @@ Registered as ``scheduler|sch``.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import random
 import re
@@ -821,6 +822,17 @@ def run_batch(
             ),
         ),
     ] = [],
+    setup_file: Annotated[
+        str | None,
+        typer.Option(
+            "--setup-file",
+            help=(
+                "Path to a JSON list of setup commands, used instead of "
+                "--setup, since a path survives cmd.exe and a POSIX shell "
+                "alike, and quoted commands don't."
+            ),
+        ),
+    ] = None,
     log_path: Annotated[
         str | None, typer.Option("--log-path", help="Output log path.")
     ] = None,
@@ -933,6 +945,16 @@ def run_batch(
 
     if args is None:
         args = []
+    if setup_file is not None:
+        if setup_cmds:
+            raise_error("Give --setup or --setup-file, not both")
+        try:
+            with open(setup_file) as f:
+                setup_cmds = json.load(f)
+        except (OSError, ValueError) as e:
+            raise_error(
+                f"Could not read setup commands from {setup_file}: {e}"
+            )
     if environment == "_system":
         raise_error(
             "Scheduler batch submission requires a scheduler environment; "

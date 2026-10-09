@@ -198,6 +198,29 @@ def _enrich_pip_deps_from_freeze(
     return result
 
 
+def _norm_pkg_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _local_pip_path(dep: str) -> str | None:
+    """The path a pip dependency installs from, if it's a local one."""
+    dep = dep.split("#", 1)[0].strip()
+    editable = re.match(r"^(-e|--editable)[\s=]+", dep)
+    target = dep[editable.end() :].strip() if editable else dep
+    url = re.match(r"^(?:\S+\s*@\s*)?(file:\S+)$", target)
+    if url:
+        from urllib.parse import unquote, urlparse
+
+        return unquote(urlparse(url[1]).path) or None
+    is_path = target.startswith((".", "/", "~")) or re.match(
+        r"^[A-Za-z]:[\\/]", target
+    )
+    if is_path or (editable and re.match(r"^\w+\+", target) is None):
+        # Without extras, e.g., '.[dev]'
+        return re.sub(r"\[[^\]]*\]$", "", target)
+    return None
+
+
 def _normalize_git_dep_url(dep: str) -> str:
     """Extract and normalize the git URL+ref from a dep string for comparison.
 
@@ -871,43 +894,56 @@ def check_env(
         if prefix is not None:
             _ = env_export.pop("name")
             env_export["prefix"] = prefix_orig
-        # If we have any editable installs, convert them back to editable from
-        # their exported package names
-        # Note that this needs to be relative to the env lock directory,
-        # since that's how pip will interpret it
-        editable_pip_deps = {}
+        # Local packages are exported by name and version, which can't be
+        # installed, so they're written as their paths, relative to the
+        # lock's directory, since that's how pip will read them
+        local_pip_deps: dict[str, tuple[str, bool]] = {}
         required_pip_deps = _get_pip_dependency_list(env_spec["dependencies"])
         for dep in required_pip_deps:
-            if dep.startswith("-e ") or dep.startswith("--editable "):
-                dir_path = dep.split(" ", 1)[1]
-                if "#" in dir_path:
-                    dir_path = dir_path.split("#", 1)[0]
-                dir_path = dir_path.strip()
-                dir_path = os.path.join(env_spec_dir, dir_path)
-                pkg_name = _editable_package_name_from_dir(dir_path)
-                if verbose:
-                    log_func(
-                        f"Found editable pip dependency '{pkg_name}' "
-                        f"at '{dir_path}'"
-                    )
-                editable_pip_deps[pkg_name] = dir_path
+            local_path = _local_pip_path(dep)
+            if local_path is None:
+                continue
+            editable = dep.startswith(("-e", "--editable"))
+            dir_path = os.path.join(
+                env_spec_dir, os.path.expanduser(local_path)
+            )
+            if os.path.isfile(dir_path) and dir_path.endswith(".whl"):
+                pkg_name = os.path.basename(dir_path).split("-")[0]
+            else:
+                try:
+                    pkg_name = _editable_package_name_from_dir(dir_path)
+                except ValueError:
+                    if editable:
+                        raise
+                    continue
+            if verbose:
+                log_func(
+                    f"Found local pip dependency '{pkg_name}' at '{dir_path}'"
+                )
+            local_pip_deps[_norm_pkg_name(pkg_name)] = (dir_path, editable)
         export_pip_deps = _get_pip_dependency_list(env_export["dependencies"])
         if export_pip_deps:
-            # Enrich with pip freeze to preserve git URLs, then fix editable paths
+            # Enrich with pip freeze to preserve git URLs, then fix local paths
             if pip_freeze:
                 export_pip_deps = _enrich_pip_deps_from_freeze(
                     export_pip_deps, pip_freeze
                 )
             for i, dep in enumerate(export_pip_deps):
-                dep_name = _pkg_name_from_dep(dep)
-                if dep_name in editable_pip_deps:
-                    path_rel_to_project_root = editable_pip_deps[dep_name]
-                    lock_dir = os.path.dirname(lock_fpath)
-                    path_rel_to_lock = os.path.relpath(
-                        path_rel_to_project_root, start=lock_dir
+                dep_name = _norm_pkg_name(_pkg_name_from_dep(dep))
+                if dep_name not in local_pip_deps:
+                    continue
+                dir_path, editable = local_pip_deps[dep_name]
+                rel = Path(
+                    os.path.relpath(
+                        dir_path, start=os.path.dirname(lock_fpath) or "."
                     )
+                ).as_posix()
+                if editable:
+                    export_pip_deps[i] = "-e " + rel
+                else:
+                    # A bare name would be read as a package to download
                     export_pip_deps[i] = (
-                        "-e " + Path(path_rel_to_lock).as_posix()
+                        rel if rel.startswith(".") else "./" + rel
                     )
             # Write the modified list back (enrichment returns a new list)
             for dep_entry in env_export["dependencies"]:
@@ -917,9 +953,14 @@ def check_env(
         out_dir = os.path.dirname(lock_fpath)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
-        with open(lock_fpath, "w", encoding="utf-8") as f:
+        with open(lock_fpath, "w", encoding="utf-8", newline="\n") as f:
             ryaml.dump(env_export, f)
-    elif pip_freeze and spec_has_git_pip and os.path.isfile(lock_fpath):
+    elif (
+        not lock_is_current
+        and pip_freeze
+        and spec_has_git_pip
+        and os.path.isfile(lock_fpath)
+    ):
         # The env matched the spec so no full re-export was done, but the
         # existing lock file may pre-date pip freeze enrichment. Update its
         # pip section in place — no conda env export needed.
@@ -933,13 +974,12 @@ def check_env(
                 if isinstance(dep_entry, dict) and "pip" in dep_entry:
                     dep_entry["pip"] = enriched
                     break
-            with open(lock_fpath, "w", encoding="utf-8") as f:
+            with open(lock_fpath, "w", encoding="utf-8", newline="\n") as f:
                 ryaml.dump(lock_data, f)
     with open(lock_fpath, encoding="utf-8") as f:
         lock_changed = f.read() != lock_before
-    write_env_spec_hash(lock_fpath, env_fpath)
     # All platforms are relocked together, so they agree; an existing lock
-    # that matches is adopted as is
+    # that matches is adopted as is, and one with no record is only added to
     spec_changed = recorded_hash != spec_hash
     adopted = recorded_hash is None and not lock_changed
     if (lock_changed or spec_changed) and not adopted:
@@ -948,8 +988,10 @@ def check_env(
             lock_fpath=lock_fpath,
             conda_exe=conda_exe,
             log_func=log_func,
-            relock=spec_changed,
+            relock=spec_changed and recorded_hash is not None,
         )
+    # Last, so an interrupted relock isn't taken as current
+    write_env_spec_hash(lock_fpath, env_fpath)
     return res
 
 
@@ -983,9 +1025,6 @@ def write_cross_platform_locks(
     )
 
     log = log_func or calkit.logger.info
-
-    def norm_name(name: str) -> str:
-        return re.sub(r"[-_.]+", "-", name).lower()
 
     def solve(arch: str, pins: list[str]) -> list | None:
         """Solve the conda part for a platform, or None if that fails."""
@@ -1024,11 +1063,13 @@ def write_cross_platform_locks(
     with open(env_fpath, encoding="utf-8") as f:
         env_spec = ryaml.load(f)
     conda_deps, pip_deps = _split_env_dependencies(env_spec["dependencies"])
-    # Git URLs resolve the same anywhere, but local paths may not
+    # Git URLs resolve the same anywhere, but local paths and included
+    # files may not
     unpinnable = [
         d
         for d in pip_deps
-        if d.startswith(("-e", "--editable")) or "file:" in d
+        if _local_pip_path(d) is not None
+        or re.match(r"^(-r|-c|--requirement|--constraint)\b", d.strip())
     ]
     channels = list(env_spec.get("channels") or [])
     # Pin direct dependencies to what's installed here
@@ -1046,10 +1087,10 @@ def write_cross_platform_locks(
     local_pip_urls = {}
     for dep in local_pip:
         if _GIT_RE.search(dep):
-            local_pip_urls[norm_name(_pkg_name_from_dep(dep))] = dep
+            local_pip_urls[_norm_pkg_name(_pkg_name_from_dep(dep))] = dep
         elif "==" in dep:
             name, vers = dep.split("==", 1)
-            local_pip_vers[norm_name(name.strip())] = vers.strip()
+            local_pip_vers[_norm_pkg_name(name.strip())] = vers.strip()
     conda_pins = [f"{n}=={v}" for n, v in sorted(local_conda_vers.items())]
     pip_pins = [f"{n}=={v}" for n, v in sorted(local_pip_vers.items())]
     pinned_conda_deps = []
@@ -1065,7 +1106,7 @@ def write_cross_platform_locks(
     pinned_pip_deps = []
     for dep in pip_deps:
         pkg = re.split(r"[=<>!~;@\s]", dep.strip(), maxsplit=1)[0]
-        name = norm_name(pkg.split("[")[0])
+        name = _norm_pkg_name(pkg.split("[")[0])
         if dep in unpinnable:
             pinned_pip_deps.append(dep)
         elif name in local_pip_urls:
@@ -1118,13 +1159,13 @@ def write_cross_platform_locks(
         ]
         if pinned_pip is not None:
             # Pip leaves alone what conda already installed
-            from_conda = {norm_name(p["name"]) for p in links}
+            from_conda = {_norm_pkg_name(p["name"]) for p in links}
             dependencies.append(
                 {
                     "pip": [
                         line
                         for line in pinned_pip
-                        if norm_name(_pkg_name_from_dep(line))
+                        if _norm_pkg_name(_pkg_name_from_dep(line))
                         not in from_conda
                     ]
                 }

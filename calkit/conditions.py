@@ -98,27 +98,6 @@ def parse_conditional(clauses: dict) -> list[tuple[str | None, str]]:
     return parsed
 
 
-def check_condition(expression: str) -> ast.Expression:
-    """Parse a condition, refusing anything evaluating it would refuse."""
-    shown = expression if len(expression) <= 200 else expression[:200] + "..."
-    try:
-        tree = ast.parse(expression, mode="eval")
-    except (SyntaxError, MemoryError, RecursionError) as e:
-        raise ValueError(f"cannot parse condition {shown!r}: {e}") from e
-
-    def refuse(problem: str) -> ValueError:
-        return ValueError(f"condition {shown!r}: {problem}")
-
-    for node in ast.walk(tree):
-        if not isinstance(node, _ALLOWED_NODES):
-            if isinstance(node, ast.expr):
-                what = f"{type(node).__name__} {ast.unparse(node)!r}"
-            else:
-                what = type(node).__name__
-            raise refuse(f"{what} is not allowed")
-    return tree
-
-
 def _arithmetic(node: ast.AST, values: dict[str, Any]) -> Any:
     """A value computed from names and literals, within size bounds."""
     if isinstance(node, ast.Constant):
@@ -156,18 +135,11 @@ def _operand(node: ast.AST, values: dict[str, Any]) -> Any:
         return [_operand(e, values) for e in node.elts]
     if isinstance(node, ast.Tuple):
         return tuple(_operand(e, values) for e in node.elts)
-    # A missing name is reported before anything else, so a name that
-    # isn't an identifier gets the message saying so
-    for inner in ast.walk(node):
-        if isinstance(inner, ast.Name) and inner.id not in values:
-            raise KeyError(inner.id)
     return _arithmetic(node, values)
 
 
 def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
     if isinstance(node, ast.BoolOp):
-        # Not short-circuited, so a misspelled name is an error whatever
-        # the current values are
         outcomes = [_truth(v, values) for v in node.values]
         if isinstance(node.op, ast.And):
             return all(outcomes)
@@ -178,12 +150,7 @@ def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
         left = _operand(node.left, values)
         for op, comparator in zip(node.ops, node.comparators):
             right = _operand(comparator, values)
-            compare = _COMPARISONS.get(type(op))
-            if compare is None:
-                raise ValueError(
-                    f"{type(op).__name__} is not a supported comparison"
-                )
-            if not compare(left, right):
+            if not _COMPARISONS[type(op)](left, right):
                 return False
             left = right
         return True
@@ -205,6 +172,25 @@ def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
     Raises ``KeyError`` for a name not in ``values`` and ``ValueError``
     for anything else wrong with the condition.
     """
+    shown = expression if len(expression) <= 200 else expression[:200] + "..."
+
+    def parse() -> ast.Expression:
+        # Refuses anything evaluating would refuse, before any values are
+        # read
+        try:
+            tree = ast.parse(expression, mode="eval")
+        except (SyntaxError, MemoryError, RecursionError) as e:
+            raise ValueError(f"cannot parse condition {shown!r}: {e}") from e
+        for node in ast.walk(tree):
+            if isinstance(node, _ALLOWED_NODES):
+                continue
+            what = type(node).__name__
+            # Not unparsed, which can recurse too deeply on a nested tree
+            segment = ast.get_source_segment(expression, node) or ""
+            if segment:
+                what += " " + repr(segment[:60])
+            raise ValueError(f"condition {shown!r}: {what} is not allowed")
+        return tree
 
     def unusable_name() -> ValueError | None:
         # A name like 'paired-gain.vawt-8' reads as arithmetic and
@@ -224,13 +210,18 @@ def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
         )
 
     try:
-        tree = check_condition(expression)
+        tree = parse()
     except ValueError:
         error = unusable_name()
         if error is not None:
             raise error from None
         raise
     try:
+        # Every name is checked up front, so a misspelled one is an error
+        # whatever the current values are, even past a false comparison
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id not in values:
+                raise KeyError(node.id)
         return bool(_truth(tree.body, values))
     except KeyError:
         error = unusable_name()
@@ -239,6 +230,10 @@ def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
         raise
     except ValueError as e:
         raise ValueError(f"condition {expression!r}: {e}") from e
+    except OverflowError as e:
+        raise ValueError(
+            f"condition {expression!r}: a value is too large"
+        ) from e
     except Exception as e:
         # E.g., comparing a string to a number, or a value too deeply nested
         # to evaluate, so callers only have to handle one kind of bad

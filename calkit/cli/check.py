@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import platform as _platform
+import re
 import shutil
 import subprocess
 import textwrap
@@ -62,6 +63,7 @@ def _check_julia_env(
     julia_version: str | None = None,
     verbose: bool = False,
     cache_key: str | None = None,
+    force: bool = False,
 ) -> str:
     """Check a Julia environment and instantiate only when needed."""
     abs_env_path = os.path.abspath(env_path)
@@ -80,7 +82,7 @@ def _check_julia_env(
     cache_env_name = cache_key or (
         f"julia::{abs_env_path}::{julia_version or ''}"
     )
-    if calkit.environments.check_cache(
+    if not force and calkit.environments.check_cache(
         env_name=cache_env_name,
         env=env,
         wdir=env_dir,
@@ -646,6 +648,7 @@ def check_environment(
             output_fpath=get_env_lock_fpath(
                 env=env, env_name=env_name, as_posix=False
             ),  # type: ignore
+            rebuild=rebuild,
         )
     elif env["kind"] == "julia":
         env_path = env.get("path")
@@ -661,6 +664,7 @@ def check_environment(
             julia_version=julia_version,
             verbose=verbose,
             cache_key=env_name,
+            force=rebuild,
         )
     elif env["kind"] in ("slurm", "pbs"):
         # Job-scheduler envs have no external manifest to validate; the
@@ -700,9 +704,11 @@ def check_environment(
                         env_name, mismatch
                     )
                 )
-        return check_environment(
+        lock_fpath = check_environment(
             env_name=picked, verbose=verbose, force=rebuild
         )
+        calkit.environments.record_build_inputs(env_name, env)
+        return lock_fpath
     elif env["kind"] == "system":
         # Nothing is installed or built for a system env; checking it means
         # making sure the machine is as the project requires, then reading
@@ -1910,21 +1916,26 @@ def check_venv(
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
-    lock_dir = os.path.dirname(lock_fpath)
+
+    def full(fpath: str) -> str:
+        return os.path.join(wdir or "", fpath)
+
+    lock_fpath_full = full(lock_fpath)
+    lock_dir = os.path.dirname(lock_fpath_full)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
     # Use main lock file if exists, else try alternatives (including legacy)
     reqs_to_use = lock_fpath
     used_legacy_lock = None
-    if not os.path.isfile(lock_fpath):
+    if not os.path.isfile(lock_fpath_full):
         for alt_fpath in alt_lock_fpaths:
-            if os.path.isfile(alt_fpath):
+            if os.path.isfile(full(alt_fpath)):
                 reqs_to_use = alt_fpath
                 if verbose:
                     typer.echo(f"Using alternative lock file: {alt_fpath}")
                 break
         for legacy_fpath in alt_lock_fpaths_delete:
-            if os.path.isfile(legacy_fpath):
+            if os.path.isfile(full(legacy_fpath)):
                 reqs_to_use = legacy_fpath
                 used_legacy_lock = legacy_fpath
                 if verbose:
@@ -1950,16 +1961,15 @@ def check_venv(
         except (OSError, subprocess.CalledProcessError):
             return None
 
-    # Hashed with the Python the venv has when none is declared, so a lock
-    # resolved for another version isn't taken as current
-    hash_python = python
-    if hash_python is None and (full_version := venv_python_version()):
-        hash_python = ".".join(full_version.split(".")[:2])
-    lock_fpath_full = os.path.join(wdir or "", lock_fpath)
+    def is_local(line: str) -> bool:
+        """Whether a frozen requirement names a path on this machine."""
+        line = line.strip()
+        if line.startswith(("-e ", "--editable")):
+            return re.match(r"^(-e|--editable)[\s=]+\w+\+", line) is None
+        return re.search(r"@\s*file:", line) is not None
+
     recorded_hash = calkit.environments.read_env_spec_hash(lock_fpath, wdir)
-    spec_hash = calkit.environments.env_spec_hash(
-        os.path.join(wdir or "", path), python=hash_python
-    )
+    spec_hash = calkit.environments.env_spec_hash(full(path), python=python)
     # A lock resolved from the current spec is an input, not rewritten here
     lock_is_current = (
         os.path.isfile(lock_fpath_full) and recorded_hash == spec_hash
@@ -1983,29 +1993,39 @@ def check_venv(
         subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
         if lock_is_current:
             return
+        # Local packages are installed from the spec, since their paths
+        # differ between machines
         with open(lock_fpath_full, encoding="utf-8") as f:
-            lock_changed = f.read() != lock_before
-        calkit.environments.write_env_spec_hash(
-            lock_fpath, path, python=hash_python, wdir=wdir
+            frozen = f.read()
+        lock = "".join(
+            ln for ln in frozen.splitlines(keepends=True) if not is_local(ln)
         )
+        if lock != frozen:
+            with open(lock_fpath_full, "w", encoding="utf-8") as f:
+                f.write(lock)
+        lock_changed = lock != lock_before
         # All platforms are relocked together, so they agree; an existing
-        # lock that matches is adopted as is
+        # lock that matches is adopted as is, and one with no record is
+        # only added to
         spec_changed = recorded_hash != spec_hash
         adopted = recorded_hash is None and not lock_changed
         if (lock_changed or spec_changed) and not adopted:
-            if kind == "uv-venv" or shutil.which("uv") is not None:
-                calkit.environments.write_cross_platform_venv_locks(
-                    spec_fpath=path,
-                    lock_fpath=lock_fpath,
-                    python_version=python or venv_python_version(),
-                    wdir=wdir,
-                    verbose=verbose,
-                    relock=spec_changed,
-                )
+            calkit.environments.write_cross_platform_venv_locks(
+                spec_fpath=path,
+                lock_fpath=lock_fpath,
+                python_version=python or venv_python_version(),
+                wdir=wdir,
+                verbose=verbose,
+                relock=spec_changed and recorded_hash is not None,
+            )
+        # Last, so an interrupted relock isn't taken as current
+        calkit.environments.write_env_spec_hash(
+            lock_fpath, path, python=python, wdir=wdir
+        )
         # Delete legacy lock file after use
         if used_legacy_lock:
             try:
-                os.remove(used_legacy_lock)
+                os.remove(full(used_legacy_lock))
                 if verbose:
                     typer.echo(
                         "Deleted legacy lock file after use: "
@@ -2020,7 +2040,7 @@ def check_venv(
 
     # If the lock file exists, try to install with that
     dep_file_txt = f"-r {path}"
-    if os.path.isfile(reqs_to_use):
+    if os.path.isfile(full(reqs_to_use)):
         dep_file_txt += f" -r {reqs_to_use}"
     try:
         pip_install_and_freeze(dep_file_txt)
@@ -2065,6 +2085,10 @@ def check_matlab_env(
         typer.Option("--name", "-n", help="Environment name in calkit.yaml."),
     ],
     output_fpath: Annotated[str, typer.Option("--output", "-o")],
+    rebuild: Annotated[
+        bool,
+        typer.Option("--rebuild", help="Rebuild the image from scratch."),
+    ] = False,
 ) -> None:
     """Check a MATLAB environment matches its spec and export a JSON lock
     file.
@@ -2099,6 +2123,7 @@ def check_matlab_env(
         fpath=dockerfile_fpath,
         lock_fpath=output_fpath,
         platform="linux/amd64",  # Only one available for now
+        rebuild=rebuild,
     )
 
 

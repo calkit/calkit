@@ -119,10 +119,10 @@ SYSTEM_LOCK_PROPERTIES = {
 # beside the table above so the two can be checked against each other; a
 # property nobody can describe is one nobody can decide whether to lock.
 SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
-    "os": "Operating system name, e.g. 'Linux' or 'Darwin'.",
-    "os-version": "Operating system release, e.g. a kernel version.",
+    "os": "Operating system name, e.g., 'Linux' or 'Darwin'.",
+    "os-version": "Operating system release, e.g., a kernel version.",
     "platform": "Full platform string, which folds in most of the above.",
-    "machine": "Machine architecture, e.g. 'x86_64' or 'arm64'.",
+    "machine": "Machine architecture, e.g., 'x86_64' or 'arm64'.",
     "processor": "Processor name, where the OS reports one.",
     "hostname": "The machine's name. Pins results to one specific host, "
     "but only by name: renaming the machine breaks the pin, and a machine "
@@ -131,12 +131,12 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
     "the platform. Pins results to one specific machine, and unlike "
     "'hostname' survives renaming it. Declaring a 'machine_id' on the "
     "environment says where to run, not that results depend on it, so "
-    "lock this to also rerun stages when the machine changes.",
+    "lock this to also keep results from mixing with another machine's.",
     "cpu-count": "Number of CPUs, which can change what a run produces "
     "where results depend on how work was divided.",
     "memory-gb": "Total memory in GB.",
     "python-version": "Version of the Python running Calkit.",
-    "python-implementation": "Python implementation, e.g. 'CPython'.",
+    "python-implementation": "Python implementation, e.g., 'CPython'.",
     "git-version": "Installed Git version.",
     "docker-version": "Installed Docker version.",
     "conda-version": "Installed Conda version.",
@@ -778,6 +778,12 @@ def get_switch_options(env_name: str, envs: dict) -> list[str]:
     options: list[str] = []
     for option in [o.use for o in _load_switch(env_name, envs)]:
         option_env = envs.get(option)
+        if option_env is None and option == "_system":
+            raise ValueError(
+                f"Switch environment '{env_name}' uses '_system'; to pick "
+                "this machine as it is, define an environment with "
+                "'kind: system' and use that"
+            )
         if option_env is None:
             raise ValueError(
                 f"Switch environment '{env_name}' uses '{option}', which is "
@@ -855,9 +861,15 @@ def resolve_switch(env_name: str, envs: dict) -> str | None:
             ]
             return any(os.environ.get(n) == v for n, v in settings)
         if isinstance(condition, HostnameMatchesCondition):
-            hostname = socket.gethostname().lower()
+            # Cluster nodes often report a short name, so the qualified one
+            # is tried too
+            hostnames = {
+                socket.gethostname().lower(),
+                socket.getfqdn().lower(),
+            }
             return any(
-                fnmatch.fnmatchcase(hostname, p.lower())
+                fnmatch.fnmatchcase(name, p.lower())
+                for name in hostnames
                 for p in any_of(condition.hostname_matches)
             )
         if isinstance(condition, OsIsCondition):
@@ -971,6 +983,19 @@ def write_switch_env_lock(
             full = os.path.join(wdir, path) if wdir else path
             if os.path.isfile(full):
                 specs[Path(path).as_posix()] = content_md5(full)
+        # Only locks resolved from a spec, which are committed and the same
+        # everywhere, not ones written by the first check on a machine
+        if option_env.get("kind") not in (
+            "conda",
+            "julia",
+            "nix",
+            "pixi",
+            "renv",
+            "uv",
+            "uv-venv",
+            "venv",
+        ):
+            continue
         lock_fpath = get_env_lock_fpath(
             env=option_env, env_name=option, as_posix=True, for_dvc=True
         )
@@ -1167,7 +1192,8 @@ def remove_built_env(env_name: str, envs: dict) -> str | None:
     """Remove what was built for an env, so checking it rebuilds it.
 
     Returns what was removed. Kinds with nothing built here to remove,
-    e.g., a system env, return None, and checking them is all a rebuild is.
+    e.g., a system or Nix env, return None, and checking them is all a
+    rebuild is. Julia and MATLAB envs are rebuilt by forcing their check.
     """
     env = envs[env_name]
     kind = env.get("kind")
@@ -1185,6 +1211,9 @@ def remove_built_env(env_name: str, envs: dict) -> str | None:
         target = os.path.join(spec_dir, ".venv")
     elif kind == "pixi":
         target = os.path.join(spec_dir, ".pixi", "envs")
+    elif kind == "renv":
+        env_dir = spec_dir if path.endswith("DESCRIPTION") else path
+        target = os.path.join(env_dir, "renv", "library")
     elif kind == "conda":
         with open(path, encoding="utf-8") as f:
             spec = yaml.safe_load(f) or {}
@@ -1439,17 +1468,52 @@ def env_spec_hash(spec_fpath: str, python: str | None = None) -> str:
 
     A change means re-resolving, which can pick up newer versions, so a
     comment or a blank line shouldn't count as one. A YAML spec is hashed
-    as the data it holds; any other is read as a requirements file.
+    as the data it holds; any other is read as a requirements file. Files
+    included with ``-r`` or ``-c`` are part of the spec.
     """
+
+    def requirement_lines(lines: list[str], base_dir: str) -> list[str]:
+        out = []
+        for ln in lines:
+            ln = re.sub(r"(^|\s)#.*", "", str(ln)).strip()
+            if not ln:
+                continue
+            out.append(ln)
+            included = re.match(
+                r"^(-r|-c|--requirement|--constraint)(\s+|=)(\S+)$", ln
+            )
+            if included is None:
+                continue
+            fpath = os.path.normpath(os.path.join(base_dir, included[3]))
+            if fpath in seen or not os.path.isfile(fpath):
+                continue
+            seen.add(fpath)
+            with open(fpath, encoding="utf-8") as f:
+                out += requirement_lines(
+                    f.read().splitlines(), os.path.dirname(fpath)
+                )
+        return out
+
+    seen: set[str] = set()
+    spec_dir = os.path.dirname(spec_fpath)
     with open(spec_fpath, encoding="utf-8") as f:
         text = f.read()
     if spec_fpath.endswith((".yml", ".yaml")):
-        content = json.dumps(yaml.safe_load(text), sort_keys=True)
+        data = yaml.safe_load(text)
+        content = json.dumps(data, sort_keys=True)
+        # Only what a pip section includes, since the rest is data
+        deps = (data or {}).get("dependencies") or []
+        for dep in deps if isinstance(deps, list) else []:
+            if isinstance(dep, dict) and isinstance(dep.get("pip"), list):
+                included = [
+                    ln
+                    for ln in requirement_lines(dep["pip"], spec_dir)
+                    if ln not in dep["pip"]
+                ]
+                if included:
+                    content += "\n" + "\n".join(included)
     else:
-        lines = [
-            re.sub(r"(^|\s)#.*", "", ln).strip() for ln in text.splitlines()
-        ]
-        content = "\n".join(ln for ln in lines if ln)
+        content = "\n".join(requirement_lines(text.splitlines(), spec_dir))
     if python is not None:
         content += f"\npython={python}"
     return hashlib.md5(content.encode()).hexdigest()
@@ -1546,17 +1610,23 @@ def write_cross_platform_venv_locks(
             for ln in f
             if re.match(r"^[A-Za-z0-9][\w.\-\[\],]*==", ln.strip())
         ]
+    has_uv = shutil.which("uv") is not None
     with tempfile.TemporaryDirectory() as tmp:
         constraints_fpath = os.path.join(tmp, "constraints.txt")
         with open(constraints_fpath, "w", encoding="utf-8") as f:
             f.write("\n".join(constraints) + "\n")
         for arch in CONDA_VENV_ARCHS:
-            target = UV_PLATFORM_TARGETS.get(arch)
-            if target is None or arch == here:
+            if arch == here:
                 continue
+            target = UV_PLATFORM_TARGETS.get(arch)
             out_fpath = os.path.join(lock_dir, arch + ext)
             out_fpath_full = os.path.join(wdir or "", out_fpath)
             if not relock and os.path.isfile(out_fpath_full):
+                continue
+            if target is None or not has_uv:
+                # Resolved from an older spec, so it would be stale
+                if relock and os.path.isfile(out_fpath_full):
+                    os.remove(out_fpath_full)
                 continue
             cmd = [
                 "uv",
@@ -1701,17 +1771,32 @@ def calc_data_for_env(
         env_lock_full = os.path.join(wdir, env_lock_fpath)
         if os.path.isfile(env_lock_full):
             env_lock_hash = calkit.get_md5(env_lock_full)
-    return {
-        "hashes": {
-            "env_hash": env_hash,
-            "env_path_hash": env_path_hash,
-            "env_prefix_hash": env_prefix_hash,
-            "julia_packages_sig": julia_packages_sig,
-            "env_lock_hash": env_lock_hash,
-            "env_inputs_hash": env_inputs_hash,
-        },
-        "checked_at": calkit.utcnow(),
+    hashes: dict = {
+        "env_hash": env_hash,
+        "env_path_hash": env_path_hash,
+        "env_prefix_hash": env_prefix_hash,
+        "julia_packages_sig": julia_packages_sig,
+        "env_lock_hash": env_lock_hash,
+        "env_inputs_hash": env_inputs_hash,
     }
+    # A switch's check is its pick's, so it's only current while the pick
+    # and everything about the picked env are the same
+    if env.get("kind") == SWITCH_KIND:
+        envs = dict(
+            calkit.load_calkit_info(wdir=wdir).get("environments") or {}
+        )
+        envs[env_name] = env
+        try:
+            picked = resolve_switch(env_name, envs)
+        except ValueError as e:
+            picked = f"error: {e}"
+        hashes["switch_pick"] = picked
+        if picked is not None and picked in envs:
+            hashes["switch_pick_cacheable"] = cacheable(envs[picked])
+            hashes["switch_pick_hashes"] = calc_data_for_env(
+                env_name=picked, env=envs[picked], wdir=wdir
+            )["hashes"]
+    return {"hashes": hashes, "checked_at": calkit.utcnow()}
 
 
 def check_cache(
@@ -1751,6 +1836,10 @@ def check_cache(
             return False
     # Check if this environment is up-to-date
     current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
+    if env.get("kind") == SWITCH_KIND and not current_data["hashes"].get(
+        "switch_pick_cacheable"
+    ):
+        return False
     if env.get("path") and not current_data["hashes"]["env_path_hash"]:
         return False
     if env.get("prefix") and not current_data["hashes"]["env_prefix_hash"]:

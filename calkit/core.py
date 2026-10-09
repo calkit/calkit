@@ -977,17 +977,56 @@ def check_app_version(
         )
 
 
-def get_version_checked_app_names(ck_info: dict) -> list[str]:
-    """The apps a requirement in a project gives a version spec for.
+def get_version_checked_app_names(
+    ck_info: dict, stage_names: list[str] | set[str] | None = None
+) -> list[str]:
+    """The apps a requirement checked here gives a version spec for.
 
     Only these are worth asking for a version up front, since some apps,
-    e.g., MATLAB, take seconds to say.
+    e.g., MATLAB, take seconds to say. That's the project's requirements
+    and those of the stages in ``stage_names``, or all stages, and their
+    environments, except for stages run on another machine, whose
+    requirements are checked there.
     """
+    from calkit.environments import (
+        COMPOSITE_ENV_SEP,
+        SWITCH_KIND,
+        env_is_local,
+        host_is_local,
+    )
+
+    envs = ck_info.get("environments") or {}
+
+    def is_remote(env: dict) -> bool:
+        if env.get("kind") == "system":
+            return not env_is_local({"host": "localhost", **env})
+        if env.get("kind") in ("slurm", "pbs"):
+            return not host_is_local(env.get("host") or "localhost")
+        return False
+
     reqs = list(get_requirements(ck_info))
-    for env in (ck_info.get("environments") or {}).values():
-        reqs += env.get("requirements") or []
-    for stage in (ck_info.get("pipeline") or {}).get("stages", {}).values():
+    stages = (ck_info.get("pipeline") or {}).get("stages", {})
+    for name, stage in stages.items():
+        if stage_names is not None and name not in stage_names:
+            continue
+        env_names = str(stage.get("environment") or "_system").split(
+            COMPOSITE_ENV_SEP
+        )
+        stage_envs = [envs.get(n) or {} for n in env_names]
+        if any(is_remote(env) for env in stage_envs):
+            continue
+        # A switch may pick any of its options here that are local
+        for env in list(stage_envs):
+            if env.get("kind") == SWITCH_KIND:
+                options = [
+                    envs.get(o.get("use")) or {}
+                    for o in env.get("switch") or []
+                    if isinstance(o, dict)
+                ]
+                stage_envs += [o for o in options if not is_remote(o)]
         reqs += stage.get("requirements") or []
+        for env in stage_envs:
+            reqs += env.get("requirements") or []
     names = []
     for raw in reqs:
         req = _normalize_requirement(raw)
@@ -1581,6 +1620,20 @@ def get_machine_properties() -> dict:
     }
 
 
+# Apps whose versions 'calkit describe system' reports on every OS
+ALWAYS_REPORTED_APPS = (
+    "git",
+    "docker",
+    "conda",
+    "mamba",
+    "uv",
+    "pixi",
+    "Rscript",
+    "juliaup",
+    "julia",
+)
+
+
 def get_system_info(apps: list[str] | None = None) -> dict:
     """Get information about the system on which we're currently running.
 
@@ -1605,17 +1658,7 @@ def get_system_info(apps: list[str] | None = None) -> dict:
     except Exception:
         pass
     # Get versions of important foundational dependencies
-    for dep in [
-        "git",
-        "docker",
-        "conda",
-        "mamba",
-        "uv",
-        "pixi",
-        "Rscript",
-        "juliaup",
-        "julia",
-    ]:
+    for dep in ALWAYS_REPORTED_APPS:
         system_info[f"{dep}_version"] = get_dep_version(dep)
     # OS-specific app versions
     if os_name == "Darwin":

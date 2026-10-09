@@ -322,7 +322,7 @@ def test_switch_env_model():
         CondaEnvironment.model_validate(
             {"kind": "conda", "path": "env.yml", "requirements": reqs}
         )
-    with pytest.raises(ValidationError, match="describe a machine"):
+    with pytest.raises(ValidationError, match="environments it picks from"):
         SwitchEnvironment.model_validate(
             switch({"use": "a"}) | {"requirements": reqs}
         )

@@ -871,9 +871,16 @@ def get_gated_stages(
     machine it locks isn't this one. The second is stages that can't run
     because something is wrong, e.g., their machine can't be reached. Both
     are skipped, keeping their outputs, but only the first is expected.
+
+    Requirements are only checked here, never prompted for or installed,
+    and anything the checks print goes to stderr, keeping stdout for,
+    e.g., ``calkit status --json``. ``interactive`` only decides whether
+    connecting to a machine may prompt.
     """
+    import contextlib
     import json
     import subprocess
+    import sys
 
     import calkit.environments as envs_mod
 
@@ -891,7 +898,8 @@ def get_gated_stages(
         """Memoize a check, returning its problem and whether it's an error."""
         key = json.dumps(key, default=str)
         if key not in cache:
-            cache[key] = func()
+            with contextlib.redirect_stdout(sys.stderr):
+                cache[key] = func()
         return cache[key]
 
     def reach(machine_name: str, machine: dict) -> Any:
@@ -918,6 +926,10 @@ def get_gated_stages(
         requirements: list, machine_name: str | None, machine: dict
     ) -> tuple[str | None, bool]:
         """Why these requirements can't be met where the stage runs."""
+        nonlocal system_info
+        # A machine with nothing to check isn't connected to
+        if not requirements:
+            return None, False
         if machine_name is not None:
             import calkit.workspace as workspace
 
@@ -931,12 +943,16 @@ def get_gated_stages(
             except (ValueError, subprocess.CalledProcessError) as e:
                 return str(e), False
             return None, False
-        if not requirements:
-            return None, False
+        if system_info is None:
+            system_info = calkit.get_system_info(
+                apps=calkit.get_version_checked_app_names(
+                    ck_info, stage_names=stage_names
+                )
+            )
         try:
             calkit.check_requirements(
                 requirements=requirements,
-                interactive=interactive,
+                interactive=False,
                 system_info=system_info,
             )
         except ValueError as e:
@@ -1002,7 +1018,7 @@ def get_gated_stages(
                 reason = envs_mod.describe_switch_no_match(env_name, env)
                 break
             resolved.append((picked, envs[picked]))
-            if env.get("lock") and envs_mod.switch_is_outer(env_name, envs):
+            if env.get("lock"):
                 switch_locks.append(
                     (
                         env_name,
@@ -1020,6 +1036,14 @@ def get_gated_stages(
             if kind == "system" and not envs_mod.env_is_local(
                 {"host": "localhost", **env}
             ):
+                if not env.get("host"):
+                    # Named by its ID alone, so there's no reaching it
+                    reason = reason or (
+                        f"environment '{env_name}' is the machine with ID "
+                        f"{env.get('machine_id')!r}, which isn't this one, "
+                        "and has no 'host' to reach it from here"
+                    )
+                    break
                 machine_name, machine = env_name, env
             elif kind in ("slurm", "pbs") and not envs_mod.host_is_local(
                 env.get("host") or "localhost"
@@ -1146,7 +1170,9 @@ def get_status(
         if check_environments:
             try:
                 gated, gate_errors = get_gated_stages(
-                    ck_info, interactive=False
+                    ck_info,
+                    stage_names=get_stages_to_gate(targets),
+                    interactive=False,
                 )
                 result["gated_stages"] = gated | gate_errors
                 env_checks = calkit.environments.check_all_in_pipeline(
@@ -2088,6 +2114,15 @@ def to_dvc(
     ck_info = markdown.ck_info
     # Likewise give questions-to-latex stages the evidence they read
     ck_info = calkit.questions.expand_questions_stages(ck_info)
+    # The project model isn't validated on every load, so this rule is
+    # enforced where stages are compiled
+    from calkit.models.core import env_requirements_problem
+
+    for env_name, env in (ck_info.get("environments") or {}).items():
+        if isinstance(env, dict) and (
+            problem := env_requirements_problem(env)
+        ):
+            raise ValueError(f"Environment '{env_name}': {problem}")
     if write and markdown.environments:
         _write_markdown_environments(markdown, wdir=wdir)
     # Everything Markdown derives is rewritten on every compile, so it
@@ -2922,4 +2957,18 @@ def get_upstream_stages(target: str, wdir: str | None = None) -> set[str]:
         if name:
             names.add(name)
             names.add(name.split("@")[0])
+    return names
+
+
+def get_stages_to_gate(targets: list[str] | None) -> set[str] | None:
+    """The stages a run of these targets can reach, or None for all."""
+    if not targets:
+        return None
+    names: set[str] = set()
+    try:
+        for target in targets:
+            names |= get_upstream_stages(target)
+    except Exception:
+        # E.g., a stage that isn't compiled yet
+        return None
     return names

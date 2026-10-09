@@ -3233,6 +3233,46 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
     )
     assert res.returncode != 0
     assert "out of date and couldn't run" in res.stderr
+    # A skipped stage is still caught out of date when a stage it depends
+    # on runs after DVC has visited it
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    ck_info["pipeline"]["stages"]["g"] = {
+        "kind": "shell-command",
+        "command": "cat u.txt > g.txt",
+        "environment": "lab",
+        "inputs": ["u.txt"],
+        "outputs": [{"path": "g.txt", "storage": "git"}],
+    }
+    ck_info["pipeline"]["stages"]["u"] = {
+        "kind": "shell-command",
+        "command": "cat in.txt > u.txt",
+        "environment": "_system",
+        "inputs": ["in.txt"],
+        "outputs": [{"path": "u.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("in.txt", "w") as f:
+        f.write("1\n")
+    subprocess.check_call(
+        ["calkit", "run", "g"], env=env | {"CK_TEST_TOKEN": "first"}
+    )
+    with open("in.txt", "w") as f:
+        f.write("2\n")
+    res = subprocess.run(
+        ["calkit", "run"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "'g' is out of date but can't run" in res.stdout
+    with open("u.txt") as f:
+        assert f.read().strip() == "2"
+    with open("g.txt") as f:
+        assert f.read().strip() == "1"
+    runs = sorted(os.listdir(os.path.join(".calkit", "local", "runs")))
+    with open(os.path.join(".calkit", "local", "runs", runs[-1])) as f:
+        run_info = json.load(f)
+    assert run_info["stages"]["g"]["status"] == "gated"
     # So is a stage that can't run because something is wrong, though the
     # rest still runs
     with open("calkit.yaml") as f:
@@ -3240,6 +3280,7 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
     ck_info["environments"]["broken"] = {
         "kind": "system",
         "host": "calkit-test.invalid",
+        "requirements": ["git"],
     }
     ck_info["pipeline"]["stages"]["odd"] = {
         "kind": "shell-command",

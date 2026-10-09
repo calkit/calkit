@@ -716,17 +716,24 @@ def remote_system_info(
     def describe() -> dict:
         command = "calkit describe system --json"
         # Versions of apps beyond the ones always reported, e.g., to lock them
-        for app in apps or []:
+        extra = [a for a in apps or [] if a not in calkit.ALWAYS_REPORTED_APPS]
+        for app in extra:
             command += f" --app {shlex.quote(app)}"
         try:
             out = subprocess.check_output(
                 workspace.login_argv(command)
             ).decode()
         except (subprocess.CalledProcessError, FileNotFoundError):
+            too_old = (
+                ", and a version new enough to report app versions with "
+                "'--app'"
+                if extra
+                else ""
+            )
             raise ValueError(
-                f"Could not read machine properties from '{workspace.host}'. "
-                "Locking them requires Calkit on that machine; install it "
-                "there, or remove 'lock' from the environment."
+                f"Could not read machine properties from '{workspace.host}' "
+                "with 'calkit describe system'. Checking that machine's "
+                f"requirements or lock needs Calkit installed there{too_old}."
             )
         try:
             return json.loads(out)

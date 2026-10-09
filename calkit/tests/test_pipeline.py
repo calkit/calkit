@@ -3828,7 +3828,8 @@ def test_switch_env_compiles(tmp_dir):
     train = stages["train"]
     assert train["cmd"].startswith("calkit scheduler batch --name train")
     assert "--environment cluster" in train["cmd"]
-    assert "--setup 'export B=2'" in train["cmd"]
+    # In a file, since a pick of this machine may run it through cmd.exe
+    assert "--setup-file .calkit/stage-setup/train.json" in train["cmd"]
     assert "calkit xenv -n py --no-check --" in train["cmd"]
     assert ".calkit/env-locks/cluster" in train["deps"]
     assert ".calkit/env-locks/slurm-env" not in train["deps"]
@@ -3868,8 +3869,17 @@ def test_switch_env_compiles(tmp_dir):
             )
 
 
-def test_get_gated_stages(tmp_dir, monkeypatch):
+def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
+    import calkit.install
+
     monkeypatch.delenv("CK_TEST_TOKEN", raising=False)
+    monkeypatch.setattr(calkit, "get_machine_id", lambda: "ab-cd")
+    # An app with an installer, which a check would offer to install
+    monkeypatch.setitem(
+        calkit.install.INSTALLERS,
+        "calkit-test-no-such-app",
+        calkit.install.INSTALLERS["uv"],
+    )
     ck_info = {
         "environments": {
             "py": {
@@ -3886,7 +3896,17 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
                 "kind": "system",
                 "requirements": [{"kind": "env-var", "name": "CK_TEST_TOKEN"}],
             },
-            "far": {"kind": "system", "host": "calkit-test.invalid"},
+            "far": {
+                "kind": "system",
+                "host": "calkit-test.invalid",
+                "requirements": ["git"],
+            },
+            "far-free": {"kind": "system", "host": "calkit-test.invalid"},
+            "by-id": {"kind": "system", "machine_id": "ef-01"},
+            "needs-app": {
+                "kind": "system",
+                "requirements": ["calkit-test-no-such-app"],
+            },
             "nowhere": {
                 "kind": "switch",
                 "switch": [
@@ -3944,6 +3964,21 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
                     "command": "true",
                     "environment": "far",
                 },
+                "far-free": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "far-free",
+                },
+                "by-id": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "by-id",
+                },
+                "no-app": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "needs-app",
+                },
                 "no-pick": {
                     "kind": "shell-command",
                     "command": "true",
@@ -4000,7 +4035,14 @@ def test_get_gated_stages(tmp_dir, monkeypatch):
         "no-pick",
         "here-token",
         "elsewhere",
+        "by-id",
+        "no-app",
     }
+    # A machine named by ID alone isn't one that can be reached, and one
+    # with nothing to check isn't connected to
+    assert "has no 'host' to reach it" in gated["by-id"]
+    # Checks never print to stdout, which, e.g., 'status --json' writes to
+    assert capsys.readouterr().out == ""
     # Something being wrong isn't the project saying the stage can't run
     assert set(errors) == {"far-away", "bad-switch"}
     assert "hostname_match" in errors["bad-switch"]

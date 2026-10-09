@@ -469,8 +469,20 @@ def test_get_version_checked_app_names():
     ck_info = {
         "requirements": ["git", "calkit>=0.1", {"jq": {"version_spec": ">1"}}],
         "environments": {
-            "ml": {"kind": "system", "requirements": ["matlab"]},
-            "py": {"kind": "uv-venv", "path": "r.txt", "requirements": ["jq"]},
+            "ml": {"kind": "system", "requirements": ["matlab>=24"]},
+            "far": {
+                "kind": "system",
+                "host": "calkit-test.invalid",
+                "requirements": ["julia>=1.10"],
+            },
+            "py": {"kind": "uv-venv", "path": "r.txt"},
+            "pick": {
+                "kind": "switch",
+                "switch": [
+                    {"when": [{"os_is": "linux"}], "use": "far"},
+                    {"use": "ml"},
+                ],
+            },
         },
         "pipeline": {
             "stages": {
@@ -481,9 +493,34 @@ def test_get_version_checked_app_names():
                         "ffmpeg>=6",
                         {"kind": "env-var", "name": "TOKEN"},
                     ],
-                }
+                },
+                "m": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "ml:py",
+                },
+                "remote": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "far:py",
+                    "requirements": ["pandoc>=3"],
+                },
+                "switched": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "pick",
+                },
             }
         },
     }
-    # Apps only required to exist aren't asked their version
-    assert calkit.get_version_checked_app_names(ck_info) == ["jq", "ffmpeg"]
+    # Apps only required to exist aren't asked their version, and nor are
+    # those checked on another machine, including a switch's remote option
+    assert calkit.get_version_checked_app_names(ck_info) == [
+        "jq",
+        "ffmpeg",
+        "matlab",
+    ]
+    # Nor those of stages the run doesn't reach
+    assert calkit.get_version_checked_app_names(
+        ck_info, stage_names={"s"}
+    ) == ["jq", "ffmpeg"]

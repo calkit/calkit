@@ -1851,6 +1851,21 @@ def test_env_spec_hashes(tmp_dir):
     write("c.yml", "name: e\nchannels: [bioconda, conda-forge]\n")
     assert envs.env_spec_hash("a.yml") == envs.env_spec_hash("b.yml")
     assert envs.env_spec_hash("a.yml") != envs.env_spec_hash("c.yml")
+    # Included files are part of the spec, relative to what includes them,
+    # including from a conda spec's pip section
+    os.makedirs("reqs")
+    write(spec, "-r reqs/base.txt\n")
+    write(os.path.join("reqs", "base.txt"), "-c pins.txt\nidna\n")
+    write(os.path.join("reqs", "pins.txt"), "idna==3.7\n")
+    write(
+        "d.yml", "name: e\ndependencies:\n  - pip:\n    - -r reqs/base.txt\n"
+    )
+    included = envs.env_spec_hash(spec), envs.env_spec_hash("d.yml")
+    write(os.path.join("reqs", "pins.txt"), "idna==3.10\n")
+    assert envs.env_spec_hash(spec) != included[0]
+    assert envs.env_spec_hash("d.yml") != included[1]
+    write(os.path.join("reqs", "base.txt"), "-r ../requirements.txt\n")
+    assert envs.env_spec_hash(spec)
     # Every platform's lock in a directory shares one entry, relative to the
     # project it's in
     os.makedirs(os.path.join("sub", ".calkit", "env-locks", "py"))
@@ -1872,7 +1887,7 @@ def test_env_spec_hashes(tmp_dir):
     assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
 
 
-def test_cross_platform_venv_locks(tmp_dir):
+def test_cross_platform_venv_locks(tmp_dir, monkeypatch):
     import calkit.environments as envs
 
     assert set(envs.UV_PLATFORM_TARGETS) <= set(envs.CONDA_VENV_ARCHS)
@@ -1917,6 +1932,27 @@ def test_cross_platform_venv_locks(tmp_dir):
         spec_fpath=spec, lock_fpath=lock_fpath, python_version="3.12"
     )
     assert not any(os.path.isfile(fpath) for fpath in written)
+    # So does relocking without uv, or for a platform uv can't target, but
+    # only missing platforms are left alone
+    lock_dir = os.path.dirname(lock_fpath)
+    siblings = [
+        os.path.join(lock_dir, a + ".txt")
+        for a in envs.CONDA_VENV_ARCHS
+        if a != here
+    ]
+    for fpath in siblings:
+        with open(fpath, "w") as f:
+            f.write("idna==3.7\n")
+    with monkeypatch.context() as m:
+        m.setattr(envs.shutil, "which", lambda name: None)
+        assert not envs.write_cross_platform_venv_locks(
+            spec_fpath=spec, lock_fpath=lock_fpath, relock=False
+        )
+        assert all(os.path.isfile(fpath) for fpath in siblings)
+        assert not envs.write_cross_platform_venv_locks(
+            spec_fpath=spec, lock_fpath=lock_fpath
+        )
+    assert not any(os.path.isfile(fpath) for fpath in siblings)
 
 
 def test_switch_env(tmp_dir, monkeypatch):
@@ -1925,7 +1961,7 @@ def test_switch_env(tmp_dir, monkeypatch):
     def option(env: str, *when: dict) -> dict:
         return {"when": list(when), "use": env} if when else {"use": env}
 
-    envs_def = {
+    envs_def: dict[str, dict] = {
         "cluster": {
             "kind": "switch",
             "switch": [
@@ -1983,6 +2019,14 @@ def test_switch_env(tmp_dir, monkeypatch):
         envs_def["one"] = {"kind": "switch", "switch": [option("here", *when)]}
         picked = envs.resolve_switch("one", envs_def)
         assert picked == ("here" if held else None), when
+    # A node that reports a short hostname still matches its qualified name
+    monkeypatch.setattr(envs.socket, "gethostname", lambda: "login1")
+    monkeypatch.setattr(envs.socket, "getfqdn", lambda: "login1.hpc.edu")
+    envs_def["one"] = {
+        "kind": "switch",
+        "switch": [option("here", {"hostname_matches": "*.hpc.edu"})],
+    }
+    assert envs.resolve_switch("one", envs_def) == "here"
     # Nothing matching and no default picks nothing, rather than guessing,
     # and says which conditions failed
     envs_def["none"] = {
@@ -2007,6 +2051,7 @@ def test_switch_env(tmp_dir, monkeypatch):
         ([option("py", is_linux), option("here")], "one or the other"),
         ([option("here"), option("py", is_linux)], "only the last option"),
         ([option("here", {"os_is": "Darwin"})], "is invalid"),
+        ([option("_system", is_linux), option("here")], "kind: system"),
     ]:
         envs_def["bad"] = {"kind": "switch", "switch": options}
         with pytest.raises(ValueError, match=match):
@@ -2063,3 +2108,95 @@ def test_switch_env(tmp_dir, monkeypatch):
     machine_env = envs.switch_machine_lock_env({"lock": ["os"]})
     envs.write_system_env_lock(env_name="rt", env=machine_env)
     assert os.path.isfile(".calkit/env-locks/rt/info.json")
+    # Locks an option's first check on a machine writes don't change it, so
+    # moving to that machine doesn't rerun anything
+    envs_def["mach"] = {
+        "kind": "switch",
+        "switch": [option("slurm-env", is_linux), option("here")],
+    }
+    mach_lock = envs.write_switch_env_lock("mach", envs_def)
+    with open(mach_lock) as f:
+        before = json.load(f)
+    envs.write_scheduler_env_lock(
+        env_name="slurm-env", env=envs_def["slurm-env"]
+    )
+    envs.write_system_env_lock(env_name="here", env={"lock": ["os"]})
+    envs.write_switch_env_lock("mach", envs_def)
+    with open(mach_lock) as f:
+        assert json.load(f) == before
+    # A runtime switch's lock gates its stages like a machine switch's
+    envs_def["rt"]["lock"] = ["hostname"]
+    with open(".calkit/env-locks/rt/info.json", "w") as f:
+        json.dump({"hostname": "calkit-test.invalid"}, f)
+    ck_info = {
+        "environments": envs_def,
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "rt",
+                }
+            }
+        },
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, interactive=False
+    )
+    assert "locked to another machine" in gated["s"] and not errors
+    del envs_def["rt"]["lock"]
+    # A switch's check is current only while its pick and the picked env
+    # are, and never when it picks a machine, which is read on each check
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": envs_def}, f)
+    envs.save_cache(env_name="rt", env=envs_def["rt"], success=True)
+    assert envs.check_cache(env_name="rt", env=envs_def["rt"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\nsix\n")
+    assert not envs.check_cache(env_name="rt", env=envs_def["rt"])
+    envs.save_cache(env_name="rt", env=envs_def["rt"], success=True)
+    envs_def["rt"]["switch"] = [
+        option("py-b", {"env_var_exists": "CK_TEST_PICK_B"}),
+        option("py"),
+    ]
+    envs_def["py-b"] = {"kind": "uv-venv", "path": "requirements.txt"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": envs_def}, f)
+    envs.save_cache(env_name="rt", env=envs_def["rt"], success=True)
+    assert envs.check_cache(env_name="rt", env=envs_def["rt"])
+    monkeypatch.setenv("CK_TEST_PICK_B", "1")
+    assert not envs.check_cache(env_name="rt", env=envs_def["rt"])
+    envs.save_cache(env_name="mach", env=envs_def["mach"], success=True)
+    assert not envs.check_cache(env_name="mach", env=envs_def["mach"])
+    # Only machines have requirements, which compiling the pipeline enforces
+    # even though the project isn't validated on load
+    for kind, extra in [("conda", {"path": "env.yml"}), ("switch", {})]:
+        bad_info = {
+            "environments": {
+                "e": {"kind": kind, "requirements": ["git"], **extra}
+            },
+            "pipeline": {"stages": {}},
+        }
+        with pytest.raises(ValueError, match="describe a machine"):
+            calkit.pipeline.to_dvc(ck_info=bad_info, write=False)
+    # A machine switch's stage setup goes in a file, which survives cmd.exe
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": envs_def,
+            "pipeline": {
+                "stages": {
+                    "job": {
+                        "kind": "shell-command",
+                        "command": "true",
+                        "environment": "mach",
+                        "setup": ["module load x"],
+                    }
+                }
+            },
+        },
+        write=False,
+    )
+    cmd = stages["job"]["cmd"]
+    assert "--setup-file .calkit/stage-setup/job.json" in cmd
+    assert "module load" not in cmd
+    assert ".calkit/stage-setup/job.json" in stages["job"]["deps"]

@@ -374,6 +374,8 @@ class Stage(BaseModel):
     # 'default_setup' already merged in per 'env_default_setup'. Resolved
     # when the pipeline is compiled, so the command in dvc.yaml says
     # everything that runs and DVC reruns the stage when any of it changes.
+    # For a machine switch, only the stage's own, since the pick's defaults
+    # are merged where it runs.
     _system_env_setup: list[str] = PrivateAttr(default_factory=list)
     # Env vars whose values this stage depends on, from its own inputs and
     # its environments', resolved when the pipeline is compiled
@@ -755,8 +757,12 @@ class Stage(BaseModel):
         if opts.options is not None:
             for opt in opts.options:
                 cmd += f" --option {opt}"
-        for setup_cmd in self.setup or []:
-            cmd += f" --setup {shlex.quote(setup_cmd)}"
+        setup_file = self.setup_file_path
+        if setup_file is not None:
+            cmd += f" --setup-file {self.path_from_wdir(setup_file)}"
+        else:
+            for setup_cmd in self.setup or []:
+                cmd += f" --setup {shlex.quote(setup_cmd)}"
         return cmd
 
     @property
@@ -2571,6 +2577,12 @@ class Pipeline(BaseModel):
                 stage.scheduler = StageSchedulerOptions()
             stage._scheduler_cli_alias = cli_alias
             stage._scheduler_kind = kind
+            # What a switch picks is known only where it runs, so its
+            # defaults are merged then, but the stage's own setup goes in a
+            # file, since a switch can pick this machine, which may run the
+            # command through cmd.exe
+            if is_machine_switch and stage.setup:
+                stage._system_env_setup = list(stage.setup)
 
     def convert_sbatch_stages(self) -> dict[str, dict]:
         """Replace legacy ``sbatch`` stages with ``shell-script`` equivalents.

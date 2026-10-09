@@ -1,5 +1,6 @@
 """Tests for ``calkit.cli.scheduler``."""
 
+import json
 import os
 import subprocess
 import sys
@@ -9,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import typer
 
+import calkit
 import calkit.cli.scheduler as sched
 from calkit.cli.scheduler import (
     _active_job_ids,
@@ -609,3 +611,51 @@ def test_queue_lock_is_exclusive(tmp_dir):
     # Whoever went first finished before the other started.
     assert order[0].startswith("enter")
     assert order[1] == order[0].replace("enter", "exit")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="The setup is a POSIX shell command"
+)
+def test_batch_on_a_switch_pick_reads_a_setup_file(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "here": {"kind": "system"},
+                    "mach": {"kind": "switch", "switch": [{"use": "here"}]},
+                }
+            },
+            f,
+        )
+    with open("setup.json", "w") as f:
+        json.dump(["export CK_TEST_SETUP=from-file"], f)
+    cmd = [
+        "calkit",
+        "scheduler",
+        "batch",
+        "--name",
+        "job",
+        "--environment",
+        "mach",
+        "--setup-file",
+        "setup.json",
+        "--log-path",
+        "job.log",
+        "--command",
+        "--",
+        "printenv",
+        "CK_TEST_SETUP",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    with open("job.log") as f:
+        assert "from-file" in f.read()
+    # One or the other, so a stage's setup can't be given twice
+    res = subprocess.run(
+        cmd[:9] + ["--setup", "true"] + cmd[9:],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "not both" in res.stderr + res.stdout

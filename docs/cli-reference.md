@@ -3276,10 +3276,11 @@ calkit check matlab-env [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default | Description                      |
-| ---------------- | ---- | -------- | ------- | -------------------------------- |
-| `--name`, `-n`   | str  | yes      |         | Environment name in calkit.yaml. |
-| `--output`, `-o` | str  | yes      |         |                                  |
+| Option           | Type    | Required | Default | Description                      |
+| ---------------- | ------- | -------- | ------- | -------------------------------- |
+| `--name`, `-n`   | str     | yes      |         | Environment name in calkit.yaml. |
+| `--output`, `-o` | str     | yes      |         |                                  |
+| `--rebuild`      | boolean | no       | False   | Rebuild the image from scratch.  |
 
 <a id="subcommand-check-reqs-requirements"></a>
 
@@ -3865,6 +3866,7 @@ Options:
 | `--out`, `-o`           | str                            | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
 | `--option`, `-s`        | str                            | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
 | `--setup`               | str                            | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
+| `--setup-file`          | str                            | no       |         | Path to a JSON list of setup commands, used instead of --setup, since a path survives cmd.exe and a POSIX shell alike, and quoted commands don't.                                                                                                                                       |
 | `--log-path`            | str                            | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
 | `--command`             | boolean                        | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
 | `--env-default-options` | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |

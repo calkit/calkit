@@ -669,6 +669,25 @@ class ReferenceCollection(BaseModel):
     files: list[ReferenceFile] = []
 
 
+# The kinds that describe a machine, so can have 'requirements'
+ENV_KINDS_WITH_REQUIREMENTS = ("pbs", "slurm", "system")
+
+
+def env_requirements_problem(env: dict) -> str | None:
+    """Why an environment can't have its 'requirements', if it can't."""
+    kind = env.get("kind")
+    if "requirements" not in env or kind in ENV_KINDS_WITH_REQUIREMENTS:
+        return None
+    if kind == "switch":
+        where = "on the machine environments it picks from"
+    else:
+        where = "on a 'system', 'slurm' or 'pbs' environment it runs inside"
+    return (
+        f"A '{kind}' environment can't have 'requirements', since they "
+        f"describe a machine; put them on the stages using it, or {where}"
+    )
+
+
 class Environment(BaseModel):
     """Base class for environments, which is never used directly.
 
@@ -715,19 +734,11 @@ class Environment(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _refuse_requirements(cls, data: object) -> object:
-        # Extra keys are ignored, so without this a runtime's requirements
-        # would silently gate nothing
-        if (
-            isinstance(data, dict)
-            and "requirements" in data
-            and "requirements" not in cls.model_fields
-        ):
-            raise ValueError(
-                f"A '{data.get('kind')}' environment can't have "
-                "'requirements', since they describe a machine; put them on "
-                "the stages using it, or on a 'system', 'slurm' or 'pbs' "
-                "environment it runs inside"
-            )
+        # Requirements describe a machine, so only machine kinds take them
+        if isinstance(data, dict):
+            problem = env_requirements_problem(data)
+            if problem is not None:
+                raise ValueError(problem)
         return data
 
 
@@ -1094,10 +1105,11 @@ class SystemEnvironment(Environment):
     where they differ, so stages that are up to date stay up to date.
     Checking the environment there warns about the difference, and a stage
     that needs to run is skipped by ``calkit run``, since its result would
-    not be comparable with the existing ones. To make the new machine the one results come
-    from, run ``calkit update env -n NAME --lock``, which updates the lock
-    and invalidates the stages that depend on it. With ``relock: auto``,
-    that happens on its own, for results that should follow the machine.
+    not be comparable with the existing ones. To make the new machine the
+    one results come from, run ``calkit update env -n NAME --lock``, which
+    updates the lock and invalidates the stages that depend on it. With
+    ``relock: auto``, that happens on its own, for results that should
+    follow the machine.
 
     ``requirements`` is the other half, and answers a different question.
     It says what must be *true* of this machine---apps that must be
@@ -1105,9 +1117,8 @@ class SystemEnvironment(Environment):
     is checked before anything runs, on the machine the environment names.
     A stage whose requirements aren't met there is skipped, keeping its
     outputs, while a locked property records what results were computed
-    with. One gates,
-    the other pins, so a property that matters both ways is written in both
-    places.
+    with. One gates, the other pins, so a property that matters both ways
+    is written in both places.
 
     ``default_setup`` is what has to be *done* on this machine before a
     stage can run: sourcing a site setup script, loading modules, putting a
@@ -1196,7 +1207,7 @@ class SystemEnvironment(Environment):
     default_setup: list[str] | None = Field(
         default=None,
         description="Commands run in the same shell, before every stage "
-        "that uses this environment, e.g. 'module load cuda' or a site "
+        "that uses this environment, e.g., 'module load cuda' or a site "
         "setup script that exports compiler paths. Merged with each "
         "stage's own 'setup' when the pipeline is compiled and written "
         "beside it, which the stage depends on, so changing them reruns "
@@ -1239,7 +1250,8 @@ class SystemEnvironment(Environment):
         default="manual",
         description="What happens on a machine whose locked properties "
         "differ from the lock. 'manual' keeps the lock, and a stage that "
-        "needs to run there fails until 'calkit update env --lock' is run. "
+        "needs to run there is skipped by 'calkit run', and refused by "
+        "'calkit xenv', until 'calkit update env --lock' is run. "
         "'auto' rewrites the lock, rerunning the stages that depend on it, "
         "for results that should follow the machine, e.g., benchmarks.",
     )
@@ -1394,7 +1406,9 @@ class SwitchEnvironment(Environment):
     The options are either all machines (``system``, ``slurm`` or
     ``pbs``), so the switch can be the outer half of a composite
     environment like ``cluster:py``, or all runtimes, e.g., one per
-    operating system. An option can't be another switch.
+    operating system. An option can't be another switch, or ``_system``;
+    to pick this machine as it is, define an environment with
+    ``kind: system`` and use that.
 
     Stages depend on the switch's definition and its options', so editing
     them reruns those stages, but not on which option was picked, so
@@ -1417,7 +1431,8 @@ class SwitchEnvironment(Environment):
         default="manual",
         description="What happens on a machine whose locked properties "
         "differ from the lock. 'manual' keeps the lock, and a stage that "
-        "needs to run there fails until 'calkit update env --lock' is run. "
+        "needs to run there is skipped by 'calkit run', and refused by "
+        "'calkit xenv', until 'calkit update env --lock' is run. "
         "'auto' rewrites the lock, rerunning the stages that depend on it, "
         "for results that should follow the machine, e.g., benchmarks.",
     )

@@ -64,7 +64,7 @@ class Requirement(BaseModel):
     default: str | None = None
     version_spec: str | None = Field(
         default=None,
-        description="Version specifier an 'app' must satisfy, e.g. '>=2.40'. "
+        description="Version specifier an 'app' must satisfy, e.g., '>=2.40'. "
         "A string requirement like 'git>=2.40' is shorthand for this.",
     )
     notes: str | None = None
@@ -169,7 +169,7 @@ class SystemValueRequirement(BaseModel):
     version_spec: str | None = Field(
         default=None,
         description="PEP 440 version specifier the property must satisfy, "
-        "e.g. '>=3.11'. For properties that are versions.",
+        "e.g., '>=3.11'. For properties that are versions.",
     )
     matches: str | list[str] | None = Field(
         default=None,

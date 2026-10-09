@@ -504,3 +504,30 @@ export function lineMap(
     };
   return { toAfter: lookup(fwd, m), toBefore: lookup(back, n) };
 }
+
+// Where rendered text is in the source near a line: all of it if it's
+// there as is, else as many of its first words as are, since macros and
+// line breaks can come between them.
+export function findInSource(
+  lines: string[],
+  line: number,
+  text: string,
+): { line: number; start: number; end: number } | undefined {
+  const words = text.split(/\s+/).filter(Boolean);
+  const near = [line, line + 1, line - 1, line + 2, line - 2].filter(
+    (l) => l >= 1 && l <= lines.length,
+  );
+  for (let n = words.length; n >= 1; n--) {
+    const needle = words.slice(0, n).join(" ");
+    if (n === 1 && needle.replace(/[^A-Za-z]/g, "").length < 3) {
+      break;
+    }
+    for (const l of near) {
+      const start = lines[l - 1].indexOf(needle);
+      if (start >= 0) {
+        return { line: l, start, end: start + needle.length };
+      }
+    }
+  }
+  return undefined;
+}

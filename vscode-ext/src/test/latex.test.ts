@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  findInSource,
   findText,
   latexStagePdf,
   latexStageSource,
@@ -232,4 +233,28 @@ test("functions injected into the webview are self-contained", () => {
     normalizeSelection("the wake re-\ncovers ﬁne\n quickly"),
     "the wake recovers fine quickly",
   );
+});
+
+test("findInSource finds selected PDF text near a source line", () => {
+  const lines = [
+    "The model in Eq.~\\eqref{eq:wake} fits the data",
+    "reasonably well, and the wake recovers by",
+    "$x/D=3$ in all cases.",
+  ];
+  // Exactly, on the line or one near it
+  assert.deepEqual(findInSource(lines, 2, "the wake recovers"), {
+    line: 2,
+    start: 21,
+    end: 38,
+  });
+  assert.deepEqual(findInSource(lines, 3, "fits the data"), {
+    line: 1,
+    start: 33,
+    end: 46,
+  });
+  // Across a macro or a line break, as many of its first words as match
+  assert.equal(findInSource(lines, 1, "fits the data reasonably")!.end, 46);
+  assert.equal(findInSource(lines, 1, "The model in Eq. (1)")!.start, 0);
+  assert.equal(findInSource(lines, 1, "absent words"), undefined);
+  assert.equal(findInSource(lines, 1, "in"), undefined);
 });

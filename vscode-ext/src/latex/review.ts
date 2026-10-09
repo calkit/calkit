@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 
 import {
   LIGATURES,
+  findInSource,
   findText,
   latexStageSource,
   lineMap,
@@ -379,15 +380,27 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     return (await this.calkit(args)).trim();
   }
 
-  private async openSource(file: string, line: number): Promise<void> {
+  // Open the source at a line, selecting some rendered text there if it
+  // can be found
+  private async openSource(
+    file: string,
+    line: number,
+    focus?: string,
+  ): Promise<void> {
     const uri = vscode.Uri.file(path.join(this.root(), file));
     const visible = vscode.window.visibleTextEditors.find(
       (e) => e.document.uri.fsPath === uri.fsPath,
     );
-    const pos = new vscode.Position(Math.max(line - 1, 0), 0);
+    const lines = fs.readFileSync(uri.fsPath, "utf8").split("\n");
+    const found = focus ? findInSource(lines, line, focus) : undefined;
+    const start = new vscode.Position(
+      Math.max((found?.line ?? line) - 1, 0),
+      found?.start ?? 0,
+    );
+    const end = found ? new vscode.Position(found.line - 1, found.end) : start;
     await vscode.window.showTextDocument(uri, {
       viewColumn: visible?.viewColumn ?? vscode.ViewColumn.Beside,
-      selection: new vscode.Range(pos, pos),
+      selection: new vscode.Range(start, end),
     });
   }
 
@@ -419,12 +432,17 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         const file =
           at &&
           synctexInputFile(at.input, (f) => fs.existsSync(path.join(root, f)));
+        const focus = typeof msg.focus === "string" ? msg.focus : undefined;
         if (at && file) {
-          await this.openSource(file, this.lines(v, file).toAfter(at.line));
+          await this.openSource(
+            file,
+            this.lines(v, file).toAfter(at.line),
+            focus,
+          );
           return;
         }
         // Without SyncTeX, the paragraph with the clicked line's text, at
-        // its line sharing the most words with it
+        // its line sharing the most words with it, or with the selection
         const para = await this.locate(v, [
           "--text",
           String(msg.context ?? ""),
@@ -435,7 +453,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         }
         const words = (t: string): Set<string> =>
           new Set(t.toLowerCase().match(/[a-z]{3,}/g) ?? []);
-        const clicked = words(String(msg.context ?? ""));
+        const clicked = words(focus ?? String(msg.context ?? ""));
         const lines = fs
           .readFileSync(path.join(root, para.path), "utf8")
           .split("\n");
@@ -450,7 +468,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
             bestScore = score;
           }
         }
-        await this.openSource(para.path, best);
+        await this.openSource(para.path, best, focus);
         return;
       }
       case "locate": {
@@ -656,7 +674,7 @@ function buildHtml(
   .badge { font-size: 0.85em; padding: 0 4px; border-radius: 2px; background: var(--vscode-badge-background);
     color: var(--vscode-badge-foreground); }
   a { color: var(--vscode-textLink-foreground); cursor: pointer; }
-  #select-btn { position: absolute; display: none; z-index: 20; }
+  #select-actions { position: absolute; display: none; z-index: 20; gap: 4px; }
   .empty { opacity: 0.7; padding: 4px; }
 </style>
 </head>
@@ -675,7 +693,10 @@ function buildHtml(
 <div id="main">
   <div id="wrap">
     <div id="viewerContainer"><div id="viewer" class="pdfViewer"></div></div>
-    <button id="select-btn" class="primary">Comment</button>
+    <div id="select-actions">
+      <button id="select-comment" class="primary">Comment</button>
+      <button id="select-source" title="Open the LaTeX source at this text">Go to source</button>
+    </div>
   </div>
   <div id="resizer"></div>
   <aside id="panel"></aside>
@@ -699,7 +720,7 @@ pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(
 const container = document.getElementById("viewerContainer");
 const panel = document.getElementById("panel");
 const statusEl = document.getElementById("status");
-const selectBtn = document.getElementById("select-btn");
+const selectBtn = document.getElementById("select-actions");
 const eventBus = new EventBus();
 const linkService = new PDFLinkService({ eventBus });
 const viewer = new PDFViewer({ container, eventBus, linkService, removePageBorders: false });
@@ -1029,35 +1050,48 @@ container.addEventListener("mouseup", () => {
     const wrapRect = document.getElementById("wrap").getBoundingClientRect();
     selectBtn.style.left = (lastRect.right - wrapRect.left + 4) + "px";
     selectBtn.style.top = (lastRect.bottom - wrapRect.top + 4) + "px";
-    selectBtn.style.display = "block";
+    selectBtn.style.display = "flex";
   }, 0);
 });
 container.addEventListener("scroll", () => { selectBtn.style.display = "none"; });
 selectBtn.addEventListener("mousedown", (e) => e.preventDefault());
-selectBtn.addEventListener("click", async () => {
-  selectBtn.style.display = "none";
+// The selected text, where it starts on its page, and the lines it's on
+async function selection() {
   const sel = document.getSelection();
-  if (!sel || sel.isCollapsed) return;
-  const text = normalizeSelection(sel.toString());
+  if (!sel || sel.isCollapsed) return null;
   const range = sel.getRangeAt(0);
-  const first = range.getClientRects()[0];
+  const rects = range.getClientRects();
   const startNode = range.startContainer;
   const startEl = startNode.nodeType === 3 ? startNode.parentElement : startNode;
   const pageDiv = startEl.closest(".page");
-  if (!first || !pageDiv) return;
+  if (!rects.length || !pageDiv) return null;
   const n = Number(pageDiv.dataset.pageNumber);
   // Where the selection starts in the page's text items
   const domIndex = [...spans(n)].indexOf(startEl);
-  const selItem = (await pageText(n)).findIndex((it) => it.span === domIndex && domIndex >= 0);
-  const selOffset = startNode.nodeType === 3 ? range.startOffset : 0;
+  const item = (await pageText(n)).findIndex((it) => it.span === domIndex && domIndex >= 0);
   const box = pageBox(pageDiv);
+  const first = rects[0];
+  const last = rects[rects.length - 1];
   const at = fromViewport(n, first.left - box.left + 1, first.top - box.top + first.height / 2);
+  const atEnd = fromViewport(n, last.left - box.left, last.top - box.top + last.height / 2);
+  return {
+    text: normalizeSelection(sel.toString()), page: n, at, item,
+    offset: startNode.nodeType === 3 ? range.startOffset : 0,
+    context: await lineText(n, at.y, atEnd.y),
+  };
+}
+document.getElementById("select-source").addEventListener("click", async () => {
+  selectBtn.style.display = "none";
+  const sel = await selection();
+  if (sel) vscode.postMessage({ type: "sourceAt", page: sel.page, x: sel.at.x, y: sel.at.y, context: sel.context, focus: sel.text });
+});
+document.getElementById("select-comment").addEventListener("click", async () => {
+  selectBtn.style.display = "none";
+  const sel = await selection();
+  if (!sel) return;
+  const { text, page: n, at, item: selItem, offset: selOffset, context } = sel;
   const reqId = ++reqCounter;
   const located = new Promise((resolve) => pending.set(reqId, resolve));
-  const rects = range.getClientRects();
-  const lastRect = rects[rects.length - 1];
-  const atEnd = fromViewport(n, lastRect.left - box.left, lastRect.top - box.top + lastRect.height / 2);
-  const context = await lineText(n, at.y, atEnd.y);
   vscode.postMessage({ type: "locate", reqId, page: n, x: at.x, y: at.y, context });
   composer = { text, occ: 0 };
   state.showComments = true;

@@ -3392,6 +3392,7 @@ Work with LaTeX.
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
 | [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
+| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX source.                    |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3581,6 +3582,18 @@ Options:
 | --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
+
+<a id="subcommand-latex-tex-comments"></a>
+
+#### `calkit latex|tex comments`
+
+Work with review comments in LaTeX source.
+
+Usage:
+
+```text
+calkit latex|tex comments COMMAND [ARGS]...
+```
 
 <a id="command-group-overleaf-ol"></a>
 

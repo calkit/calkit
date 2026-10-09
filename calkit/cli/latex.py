@@ -10,6 +10,7 @@ import shutil
 import string
 import subprocess
 import sys
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 
@@ -2773,6 +2774,12 @@ def merge_docx(
                     and existing.resolved == tc.resolved
                 ):
                     continue
+                # Word can't carry these, so they come from the source
+                tc.id, tc.issue, tc.attrs = (
+                    existing.id,
+                    existing.issue,
+                    existing.attrs,
+                )
                 # Word knows neither emails nor what the source already
                 # recorded, so carry those over for unchanged messages
                 known = {(e.author, e.text): e for e in existing.entries}
@@ -2850,3 +2857,264 @@ def merge_docx(
         f"already there, {counts['pending']} pending, {counts['unplaced']} "
         f"unplaced); {added} comments added, {updated} updated"
     )
+
+
+comments_app = typer.Typer(no_args_is_help=True)
+latex_app.add_typer(
+    comments_app,
+    name="comments",
+    help="Work with review comments in LaTeX source.",
+)
+
+_ID_OPTION = typer.Option("--id", help="ID of the thread.")
+_LINE_OPTION = typer.Option(
+    "--line", "-l", help="Number of any line in the thread."
+)
+
+
+def _comment_json(
+    path: str, tc: calkit.latex.TexComment, blks: list[calkit.latex.Block]
+) -> dict:
+    anchor = calkit.latex.comment_anchor(blks, tc)
+    return {
+        "id": tc.id,
+        "path": path,
+        "line": tc.lineno,
+        "nlines": tc.nlines,
+        "resolved": tc.resolved,
+        "issue": tc.issue,
+        "highlight": (
+            {"text": tc.highlight, "occ": tc.highlight_occ}
+            if tc.highlight
+            else None
+        ),
+        "anchor": (
+            {
+                "line": anchor.lineno,
+                "end_line": anchor.lines[-1].lineno,
+                "text": anchor.text,
+            }
+            if anchor is not None
+            else None
+        ),
+        "messages": [
+            {
+                "author": e.author,
+                "email": e.email,
+                "date": e.date,
+                "text": e.text,
+            }
+            for e in tc.entries
+        ],
+        "attrs": tc.attrs,
+    }
+
+
+def _new_entry(
+    text: str, author: str | None, email: str | None
+) -> calkit.latex.Entry:
+    import datetime
+
+    import git
+
+    if author is None:
+        try:
+            author = git.Git().config("--get", "user.name").strip()
+            email = email or git.Git().config("--get", "user.email").strip()
+        except git.GitCommandError:
+            raise_error("Set --author, or Git's user.name")
+    date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    return calkit.latex.Entry(author, text, email or None, date)
+
+
+def _edit_comment(
+    tex_path: str,
+    id: str | None,
+    line: int | None,
+    edit: Callable[[calkit.latex.TexComment], None],
+) -> calkit.latex.TexComment:
+    """Apply an edit to one thread and write the file back, giving the
+    thread an ID if it had none."""
+    if (id is None) == (line is None):
+        raise_error("Specify one of --id or --line")
+    if not os.path.isfile(tex_path):
+        raise_error(f"{tex_path} does not exist")
+    lines = Path(tex_path).read_text(encoding="utf-8").split("\n")
+    tc = calkit.latex.find_comment(lines, id=id, lineno=line)
+    if tc is None:
+        raise_error(f"No comment thread in {tex_path} at {id or line}")
+    edit(tc)
+    tc.id = tc.id or calkit.latex.new_comment_id()
+    calkit.latex.write_comment(lines, tc)
+    Path(tex_path).write_text("\n".join(lines), encoding="utf-8")
+    return tc
+
+
+@comments_app.command(name="list")
+def list_comments(
+    tex_path: Annotated[
+        str,
+        typer.Argument(
+            help="Document to list comments from, including files it inputs."
+        ),
+    ],
+    unresolved: Annotated[
+        bool,
+        typer.Option("--unresolved", "-u", help="Only list open threads."),
+    ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """List the comment threads in a LaTeX document."""
+    if not os.path.isfile(tex_path):
+        raise_error(f"{tex_path} does not exist")
+    # In document order, so threads in an input come where it's input
+    order = {
+        (ln.path, ln.lineno): i
+        for i, ln in enumerate(calkit.latex.flatten(tex_path))
+    }
+    out = []
+    for path in dict.fromkeys(p for p, _ in order):
+        lines = Path(path).read_text(encoding="utf-8").split("\n")
+        blks = calkit.latex.file_blocks(path, lines)
+        for tc in calkit.latex.parse_comments(lines):
+            if not (unresolved and tc.resolved):
+                out.append(_comment_json(path, tc, blks))
+    out.sort(key=lambda c: order.get((c["path"], c["line"]), 0))
+    if as_json:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    for c in out:
+        status = " (resolved)" if c["resolved"] else ""
+        typer.echo(f"{c['path']}:{c['line']} [{c['id'] or '-'}]{status}")
+        if c["highlight"]:
+            typer.echo(f'  On "{c["highlight"]["text"]}"')
+        for m in c["messages"]:
+            typer.echo(f"  {m['author']}: {m['text']}")
+
+
+@comments_app.command(name="add")
+def add_comment(
+    tex_path: Annotated[str, typer.Argument(help="File to comment in.")],
+    line: Annotated[
+        int,
+        typer.Option(
+            "--line",
+            "-l",
+            help="A line in, or just above, the paragraph to comment on.",
+        ),
+    ],
+    text: Annotated[str, typer.Option("--text", "-m", help="The comment.")],
+    highlight: Annotated[
+        str | None,
+        typer.Option(
+            "--highlight", help="Rendered text in the paragraph it's about."
+        ),
+    ] = None,
+    occ: Annotated[
+        int,
+        typer.Option(
+            "--occ", help="Which occurrence of the highlight text, from 0."
+        ),
+    ] = 0,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", help="Defaults to Git's user.name."),
+    ] = None,
+    email: Annotated[
+        str | None,
+        typer.Option("--email", help="Defaults to Git's user.email."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output the thread as JSON.")
+    ] = False,
+) -> None:
+    """Start a comment thread above a paragraph, printing its ID."""
+    if not os.path.isfile(tex_path):
+        raise_error(f"{tex_path} does not exist")
+    lines = Path(tex_path).read_text(encoding="utf-8").split("\n")
+    tc = calkit.latex.TexComment(
+        [_new_entry(text, author, email)],
+        highlight=highlight or None,
+        highlight_occ=occ,
+        id=calkit.latex.new_comment_id(),
+    )
+    try:
+        calkit.latex.add_comment(lines, line, tc)
+    except ValueError as e:
+        raise_error(str(e))
+    Path(tex_path).write_text("\n".join(lines), encoding="utf-8")
+    if as_json:
+        blks = calkit.latex.file_blocks(tex_path, lines)
+        typer.echo(json.dumps(_comment_json(tex_path, tc, blks), indent=2))
+    else:
+        typer.echo(tc.id)
+
+
+@comments_app.command(name="reply")
+def reply_to_comment(
+    tex_path: Annotated[str, typer.Argument(help="File the thread is in.")],
+    text: Annotated[str, typer.Option("--text", "-m", help="The reply.")],
+    id: Annotated[str | None, _ID_OPTION] = None,
+    line: Annotated[int | None, _LINE_OPTION] = None,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", help="Defaults to Git's user.name."),
+    ] = None,
+    email: Annotated[
+        str | None,
+        typer.Option("--email", help="Defaults to Git's user.email."),
+    ] = None,
+) -> None:
+    """Reply to a comment thread."""
+    entry = _new_entry(text, author, email)
+    tc = _edit_comment(tex_path, id, line, lambda tc: tc.entries.append(entry))
+    typer.echo(tc.id)
+
+
+@comments_app.command(name="resolve")
+def resolve_comment(
+    tex_path: Annotated[str, typer.Argument(help="File the thread is in.")],
+    id: Annotated[str | None, _ID_OPTION] = None,
+    line: Annotated[int | None, _LINE_OPTION] = None,
+) -> None:
+    """Mark a comment thread resolved."""
+
+    def edit(tc: calkit.latex.TexComment) -> None:
+        tc.resolved = True
+
+    typer.echo(_edit_comment(tex_path, id, line, edit).id)
+
+
+@comments_app.command(name="reopen")
+def reopen_comment(
+    tex_path: Annotated[str, typer.Argument(help="File the thread is in.")],
+    id: Annotated[str | None, _ID_OPTION] = None,
+    line: Annotated[int | None, _LINE_OPTION] = None,
+) -> None:
+    """Mark a resolved comment thread open again."""
+
+    def edit(tc: calkit.latex.TexComment) -> None:
+        tc.resolved = False
+
+    typer.echo(_edit_comment(tex_path, id, line, edit).id)
+
+
+@comments_app.command(name="delete")
+def delete_comment(
+    tex_path: Annotated[str, typer.Argument(help="File the thread is in.")],
+    id: Annotated[str | None, _ID_OPTION] = None,
+    line: Annotated[int | None, _LINE_OPTION] = None,
+) -> None:
+    """Delete a comment thread and its replies."""
+    if (id is None) == (line is None):
+        raise_error("Specify one of --id or --line")
+    if not os.path.isfile(tex_path):
+        raise_error(f"{tex_path} does not exist")
+    lines = Path(tex_path).read_text(encoding="utf-8").split("\n")
+    tc = calkit.latex.find_comment(lines, id=id, lineno=line)
+    if tc is None:
+        raise_error(f"No comment thread in {tex_path} at {id or line}")
+    del lines[tc.lineno - 1 : tc.lineno - 1 + tc.nlines]
+    Path(tex_path).write_text("\n".join(lines), encoding="utf-8")

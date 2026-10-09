@@ -963,3 +963,106 @@ def test_from_questions(tmp_dir):
     ck_info["pipeline"]["stages"]["qa"]["wdir"] = "paper"
     with pytest.raises(Exception, match="wdir"):
         calkit.pipeline.to_dvc(ck_info=ck_info)
+
+
+def test_comments(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", "latex", "comments", *args],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\begin{document}\n"
+            "\\input{intro}\n"
+            "\n"
+            "First paragraph,\n"
+            "over two lines.\n"
+            "\n"
+            "Second paragraph.\n"
+            "\\end{document}\n"
+        )
+    with open("paper/intro.tex", "w") as f:
+        f.write(
+            "% COMMENT\n"
+            "%   T. Author:\n"
+            "%     A thread without an ID.\n"
+            "Intro text.\n"
+        )
+    # Listing follows inputs, and anchors each thread to the paragraph
+    # below it
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    assert len(listed) == 1 and listed[0]["path"] == "paper/intro.tex"
+    assert listed[0]["id"] is None and listed[0]["line"] == 1
+    assert listed[0]["anchor"]["text"] == "Intro text."
+    # Adding at any line in a paragraph puts the thread above it, with an
+    # ID and the author from Git
+    subprocess.run(["git", "init", "-q"], check=True)
+    subprocess.run(["git", "config", "user.name", "Ann Author"], check=True)
+    subprocess.run(["git", "config", "user.email", "ann@x.org"], check=True)
+    added = json.loads(
+        ck(
+            "add",
+            "paper/main.tex",
+            "--line",
+            "5",
+            "-m",
+            "Clarify.",
+            "--highlight",
+            "two lines",
+            "--json",
+        )
+    )
+    id_ = added["id"]
+    assert re.fullmatch(r"[0-9a-f]{8}", id_)
+    assert added["anchor"]["line"] == added["line"] + added["nlines"]
+    assert added["anchor"]["text"] == "First paragraph, over two lines."
+    assert added["messages"][0]["author"] == "Ann Author"
+    assert added["messages"][0]["email"] == "ann@x.org"
+    with open("paper/main.tex") as f:
+        lines = f.read().split("\n")
+    assert lines[3] == (f'% COMMENT id={id_} highlight={{text: "two lines"}}')
+    assert lines[4].startswith("%   Ann Author <ann@x.org> (")
+    # A second thread on the same paragraph goes below the first
+    id2 = ck("add", "paper/main.tex", "-l", "8", "-m", "Also.")
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    assert [c["id"] for c in listed[1:]] == [id_, id2]
+    assert listed[1]["anchor"] == listed[2]["anchor"]
+    assert listed[0]["path"] == "paper/intro.tex"
+    # Replying and resolving by ID
+    ck("reply", "paper/main.tex", "--id", id_, "-m", "Done.", "--author", "B")
+    ck("resolve", "paper/main.tex", "--id", id_)
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    thread = next(c for c in listed if c["id"] == id_)
+    assert thread["resolved"]
+    assert [m["text"] for m in thread["messages"]] == ["Clarify.", "Done."]
+    assert thread["highlight"] == {"text": "two lines", "occ": 0}
+    unresolved = json.loads(ck("list", "paper/main.tex", "-u", "--json"))
+    assert id_ not in [c["id"] for c in unresolved]
+    ck("reopen", "paper/main.tex", "--id", id_)
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    assert not next(c for c in listed if c["id"] == id_)["resolved"]
+    # A thread without an ID gets one when it's first edited by line
+    new_id = ck("resolve", "paper/intro.tex", "--line", "2")
+    with open("paper/intro.tex") as f:
+        assert f.read().startswith(f"% COMMENT id={new_id} resolved=true\n")
+    # Deleting removes the whole thread and nothing else
+    ck("delete", "paper/main.tex", "--id", id2)
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    assert id2 not in [c["id"] for c in listed]
+    with open("paper/main.tex") as f:
+        assert "Also." not in f.read()
+    # Bad references fail
+    for args in [
+        ["resolve", "paper/main.tex", "--id", "nope"],
+        ["resolve", "paper/main.tex"],
+        ["add", "paper/main.tex", "-l", "99", "-m", "x"],
+    ]:
+        res = subprocess.run(
+            ["calkit", "latex", "comments", *args], capture_output=True
+        )
+        assert res.returncode != 0

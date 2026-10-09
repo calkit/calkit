@@ -7,7 +7,7 @@ import hashlib
 import os
 import re
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1124,6 +1124,12 @@ class TexComment:
     resolved: bool = False
     lineno: int = 0
     nlines: int = 0
+    # Stable across edits, so other tools can refer to the thread
+    id: str | None = None
+    # Where the thread is tracked as an issue, e.g., on GitHub
+    issue: str | None = None
+    # Attributes this version doesn't know, kept so they survive a rewrite
+    attrs: dict[str, Any] = field(default_factory=dict)
 
     @property
     def author(self) -> str:
@@ -1143,14 +1149,28 @@ class TexComment:
     def render(self) -> list[str]:
         import json
 
+        def fmt(value: Any) -> str:
+            if isinstance(value, dict):
+                items = [f"{k}: {json.dumps(v)}" for k, v in value.items()]
+                return "{" + ", ".join(items) + "}"
+            if isinstance(value, bool):
+                return str(value).lower()
+            s = str(value)
+            return s if re.fullmatch(r'[^\s"{}]+', s) else json.dumps(s)
+
         attrs = []
+        if self.id:
+            attrs.append(f"id={fmt(self.id)}")
         if self.resolved:
             attrs.append("resolved=true")
+        if self.issue:
+            attrs.append(f"issue={fmt(self.issue)}")
         if self.highlight:
             value = f"text: {json.dumps(self.highlight)}"
             if self.highlight_occ:
                 value += f", occ: {self.highlight_occ}"
             attrs.append("highlight={" + value + "}")
+        attrs += [f"{k}={fmt(v)}" for k, v in self.attrs.items()]
         out = ["% COMMENT"]
         # Attributes continue onto their own lines when they don't fit
         for attr in attrs:
@@ -1202,19 +1222,79 @@ def parse_comments(lines: list[str]) -> list[TexComment]:
             i += 1
         if entries:
             attrs = _parse_header(header)
-            highlight = attrs.get("highlight")
+            highlight = attrs.pop("highlight", None)
             if isinstance(highlight, dict):
                 text, occ = highlight.get("text"), highlight.get("occ", 0)
             else:
                 text, occ = highlight, 0
+            id_, issue = attrs.pop("id", None), attrs.pop("issue", None)
             out.append(
                 TexComment(
                     entries,
                     str(text) if text else None,
                     int(occ or 0),
-                    str(attrs.get("resolved", "")).lower() == "true",
+                    str(attrs.pop("resolved", "")).lower() == "true",
                     start + 1,
                     i - start,
+                    id=str(id_) if id_ else None,
+                    issue=str(issue) if issue else None,
+                    attrs=attrs,
                 )
             )
     return out
+
+
+def new_comment_id() -> str:
+    import secrets
+
+    return secrets.token_hex(4)
+
+
+def find_comment(
+    lines: list[str], id: str | None = None, lineno: int | None = None
+) -> TexComment | None:
+    """A thread by its ID or by the number of any line in it."""
+    for tc in parse_comments(lines):
+        if (id is not None and tc.id == id) or (
+            lineno is not None and tc.lineno <= lineno < tc.lineno + tc.nlines
+        ):
+            return tc
+    return None
+
+
+def file_blocks(path: str, lines: list[str]) -> list[Block]:
+    """The blocks of one file on its own, without following its inputs."""
+    return blocks(
+        [
+            SourceLine(path, i, text)
+            for i, text in enumerate(lines, 1)
+            if not _INCLUDE_RE.match(text.split("%")[0])
+        ]
+    )
+
+
+def comment_anchor(blks: list[Block], tc: TexComment) -> Block | None:
+    """The block a thread is about, from its file's blocks: the first one
+    below it."""
+    return next((b for b in blks if b.lineno >= tc.lineno + tc.nlines), None)
+
+
+def add_comment(lines: list[str], lineno: int, tc: TexComment) -> None:
+    """Put a thread above the block at or after a line, below any threads
+    already there, editing the lines in place."""
+    blk = next(
+        (b for b in file_blocks("", lines) if b.lines[-1].lineno >= lineno),
+        None,
+    )
+    if blk is None:
+        raise ValueError(f"No paragraph at or after line {lineno}")
+    rendered = tc.render()
+    lines[blk.lineno - 1 : blk.lineno - 1] = rendered
+    tc.lineno, tc.nlines = blk.lineno, len(rendered)
+
+
+def write_comment(lines: list[str], tc: TexComment) -> None:
+    """Write a parsed thread back over its own lines, in place."""
+    rendered = tc.render()
+    lines[tc.lineno - 1 : tc.lineno - 1 + tc.nlines] = rendered
+    tc.nlines = len(rendered)

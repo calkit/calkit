@@ -235,7 +235,9 @@ export function AddCommentTip({
   defaultCreateIssue = true,
   anchor,
 }: {
-  onConfirm: (text: string, createIssue: boolean) => void
+  // Kept open, saving, until a promise it returns settles, so a failure
+  // leaves the comment to try again
+  onConfirm: (text: string, createIssue: boolean) => void | Promise<unknown>
   onCancel: () => void
   // Hide the "Create GitHub issue" checkbox (e.g. for release review, where
   // issue mirroring is handled server-side and isn't a reviewer choice).
@@ -249,7 +251,19 @@ export function AddCommentTip({
 }) {
   const [text, setText] = useState("")
   const [createIssue, setCreateIssue] = useState(defaultCreateIssue)
+  const [saving, setSaving] = useState(false)
   const bg = useColorModeValue("white", "gray.800")
+  const save = async () => {
+    if (!text.trim() || saving) return
+    setSaving(true)
+    try {
+      await onConfirm(text.trim(), createIssue)
+    } catch {
+      // The caller's mutation shows the error; the text stays for a retry
+    } finally {
+      setSaving(false)
+    }
+  }
   const borderColor = useColorModeValue("gray.200", "gray.600")
 
   const box = (
@@ -269,11 +283,12 @@ export function AddCommentTip({
         size="sm"
         rows={3}
         value={text}
+        isDisabled={saving}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) {
             e.preventDefault()
-            onConfirm(text.trim(), createIssue)
+            void save()
           }
         }}
         mb={2}
@@ -283,6 +298,7 @@ export function AddCommentTip({
           size="sm"
           mb={2}
           isChecked={createIssue}
+          isDisabled={saving}
           onChange={(e) => setCreateIssue(e.target.checked)}
         >
           Create GitHub issue
@@ -293,11 +309,17 @@ export function AddCommentTip({
           size="xs"
           variant="primary"
           isDisabled={!text.trim()}
-          onClick={() => onConfirm(text.trim(), createIssue)}
+          isLoading={saving}
+          onClick={() => void save()}
         >
           Save
         </Button>
-        <Button size="xs" variant="ghost" onClick={onCancel}>
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={onCancel}
+          isDisabled={saving}
+        >
           Cancel
         </Button>
       </Flex>
@@ -340,10 +362,13 @@ export function HighlightPopup({
   canResolve: boolean
   isResolved: boolean
   isResolving?: boolean
-  onResolve: (resolved: boolean) => void
+  onResolve: (resolved: boolean) => void | Promise<unknown>
 }) {
   const bg = useColorModeValue("white", "gray.800")
   const borderColor = useColorModeValue("gray.200", "gray.600")
+  // The popup is drawn when it's hovered, so it keeps its own state while
+  // the change it asked for is made
+  const [resolving, setResolving] = useState(false)
 
   return (
     <Box
@@ -378,7 +403,7 @@ export function HighlightPopup({
           </Flex>
         </Box>
         {canResolve &&
-          (isResolving ? (
+          (isResolving || resolving ? (
             <Spinner size="xs" color="ui.main" />
           ) : (
             <IconButton
@@ -387,7 +412,14 @@ export function HighlightPopup({
               size="xs"
               variant="ghost"
               colorScheme={isResolved ? "gray" : "green"}
-              onClick={() => onResolve(!isResolved)}
+              onClick={async () => {
+                setResolving(true)
+                try {
+                  await onResolve(!isResolved)
+                } finally {
+                  setResolving(false)
+                }
+              }}
             />
           ))}
       </Flex>
@@ -450,6 +482,7 @@ export default function PdfAnnotator({
 }: PdfAnnotatorProps) {
   const { user } = useAuth()
   const queryClient = useQueryClient()
+  const showToast = useCustomToast()
   const latexComments = useLatexComments(
     ownerName,
     projectName,
@@ -494,7 +527,8 @@ export default function PdfAnnotator({
           git_ref: gitRef ?? null,
         },
       }).then((response) => response.data),
-    onSuccess: () => {
+    // Settled once the comments are back, so whatever waits on it sees them
+    onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: [
           "projects",
@@ -504,8 +538,8 @@ export default function PdfAnnotator({
           artifactType,
           publicationPath,
         ],
-      })
-    },
+      }),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   const resolveMutation = useMutation({
@@ -519,7 +553,8 @@ export default function PdfAnnotator({
         comment_id: commentId,
         projectCommentPatch: { resolved },
       }).then((response) => response.data),
-    onSuccess: () => {
+    // Settled once the comments are back, so whatever waits on it sees them
+    onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: [
           "projects",
@@ -529,8 +564,8 @@ export default function PdfAnnotator({
           artifactType,
           publicationPath,
         ],
-      })
-    },
+      }),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   const comments: ProjectComment[] = commentsQuery.data ?? []
@@ -559,14 +594,13 @@ export default function PdfAnnotator({
         content: newHighlight.content as unknown as Record<string, unknown>,
       } as CommentHighlight
       if (latex) {
-        latexComments.post.mutate({
+        return latexComments.post.mutateAsync({
           comment: commentText,
           highlight,
           createIssue,
         })
-        return
       }
-      postMutation.mutate({
+      return postMutation.mutateAsync({
         comment: commentText,
         highlight,
         create_github_issue: createIssue,
@@ -594,8 +628,8 @@ export default function PdfAnnotator({
         <AddCommentTip
           anchor={anchor}
           defaultCreateIssue={!latex}
-          onConfirm={(text, createIssue) => {
-            handleAddHighlight(
+          onConfirm={async (text, createIssue) => {
+            await handleAddHighlight(
               { position, content, comment: { text, emoji: "" } },
               text,
               createIssue,
@@ -649,16 +683,23 @@ export default function PdfAnnotator({
                 (resolveMutation.isPending &&
                   resolveMutation.variables?.commentId === annotHL.dbId)
               }
-              onResolve={(resolved) => {
-                if (latex && !comments.some((c) => c.id === annotHL.dbId)) {
-                  latexComments.resolve.mutate({ key: annotHL.dbId, resolved })
-                } else {
-                  resolveMutation.mutate({
-                    commentId: annotHL.dbId,
-                    resolved,
-                  })
+              onResolve={async (resolved) => {
+                try {
+                  if (latex && !comments.some((c) => c.id === annotHL.dbId)) {
+                    await latexComments.resolve.mutateAsync({
+                      key: annotHL.dbId,
+                      resolved,
+                    })
+                  } else {
+                    await resolveMutation.mutateAsync({
+                      commentId: annotHL.dbId,
+                      resolved,
+                    })
+                  }
+                  hideTip()
+                } catch {
+                  // The mutation shows the error
                 }
-                hideTip()
               }}
             />
           }

@@ -8,7 +8,7 @@ from unittest.mock import ANY, patch
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 import app.index
 from app import users, zotero
@@ -5073,7 +5073,7 @@ def test_post_project_org_repo_collaborator(
     assert "not installed" in resp.json()["detail"]
     assert get_org_by_github_name(db, org_github_name) is None
     install_status = 200
-    name = f"xfo-{suffix}"
+    name = f"widget-{suffix}"
     resp = post(name)
     assert resp.status_code == 200, resp.text
     assert resp.json()["is_public"] is False
@@ -5097,6 +5097,44 @@ def test_post_project_org_repo_collaborator(
     resp = post(f"second-{suffix}")
     assert resp.status_code == 200, resp.text
     assert resp.json()["owner_account_id"] == str(org.account.id)
+    # Another collaborator finds it by its repo before ever opening it,
+    # which is how 'calkit update remote' looks for it, while someone the
+    # repo isn't shared with still doesn't
+    other = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"other-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"other{suffix}",
+            github_username=f"other{suffix}",
+        ),
+    )
+    other_headers = authentication_token_from_email(
+        client=client, email=other.email, db=db
+    )
+    for permission, expected in [("none", []), ("write", [name])]:
+        db.exec(
+            delete(UserProjectAccess).where(
+                UserProjectAccess.user_id == other.id
+            )
+        )
+        db.commit()
+        with (
+            patch("app.users.get_github_token", return_value="gh-token"),
+            patch(
+                "app.projects.requests.get",
+                return_value=SimpleNamespace(
+                    status_code=200, json=lambda: {"permission": permission}
+                ),
+            ),
+        ):
+            resp = client.get(
+                "/projects",
+                headers=other_headers,
+                params={"github_repo": f"{org_github_name}/{name}"},
+            )
+        assert resp.status_code == 200, resp.text
+        assert [p["name"] for p in resp.json()["data"]] == expected
 
 
 def test_post_project_dataset_provenance(

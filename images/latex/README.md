@@ -8,8 +8,8 @@ the purpose of this image is to provide most of the packages scientific
 articles need without the <!-- calkit value key=texlive_full.unpacked_gb format="{:.1f}" -->6.2<!-- /calkit value --> GB
 of `texlive/texlive:latest-full`, a <!-- calkit value key=texlive_full.download_gb format="{:.1f}" -->2.7<!-- /calkit value --> GB
 download.
-Instead, this one is <!-- calkit value key=calkit.unpacked_mb format="{:.0f}" -->731<!-- /calkit value --> MB
-unpacked and <!-- calkit value key=calkit.download_mb format="{:.0f}" -->400<!-- /calkit value --> MB
+Instead, this one is <!-- calkit value key=calkit.unpacked_mb format="{:.0f}" -->896<!-- /calkit value --> MB
+unpacked and <!-- calkit value key=calkit.download_mb format="{:.0f}" -->433<!-- /calkit value --> MB
 to download, which speeds up downloads.
 These are measured for amd64, as described [below](#measuring-its-size).
 When run through `calkit latex build`,

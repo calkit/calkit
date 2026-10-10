@@ -49,6 +49,9 @@ dependencies = [
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
+  # Releases differ in where they wrap dvc.lock's long lines, so pin one to
+  # keep the file from flipping between machines
+  "ruamel.yaml>=0.19.1,<0.20",
   "rich",
   "typer==0.27.2",
   "websockets",
@@ -106,6 +109,7 @@ dev = [
   "pypandoc-binary>=1.13",
   "matplotlib>=3.10.8",
   "pypdfium2>=5.13.0",
+  "simpy>=4.1.1",
 ]
 
 [project.urls]
@@ -201,6 +205,8 @@ module = [
     "requests",
     "pypdfium2",
     "psutil",
+    "simpy",
+    "pypandoc",
 ]
 ignore_missing_imports = true
 

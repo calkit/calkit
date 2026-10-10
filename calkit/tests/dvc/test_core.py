@@ -618,3 +618,48 @@ def test_set_remote_auth_only_for_hub_remotes(monkeypatch, tmp_path):
         assert bool(calls) == sent, url
         if sent:
             assert calls[-1][-1] == "Bearer ckp_token"
+
+
+def test_ck_fs_reads_content_only_for_dirs() -> None:
+    from calkit.dvc.core import CalkitDVCFileSystem
+
+    calls: list[tuple[list[str], bool]] = []
+    stored = {
+        "o/p/files/md5/aa/1.dir": b"[]",
+        "o/p/files/md5/bb/2": b"data",
+    }
+
+    class FakeFS:
+        def info_many(
+            self, paths: list[str], content: bool = True, **kwargs: object
+        ) -> dict[str, dict]:
+            calls.append((sorted(paths), content))
+            infos = {}
+            for path in paths:
+                if path in stored:
+                    infos[path] = {"name": path, "size": len(stored[path])}
+                    if content:
+                        infos[path]["content"] = stored[path]
+            return infos
+
+    fs = CalkitDVCFileSystem()
+    fs.__dict__["fs"] = FakeFS()
+    paths = [
+        "o/p/files/md5/aa/1.dir",
+        "o/p/files/md5/bb/2",
+        "o/p/files/md5/cc/3.dir",
+        "o/p/files/md5/dd/4",
+    ]
+    assert fs.exists(paths) == [True, True, False, False]
+    assert calls == [
+        (["o/p/files/md5/aa/1.dir", "o/p/files/md5/cc/3.dir"], True),
+        (["o/p/files/md5/bb/2", "o/p/files/md5/dd/4"], False),
+    ]
+    infos = fs.info(paths[:2])
+    assert infos[0]["content"] == b"[]"
+    assert "content" not in infos[1]
+    # Everything asked about is answered from what was already fetched
+    assert len(calls) == 2
+    with pytest.raises(FileNotFoundError):
+        fs.info(paths)
+    assert len(calls) == 2

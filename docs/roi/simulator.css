@@ -1,0 +1,352 @@
+#simulator {
+  --sim-mark: var(--md-primary-fg-color);
+  --sim-ink: var(--md-default-fg-color);
+  --sim-muted: var(--md-default-fg-color--light);
+  --sim-rule: var(--md-default-fg-color--lightest);
+  --sim-surface: var(--md-default-bg-color);
+}
+
+#simulator input,
+#simulator select {
+  font: inherit;
+  color: var(--sim-ink);
+  background: var(--sim-surface);
+  border: 1px solid var(--sim-rule);
+  border-radius: 4px;
+  padding: 0.2em 0.4em;
+}
+
+#simulator input[type="number"] {
+  width: 6em;
+}
+
+#simulator input:disabled {
+  opacity: 0.35;
+}
+
+.sim-table-wrap {
+  overflow-x: auto;
+}
+
+.sim-stages {
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.sim-stages th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--sim-muted);
+  padding: 0 0.6em 0.4em 0;
+  vertical-align: bottom;
+}
+
+.sim-stages td {
+  padding: 0.15em 0.6em 0.15em 0;
+}
+
+.sim-remove {
+  background: none;
+  border: none;
+  color: var(--sim-muted);
+  cursor: pointer;
+}
+
+.sim-remove:disabled {
+  visibility: hidden;
+}
+
+.sim-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.6rem 1.2rem;
+  margin: 1.2rem 0;
+  font-size: 0.75rem;
+}
+
+.sim-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2em;
+}
+
+.sim-field span {
+  color: var(--sim-muted);
+}
+
+.sim-field select {
+  max-width: 100%;
+}
+
+.sim-status {
+  margin-left: 0.8em;
+  color: var(--sim-muted);
+  font-size: 0.75rem;
+}
+
+.sim-progress {
+  display: block;
+  width: 100%;
+  margin-top: 0.6rem;
+  accent-color: var(--sim-mark);
+}
+
+.sim-progress[hidden] {
+  display: none;
+}
+
+.sim-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 1rem;
+}
+
+.sim-tile {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--sim-rule);
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+}
+
+.sim-tile-label,
+.sim-tile-note,
+.sim-caption {
+  color: var(--sim-muted);
+  font-size: 0.75rem;
+}
+
+.sim-tile-value {
+  font-size: 1.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.sim-warning {
+  font-size: 0.75rem;
+}
+
+.sim-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.sim-bar-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 2fr) 3fr 3.5em 7em;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.1rem 0;
+}
+
+.sim-bar-row:hover {
+  background: var(--md-code-bg-color);
+}
+
+.sim-bar-plot {
+  position: relative;
+  height: 1rem;
+}
+
+.sim-bar {
+  position: absolute;
+  top: 0.15rem;
+  height: 0.7rem;
+  background: var(--sim-mark);
+  border-radius: 0 4px 4px 0;
+}
+
+.sim-bar--negative {
+  border-radius: 4px 0 0 4px;
+}
+
+.sim-zero {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--sim-muted);
+}
+
+.sim-whisker {
+  position: absolute;
+  top: 0.5rem;
+  border-top: 2px solid var(--sim-ink);
+  opacity: 0.6;
+}
+
+.sim-bar-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-tip {
+  position: fixed;
+  z-index: 10;
+  max-width: 290px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.7rem;
+  color: var(--sim-ink);
+  background: var(--sim-surface);
+  border: 1px solid var(--sim-rule);
+  border-radius: 4px;
+  box-shadow: var(--md-shadow-z2);
+  pointer-events: none;
+}
+
+.sim-field input[type="checkbox"] {
+  align-self: flex-start;
+  margin: 0.4em 0;
+}
+
+.sim-loop {
+  font-size: 0.75rem;
+  line-height: 2.2;
+}
+
+.sim-field--wide {
+  grid-column: 1 / -1;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sim-field--wide legend {
+  color: var(--sim-muted);
+  padding: 0;
+  margin-bottom: 0.2em;
+}
+
+.sim-radio {
+  display: flex;
+  gap: 0.5em;
+  align-items: baseline;
+  color: var(--sim-ink);
+}
+
+.sim-dag {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 36rem;
+}
+
+.sim-dag-node {
+  fill: var(--md-code-bg-color);
+  stroke: var(--sim-rule);
+}
+
+.sim-dag-label {
+  fill: var(--sim-ink);
+  font-size: 12px;
+}
+
+.sim-dag-note {
+  fill: var(--sim-muted);
+  font-size: 11px;
+}
+
+.sim-dag-note--loop {
+  fill: var(--sim-mark);
+  font-weight: 600;
+}
+
+.sim-dag-edge,
+.sim-dag-review,
+.sim-dag-loop {
+  fill: none;
+  stroke: var(--sim-muted);
+  stroke-width: 1.5;
+}
+
+.sim-dag-edge--hand {
+  stroke-dasharray: 5 4;
+}
+
+.sim-dag-review {
+  stroke-dasharray: 2 3;
+}
+
+.sim-dag-loop {
+  stroke: var(--sim-mark);
+  stroke-width: 2;
+}
+
+.sim-dag-head {
+  fill: var(--sim-muted);
+  fill: context-stroke;
+}
+
+.sim-dag-gate {
+  stroke: var(--sim-ink);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.sim-dag-project {
+  fill: none;
+  stroke: var(--sim-mark);
+  stroke-width: 1.5;
+}
+
+.sim-dag-hit {
+  stroke: transparent;
+  stroke-width: 16;
+  cursor: pointer;
+}
+
+.sim-dag-hit:hover {
+  stroke: var(--sim-mark);
+  stroke-opacity: 0.15;
+}
+
+.sim-diagram {
+  overflow-x: auto;
+}
+
+.sim-cells {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(46rem, 100%), 1fr));
+  gap: 1rem;
+}
+
+.sim-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border: 1px solid var(--sim-rule);
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  min-width: 0;
+}
+
+.sim-explain {
+  margin-top: 2rem;
+  font-size: 0.75rem;
+}
+
+.sim-explain summary {
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sim-assumptions {
+  border-collapse: collapse;
+}
+
+.sim-assumptions td {
+  padding: 0.25em 0.8em 0.25em 0;
+  vertical-align: top;
+  border-top: 1px solid var(--sim-rule);
+}
+
+.sim-assumptions td:first-child,
+.sim-assumptions td:last-child {
+  white-space: nowrap;
+}
+
+.sim-bar-note {
+  color: var(--sim-muted);
+}

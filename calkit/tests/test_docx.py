@@ -172,6 +172,26 @@ def test_latex_source_helpers(project: Path) -> None:
         False,
     )
     assert back.entries[0].email == "email@mail.com"
+    # An ID, an issue, and attributes from a newer schema survive a rewrite
+    newer = [
+        "% COMMENT id=0a1b2c3d issue=https://github.com/o/r/issues/7",
+        '%   origin={tool: "x", v: 2} note="two words"',
+        "%   A:",
+        "%     Hi.",
+    ]
+    back = calkit.latex.parse_comments(newer)[0]
+    assert (back.id, back.issue) == (
+        "0a1b2c3d",
+        "https://github.com/o/r/issues/7",
+    )
+    assert back.attrs == {"origin": {"tool": "x", "v": 2}, "note": "two words"}
+    again = calkit.latex.parse_comments(back.render())[0]
+    assert (again.id, again.issue, again.attrs, again.entries) == (
+        back.id,
+        back.issue,
+        back.attrs,
+        back.entries,
+    )
     assert calkit.latex.word_date("2026-09-06T08:44:00Z") == "2026-09-06 08:44"
     assert calkit.latex.make_bookmark_name("paper/main.tex", 19).startswith(
         "ck_"
@@ -468,13 +488,27 @@ def test_docx_round_trip(
     )
     assert "Figures were changed in Word" in out and "image1.png" in out
     main = Path("paper/main.tex").read_text(encoding="utf-8")
-    # A thread resolved in Word is marked resolved in the source, and
-    # exports back to Word as resolved
+    # A thread resolved in Word is marked resolved in the source, keeping
+    # the ID and issue Word can't carry, and exports back to Word as
+    # resolved
+    methods = Path("paper/methods.tex").read_text(encoding="utf-8")
+    assert "% COMMENT\n%   T. Author:" in methods
+    Path("paper/methods.tex").write_text(
+        methods.replace(
+            "% COMMENT\n%   T. Author:",
+            "% COMMENT id=0a1b2c3d issue=https://github.com/o/r/issues/7\n"
+            "%   T. Author:",
+        ),
+        encoding="utf-8",
+    )
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/resolved.docx"], check=True
     )
     methods = Path("paper/methods.tex").read_text(encoding="utf-8")
-    assert "% COMMENT resolved=true\n%   T. Author:" in methods
+    assert (
+        "% COMMENT id=0a1b2c3d resolved=true "
+        "issue=https://github.com/o/r/issues/7\n%   T. Author:"
+    ) in methods
     parsed = calkit.latex.parse_comments(methods.split("\n"))
     assert [c.resolved for c in parsed] == [True]
     # With --log, the record is kept in the project too

@@ -12,7 +12,58 @@ questions:
       time to valuable knowledge, from working on all stages together in
       small steps, akin to one piece flow in lean manufacturing,
       versus a more waterfall, stage gate style?
-    hypothesis: An agile, lean approach is 10x more efficient.
+    hypothesis: An agile, lean approach is ~2x more efficient.
+    answer:
+      if r_combined >= 2: >-
+        Yes, in a simulation of a six-finding paper: working in small steps
+        with automated tooling, as in continuous delivery, reached a
+        published paper {r_combined:.1f}x sooner than working stage by stage
+        with manual tooling, and fit {s_combined:.1f}x as many papers into a
+        PhD with half the time spent waiting on reviews put to other use.
+        It takes both: small steps alone gave {r_manual:.1f}x and the
+        tooling alone {r_tooling:.1f}x.
+      else: >-
+        Not in a simulation of a six-finding paper, where working in small
+        steps with automated tooling, as in continuous delivery, reached a
+        published paper {r_combined:.1f}x sooner than working stage by stage
+        with manual tooling, and fit {s_combined:.1f}x as many papers into a
+        PhD with half the time spent waiting on reviews put to other use.
+    evidence:
+      - kind: figure
+        path: docs/img/research-flow.png
+      - kind: result
+        path: results/research-flow.json
+        values:
+          r_combined: ratio.days_combined
+          s_combined: ratio.student_days_combined
+          r_manual: ratio.days_manual
+          r_tooling: ratio.days_tooling
+  - question: >-
+      What most slows research and limits iteration in the status quo, and
+      how do agents change that?
+    answer: >-
+      In a simulation of a six-finding paper worked stage by stage with
+      manual tooling, waiting on the PI to review big batches takes
+      {sq_wait:.0%} of the time to a published paper, more than anything
+      else, and breaking the batches up gives {batch_loops:.1f}x as many
+      feedback loops. The batches are big because tool hopping and review
+      prep cost something on every iteration: worked in small steps with
+      today's tools, tool hopping is the largest waste, at {hop:.0%} of the
+      time, and taking it away publishes {hop_gain:.2f}x sooner with
+      {hop_flaws:.0%} fewer flaws. Agents shrink the hands-on work, so
+      waiting on the PI grows to {agents_wait:.0%}.
+    evidence:
+      - kind: figure
+        path: docs/img/research-flow-waste.png
+      - kind: result
+        path: results/research-flow.json
+        values:
+          sq_wait: waste.headline.status_quo_waiting_share
+          agents_wait: waste.headline.agents_waiting_share
+          batch_loops: waste.headline.batches_loops_gain
+          hop: waste.headline.small_steps_hopping_share
+          hop_gain: waste.headline.small_steps_hopping_gain
+          hop_flaws: waste.headline.small_steps_hopping_flaw_cut
   - question: >-
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?
@@ -54,6 +105,10 @@ environments:
     kind: uv
     path: pyproject.toml
     description: Calkit itself, from this checkout, with its dev tools.
+  tex:
+    kind: docker
+    image: ghcr.io/calkit/latex:0.1.6
+    description: Calkit's TeX Live image via Docker.
 
 pipeline:
   stages:
@@ -91,7 +146,57 @@ pipeline:
       outputs:
         - path: docs/img/latex-word-round-trip.png
           storage: git
-
+    research-flow:
+      kind: python-script
+      script_path: scripts/research-flow.py
+      environment: dev
+      description: >-
+        Simulate a paper worked in small steps versus stage by stage, with
+        manual and automated tooling.
+      inputs:
+        - docs/roi/research_flow.py
+      outputs:
+        - path: results/research-flow.json
+          storage: git
+    research-flow-figure:
+      kind: python-script
+      script_path: scripts/plot-research-flow.py
+      environment: dev
+      inputs:
+        - results/research-flow.json
+      outputs:
+        - docs/img/research-flow.png
+        - docs/img/research-flow-goals.png
+        - docs/img/research-flow-waste.png
+    budget-2027:
+      kind: python-script
+      script_path: scripts/budget.py
+      environment: dev
+      description: >-
+        Total up the budget for the 2027 pilot that the one-pager asks for.
+      args:
+        - --workshops=4
+        - --attendees=25
+        - --supported=20
+        - --indirect-rate=0
+      inputs:
+        - docs/one-pager/2027-budget.csv
+      outputs:
+        - path: results/2027-budget.json
+          storage: git
+    one-pager:
+      kind: markdown
+      target_path: docs/one-pager/main.md
+      description: >-
+        Build the one-pager into a PDF, with its values read from the
+        results and linked to the questions they bear on.
+      pdf:
+        environment: tex
+        template_path: docs/one-pager/template.tex
+        filters:
+          - docs/one-pager/one-pager.lua
+        args:
+          - --shift-heading-level-by=-1
     latex-image-readme:
       kind: markdown
       target_path: images/latex/README.md
@@ -104,3 +209,33 @@ figures:
       A page of the LaTeX/Word example as built from LaTeX, as exported to
       Word, and as built again after merging the Word copy back.
     stage: latex-word-round-trip-figure
+  - path: docs/img/research-flow.png
+    title: Research flow simulation
+    description: >-
+      Time to a published paper worked in small steps versus stage by
+      stage, by how often reviews happen, and by handoff cost and flaw rate.
+    stage: research-flow-figure
+  - path: docs/img/research-flow-goals.png
+    title: Research productivity, goal by goal
+    description: >-
+      Improvement over working stage by stage with manual tooling on a first
+      paper, as agents, small steps, Calkit's tooling, faster collaboration,
+      faster verification, and agent-assisted PI review are added in turn.
+    stage: research-flow-figure
+  - path: docs/img/research-flow-waste.png
+    title: Waste in the research workflow
+    description: >-
+      Where the time to a published paper goes, with and without agents and
+      small steps, and how much faster it gets with each kind of waste
+      removed on its own.
+    stage: research-flow-figure
+
+tables:
+  - path: docs/one-pager/2027-budget.csv
+    title: Budget for the 2027 pilot
+    description: >-
+      Line items for a six-month pilot of workshops and supported project
+      conversions, from which the one-pager's ask is computed.
+
+references:
+  - path: references.bib

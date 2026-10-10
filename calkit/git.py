@@ -131,7 +131,8 @@ def get_staged_files(
         repo = get_repo(path)
     cmd = ["--staged", "--name-only"]
     if path is not None:
-        cmd.append(path)
+        # A staged deletion's path is gone, so Git would read it as a ref
+        cmd += ["--", path]
     diff = repo.git.diff(cmd)
     paths = diff.split("\n")
     return [p for p in paths if p]
@@ -166,7 +167,8 @@ def get_staged_files_with_status(
         repo = get_repo(path)
     cmd = ["--staged", "--name-status"]
     if path is not None:
-        cmd.append(path)
+        # A staged deletion's path is gone, so Git would read it as a ref
+        cmd += ["--", path]
     diff = repo.git.diff(cmd)
     paths = diff.split("\n")
     res = []

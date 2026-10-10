@@ -3386,10 +3386,12 @@ Work with LaTeX.
 | -------------------------------------------------------- | ------------------------------------------------------------- |
 | [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                 |
 | [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command. |
+| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.       |
 | [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                 |
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
 | [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
+| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX source.                    |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3440,6 +3442,38 @@ Options:
 | ---------------- | ---- | -------- | --------- | ------------------------------------ |
 | `--output`, `-o` | str  | yes      |           | Output LaTeX file path(s).           |
 | `--command`      | str  | no       | questions | Command name to use in LaTeX output. |
+
+<a id="subcommand-latex-tex-from-markdown"></a>
+
+#### `calkit latex|tex from-markdown`
+
+Build a Markdown file into a PDF with pandoc and LaTeX.
+
+Value markers are filled from their results files, which keeps the Markdown itself current too, and each value links to the question on the project's hub whose evidence cites it. The template gets the Calkit version and the project's URL as the `calkit-version`, `project-url`, and `project` variables.
+
+Usage:
+
+```text
+calkit latex|tex from-markdown [OPTIONS] MD-PATH
+```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                 |
+| --------- | ---- | -------- | ------- | --------------------------- |
+| `md_path` | str  | yes      |         | The Markdown file to build. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                        |
+| --------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`      | str     | yes      |         | Where to write the PDF, or the LaTeX with a .tex extension; can be given more than once.           |
+| `--environment`, `-e` | str     | no       |         | Environment to run pandoc and LaTeX in, e.g., one using Calkit's LaTeX image, which includes both. |
+| `--template`          | str     | no       |         | Pandoc template.                                                                                   |
+| `--filter`            | str     | no       |         | Pandoc Lua filter; can be given more than once.                                                    |
+| `--pandoc-arg`        | str     | no       |         | Another argument for pandoc; can be given more than once.                                          |
+| `--no-check`          | boolean | no       | False   | Don't check the environment first.                                                                 |
+| `--verbose`, `-v`     | boolean | no       | False   | Print commands.                                                                                    |
 
 <a id="subcommand-latex-tex-build"></a>
 
@@ -3579,6 +3613,18 @@ Options:
 | --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
+
+<a id="subcommand-latex-tex-comments"></a>
+
+#### `calkit latex|tex comments`
+
+Work with review comments in LaTeX source.
+
+Usage:
+
+```text
+calkit latex|tex comments COMMAND [ARGS]...
+```
 
 <a id="command-group-overleaf-ol"></a>
 

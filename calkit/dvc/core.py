@@ -367,6 +367,16 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         fs.info = cached_info  # type: ignore[method-assign]
         return fs
 
+    def _info_many(self, paths: list[str], **kwargs: Any) -> dict:
+        # Only a .dir is read once it's found, so any other object's content
+        # would be downloaded just to say it exists
+        dirs = [p for p in paths if p.endswith(".dir")]
+        others = [p for p in paths if not p.endswith(".dir")]
+        infos = self.fs.info_many(dirs, **kwargs) if dirs else {}
+        if others:
+            infos |= self.fs.info_many(others, content=False, **kwargs)
+        return infos
+
     def _extract_owner_project(self) -> tuple[str, str] | None:
         """Extract owner and project from the path_info."""
         try:
@@ -432,7 +442,7 @@ class CalkitDVCFileSystem(ObjectFileSystem):
                     uncached_paths.append(p)
             # Only fetch info for uncached paths
             if uncached_paths:
-                infos = self.fs.info_many(uncached_paths, **kwargs)
+                infos = self._info_many(uncached_paths, **kwargs)
                 # Cache the newly fetched info
                 for p in uncached_paths:
                     exists = p in infos and isinstance(infos[p], dict)
@@ -490,7 +500,7 @@ class CalkitDVCFileSystem(ObjectFileSystem):
             # Only fetch info for uncached paths
             # Use info_many to get and cache both info and existence
             if uncached_paths:
-                infos = self.fs.info_many(uncached_paths, **kwargs)
+                infos = self._info_many(uncached_paths, **kwargs)
                 for p in uncached_paths:
                     exists = p in infos and isinstance(infos[p], dict)
                     if p not in self._cache:

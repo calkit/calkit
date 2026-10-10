@@ -156,6 +156,10 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
 async def test_sessions(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     monkeypatch.setenv("SHELL", "/bin/sh")
+    # The Operator points its own requests at its hub, which commands in
+    # sessions don't inherit, so they use the project's
+    monkeypatch.setattr(operator, "_inherited_hub", None)
+    monkeypatch.setenv("CALKIT_HUB", "http://localhost")
     _init_project(os.path.join(tmp_path, "calkit", "demo"))
     import base64
     import time
@@ -277,10 +281,10 @@ async def test_sessions(tmp_path, monkeypatch):
         {
             "type": "sessions.input",
             "session": sid,
-            "data": "echo HI-$((6*7))\n",
+            "data": "echo HI-$((6*7))-${CALKIT_HUB:-none}\n",
         },
     )
-    await wait_for(lambda: "HI-42" in output("a"))
+    await wait_for(lambda: "HI-42-none" in output("a"))
     # Input the terminal can't take at once, e.g., a long paste, all arrives
     paste = ("true " + "x" * 64 + "\n") * 300 + "echo PASTED-$((2*3))\n"
     message("a", {"type": "sessions.input", "session": sid, "data": paste})

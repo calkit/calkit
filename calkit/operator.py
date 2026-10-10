@@ -53,6 +53,9 @@ RESTART_CHECK_SECONDS = 30
 # Each hub's Operator has its own config, service, lock, and log, named by
 # the hub's key, so Operators for several hubs can run side by side.
 _hub_url: str | None = None
+# Hub requests are pointed at the Operator's hub through CALKIT_HUB, but
+# what runs in workspaces gets the value it started with
+_inherited_hub = os.environ.get("CALKIT_HUB")
 
 
 class OperatorRevoked(Exception):
@@ -627,6 +630,18 @@ def get_shell() -> str:
         return "/bin/sh"
 
 
+def child_env() -> dict[str, str]:
+    """The environment for what runs in workspaces, without the Operator's
+    own hub, so commands use the project's, as in any terminal.
+    """
+    env = dict(os.environ)
+    if _inherited_hub is None:
+        env.pop("CALKIT_HUB", None)
+    else:
+        env["CALKIT_HUB"] = _inherited_hub
+    return env
+
+
 def _calkit(args: list[str], wdir: str) -> None:
     """Run Calkit in the Operator's interpreter, raising with its output if
     it fails.
@@ -634,6 +649,7 @@ def _calkit(args: list[str], wdir: str) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "calkit", *args],
         cwd=wdir,
+        env=child_env(),
         capture_output=True,
         text=True,
     )
@@ -669,6 +685,7 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
         # last checks is reported instead
         [sys.executable, "-m", "calkit", "status", "--json", "--no-env-check"],
         cwd=wdir,
+        env=child_env(),
         capture_output=True,
         text=True,
     )
@@ -919,6 +936,7 @@ def run_pipeline(wdir: str, stages: list[str] | None = None) -> dict:
     result = subprocess.run(
         [sys.executable, "-m", "calkit", "run", *(stages or [])],
         cwd=wdir,
+        env=child_env(),
         capture_output=True,
         text=True,
     )
@@ -1081,7 +1099,7 @@ class Operator:
         # make system calls, not run code that could wait on a lock held
         # by a thread that no longer exists in it
         shell = shutil.which(get_shell()) or "/bin/sh"
-        env = dict(os.environ, TERM="xterm-256color")
+        env = dict(child_env(), TERM="xterm-256color")
         argv = [os.fsencode(shell), b"-l"]
         envb = {os.fsencode(k): os.fsencode(v) for k, v in env.items()}
         cwd = os.fsencode(workspace)

@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -915,3 +916,90 @@ async def test_relay_connection(monkeypatch):
     # next regular check-in
     assert sent == [{"type": "auth", "token": "tok"}]
     assert check_ins == [True]
+
+
+def test_restarts(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    monkeypatch.setattr(operator, "RESTART_CHECK_SECONDS", 0.01)
+    monkeypatch.setattr(operator.calkit, "__version__", "1.0.0")
+    installed = ["1.0.0"]
+    monkeypatch.setattr(
+        operator, "get_installed_version", lambda: installed[0]
+    )
+    op = operator.Operator({"name": "box", "workspaces": []})
+    assert not op.restart_pending()
+    # A new version installed under it, e.g., by an automatic upgrade
+    installed[0] = "1.1.0"
+    assert op.restart_pending()
+    installed[0] = "1.0.0"
+    # A request from 'calkit upgrade' is read once
+    pids = {"calkit.io": 123, "other.hub": None}
+    for key in pids:
+        os.makedirs(operator.operator_dir(key))
+    monkeypatch.setattr(
+        operator, "get_running_pid", lambda key=None: pids[key]
+    )
+    assert operator.request_restarts() == [("calkit.io", 123)]
+    assert not os.path.exists(operator._restart_request_path("other.hub"))
+    assert op.restart_pending()
+    assert not os.path.exists(operator._restart_request_path())
+    assert op.restart_requested and not op.stop_requested
+    # As is one from the hub, which comes with a check-in
+    op.restart_requested = False
+    assert not op.restart_pending()
+    reported: list[bool] = []
+
+    def check_in(cfg, workspaces, mode, connected, pending) -> dict:
+        reported.append(pending)
+        return {"restart": True}
+
+    monkeypatch.setattr(operator, "discover_workspaces", lambda cfg: [])
+    monkeypatch.setattr(operator, "check_in", check_in)
+    asyncio.run(op.check_in())
+    assert op.restart_requested
+    asyncio.run(op.check_in())
+    assert reported == [False, True]
+
+    # It waits until no session or run is using it
+    async def wait_for_idle() -> None:
+        op.sessions["s"] = cast(Any, SimpleNamespace(workspace="/ws"))
+        op.workspace_actions["/ws"] = "workspace.run"
+        waiting = asyncio.create_task(op.wait_to_restart())
+        await asyncio.sleep(0.05)
+        assert not waiting.done()
+        op.sessions.clear()
+        await asyncio.sleep(0.05)
+        assert not waiting.done()
+        op.workspace_actions.clear()
+        await asyncio.wait_for(waiting, 1)
+        assert op.restarting
+        # Asked to stop, e.g., so an upgrade can replace its files on Windows,
+        # it doesn't start again
+        stopping = operator.Operator({"name": "box", "workspaces": []})
+        operator.request_restarts(stop=True)
+        await asyncio.wait_for(stopping.wait_to_restart(), 1)
+        assert stopping.stop_requested and not stopping.restarting
+
+    asyncio.run(wait_for_idle())
+    # Restarting replaces the process with one running the same way
+    execs = []
+    monkeypatch.setattr(operator.os, "execv", lambda *a: execs.append(a))
+    monkeypatch.setattr(operator.sys, "platform", "linux")
+    operator.restart_process("service")
+    cmd = operator._service_command("service")
+    assert execs == [(cmd[0], cmd)]
+    # Run restarts once its Operator stops for one, and drops requests left
+    # from before it started
+    restarts: list[str] = []
+    monkeypatch.setattr(operator, "restart_process", restarts.append)
+
+    async def stop_to_restart(self) -> None:
+        self.restarting = True
+
+    monkeypatch.setattr(operator.Operator, "run", stop_to_restart)
+    # Left alone, so SIGTERM still ends the tests that follow
+    monkeypatch.setattr("signal.signal", lambda *args: None)
+    operator.request_restarts()
+    assert operator.run({"name": "box", "workspaces": []}, mode="service")
+    assert restarts == ["service"]
+    assert not os.path.exists(operator._restart_request_path())

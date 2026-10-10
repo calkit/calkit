@@ -46,6 +46,8 @@ MAX_INPUT_BUFFER_BYTES = 1024 * 1024
 # In cron mode, the Operator exits after this long with no sessions or
 # browsers, and cron starts it again when the hub asks
 CRON_IDLE_EXIT_SECONDS = 900
+# How often to check whether Calkit was upgraded or a restart was asked for
+RESTART_CHECK_SECONDS = 30
 
 # The hub the Operator commands in this process act on, by its web URL.
 # Each hub's Operator has its own config, service, lock, and log, named by
@@ -105,9 +107,12 @@ def hub_url_from_api_url(api_url: str) -> str:
     return f"{parsed.scheme}://{netloc}"
 
 
-def operator_dir() -> str:
+def operator_dir(key: str | None = None) -> str:
     return os.path.join(
-        config.get_user_home(), ".calkit", "operators", hub_key()
+        config.get_user_home(),
+        ".calkit",
+        "operators",
+        hub_key() if key is None else key,
     )
 
 
@@ -524,7 +529,11 @@ def discover_workspaces(cfg: dict) -> list[dict]:
 
 
 def check_in(
-    cfg: dict, workspaces: list[dict], mode: str, connected: bool = True
+    cfg: dict,
+    workspaces: list[dict],
+    mode: str,
+    connected: bool = True,
+    restart_pending: bool = False,
 ) -> dict:
     from requests.exceptions import HTTPError
 
@@ -539,6 +548,7 @@ def check_in(
                 workspaces=workspaces,
                 mode=mode,
                 connected=connected,
+                restart_pending=restart_pending,
             ),
             headers={"Authorization": f"Bearer {cfg['token']}"},
             auth=False,
@@ -1020,6 +1030,10 @@ class Operator:
         # Workspaces this Operator holds the lock for, against other hubs'
         self.claimed: set[str] = set()
         self.connected_check_in: asyncio.Task | None = None
+        # Asked for by the hub or 'calkit upgrade', and done once idle
+        self.restart_requested = False
+        self.stop_requested = False
+        self.restarting = False
 
     async def send(self, ch: str, msg: dict) -> None:
         ws = self.ws
@@ -1394,10 +1408,49 @@ class Operator:
         # Whether browsers can reach it now, so the hub doesn't show it
         # online while it's reconnecting
         resp = await asyncio.to_thread(
-            check_in, self.cfg, self.workspaces, self.mode, self.ws is not None
+            check_in,
+            self.cfg,
+            self.workspaces,
+            self.mode,
+            self.ws is not None,
+            self.restart_pending(),
         )
         self.check_in_interval = resp.get("check_in_interval", 60)
+        if resp.get("restart"):
+            self.restart_requested = True
         return resp
+
+    def restart_pending(self) -> bool:
+        """Whether this Operator should restart or stop once idle, because
+        it was asked to or Calkit was upgraded under it.
+        """
+        try:
+            with open(_restart_request_path()) as f:
+                request = f.read().strip()
+            os.remove(_restart_request_path())
+        except OSError:
+            request = None
+        if request == "stop":
+            self.stop_requested = True
+        elif request is not None:
+            self.restart_requested = True
+        installed = get_installed_version()
+        upgraded = installed is not None and installed != calkit.__version__
+        return self.restart_requested or self.stop_requested or upgraded
+
+    async def wait_to_restart(self) -> None:
+        """Return once a restart is pending and nothing is using this
+        Operator, so no session or run is cut off.
+        """
+        while True:
+            await asyncio.sleep(RESTART_CHECK_SECONDS)
+            if not self.restart_pending():
+                continue
+            if self.sessions or self.workspace_actions:
+                continue
+            self.restarting = not self.stop_requested
+            logger.info("Restarting" if self.restarting else "Stopping")
+            return
 
     async def check_in_quietly(self) -> None:
         try:
@@ -1466,6 +1519,7 @@ class Operator:
         idle: asyncio.Task | None = None
         if self.idle_exit_seconds is not None:
             idle = asyncio.create_task(self.wait_until_idle())
+        restart = asyncio.create_task(self.wait_to_restart())
         delay = 1.0
         try:
             while True:
@@ -1475,13 +1529,13 @@ class Operator:
                         checker = asyncio.create_task(self.keep_checking_in())
                     delay = 1.0
                     connection = asyncio.create_task(self.connect(resp))
-                    waiting = [connection, checker]
+                    waiting = [connection, checker, restart]
                     if idle is not None:
                         waiting.append(idle)
                     done, _ = await asyncio.wait(
                         waiting, return_when=asyncio.FIRST_COMPLETED
                     )
-                    if idle in done:
+                    if idle in done or restart in done:
                         connection.cancel()
                         return
                     if checker in done:
@@ -1496,17 +1550,19 @@ class Operator:
                     delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
                 await asyncio.sleep(delay)
         finally:
-            for task in [checker, idle]:
+            for task in [checker, idle, restart]:
                 if task is not None:
                     task.cancel()
             self.close_all()
-            # So the hub shows it offline now rather than minutes from now
-            try:
-                await asyncio.to_thread(
-                    check_in, self.cfg, self.workspaces, self.mode, False
-                )
-            except Exception:
-                pass
+            # So the hub shows it offline now rather than minutes from now,
+            # unless it's coming right back
+            if not self.restarting:
+                try:
+                    await asyncio.to_thread(
+                        check_in, self.cfg, self.workspaces, self.mode, False
+                    )
+                except Exception:
+                    pass
 
 
 def acquire_lock() -> Any:
@@ -1537,16 +1593,67 @@ def acquire_lock() -> Any:
     return f
 
 
-def _pid_path() -> str:
-    return os.path.join(operator_dir(), "operator.pid")
+def _pid_path(key: str | None = None) -> str:
+    return os.path.join(operator_dir(key), "operator.pid")
 
 
-def get_running_pid() -> int | None:
+def _restart_request_path(key: str | None = None) -> str:
+    return os.path.join(operator_dir(key), "restart")
+
+
+def request_restarts(stop: bool = False) -> list[tuple[str, int]]:
+    """Ask every Operator running on this machine to restart, or to stop,
+    once nothing is using it, returning their hub keys and process IDs.
+    """
+    root = os.path.join(config.get_user_home(), ".calkit", "operators")
+    running = []
+    for key in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        pid = get_running_pid(key)
+        if pid is not None:
+            request = "stop" if stop else "restart"
+            _write_private(_restart_request_path(key), request)
+            running.append((key, pid))
+    return running
+
+
+def get_installed_version() -> str | None:
+    """The Calkit version installed now, which an upgrade can change
+    under a running Operator.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("calkit-python")
+    except PackageNotFoundError:
+        return None
+
+
+def restart_process(mode: str) -> None:
+    """Replace this process with an Operator running the Calkit installed
+    now.
+
+    Exec keeps the process ID, so the service manager that started it still
+    tracks it; Windows has no exec, so a new process is started instead.
+    """
+    cmd = _service_command(mode)
+    if logger.isEnabledFor(logging.DEBUG):
+        cmd.append("--verbose")
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    if sys.platform == "win32":
+        from calkit.upgrade import _popen_detached
+
+        _popen_detached(cmd, log_fpath=get_log_path())
+        return
+    os.execv(cmd[0], cmd)
+
+
+def get_running_pid(key: str | None = None) -> int | None:
     """The running Operator's process ID, if one is running."""
     import psutil
 
     try:
-        with open(_pid_path()) as f:
+        with open(_pid_path(key)) as f:
             pid = int(f.read().strip())
     except (OSError, ValueError):
         return None
@@ -1576,6 +1683,12 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, interrupt)
+    # A request left from before this one started is already answered
+    try:
+        os.remove(_restart_request_path())
+    except OSError:
+        pass
+    operator = None
     try:
         if mode == "cron":
             workspaces = discover_workspaces(cfg)
@@ -1590,6 +1703,8 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
         asyncio.run(operator.run())
     finally:
         lock.close()
+    if operator is not None and operator.restarting:
+        restart_process(mode)
     return True
 
 

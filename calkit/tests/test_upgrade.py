@@ -224,3 +224,49 @@ def test_get_dev_upgrade_cmds(tmp_path, monkeypatch):
     monkeypatch.setattr(upgrade, "get_editable_path", lambda: None)
     with pytest.raises(ValueError, match="not an editable"):
         upgrade.get_dev_upgrade_cmds()
+
+
+def test_upgrade_with_operators(tmp_path, monkeypatch, capsys):
+    from calkit import operator
+
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    requests = []
+    running = [("calkit.io", 123), ("other.hub", 456)]
+
+    def request_restarts(stop=False):
+        requests.append(stop)
+        return running
+
+    monkeypatch.setattr(operator, "request_restarts", request_restarts)
+    # Elsewhere, running Operators restart once it's done, which also
+    # catches a dev install updated without a new version
+    monkeypatch.setattr(sys, "platform", "linux")
+    marker = tmp_path / "upgraded"
+    upgrade.run_upgrade_cmds([["touch", str(marker)]])
+    assert marker.exists()
+    assert requests == [False]
+    assert "Operators will restart" in capsys.readouterr().out
+    # On Windows they stop so their files can be replaced, the upgrade
+    # waits for them, and those installed as a service start again either
+    # way
+    monkeypatch.setattr(sys, "platform", "win32")
+    startup = tmp_path / "calkit-operator-calkit.io.vbs"
+    startup.write_text("")
+    monkeypatch.setattr(
+        operator,
+        "_windows_startup_path",
+        lambda key: str(startup if key == "calkit.io" else tmp_path / "none"),
+    )
+    started = []
+    monkeypatch.setattr(
+        upgrade, "_popen_detached", lambda cmd, **kw: started.append(cmd)
+    )
+    requests.clear()
+    assert upgrade.run_after_exit([["up"]], [1]) == ["calkit.io", "other.hub"]
+    assert requests == [True]
+    script = started[0][-1]
+    for pid in [1, 123, 456]:
+        assert f"Wait-Process -Id {pid} " in script
+    assert script.index("& 'up'") < script.index(f"& wscript '{startup}'")
+    assert script.count("wscript") == 1
+    assert script.endswith("exit $failed")

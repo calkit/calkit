@@ -42,14 +42,18 @@ rejects its token and the Operator shuts down.
   `cron`), whether it's `connected` to the relay, and what workspaces it
   has, each with its Git state and pipeline run state: `running`,
   `running_stages`, `running_since`, and `last_run` (`status`, `started`,
-  `ended`, and `failed_stages`).
-  It returns the relay URL, an Operator relay token, and `connect`, which
-  tells an Operator in cron mode whether to connect.
+  `ended`, and `failed_stages`), and whether a restart is pending
+  (`restart_pending`).
+  It returns the relay URL, an Operator relay token, `connect`, which
+  tells an Operator in cron mode whether to connect, and `restart`, which
+  passes on a restart its owner asked for.
   Operators check in every 60 seconds while connected.
 - `POST /operators/{operator_id}/wake`, with the user's token, asks an
   Operator in cron mode to connect at its next check-in.
   The request lapses after 15 minutes and is cleared once the Operator
   checks in connected.
+- `POST /operators/{operator_id}/restart`, with the user's token, asks an
+  Operator to restart, which it hears at its next check-in.
 - `POST /operators/{operator_id}/relay-token`, with the user's token,
   returns the relay URL and a browser relay token for that Operator.
   It requires an access token from a person signing in to the web app,
@@ -84,6 +88,27 @@ It checks in with `connected` false and exits unless `connect` is true.
 If it is, it runs as usual until it has had no sessions and no browsers
 for 15 minutes.
 A lock file keeps one Operator running per machine, user, and hub.
+
+## Restarts
+
+An Operator restarts once nothing is using it, i.e., it has no sessions
+and no workspace actions, e.g., runs, in progress, when:
+
+- The Calkit version installed differs from the one it's running, e.g.,
+  after an automatic upgrade.
+- `calkit upgrade` or `calkit dev upgrade` asks it to, by writing
+  `restart` in its directory, which covers a dev install updated without a
+  new version.
+- Its owner asks on the hub.
+
+It checks every 30 seconds and reports `restart_pending` until it has
+restarted.
+On Linux and macOS it execs itself, so the process ID the service manager
+tracks stays the same; on Windows it starts a new process.
+On Windows, a running Operator holds files an upgrade replaces, so an
+upgrade instead asks it to stop (writing `stop`), waits for it to exit, and
+afterwards starts those installed as a service again, whether or not the
+upgrade worked.
 
 ## Relay
 

@@ -313,34 +313,45 @@ def get_log_fpath() -> str:
     return os.path.join(dpath, "upgrade.log")
 
 
-def run_after_exit(cmds: list[list[str]], pids: list[int]) -> None:
+def run_after_exit(cmds: list[list[str]], pids: list[int]) -> list[str]:
     """Run commands in the background once the given processes exit.
 
     On Windows, files of a running program can't be replaced, so an
     upgrade has to wait for every Calkit process involved to exit, and
-    the waiting can't be done by Calkit's own Python.
+    the waiting can't be done by Calkit's own Python. Running Operators
+    hold them too, so they stop once idle and those installed as a service
+    start again afterwards; the hub keys of those stopped are returned.
     """
     log_fpath = get_log_fpath()
     if sys.platform == "win32":
+        from calkit import operator
 
         def quote(s: str) -> str:
             return "'" + s.replace("'", "''") + "'"
 
+        stopped = operator.request_restarts(stop=True)
+        pids = pids + [pid for _, pid in stopped]
         script = "".join(
             f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue; "
             for pid in pids
         )
+        script += "$failed = 0; "
         for cmd in cmds:
             script += (
-                "& "
+                "if (-not $failed) { & "
                 + " ".join(quote(c) for c in cmd)
-                + f" *>> {quote(log_fpath)}; "
-                + "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; "
+                + f" *>> {quote(log_fpath)}; $failed = $LASTEXITCODE }}; "
             )
+        # Whether or not the upgrade worked
+        for key, _ in stopped:
+            fpath = operator._windows_startup_path(key)
+            if os.path.isfile(fpath):
+                script += f"& wscript {quote(fpath)}; "
+        script += "exit $failed"
         _popen_detached(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
         )
-        return
+        return [key for key, _ in stopped]
     import psutil
 
     procs = []
@@ -354,6 +365,7 @@ def run_after_exit(cmds: list[list[str]], pids: list[int]) -> None:
         for cmd in cmds:
             if subprocess.run(cmd, stdout=log, stderr=log).returncode != 0:
                 break
+    return []
 
 
 def run_upgrade_cmds(cmds: list[list[str]]) -> None:
@@ -364,18 +376,31 @@ def run_upgrade_cmds(cmds: list[list[str]]) -> None:
 
     import typer
 
+    from calkit import operator
+
     if sys.platform == "win32":
-        run_after_exit(cmds, get_calkit_pids())
+        stopped = run_after_exit(cmds, get_calkit_pids())
         typer.echo(
             "Calkit will finish upgrading in the background once this "
             f"command exits; see {get_log_fpath()} for details"
         )
+        if stopped:
+            typer.echo(
+                "Running Operators will stop for it once nothing is using "
+                "them, and those installed as a service will start again"
+            )
         return
     for cmd in cmds:
         typer.echo(f"Running: {shlex.join(cmd)}")
         if subprocess.run(cmd).returncode != 0:
             raise RuntimeError("Upgrade failed")
     typer.echo("Success!")
+    # They notice a new version themselves, but not a dev install's update
+    # of the same one
+    if operator.request_restarts():
+        typer.echo(
+            "Running Operators will restart with it once nothing is using them"
+        )
 
 
 def get_latest_version() -> str:

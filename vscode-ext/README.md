@@ -76,7 +76,7 @@ project in a plain folder.
 
 ## LaTeX PDF review
 
-- Easily jump between source .tex and PDF in the LaTeX Workshop PDF viewer.
+- Easily jump between source .tex and PDF in the Calkit PDF Review viewer.
 - Comment on sections of text from the PDF viewer and have them show up in
   the .tex source following the Calkit LaTeX comment schema,
   which also shows up on the Calkit Hub and can sync to GitHub issues.

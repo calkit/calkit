@@ -1098,8 +1098,11 @@ def restore_output_ignores(wdir: str | None = None) -> list[str]:
     return written
 
 
-def get_storage_problems(
-    wdir: str | None = None, large_mb: float | None = 50
+def get_storage_problems(  # type: ignore[no-any-unimported]
+    wdir: str | None = None,
+    large_mb: float | None = 50,
+    dvc_repo: dvc.repo.Repo | None = None,
+    ck_info: dict | None = None,
 ) -> list[dict]:
     """Find paths whose tracking disagrees with where they're declared to be
     stored.
@@ -1115,6 +1118,10 @@ def get_storage_problems(
     - ``zipped``: stored zipped with DVC, but tracked by Git too.
     - ``large``: tracked by Git, and larger than ``large_mb``, which is only
       advice; None skips this check.
+
+    Building DVC's index is most of the cost, and loading calkit.yaml much
+    of the rest, so a ``dvc_repo`` that has built it, and ``ck_info``, can
+    be passed in.
     """
     import bisect
 
@@ -1149,7 +1156,9 @@ def get_storage_problems(
 
     problems: list[dict] = []
     # Cached by DVC, so not to be tracked by Git
-    dvc_repo = get_dvc_repo(wdir)
+    repo_given = dvc_repo is not None
+    if dvc_repo is None:
+        dvc_repo = get_dvc_repo(wdir)
     try:
         for out in dvc_repo.index.outs:
             path = Path(out.fs_path).resolve()
@@ -1179,9 +1188,11 @@ def get_storage_problems(
                 problem["stage"] = out.stage.addressing
             problems.append(problem)
     finally:
-        dvc_repo.close()
+        if not repo_given:
+            dvc_repo.close()
     # Declared to be stored in Git, so not to be ignored by it
-    ck_info = calkit.load_calkit_info(wdir=wdir)
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
     try:
         stages = Pipeline.model_validate(ck_info["pipeline"]).stages
     except Exception:

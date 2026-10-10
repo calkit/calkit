@@ -154,6 +154,9 @@ class PipelineStatus(BaseModel):
     # DVC's data status, when asked for, computed alongside the stage status
     # so it reuses that index and those hashes; not part of the output
     dvc_data_status: dict | None = Field(default=None, exclude=True)
+    # Likewise for paths tracked where they shouldn't be, from
+    # calkit.dvc.get_storage_problems
+    storage_problems: list[dict] | None = Field(default=None, exclude=True)
 
     @field_validator("stale_stages", mode="before")
     @classmethod
@@ -857,6 +860,7 @@ def get_status(
     compile_to_dvc: bool = True,
     force_env_check: bool = False,
     with_data_status: bool = False,
+    with_storage_problems: bool = False,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
@@ -954,6 +958,7 @@ def get_status(
             # Held across all of these so DVC builds its index and hashes
             # each path once, rather than dropping them between calls
             dvc_data_status = None
+            storage_problems = None
             with (
                 dvc.repo.lock_repo(dvc_repo),
                 calkit.dvc.memoized_hashes(),
@@ -966,6 +971,13 @@ def get_status(
                 if with_data_status:
                     try:
                         dvc_data_status = dict(dvc_repo.data_status())
+                    except Exception:
+                        pass
+                if with_storage_problems:
+                    try:
+                        storage_problems = calkit.dvc.get_storage_problems(
+                            dvc_repo=dvc_repo, ck_info=ck_info
+                        )
                     except Exception:
                         pass
             raw_status = calkit.dvc.status_as_posix(raw_status)
@@ -1324,6 +1336,7 @@ def get_status(
             errors=result["errors"],
             ignored_files_in_inputs=ignored_files_in_inputs,
             dvc_data_status=dvc_data_status,
+            storage_problems=storage_problems,
         )
     finally:
         if wdir is not None:

@@ -589,6 +589,7 @@ def get_status(
             clean_notebooks=True,
             compile_to_dvc=True,
             with_data_status="dvc" in categories,
+            with_storage_problems="dvc" in categories,
         )
         if pipeline_status.failed_environment_checks:
             warn(
@@ -629,6 +630,17 @@ def get_status(
             frozen_stages=frozen_stages,
             check_history=False,
         )
+    # Paths tracked where they shouldn't be, found with the pipeline's status,
+    # which builds the DVC index this needs anyway, unless it stopped short
+    storage_problems = None
+    if "dvc" in categories and running_status is None:
+        if pipeline_status is not None:
+            storage_problems = pipeline_status.storage_problems
+        if storage_problems is None:
+            try:
+                storage_problems = calkit.dvc.get_storage_problems()
+            except Exception:
+                pass
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:
@@ -694,6 +706,7 @@ def get_status(
                 )
             except Exception as e:
                 status_dict["dvc"] = {"error": f"{e.__class__.__name__}: {e}"}
+            status_dict["storage"] = storage_problems
         if "pipeline" in categories or "dvc" in categories:
             if running_status is not None:
                 status_dict["pipeline"] = running_status
@@ -760,6 +773,10 @@ def get_status(
             raw.pop("git", None)
             raw = calkit.dvc.data_status_as_posix(raw)
             typer.echo(_format_dvc_data_status(raw, zip_path_map))
+            for problem in storage_problems or []:
+                warn(problem["message"])
+            if storage_problems:
+                typer.echo("Run 'calkit check storage' for detail.\n")
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
         if running_status is not None:

@@ -2026,6 +2026,95 @@ def check_pipeline(
             )
 
 
+@check_app.command(name="storage")
+def check_storage(
+    fix: Annotated[
+        bool,
+        typer.Option(
+            "--fix", help="Move each path to where it's declared to be stored."
+        ),
+    ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output the problems as JSON.")
+    ] = False,
+) -> None:
+    """Check that paths are tracked where they're declared to be stored.
+
+    That is, nothing is tracked by both Git and DVC, no pipeline output
+    stored in Git is ignored by it, and nothing in Git is too large for it.
+    With --fix, the pipeline's declarations, or a file's .dvc file, decide
+    where each path belongs, and the changes are staged.
+    """
+    import calkit.dvc
+    import calkit.git
+    import calkit.pipeline
+
+    if fix and as_json:
+        raise_error("--json can't be used with --fix")
+    problems = calkit.dvc.get_storage_problems()
+    if as_json:
+        typer.echo(json.dumps(problems, indent=2))
+    if not fix:
+        if not as_json:
+            for problem in problems:
+                warn(problem["message"])
+        if any(p["kind"] != "large" for p in problems):
+            if not as_json:
+                typer.echo("Run 'calkit check storage --fix' to fix these")
+            raise typer.Exit(1)
+        if not problems and not as_json:
+            calkit.echo("✅ Every path is stored where it's declared to be")
+        return
+    repo = calkit.git.get_repo()
+    gitignores = calkit.git.get_dirty_gitignores(repo)
+    fixed = []
+    unfixed = []
+    # Pipeline outputs are recorded in DVC, which records their stages'
+    # inputs too, so only for stages that are up to date
+    to_record = []
+    for problem in problems:
+        path = os.path.abspath(problem["path"])
+        if problem["store_in"] == "dvc":
+            repo.git.rm("-r", "-q", "--cached", "--", path)
+            calkit.git.ensure_path_is_ignored(repo, path)
+            if problem["kind"] == "both":
+                to_record.append(problem)
+        elif problem["store_in"] == "git":
+            calkit.git.ensure_path_is_not_ignored(repo, path)
+            repo.git.add("--", path)
+        else:
+            unfixed.append(problem)
+            continue
+        fixed.append(problem)
+        typer.echo(f"Fixed: {problem['message']}")
+    # None when it can't be told which are stale, so none are recorded
+    stale: set[str] | None = set()
+    if any(p["stage"] for p in to_record):
+        status = calkit.pipeline.get_status(
+            check_environments=False, clean_notebooks=False
+        )
+        if not status.errors:
+            stale = {n.split("@")[0] for n in status.stale_stage_names}
+        else:
+            stale = None
+    for problem in to_record:
+        stage = problem["stage"]
+        if stage and (stale is None or stage.split("@")[0] in stale):
+            typer.echo(f"Run '{stage}' to record {problem['path']} in DVC")
+            continue
+        target = problem["dvc_file"] or stage
+        if calkit.dvc.run_dvc_command(["commit", "-f", "-q", target]) != 0:
+            warn(f"Couldn't record {problem['path']} in DVC")
+    for message in calkit.git.stage_gitignores(repo, gitignores):
+        warn(message)
+    for problem in unfixed:
+        warn(problem["message"])
+    if fixed:
+        typer.echo("Commit the staged changes")
+    if any(p["kind"] != "large" for p in unfixed):
+        raise typer.Exit(1)
+
+
 @check_app.command(name="call")
 def check_call(
     cmd: Annotated[str, typer.Argument(help="Command to check.")],

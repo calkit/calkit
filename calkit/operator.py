@@ -2000,8 +2000,15 @@ def _stop_running_operator() -> None:
     import psutil
 
     pid = get_running_pid()
-    if pid is not None:
-        psutil.Process(pid).terminate()
+    if pid is None:
+        return
+    proc = psutil.Process(pid)
+    proc.terminate()
+    # So one started right after doesn't find the lock still held
+    try:
+        proc.wait(timeout=30)
+    except psutil.TimeoutExpired:
+        proc.kill()
 
 
 def uninstall_service(key: str | None = None) -> None:
@@ -2109,6 +2116,37 @@ def get_service_status() -> str | None:
             )
             return f"{kind} ({state})"
     return None
+
+
+def restart_service() -> None:
+    """Restart the Operator's service, starting it if it isn't running."""
+    system = platform.system()
+    if system == "Linux" and os.path.isfile(_systemd_unit_path()):
+        subprocess.run(
+            ["systemctl", "--user", "restart", systemd_unit()], check=True
+        )
+        return
+    if system == "Darwin":
+        for at_boot in [False, True]:
+            fpath = _launchd_plist_path(at_boot)
+            if not os.path.isfile(fpath):
+                continue
+            domain = "system" if at_boot else f"gui/{os.getuid()}"
+            sudo = ["sudo"] if at_boot else []
+            target = f"{domain}/{service_label()}"
+            loaded = subprocess.run(
+                [*sudo, "launchctl", "print", target], capture_output=True
+            )
+            # Booting it out and in again races, since bootout returns
+            # before the Operator has stopped, so it's restarted in place
+            if loaded.returncode == 0:
+                cmd = [*sudo, "launchctl", "kickstart", "-k", target]
+            else:
+                cmd = [*sudo, "launchctl", "bootstrap", domain, fpath]
+            subprocess.run(cmd, check=True)
+            return
+    set_service_running(False)
+    set_service_running(True)
 
 
 def set_service_running(running: bool) -> None:

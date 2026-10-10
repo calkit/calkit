@@ -264,17 +264,15 @@ def stop(hub: HubOption = None) -> None:
 @operator_app.command(name="restart")
 def restart(hub: HubOption = None) -> None:
     """Restart the Operator's service, e.g., after updating Calkit."""
+    import subprocess
+
     from calkit import operator
 
     _select_hub(hub)
     _require_config()
     try:
-        operator.set_service_running(False)
-    except Exception:
-        pass
-    try:
-        operator.set_service_running(True)
-    except RuntimeError as e:
+        operator.restart_service()
+    except (RuntimeError, subprocess.CalledProcessError) as e:
         raise_error(str(e))
     typer.echo("Restarted the Operator")
 

@@ -367,6 +367,42 @@ def test_service_files(tmp_path, monkeypatch):
     assert f"ExecStart={shlex.join(command)}" in unit
     assert "Restart=on-failure" in unit
     assert "WantedBy=default.target" in unit
+    # Restarting a loaded launchd agent happens in place, since booting it
+    # out returns before it has stopped, so booting it in again fails;
+    # one that isn't loaded is started
+    calls: list[list[str]] = []
+    loaded = [True]
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        code = 0 if cmd[:2] != ["launchctl", "print"] or loaded[0] else 113
+        return subprocess.CompletedProcess(cmd, code)
+
+    monkeypatch.setattr(operator.subprocess, "run", run)
+    monkeypatch.setattr(operator.os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(operator.platform, "system", lambda: "Darwin")
+    agent_path = operator._launchd_plist_path(at_boot=False)
+    os.makedirs(os.path.dirname(agent_path))
+    Path(agent_path).write_bytes(operator._launchd_plist(at_boot=False))
+    target = f"gui/501/{operator.service_label()}"
+    for is_loaded, last in [
+        (True, ["launchctl", "kickstart", "-k", target]),
+        (False, ["launchctl", "bootstrap", "gui/501", agent_path]),
+    ]:
+        loaded[0] = is_loaded
+        calls.clear()
+        operator.restart_service()
+        assert calls == [["launchctl", "print", target], last]
+    # systemd restarts in one step too
+    monkeypatch.setattr(operator.platform, "system", lambda: "Linux")
+    unit_path = operator._systemd_unit_path()
+    os.makedirs(os.path.dirname(unit_path))
+    Path(unit_path).write_text(unit)
+    calls.clear()
+    operator.restart_service()
+    assert calls == [
+        ["systemctl", "--user", "restart", operator.systemd_unit()]
+    ]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Cron and flock are POSIX")

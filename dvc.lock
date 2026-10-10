@@ -10,8 +10,8 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 187ece7ca15063da14b750bfabc63d8c
-      size: 128246
+      md5: 60abe492ce85986d5be6e0c9b5f06b27
+      size: 128426
     - path: calkit/docx.py
       hash: md5
       md5: 7862d8079e091ea3c6b36208478f377c
@@ -55,20 +55,20 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: e7773d9459990d775aed9a995ea67211
-      size: 173426
+      md5: aac6dcb0a4fe5ea44486d1830a2329b5
+      size: 173958
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: e7773d9459990d775aed9a995ea67211
-      size: 173426
+      md5: aac6dcb0a4fe5ea44486d1830a2329b5
+      size: 173958
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 949f1d3bb602a36b5eab9619c632871f
-      size: 36779
+      md5: 868cfbd8b931cb177db4c80e90c0ca3d
+      size: 36152
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: aeb566af2fde8380706b6c593b93c59f
-      size: 124116
+      md5: 51745bc22f2e95a9c41e83eb58654538
+      size: 121661
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/plot-latex-word-round-trip.py
@@ -79,16 +79,16 @@ stages:
       size: 5
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: e7773d9459990d775aed9a995ea67211
-      size: 173426
+      md5: aac6dcb0a4fe5ea44486d1830a2329b5
+      size: 173958
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: e7773d9459990d775aed9a995ea67211
-      size: 173426
+      md5: aac6dcb0a4fe5ea44486d1830a2329b5
+      size: 173958
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: aeb566af2fde8380706b6c593b93c59f
-      size: 124116
+      md5: 51745bc22f2e95a9c41e83eb58654538
+      size: 121661
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: d9d7b45c12044f5ae8f54491c383ecd4
@@ -100,8 +100,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: 82a47554fac9501fbd9067606e5d8c1c
-      size: 276591
+      md5: e5bd6ed3398794eaceced8ad697e7cf3
+      size: 207280
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -140,8 +140,8 @@ stages:
       size: 36026
     - path: scripts/research-flow.py
       hash: md5
-      md5: 7116a10dcfefc35ad2336d1a87d8ead1
-      size: 13739
+      md5: c626580f6f61f1f7f6b05abb88ad5f5f
+      size: 14225
     - path: uv.lock
       hash: md5
       md5: 49df39469edb33abfb86da752176e23c
@@ -149,8 +149,8 @@ stages:
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: 6ce8a086d047d4c8eb2194fee71a03d3
-      size: 79852
+      md5: ad60cc07e5c53f0803252e215ff43141
+      size: 75297
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -160,8 +160,8 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: 6ce8a086d047d4c8eb2194fee71a03d3
-      size: 79852
+      md5: ad60cc07e5c53f0803252e215ff43141
+      size: 75297
     - path: scripts/plot-research-flow.py
       hash: md5
       md5: 19f5cc7b755ecf4c3c11b1bf734ee1e6
@@ -173,16 +173,16 @@ stages:
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
-      md5: 5f7d3774df4a60aeaa15b588b39252d2
-      size: 205892
+      md5: eae4437e9bff4b1d4e30c240ac129253
+      size: 181088
     - path: docs/img/research-flow-waste.png
       hash: md5
-      md5: 050f2fb5039cd33e738023f2f95e8576
-      size: 127296
+      md5: a8d262629eb1e6aade04772421f057a6
+      size: 115898
     - path: docs/img/research-flow.png
       hash: md5
-      md5: 5cecfe136c05fb7db5ec3173ae0bae2c
-      size: 373775
+      md5: ecdd9b9085bd15268d23a349a2e8de2d
+      size: 335476
   one-pager-latex:
     cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
     deps:
@@ -314,10 +314,10 @@ stages:
       size: 1649
     - path: results/research-flow.json
       hash: md5
-      md5: 6ce8a086d047d4c8eb2194fee71a03d3
-      size: 79852
+      md5: ad60cc07e5c53f0803252e215ff43141
+      size: 75297
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: f9719237ae754463ea36aa2215166baf
-      size: 137550
+      md5: 62d4174727fbddf9dce2d54cb549ee47
+      size: 137554

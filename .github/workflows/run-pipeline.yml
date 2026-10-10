@@ -31,6 +31,11 @@ jobs:
           # The branch itself rather than the merge commit, so results can
           # be pushed back to it
           ref: ${{ github.head_ref || github.ref_name }}
+          # All of history and tags, since a built document is dated by the
+          # last commit to touch it and stamped with Calkit's version, and a
+          # shallow clone gets both wrong, so outputs wouldn't match a local
+          # build
+          fetch-depth: 0
       - name: Configure Git credentials
         run: |
           git config user.name 'github-actions[bot]'

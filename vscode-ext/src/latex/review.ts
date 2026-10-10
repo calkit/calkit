@@ -914,6 +914,10 @@ function findParagraph(text) {
 }
 async function placeParagraph(text) {
   const words = text.split(/\\s+/).filter(Boolean);
+  if (!words.length) return null;
+  // Runs of fewer words for a short paragraph, e.g., an equation
+  const sizes = [8, 5].filter((s) => s <= words.length);
+  if (!sizes.length) sizes.push(words.length);
   const pages = [];
   for (let n = 1; n <= pdfDoc.numPages; n++) pages.push(await pageText(n));
   const hitsOf = (needle) => {
@@ -931,7 +935,7 @@ async function placeParagraph(text) {
   };
   let start = null;
   let fallback = null;
-  for (const size of [8, 5]) {
+  for (const size of sizes) {
     for (let i = 0; i + size <= words.length && i < 20 && !start; i++) {
       const hits = hitsOf(words.slice(i, i + size).join(" "));
       if (hits.length === 1) start = hits[0];
@@ -941,7 +945,7 @@ async function placeParagraph(text) {
   start ??= fallback;
   if (!start) return null;
   let end = null;
-  for (const size of [8, 5]) {
+  for (const size of sizes) {
     for (let i = words.length - size; i >= 0 && i > words.length - size - 20 && !end; i--) {
       end = hitsOf(words.slice(i, i + size).join(" ")).find((h) => after(h, start)) ?? null;
     }

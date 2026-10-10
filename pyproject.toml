@@ -53,9 +53,10 @@ dependencies = [
   # Releases differ in where they wrap dvc.lock's long lines, so pin one to
   # keep the file from flipping between machines
   "ruamel.yaml>=0.19.1,<0.20",
-  # Lets DVC parse dvc.lock with libyaml, several times faster; there's no
-  # wheel for Windows on ARM, which would need a compiler
-  "ruamel.yaml.clib>=0.2.15; platform_python_implementation == 'CPython' and (sys_platform != 'win32' or platform_machine != 'ARM64')",
+  # Lets DVC parse dvc.lock with libyaml, several times faster; limited to
+  # where it has wheels, since elsewhere it would need a compiler to install,
+  # and without it DVC just falls back to pure Python
+  "ruamel.yaml.clib>=0.2.15; platform_python_implementation == 'CPython' and python_version < '3.15' and (sys_platform == 'darwin' or (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'win32' and platform_machine == 'AMD64'))",
   "rich",
   "typer==0.27.2",
   "uvicorn",

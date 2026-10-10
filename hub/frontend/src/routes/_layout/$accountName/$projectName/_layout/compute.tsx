@@ -24,7 +24,11 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Link as RouterLink, createFileRoute } from "@tanstack/react-router"
+import {
+  Link as RouterLink,
+  createFileRoute,
+  redirect,
+} from "@tanstack/react-router"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import "@xterm/xterm/css/xterm.css"
@@ -79,11 +83,49 @@ const computeSearchSchema = z.object({
   confirm_run: z.string().optional(),
 })
 
+// The open panes and workspace, kept for the browser tab so leaving for
+// another page and coming back, e.g., through the sidebar, restores them
+type ComputeState = { panes?: string[]; workspace?: string }
+
+const computeStateKey = (accountName: string, projectName: string) =>
+  `calkit-compute:${accountName}/${projectName}`
+
+function readComputeState(key: string): ComputeState {
+  try {
+    return JSON.parse(sessionStorage.getItem(key) ?? "{}")
+  } catch {
+    return {}
+  }
+}
+
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/compute",
 )({
   component: Compute,
   validateSearch: (search) => computeSearchSchema.parse(search),
+  beforeLoad: ({ cause, params, search }) => {
+    // Only on arriving, since closing the last pane leaves none on purpose
+    if (cause !== "enter") return
+    const stored = readComputeState(
+      computeStateKey(params.accountName, params.projectName),
+    )
+    const restored = {
+      panes: search.panes ?? stored.panes,
+      workspace: search.workspace ?? stored.workspace,
+    }
+    if (
+      restored.panes === search.panes &&
+      restored.workspace === search.workspace
+    ) {
+      return
+    }
+    throw redirect({
+      to: "/$accountName/$projectName/compute",
+      params,
+      search: { ...search, ...restored },
+      replace: true,
+    })
+  },
 })
 
 interface SessionInfo {
@@ -960,6 +1002,20 @@ function Compute() {
   const [, setVersion] = useState(0)
   const rerender = useCallback(() => setVersion((v) => v + 1), [])
   const [sessions, setSessions] = useState<Record<string, SessionInfo[]>>({})
+  useEffect(() => {
+    const state: ComputeState = {
+      panes: search.panes,
+      workspace: search.workspace,
+    }
+    try {
+      sessionStorage.setItem(
+        computeStateKey(accountName, projectName),
+        JSON.stringify(state),
+      )
+    } catch {
+      // Only a convenience
+    }
+  }, [accountName, projectName, search.panes, search.workspace])
   const panes: Pane[] = (search.panes ?? []).map((p) => {
     const [operatorId, session] = p.split(":")
     return { operatorId, session }

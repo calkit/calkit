@@ -2286,9 +2286,10 @@ calkit describe|desc system [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description            |
-| -------- | ------- | -------- | ------- | ---------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON. |
+| Option   | Type    | Required | Default | Description                                                                        |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON.                                                             |
+| `--app`  | str     | no       |         | An app whose version to include, beyond the ones always reported. Repeat for more. |
 
 <a id="subcommand-describe-desc-environment-env"></a>
 
@@ -2857,7 +2858,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs.
+Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
 
 Usage:
 
@@ -2867,10 +2868,11 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option                   | Type | Required | Default | Description                                                               |
-| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `--name`, `-n`           | str  | yes      |         | Name of the environment to update                                         |
-| `--add`, `--add-package` | str  | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                              |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
+| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -2878,7 +2880,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs.
+Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
 
 Usage:
 
@@ -2888,10 +2890,11 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option                   | Type | Required | Default | Description                                                               |
-| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `--name`, `-n`           | str  | yes      |         | Name of the environment to update                                         |
-| `--add`, `--add-package` | str  | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                              |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
+| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
 
 <a id="subcommand-update-stage"></a>
 
@@ -3065,6 +3068,8 @@ Options:
 
 Check that an environment is up-to-date.
 
+An environment is also rebuilt when one of its 'inputs' changes.
+
 Usage:
 
 ```text
@@ -3073,10 +3078,11 @@ calkit check environment [OPTIONS]
 
 Options:
 
-| Option         | Type    | Required | Default | Description                       |
-| -------------- | ------- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | str     | yes      |         | Name of the environment to check. |
-| `--verbose`    | boolean | no       | False   | Print verbose output.             |
+| Option          | Type    | Required | Default | Description                                                                                                |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`  | str     | yes      |         | Name of the environment to check.                                                                          |
+| `--verbose`     | boolean | no       | False   | Print verbose output.                                                                                      |
+| `--force`, `-f` | boolean | no       | False   | Rebuild the environment from scratch, e.g., after something it was built from changed outside the project. |
 
 <a id="subcommand-check-julia-env"></a>
 
@@ -3199,6 +3205,7 @@ Options:
 | `--registry`       | str     | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                           |
 | `--lock-arch`      | str     | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                       |
 | `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                         |
+| `--rebuild`        | boolean | no       | False   | Build the image from scratch, pulling its base image, rather than reusing a cached or locked one.                                                                 |
 
 <a id="subcommand-check-conda-env"></a>
 
@@ -3269,10 +3276,11 @@ calkit check matlab-env [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default | Description                      |
-| ---------------- | ---- | -------- | ------- | -------------------------------- |
-| `--name`, `-n`   | str  | yes      |         | Environment name in calkit.yaml. |
-| `--output`, `-o` | str  | yes      |         |                                  |
+| Option           | Type    | Required | Default | Description                      |
+| ---------------- | ------- | -------- | ------- | -------------------------------- |
+| `--name`, `-n`   | str     | yes      |         | Environment name in calkit.yaml. |
+| `--output`, `-o` | str     | yes      |         |                                  |
+| `--rebuild`      | boolean | no       | False   | Rebuild the image from scratch.  |
 
 <a id="subcommand-check-reqs-requirements"></a>
 
@@ -3904,6 +3912,7 @@ Options:
 | `--out`, `-o`           | str                            | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
 | `--option`, `-s`        | str                            | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
 | `--setup`               | str                            | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
+| `--setup-file`          | str                            | no       |         | Path to a JSON list of setup commands, used instead of --setup, since a path survives cmd.exe and a POSIX shell alike, and quoted commands don't.                                                                                                                                       |
 | `--log-path`            | str                            | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
 | `--command`             | boolean                        | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
 | `--env-default-options` | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |

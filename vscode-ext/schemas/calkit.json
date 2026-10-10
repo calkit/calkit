@@ -1,5 +1,30 @@
 {
   "$defs": {
+    "AppExistsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "app_exists": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "App that must be on PATH, e.g., 'sbatch'.",
+          "title": "App Exists"
+        }
+      },
+      "required": [
+        "app_exists"
+      ],
+      "title": "AppExistsCondition",
+      "type": "object"
+    },
     "CommandStage": {
       "additionalProperties": false,
       "properties": {
@@ -58,6 +83,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -72,7 +100,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -132,6 +160,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -209,6 +275,29 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "conda",
@@ -549,6 +638,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -563,7 +655,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -622,6 +714,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -811,7 +941,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -1009,6 +1146,81 @@
         "path"
       ],
       "title": "DocumentEvidence",
+      "type": "object"
+    },
+    "EnvVarEqualsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "env_var_equals": {
+          "anyOf": [
+            {
+              "pattern": "^[^=]+=",
+              "type": "string"
+            },
+            {
+              "items": {
+                "pattern": "^[^=]+=",
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "'NAME=value' an environmental variable must be set to, e.g., 'NERSC_HOST=perlmutter'.",
+          "title": "Env Var Equals"
+        }
+      },
+      "required": [
+        "env_var_equals"
+      ],
+      "title": "EnvVarEqualsCondition",
+      "type": "object"
+    },
+    "EnvVarExistsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "env_var_exists": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Environmental variable that must be set.",
+          "title": "Env Var Exists"
+        }
+      },
+      "required": [
+        "env_var_exists"
+      ],
+      "title": "EnvVarExistsCondition",
+      "type": "object"
+    },
+    "EnvVarInput": {
+      "additionalProperties": false,
+      "description": "An environment variable whose value a stage's results depend on.\n\nThe value is hashed, not stored, into a file the stage depends on, so\nchanging it reruns the stage. A short or guessable value could be\nrecovered from its hash, so this isn't a way to keep one secret.\nIt is read where ``calkit run`` runs, from the project's ``env_vars``,\nthe environment or ``.env``, even for a stage that runs on another\nmachine.",
+      "properties": {
+        "kind": {
+          "const": "env-var",
+          "description": "Always 'env-var'.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name of the environment variable.",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "EnvVarInput",
       "type": "object"
     },
     "Figure": {
@@ -1256,6 +1468,31 @@
       "title": "FormulaParams",
       "type": "object"
     },
+    "HostnameMatchesCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "hostname_matches": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Glob the hostname must match, case-insensitively, e.g., '*.cluster.edu'.",
+          "title": "Hostname Matches"
+        }
+      },
+      "required": [
+        "hostname_matches"
+      ],
+      "title": "HostnameMatchesCondition",
+      "type": "object"
+    },
     "Input": {
       "properties": {
         "description": {
@@ -1417,6 +1654,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -1431,7 +1671,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -1500,6 +1740,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -1617,6 +1895,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -1631,7 +1912,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -1691,6 +1972,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -1768,6 +2087,29 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "julia": {
           "description": "Julia version to use.",
@@ -1855,6 +2197,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -1869,7 +2214,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -1929,6 +2274,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -2102,6 +2485,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2116,7 +2502,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2206,6 +2592,44 @@
           "description": "Parameters injected into the notebook. A value like '{name}' is filled in from the project-level parameters.",
           "title": "Parameters",
           "type": "object"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -2389,6 +2813,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2403,7 +2830,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2530,6 +2957,44 @@
           "default": "dvc",
           "description": "Where to store the resulting PDF.",
           "title": "Pdf Storage"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -2812,6 +3277,31 @@
       "title": "LookupTableParams",
       "type": "object"
     },
+    "MachineIdEqualsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "machine_id_equals": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "ID of the machine, as 'calkit describe system' shows it, ignoring case and dashes.",
+          "title": "Machine Id Equals"
+        }
+      },
+      "required": [
+        "machine_id_equals"
+      ],
+      "title": "MachineIdEqualsCondition",
+      "type": "object"
+    },
     "MapPathsStage": {
       "additionalProperties": false,
       "properties": {
@@ -2865,6 +3355,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2879,7 +3372,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2968,6 +3461,44 @@
             ]
           },
           "title": "Paths",
+          "type": "array"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
           "type": "array"
         },
         "scheduler": {
@@ -3094,6 +3625,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3108,7 +3642,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3218,6 +3752,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -3419,6 +3991,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3478,6 +4053,44 @@
           ],
           "default": null,
           "description": "Also build the file into a PDF with pandoc and LaTeX. A file that only builds a PDF needs no code blocks."
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -3596,6 +4209,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3610,7 +4226,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3670,6 +4286,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -3747,6 +4401,29 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "matlab",
@@ -3840,6 +4517,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3854,7 +4534,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3926,6 +4606,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -4125,6 +4843,29 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
         "kind": {
           "const": "nix",
           "default": "nix",
@@ -4242,6 +4983,41 @@
         "path"
       ],
       "title": "Notebook",
+      "type": "object"
+    },
+    "OsIsCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "os_is": {
+          "anyOf": [
+            {
+              "enum": [
+                "linux",
+                "macos",
+                "windows"
+              ],
+              "type": "string"
+            },
+            {
+              "items": {
+                "enum": [
+                  "linux",
+                  "macos",
+                  "windows"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Operating system: 'linux', 'macos' or 'windows'.",
+          "title": "Os Is"
+        }
+      },
+      "required": [
+        "os_is"
+      ],
+      "title": "OsIsCondition",
       "type": "object"
     },
     "Output": {
@@ -4400,7 +5176,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -4431,6 +5214,44 @@
           "default": null,
           "description": "How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit.",
           "title": "Max Concurrent Jobs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         }
       },
       "title": "PBSEnvironment",
@@ -4625,6 +5446,29 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "pixi",
@@ -4902,6 +5746,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4916,7 +5763,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -4987,6 +5834,44 @@
           "description": "Name of the procedure to carry out, as it is keyed under 'procedures' in calkit.yaml.",
           "title": "Procedure Name",
           "type": "string"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -5416,6 +6301,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -5430,7 +6318,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -5490,6 +6378,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -5621,6 +6547,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -5635,7 +6564,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -5695,6 +6624,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -5941,6 +6908,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -5955,7 +6925,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6015,6 +6985,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -6081,6 +7089,29 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "renv",
@@ -6175,6 +7206,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -6189,7 +7223,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6248,6 +7282,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -6574,7 +7646,7 @@
       "type": "object"
     },
     "Requirement": {
-      "description": "Something that must be true of a machine before the project runs.\n\nFour kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file -- e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --`` explicitly\n  rather than relying on an implicit wrap. ``cache_ttl`` skips\n  re-probing slow checks.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed -- how many CPUs it\nhas, what OS it runs -- are constrained by\n``SystemNumberRequirement`` and ``SystemValueRequirement``\ninstead, which name a property rather than a thing.",
+      "description": "Something that must be true of a machine before the project runs.\n\nFour kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
       "properties": {
         "cache_ttl": {
           "anyOf": [
@@ -6676,7 +7748,7 @@
             }
           ],
           "default": null,
-          "description": "Version specifier an 'app' must satisfy, e.g. '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.",
+          "description": "Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.",
           "title": "Version Spec"
         }
       },
@@ -7007,6 +8079,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -7021,7 +8096,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -7112,6 +8187,44 @@
           "description": "Paths this stage produces.",
           "title": "Outputs"
         },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
         "sbatch_options": {
           "default": [],
           "description": "Options passed to sbatch.",
@@ -7189,7 +8302,7 @@
       "type": "object"
     },
     "SetupRequirement": {
-      "description": "A ``setup`` requirement, whose ``name`` may be omitted.\n\nA single anonymous setup step is common enough that requiring a name\nadds friction, so Calkit synthesizes a stable ``setup-<hash>`` one from\n``check_command``. This is a separate model rather than a loosening of\n``Requirement.name`` so the published schema still rejects an ``app``\nor ``env-var`` requirement with no name, where the name is the\nidentity.",
+      "description": "A ``setup`` requirement, whose ``name`` may be omitted.\n\nWithout a ``name``, Calkit derives a stable ``setup-<hash>`` one from\n``check_command``.",
       "properties": {
         "cache_ttl": {
           "anyOf": [
@@ -7294,7 +8407,7 @@
             }
           ],
           "default": null,
-          "description": "Version specifier an 'app' must satisfy, e.g. '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.",
+          "description": "Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.",
           "title": "Version Spec"
         }
       },
@@ -7359,6 +8472,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -7373,7 +8489,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -7432,6 +8548,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -7569,6 +8723,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -7583,7 +8740,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -7642,6 +8799,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -7896,7 +9091,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -7927,6 +9129,44 @@
           "default": null,
           "description": "How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit.",
           "title": "Max Concurrent Jobs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         }
       },
       "title": "SlurmEnvironment",
@@ -8198,8 +9438,171 @@
       "title": "Subproject",
       "type": "object"
     },
+    "SwitchEnvironment": {
+      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_exists``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
+        "kind": {
+          "const": "switch",
+          "default": "switch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lock": {
+          "default": [],
+          "description": "Properties of the machine the picked environment runs on that results depend on, recorded the first time the switch is checked, as for a 'system' environment.",
+          "items": {
+            "anyOf": [
+              {
+                "enum": [
+                  "os",
+                  "os-version",
+                  "platform",
+                  "machine",
+                  "processor",
+                  "hostname",
+                  "machine-id",
+                  "cpu-count",
+                  "memory-gb",
+                  "python-version",
+                  "python-implementation",
+                  "git-version",
+                  "docker-version",
+                  "conda-version",
+                  "mamba-version",
+                  "uv-version",
+                  "pixi-version",
+                  "julia-version",
+                  "juliaup-version",
+                  "rscript-version",
+                  "brew-version"
+                ],
+                "type": "string"
+              },
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]*-version$",
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Lock",
+          "type": "array"
+        },
+        "relock": {
+          "default": "manual",
+          "description": "What happens on a machine whose locked properties differ from the lock. 'manual' keeps the lock, and a stage that needs to run there is skipped by 'calkit run', and refused by 'calkit xenv', until 'calkit update env --lock' is run. 'auto' rewrites the lock, rerunning the stages that depend on it, for results that should follow the machine, e.g., benchmarks.",
+          "enum": [
+            "manual",
+            "auto"
+          ],
+          "title": "Relock",
+          "type": "string"
+        },
+        "switch": {
+          "description": "Environments to pick from, tried in order.",
+          "items": {
+            "$ref": "#/$defs/SwitchOption"
+          },
+          "minItems": 1,
+          "title": "Switch",
+          "type": "array"
+        }
+      },
+      "required": [
+        "switch"
+      ],
+      "title": "SwitchEnvironment",
+      "type": "object"
+    },
+    "SwitchOption": {
+      "additionalProperties": false,
+      "description": "An environment a switch picks, and when.",
+      "properties": {
+        "use": {
+          "description": "Name of the environment to use.",
+          "title": "Use",
+          "type": "string"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "items": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/AppExistsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarExistsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarEqualsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/HostnameMatchesCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/OsIsCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/MachineIdEqualsCondition"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Conditions this machine must all meet for this option to be picked. Only the last option may leave it out, to be picked when no other is.",
+          "title": "When"
+        }
+      },
+      "required": [
+        "use"
+      ],
+      "title": "SwitchOption",
+      "type": "object"
+    },
     "SystemEnvironment": {
-      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``requirements`` is the other half, and answers a different question.\nIt says what must be *true* of this machine -- apps that must be\ninstalled, variables that must be set, at least this many CPUs -- and\nis checked before anything runs, on the machine the environment names.\nA requirement that fails stops the run and says how to fix it; a locked\nproperty that changes silently invalidates a cached result. One gates,\nthe other pins, so a property that matters both ways is written in both\nplaces.\n\n``default_setup`` is what has to be *done* on this machine before a\nstage can run: sourcing a site setup script, loading modules, putting a\nhand-built toolchain on the ``PATH``. It runs in the same shell as the\nstage's own command, so a variable it sets or a function it defines is\nin scope for the stage, whether or not it was exported -- only a child\nprocess needs that. This is why it can't be a ``setup`` requirement:\nthose run in a shell of their own and are cached, since they check\nwhether something has been done rather than doing it every time.\n\nIt is not recorded in the environment's lock file. The pipeline\ncompiler merges it with each stage's own ``setup`` and writes the\nresult beside the pipeline, which the stage depends on -- so changing\nit reruns exactly the stages that run it, and not the ones whose\n``env_default_setup`` means they never do.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't -- so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
+      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are recorded in the environment's lock file, which\nstages depend on, the first time the environment is checked. After\nthat, the lock is not rewritten when the project moves to a machine\nwhere they differ, so stages that are up to date stay up to date.\nChecking the environment there warns about the difference, and a stage\nthat needs to run is skipped by ``calkit run``, since its result would\nnot be comparable with the existing ones. To make the new machine the\none results come from, run ``calkit update env -n NAME --lock``, which\nupdates the lock and invalidates the stages that depend on it. With\n``relock: auto``, that happens on its own, for results that should\nfollow the machine.\n\n``requirements`` is the other half, and answers a different question.\nIt says what must be *true* of this machine---apps that must be\ninstalled, variables that must be set, at least this many CPUs---and\nis checked before anything runs, on the machine the environment names.\nA stage whose requirements aren't met there is skipped, keeping its\noutputs, while a locked property records what results were computed\nwith. One gates, the other pins, so a property that matters both ways\nis written in both places.\n\n``default_setup`` is what has to be *done* on this machine before a\nstage can run: sourcing a site setup script, loading modules, putting a\nhand-built toolchain on the ``PATH``. It runs in the same shell as the\nstage's own command, so a variable it sets or a function it defines is\nin scope for the stage, whether or not it was exported---only a child\nprocess needs that. This is why it can't be a ``setup`` requirement:\nthose run in a shell of their own and are cached, since they check\nwhether something has been done rather than doing it every time.\n\nIt is not recorded in the environment's lock file. The pipeline\ncompiler merges it with each stage's own ``setup`` and writes the\nresult beside the pipeline, which the stage depends on---so changing\nit reruns exactly the stages that run it, and not the ones whose\n``env_default_setup`` means they never do.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't---so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host---the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
       "properties": {
         "default_setup": {
           "anyOf": [
@@ -8214,7 +9617,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run in the same shell, before every stage that uses this environment, e.g. 'module load cuda' or a site setup script that exports compiler paths. Merged with each stage's own 'setup' when the pipeline is compiled and written beside it, which the stage depends on, so changing them reruns the stages that actually run them.",
+          "description": "Commands run in the same shell, before every stage that uses this environment, e.g., 'module load cuda' or a site setup script that exports compiler paths. Merged with each stage's own 'setup' when the pipeline is compiled and written beside it, which the stage depends on, so changing them reruns the stages that actually run them.",
           "title": "Default Setup"
         },
         "description": {
@@ -8240,7 +9643,14 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
               },
               "type": "array"
             },
@@ -8260,32 +9670,40 @@
         },
         "lock": {
           "default": [],
-          "description": "Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.",
+          "description": "Properties of the machine this environment's results depend on, recorded the first time it is checked. Besides those listed, any app's version can be locked as '<app>-version'. 'relock' says what happens on a machine where they differ. Empty means nothing about the machine is pinned.",
           "items": {
-            "enum": [
-              "os",
-              "os-version",
-              "platform",
-              "machine",
-              "processor",
-              "hostname",
-              "machine-id",
-              "cpu-count",
-              "memory-gb",
-              "python-version",
-              "python-implementation",
-              "git-version",
-              "docker-version",
-              "conda-version",
-              "mamba-version",
-              "uv-version",
-              "pixi-version",
-              "julia-version",
-              "juliaup-version",
-              "rscript-version",
-              "brew-version"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "os",
+                  "os-version",
+                  "platform",
+                  "machine",
+                  "processor",
+                  "hostname",
+                  "machine-id",
+                  "cpu-count",
+                  "memory-gb",
+                  "python-version",
+                  "python-implementation",
+                  "git-version",
+                  "docker-version",
+                  "conda-version",
+                  "mamba-version",
+                  "uv-version",
+                  "pixi-version",
+                  "julia-version",
+                  "juliaup-version",
+                  "rscript-version",
+                  "brew-version"
+                ],
+                "type": "string"
+              },
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]*-version$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Lock",
           "type": "array"
@@ -8302,6 +9720,16 @@
           "default": null,
           "description": "Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that.",
           "title": "Machine Id"
+        },
+        "relock": {
+          "default": "manual",
+          "description": "What happens on a machine whose locked properties differ from the lock. 'manual' keeps the lock, and a stage that needs to run there is skipped by 'calkit run', and refused by 'calkit xenv', until 'calkit update env --lock' is run. 'auto' rewrites the lock, rerunning the stages that depend on it, for results that should follow the machine, e.g., benchmarks.",
+          "enum": [
+            "manual",
+            "auto"
+          ],
+          "title": "Relock",
+          "type": "string"
         },
         "requirements": {
           "default": [],
@@ -8343,7 +9771,7 @@
         },
         "shell": {
           "default": "bash",
-          "description": "Shell in which setup commands run, both 'default_setup' and a stage's own 'setup', together with the stage's command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to have setup commands. Ignored when neither this environment nor any stage using it has setup commands. Setting it to anything but 'bash' is recorded in the environment's lock file -- unlike the commands themselves, the shell isn't in the compiled command -- so stages that run setup commands rerun when it changes.",
+          "description": "Shell in which setup commands run, both 'default_setup' and a stage's own 'setup', together with the stage's command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to have setup commands. Ignored when neither this environment nor any stage using it has setup commands. Setting it to anything but 'bash' is recorded in the environment's lock file, since unlike the commands themselves the shell isn't in the compiled command, so stages that run setup commands rerun when it changes.",
           "enum": [
             "sh",
             "bash",
@@ -8396,7 +9824,7 @@
       "type": "object"
     },
     "SystemNumberRequirement": {
-      "description": "A bound on a numeric property of the machine.\n\nA property is not a thing that can be installed, so there is nothing to\nname and nothing to offer to fix: the check either passes on this\nmachine or reports what it found against what was asked for.\n\nAt least one bound must be given. An entry that constrains nothing says\nnothing -- if the intent is 'results depend on this property', that is\nwhat a ``system`` environment's ``lock`` is for.",
+      "description": "A bound on a numeric property of the machine.\n\nA property can't be installed, so there is nothing to name and nothing\nto fix: the check either passes on this machine or reports what it\nfound against what was asked for.\n\nAt least one of ``min`` and ``max`` must be given. To record a property\nthat results depend on rather than constrain it, add it to a\n``system`` environment's ``lock``.",
       "properties": {
         "description": {
           "anyOf": [
@@ -8453,7 +9881,7 @@
       "type": "object"
     },
     "SystemValueRequirement": {
-      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly, case-insensitively, and a list of values\nmeans any of them will do. ``version_spec`` compares as a version, for\nproperties like ``os-version`` and ``python-version`` where '>=' means\nsomething.\n\nAt least one of the two must be given, for the same reason a numeric\nrequirement needs a bound.",
+      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``python-version`` where '>=' means something.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
       "properties": {
         "description": {
           "anyOf": [
@@ -8502,6 +9930,25 @@
           "title": "Kind",
           "type": "string"
         },
+        "matches": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Glob the property must match, case-insensitively, e.g., `*.cluster.edu` for a hostname. A list means any one of them.",
+          "title": "Matches"
+        },
         "version_spec": {
           "anyOf": [
             {
@@ -8512,7 +9959,7 @@
             }
           ],
           "default": null,
-          "description": "PEP 440 version specifier the property must satisfy, e.g. '>=3.11'. For properties that are versions.",
+          "description": "PEP 440 version specifier the property must satisfy, e.g., '>=3.11'. For properties that are versions.",
           "title": "Version Spec"
         }
       },
@@ -8636,6 +10083,29 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
         "kind": {
           "const": "uv",
           "default": "uv",
@@ -8668,6 +10138,29 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "uv-venv",
@@ -8792,6 +10285,29 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.",
+          "title": "Inputs"
+        },
         "kind": {
           "const": "venv",
           "default": "venv",
@@ -8889,6 +10405,9 @@
                     "type": "string"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -8903,7 +10422,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8963,6 +10482,44 @@
           "default": [],
           "description": "Paths this stage produces.",
           "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
         },
         "scheduler": {
           "anyOf": [
@@ -9523,6 +11080,7 @@
             "pixi": "#/$defs/PixiEnvironment",
             "renv": "#/$defs/REnvironment",
             "slurm": "#/$defs/SlurmEnvironment",
+            "switch": "#/$defs/SwitchEnvironment",
             "system": "#/$defs/SystemEnvironment",
             "uv": "#/$defs/UvEnvironment",
             "uv-venv": "#/$defs/UvVenvEnvironment",
@@ -9569,6 +11127,9 @@
           },
           {
             "$ref": "#/$defs/SystemEnvironment"
+          },
+          {
+            "$ref": "#/$defs/SwitchEnvironment"
           }
         ]
       },

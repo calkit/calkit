@@ -28,13 +28,22 @@ from pydantic.json_schema import SkipJsonSchema
 from typing_extensions import Annotated
 
 import calkit.latex
-from calkit.models.io import InputsFromStageOutputs, PathInput, PathOutput
+from calkit.models.io import (
+    EnvVarInput,
+    InputsFromStageOutputs,
+    PathInput,
+    PathOutput,
+)
 from calkit.models.iteration import (
     ExpandedParametersType,
     ParameterIteration,
     ParametersType,
     RangeIteration,
 )
+from calkit.models.requirements import RequirementType
+
+# What a stage's 'inputs' can list
+StageInput = str | EnvVarInput | PathInput | InputsFromStageOutputs
 
 
 def check_path_relative_and_child_of_cwd(s: str) -> str:
@@ -290,11 +299,12 @@ class Stage(BaseModel):
         "to this.",
     )
     # TODO: Support other input types
-    inputs: list[str | PathInput | InputsFromStageOutputs] = Field(
+    inputs: list[StageInput] = Field(
         default=[],
         description="Paths this stage depends on, which trigger a rerun when "
         "they change. Normally plain path strings; an object carrying a "
-        "'path' is also accepted.",
+        "'path' is also accepted, and an 'env-var' entry makes the stage "
+        "depend on an environment variable's value.",
         json_schema_extra=_allow_null,
     )
     # TODO: Support database outputs
@@ -342,6 +352,12 @@ class Stage(BaseModel):
         "environment's first, then the stage's; 'ignore' never runs the "
         "environment's.",
     )
+    requirements: list[RequirementType] = Field(
+        default=[],
+        description="What must be true where this stage runs, in addition "
+        "to its environments' requirements. On a machine where they aren't "
+        "met, the stage is skipped and keeps its outputs.",
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
     # Resolved at pipeline-compilation time by set_stage_scheduler_options;
@@ -360,7 +376,12 @@ class Stage(BaseModel):
     # 'default_setup' already merged in per 'env_default_setup'. Resolved
     # when the pipeline is compiled, so the command in dvc.yaml says
     # everything that runs and DVC reruns the stage when any of it changes.
+    # For a machine switch, only the stage's own, since the pick's defaults
+    # are merged where it runs.
     _system_env_setup: list[str] = PrivateAttr(default_factory=list)
+    # Env vars whose values this stage depends on, from its own inputs and
+    # its environments', resolved when the pipeline is compiled
+    _env_var_names: list[str] = PrivateAttr(default_factory=list)
 
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
@@ -468,6 +489,28 @@ class Stage(BaseModel):
     def dvc_cmd(self) -> str:
         raise NotImplementedError
 
+    def path_from_wdir(self, path: str) -> str:
+        """A project-relative path as seen from the stage's ``wdir``.
+
+        DVC resolves a stage's command and deps from its ``wdir``, but the
+        files Calkit generates for it live under the project root.
+        """
+        if self.wdir is None:
+            return path
+        return posixpath.relpath(path, posixpath.normpath(self.wdir))
+
+    @property
+    def file_stem(self) -> str:
+        """The stage's name as a file name, unique among stages."""
+        import hashlib
+
+        name = self.name or ""
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+        if safe != name:
+            # So, e.g., 'a b' and 'a_b' don't share a file
+            safe += "-" + hashlib.md5(name.encode()).hexdigest()[:8]
+        return safe
+
     @property
     def setup_file_path(self) -> str | None:
         """Where this stage's resolved setup commands are written.
@@ -487,10 +530,9 @@ class Stage(BaseModel):
         """
         if not self._system_env_setup:
             return None
-        # Stage names can carry characters a path shouldn't, e.g. the '@'
-        # DVC gives an iterated stage
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.name)
-        return posixpath.join(".calkit", "stage-setup", f"{safe}.json")
+        return posixpath.join(
+            ".calkit", "stage-setup", f"{self.file_stem}.json"
+        )
 
     def write_setup_file(self, wdir: str | None = None) -> str | None:
         """Write the resolved setup commands, returning the path."""
@@ -514,13 +556,56 @@ class Stage(BaseModel):
         return rel_path
 
     @property
+    def env_var_file_path(self) -> str | None:
+        """Where hashes of the env vars this stage depends on are written.
+
+        Rewritten by every compile from this machine's values, and not
+        committed, like the setup file: ``dvc.lock`` records its checksum.
+        """
+        if not self._env_var_names:
+            return None
+        return posixpath.join(".calkit", "env-vars", f"{self.file_stem}.json")
+
+    def write_env_var_file(
+        self, values: dict[str, str | None], wdir: str | None = None
+    ) -> str | None:
+        """Write hashes of the env vars this stage depends on."""
+        import hashlib
+        import json
+
+        rel_path = self.env_var_file_path
+        if rel_path is None:
+            return None
+        hashes = {
+            name: (
+                None
+                if values.get(name) is None
+                else hashlib.sha256(str(values[name]).encode()).hexdigest()
+            )
+            for name in self._env_var_names
+        }
+        fpath = os.path.join(wdir, rel_path) if wdir else rel_path
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        content = json.dumps(hashes, indent=2, sort_keys=True) + "\n"
+        if os.path.isfile(fpath):
+            with open(fpath) as f:
+                if f.read() == content:
+                    return rel_path
+        with open(fpath, "w", newline="\n") as f:
+            f.write(content)
+        return rel_path
+
+    @property
     def dvc_deps(self) -> list[str]:
         deps = []
         setup_file = self.setup_file_path
         if setup_file is not None:
-            deps.append(setup_file)
+            deps.append(self.path_from_wdir(setup_file))
+        env_var_file = self.env_var_file_path
+        if env_var_file is not None:
+            deps.append(self.path_from_wdir(env_var_file))
         for i in self.inputs:
-            if isinstance(i, InputsFromStageOutputs):
+            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
                 continue
             path = i if isinstance(i, str) else i.path
             if path not in deps:
@@ -588,7 +673,7 @@ class Stage(BaseModel):
             # file is a dep, so editing either list still reruns the stage.
             setup_file = self.setup_file_path
             if setup_file is not None:
-                cmd += f" --setup-file {setup_file}"
+                cmd += f" --setup-file {self.path_from_wdir(setup_file)}"
             if self.inner_environment == self.outer_environment:
                 return cmd + " --"
             # The inner xenv runs in the workspace rather than here
@@ -674,8 +759,12 @@ class Stage(BaseModel):
         if opts.options is not None:
             for opt in opts.options:
                 cmd += f" --option {opt}"
-        for setup_cmd in self.setup or []:
-            cmd += f" --setup {shlex.quote(setup_cmd)}"
+        setup_file = self.setup_file_path
+        if setup_file is not None:
+            cmd += f" --setup-file {self.path_from_wdir(setup_file)}"
+        else:
+            for setup_cmd in self.setup or []:
+                cmd += f" --setup {shlex.quote(setup_cmd)}"
         return cmd
 
     @property
@@ -723,7 +812,7 @@ class Stage(BaseModel):
         cmd = self.dvc_cmd
         deps = self.dvc_deps
         for i in self.inputs:
-            if isinstance(i, InputsFromStageOutputs):
+            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
                 continue
             path = i if isinstance(i, str) else i.path
             if path not in deps:
@@ -1538,13 +1627,60 @@ class ShellCommandStage(Stage):
     )
 
     @property
+    def command_file_path(self) -> str | None:
+        """Where a command the calling shell would expand is written.
+
+        DVC runs a stage's command through a shell, which on POSIX expands
+        ``$VAR`` and backticks before anything the stage runs in, e.g., a
+        container, a job, or the environment's setup. Run from a file, the
+        command is only read by the shell meant to run it. Iterated stages
+        keep the command inline, since their arguments are filled into it.
+        """
+        if self.iterate_over is not None:
+            return None
+        if "$" not in self.command and "`" not in self.command:
+            return None
+        return posixpath.join(
+            ".calkit", "stage-commands", f"{self.file_stem}.sh"
+        )
+
+    def write_command_file(self, wdir: str | None = None) -> str | None:
+        """Write the command to its file, if it has one."""
+        rel_path = self.command_file_path
+        if rel_path is None:
+            return None
+        fpath = os.path.join(wdir, rel_path) if wdir else rel_path
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        content = self.command.rstrip("\n") + "\n"
+        if os.path.isfile(fpath):
+            with open(fpath) as f:
+                if f.read() == content:
+                    return rel_path
+        with open(fpath, "w", newline="\n") as f:
+            f.write(content)
+        return rel_path
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = super().dvc_deps
+        command_file = self.command_file_path
+        if command_file is not None:
+            deps = [self.path_from_wdir(command_file)] + deps
+        return deps
+
+    @property
     def dvc_cmd(self) -> str:
-        shell_cmd = self.command.replace('"', '\\"')
         cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
         else:
             norc_args = "--noprofile --norc"
+        command_file = self.command_file_path
+        if command_file is not None:
+            command_file = self.path_from_wdir(command_file)
+            cmd += f" {self.shell} {norc_args} {command_file}"
+            return cmd.strip()
+        shell_cmd = self.command.replace('"', '\\"')
         cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
         return cmd.strip()
 
@@ -2287,7 +2423,7 @@ class MarkdownStage(Stage):
         default="_system",
         description="Environment used by blocks that don't name one.",
     )
-    inputs: list[str | PathInput | InputsFromStageOutputs] = Field(
+    inputs: list[StageInput] = Field(
         default=[],
         description="Paths every stage declared in the file depends on, in "
         "addition to any a block declares for itself.",
@@ -2404,7 +2540,12 @@ class Pipeline(BaseModel):
         such a stage runs, so the merged chain goes into the command DVC
         records. A scheduler env's is still left to the batch CLI.
         """
-        from calkit.environments import merge_setup_commands
+        from calkit.environments import (
+            SWITCH_KIND,
+            env_can_be_outer,
+            merge_setup_commands,
+            switch_is_outer,
+        )
 
         # Stage kinds that don't require a separate inner runtime, so they
         # can run on a plain (non-composite) scheduler env. Anything else
@@ -2432,6 +2573,17 @@ class Pipeline(BaseModel):
                 )
             env = environments.get(stage.outer_environment, {})
             kind = env.get("kind")
+            # Which option a switch picks is only known where the stage runs
+            is_machine_switch = kind == SWITCH_KIND and switch_is_outer(
+                env_name, environments
+            )
+            if kind == SWITCH_KIND and not is_machine_switch:
+                if stage.inner_environment != stage.outer_environment:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has outer environment "
+                        f"'{env_name}', a switch between runtimes, which "
+                        "can't wrap another environment"
+                    )
             # Setup commands are run by whatever dispatches the stage, and
             # only these kinds dispatch one: the others hand the command to
             # a runtime that has no shell of its own to prepare. Reported
@@ -2441,8 +2593,10 @@ class Pipeline(BaseModel):
             # a bare command with nothing wrapping it, and a project that
             # needs setup is a project that should name its machine.
             if (
-                stage.setup or stage.env_default_setup != "replace"
-            ) and kind not in ("system", "slurm", "pbs"):
+                (stage.setup or stage.env_default_setup != "replace")
+                and kind not in ("system", "slurm", "pbs")
+                and not is_machine_switch
+            ):
                 described = (
                     "the built-in '_system' environment"
                     if env_name == "_system"
@@ -2477,7 +2631,7 @@ class Pipeline(BaseModel):
                         f"'{stage.inner_environment}' that is not "
                         "defined in environments"
                     )
-                if inner_env.get("kind") in set(scheduler_kinds) | {"system"}:
+                if env_can_be_outer(stage.inner_environment, environments):
                     raise ValueError(
                         f"Stage '{stage.name}' has system outer environment "
                         f"'{stage.outer_environment}' and inner environment "
@@ -2487,10 +2641,14 @@ class Pipeline(BaseModel):
                         "scheduler"
                     )
                 continue
-            if kind not in scheduler_kinds:
+            if kind not in scheduler_kinds and not is_machine_switch:
                 continue
-            cli_alias = scheduler_kinds[kind]
-            scheduler_label = kind.upper()
+            # A switch of machines dispatches like a scheduler stage, and
+            # 'calkit scheduler batch' runs it on whichever one it picks
+            cli_alias = "scheduler"
+            scheduler_label = (
+                "machine switch" if is_machine_switch else str(kind).upper()
+            )
             if stage.kind not in plain_ok_kinds:
                 if stage.inner_environment == stage.outer_environment:
                     raise ValueError(
@@ -2507,7 +2665,10 @@ class Pipeline(BaseModel):
                         f"'{stage.inner_environment}' that is not "
                         "defined in environments"
                     )
-                if inner_env.get("kind") in scheduler_kinds:
+                if inner_env.get("kind") in scheduler_kinds or (
+                    is_machine_switch
+                    and env_can_be_outer(stage.inner_environment, environments)
+                ):
                     raise ValueError(
                         f"Stage '{stage.name}' has {scheduler_label} outer "
                         f"environment '{stage.outer_environment}' and "
@@ -2519,6 +2680,12 @@ class Pipeline(BaseModel):
                 stage.scheduler = StageSchedulerOptions()
             stage._scheduler_cli_alias = cli_alias
             stage._scheduler_kind = kind
+            # What a switch picks is known only where it runs, so its
+            # defaults are merged then, but the stage's own setup goes in a
+            # file, since a switch can pick this machine, which may run the
+            # command through cmd.exe
+            if is_machine_switch and stage.setup:
+                stage._system_env_setup = list(stage.setup)
 
     def convert_sbatch_stages(self) -> dict[str, dict]:
         """Replace legacy ``sbatch`` stages with ``shell-script`` equivalents.
@@ -2647,5 +2814,6 @@ class Pipeline(BaseModel):
                 stage.outer_environment,
             ):
                 for fpath in env_lock_fpaths.get(env_name, []):
+                    fpath = stage.path_from_wdir(fpath)
                     if fpath not in stage.inputs:
                         stage.inputs.append(fpath)

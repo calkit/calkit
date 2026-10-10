@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import threading
 from collections.abc import Iterator
@@ -209,6 +210,106 @@ def dvc_lock_timeout(seconds: float):
         yield
     finally:
         dvc.lock.DEFAULT_TIMEOUT = previous
+
+
+@contextlib.contextmanager
+def skip_stages(
+    reasons: dict[str, str], skipped: dict[str, str] | None = None
+) -> Iterator[None]:
+    """Skip these stages in ``dvc repro`` while active, keeping their outputs.
+
+    Keyed by Calkit stage name, which also covers the ``<name>@<item>``
+    stages DVC makes from an iterated one and the stages generated from
+    one, e.g., a LaTeX stage's diffs. Only stages in the root ``dvc.yaml``
+    match, so a subproject's stage of the same name isn't skipped. A
+    skipped stage is frozen, so its own inputs aren't reproduced on its
+    account, and isn't run or recorded in ``dvc.lock``, so it stays out of
+    date rather than looking current. Each skipped stage that was out of
+    date is added to ``skipped`` with its reason, including one that only
+    went out of date when a stage it depends on ran after it was visited,
+    since a frozen stage has no edges to order it after them.
+    """
+    from dvc.stage import Stage
+    from dvc.stage.loader import StageLoader
+
+    def reason_for(stage: Any) -> str | None:
+        name = getattr(stage, "name", None)
+        dvcfile = getattr(stage, "dvcfile", None)
+        if not name or dvcfile is None:
+            return None
+        if os.path.normpath(os.path.relpath(dvcfile.path)) != "dvc.yaml":
+            return None
+        reason = reasons.get(name, reasons.get(name.split("@")[0]))
+        if reason is None:
+            # A stage Calkit generated from another says which one
+            match = re.match(
+                r"Automatically generated from the '([^']+)' stage",
+                getattr(stage, "desc", None) or "",
+            )
+            if match:
+                reason = reasons.get(match.group(1))
+        return reason
+
+    original_load = StageLoader.__dict__["load_stage"]
+    original_reproduce = Stage.reproduce
+    # Visited while up to date, so checked again whenever a stage runs,
+    # while DVC holds the repo lock that checking needs
+    unchanged: list[tuple[Any, bool]] = []
+
+    def is_stale(stage: Any, **kwargs: Any) -> bool:
+        # Frozen stages never report changed deps, so ask without it
+        stage.frozen = False
+        try:
+            return bool(
+                kwargs.get("force")
+                or stage.changed(
+                    kwargs.get("allow_missing", False), kwargs.get("upstream")
+                )
+            )
+        finally:
+            stage.frozen = True
+
+    def load_stage(cls: Any, *args: Any, **kwargs: Any) -> Any:
+        stage = original_load.__func__(cls, *args, **kwargs)
+        if reason_for(stage) is not None:
+            stage.frozen = True
+        return stage
+
+    def reproduce(self: Any, *args: Any, **kwargs: Any) -> Any:
+        reason = reason_for(self)
+        if reason is None:
+            result = original_reproduce(self, *args, **kwargs)
+            if result is not None and skipped is not None:
+                for stage, allow_missing in list(unchanged):
+                    if is_stale(stage, allow_missing=allow_missing):
+                        skipped[stage.addressing] = reason_for(stage) or ""
+                        unchanged.remove((stage, allow_missing))
+            return result
+        if not is_stale(self, **kwargs):
+            logging.getLogger("dvc").info(
+                "Stage '%s' didn't change, skipping", self.addressing
+            )
+            unchanged.append((self, kwargs.get("allow_missing", False)))
+            return None
+        logging.getLogger("dvc").info(
+            "Stage '%s' can't run on this machine, skipping: %s",
+            self.addressing,
+            reason,
+        )
+        if skipped is not None:
+            skipped[self.addressing] = reason
+        return None
+
+    if not reasons:
+        yield
+        return
+    setattr(StageLoader, "load_stage", classmethod(load_stage))
+    setattr(Stage, "reproduce", reproduce)
+    try:
+        yield
+    finally:
+        setattr(StageLoader, "load_stage", original_load)
+        setattr(Stage, "reproduce", original_reproduce)
 
 
 _memoized_hashes_lock = threading.RLock()

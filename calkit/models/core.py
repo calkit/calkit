@@ -24,8 +24,22 @@ from pydantic import (
 from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
+from calkit.models.io import EnvVarInput
 from calkit.models.iteration import ParametersType
 from calkit.models.pipeline import Pipeline, RelativeChildPathString
+from calkit.models.requirements import (  # noqa: F401
+    Dependency,
+    DependencyAttrs,
+    Requirement,
+    RequirementAttrs,
+    RequirementType,
+    SetupDependency,
+    SetupRequirement,
+    SystemNumberProperty,
+    SystemNumberRequirement,
+    SystemValueProperty,
+    SystemValueRequirement,
+)
 
 
 class _ImportedFromProject(BaseModel):
@@ -655,204 +669,23 @@ class ReferenceCollection(BaseModel):
     files: list[ReferenceFile] = []
 
 
-class RequirementAttrs(BaseModel):
-    """A requirement's properties, as written under ``{name: {...}}``.
-
-    ``Requirement`` is this plus the name; the mapping form supplies the
-    name as its key instead.
-    """
-
-    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
-    check_command: str | None = None
-    setup_command: str | None = None
-    cache_ttl: str | int | None = None
-    description: str | None = None
-    default: str | None = None
-    version_spec: str | None = None
-    notes: str | None = None
+# The kinds that describe a machine, so can have 'requirements'
+ENV_KINDS_WITH_REQUIREMENTS = ("pbs", "slurm", "system")
 
 
-class Requirement(BaseModel):
-    """Something that must be true of a machine before the project runs.
-
-    Four kinds are supported:
-
-    - ``app``: an executable that must be on ``PATH``, optionally
-      satisfying a ``version_spec``.
-    - ``env-var``: an environmental variable that must be defined.
-    - ``setup``: a per-machine precondition that isn't a file -- e.g.,
-      the user must have authenticated a CLI like ``gh auth login``.
-      A ``setup`` requirement declares ``check_command`` (a shell command
-      whose exit code determines whether it is satisfied) and
-      ``setup_command`` (run on a TTY when the user agrees, or printed
-      as a fix-it command otherwise). To run either inside a project
-      environment, prefix it with ``calkit xenv -n <env> --`` explicitly
-      rather than relying on an implicit wrap. ``cache_ttl`` skips
-      re-probing slow checks.
-    - ``calkit-config``: a value that must be set in the user's Calkit
-      configuration.
-
-    These name a thing that must be present, so each has a ``name``. The
-    properties of a machine that can't be installed -- how many CPUs it
-    has, what OS it runs -- are constrained by
-    ``SystemNumberRequirement`` and ``SystemValueRequirement``
-    instead, which name a property rather than a thing.
-    """
-
-    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
-    name: str
-    # ``setup``-kind fields; ignored for other kinds.
-    check_command: str | None = None
-    setup_command: str | None = None
-    # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
-    # integer number of seconds. Setup requirements cache successful checks
-    # by default for ``DEFAULT_SETUP_CACHE_TTL``; set ``cache_ttl: 0`` to
-    # disable caching and re-probe every run.
-    cache_ttl: str | int | None = None
-    description: str | None = None
-    # Allow a per-env-var default value to be set (used by ``check env-vars``).
-    default: str | None = None
-    version_spec: str | None = Field(
-        default=None,
-        description="Version specifier an 'app' must satisfy, e.g. '>=2.40'. "
-        "A string requirement like 'git>=2.40' is shorthand for this.",
+def env_requirements_problem(env: dict) -> str | None:
+    """Why an environment can't have its 'requirements', if it can't."""
+    kind = env.get("kind")
+    if "requirements" not in env or kind in ENV_KINDS_WITH_REQUIREMENTS:
+        return None
+    if kind == "switch":
+        where = "on the machine environments it picks from"
+    else:
+        where = "on a 'system', 'slurm' or 'pbs' environment it runs inside"
+    return (
+        f"A '{kind}' environment can't have 'requirements', since they "
+        f"describe a machine; put them on the stages using it, or {where}"
     )
-    notes: str | None = None
-
-
-class SetupRequirement(Requirement):
-    """A ``setup`` requirement, whose ``name`` may be omitted.
-
-    A single anonymous setup step is common enough that requiring a name
-    adds friction, so Calkit synthesizes a stable ``setup-<hash>`` one from
-    ``check_command``. This is a separate model rather than a loosening of
-    ``Requirement.name`` so the published schema still rejects an ``app``
-    or ``env-var`` requirement with no name, where the name is the
-    identity.
-    """
-
-    kind: Literal["setup"] = "setup"
-    name: str | None = None
-
-
-# Machine properties whose values are numbers, so they're constrained by
-# range rather than by matching. Kebab-case like the rest of calkit.yaml;
-# ``calkit.environments`` maps these onto the snake_case keys
-# ``get_system_info`` returns.
-SystemNumberProperty = Literal["cpu-count", "memory-gb"]
-
-# Machine properties whose values are strings. ``*-version`` properties of
-# installed tools are deliberately absent: those are reachable as an ``app``
-# requirement with a ``version_spec``, which is one way to say it rather
-# than two. ``python-version`` stays because it describes the interpreter
-# running Calkit, which need not be whatever ``python`` resolves to.
-SystemValueProperty = Literal[
-    "os",
-    "os-version",
-    "platform",
-    "machine",
-    "processor",
-    "hostname",
-    "machine-id",
-    "python-version",
-    "python-implementation",
-]
-
-
-class SystemNumberRequirement(BaseModel):
-    """A bound on a numeric property of the machine.
-
-    A property is not a thing that can be installed, so there is nothing to
-    name and nothing to offer to fix: the check either passes on this
-    machine or reports what it found against what was asked for.
-
-    At least one bound must be given. An entry that constrains nothing says
-    nothing -- if the intent is 'results depend on this property', that is
-    what a ``system`` environment's ``lock`` is for.
-    """
-
-    kind: SystemNumberProperty = Field(
-        description="Which numeric property of the machine to constrain."
-    )
-    min: float | None = Field(
-        default=None, description="Smallest acceptable value, inclusive."
-    )
-    max: float | None = Field(
-        default=None, description="Largest acceptable value, inclusive."
-    )
-    description: str | None = None
-
-    @model_validator(mode="after")
-    def _check_bounded(self) -> SystemNumberRequirement:
-        if self.min is None and self.max is None:
-            raise ValueError(
-                f"Requirement on '{self.kind}' needs a 'min' or a 'max'; "
-                "to depend on its value rather than constrain it, add it to "
-                "the environment's 'lock'"
-            )
-        if self.min is not None and self.max is not None:
-            if self.min > self.max:
-                raise ValueError(
-                    f"Requirement on '{self.kind}' has min {self.min} greater "
-                    f"than max {self.max}, which nothing can satisfy"
-                )
-        return self
-
-
-class SystemValueRequirement(BaseModel):
-    """A constraint on a string-valued property of the machine.
-
-    ``equals`` matches exactly, case-insensitively, and a list of values
-    means any of them will do. ``version_spec`` compares as a version, for
-    properties like ``os-version`` and ``python-version`` where '>=' means
-    something.
-
-    At least one of the two must be given, for the same reason a numeric
-    requirement needs a bound.
-    """
-
-    kind: SystemValueProperty = Field(
-        description="Which property of the machine to constrain."
-    )
-    equals: str | list[str] | None = Field(
-        default=None,
-        description="Value the property must have, matched "
-        "case-insensitively. A list means any one of them is acceptable.",
-    )
-    version_spec: str | None = Field(
-        default=None,
-        description="PEP 440 version specifier the property must satisfy, "
-        "e.g. '>=3.11'. For properties that are versions.",
-    )
-    description: str | None = None
-
-    @model_validator(mode="after")
-    def _check_constrained(self) -> SystemValueRequirement:
-        if self.equals is None and self.version_spec is None:
-            raise ValueError(
-                f"Requirement on '{self.kind}' needs an 'equals' or a "
-                "'version_spec'; to depend on its value rather than "
-                "constrain it, add it to the environment's 'lock'"
-            )
-        return self
-
-
-# Every shape a requirement can be written in. The mapping form
-# ``{name: {...}}`` comes last so a flat dict is matched as the object it
-# looks like rather than as a one-key mapping.
-RequirementType = (
-    str
-    | SystemNumberRequirement
-    | SystemValueRequirement
-    | SetupRequirement
-    | Requirement
-    | dict[str, RequirementAttrs | None]
-)
-
-# Pre-rename names, kept so existing imports keep working.
-DependencyAttrs = RequirementAttrs
-Dependency = Requirement
-SetupDependency = SetupRequirement
 
 
 class Environment(BaseModel):
@@ -880,6 +713,7 @@ class Environment(BaseModel):
         "venv",
         "uv-venv",
         "renv",
+        "switch",
     ] = Field(description="What kind of environment this is.")
     # Note: ``path`` is declared on the specific subclasses that need it (most
     # of them, required; optional for Docker) rather than here, so subclasses
@@ -888,6 +722,24 @@ class Environment(BaseModel):
     description: str | None = Field(
         default=None, description="A description of the environment."
     )
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project this environment is built from "
+        "that its spec doesn't name, e.g., a local package it installs. "
+        "Editing one rebuilds the environment and reruns the stages using "
+        "it.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_requirements(cls, data: object) -> object:
+        # Requirements describe a machine, so only machine kinds take them
+        if isinstance(data, dict):
+            problem = env_requirements_problem(data)
+            if problem is not None:
+                raise ValueError(problem)
+        return data
 
 
 class CondaEnvironment(Environment):
@@ -1052,7 +904,7 @@ class DockerEnvironment(Environment):
         default=None,
         description="User to run the container as. Defaults to the host user.",
     )
-    inputs: list[str] | None = Field(
+    inputs: list[str | EnvVarInput] | None = Field(
         default=None,
         # See the note on the other environments that take this field
         validation_alias=AliasChoices("inputs", "deps"),
@@ -1133,7 +985,7 @@ class SlurmEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1154,6 +1006,13 @@ class SlurmEnvironment(Environment):
         "a slot, so an iterated stage does not flood a shared cluster's queue "
         "with every one of its jobs at the same time. Null means no limit.",
     )
+    requirements: list[RequirementType] = Field(
+        default=[],
+        description="What must be true of this machine before stages run on "
+        "it: apps on PATH, environmental variables, setup steps, and "
+        "constraints on properties like CPU count. Checked on the machine "
+        "this environment names, which is not necessarily this one.",
+    )
 
 
 class PBSEnvironment(Environment):
@@ -1169,7 +1028,7 @@ class PBSEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1187,6 +1046,13 @@ class PBSEnvironment(Environment):
         ge=1,
         description="How many of this project's jobs may sit in the queue "
         "(running or pending) at once. Null means no limit.",
+    )
+    requirements: list[RequirementType] = Field(
+        default=[],
+        description="What must be true of this machine before stages run on "
+        "it: apps on PATH, environmental variables, setup steps, and "
+        "constraints on properties like CPU count. Checked on the machine "
+        "this environment names, which is not necessarily this one.",
     )
 
 
@@ -1218,6 +1084,10 @@ SystemLockProperty = Literal[
     "rscript-version",
     "brew-version",
 ]
+# Any other app's version, as reported by '<app> --version'
+AppVersionLockProperty = Annotated[
+    str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.+-]*-version$")
+]
 
 
 class SystemEnvironment(Environment):
@@ -1229,31 +1099,39 @@ class SystemEnvironment(Environment):
     ``lock`` is how a project says which properties of the machine its
     results actually depend on.
 
-    Locked properties are written to the environment's lock file, which
-    stages depend on, so moving to a machine where one of them differs
-    invalidates the cached result rather than silently reusing it.
+    Locked properties are recorded in the environment's lock file, which
+    stages depend on, the first time the environment is checked. After
+    that, the lock is not rewritten when the project moves to a machine
+    where they differ, so stages that are up to date stay up to date.
+    Checking the environment there warns about the difference, and a stage
+    that needs to run is skipped by ``calkit run``, since its result would
+    not be comparable with the existing ones. To make the new machine the
+    one results come from, run ``calkit update env -n NAME --lock``, which
+    updates the lock and invalidates the stages that depend on it. With
+    ``relock: auto``, that happens on its own, for results that should
+    follow the machine.
 
     ``requirements`` is the other half, and answers a different question.
-    It says what must be *true* of this machine -- apps that must be
-    installed, variables that must be set, at least this many CPUs -- and
+    It says what must be *true* of this machine---apps that must be
+    installed, variables that must be set, at least this many CPUs---and
     is checked before anything runs, on the machine the environment names.
-    A requirement that fails stops the run and says how to fix it; a locked
-    property that changes silently invalidates a cached result. One gates,
-    the other pins, so a property that matters both ways is written in both
-    places.
+    A stage whose requirements aren't met there is skipped, keeping its
+    outputs, while a locked property records what results were computed
+    with. One gates, the other pins, so a property that matters both ways
+    is written in both places.
 
     ``default_setup`` is what has to be *done* on this machine before a
     stage can run: sourcing a site setup script, loading modules, putting a
     hand-built toolchain on the ``PATH``. It runs in the same shell as the
     stage's own command, so a variable it sets or a function it defines is
-    in scope for the stage, whether or not it was exported -- only a child
+    in scope for the stage, whether or not it was exported---only a child
     process needs that. This is why it can't be a ``setup`` requirement:
     those run in a shell of their own and are cached, since they check
     whether something has been done rather than doing it every time.
 
     It is not recorded in the environment's lock file. The pipeline
     compiler merges it with each stage's own ``setup`` and writes the
-    result beside the pipeline, which the stage depends on -- so changing
+    result beside the pipeline, which the stage depends on---so changing
     it reruns exactly the stages that run it, and not the ones whose
     ``env_default_setup`` means they never do.
 
@@ -1269,7 +1147,7 @@ class SystemEnvironment(Environment):
     networks, and are reused; a project that means one particular machine
     can name it here instead and have that survive all of it. It replaces
     the name in deciding whether this is that machine, and is checked again
-    on the far end when it isn't -- so a host that has come to point at a
+    on the far end when it isn't---so a host that has come to point at a
     different box is reported rather than run on. ``host`` is still what
     reaches it, so both are worth declaring for a machine that isn't this
     one. Run ``calkit describe system`` on a machine to read its ID.
@@ -1280,7 +1158,7 @@ class SystemEnvironment(Environment):
     one. Whether it does is left to ``lock``, where ``machine-id`` is
     available for projects whose results really are machine-specific.
 
-    ``wdir`` is the project's workspace on that host -- the directory the
+    ``wdir`` is the project's workspace on that host---the directory the
     stage runs in. It defaults to
     ``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just
     names a host lands somewhere predictable rather than having to spell
@@ -1329,7 +1207,7 @@ class SystemEnvironment(Environment):
     default_setup: list[str] | None = Field(
         default=None,
         description="Commands run in the same shell, before every stage "
-        "that uses this environment, e.g. 'module load cuda' or a site "
+        "that uses this environment, e.g., 'module load cuda' or a site "
         "setup script that exports compiler paths. Merged with each "
         "stage's own 'setup' when the pipeline is compiled and written "
         "beside it, which the stage depends on, so changing them reruns "
@@ -1343,11 +1221,11 @@ class SystemEnvironment(Environment):
         "and sourcing a setup script is the usual reason to have setup "
         "commands. Ignored when neither this environment nor any stage "
         "using it has setup commands. Setting it to anything but 'bash' "
-        "is recorded in the environment's lock file -- unlike the commands "
-        "themselves, the shell isn't in the compiled command -- so stages "
-        "that run setup commands rerun when it changes.",
+        "is recorded in the environment's lock file, since unlike the "
+        "commands themselves the shell isn't in the compiled command, so "
+        "stages that run setup commands rerun when it changes.",
     )
-    inputs: list[RelativeChildPathString] | None = Field(
+    inputs: list[RelativeChildPathString | EnvVarInput] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1360,11 +1238,22 @@ class SystemEnvironment(Environment):
         "this environment, so editing one reruns them. Must be inside the "
         "project: a stage can't depend on something the repo doesn't carry.",
     )
-    lock: list[SystemLockProperty] = Field(
+    lock: list[SystemLockProperty | AppVersionLockProperty] = Field(
         default=[],
         description="Properties of the machine this environment's results "
-        "depend on. Stages rerun when a locked property changes. Empty means "
-        "nothing about the machine is pinned.",
+        "depend on, recorded the first time it is checked. Besides those "
+        "listed, any app's version can be locked as '<app>-version'. "
+        "'relock' says what happens on a machine where they differ. Empty "
+        "means nothing about the machine is pinned.",
+    )
+    relock: Literal["manual", "auto"] = Field(
+        default="manual",
+        description="What happens on a machine whose locked properties "
+        "differ from the lock. 'manual' keeps the lock, and a stage that "
+        "needs to run there is skipped by 'calkit run', and refused by "
+        "'calkit xenv', until 'calkit update env --lock' is run. "
+        "'auto' rewrites the lock, rerunning the stages that depend on it, "
+        "for results that should follow the machine, e.g., benchmarks.",
     )
     requirements: list[RequirementType] = Field(
         default=[],
@@ -1373,6 +1262,194 @@ class SystemEnvironment(Environment):
         "constraints on properties like CPU count. Checked on the machine "
         "this environment names, which is not necessarily this one.",
     )
+
+
+_OsName = Literal["linux", "macos", "windows"]
+_EnvVarSetting = Annotated[str, Field(pattern=r"^[^=]+=")]
+
+
+class AppExistsCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    app_exists: str | list[str] = Field(
+        description="App that must be on PATH, e.g., 'sbatch'."
+    )
+
+
+class EnvVarExistsCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    env_var_exists: str | list[str] = Field(
+        description="Environmental variable that must be set."
+    )
+
+
+class EnvVarEqualsCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    env_var_equals: _EnvVarSetting | list[_EnvVarSetting] = Field(
+        description="'NAME=value' an environmental variable must be set to, "
+        "e.g., 'NERSC_HOST=perlmutter'."
+    )
+
+
+class HostnameMatchesCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    hostname_matches: str | list[str] = Field(
+        description="Glob the hostname must match, case-insensitively, "
+        "e.g., '*.cluster.edu'."
+    )
+
+
+class OsIsCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    os_is: _OsName | list[_OsName] = Field(
+        description="Operating system: 'linux', 'macos' or 'windows'."
+    )
+
+
+class MachineIdEqualsCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    machine_id_equals: str | list[str] = Field(
+        description="ID of the machine, as 'calkit describe system' shows "
+        "it, ignoring case and dashes."
+    )
+
+
+_SWITCH_CONDITIONS: list[type[BaseModel]] = [
+    AppExistsCondition,
+    EnvVarExistsCondition,
+    EnvVarEqualsCondition,
+    HostnameMatchesCondition,
+    OsIsCondition,
+    MachineIdEqualsCondition,
+]
+
+
+def _switch_condition_name(value: object) -> str | None:
+    # A condition is a one-key map, and the key says which it is
+    if isinstance(value, BaseModel):
+        return next(iter(type(value).model_fields))
+    if isinstance(value, dict) and len(value) == 1:
+        return str(next(iter(value)))
+    return None
+
+
+SwitchCondition = Annotated[
+    Annotated[AppExistsCondition, Tag("app_exists")]
+    | Annotated[EnvVarExistsCondition, Tag("env_var_exists")]
+    | Annotated[EnvVarEqualsCondition, Tag("env_var_equals")]
+    | Annotated[HostnameMatchesCondition, Tag("hostname_matches")]
+    | Annotated[OsIsCondition, Tag("os_is")]
+    | Annotated[MachineIdEqualsCondition, Tag("machine_id_equals")],
+    Discriminator(
+        _switch_condition_name,
+        custom_error_type="switch_condition",
+        custom_error_message="A condition is one 'name: value' pair, "
+        "e.g., 'os_is: linux', named one of: "
+        + ", ".join(next(iter(c.model_fields)) for c in _SWITCH_CONDITIONS)
+        + "; list several to require all of them",
+    ),
+]
+
+
+class SwitchOption(BaseModel):
+    """An environment a switch picks, and when."""
+
+    model_config = ConfigDict(extra="forbid")
+    when: Annotated[list[SwitchCondition], Field(min_length=1)] | None = Field(
+        default=None,
+        description="Conditions this machine must all meet for this "
+        "option to be picked. Only the last option may leave it out, to "
+        "be picked when no other is.",
+    )
+    use: str = Field(description="Name of the environment to use.")
+
+
+class SwitchEnvironment(Environment):
+    """One of several environments, picked by the machine Calkit runs on.
+
+    ``switch`` lists the options in order, and the first whose ``when``
+    conditions this machine all meets is picked. The last option can leave
+    out ``when`` to be the default. Each condition is one ``name: value``
+    pair:
+
+    - ``app_exists``: an app on ``PATH``.
+    - ``env_var_exists``: an environmental variable that is set.
+    - ``env_var_equals``: ``NAME=value`` for an environmental variable.
+    - ``hostname_matches``: a glob the hostname matches, ignoring case.
+    - ``os_is``: ``linux``, ``macos`` or ``windows``.
+    - ``machine_id_equals``: this machine's ID, as
+      ``calkit describe system`` shows it.
+
+    A list of values means any one of them. To pick an environment when
+    either of two conditions holds, list it as two options. For example:
+
+    ```yaml
+    cluster:
+      kind: switch
+      switch:
+        - when:
+            - os_is: linux
+            - app_exists: sbatch
+          use: any-slurm
+        - when:
+            - env_var_equals: NERSC_HOST=perlmutter
+          use: perlmutter
+        - when:
+            - hostname_matches: ["*.gps.caltech.edu", "*.hpc.caltech.edu"]
+          use: clima
+        - use: clima-remote
+    ```
+
+    The conditions are checked on the machine Calkit runs on, which is
+    where the pick is made, even when the option picked is another
+    machine.
+
+    The options are either all machines (``system``, ``slurm`` or
+    ``pbs``), so the switch can be the outer half of a composite
+    environment like ``cluster:py``, or all runtimes, e.g., one per
+    operating system. An option can't be another switch, or ``_system``;
+    to pick this machine as it is, define an environment with
+    ``kind: system`` and use that.
+
+    Stages depend on the switch's definition and its options', so editing
+    them reruns those stages, but not on which option was picked, so
+    moving between machines the switch covers doesn't. A stage whose
+    switch picks nothing on this machine can't run here, and is skipped.
+    """
+
+    kind: Literal["switch"] = "switch"
+    switch: list[SwitchOption] = Field(
+        min_length=1,
+        description="Environments to pick from, tried in order.",
+    )
+    lock: list[SystemLockProperty | AppVersionLockProperty] = Field(
+        default=[],
+        description="Properties of the machine the picked environment runs "
+        "on that results depend on, recorded the first time the switch is "
+        "checked, as for a 'system' environment.",
+    )
+    relock: Literal["manual", "auto"] = Field(
+        default="manual",
+        description="What happens on a machine whose locked properties "
+        "differ from the lock. 'manual' keeps the lock, and a stage that "
+        "needs to run there is skipped by 'calkit run', and refused by "
+        "'calkit xenv', until 'calkit update env --lock' is run. "
+        "'auto' rewrites the lock, rerunning the stages that depend on it, "
+        "for results that should follow the machine, e.g., benchmarks.",
+    )
+
+    @field_validator("switch")
+    @classmethod
+    def check_default_is_last(
+        cls, v: list[SwitchOption]
+    ) -> list[SwitchOption]:
+        for option in v[:-1]:
+            if option.when is None:
+                raise ValueError(
+                    f"Option '{option.use}' has no 'when', so it "
+                    "would always be picked; only the last option may "
+                    "leave it out"
+                )
+        return v
 
 
 class Software(BaseModel):
@@ -2069,7 +2146,8 @@ class ProjectInfo(BaseModel):
             | UvEnvironment
             | UvVenvEnvironment
             | NixEnvironment
-            | SystemEnvironment,
+            | SystemEnvironment
+            | SwitchEnvironment,
             Discriminator("kind"),
         ],
     ] = Field(

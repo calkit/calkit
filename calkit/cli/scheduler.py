@@ -9,6 +9,7 @@ Registered as ``scheduler|sch``.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import random
 import re
@@ -821,6 +822,17 @@ def run_batch(
             ),
         ),
     ] = [],
+    setup_file: Annotated[
+        str | None,
+        typer.Option(
+            "--setup-file",
+            help=(
+                "Path to a JSON list of setup commands, used instead of "
+                "--setup, since a path survives cmd.exe and a POSIX shell "
+                "alike, and quoted commands don't."
+            ),
+        ),
+    ] = None,
     log_path: Annotated[
         str | None, typer.Option("--log-path", help="Output log path.")
     ] = None,
@@ -869,16 +881,130 @@ def run_batch(
     iterated stage does not put all of its jobs into a shared cluster's queue
     at once.
     """
+
+    def replace_environment_arg(argv: list[str], env_name: str) -> list[str]:
+        """Return ``argv`` with its ``--environment`` value replaced."""
+        out = list(argv)
+        for i, arg in enumerate(out):
+            if arg in ("--environment", "-e") and i + 1 < len(out):
+                out[i + 1] = env_name
+                return out
+            if arg.startswith("--environment="):
+                out[i] = f"--environment={env_name}"
+                return out
+        return out
+
+    def run_on_system(
+        env_name: str,
+        env: dict,
+        target: str,
+        args: list[str],
+        outs: list[str],
+        setup_cmds: list[str],
+        log_path: str,
+        is_command: bool,
+    ) -> None:
+        """Run a job on a ``system`` env a switch picked, rather than queue it.
+
+        Goes through ``calkit xenv``, which knows how to reach the machine, and
+        writes the log a scheduler would, since the stage declares it.
+        """
+        for out in outs:
+            if os.path.isfile(out):
+                os.remove(out)
+            elif os.path.isdir(out):
+                shutil.rmtree(out)
+        parts = [target] + list(args)
+        if (
+            not is_command
+            and os.path.isfile(target)
+            and not os.access(target, os.X_OK)
+        ):
+            parts = _detect_interpreter(target) + parts
+        cmd = ["calkit", "xenv", "-n", env_name, "--no-check"]
+        for setup_cmd in setup_cmds:
+            cmd += ["--setup", setup_cmd]
+        cmd += ["--", *parts]
+        logs_dir = os.path.dirname(log_path)
+        if logs_dir:
+            os.makedirs(logs_dir, exist_ok=True)
+        with open(log_path, "w") as log_file:
+            p = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            assert p.stdout is not None
+            for line in p.stdout:
+                sys.stdout.write(line)
+                log_file.write(line)
+            returncode = p.wait()
+        if returncode != 0:
+            raise typer.Exit(returncode)
+
     if args is None:
         args = []
+    if setup_file is not None:
+        if setup_cmds:
+            raise_error("Give --setup or --setup-file, not both")
+        try:
+            with open(setup_file) as f:
+                setup_cmds = json.load(f)
+        except (OSError, ValueError) as e:
+            raise_error(
+                f"Could not read setup commands from {setup_file}: {e}"
+            )
     if environment == "_system":
         raise_error(
             "Scheduler batch submission requires a scheduler environment; "
             "got '_system'"
         )
     ck_info = calkit.load_calkit_info()
-    env = ck_info.get("environments", {}).get(environment, {})
+    envs = ck_info.get("environments", {})
+    env = envs.get(environment, {})
     kind = env.get("kind")
+    argv = sys.argv[1:]
+    if kind == calkit.environments.SWITCH_KIND:
+        switch_name = environment
+        try:
+            if not calkit.environments.switch_is_outer(switch_name, envs):
+                raise ValueError(
+                    f"Switch environment '{switch_name}' picks runtimes, "
+                    "not machines to run a job on"
+                )
+            picked = calkit.environments.resolve_switch(switch_name, envs)
+        except ValueError as e:
+            raise_error(str(e))
+        if picked is None:
+            raise_error(
+                calkit.environments.describe_switch_no_match(switch_name, env)
+            )
+        _gate_switch_machine_lock(switch_name, env, picked, envs, ck_info)
+        typer.echo(f"Environment '{switch_name}' picks '{picked}' here")
+        environment, env = picked, envs[picked]
+        kind = env.get("kind")
+        # Resolved once, here, so a far end re-running this doesn't pick
+        # again from where it sits
+        argv = replace_environment_arg(argv, picked)
+    if kind == "system":
+        run_on_system(
+            env_name=environment,
+            env=env,
+            target=target,
+            args=args,
+            outs=outs,
+            setup_cmds=calkit.environments.merge_setup_commands(
+                env.get("default_setup"), setup_cmds, env_default_setup
+            ),
+            log_path=log_path or os.path.join(LOGS_DIR, f"{name}.out"),
+            is_command=(
+                is_command
+                if is_command is not None
+                else not os.path.isfile(target)
+            ),
+        )
+        return
     if kind not in SCHEDULER_KINDS:
         raise_error(
             f"Environment '{environment}' is not a scheduler environment "
@@ -907,7 +1033,9 @@ def run_batch(
             # Re-run this same invocation over there. It terminates rather
             # than bouncing onward, since on the cluster the env's host is
             # local and this branch isn't taken.
-            remote_command = "calkit " + shlex.join(sys.argv[1:])
+            remote_command = "calkit " + shlex.join(
+                calkit.environments.check_inner_env_there(argv)
+            )
             workspace.run_in_workspace(
                 workspace=ws,
                 command=remote_command,
@@ -1156,6 +1284,34 @@ def run_batch(
     typer.echo("Waiting for job to finish")
     exit_code = _wait_until_done(kind, job_id, name)
     _finalize_job(name, job_id, exit_code, log_path)
+
+
+def _gate_switch_machine_lock(
+    switch_name: str, env: dict, picked: str, envs: dict, ck_info: dict
+) -> None:
+    """Refuse to run where a switch's locked machine properties differ."""
+    if not env.get("lock"):
+        return
+    machine_env = calkit.environments.switch_machine_lock_env(env)
+    try:
+        system_info = calkit.environments.picked_machine_info(
+            picked, envs[picked], ck_info, lock=env.get("lock")
+        )
+        # Writes only a first lock, or a new one with 'relock: auto'
+        calkit.environments.write_system_env_lock(
+            env_name=switch_name, env=machine_env, system_info=system_info
+        )
+        mismatch = calkit.environments.system_env_lock_mismatch(
+            env_name=switch_name, env=machine_env, system_info=system_info
+        )
+    except ValueError as e:
+        raise_error(f"Environment '{switch_name}': {e}")
+    if mismatch:
+        raise_error(
+            calkit.environments.describe_system_env_lock_mismatch(
+                switch_name, mismatch
+            )
+        )
 
 
 def _detect_interpreter(target: str) -> list[str]:

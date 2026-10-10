@@ -128,7 +128,8 @@ requirements:
 
 `cpu-count` and `memory-gb` take `min` and/or `max`.
 Everything else takes `equals`---matched case-insensitively, and a list
-means any one of them will do---or a `version_spec` for properties that
+means any one of them will do---`matches`, a glob like `*.cluster.edu`
+that is matched the same way, or a `version_spec` for properties that
 are versions.
 The properties available are the machine-describing ones from the table
 in [environments](environments.md#system);
@@ -145,6 +146,61 @@ Checking these means reading the machine, which is what
 `calkit describe system` reports.
 A property the machine doesn't report is an error rather than a silent
 pass---an unanswerable question isn't a satisfied one.
+
+## Requirements of a stage or an environment
+
+Requirements in the project's `requirements` section apply to the whole
+project, so a machine that doesn't meet them can't run anything.
+A requirement that only some stages have can go on those stages, or on
+an environment that describes a machine, i.e., a `system`, `slurm` or
+`pbs` environment, which applies it to every stage using that
+environment.
+Other environments, e.g., `conda` or `uv-venv`, describe what's
+installed rather than the machine, so they can't have requirements;
+pair one with a machine instead, as in `cluster:py`:
+
+```yaml
+environments:
+  ml:
+    kind: system
+    requirements:
+      - matlab
+  cluster:
+    kind: system
+    requirements:
+      - kind: hostname
+        matches: "*.cluster.edu"
+  py:
+    kind: uv-venv
+    path: requirements.txt
+pipeline:
+  stages:
+    fetch:
+      kind: python-script
+      script_path: scripts/fetch.py
+      environment: cluster:py
+      requirements:
+        - kind: env-var
+          name: DATA_TOKEN
+```
+
+On a machine where a stage's requirements, or its environments', aren't
+met, `calkit run` skips that stage rather than failing.
+The same goes for a stage whose `switch` environment picks nothing
+there, or whose `system` environment is locked to another machine.
+Its outputs are kept, so stages that use them still run.
+It stays out of date in `calkit status`, which says why it can't run
+there, and the run ends by listing the out-of-date stages it skipped.
+Requirements of an environment on another machine, e.g., a `system`
+environment with a `host`, are checked on that machine.
+
+Some skips still fail the run, after the stages that can run have run:
+
+- One of the stages named on the command line, e.g.,
+  `calkit run fetch`, is out of date and can't run.
+- A stage is out of date and can't run because something is wrong
+  rather than because the project says so, e.g., its machine can't be
+  reached.
 
 ## Pinning the Calkit CLI version
 

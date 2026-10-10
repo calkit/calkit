@@ -851,12 +851,26 @@ def check_property_requirement(
         return
     equals = req.get("equals")
     spec = req.get("version_spec")
-    if equals is None and spec is None:
+    patterns = req.get("matches")
+    if equals is None and spec is None and patterns is None:
         raise ValueError(
-            f"Requirement on '{prop}' needs an 'equals' or a 'version_spec'; "
-            "to depend on its value rather than constrain it, add it to the "
-            "environment's 'lock'"
+            f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
+            "'version_spec'; to depend on its value rather than constrain "
+            "it, add it to the environment's 'lock'"
         )
+    if patterns is not None:
+        import fnmatch
+
+        globs = [patterns] if isinstance(patterns, str) else list(patterns)
+        if not any(
+            fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
+            for g in globs
+        ):
+            wanted = " or ".join(f"'{g}'" for g in globs)
+            raise ValueError(
+                f"{described_as} has {prop} '{value}', which doesn't match "
+                f"{wanted}"
+            )
     if equals is not None:
         allowed = [equals] if isinstance(equals, str) else list(equals)
         # Matched case-insensitively because the same machine is 'Darwin'
@@ -961,6 +975,68 @@ def check_app_version(
             f"app '{name}' is version {found} on {described_as}, but "
             f"'{spec_str}' is required"
         )
+
+
+def get_version_checked_app_names(
+    ck_info: dict, stage_names: list[str] | set[str] | None = None
+) -> list[str]:
+    """The apps a requirement checked here gives a version spec for.
+
+    Only these are worth asking for a version up front, since some apps,
+    e.g., MATLAB, take seconds to say. That's the project's requirements
+    and those of the stages in ``stage_names``, or all stages, and their
+    environments, except for stages run on another machine, whose
+    requirements are checked there.
+    """
+    from calkit.environments import (
+        COMPOSITE_ENV_SEP,
+        SWITCH_KIND,
+        env_is_local,
+        host_is_local,
+    )
+
+    envs = ck_info.get("environments") or {}
+
+    def is_remote(env: dict) -> bool:
+        if env.get("kind") == "system":
+            return not env_is_local({"host": "localhost", **env})
+        if env.get("kind") in ("slurm", "pbs"):
+            return not host_is_local(env.get("host") or "localhost")
+        return False
+
+    reqs = list(get_requirements(ck_info))
+    stages = (ck_info.get("pipeline") or {}).get("stages", {})
+    for name, stage in stages.items():
+        if stage_names is not None and name not in stage_names:
+            continue
+        env_names = str(stage.get("environment") or "_system").split(
+            COMPOSITE_ENV_SEP
+        )
+        stage_envs = [envs.get(n) or {} for n in env_names]
+        if any(is_remote(env) for env in stage_envs):
+            continue
+        # A switch may pick any of its options here that are local
+        for env in list(stage_envs):
+            if env.get("kind") == SWITCH_KIND:
+                options = [
+                    envs.get(o.get("use")) or {}
+                    for o in env.get("switch") or []
+                    if isinstance(o, dict)
+                ]
+                stage_envs += [o for o in options if not is_remote(o)]
+        reqs += stage.get("requirements") or []
+        for env in stage_envs:
+            reqs += env.get("requirements") or []
+    names = []
+    for raw in reqs:
+        req = _normalize_requirement(raw)
+        if (
+            req["kind"] == "app"
+            and req["name"] != "calkit"
+            and req.get("version_spec")
+        ):
+            names.append(req["name"])
+    return list(dict.fromkeys(names))
 
 
 def check_requirements(
@@ -1371,10 +1447,20 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
 
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
-    try:
+    # MATLAB has no '--version', and starts in full if passed one
+    if dep_name == "matlab":
+        cmd = [dep_name, "-batch", "disp(version)"]
+    else:
         cmd = [dep_name, "--version"]
+    try:
+        # Without stdin, a tool that ignores the flag can't wait on a prompt
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            stdin=subprocess.DEVNULL,
+            timeout=120,
         )
         return result.stdout.strip()
     except Exception:
@@ -1508,13 +1594,16 @@ def get_machine_id() -> str | None:
     return _read_platform_machine_id()
 
 
-def get_system_info() -> dict:
-    """Get information about the system on which we're currently running."""
+def get_machine_properties() -> dict:
+    """The properties of this machine that are cheap to read.
+
+    Everything in ``get_system_info`` except what it has to run a program
+    for, e.g., tool versions.
+    """
     import psutil
 
-    os_name = platform.system()
-    system_info = {
-        "os": os_name,
+    return {
+        "os": platform.system(),
         "os_version": platform.release(),
         "python_version": platform.python_version(),
         "calkit_version": calkit.__version__,
@@ -1529,6 +1618,30 @@ def get_system_info() -> dict:
         "memory_gb": psutil.virtual_memory().total / (1024**3),
         "cpu_count": os.cpu_count(),
     }
+
+
+# Apps whose versions 'calkit describe system' reports on every OS
+ALWAYS_REPORTED_APPS = (
+    "git",
+    "docker",
+    "conda",
+    "mamba",
+    "uv",
+    "pixi",
+    "Rscript",
+    "juliaup",
+    "julia",
+)
+
+
+def get_system_info(apps: list[str] | None = None) -> dict:
+    """Get information about the system on which we're currently running.
+
+    ``apps`` are reported with a version each, beyond the ones always
+    reported, e.g., the apps a project's requirements name.
+    """
+    system_info = get_machine_properties()
+    os_name = system_info["os"]
     node_id = uuid.getnode()
     # The multicast bit is the 40th bit from the right (0-indexed)
     # This corresponds to the least significant bit of the first octet
@@ -1545,17 +1658,7 @@ def get_system_info() -> dict:
     except Exception:
         pass
     # Get versions of important foundational dependencies
-    for dep in [
-        "git",
-        "docker",
-        "conda",
-        "mamba",
-        "uv",
-        "pixi",
-        "Rscript",
-        "juliaup",
-        "julia",
-    ]:
+    for dep in ALWAYS_REPORTED_APPS:
         system_info[f"{dep}_version"] = get_dep_version(dep)
     # OS-specific app versions
     if os_name == "Darwin":
@@ -1567,6 +1670,9 @@ def get_system_info() -> dict:
     elif os_name == "Windows":
         for dep in ["choco", "winget"]:
             system_info[f"{dep}_version"] = get_dep_version(dep)
+    for app in apps or []:
+        if f"{app}_version" not in system_info:
+            system_info[f"{app}_version"] = get_dep_version(app)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info

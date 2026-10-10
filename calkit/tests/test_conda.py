@@ -1,6 +1,7 @@
 """Tests for the ``conda`` module."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from calkit.conda import (
     _unparseable_version_satisfies,
     check_env,
     find_conda_exe,
+    write_cross_platform_locks,
 )
 
 ENV_NAME = "main"
@@ -202,6 +204,273 @@ def conda_env_name():
     yield name
     # Teardown code
     delete_env(name)
+
+
+@pytest.mark.xdist_group("conda")
+@skipif_windows_conda
+def test_check_env_locks_every_platform(tmp_dir, conda_env_name):
+    import calkit.environments as envs
+
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "-n",
+            ENV_NAME,
+            "--no-check",
+            "python=3.12",
+            "six",
+            "--pip",
+            "iniconfig",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
+    lock_dir = os.path.join(".calkit", "env-locks", ENV_NAME)
+    here = envs._conda_venv_platform()
+    lock_fpath = os.path.join(lock_dir, here + ".yml")
+
+    def spec_is_recorded() -> bool:
+        return envs.read_env_spec_hash(lock_fpath) == envs.env_spec_hash(
+            "environment.yml"
+        )
+
+    def read(fpath: str) -> str:
+        with open(fpath) as f:
+            return f.read()
+
+    assert spec_is_recorded()
+    # Other platforms are solved up front with the versions installed here,
+    # so moving to one doesn't add a lock and invalidate every stage
+    others = [f for f in os.listdir(lock_dir) if f != here + ".yml"]
+    assert others
+    with open(lock_fpath) as f:
+        six = [d for d in calkit.ryaml.load(f)["dependencies"] if "six=" in d]
+    for fname in others:
+        text = read(os.path.join(lock_dir, fname))
+        assert "iniconfig==" in text
+        assert six[0].rsplit("=", 1)[0] + "=" in text
+    # A machine without the env creates it from the lock, and leaves the
+    # lock as it was, without solving for other platforms again
+    before = read(lock_fpath)
+    sibling = os.path.join(lock_dir, others[0])
+    os.remove(sibling)
+    delete_env(conda_env_name)
+    subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
+    assert read(lock_fpath) == before
+    assert not os.path.isfile(sibling)
+    # A lock that matches but has no record, e.g., from before records were
+    # kept, is adopted as is
+    os.remove(envs.ENV_SPEC_HASHES_FPATH)
+    subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
+    assert spec_is_recorded()
+    assert read(lock_fpath) == before
+    assert not os.path.isfile(sibling)
+    # A relock made on another machine is followed, from the lock
+    with open(lock_fpath, "w") as f:
+        f.write(re.sub(r"- six=[^\n]*", "- six=1.16.0", before))
+    subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
+    subprocess.check_call(
+        [
+            "conda",
+            "run",
+            "-n",
+            conda_env_name,
+            "python",
+            "-c",
+            "import six; assert six.__version__ == '1.16.0'",
+        ]
+    )
+    assert "- six=1.16.0\n" in read(lock_fpath)
+    # A changed spec is resolved again everywhere, and a machine without the
+    # env creates it from the spec rather than the outdated lock
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "--overwrite",
+            "-n",
+            ENV_NAME,
+            "--no-check",
+            "python=3.12",
+            "six",
+            "--pip",
+            "iniconfig",
+            "--pip",
+            "idna",
+        ]
+    )
+    delete_env(conda_env_name)
+    subprocess.check_call(["calkit", "check", "env", "-n", ENV_NAME])
+    subprocess.check_call(
+        ["conda", "run", "-n", conda_env_name, "python", "-c", "import idna"]
+    )
+    assert spec_is_recorded()
+    assert os.path.isfile(sibling)
+    for fname in os.listdir(lock_dir):
+        assert "idna" in read(os.path.join(lock_dir, fname))
+
+
+def test_write_cross_platform_locks(tmp_path, monkeypatch):
+    import json
+    import types
+
+    import calkit.environments as envs
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(envs, "_conda_venv_platform", lambda: "linux-64")
+    monkeypatch.setattr(
+        envs, "CONDA_VENV_ARCHS", ["linux-64", "osx-arm64", "win-64"]
+    )
+    monkeypatch.setattr(calkit.conda.shutil, "which", lambda name: "uv")
+    for var in ("CONDA_OVERRIDE_OSX", "CONDA_OVERRIDE_GLIBC"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("CONDA_PINNED_PACKAGES", raising=False)
+    solves: dict[str, tuple[list, dict]] = {}
+    compiles: list[tuple[list[str], list[str] | None]] = []
+    failing: set[str] = set()
+    failing_pinned: set[str] = set()
+
+    def fake_run(
+        cmd: list[str], capture_output: bool, text: bool, env: dict
+    ) -> types.SimpleNamespace:
+        arch = env["CONDA_SUBDIR"]
+        solves[arch] = (cmd, env)
+        if arch in failing or (
+            arch in failing_pinned and "CONDA_PINNED_PACKAGES" in env
+        ):
+            return types.SimpleNamespace(stdout='{"error": "unsolvable"}')
+        links = [
+            {"name": "python", "version": "3.12.11", "build_string": "h_0"},
+            {"name": "six", "version": "1.17.0", "build_string": "pyh_0"},
+            {"name": "numpy", "version": "2.3.0", "build_string": "py_0"},
+        ]
+        return types.SimpleNamespace(
+            stdout=json.dumps({"actions": {"LINK": links}})
+        )
+
+    def fake_compile(
+        pip_deps: list[str],
+        target: str,
+        python: str | None,
+        constraints: list[str] | None = None,
+    ) -> list[str]:
+        compiles.append((pip_deps, constraints))
+        return ["iniconfig==2.1.0", "NumPy==2.3.0"]
+
+    monkeypatch.setattr(calkit.conda.subprocess, "run", fake_run)
+    monkeypatch.setattr(calkit.conda, "_compile_pip_deps", fake_compile)
+
+    def write_spec(pip_deps: list[str]) -> None:
+        spec = {
+            "name": "main",
+            "channels": ["conda-forge"],
+            "dependencies": ["python=3.12", "six", "numpy", {"pip": pip_deps}],
+        }
+        with open("environment.yml", "w") as f:
+            calkit.ryaml.dump(spec, f)
+
+    def write_local(pip_locked: list[str]) -> None:
+        local = {
+            "name": "main",
+            "channels": ["conda-forge"],
+            "dependencies": [
+                "python=3.12.11=h_0",
+                "six=1.17.0=pyh_0",
+                "numpy=2.3.0=py_0",
+                "libzlib=1.3.1=h_0",
+                {"pip": pip_locked},
+            ],
+        }
+        with open(os.path.join("locks", "linux-64.yml"), "w") as f:
+            calkit.ryaml.dump(local, f)
+
+    def read(fpath: str) -> str:
+        with open(fpath) as f:
+            return f.read()
+
+    def locks(relock: bool = True) -> list[str]:
+        return write_cross_platform_locks(
+            env_fpath="environment.yml",
+            lock_fpath=os.path.join("locks", "linux-64.yml"),
+            conda_exe="conda",
+            log_func=print,
+            relock=relock,
+        )
+
+    os.makedirs("locks")
+    write_spec(["iniconfig"])
+    write_local(["iniconfig==2.1.0", "packaging==25.0"])
+    osx = os.path.join("locks", "osx-arm64.yml")
+    win = os.path.join("locks", "win-64.yml")
+    with open(osx, "w") as f:
+        f.write("name: main\ndependencies: [python=3.12.10=hosx_0]\n")
+    # Relocking solves every other platform, an existing lock included
+    assert locks() == [osx, win]
+    assert "hosx_0" not in read(osx)
+    assert solves["osx-arm64"][1]["CONDA_OVERRIDE_OSX"] == "11.0"
+    # Direct dependencies are pinned to the versions installed here, and
+    # every other package is held to them where the solve needs it
+    cmd, env = solves["win-64"]
+    assert cmd[-3:] == ["python==3.12.11", "six==1.17.0", "numpy==2.3.0"]
+    assert "libzlib==1.3.1" in env["CONDA_PINNED_PACKAGES"].split("&")
+    assert "CONDA_OVERRIDE_OSX" not in env
+    assert "CONDA_OVERRIDE_GLIBC" not in env
+    assert compiles[-1] == (
+        ["iniconfig==2.1.0"],
+        ["iniconfig==2.1.0", "packaging==25.0"],
+    )
+    # The lock leaves to conda what conda installs
+    with open(win) as f:
+        lock = calkit.ryaml.load(f)
+    assert lock["name"] == "main"
+    assert "six=1.17.0=pyh_0" in lock["dependencies"]
+    assert lock["dependencies"][-1] == {"pip": ["iniconfig==2.1.0"]}
+    # Without relocking, only missing platforms are solved
+    solves.clear()
+    assert locks(relock=False) == []
+    assert solves == {}
+    os.remove(win)
+    assert locks(relock=False) == [win]
+    assert list(solves) == ["win-64"]
+    # A platform without some version locked here is solved without them
+    failing_pinned.add("win-64")
+    assert locks() == [osx, win]
+    assert "CONDA_PINNED_PACKAGES" not in solves["win-64"][1]
+    failing_pinned.clear()
+    # Relocking removes a lock that can't be solved again, since it's stale,
+    # but otherwise a missing one is left for its own machine
+    failing.add("win-64")
+    assert locks() == [osx]
+    assert not os.path.isfile(win)
+    assert locks(relock=False) == []
+    failing.clear()
+    # A git dependency is pinned to the commit locked here, but an editable
+    # one names a path on this machine
+    git_dep = "pyxdsm @ git+https://github.com/x/pyXDSM.git@fc0b49b"
+    locked_git = git_dep.replace("fc0b49b", "fc0b49b31552f3ed")
+    write_local(["iniconfig==2.1.0", locked_git])
+    write_spec(["iniconfig", git_dep])
+    assert locks() == [osx, win]
+    assert compiles[-1][0] == ["iniconfig==2.1.0", locked_git]
+    for local in ("-e ./pkg", "./pkg", "pkg @ file:///x", "-r more.txt"):
+        assert locks() == [osx, win]
+        write_spec(["iniconfig", local])
+        assert locks() == []
+        assert not os.path.isfile(osx) and not os.path.isfile(win)
+        write_spec(["iniconfig"])
+    # Solving on the same OS assumes nothing about its virtual packages
+    write_spec(["iniconfig"])
+    monkeypatch.setattr(
+        envs, "CONDA_VENV_ARCHS", ["linux-64", "linux-aarch64"]
+    )
+    assert locks() == [os.path.join("locks", "linux-aarch64.yml")]
+    assert "CONDA_OVERRIDE_GLIBC" not in solves["linux-aarch64"][1]
+    # Only a per-platform lock has siblings
+    monkeypatch.setattr(envs, "_conda_venv_platform", lambda: "osx-64")
+    assert locks() == []
 
 
 @pytest.mark.xdist_group("conda")
@@ -563,6 +832,32 @@ fallback_version = "0+unknown"
     res = check_env(relaxed=True)
     assert res.env_exists
     assert not res.env_needs_rebuild
+    # A local package that isn't editable is locked as its path rather than
+    # its version, so the env can be created from the lock anywhere
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "--overwrite",
+            "-n",
+            ENV_NAME,
+            "--no-check",
+            "python=3.12",
+            "pip",
+            "six",
+            "--pip",
+            ".",
+        ]
+    )
+    check_env(lock_fpath="lock.yml", relaxed=True)
+    with open("lock.yml") as f:
+        pip_deps = calkit.ryaml.load(f)["dependencies"][-1]["pip"]
+    assert "." in pip_deps
+    assert not [d for d in pip_deps if d.startswith("src-thing")]
+    delete_env(conda_env_name)
+    res = check_env(lock_fpath="lock.yml", relaxed=True)
+    assert not res.env_exists
 
 
 def test_find_conda_exe():

@@ -229,6 +229,11 @@ def test_check_property_requirement():
     check({"kind": "os", "equals": ["Darwin", "Linux"]}, info)
     with pytest.raises(ValueError, match="'Darwin' is required"):
         check({"kind": "os", "equals": "Darwin"}, info)
+    # Globs match case-insensitively too, and a list means any of them
+    check({"kind": "os", "matches": "lin*"}, info)
+    check({"kind": "os", "matches": ["darwin", "L?nux"]}, info)
+    with pytest.raises(ValueError, match="doesn't match 'win\\*'"):
+        check({"kind": "os", "matches": "win*"}, info)
     # Versions compare as versions rather than as strings
     check({"kind": "python-version", "version_spec": ">=3.11"}, info)
     with pytest.raises(ValueError, match=">=3.13"):
@@ -283,6 +288,25 @@ def test_check_app_version():
     # A version a system description doesn't carry is still read from the
     # machine, unless the machine in question isn't this one
     check_app_version("git", ">=1", system_info={})
+    # Probes get no stdin and a timeout, and MATLAB is asked its own way
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if cmd[0] == "hangs":
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="25.1.0.2943329 (R2025a)\n"
+        )
+
+    with mock.patch("calkit.core.subprocess.run", fake_run):
+        assert calkit.get_dep_version("matlab") == "25.1.0.2943329 (R2025a)"
+        assert calkit.get_dep_version("hangs") is None
+        check_app_version("matlab", ">=25", system_info={})
+    assert calls[0][0] == ["matlab", "-batch", "disp(version)"]
+    assert calls[1][0] == ["hangs", "--version"]
+    assert all(kw["stdin"] is subprocess.DEVNULL for _, kw in calls)
+    assert all(kw["timeout"] for _, kw in calls)
 
 
 def test_check_dep_exists_conda_off_path(monkeypatch):
@@ -439,3 +463,64 @@ def test_update_readme_content():
     )
     assert calkit.update_readme_content("", "T", "D.") == "# T\n\nD.\n"
     assert calkit.update_readme_content("", "T", None) == "# T\n"
+
+
+def test_get_version_checked_app_names():
+    ck_info = {
+        "requirements": ["git", "calkit>=0.1", {"jq": {"version_spec": ">1"}}],
+        "environments": {
+            "ml": {"kind": "system", "requirements": ["matlab>=24"]},
+            "far": {
+                "kind": "system",
+                "host": "calkit-test.invalid",
+                "requirements": ["julia>=1.10"],
+            },
+            "py": {"kind": "uv-venv", "path": "r.txt"},
+            "pick": {
+                "kind": "switch",
+                "switch": [
+                    {"when": [{"os_is": "linux"}], "use": "far"},
+                    {"use": "ml"},
+                ],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "requirements": [
+                        "ffmpeg>=6",
+                        {"kind": "env-var", "name": "TOKEN"},
+                    ],
+                },
+                "m": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "ml:py",
+                },
+                "remote": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "far:py",
+                    "requirements": ["pandoc>=3"],
+                },
+                "switched": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "pick",
+                },
+            }
+        },
+    }
+    # Apps only required to exist aren't asked their version, and nor are
+    # those checked on another machine, including a switch's remote option
+    assert calkit.get_version_checked_app_names(ck_info) == [
+        "jq",
+        "ffmpeg",
+        "matlab",
+    ]
+    # Nor those of stages the run doesn't reach
+    assert calkit.get_version_checked_app_names(
+        ck_info, stage_names={"s"}
+    ) == ["jq", "ffmpeg"]

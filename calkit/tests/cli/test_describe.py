@@ -16,6 +16,23 @@ def test_describe_system():
     out = subprocess.check_output(["calkit", "describe", "system"], text=True)
     assert not out.startswith("{")
     assert f"calkit_version: {calkit.__version__}" in out
+    # Apps beyond the ones always reported can be asked about
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "describe",
+            "system",
+            "--json",
+            "--app",
+            "calkit",
+            "--app",
+            "calkit-test-no-such-app",
+        ],
+        text=True,
+    )
+    info = json.loads(out)
+    assert info["calkit_version"]
+    assert info["calkit-test-no-such-app_version"] is None
 
 
 def test_describe_environments(tmp_dir):

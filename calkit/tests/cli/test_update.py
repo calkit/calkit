@@ -672,3 +672,89 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
     assert remote_names[-1] == "acme-lab/widget"
     assert calkit.load_calkit_info()["owner"] == "acme-lab"
+
+
+def test_update_env_lock(tmp_dir, monkeypatch):
+    import calkit.environments as envs
+    import calkit.workspace
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "bench": {"kind": "system", "lock": ["os", "cpu-count"]},
+        "far": {
+            "kind": "system",
+            "host": "bigbox.invalid",
+            "wdir": "/work",
+            "lock": ["os", "cpu-count"],
+        },
+        "plain": {"kind": "system"},
+        "pick": {
+            "kind": "switch",
+            "switch": [{"use": "plain"}],
+            "lock": ["os"],
+        },
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = ck_info["environments"]["bench"]
+    lock_fpath = os.path.join(".calkit", "env-locks", "bench", "info.json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    locked = envs.read_system_env_lock(env_name="bench", env=env)
+    assert locked == envs.get_system_lock_data(["os", "cpu-count"])
+    # Running it again changes nothing, and says so
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "already locked" in result.output
+    # A lock from another machine is replaced, and the change reported
+    with open(lock_fpath, "w") as f:
+        json.dump({"os": "SomeOtherOS", "cpu-count": 1}, f)
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "SomeOtherOS" in result.output
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])
+    # A remote env is locked to the far end, not this machine
+    monkeypatch.setattr(
+        calkit.workspace,
+        "remote_system_info",
+        lambda ws, apps=None: {"os": "FarOS", "cpu_count": 128},
+    )
+    result = runner.invoke(update_app, ["env", "-n", "far", "--lock"])
+    assert result.exit_code == 0, result.output
+    assert "bigbox.invalid" in result.output
+    assert envs.read_system_env_lock(
+        env_name="far", env=ck_info["environments"]["far"]
+    ) == {"os": "FarOS", "cpu-count": 128}
+    # A switch is locked to the machine its pick runs on
+    result = runner.invoke(update_app, ["env", "-n", "pick", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(os.path.join(".calkit", "env-locks", "pick", "info.json")) as f:
+        assert json.load(f) == envs.get_system_lock_data(["os"])
+    # Nothing to relock without machine properties or a machine
+    result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(
+        update_app, ["env", "-n", "bench", "--lock", "--add", "numpy"]
+    )
+    assert result.exit_code != 0
+    assert "not both" in result.output
+    # An unreadable lock doesn't stop a relock
+    with open(lock_fpath, "w") as f:
+        f.write("{not json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])

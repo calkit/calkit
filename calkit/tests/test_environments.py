@@ -84,6 +84,67 @@ def test_check_all_in_pipeline(tmp_dir):
     print(res)
     assert res["py1"]["success"]
     assert res["py1"]["cached"]
+    # Editing an input's contents, not just its path, invalidates the cache
+    with open("local.txt", "w") as f:
+        f.write("one\n")
+    ck_info["environments"]["py1"]["inputs"] = ["local.txt"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert not calkit.environments.check_all_in_pipeline()["py1"].get("cached")
+    assert calkit.environments.check_all_in_pipeline()["py1"]["cached"]
+    with open("local.txt", "w") as f:
+        f.write("two\n")
+    assert not calkit.environments.check_all_in_pipeline()["py1"].get("cached")
+    # An inner env runs where its outer env does, so one behind another
+    # machine isn't checked here; nor are the envs of stages that are
+    # skipped, and an undefined env is a failure rather than a crash
+    ck_info["environments"]["far"] = {
+        "kind": "system",
+        "host": "calkit-test.invalid",
+    }
+    ck_info["environments"]["py2"] = {
+        "kind": "uv-venv",
+        "path": "requirements.txt",
+        "prefix": ".venv2",
+    }
+    stages = ck_info["pipeline"]["stages"]
+    stages["remote"] = {
+        "kind": "python-script",
+        "script_path": "s.py",
+        "environment": "far:py2",
+    }
+    stages["skipped"] = {
+        "kind": "python-script",
+        "script_path": "s.py",
+        "environment": "py2",
+    }
+    stages["typo"] = {
+        "kind": "python-script",
+        "script_path": "s.py",
+        "environment": "nope",
+    }
+    # A notebook stage runs here in its inner env whatever its outer one
+    ck_info["environments"]["py3"] = dict(
+        ck_info["environments"]["py2"], prefix=".venv3"
+    )
+    stages["nb"] = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "nb.ipynb",
+        "environment": "far:py3",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = calkit.environments.check_all_in_pipeline(skip_stages=["skipped"])
+    assert set(res) == {"py1", "far", "nope", "py3"}
+    assert not res["nope"]["success"]
+    assert not os.path.isdir(".venv2")
+    assert calkit.environments.check_inner_env_there(
+        ["calkit", "xenv", "-n", "py2", "--no-check", "--", "a", "--no-check"]
+    ) == ["calkit", "xenv", "-n", "py2", "--", "a", "--no-check"]
+    assert calkit.environments.check_inner_env_there(["echo", "hi"]) == [
+        "echo",
+        "hi",
+    ]
 
 
 def test_cache_uses_dir_signature_for_conda_prefix(tmp_dir, monkeypatch):
@@ -1564,6 +1625,121 @@ def test_system_lock_can_describe_another_machine(tmp_dir):
         assert json.load(f) == {"cpu-count": 64}
 
 
+def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
+    import calkit.environments as envs
+
+    env = {"kind": "system", "lock": ["cpu-count", "os"]}
+    lock_fpath = envs.write_system_env_lock(env_name="bench", env=env)
+    assert lock_fpath is not None
+    with open(lock_fpath) as f:
+        locked = json.load(f)
+    # A machine that disagrees keeps the lock and reports the mismatch
+    elsewhere = {
+        "cpu_count": locked["cpu-count"] + 1,
+        "os": "SomeOtherOS",
+    }
+    envs.write_system_env_lock(
+        env_name="bench", env=env, system_info=elsewhere
+    )
+    with open(lock_fpath) as f:
+        assert json.load(f) == locked
+    mismatch = envs.system_env_lock_mismatch(
+        env_name="bench", env=env, system_info=elsewhere
+    )
+    assert set(mismatch) == {"cpu-count", "os"}
+    assert mismatch["os"] == {
+        "locked": locked["os"],
+        "actual": "SomeOtherOS",
+    }
+    described = envs.describe_system_env_lock_mismatch("bench", mismatch)
+    assert "calkit update env -n bench --lock" in described
+    assert "SomeOtherOS" in described
+    # Only relocking moves the recorded properties
+    envs.write_system_env_lock(
+        env_name="bench", env=env, system_info=elsewhere, relock=True
+    )
+    with open(lock_fpath) as f:
+        assert json.load(f) == {
+            "cpu-count": elsewhere["cpu_count"],
+            "os": "SomeOtherOS",
+        }
+    assert not envs.system_env_lock_mismatch(
+        env_name="bench", env=env, system_info=elsewhere
+    )
+    # No lock yet is not a mismatch
+    assert not envs.system_env_lock_mismatch(env_name="never-locked", env=env)
+    # An unreadable lock is an error rather than treated as missing
+    with open(lock_fpath, "w") as f:
+        f.write("{not json")
+    with pytest.raises(ValueError, match="cannot be read"):
+        envs.read_system_env_lock(env_name="bench", env=env)
+    with pytest.raises(ValueError, match="cannot be read"):
+        envs.write_system_env_lock(env_name="bench", env=env)
+    with open(lock_fpath, "w") as f:
+        f.write("[1, 2]")
+    with pytest.raises(ValueError, match="does not contain an object"):
+        envs.system_env_lock_mismatch(env_name="bench", env=env)
+    # Relocking doesn't read the broken file
+    envs.write_system_env_lock(env_name="bench", env=env, relock=True)
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["cpu-count", "os"])
+    # With 'relock: auto' the lock follows the machine instead
+    auto = env | {"relock": "auto"}
+    envs.write_system_env_lock(
+        env_name="bench", env=auto, system_info=elsewhere
+    )
+    assert envs.read_system_env_lock(env_name="bench", env=auto) == {
+        "cpu-count": elsewhere["cpu_count"],
+        "os": "SomeOtherOS",
+    }
+    assert (
+        envs.switch_machine_lock_env({"lock": ["os"], "relock": "auto"})[
+            "relock"
+        ]
+        == "auto"
+    )
+
+
+def test_lock_any_app_version(tmp_dir):
+    import calkit.environments as envs
+
+    assert envs.lock_app_names(["os", "git-version", "jq-version"]) == ["jq"]
+    # Any app's version can be locked, read from the machine like the rest
+    data = envs.get_system_lock_data(
+        ["jq-version"], system_info={"jq_version": "jq-1.7.1"}
+    )
+    assert data == {"jq-version": "jq-1.7.1"}
+    data = envs.get_system_lock_data(["calkit-version"])
+    assert data["calkit-version"]
+    with pytest.raises(ValueError, match="not available"):
+        envs.get_system_lock_data(["calkit-test-no-such-app-version"])
+    with pytest.raises(ValueError, match="'<app>-version' for any app"):
+        envs.get_system_lock_data(["bogus"])
+
+
+def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):
+    import calkit.environments as envs
+
+    # The shell is a project setting, so changing it still updates the lock
+    env = {"kind": "system", "lock": ["os"], "shell": "zsh"}
+    lock_fpath = envs.write_system_env_lock(env_name="shell", env=env)
+    assert lock_fpath is not None
+    with open(lock_fpath) as f:
+        assert json.load(f)["shell"] == "zsh"
+    env["shell"] = "fish"
+    envs.write_system_env_lock(env_name="shell", env=env)
+    with open(lock_fpath) as f:
+        data = json.load(f)
+    assert data["shell"] == "fish"
+    # A property newly added to 'lock' is read from this machine
+    env["lock"] = ["os", "cpu-count"]
+    envs.write_system_env_lock(env_name="shell", env=env)
+    with open(lock_fpath) as f:
+        data = json.load(f)
+    assert data["cpu-count"] == calkit.get_system_info()["cpu_count"]
+
+
 def test_system_env_checks_are_not_cached():
     import calkit.environments as envs
 
@@ -1641,3 +1817,386 @@ def test_env_inputs_must_be_inside_the_project():
     assert envs.get_env_input_paths(
         {"kind": "docker", "inputs": ["../outside.C"]}
     ) == ["../outside.C"]
+
+
+def test_env_spec_hashes(tmp_dir):
+    import json
+
+    import calkit.environments as envs
+
+    def write(fpath: str, text: str) -> None:
+        with open(fpath, "w", newline="") as f:
+            f.write(text)
+
+    spec, lock = "requirements.txt", "requirements-lock.txt"
+    write(spec, "idna\n")
+    write(lock, "idna==3.10\n")
+    # Recorded beside the lock, not in it
+    assert envs.read_env_spec_hash(lock) is None
+    envs.write_env_spec_hash(lock, spec)
+    assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
+    with open(lock) as f:
+        assert f.read() == "idna==3.10\n"
+    # Comments, blank lines, spacing and line endings aren't changes
+    base = envs.env_spec_hash(spec)
+    for text in ["# Deps\nidna  # For URLs\n\n", "idna\r\n", "  idna\n"]:
+        write(spec, text)
+        assert envs.env_spec_hash(spec) == base
+    write(spec, "idna\ncertifi\n")
+    assert envs.env_spec_hash(spec) != base
+    assert envs.env_spec_hash(spec, python="3.11") != envs.env_spec_hash(spec)
+    # A YAML spec is hashed as the data it holds, so channel order counts
+    write("a.yml", "name: e\n# Note\nchannels: [conda-forge, bioconda]\n")
+    write("b.yml", "channels:\n  - conda-forge\n  - bioconda\nname: 'e'\n")
+    write("c.yml", "name: e\nchannels: [bioconda, conda-forge]\n")
+    assert envs.env_spec_hash("a.yml") == envs.env_spec_hash("b.yml")
+    assert envs.env_spec_hash("a.yml") != envs.env_spec_hash("c.yml")
+    # Included files are part of the spec, relative to what includes them,
+    # including from a conda spec's pip section
+    os.makedirs("reqs")
+    write(spec, "-r reqs/base.txt\n")
+    write(os.path.join("reqs", "base.txt"), "-c pins.txt\nidna\n")
+    write(os.path.join("reqs", "pins.txt"), "idna==3.7\n")
+    write(
+        "d.yml", "name: e\ndependencies:\n  - pip:\n    - -r reqs/base.txt\n"
+    )
+    included = envs.env_spec_hash(spec), envs.env_spec_hash("d.yml")
+    write(os.path.join("reqs", "pins.txt"), "idna==3.10\n")
+    assert envs.env_spec_hash(spec) != included[0]
+    assert envs.env_spec_hash("d.yml") != included[1]
+    write(os.path.join("reqs", "base.txt"), "-r ../requirements.txt\n")
+    assert envs.env_spec_hash(spec)
+    # Every platform's lock in a directory shares one entry, relative to the
+    # project it's in
+    os.makedirs(os.path.join("sub", ".calkit", "env-locks", "py"))
+    write(os.path.join("sub", spec), "idna\n")
+    envs.write_env_spec_hash(
+        os.path.join(".calkit", "env-locks", "py", "linux-64.txt"),
+        spec,
+        wdir="sub",
+    )
+    assert envs.read_env_spec_hash(
+        os.path.join(".calkit", "env-locks", "py", "win-64.txt"), wdir="sub"
+    ) == envs.env_spec_hash(os.path.join("sub", spec))
+    with open(os.path.join("sub", envs.ENV_SPEC_HASHES_FPATH)) as f:
+        assert list(json.load(f)) == [".calkit/env-locks/py"]
+    # An unreadable file records nothing, and is replaced on the next write
+    write(envs.ENV_SPEC_HASHES_FPATH, "not json")
+    assert envs.read_env_spec_hash(lock) is None
+    envs.write_env_spec_hash(lock, spec)
+    assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
+
+
+def test_cross_platform_venv_locks(tmp_dir, monkeypatch):
+    import calkit.environments as envs
+
+    assert set(envs.UV_PLATFORM_TARGETS) <= set(envs.CONDA_VENV_ARCHS)
+    spec = "requirements.txt"
+    with open(spec, "w") as f:
+        f.write("idna\n")
+    # A lock that isn't one of a per-platform set gets no siblings
+    with open("lock.txt", "w") as f:
+        f.write("idna==3.7\n")
+    assert not envs.write_cross_platform_venv_locks(
+        spec_fpath=spec, lock_fpath="lock.txt", python_version="3.12"
+    )
+    assert not set(os.listdir()) & {a + ".txt" for a in envs.CONDA_VENV_ARCHS}
+    # Other platforms are resolved to the versions locked here
+    os.makedirs(os.path.join(".calkit", "env-locks", "py"), exist_ok=True)
+    here = envs._conda_venv_platform()
+    lock_fpath = os.path.join(".calkit", "env-locks", "py", here + ".txt")
+    with open(lock_fpath, "w") as f:
+        f.write("idna==3.7\n")
+    written = envs.write_cross_platform_venv_locks(
+        spec_fpath=spec, lock_fpath=lock_fpath, python_version="3.12"
+    )
+    assert lock_fpath not in written
+    for fpath in written:
+        with open(fpath) as f:
+            assert "idna==3.7" in f.read()
+    if not written:
+        return
+    # Without relocking, only missing platforms are added
+    os.remove(written[0])
+    again = envs.write_cross_platform_venv_locks(
+        spec_fpath=spec,
+        lock_fpath=lock_fpath,
+        python_version="3.12",
+        relock=False,
+    )
+    assert again == [written[0]]
+    # Relocking removes a platform that can't be resolved, which is stale
+    with open(spec, "w") as f:
+        f.write("idna\ncalkit-no-such-package-anywhere\n")
+    assert not envs.write_cross_platform_venv_locks(
+        spec_fpath=spec, lock_fpath=lock_fpath, python_version="3.12"
+    )
+    assert not any(os.path.isfile(fpath) for fpath in written)
+    # So does relocking without uv, or for a platform uv can't target, but
+    # only missing platforms are left alone
+    lock_dir = os.path.dirname(lock_fpath)
+    siblings = [
+        os.path.join(lock_dir, a + ".txt")
+        for a in envs.CONDA_VENV_ARCHS
+        if a != here
+    ]
+    for fpath in siblings:
+        with open(fpath, "w") as f:
+            f.write("idna==3.7\n")
+    with monkeypatch.context() as m:
+        m.setattr(envs.shutil, "which", lambda name: None)
+        assert not envs.write_cross_platform_venv_locks(
+            spec_fpath=spec, lock_fpath=lock_fpath, relock=False
+        )
+        assert all(os.path.isfile(fpath) for fpath in siblings)
+        assert not envs.write_cross_platform_venv_locks(
+            spec_fpath=spec, lock_fpath=lock_fpath
+        )
+    assert not any(os.path.isfile(fpath) for fpath in siblings)
+
+
+def test_switch_env(tmp_dir, monkeypatch):
+    import calkit.environments as envs
+
+    def option(env: str, *when: dict) -> dict:
+        return {"when": list(when), "use": env} if when else {"use": env}
+
+    envs_def: dict[str, dict] = {
+        "cluster": {
+            "kind": "switch",
+            "switch": [
+                option("slurm-env", {"app_exists": "calkit-test-no-such-app"}),
+                option(
+                    "lab",
+                    {"env_var_equals": ["CK_TEST_SITE=lab", "CK_TEST_SITE=b"]},
+                ),
+                option("here", {"hostname_matches": "*"}),
+            ],
+        },
+        "slurm-env": {"kind": "slurm"},
+        "lab": {"kind": "system", "host": "lab.invalid"},
+        "here": {"kind": "system"},
+        "py": {"kind": "uv-venv", "path": "requirements.txt"},
+    }
+    monkeypatch.delenv("CK_TEST_SITE", raising=False)
+    assert envs.get_switch_options("cluster", envs_def) == [
+        "slurm-env",
+        "lab",
+        "here",
+    ]
+    assert envs.switch_is_outer("cluster", envs_def)
+    assert envs.env_can_be_outer("cluster", envs_def)
+    assert not envs.env_can_be_outer("py", envs_def)
+    # First match wins, and conditions see this machine and its env vars
+    assert envs.resolve_switch("cluster", envs_def) == "here"
+    monkeypatch.setenv("CK_TEST_SITE", "b")
+    assert envs.resolve_switch("cluster", envs_def) == "lab"
+    # Each condition, where a list of values means any one, and every
+    # condition of an option must hold
+    monkeypatch.setattr(envs.socket, "gethostname", lambda: "N1.Cluster.EDU")
+    monkeypatch.setattr(envs.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(calkit, "get_machine_id", lambda: "AB-CD")
+    monkeypatch.setenv("CK_TEST_EMPTY", "")
+    cases: list[tuple[list[dict], bool]] = [
+        ([{"app_exists": "git"}], True),
+        ([{"app_exists": ["calkit-test-no-such-app", "git"]}], True),
+        ([{"env_var_exists": "CK_TEST_SITE"}], True),
+        ([{"env_var_exists": "CK_TEST_UNSET"}], False),
+        ([{"env_var_equals": "CK_TEST_UNSET="}], False),
+        ([{"env_var_equals": "CK_TEST_EMPTY="}], True),
+        ([{"env_var_equals": "CK_TEST_SITE=b=c"}], False),
+        ([{"hostname_matches": "*.cluster.edu"}], True),
+        ([{"hostname_matches": ["x", "n?.*"]}], True),
+        ([{"hostname_matches": "cluster.edu"}], False),
+        ([{"os_is": "macos"}], True),
+        ([{"os_is": ["linux", "windows"]}], False),
+        ([{"machine_id_equals": "abcd"}], True),
+        ([{"machine_id_equals": ["ef"]}], False),
+        ([{"os_is": "macos"}, {"app_exists": "git"}], True),
+        ([{"os_is": "macos"}, {"os_is": "linux"}], False),
+    ]
+    for when, held in cases:
+        envs_def["one"] = {"kind": "switch", "switch": [option("here", *when)]}
+        picked = envs.resolve_switch("one", envs_def)
+        assert picked == ("here" if held else None), when
+    # A node that reports a short hostname still matches its qualified name
+    monkeypatch.setattr(envs.socket, "gethostname", lambda: "login1")
+    monkeypatch.setattr(envs.socket, "getfqdn", lambda: "login1.hpc.edu")
+    envs_def["one"] = {
+        "kind": "switch",
+        "switch": [option("here", {"hostname_matches": "*.hpc.edu"})],
+    }
+    assert envs.resolve_switch("one", envs_def) == "here"
+    # Nothing matching and no default picks nothing, rather than guessing,
+    # and says which conditions failed
+    envs_def["none"] = {
+        "kind": "switch",
+        "switch": [
+            option("here", {"os_is": "linux"}, {"app_exists": "sbatch"}),
+            option("here", {"env_var_equals": "CK_TEST_SITE=lab"}),
+        ],
+    }
+    assert envs.resolve_switch("none", envs_def) is None
+    reason = envs.describe_switch_no_match("none", envs_def["none"])
+    assert reason.endswith(
+        "none of these hold: os_is: linux and app_exists: sbatch; "
+        "env_var_equals: CK_TEST_SITE=lab"
+    )
+    # Options must exist, not be switches, and not mix machines and
+    # runtimes, and a definition that doesn't validate says so
+    is_linux = {"os_is": "linux"}
+    for options, match in [
+        ([option("nope", is_linux), option("here")], "not defined"),
+        ([option("cluster", is_linux), option("here")], "another switch"),
+        ([option("py", is_linux), option("here")], "one or the other"),
+        ([option("here"), option("py", is_linux)], "only the last option"),
+        ([option("here", {"os_is": "Darwin"})], "is invalid"),
+        ([option("_system", is_linux), option("here")], "kind: system"),
+    ]:
+        envs_def["bad"] = {"kind": "switch", "switch": options}
+        with pytest.raises(ValueError, match=match):
+            envs.get_switch_options("bad", envs_def)
+    del envs_def["bad"]
+    # A switch of runtimes can't wrap another env
+    envs_def["rt"] = {"kind": "switch", "switch": [option("py")]}
+    assert not envs.switch_is_outer("rt", envs_def)
+    # The definitions lock is the same on every machine, and changes when an
+    # option's definition or spec does
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    lock_fpath = envs.write_switch_env_lock("rt", envs_def)
+    assert lock_fpath == ".calkit/env-locks/rt/switch.json"
+    assert envs.get_env_lock_fpath(
+        env=envs_def["rt"], env_name="rt", for_dvc=True
+    ) == os.path.dirname(lock_fpath)
+    with open(lock_fpath) as f:
+        locked = json.load(f)
+    assert set(locked["options"]) == {"py"}
+    assert "requirements.txt" in locked["specs"]
+    monkeypatch.setenv("CK_TEST_SITE", "elsewhere")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        assert json.load(f) == locked
+    with open("requirements.txt", "w") as f:
+        f.write("idna\ncertifi\n")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        assert json.load(f)["specs"] != locked["specs"]
+    # So does an option's lock, though not its line endings
+    py_lock = envs.get_env_lock_fpath(
+        env=envs_def["py"], env_name="py", for_dvc=True
+    )
+    assert py_lock is not None
+    os.makedirs(py_lock, exist_ok=True)
+    with open(os.path.join(py_lock, "linux-64.txt"), "w") as f:
+        f.write("idna==3.10\n")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        with_lock = json.load(f)
+    assert "py" in with_lock["locks"]
+    with open(os.path.join(py_lock, "linux-64.txt"), "wb") as f:
+        f.write(b"idna==3.10\r\n")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        assert json.load(f) == with_lock
+    with open(os.path.join(py_lock, "linux-64.txt"), "w") as f:
+        f.write("idna==3.11\n")
+    envs.write_switch_env_lock("rt", envs_def)
+    with open(lock_fpath) as f:
+        assert json.load(f)["locks"] != with_lock["locks"]
+    # A switch's machine lock is a system env lock beside the definitions
+    machine_env = envs.switch_machine_lock_env({"lock": ["os"]})
+    envs.write_system_env_lock(env_name="rt", env=machine_env)
+    assert os.path.isfile(".calkit/env-locks/rt/info.json")
+    # Locks an option's first check on a machine writes don't change it, so
+    # moving to that machine doesn't rerun anything
+    envs_def["mach"] = {
+        "kind": "switch",
+        "switch": [option("slurm-env", is_linux), option("here")],
+    }
+    mach_lock = envs.write_switch_env_lock("mach", envs_def)
+    with open(mach_lock) as f:
+        before = json.load(f)
+    envs.write_scheduler_env_lock(
+        env_name="slurm-env", env=envs_def["slurm-env"]
+    )
+    envs.write_system_env_lock(env_name="here", env={"lock": ["os"]})
+    envs.write_switch_env_lock("mach", envs_def)
+    with open(mach_lock) as f:
+        assert json.load(f) == before
+    # A runtime switch's lock gates its stages like a machine switch's
+    envs_def["rt"]["lock"] = ["hostname"]
+    with open(".calkit/env-locks/rt/info.json", "w") as f:
+        json.dump({"hostname": "calkit-test.invalid"}, f)
+    ck_info = {
+        "environments": envs_def,
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "rt",
+                }
+            }
+        },
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, interactive=False
+    )
+    assert "locked to another machine" in gated["s"] and not errors
+    del envs_def["rt"]["lock"]
+    # A switch's check is current only while its pick and the picked env
+    # are, and never when it picks a machine, which is read on each check
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": envs_def}, f)
+    envs.save_cache(env_name="rt", env=envs_def["rt"], success=True)
+    assert envs.check_cache(env_name="rt", env=envs_def["rt"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\nsix\n")
+    assert not envs.check_cache(env_name="rt", env=envs_def["rt"])
+    envs.save_cache(env_name="rt", env=envs_def["rt"], success=True)
+    envs_def["rt"]["switch"] = [
+        option("py-b", {"env_var_exists": "CK_TEST_PICK_B"}),
+        option("py"),
+    ]
+    envs_def["py-b"] = {"kind": "uv-venv", "path": "requirements.txt"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": envs_def}, f)
+    envs.save_cache(env_name="rt", env=envs_def["rt"], success=True)
+    assert envs.check_cache(env_name="rt", env=envs_def["rt"])
+    monkeypatch.setenv("CK_TEST_PICK_B", "1")
+    assert not envs.check_cache(env_name="rt", env=envs_def["rt"])
+    envs.save_cache(env_name="mach", env=envs_def["mach"], success=True)
+    assert not envs.check_cache(env_name="mach", env=envs_def["mach"])
+    # Only machines have requirements, which compiling the pipeline enforces
+    # even though the project isn't validated on load
+    for kind, extra in [("conda", {"path": "env.yml"}), ("switch", {})]:
+        bad_info = {
+            "environments": {
+                "e": {"kind": kind, "requirements": ["git"], **extra}
+            },
+            "pipeline": {"stages": {}},
+        }
+        with pytest.raises(ValueError, match="describe a machine"):
+            calkit.pipeline.to_dvc(ck_info=bad_info, write=False)
+    # A machine switch's stage setup goes in a file, which survives cmd.exe
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": envs_def,
+            "pipeline": {
+                "stages": {
+                    "job": {
+                        "kind": "shell-command",
+                        "command": "true",
+                        "environment": "mach",
+                        "setup": ["module load x"],
+                    }
+                }
+            },
+        },
+        write=False,
+    )
+    cmd = stages["job"]["cmd"]
+    assert "--setup-file .calkit/stage-setup/job.json" in cmd
+    assert "module load" not in cmd
+    assert ".calkit/stage-setup/job.json" in stages["job"]["deps"]

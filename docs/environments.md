@@ -635,38 +635,41 @@ Nothing is pinned by default, since opting out of isolation is the whole
 point of this kind.
 The `lock` property is how a project says which properties of the machine
 its results actually depend on.
-Locked properties are written to the environment's lock file,
-which stages depend on,
-so moving to a machine where one of them differs reruns the stage
-rather than silently reusing a cached result.
+Locked properties are recorded in the environment's lock file the first
+time it's checked.
+On a machine where one of them differs, `calkit run` skips the stages
+using the environment rather than mixing results from different
+machines, until the lock is updated with `calkit update env --lock`.
+With `relock: auto`, the lock follows the machine instead, and the
+stages rerun.
 
 <!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:START -->
 
 The properties that can be locked are:
 
-| Property                | Description                                                                                                                                                                                                                                                                                                     |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `os`                    | Operating system name, e.g. 'Linux' or 'Darwin'.                                                                                                                                                                                                                                                                |
-| `os-version`            | Operating system release, e.g. a kernel version.                                                                                                                                                                                                                                                                |
-| `platform`              | Full platform string, which folds in most of the above.                                                                                                                                                                                                                                                         |
-| `machine`               | Machine architecture, e.g. 'x86_64' or 'arm64'.                                                                                                                                                                                                                                                                 |
-| `processor`             | Processor name, where the OS reports one.                                                                                                                                                                                                                                                                       |
-| `hostname`              | The machine's name. Pins results to one specific host, but only by name: renaming the machine breaks the pin, and a machine elsewhere with the same name satisfies it. Prefer 'machine-id'.                                                                                                                     |
-| `machine-id`            | A stable identifier for the machine itself, read from the platform. Pins results to one specific machine, and unlike 'hostname' survives renaming it. Declaring a 'machine_id' on the environment says where to run, not that results depend on it, so lock this to also rerun stages when the machine changes. |
-| `cpu-count`             | Number of CPUs, which can change what a run produces where results depend on how work was divided.                                                                                                                                                                                                              |
-| `memory-gb`             | Total memory in GB.                                                                                                                                                                                                                                                                                             |
-| `python-version`        | Version of the Python running Calkit.                                                                                                                                                                                                                                                                           |
-| `python-implementation` | Python implementation, e.g. 'CPython'.                                                                                                                                                                                                                                                                          |
-| `git-version`           | Installed Git version.                                                                                                                                                                                                                                                                                          |
-| `docker-version`        | Installed Docker version.                                                                                                                                                                                                                                                                                       |
-| `conda-version`         | Installed Conda version.                                                                                                                                                                                                                                                                                        |
-| `mamba-version`         | Installed Mamba version.                                                                                                                                                                                                                                                                                        |
-| `uv-version`            | Installed uv version.                                                                                                                                                                                                                                                                                           |
-| `pixi-version`          | Installed Pixi version.                                                                                                                                                                                                                                                                                         |
-| `julia-version`         | Installed Julia version.                                                                                                                                                                                                                                                                                        |
-| `juliaup-version`       | Installed Juliaup version.                                                                                                                                                                                                                                                                                      |
-| `rscript-version`       | Installed Rscript version.                                                                                                                                                                                                                                                                                      |
-| `brew-version`          | Installed Homebrew version. macOS only.                                                                                                                                                                                                                                                                         |
+| Property                | Description                                                                                                                                                                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `os`                    | Operating system name, e.g., 'Linux' or 'Darwin'.                                                                                                                                                                                                                                                                         |
+| `os-version`            | Operating system release, e.g., a kernel version.                                                                                                                                                                                                                                                                         |
+| `platform`              | Full platform string, which folds in most of the above.                                                                                                                                                                                                                                                                   |
+| `machine`               | Machine architecture, e.g., 'x86_64' or 'arm64'.                                                                                                                                                                                                                                                                          |
+| `processor`             | Processor name, where the OS reports one.                                                                                                                                                                                                                                                                                 |
+| `hostname`              | The machine's name. Pins results to one specific host, but only by name: renaming the machine breaks the pin, and a machine elsewhere with the same name satisfies it. Prefer 'machine-id'.                                                                                                                               |
+| `machine-id`            | A stable identifier for the machine itself, read from the platform. Pins results to one specific machine, and unlike 'hostname' survives renaming it. Declaring a 'machine_id' on the environment says where to run, not that results depend on it, so lock this to also keep results from mixing with another machine's. |
+| `cpu-count`             | Number of CPUs, which can change what a run produces where results depend on how work was divided.                                                                                                                                                                                                                        |
+| `memory-gb`             | Total memory in GB.                                                                                                                                                                                                                                                                                                       |
+| `python-version`        | Version of the Python running Calkit.                                                                                                                                                                                                                                                                                     |
+| `python-implementation` | Python implementation, e.g., 'CPython'.                                                                                                                                                                                                                                                                                   |
+| `git-version`           | Installed Git version.                                                                                                                                                                                                                                                                                                    |
+| `docker-version`        | Installed Docker version.                                                                                                                                                                                                                                                                                                 |
+| `conda-version`         | Installed Conda version.                                                                                                                                                                                                                                                                                                  |
+| `mamba-version`         | Installed Mamba version.                                                                                                                                                                                                                                                                                                  |
+| `uv-version`            | Installed uv version.                                                                                                                                                                                                                                                                                                     |
+| `pixi-version`          | Installed Pixi version.                                                                                                                                                                                                                                                                                                   |
+| `julia-version`         | Installed Julia version.                                                                                                                                                                                                                                                                                                  |
+| `juliaup-version`       | Installed Juliaup version.                                                                                                                                                                                                                                                                                                |
+| `rscript-version`       | Installed Rscript version.                                                                                                                                                                                                                                                                                                |
+| `brew-version`          | Installed Homebrew version. macOS only.                                                                                                                                                                                                                                                                                   |
 
 Run `calkit describe system` to see what these are on the machine you're on.
 
@@ -697,17 +700,18 @@ environments:
 
 `requirements` and `lock` answer different questions,
 which is why a property can appear in both.
-A requirement is a precondition: it's checked before anything runs,
-and one that isn't met stops the run and says what was found and what
-was needed.
-A lock is a cache input: nothing is checked, but the property's observed
-value is recorded, and a stage reruns when it changes.
-So the example above means "refuse to run on fewer than 16 CPUs,"
-and separately "rerun everything if the number of CPUs isn't what it was
-last time."
+A requirement is a precondition: on a machine that doesn't meet it,
+the stages using the environment are skipped, and `calkit status` says
+what was found and what was needed.
+A lock pins a value results depend on: the first value seen is
+recorded, and a machine with a different one skips those stages too,
+unless the lock is updated or set to follow the machine.
+So the example above means "don't run on fewer than 16 CPUs,"
+and separately "don't mix results from machines with different numbers
+of CPUs."
 
-If you don't care what a property is but do care when it changes,
-lock it and leave it out of `requirements`.
+If you don't care what a property is but do care that it stays the
+same, lock it and leave it out of `requirements`.
 A requirement that constrains nothing is rejected, since it asserts
 nothing.
 
@@ -1070,8 +1074,13 @@ environments:
 ```
 
 Locked properties are written to the environment's lock file, which stages
-depend on, so running on a machine where one of them differs invalidates
-the cached result instead of silently reusing it.
+depend on, the first time the environment is checked.
+On a machine where one of them differs, the lock is left alone, so
+results already computed stay current, and stages that need to run are
+skipped there rather than mixing in results from a different machine.
+Run `calkit update env -n NAME --lock` to make the new machine the one
+results come from, or set `relock: auto` for the lock to follow whichever
+machine runs the stages.
 Locking a property the machine can't supply, e.g., a tool that isn't
 installed, is an error rather than a recorded null---a stage that claims to
 be pinned to something it isn't is worse than one that pins nothing.
@@ -1081,6 +1090,36 @@ be pinned to something it isn't is worse than one that pins nothing.
     The properties available to `lock` are a fixed set, so editors can offer
     them and a typo is reported rather than silently locking nothing. See
     the `system` entry in the reference below for the full list.
+
+## Running a project on more than one machine
+
+A project often runs on more than one machine, e.g., a laptop for the
+paper and a cluster for the simulations.
+These settings decide what happens where:
+
+- `requirements` on a stage or an environment say what a machine needs
+  for it to run there.
+  Elsewhere, its stages are skipped and keep their outputs, so the rest
+  of the pipeline still runs
+  (see [requirements](requirements.md#requirements-of-a-stage-or-an-environment)).
+- A `switch` environment picks one of several environments by machine,
+  e.g., a SLURM cluster where `sbatch` exists and this machine otherwise,
+  without rerunning stages when the project moves between them.
+- `lock` on a `system` environment records the machine properties
+  results depend on.
+  A machine that differs doesn't rerun those stages unless the lock is
+  updated, or set to follow the machine with `relock: auto`.
+- Lock files for `uv-venv`, `venv` and `conda` environments are written
+  for every platform at once where possible, with the same package
+  versions where each platform has them, so a collaborator on another
+  operating system installs from them rather than relocking.
+  Changing the spec relocks every platform, and a machine updates its
+  environment to match its lock the next time it's checked.
+  Which spec the locks came from is recorded in
+  `.calkit/env-spec-hashes.json`, which is committed along with them.
+
+`calkit status` says which stages can't run on the current machine and
+why.
 
 <!-- AUTO-GENERATED: ENV-KINDS:START -->
 
@@ -1092,12 +1131,13 @@ Environment definitions belong in the `environments` section of `calkit.yaml`.
 
 Model class: `CondaEnvironment`
 
-| Parameter   | Type             | Required | Description                              |
-| ----------- | ---------------- | -------- | ---------------------------------------- |
-| kind        | Literal['conda'] | yes      | What kind of environment this is.        |
-| path        | str              | yes      | Path to the Conda environment YAML file. |
-| prefix      | str              | no       | Path at which to create the environment. |
-| description | str              | no       | A description of the environment.        |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['conda']         | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| path        | str                      | yes      | Path to the Conda environment YAML file.                                                                                                                                                |
+| prefix      | str                      | no       | Path at which to create the environment.                                                                                                                                                |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `docker`
 
@@ -1106,6 +1146,7 @@ Model class: `DockerEnvironment`
 | Parameter       | Type                           | Required | Description                                                                                                                                                                                                                                                         |
 | --------------- | ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind            | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                                                                                                                                   |
+| inputs          | list[str \| EnvVarInput]       | no       | Files added to the container as dependencies. Their checksums are recorded in the environment's lock file, so editing one rebuilds the image and reruns the stages that use it.                                                                                     |
 | path            | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                                                                                                                                      |
 | image           | str                            | no       | Name of the Docker image. Optional for an environment with a Dockerfile, which is named after the project and environment it belongs to, e.g., 'someone/some-project.my-env'. Required for one defined purely by an image.                                          |
 | registry        | str                            | no       | Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. Images are kept local if this is unset or null. |
@@ -1116,7 +1157,6 @@ Model class: `DockerEnvironment`
 | platform        | str                            | no       | Platform to run as, e.g., 'linux/amd64'.                                                                                                                                                                                                                            |
 | wdir            | str                            | no       | Working directory inside the container. Defaults to '/work'.                                                                                                                                                                                                        |
 | user            | str                            | no       | User to run the container as. Defaults to the host user.                                                                                                                                                                                                            |
-| inputs          | list[str]                      | no       | Files added to the container as dependencies. Their checksums are recorded in the environment's lock file, so editing one rebuilds the image and reruns the stages that use it.                                                                                     |
 | env_vars        | dict[str, str]                 | no       | Environmental variables to set in the container.                                                                                                                                                                                                                    |
 | ports           | list[str]                      | no       | Ports to expose, e.g., '8080:80'.                                                                                                                                                                                                                                   |
 | gpus            | str                            | no       | GPUs to make available, passed to 'docker run --gpus'.                                                                                                                                                                                                              |
@@ -1128,84 +1168,155 @@ Model class: `DockerEnvironment`
 
 Model class: `JuliaEnvironment`
 
-| Parameter   | Type             | Required | Description                               |
-| ----------- | ---------------- | -------- | ----------------------------------------- |
-| kind        | Literal['julia'] | yes      | What kind of environment this is.         |
-| path        | str              | yes      | Path to the Julia project's Project.toml. |
-| julia       | str              | yes      | Julia version to use.                     |
-| description | str              | no       | A description of the environment.         |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['julia']         | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| path        | str                      | yes      | Path to the Julia project's Project.toml.                                                                                                                                               |
+| julia       | str                      | yes      | Julia version to use.                                                                                                                                                                   |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `matlab`
 
 Model class: `MatlabEnvironment`
 
-| Parameter   | Type              | Required | Description                           |
-| ----------- | ----------------- | -------- | ------------------------------------- |
-| kind        | Literal['matlab'] | yes      | What kind of environment this is.     |
-| version     | str               | no       | MATLAB version to use.                |
-| products    | list[str]         | no       | MATLAB products (toolboxes) required. |
-| description | str               | no       | A description of the environment.     |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['matlab']        | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| version     | str                      | no       | MATLAB version to use.                                                                                                                                                                  |
+| products    | list[str]                | no       | MATLAB products (toolboxes) required.                                                                                                                                                   |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `nix`
 
 Model class: `NixEnvironment`
 
-| Parameter   | Type           | Required | Description                                                                                                                          |
-| ----------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| kind        | Literal['nix'] | yes      | What kind of environment this is.                                                                                                    |
-| path        | str            | yes      | Path to the project's flake.nix. The flake.lock alongside it is the reproducibility-anchoring lock file tracked as a DVC dependency. |
-| shell       | str            | no       | Name of the dev shell to enter, passed as #<shell> to 'nix develop'. Defaults to the flake's default dev shell.                      |
-| description | str            | no       | A description of the environment.                                                                                                    |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['nix']           | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| path        | str                      | yes      | Path to the project's flake.nix. The flake.lock alongside it is the reproducibility-anchoring lock file tracked as a DVC dependency.                                                    |
+| shell       | str                      | no       | Name of the dev shell to enter, passed as #<shell> to 'nix develop'. Defaults to the flake's default dev shell.                                                                         |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `pbs`
 
 Model class: `PBSEnvironment`
 
-| Parameter           | Type           | Required | Description                                                                                                                                                                                                                                                  |
-| ------------------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| kind                | Literal['pbs'] | yes      | What kind of environment this is.                                                                                                                                                                                                                            |
-| host                | str            | no       | Host on which to submit jobs, over SSH if not localhost.                                                                                                                                                                                                     |
-| default_options     | list[str]      | no       | Options passed to qsub by default.                                                                                                                                                                                                                           |
-| default_setup       | list[str]      | no       | Commands run at the start of every job script.                                                                                                                                                                                                               |
-| inputs              | list[str]      | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry. |
-| max_concurrent_jobs | int            | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit.                                                                                                                                                      |
-| description         | str            | no       | A description of the environment.                                                                                                                                                                                                                            |
+| Parameter           | Type                                                                                                                             | Required | Description                                                                                                                                                                                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| kind                | Literal['pbs']                                                                                                                   | yes      | What kind of environment this is.                                                                                                                                                                                                                            |
+| inputs              | list[str \| EnvVarInput]                                                                                                         | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry. |
+| host                | str                                                                                                                              | no       | Host on which to submit jobs, over SSH if not localhost.                                                                                                                                                                                                     |
+| default_options     | list[str]                                                                                                                        | no       | Options passed to qsub by default.                                                                                                                                                                                                                           |
+| default_setup       | list[str]                                                                                                                        | no       | Commands run at the start of every job script.                                                                                                                                                                                                               |
+| max_concurrent_jobs | int                                                                                                                              | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit.                                                                                                                                                      |
+| requirements        | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]] | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.               |
+| description         | str                                                                                                                              | no       | A description of the environment.                                                                                                                                                                                                                            |
 
 #### `pixi`
 
 Model class: `PixiEnvironment`
 
-| Parameter   | Type            | Required | Description                                       |
-| ----------- | --------------- | -------- | ------------------------------------------------- |
-| kind        | Literal['pixi'] | yes      | What kind of environment this is.                 |
-| path        | str             | yes      | Path to the Pixi manifest file.                   |
-| name        | str             | no       | Name of the environment within the Pixi manifest. |
-| description | str             | no       | A description of the environment.                 |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['pixi']          | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| path        | str                      | yes      | Path to the Pixi manifest file.                                                                                                                                                         |
+| name        | str                      | no       | Name of the environment within the Pixi manifest.                                                                                                                                       |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `renv`
 
 Model class: `REnvironment`
 
-| Parameter   | Type            | Required | Description                                                                       |
-| ----------- | --------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['renv'] | yes      | What kind of environment this is.                                                 |
-| path        | str             | yes      | Path to the project's DESCRIPTION file. The renv lock file is created next to it. |
-| prefix      | str             | no       | Path at which to create the environment.                                          |
-| description | str             | no       | A description of the environment.                                                 |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['renv']          | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| path        | str                      | yes      | Path to the project's DESCRIPTION file. The renv lock file is created next to it.                                                                                                       |
+| prefix      | str                      | no       | Path at which to create the environment.                                                                                                                                                |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `slurm`
 
 Model class: `SlurmEnvironment`
 
-| Parameter           | Type             | Required | Description                                                                                                                                                                                                                                                     |
-| ------------------- | ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind                | Literal['slurm'] | yes      | What kind of environment this is.                                                                                                                                                                                                                               |
-| host                | str              | no       | Host on which to submit jobs, over SSH if not localhost.                                                                                                                                                                                                        |
-| default_options     | list[str]        | no       | Options passed to sbatch by default.                                                                                                                                                                                                                            |
-| default_setup       | list[str]        | no       | Commands run at the start of every job script.                                                                                                                                                                                                                  |
-| inputs              | list[str]        | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.    |
-| max_concurrent_jobs | int              | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit. |
-| description         | str              | no       | A description of the environment.                                                                                                                                                                                                                               |
+| Parameter           | Type                                                                                                                             | Required | Description                                                                                                                                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind                | Literal['slurm']                                                                                                                 | yes      | What kind of environment this is.                                                                                                                                                                                                                               |
+| inputs              | list[str \| EnvVarInput]                                                                                                         | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.    |
+| host                | str                                                                                                                              | no       | Host on which to submit jobs, over SSH if not localhost.                                                                                                                                                                                                        |
+| default_options     | list[str]                                                                                                                        | no       | Options passed to sbatch by default.                                                                                                                                                                                                                            |
+| default_setup       | list[str]                                                                                                                        | no       | Commands run at the start of every job script.                                                                                                                                                                                                                  |
+| max_concurrent_jobs | int                                                                                                                              | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit. |
+| requirements        | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]] | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                  |
+| description         | str                                                                                                                              | no       | A description of the environment.                                                                                                                                                                                                                               |
+
+#### `switch`
+
+Model class: `SwitchEnvironment`
+
+One of several environments, picked by the machine Calkit runs on.
+
+`switch` lists the options in order, and the first whose `when`
+conditions this machine all meets is picked. The last option can leave
+out `when` to be the default. Each condition is one `name: value`
+pair:
+
+- `app_exists`: an app on `PATH`.
+- `env_var_exists`: an environmental variable that is set.
+- `env_var_equals`: `NAME=value` for an environmental variable.
+- `hostname_matches`: a glob the hostname matches, ignoring case.
+- `os_is`: `linux`, `macos` or `windows`.
+- `machine_id_equals`: this machine's ID, as
+  `calkit describe system` shows it.
+
+A list of values means any one of them. To pick an environment when
+either of two conditions holds, list it as two options. For example:
+
+```yaml
+cluster:
+  kind: switch
+  switch:
+    - when:
+        - os_is: linux
+        - app_exists: sbatch
+      use: any-slurm
+    - when:
+        - env_var_equals: NERSC_HOST=perlmutter
+      use: perlmutter
+    - when:
+        - hostname_matches: ["*.gps.caltech.edu", "*.hpc.caltech.edu"]
+      use: clima
+    - use: clima-remote
+```
+
+The conditions are checked on the machine Calkit runs on, which is
+where the pick is made, even when the option picked is another
+machine.
+
+The options are either all machines (`system`, `slurm` or
+`pbs`), so the switch can be the outer half of a composite
+environment like `cluster:py`, or all runtimes, e.g., one per
+operating system. An option can't be another switch, or `_system`;
+to pick this machine as it is, define an environment with
+`kind: system` and use that.
+
+Stages depend on the switch's definition and its options', so editing
+them reruns those stages, but not on which option was picked, so
+moving between machines the switch covers doesn't. A stage whose
+switch picks nothing on this machine can't run here, and is skipped.
+
+| Parameter   | Type                                                                                                                                                                                                                                                                                                                                                | Required | Description                                                                                                                                                                                                                                                                                                                                                             |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['switch']                                                                                                                                                                                                                                                                                                                                   | yes      | What kind of environment this is.                                                                                                                                                                                                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput]                                                                                                                                                                                                                                                                                                                            | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it.                                                                                                                                                                                 |
+| switch      | list[SwitchOption]                                                                                                                                                                                                                                                                                                                                  | yes      | Environments to pick from, tried in order.                                                                                                                                                                                                                                                                                                                              |
+| lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version'] \| str] | no       | Properties of the machine the picked environment runs on that results depend on, recorded the first time the switch is checked, as for a 'system' environment.                                                                                                                                                                                                          |
+| relock      | Literal['manual'\|'auto']                                                                                                                                                                                                                                                                                                                           | no       | What happens on a machine whose locked properties differ from the lock. 'manual' keeps the lock, and a stage that needs to run there is skipped by 'calkit run', and refused by 'calkit xenv', until 'calkit update env --lock' is run. 'auto' rewrites the lock, rerunning the stages that depend on it, for results that should follow the machine, e.g., benchmarks. |
+| description | str                                                                                                                                                                                                                                                                                                                                                 | no       | A description of the environment.                                                                                                                                                                                                                                                                                                                                       |
 
 #### `system`
 
@@ -1219,31 +1330,39 @@ since opting out of isolation is the whole point of this kind, so
 `lock` is how a project says which properties of the machine its
 results actually depend on.
 
-Locked properties are written to the environment's lock file, which
-stages depend on, so moving to a machine where one of them differs
-invalidates the cached result rather than silently reusing it.
+Locked properties are recorded in the environment's lock file, which
+stages depend on, the first time the environment is checked. After
+that, the lock is not rewritten when the project moves to a machine
+where they differ, so stages that are up to date stay up to date.
+Checking the environment there warns about the difference, and a stage
+that needs to run is skipped by `calkit run`, since its result would
+not be comparable with the existing ones. To make the new machine the
+one results come from, run `calkit update env -n NAME --lock`, which
+updates the lock and invalidates the stages that depend on it. With
+`relock: auto`, that happens on its own, for results that should
+follow the machine.
 
 `requirements` is the other half, and answers a different question.
-It says what must be _true_ of this machine -- apps that must be
-installed, variables that must be set, at least this many CPUs -- and
+It says what must be _true_ of this machine---apps that must be
+installed, variables that must be set, at least this many CPUs---and
 is checked before anything runs, on the machine the environment names.
-A requirement that fails stops the run and says how to fix it; a locked
-property that changes silently invalidates a cached result. One gates,
-the other pins, so a property that matters both ways is written in both
-places.
+A stage whose requirements aren't met there is skipped, keeping its
+outputs, while a locked property records what results were computed
+with. One gates, the other pins, so a property that matters both ways
+is written in both places.
 
 `default_setup` is what has to be _done_ on this machine before a
 stage can run: sourcing a site setup script, loading modules, putting a
 hand-built toolchain on the `PATH`. It runs in the same shell as the
 stage's own command, so a variable it sets or a function it defines is
-in scope for the stage, whether or not it was exported -- only a child
+in scope for the stage, whether or not it was exported---only a child
 process needs that. This is why it can't be a `setup` requirement:
 those run in a shell of their own and are cached, since they check
 whether something has been done rather than doing it every time.
 
 It is not recorded in the environment's lock file. The pipeline
 compiler merges it with each stage's own `setup` and writes the
-result beside the pipeline, which the stage depends on -- so changing
+result beside the pipeline, which the stage depends on---so changing
 it reruns exactly the stages that run it, and not the ones whose
 `env_default_setup` means they never do.
 
@@ -1259,7 +1378,7 @@ answers to. Names are renamed, resolve differently from different
 networks, and are reused; a project that means one particular machine
 can name it here instead and have that survive all of it. It replaces
 the name in deciding whether this is that machine, and is checked again
-on the far end when it isn't -- so a host that has come to point at a
+on the far end when it isn't---so a host that has come to point at a
 different box is reported rather than run on. `host` is still what
 reaches it, so both are worth declaring for a machine that isn't this
 one. Run `calkit describe system` on a machine to read its ID.
@@ -1270,7 +1389,7 @@ and updating this need not invalidate everything computed on the old
 one. Whether it does is left to `lock`, where `machine-id` is
 available for projects whose results really are machine-specific.
 
-`wdir` is the project's workspace on that host -- the directory the
+`wdir` is the project's workspace on that host---the directory the
 stage runs in. It defaults to
 `~/.calkit/workspaces/<hub>/<owner>/<name>`, so a project that just
 names a host lands somewhere predictable rather than having to spell
@@ -1284,53 +1403,57 @@ here. An environment doesn't know which files a stage reads, so a list
 kept alongside it can fall behind the pipeline and quietly run against
 stale inputs; the paths are taken from the stage instead.
 
-| Parameter     | Type                                                                                                                                                                                                                                                                                                                                         | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| kind          | Literal['system']                                                                                                                                                                                                                                                                                                                            | yes      | What kind of environment this is.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| host          | str                                                                                                                                                                                                                                                                                                                                          | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| machine_id    | str                                                                                                                                                                                                                                                                                                                                          | no       | Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that.                                                                                                                                                                                                                        |
-| user          | str                                                                                                                                                                                                                                                                                                                                          | no       | User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ssh_key       | str                                                                                                                                                                                                                                                                                                                                          | no       | Path to the SSH private key used to reach another host. Left to SSH and its agent by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| wdir          | str                                                                                                                                                                                                                                                                                                                                          | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.                                                                                                                                                                                                                                                                                                                                                             |
-| default_setup | list[str]                                                                                                                                                                                                                                                                                                                                    | no       | Commands run in the same shell, before every stage that uses this environment, e.g. 'module load cuda' or a site setup script that exports compiler paths. Merged with each stage's own 'setup' when the pipeline is compiled and written beside it, which the stage depends on, so changing them reruns the stages that actually run them.                                                                                                                                                                                                      |
-| shell         | Literal['sh'\|'bash'\|'zsh']                                                                                                                                                                                                                                                                                                                 | no       | Shell in which setup commands run, both 'default_setup' and a stage's own 'setup', together with the stage's command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to have setup commands. Ignored when neither this environment nor any stage using it has setup commands. Setting it to anything but 'bash' is recorded in the environment's lock file -- unlike the commands themselves, the shell isn't in the compiled command -- so stages that run setup commands rerun when it changes. |
-| inputs        | list[str]                                                                                                                                                                                                                                                                                                                                    | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.                                                                                                                                                                                                                                                                                     |
-| lock          | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.                                                                                                                                                                                                                                                                                                                                                                                    |
-| requirements  | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                                                                                                                                                                                                             | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                                                                                                                                                                                                                                                                                                   |
-| description   | str                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Parameter     | Type                                                                                                                                                                                                                                                                                                                                                | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind          | Literal['system']                                                                                                                                                                                                                                                                                                                                   | yes      | What kind of environment this is.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| inputs        | list[str \| EnvVarInput]                                                                                                                                                                                                                                                                                                                            | no       | Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.                                                                                                                                                                                                                                                                                      |
+| host          | str                                                                                                                                                                                                                                                                                                                                                 | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| machine_id    | str                                                                                                                                                                                                                                                                                                                                                 | no       | Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that.                                                                                                                                                                                                                         |
+| user          | str                                                                                                                                                                                                                                                                                                                                                 | no       | User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ssh_key       | str                                                                                                                                                                                                                                                                                                                                                 | no       | Path to the SSH private key used to reach another host. Left to SSH and its agent by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| wdir          | str                                                                                                                                                                                                                                                                                                                                                 | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.                                                                                                                                                                                                                                                                                                                                                              |
+| default_setup | list[str]                                                                                                                                                                                                                                                                                                                                           | no       | Commands run in the same shell, before every stage that uses this environment, e.g., 'module load cuda' or a site setup script that exports compiler paths. Merged with each stage's own 'setup' when the pipeline is compiled and written beside it, which the stage depends on, so changing them reruns the stages that actually run them.                                                                                                                                                                                                      |
+| shell         | Literal['sh'\|'bash'\|'zsh']                                                                                                                                                                                                                                                                                                                        | no       | Shell in which setup commands run, both 'default_setup' and a stage's own 'setup', together with the stage's command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to have setup commands. Ignored when neither this environment nor any stage using it has setup commands. Setting it to anything but 'bash' is recorded in the environment's lock file, since unlike the commands themselves the shell isn't in the compiled command, so stages that run setup commands rerun when it changes. |
+| lock          | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version'] \| str] | no       | Properties of the machine this environment's results depend on, recorded the first time it is checked. Besides those listed, any app's version can be locked as '<app>-version'. 'relock' says what happens on a machine where they differ. Empty means nothing about the machine is pinned.                                                                                                                                                                                                                                                      |
+| relock        | Literal['manual'\|'auto']                                                                                                                                                                                                                                                                                                                           | no       | What happens on a machine whose locked properties differ from the lock. 'manual' keeps the lock, and a stage that needs to run there is skipped by 'calkit run', and refused by 'calkit xenv', until 'calkit update env --lock' is run. 'auto' rewrites the lock, rerunning the stages that depend on it, for results that should follow the machine, e.g., benchmarks.                                                                                                                                                                           |
+| requirements  | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                                                                                                                                                                                                                    | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                                                                                                                                                                                                                                                                                                    |
+| description   | str                                                                                                                                                                                                                                                                                                                                                 | no       | A description of the environment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 #### `uv`
 
 Model class: `UvEnvironment`
 
-| Parameter   | Type          | Required | Description                              |
-| ----------- | ------------- | -------- | ---------------------------------------- |
-| kind        | Literal['uv'] | yes      | What kind of environment this is.        |
-| path        | str           | yes      | Path to the uv project's pyproject.toml. |
-| description | str           | no       | A description of the environment.        |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['uv']            | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| path        | str                      | yes      | Path to the uv project's pyproject.toml.                                                                                                                                                |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `uv-venv`
 
 Model class: `UvVenvEnvironment`
 
-| Parameter   | Type               | Required | Description                                                                                                                                                                     |
-| ----------- | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind        | Literal['uv-venv'] | yes      | What kind of environment this is.                                                                                                                                               |
-| path        | str                | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
-| prefix      | str                | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
-| python      | str                | no       | Python version to use when creating the environment.                                                                                                                            |
-| description | str                | no       | A description of the environment.                                                                                                                                               |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['uv-venv']       | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| path        | str                      | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                                  |
+| prefix      | str                      | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict.         |
+| python      | str                      | no       | Python version to use when creating the environment.                                                                                                                                    |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 #### `venv`
 
 Model class: `VenvEnvironment`
 
-| Parameter   | Type            | Required | Description                                                                                                                                                                     |
-| ----------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind        | Literal['venv'] | yes      | What kind of environment this is.                                                                                                                                               |
-| path        | str             | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
-| prefix      | str             | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
-| python      | str             | no       | Python version to use when creating the environment.                                                                                                                            |
-| description | str             | no       | A description of the environment.                                                                                                                                               |
+| Parameter   | Type                     | Required | Description                                                                                                                                                                             |
+| ----------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['venv']          | yes      | What kind of environment this is.                                                                                                                                                       |
+| inputs      | list[str \| EnvVarInput] | no       | Files in the project this environment is built from that its spec doesn't name, e.g., a local package it installs. Editing one rebuilds the environment and reruns the stages using it. |
+| path        | str                      | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                                  |
+| prefix      | str                      | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict.         |
+| python      | str                      | no       | Python version to use when creating the environment.                                                                                                                                    |
+| description | str                      | no       | A description of the environment.                                                                                                                                                       |
 
 <!-- AUTO-GENERATED: ENV-KINDS:END -->

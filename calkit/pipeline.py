@@ -19,6 +19,7 @@ from calkit.models.pipeline import (
     LatexStage,
     PathOutput,
     Pipeline,
+    ShellCommandStage,
     Stage,
 )
 
@@ -151,6 +152,11 @@ class PipelineStatus(BaseModel):
     ignored_files_in_inputs: dict[str, dict[str, list[str]]] = Field(
         default_factory=dict
     )
+    # What each switch environment the pipeline uses picks on this machine,
+    # None where it picks nothing
+    switches: dict[str, str | None] = Field(default_factory=dict)
+    # Stages that can't run on this machine, with why
+    gated_stages: dict[str, str] = Field(default_factory=dict)
     # DVC's data status, when asked for, computed alongside the stage status
     # so it reuses that index and those hashes; not part of the output
     dvc_data_status: dict | None = Field(default=None, exclude=True)
@@ -252,6 +258,9 @@ class StaleStage(BaseModel):
     # mechanism, so they should not be advertised as always-run stages of the
     # parent project.
     is_subproject: bool = False
+    # Why the stage can't run on this machine, if it can't; it stays stale
+    # here, since running elsewhere is what brings it up to date
+    cannot_run_here: str | None = None
 
     @staticmethod
     def _as_path_list(paths: object) -> list[str]:
@@ -848,6 +857,252 @@ def _status_target_matches(
     return any(_paths_overlap(norm_target, p) for p in candidate_paths)
 
 
+def get_gated_stages(
+    ck_info: dict,
+    stage_names: list[str] | set[str] | None = None,
+    interactive: bool | None = None,
+    system_info: dict | None = None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Stages that can't run on this machine, with the reason for each.
+
+    Returns two mappings. The first is stages the project says can't run
+    here: a requirement of the stage or of an environment it uses isn't
+    met where it would run, a switch it uses picks nothing here, or a
+    machine it locks isn't this one. The second is stages that can't run
+    because something is wrong, e.g., their machine can't be reached. Both
+    are skipped, keeping their outputs, but only the first is expected.
+
+    Requirements are only checked here, never prompted for or installed,
+    and anything the checks print goes to stderr, keeping stdout for,
+    e.g., ``calkit status --json``. ``interactive`` only decides whether
+    connecting to a machine may prompt.
+    """
+    import contextlib
+    import json
+    import subprocess
+    import sys
+
+    import calkit.environments as envs_mod
+
+    if interactive is None:
+        from calkit.dependencies import _is_interactive
+
+        interactive = _is_interactive()
+    envs = ck_info.get("environments", {})
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    gated: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    cache: dict[str, tuple[str | None, bool]] = {}
+
+    def check(key: Any, func: Any) -> tuple[str | None, bool]:
+        """Memoize a check, returning its problem and whether it's an error."""
+        key = json.dumps(key, default=str)
+        if key not in cache:
+            with contextlib.redirect_stdout(sys.stderr):
+                cache[key] = func()
+        return cache[key]
+
+    def reach(machine_name: str, machine: dict) -> Any:
+        """Get a workspace for a machine, set up to answer without a prompt."""
+        import calkit.workspace as workspace
+
+        machine = dict(machine)
+        for field in workspace.CONNECTION_FIELDS:
+            if isinstance(machine.get(field), str):
+                machine[field] = workspace.expand_with_prompts(
+                    machine[field],
+                    interactive=interactive,
+                    described_as=(
+                        f"environment '{machine_name}' "
+                        f"{field.replace('_', ' ')}"
+                    ),
+                )
+        ws = workspace.Workspace.from_env(
+            env=machine, env_name=machine_name, ck_info=ck_info
+        )
+        return workspace.ensure_reachable(ws, interactive=interactive)
+
+    def requirements_problem(
+        requirements: list, machine_name: str | None, machine: dict
+    ) -> tuple[str | None, bool]:
+        """Why these requirements can't be met where the stage runs."""
+        nonlocal system_info
+        # A machine with nothing to check isn't connected to
+        if not requirements:
+            return None, False
+        if machine_name is not None:
+            import calkit.workspace as workspace
+
+            try:
+                ws = reach(machine_name, machine)
+            except (ValueError, subprocess.CalledProcessError) as e:
+                host = machine.get("host")
+                return f"can't reach host '{host}': {e}", True
+            try:
+                workspace.check_requirements(ws, requirements)
+            except (ValueError, subprocess.CalledProcessError) as e:
+                return str(e), False
+            return None, False
+        if system_info is None:
+            system_info = calkit.get_system_info(
+                apps=calkit.get_version_checked_app_names(
+                    ck_info, stage_names=stage_names
+                )
+            )
+        try:
+            calkit.check_requirements(
+                requirements=requirements,
+                interactive=False,
+                system_info=system_info,
+            )
+        except ValueError as e:
+            return str(e), False
+        return None, False
+
+    def lock_problem(
+        lock_name: str, lock_env: dict, machine_name: str, machine: dict
+    ) -> tuple[str | None, bool]:
+        """Why a machine lock rules this one out, if it does."""
+        if lock_env.get("relock") == "auto" or not lock_env.get("lock"):
+            return None, False
+        try:
+            if envs_mod.read_system_env_lock(lock_name, lock_env) is None:
+                # The first check here writes it
+                return None, False
+            info = envs_mod.picked_machine_info(
+                machine_name, machine, ck_info, lock=lock_env.get("lock")
+            )
+            mismatch = envs_mod.system_env_lock_mismatch(
+                env_name=lock_name, env=lock_env, system_info=info
+            )
+        except (ValueError, subprocess.CalledProcessError) as e:
+            return f"environment '{lock_name}': {e}", True
+        if not mismatch:
+            return None, False
+        props = ", ".join(
+            f"{prop} {d['locked']!r} there, {d['actual']!r} here"
+            for prop, d in sorted(mismatch.items())
+        )
+        return (
+            f"environment '{lock_name}' is locked to another machine "
+            f"({props}); to make this machine the one its results come "
+            f"from, run 'calkit update env -n {lock_name} --lock', or set "
+            "'relock: auto' on it to follow whichever machine runs it"
+        ), False
+
+    for name, stage in stages.items():
+        if stage_names is not None and name not in stage_names:
+            continue
+        if stage.get("frozen"):
+            continue
+        env_names = str(stage.get("environment") or "_system").split(
+            envs_mod.COMPOSITE_ENV_SEP
+        )
+        resolved: list[tuple[str, dict]] = []
+        reason = None
+        is_error = False
+        switch_locks: list[tuple[str, dict, str, dict]] = []
+        for env_name in dict.fromkeys(env_names):
+            env = envs.get(env_name)
+            if env is None:
+                continue
+            resolved.append((env_name, env))
+            if env.get("kind") != envs_mod.SWITCH_KIND:
+                continue
+            try:
+                picked = envs_mod.resolve_switch(env_name, envs)
+            except ValueError as e:
+                reason, is_error = str(e), True
+                break
+            if picked is None:
+                reason = envs_mod.describe_switch_no_match(env_name, env)
+                break
+            resolved.append((picked, envs[picked]))
+            if env.get("lock"):
+                switch_locks.append(
+                    (
+                        env_name,
+                        envs_mod.switch_machine_lock_env(env),
+                        picked,
+                        envs[picked],
+                    )
+                )
+        # Checked on the machine the stage runs on, which a remote outer
+        # env names
+        machine_name = None
+        machine: dict = {}
+        for env_name, env in resolved:
+            kind = env.get("kind")
+            if kind == "system" and not envs_mod.env_is_local(
+                {"host": "localhost", **env}
+            ):
+                if not env.get("host"):
+                    # Named by its ID alone, so there's no reaching it
+                    reason = reason or (
+                        f"environment '{env_name}' is the machine with ID "
+                        f"{env.get('machine_id')!r}, which isn't this one, "
+                        "and has no 'host' to reach it from here"
+                    )
+                    break
+                machine_name, machine = env_name, env
+            elif kind in ("slurm", "pbs") and not envs_mod.host_is_local(
+                env.get("host") or "localhost"
+            ):
+                machine_name, machine = env_name, env
+        if reason is None:
+            requirements = list(stage.get("requirements") or [])
+            for _, env in resolved:
+                requirements += env.get("requirements") or []
+            reason, is_error = check(
+                ["requirements", machine_name, requirements],
+                lambda: requirements_problem(
+                    requirements, machine_name, machine
+                ),
+            )
+            # A machine that is only described here could run its stages
+            # from here if Calkit knew how to reach it
+            local_machines = [
+                n
+                for n, env in resolved
+                if env.get("kind") == "system"
+                and not env.get("host")
+                and env.get("requirements")
+            ]
+            if (
+                reason is not None
+                and not is_error
+                and machine_name is None
+                and local_machines
+                and check(
+                    ["requirements", None, envs[local_machines[0]]],
+                    lambda: requirements_problem(
+                        envs[local_machines[0]]["requirements"], None, {}
+                    ),
+                )[0]
+                is not None
+            ):
+                reason += (
+                    f"; giving environment '{local_machines[0]}' a 'host' "
+                    "would let its stages run there from here over SSH"
+                )
+        if reason is None:
+            locks = [
+                (n, env, n, env)
+                for n, env in resolved
+                if env.get("kind") == "system"
+            ] + switch_locks
+            for lock_name, lock_env, m_name, m_env in locks:
+                reason, is_error = check(
+                    ["lock", lock_name],
+                    lambda: lock_problem(lock_name, lock_env, m_name, m_env),
+                )
+                if reason is not None:
+                    break
+        if reason is not None:
+            (errors if is_error else gated)[name] = reason
+    return gated, errors
+
+
 def get_status(
     ck_info: dict | None = None,
     targets: list[str] | None = None,
@@ -896,12 +1151,35 @@ def get_status(
                 f"Failed to read markdown stages: {e.__class__.__name__}: {e}"
             )
             return PipelineStatus.model_validate(result)
+        environments = ck_info.get("environments", {})
+        for stage in ck_info.get("pipeline", {}).get("stages", {}).values():
+            names = str(stage.get("environment") or "").split(
+                calkit.environments.COMPOSITE_ENV_SEP
+            )
+            for name in names:
+                env = environments.get(name) or {}
+                if env.get("kind") != calkit.environments.SWITCH_KIND:
+                    continue
+                try:
+                    result.setdefault("switches", {})[name] = (
+                        calkit.environments.resolve_switch(name, environments)
+                    )
+                except ValueError as e:
+                    result["errors"].append(str(e))
+                    return PipelineStatus.model_validate(result)
         if check_environments:
             try:
+                gated, gate_errors = get_gated_stages(
+                    ck_info,
+                    stage_names=get_stages_to_gate(targets),
+                    interactive=False,
+                )
+                result["gated_stages"] = gated | gate_errors
                 env_checks = calkit.environments.check_all_in_pipeline(
                     ck_info=ck_info,
                     targets=targets,
                     force=force_env_check,
+                    skip_stages=list(result["gated_stages"]),
                 )
                 result["environment_checks"] = env_checks
             except Exception as e:
@@ -1315,6 +1593,11 @@ def get_status(
                         annotated = True
             if not annotated:
                 ignored_files_in_inputs.setdefault(name, {})[dep_path] = files
+        gated_stages = result.get("gated_stages", {})
+        for display_name, stale_stage in ordered_stale_stages.items():
+            reason = gated_stages.get(display_name.split("@")[0])
+            if reason is not None:
+                stale_stage.cannot_run_here = reason
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
@@ -1323,6 +1606,8 @@ def get_status(
             stale_stages=result["stale_stages"],
             errors=result["errors"],
             ignored_files_in_inputs=ignored_files_in_inputs,
+            switches=result.get("switches", {}),
+            gated_stages=result.get("gated_stages", {}),
             dvc_data_status=dvc_data_status,
         )
     finally:
@@ -1807,7 +2092,16 @@ def to_dvc(
     import calkit.dvc.zip
     import calkit.markdown
     import calkit.questions
-    from calkit.environments import get_env_input_paths, get_env_lock_fpath
+    from calkit.environments import (
+        SWITCH_KIND,
+        get_env_input_env_vars,
+        get_env_input_paths,
+        get_env_lock_fpath,
+        get_switch_options,
+        resolve_env_var,
+        write_switch_env_lock,
+    )
+    from calkit.models.io import EnvVarInput
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -1820,6 +2114,15 @@ def to_dvc(
     ck_info = markdown.ck_info
     # Likewise give questions-to-latex stages the evidence they read
     ck_info = calkit.questions.expand_questions_stages(ck_info)
+    # The project model isn't validated on every load, so this rule is
+    # enforced where stages are compiled
+    from calkit.models.core import env_requirements_problem
+
+    for env_name, env in (ck_info.get("environments") or {}).items():
+        if isinstance(env, dict) and (
+            problem := env_requirements_problem(env)
+        ):
+            raise ValueError(f"Environment '{env_name}': {problem}")
     if write and markdown.environments:
         _write_markdown_environments(markdown, wdir=wdir)
     # Everything Markdown derives is rewritten on every compile, so it
@@ -1973,20 +2276,18 @@ def to_dvc(
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
-        # An env that runs setup commands can name the files they read---a
-        # setup script it sources, most often. Those are inputs to every
-        # stage using the env, in the same way its lock file is: editing
-        # how a build is set up changes what the build produces. Declared
-        # rather than parsed out of the commands, since a shell command
-        # doesn't reliably say which of its words is a path. Only the kinds
-        # with a ``default_setup``: a Docker env's ``inputs`` are files
-        # copied into the image, and their checksums already ride along in
-        # its lock file, which stages depend on.
-        if env.get("kind") in ("system", "slurm", "pbs"):
+        # Files an env is built or set up from are inputs to every stage
+        # using it, as its lock file is. Not a Docker env's: those are
+        # copied into the image, and their checksums are in its lock.
+        if env.get("kind") != "docker":
             for env_input in get_env_input_paths(env, env_name):
                 env_lock_fpaths.setdefault(env_name, []).append(
                     Path(env_input).as_posix()
                 )
+        if env.get("kind") == SWITCH_KIND and write:
+            # The same on every machine, so it is written here rather than
+            # by an environment check, which only runs where stages do
+            write_switch_env_lock(env_name, environments, wdir=wdir)
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=True, for_dvc=True, wdir=wdir
         )
@@ -2063,6 +2364,18 @@ def to_dvc(
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
+    # Env vars each stage depends on, its own and its environments'
+    for stage in pipeline.stages.values():
+        names = [i.name for i in stage.inputs if isinstance(i, EnvVarInput)]
+        for env_name in dict.fromkeys(
+            [stage.outer_environment, stage.inner_environment]
+        ):
+            env = environments.get(env_name) or {}
+            names += get_env_input_env_vars(env)
+            if env.get("kind") == SWITCH_KIND:
+                for option in get_switch_options(env_name, environments):
+                    names += get_env_input_env_vars(environments[option])
+        stage._env_var_names = sorted(set(names))
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
@@ -2087,14 +2400,62 @@ def to_dvc(
                 marker="calkit stage setup",
                 lines=["/.calkit/stage-setup/"],
             )
+        # Committed, unlike the setup files, so a remote workspace gets them
+        # with the rest of the snapshot
+        command_files = [
+            path
+            for stage in pipeline.stages.values()
+            if isinstance(stage, ShellCommandStage)
+            and (path := stage.write_command_file(wdir=wdir)) is not None
+        ]
+        # Hashes of this machine's values, so like the setup files they are
+        # rewritten by every compile and not committed
+        env_var_files = [
+            path
+            for stage in pipeline.stages.values()
+            if (
+                path := stage.write_env_var_file(
+                    {
+                        name: resolve_env_var(name, ck_info, wdir=wdir)
+                        for name in stage._env_var_names
+                    },
+                    wdir=wdir,
+                )
+            )
+            is not None
+        ]
+        if manage_gitignore and env_var_files:
+            _write_managed_gitignore_block(
+                os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
+                marker="calkit stage env vars",
+                lines=["/.calkit/env-vars/"],
+            )
+        # Remove files left by stages that were renamed, deleted, or no
+        # longer need one, since the command files are committed
+        for gen_dir, kept in [
+            ("stage-setup", setup_files),
+            ("stage-commands", command_files),
+            ("env-vars", env_var_files),
+        ]:
+            gen_dpath = os.path.join(wdir or ".", ".calkit", gen_dir)
+            if not os.path.isdir(gen_dpath):
+                continue
+            kept_names = {posixpath.basename(p) for p in kept}
+            for fname in os.listdir(gen_dpath):
+                fpath = os.path.join(gen_dpath, fname)
+                if fname not in kept_names and os.path.isfile(fpath):
+                    os.remove(fpath)
         # Only when there is a lock file to protect. A project with no
         # environment that locks under .calkit has nothing whose hash a
         # line-ending rewrite could change, and shouldn't get a
         # .gitattributes it never needed.
-        if manage_gitignore and any(
-            Path(p).as_posix().startswith(".calkit/env-locks/")
-            for paths in env_lock_fpaths.values()
-            for p in paths
+        if manage_gitignore and (
+            command_files
+            or any(
+                Path(p).as_posix().startswith(".calkit/env-locks/")
+                for paths in env_lock_fpaths.values()
+                for p in paths
+            )
         ):
             _ensure_calkit_gitattributes(wdir=wdir)
     # Ensure environment lock files are set as stage inputs if necessary
@@ -2599,4 +2960,18 @@ def get_upstream_stages(target: str, wdir: str | None = None) -> set[str]:
         if name:
             names.add(name)
             names.add(name.split("@")[0])
+    return names
+
+
+def get_stages_to_gate(targets: list[str] | None) -> set[str] | None:
+    """The stages a run of these targets can reach, or None for all."""
+    if not targets:
+        return None
+    names: set[str] = set()
+    try:
+        for target in targets:
+            names |= get_upstream_stages(target)
+    except Exception:
+        # E.g., a stage that isn't compiled yet
+        return None
     return names

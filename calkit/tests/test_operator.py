@@ -934,6 +934,81 @@ def test_workspace_actions(tmp_path, monkeypatch):
     assert path == os.path.join(tmp_path, "calkit", "other")
     assert calls == [["clone", url, path, "--no-dvc-pull"]]
 
+    # Stages are listed in order with their state and the questions resting
+    # on them, as evidence or upstream of it, matched through their paths,
+    # including matrix ones, known only up to their template
+    pipeline_dir = os.path.join(tmp_path, "pipeline")
+    os.makedirs(pipeline_dir)
+    with open(os.path.join(pipeline_dir, "dvc.yaml"), "w") as f:
+        json.dump(
+            {
+                "stages": {
+                    "fetch": {"cmd": "x", "outs": ["data/raw"]},
+                    "sim": {
+                        "matrix": {"case": ["a", "b"]},
+                        "cmd": "x",
+                        "deps": ["data/raw/mesh.csv"],
+                        "outs": ["results/${item.case}/out.csv"],
+                    },
+                    "plot": {
+                        "cmd": "x",
+                        "deps": ["results", {"plot.py": {}}],
+                        "outs": [{"fig.png": {"cache": False}}],
+                    },
+                    "other": {"cmd": "x", "outs": ["other.txt"]},
+                }
+            },
+            f,
+        )
+    with open(os.path.join(pipeline_dir, "calkit.yaml"), "w") as f:
+        f.write("pipeline:\n  stages:\n    plot:\n      kind: python-script\n")
+    stages = operator.get_stage_list(
+        pipeline_dir,
+        {
+            "pipeline": {
+                "stale_stage_names": ["sim@b", "plot"],
+                "running_stages": ["sim@a"],
+            },
+            "questions": {
+                "questions": [
+                    {"index": 1, "evidence": [{"stage": "plot"}]},
+                    {"index": 2, "evidence": [{"stage": "sim@a"}, {}]},
+                ]
+            },
+        },
+    )
+    assert stages == [
+        {
+            "name": "fetch",
+            "kind": None,
+            "state": "ok",
+            "questions": [],
+            "feeds_questions": [1, 2],
+        },
+        {
+            "name": "sim",
+            "kind": None,
+            "state": "running",
+            "questions": [2],
+            "feeds_questions": [1],
+        },
+        {
+            "name": "plot",
+            "kind": "python-script",
+            "state": "stale",
+            "questions": [1],
+            "feeds_questions": [],
+        },
+        {
+            "name": "other",
+            "kind": None,
+            "state": "ok",
+            "questions": [],
+            "feeds_questions": [],
+        },
+    ]
+    assert operator.get_stage_list(str(tmp_path), None) == []
+
     # Pulling only fast-forwards unless asked to merge, which is undone if
     # it conflicts
     def git(*args, cwd=wdir):

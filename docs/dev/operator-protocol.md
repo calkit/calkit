@@ -215,6 +215,11 @@ don't either.
 | `workspace.discard`    |                                                                       |
 | `workspace.add_stage`  | `name`, `cmd`, `deps`, `outs`, `calkit_type`, `calkit_object`, `push` |
 
+`workspace.status` returns what `calkit status --json` reports as
+`status`, plus `stages`, every stage in the pipeline in order, each with
+its `name`, `kind`, `state` (`running`, `stale`, or `ok`), the indexes of
+the `questions` whose evidence it makes, and the ones it only feeds, being
+upstream of that (`feeds_questions`).
 `workspace.git_status` returns the Git part of `workspace.status`, which is
 quick, while the rest can take a while for a large pipeline, so the
 browser asks for both and shows Git's first.

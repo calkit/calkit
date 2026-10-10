@@ -191,6 +191,19 @@ export default function WorkspacePanel({
     status?.dvc?.committed?.modified ?? [],
   )
   const staleStages: string[] = status?.pipeline?.stale_stage_names ?? []
+  // Every stage, in order, from Operators that list them
+  const stageList:
+    | {
+        name: string
+        kind: string | null
+        state: "running" | "stale" | "ok"
+        questions: number[]
+        feeds_questions: number[]
+      }[]
+    | undefined = statusQuery.data?.stages
+  const questionText = (index: number): string =>
+    status?.questions?.questions?.find((q: any) => q.index === index)
+      ?.question ?? `Question ${index}`
   const staleDetail: Record<string, any> = status?.pipeline?.stale_stages ?? {}
   // From the latest check-in until the live status arrives
   const runningStages: string[] =
@@ -619,7 +632,91 @@ export default function WorkspacePanel({
                     Up to date
                   </Text>
                 )}
-              <Flex gap={1} wrap="wrap">
+              {stageList && stageList.length > 0 && (
+                <Box maxH="280px" overflowY="auto">
+                  {stageList.map((stage) => (
+                    <Flex key={stage.name} align="center" gap={2} minH="24px">
+                      <Box w="12px" flexShrink={0}>
+                        {stage.state === "running" ? (
+                          <Spinner size="xs" color="blue.400" />
+                        ) : (
+                          <Box
+                            w={2}
+                            h={2}
+                            borderRadius="full"
+                            bg={
+                              stage.state === "stale"
+                                ? "yellow.400"
+                                : "ui.success"
+                            }
+                          />
+                        )}
+                      </Box>
+                      <Tooltip
+                        label={
+                          stage.state === "stale" ? (
+                            <Box whiteSpace="pre-line">
+                              {staleStages
+                                .filter((n) => n.split("@")[0] === stage.name)
+                                .map(
+                                  (n) =>
+                                    `${n === stage.name ? "" : `${n}: `}${describeStale(n)}`,
+                                )
+                                .join("\n")}
+                            </Box>
+                          ) : (
+                            stage.kind
+                          )
+                        }
+                        isDisabled={stage.state !== "stale" && !stage.kind}
+                      >
+                        <Text fontFamily="mono" fontSize="sm" noOfLines={1}>
+                          {stage.name}
+                        </Text>
+                      </Tooltip>
+                      <Flex gap={1} ml="auto" flexShrink={0} align="center">
+                        {stage.questions.map((index) => (
+                          <Tooltip key={index} label={questionText(index)}>
+                            <Badge fontSize="2xs" colorScheme="teal">
+                              Q{index}
+                            </Badge>
+                          </Tooltip>
+                        ))}
+                        {stage.feeds_questions.length > 0 && (
+                          <Tooltip
+                            label={
+                              <Box whiteSpace="pre-line">
+                                {stage.feeds_questions
+                                  .map((i) => `Q${i}: ${questionText(i)}`)
+                                  .join("\n")}
+                              </Box>
+                            }
+                          >
+                            <Text fontSize="2xs" color="ui.dim">
+                              feeds {stage.feeds_questions.length}
+                            </Text>
+                          </Tooltip>
+                        )}
+                        {editable && stage.state === "stale" && (
+                          <Tooltip label={`Run ${stage.name}`}>
+                            <IconButton
+                              aria-label={`Run ${stage.name}`}
+                              icon={<FiPlay />}
+                              size="xs"
+                              variant="ghost"
+                              minW="18px"
+                              h="18px"
+                              isDisabled={running}
+                              onClick={() => run([stage.name])}
+                            />
+                          </Tooltip>
+                        )}
+                      </Flex>
+                    </Flex>
+                  ))}
+                </Box>
+              )}
+              <Flex gap={1} wrap="wrap" hidden={Boolean(stageList)}>
                 {runningStages.map((stage) => (
                   <Tag key={stage} size="sm" colorScheme="blue">
                     <TagLabel>{stage}</TagLabel>
@@ -800,6 +897,27 @@ export default function WorkspacePanel({
                   )
                 }
               >
+                {/* What the stages running now are for */}
+                {running &&
+                  (stageList ?? [])
+                    .filter(
+                      (stage) =>
+                        stage.state === "running" &&
+                        stage.questions.length + stage.feeds_questions.length >
+                          0,
+                    )
+                    .map((stage) => (
+                      <Text key={stage.name} fontSize="sm" mb={1}>
+                        <Code fontSize="xs">{stage.name}</Code>{" "}
+                        {[...stage.questions, ...stage.feeds_questions]
+                          .slice(0, 5)
+                          .map((i) => `Q${i}: ${questionText(i)}`)
+                          .join("; ")}
+                        {stage.questions.length + stage.feeds_questions.length >
+                          5 &&
+                          ` (+${stage.questions.length + stage.feeds_questions.length - 5} more)`}
+                      </Text>
+                    ))}
                 <Box
                   as="pre"
                   ref={runLogRef}

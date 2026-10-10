@@ -749,6 +749,139 @@ def get_workspace_git_status(wdir: str, fetch: bool = True) -> dict:
     }
 
 
+def get_stage_list(wdir: str, status: dict | None) -> list[dict]:
+    """Every stage in a workspace's pipeline, in order, with its state and
+    the questions whose answers rest on it, as evidence or upstream of it.
+
+    Read from the DVC pipeline ``calkit status`` compiled, with the state and
+    the questions' evidence from what it reported.
+    """
+    from calkit.core import _load_yaml_readonly
+
+    try:
+        with open(os.path.join(wdir, "dvc.yaml")) as f:
+            dvc_stages = (_load_yaml_readonly(f) or {}).get("stages") or {}
+        with open(os.path.join(wdir, "calkit.yaml")) as f:
+            ck_stages = (
+                (_load_yaml_readonly(f) or {}).get("pipeline") or {}
+            ).get("stages") or {}
+    except Exception:
+        return []
+    if not isinstance(dvc_stages, dict):
+        return []
+
+    def paths(items: Any) -> list[tuple[str, bool]]:
+        # Paths, and whether they're templated, e.g., per matrix item, in
+        # which case only what comes before the template is known
+        result = []
+        for item in items or []:
+            path = next(iter(item)) if isinstance(item, dict) else item
+            if isinstance(path, str):
+                prefix = path.split("${")[0].rstrip("/")
+                result.append((prefix, "${" in path))
+        return result
+
+    outs = {
+        name: paths(stage.get("outs"))
+        for name, stage in dvc_stages.items()
+        if isinstance(stage, dict)
+    }
+    # Who makes each path, and each folder something is made in, so an
+    # input can be matched to what makes it, inside it, or around it
+    makers: dict[str, set[str]] = {}
+    makers_within: dict[str, set[str]] = {}
+    templated = []
+    for name, stage_outs in outs.items():
+        for path, is_templated in stage_outs:
+            if not path:
+                continue
+            if is_templated:
+                templated.append((path, name))
+            makers.setdefault(path, set()).add(name)
+            parts = path.split("/")
+            for i in range(1, len(parts)):
+                makers_within.setdefault("/".join(parts[:i]), set()).add(name)
+
+    def get_makers(dep: tuple[str, bool]) -> set[str]:
+        path, is_templated = dep
+        if not path:
+            return set()
+        found = set(makers.get(path, ())) | makers_within.get(path, set())
+        parts = path.split("/")
+        for i in range(1, len(parts)):
+            found |= makers.get("/".join(parts[:i]), set())
+        for prefix, name in templated:
+            if path.startswith(prefix):
+                found.add(name)
+        # Templated inputs match what's made under what's known of them
+        if is_templated:
+            found |= {
+                name
+                for out, names in makers.items()
+                if out.startswith(path)
+                for name in names
+            }
+        return found
+
+    # What each stage needs run first
+    upstream = {
+        name: set().union(
+            *[get_makers(dep) for dep in paths(stage.get("deps"))]
+        )
+        - {name}
+        for name, stage in dvc_stages.items()
+        if isinstance(stage, dict)
+    }
+
+    def with_upstream(names: set[str]) -> set[str]:
+        found, todo = set(), list(names)
+        while todo:
+            name = todo.pop()
+            if name not in found:
+                found.add(name)
+                todo.extend(upstream.get(name, ()))
+        return found
+
+    pipeline = (status or {}).get("pipeline") or {}
+    # DVC names matrix items stage@item, while both pipelines name the stage
+    stale = {n.split("@")[0] for n in pipeline.get("stale_stage_names") or []}
+    running = {n.split("@")[0] for n in pipeline.get("running_stages") or []}
+    # Questions whose evidence a stage makes, and ones it only feeds
+    questions: dict[str, list[int]] = {}
+    feeds: dict[str, list[int]] = {}
+    for question in ((status or {}).get("questions") or {}).get(
+        "questions"
+    ) or []:
+        evidence = {
+            ev["stage"].split("@")[0]
+            for ev in question.get("evidence") or []
+            if ev.get("stage")
+        }
+        for name in evidence:
+            questions.setdefault(name, []).append(question["index"])
+        for name in with_upstream(evidence) - evidence:
+            feeds.setdefault(name, []).append(question["index"])
+    stages = []
+    for name in outs:
+        ck_stage = ck_stages.get(name) if isinstance(ck_stages, dict) else None
+        stages.append(
+            dict(
+                name=name,
+                kind=ck_stage.get("kind")
+                if isinstance(ck_stage, dict)
+                else None,
+                state="running"
+                if name in running
+                else "stale"
+                if name in stale
+                else "ok",
+                questions=questions.get(name, []),
+                feeds_questions=feeds.get(name, []),
+            )
+        )
+    return stages
+
+
 def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     """A workspace's status as ``calkit status --json`` reports it, the same
     as the VS Code extension shows, plus how far it is from its remote.
@@ -782,6 +915,7 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
         )
     return {
         "status": status,
+        "stages": get_stage_list(wdir, status),
         "commits_ahead": git_status["commits_ahead"],
         "commits_behind": git_status["commits_behind"],
         "errors": errors,

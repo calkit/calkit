@@ -298,17 +298,17 @@
       "days_median": 397.5,
       "days_p10": 317.5,
       "days_p90": 518.0000000000001,
-      "idle_mean": 147.252152869778,
+      "idle_mean": 147.25215286977803,
       "student_days_mean": 337.407673565111,
       "days_to_finding_mean": 164.58022156349762,
       "days_to_first_finding_mean": 47.800553952201554,
       "effort": {
         "learning": 0.0,
         "work": 184.49965738778874,
-        "rework": 42.45546460505723,
+        "rework": 42.455464605057244,
         "wasted": 6.8988893310327395,
         "handoff": 0.8865000000000007,
-        "setup": 24.479335806343258,
+        "setup": 24.47933580634326,
         "prep": 2.0305000000000013,
         "translate": 0.0,
         "upkeep": 0.0,
@@ -368,14 +368,14 @@
         1.243907790252143,
         1.1691705560570764,
         1.0761275749513446,
-        0.9571146637475749
+        0.9571146637475751
       ],
       "combined": [
         1.6542072275086899,
         1.6160747979063244,
         1.5696214515124505,
-        1.5117900656259684,
-        1.437816924272324
+        1.5117900656259686,
+        1.4378169242723244
       ]
     }
   },
@@ -490,10 +490,10 @@
         "days_median": 552.0428603561395,
         "days_p10": 463.0328462255435,
         "days_p90": 703.8830972604852,
-        "idle_mean": 138.10336874884064,
+        "idle_mean": 138.10336874884067,
         "student_days_mean": 502.09102905239865,
         "days_to_finding_mean": 287.8886613128306,
-        "days_to_first_finding_mean": 132.34678313834522,
+        "days_to_first_finding_mean": 132.34678313834524,
         "effort": {
           "learning": 60.0,
           "work": 182.91378499717337,
@@ -605,7 +605,7 @@
         "days_p90": 552.05,
         "idle_mean": 157.02991685803997,
         "student_days_mean": 345.07629157098,
-        "days_to_finding_mean": 167.11683815869003,
+        "days_to_finding_mean": 167.11683815869,
         "days_to_first_finding_mean": 46.34555028594627,
         "effort": {
           "learning": 0.0,
@@ -752,7 +752,7 @@
   "waste": {
     "breakdown": {
       "status quo": {
-        "hands-on work": 184.28187712811905,
+        "hands-on work": 184.28187712811908,
         "rework": 69.12344793944818,
         "review prep": 74.25625,
         "tool hopping": 40.87239169390229,
@@ -846,7 +846,7 @@
         "days_to_first_finding_mean": 381.925,
         "effort": {
           "learning": 0.0,
-          "work": 184.28187712811905,
+          "work": 184.28187712811908,
           "rework": 69.12344793944818,
           "wasted": 0.0,
           "handoff": 15.75875,
@@ -858,7 +858,7 @@
           "revise": 2.0,
           "curate": 0.0
         },
-        "effort_total": 372.6689667614695,
+        "effort_total": 372.66896676146956,
         "pi_hours_mean": 43.6021875,
         "findings_mean": 8.0325,
         "flawed_findings_mean": 0.36,
@@ -882,7 +882,7 @@
         "effort": {
           "learning": 0.0,
           "work": 185.31538428174667,
-          "rework": 57.109909136556745,
+          "rework": 57.10990913655675,
           "wasted": 5.078889900618879,
           "handoff": 21.91375,
           "setup": 78.52690150974547,
@@ -948,7 +948,7 @@
         "idle_mean": 153.13630861537303,
         "student_days_mean": 382.92184569231347,
         "days_to_finding_mean": 189.65830725675994,
-        "days_to_first_finding_mean": 53.23349089390714,
+        "days_to_first_finding_mean": 53.23349089390713,
         "effort": {
           "learning": 0.0,
           "work": 136.27761944096514,
@@ -1094,7 +1094,7 @@
           "days_median": 549.0,
           "days_p10": 409.0,
           "days_p90": 747.0,
-          "idle_mean": 191.04669383953274,
+          "idle_mean": 191.0466938395328,
           "student_days_mean": 469.0016530802336,
           "days_to_finding_mean": 366.0875,
           "days_to_first_finding_mean": 333.2,
@@ -1213,7 +1213,7 @@
           "days_to_first_finding_mean": 58.130831345187474,
           "effort": {
             "learning": 0.0,
-            "work": 183.2244033743722,
+            "work": 183.22440337437223,
             "rework": 56.9919746285718,
             "wasted": 6.8285827249350834,
             "handoff": 0.8679500000000008,
@@ -1225,7 +1225,7 @@
             "revise": 2.0,
             "curate": 0.0
           },
-          "effort_total": 361.3260804870812,
+          "effort_total": 361.32608048708124,
           "pi_hours_mean": 33.92578125,
           "findings_mean": 8.1725,
           "flawed_findings_mean": 0.2925,
@@ -1288,7 +1288,7 @@
           "effort": {
             "learning": 0.0,
             "work": 185.67789170187916,
-            "rework": 44.88316749715972,
+            "rework": 44.88316749715973,
             "wasted": 5.12108338575175,
             "handoff": 22.37625,
             "setup": 78.25464085440754,
@@ -1299,7 +1299,7 @@
             "revise": 2.0,
             "curate": 0.0
           },
-          "effort_total": 431.88365843919814,
+          "effort_total": 431.8836584391982,
           "pi_hours_mean": 38.0571875,
           "findings_mean": 8.065,
           "flawed_findings_mean": 0.3175,
@@ -1655,7 +1655,7 @@
           "days_median": 408.0,
           "days_p10": 313.0,
           "days_p90": 543.0,
-          "idle_mean": 157.60477031377835,
+          "idle_mean": 157.60477031377832,
           "student_days_mean": 345.56511484311085,
           "days_to_finding_mean": 168.29486258975427,
           "days_to_first_finding_mean": 47.142640797490934,
@@ -1702,7 +1702,7 @@
             "rework": 37.55790666230428,
             "wasted": 4.262652913111161,
             "handoff": 12.08875,
-            "setup": 66.60396984757617,
+            "setup": 66.60396984757615,
             "prep": 38.05,
             "translate": 0.0,
             "upkeep": 0.0,
@@ -2016,13 +2016,13 @@
         "days_p90": 457.5,
         "idle_mean": 144.61462391534698,
         "student_days_mean": 275.9589380423265,
-        "days_to_finding_mean": 125.17740245044298,
+        "days_to_finding_mean": 125.17740245044301,
         "days_to_first_finding_mean": 36.78572725126473,
         "effort": {
           "learning": 0.9000000000000002,
           "work": 137.31398858848635,
           "rework": 34.878553783227325,
-          "wasted": 5.189394770593605,
+          "wasted": 5.189394770593603,
           "handoff": 0.9065660790864246,
           "setup": 20.045626283267698,
           "prep": 1.8912465799915987,
@@ -2065,7 +2065,7 @@
           "rework": 27.89257445849742,
           "wasted": 5.2416668565463205,
           "handoff": 0.8330559309281714,
-          "setup": 17.199407859926744,
+          "setup": 17.199407859926747,
           "prep": 1.7846963485782368,
           "translate": 0.0,
           "upkeep": 0.0,
@@ -2104,7 +2104,7 @@
           "learning": 0.9000000000000002,
           "work": 134.1321350124055,
           "rework": 28.85843782361019,
-          "wasted": 4.6063132121426476,
+          "wasted": 4.606313212142648,
           "handoff": 0.8350576348027636,
           "setup": 17.157177958047747,
           "prep": 1.776081692078444,
@@ -2225,7 +2225,7 @@
         "days_to_first_finding_mean": 45.19913371969704,
         "effort": {
           "learning": 3.0,
-          "work": 184.94671922582762,
+          "work": 184.94671922582765,
           "rework": 31.04534434985668,
           "wasted": 5.997280471819622,
           "handoff": 1.2407365847321354,
@@ -2237,7 +2237,7 @@
           "revise": 2.0,
           "curate": 0.5012507676735778
         },
-        "effort_total": 255.74121389072226,
+        "effort_total": 255.7412138907223,
         "pi_hours_mean": 13.264296875,
         "findings_mean": 8.1,
         "flawed_findings_mean": 0.01,

@@ -1374,6 +1374,7 @@ def test_check_storage(tmp_dir):
     with open("other.csv", "a") as f:
         f.write("1,2\n")
     git("add", "-f", "other.csv")
+    git("commit", "-qam", "Break storage")
     result = check()
     assert result.returncode != 0
     for path in ["out.txt", "data.csv", "kept.txt", "other.csv"]:
@@ -1381,7 +1382,9 @@ def test_check_storage(tmp_dir):
     result = check("--json")
     assert result.returncode != 0
     assert len(json.loads(result.stdout)) == 4
-    # Each is fixed but the one that's unclear, which fails the check
+    assert check("--json", "--fix").returncode != 0
+    # Each is fixed but the one that's unclear, which fails the check, and
+    # the .gitignore that fixing changes is staged with the rest
     result = check("--fix")
     assert result.returncode != 0
     assert "other.csv" in result.stdout
@@ -1391,6 +1394,8 @@ def test_check_storage(tmp_dir):
         "data.csv",
     ]
     assert git("ls-files", "--", "kept.txt").strip() == "kept.txt"
+    assert ".gitignore" in git("diff", "--cached", "--name-only").split()
+    assert ".gitignore" not in git("diff", "--name-only").split()
     assert "up to date" in subprocess.check_output(
         ["dvc", "status", "make"], text=True
     )

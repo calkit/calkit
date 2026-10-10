@@ -2049,6 +2049,8 @@ def check_storage(
     import calkit.git
     import calkit.pipeline
 
+    if fix and as_json:
+        raise_error("--json can't be used with --fix")
     problems = calkit.dvc.get_storage_problems()
     if as_json:
         typer.echo(json.dumps(problems, indent=2))
@@ -2064,6 +2066,7 @@ def check_storage(
             calkit.echo("✅ Every path is stored where it's declared to be")
         return
     repo = calkit.git.get_repo()
+    gitignores = calkit.git.get_dirty_gitignores(repo)
     fixed = []
     unfixed = []
     # Pipeline outputs are recorded in DVC, which records their stages'
@@ -2102,10 +2105,12 @@ def check_storage(
         target = problem["dvc_file"] or stage
         if calkit.dvc.run_dvc_command(["commit", "-f", "-q", target]) != 0:
             warn(f"Couldn't record {problem['path']} in DVC")
+    for message in calkit.git.stage_gitignores(repo, gitignores):
+        warn(message)
     for problem in unfixed:
         warn(problem["message"])
     if fixed:
-        typer.echo("Commit the staged changes and any to .gitignore")
+        typer.echo("Commit the staged changes")
     if any(p["kind"] != "large" for p in unfixed):
         raise typer.Exit(1)
 

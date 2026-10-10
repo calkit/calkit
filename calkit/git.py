@@ -456,6 +456,54 @@ def ensure_path_is_not_ignored(
     return True
 
 
+def get_dirty_gitignores(repo: git.Repo) -> dict[str, str]:
+    """Each .gitignore with changes not yet committed, relative to the repo
+    root, and what it holds.
+    """
+    status = repo.git.status("--porcelain", "--untracked-files=all")
+    dirty = {}
+    for line in status.splitlines():
+        path = line[3:].strip('"')
+        if path.endswith(".gitignore"):
+            fpath = os.path.join(repo.working_dir, path)
+            exists = os.path.isfile(fpath)
+            dirty[path] = open(fpath).read() if exists else ""
+    return dirty
+
+
+def stage_gitignores(
+    repo: git.Repo, dirty_before: dict[str, str]
+) -> list[str]:
+    """Stage each .gitignore changed since ``dirty_before`` was taken with
+    ``get_dirty_gitignores``.
+
+    One that already had changes isn't staged, since that would commit
+    them too, though DVC may have staged it already if it autostages.
+    Returns a warning for each that couldn't be staged cleanly.
+    """
+    messages = []
+    for gitignore, text in sorted(get_dirty_gitignores(repo).items()):
+        if gitignore in dirty_before:
+            if text == dirty_before[gitignore]:
+                continue
+            if repo.git.diff("--name-only", "--", gitignore).strip():
+                messages.append(
+                    f"{gitignore} already had changes, so the rules added "
+                    "to it aren't staged; stage it when it's ready"
+                )
+            else:
+                messages.append(
+                    f"{gitignore} already had changes, which DVC staged "
+                    "with the rules added to it; check them before committing"
+                )
+            continue
+        try:
+            repo.git.add("-A", "--", gitignore)
+        except git.GitCommandError:
+            messages.append(f"Couldn't stage {gitignore}")
+    return messages
+
+
 def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
     """Ensure the .dvc pointer for ``path`` will not be Git-ignored.
 

@@ -1128,11 +1128,13 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     import calkit.dvc.zip
     import calkit.git
     from calkit.models.pipeline import (
+        JsonToLatexStage,
         JupyterNotebookStage,
         LatexStage,
         MarimoHtmlWasmStage,
         PathOutput,
         Pipeline,
+        QuestionsToLatexStage,
     )
 
     base = Path(wdir or ".").resolve()
@@ -1162,6 +1164,9 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     try:
         for out in dvc_repo.index.outs:
             path = Path(out.fs_path).resolve()
+            # A project in a subdirectory can share its DVC repo with others
+            if not path.is_relative_to(base):
+                continue
             if not out.use_cache or not in_git(path):
                 continue
             message = f"{rel(path)} is tracked by both Git and DVC"
@@ -1210,6 +1215,11 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
         if stage.scheduler_log_output is not None:
             outs.append(stage.scheduler_log_output)
         paths = [out.path for out in outs if out.storage == "git"]
+        # Generated LaTeX is stored in Git unless it says otherwise
+        if isinstance(stage, (JsonToLatexStage, QuestionsToLatexStage)):
+            paths += [
+                out for out in stage.outputs or [] if isinstance(out, str)
+            ]
         if isinstance(stage, LatexStage) and stage.pdf_storage == "git":
             paths.append(stage.pdf_path)
         for p in paths:

@@ -667,6 +667,10 @@ def test_get_storage_problems(tmp_dir):
     # is wrong
     git("add", "-f", "out.txt", "data.csv")
     found = problems()
+    # Only the project's own paths count, not those of another sharing its
+    # DVC repo
+    os.makedirs("sub")
+    assert problems(wdir="sub") == {}
     assert found["out.txt"]["kind"] == "both"
     assert found["out.txt"]["stage"] == "make"
     assert found["out.txt"]["store_in"] == "dvc"
@@ -685,6 +689,20 @@ def test_get_storage_problems(tmp_dir):
     assert list(found) == ["kept.txt"]
     assert found["kept.txt"]["kind"] == "ignored"
     assert found["kept.txt"]["store_in"] == "git"
+    # Including generated LaTeX, which is stored in Git unless it says
+    # otherwise
+    ck_info["pipeline"]["stages"]["values"] = {
+        "kind": "json-to-latex",
+        "inputs": ["values.json"],
+        "outputs": ["values.tex"],
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("values.tex", "w") as f:
+        f.write("x")
+    with open(".gitignore", "a") as f:
+        f.write("/values.tex\n")
+    assert problems()["values.tex"]["kind"] == "ignored"
+    os.remove("values.tex")
     # A path stored zipped and tracked by Git
     os.makedirs("zipped")
     with open("zipped/a.txt", "w") as f:

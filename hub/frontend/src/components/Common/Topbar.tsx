@@ -33,10 +33,17 @@ import UserMenu from "./UserMenu"
 // "Docs" leaves the app entirely rather than going to a page that only
 // links onward to the documentation site, which is where that content is
 // actually maintained.
-const NAV_LINKS: { label: string; to?: string; href?: string }[] = [
+const NAV_LINKS: {
+  label: string
+  to?: string
+  href?: string
+  // Only for someone signed in, e.g., their own machines
+  signedIn?: boolean
+}[] = [
   { label: "Orgs", to: "/orgs" },
   { label: "Projects", to: "/projects" },
   { label: "Datasets", to: "/datasets" },
+  { label: "Compute", to: "/compute", signedIn: true },
   { label: "Docs", href: "https://docs.calkit.org" },
 ]
 
@@ -162,9 +169,11 @@ export default function Topbar() {
               spacing={4}
               display={{ base: "none", md: "flex" }}
             >
-              {NAV_LINKS.map((link) => (
-                <NavLink key={link.label} {...link} />
-              ))}
+              {NAV_LINKS.filter((link) => user || !link.signedIn).map(
+                ({ signedIn, ...link }) => (
+                  <NavLink key={link.label} {...link} />
+                ),
+              )}
             </HStack>
           </HStack>
           <Flex alignItems={"center"} gap={2}>
@@ -271,9 +280,11 @@ export default function Topbar() {
         {isOpen ? (
           <Box pb={4} display={{ md: "none" }}>
             <Stack as={"nav"} spacing={4}>
-              {NAV_LINKS.map((link) => (
-                <NavLink key={link.label} {...link} />
-              ))}
+              {NAV_LINKS.filter((link) => user || !link.signedIn).map(
+                ({ signedIn, ...link }) => (
+                  <NavLink key={link.label} {...link} />
+                ),
+              )}
             </Stack>
           </Box>
         ) : null}

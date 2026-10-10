@@ -29,6 +29,7 @@ import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutOrgsRouteImport } from './routes/_layout/orgs'
 import { Route as LayoutNewRouteImport } from './routes/_layout/new'
 import { Route as LayoutDatasetsRouteImport } from './routes/_layout/datasets'
+import { Route as LayoutComputeRouteImport } from './routes/_layout/compute'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutAccountNameIndexRouteImport } from './routes/_layout/$accountName/index'
 import { Route as LayoutAccountNameProjectNameLayoutRouteImport } from './routes/_layout/$accountName/$projectName/_layout'
@@ -146,6 +147,11 @@ const LayoutNewRoute = LayoutNewRouteImport.update({
 const LayoutDatasetsRoute = LayoutDatasetsRouteImport.update({
   id: '/datasets',
   path: '/datasets',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutComputeRoute = LayoutComputeRouteImport.update({
+  id: '/compute',
+  path: '/compute',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutAdminRoute = LayoutAdminRouteImport.update({
@@ -309,6 +315,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutAdminRoute
+  '/compute': typeof LayoutComputeRoute
   '/datasets': typeof LayoutDatasetsRoute
   '/new': typeof LayoutNewRoute
   '/orgs': typeof LayoutOrgsRoute
@@ -353,6 +360,7 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutAdminRoute
+  '/compute': typeof LayoutComputeRoute
   '/datasets': typeof LayoutDatasetsRoute
   '/new': typeof LayoutNewRoute
   '/orgs': typeof LayoutOrgsRoute
@@ -397,6 +405,7 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/compute': typeof LayoutComputeRoute
   '/_layout/datasets': typeof LayoutDatasetsRoute
   '/_layout/new': typeof LayoutNewRoute
   '/_layout/orgs': typeof LayoutOrgsRoute
@@ -444,6 +453,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/admin'
+    | '/compute'
     | '/datasets'
     | '/new'
     | '/orgs'
@@ -488,6 +498,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/admin'
+    | '/compute'
     | '/datasets'
     | '/new'
     | '/orgs'
@@ -531,6 +542,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/_layout/admin'
+    | '/_layout/compute'
     | '/_layout/datasets'
     | '/_layout/new'
     | '/_layout/orgs'
@@ -711,6 +723,13 @@ declare module '@tanstack/react-router' {
       path: '/datasets'
       fullPath: '/datasets'
       preLoaderRoute: typeof LayoutDatasetsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/compute': {
+      id: '/_layout/compute'
+      path: '/compute'
+      fullPath: '/compute'
+      preLoaderRoute: typeof LayoutComputeRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/admin': {
@@ -1005,6 +1024,7 @@ const LayoutAccountNameProjectNameRouteWithChildren =
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutComputeRoute: typeof LayoutComputeRoute
   LayoutDatasetsRoute: typeof LayoutDatasetsRoute
   LayoutNewRoute: typeof LayoutNewRoute
   LayoutOrgsRoute: typeof LayoutOrgsRoute
@@ -1017,6 +1037,7 @@ interface LayoutRouteChildren {
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
+  LayoutComputeRoute: LayoutComputeRoute,
   LayoutDatasetsRoute: LayoutDatasetsRoute,
   LayoutNewRoute: LayoutNewRoute,
   LayoutOrgsRoute: LayoutOrgsRoute,

@@ -130,6 +130,8 @@ INVALID_ACCOUNT_NAMES = [
     "checks",
     "cloud",
     "clouds",
+    # The user's own Operators, workspaces, and sessions
+    "compute",
     "create",
     "data",
     "datasets",

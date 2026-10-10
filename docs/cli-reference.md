@@ -2564,6 +2564,7 @@ Update objects.
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`path-storage`](#subcommand-update-path-storage)     | Move paths between Git and DVC storage without rerunning anything.                   |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 | [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
 
@@ -2947,6 +2948,32 @@ Options:
 | `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
 | `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
 | `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+
+<a id="subcommand-update-path-storage"></a>
+
+#### `calkit update path-storage`
+
+Move paths between Git and DVC storage without rerunning anything.
+
+A pipeline output's storage is changed where the pipeline declares it, e.g., an output's 'storage' or a LaTeX stage's 'pdf_storage', and a file added on its own is added again with the other system. Either way it's untracked from where it was, so it isn't left in both. The tracking changes are staged, and calkit.yaml and dvc.yaml are left to commit.
+
+Usage:
+
+```text
+calkit update path-storage [OPTIONS] PATHS...
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------- |
+| `paths`  | str  | yes      |         | Files or directories to move, from the project. |
+
+Options:
+
+| Option       | Type | Required | Default | Description                      |
+| ------------ | ---- | -------- | ------- | -------------------------------- |
+| `--to`, `-t` | str  | yes      |         | Where to store them: git or dvc. |
 
 <a id="subcommand-update-dataset"></a>
 

@@ -222,7 +222,7 @@ paths, and refusing sessions where they can't be enforced.
 There are two kinds:
 
 - Personal workspaces are ordinary long-lived checkouts.
-  The Operator discovers Calkit projects under `~/calkit`, and
+  The Operator discovers Calkit projects under `~/calkit` and `~/dev`, and
   `calkit operator add-workspace <path>` registers ones elsewhere.
   These are the only kind edited from the hub.
 - Managed workspaces are the existing hidden ones under

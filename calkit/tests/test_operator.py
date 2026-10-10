@@ -92,8 +92,11 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
         "token": "cko_x",
         "workspaces": [],
     }
-    # Projects under ~/calkit are found; other folders there are not
+    # Projects under ~/calkit and ~/dev are found; other folders there are
+    # not
     _init_project(os.path.join(home, "calkit", "demo"))
+    _init_project(os.path.join(home, "dev", "tool"), name="tool")
+    os.makedirs(os.path.join(home, "dev", "not-calkit"))
     os.makedirs(os.path.join(home, "calkit", "not-a-project"))
     with open(os.path.join(home, "calkit", "demo", "notes.txt"), "w") as f:
         f.write("uncommitted")
@@ -128,6 +131,7 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     }
     assert set(workspaces) == {
         "calkit/demo",
+        "dev/tool",
         "src/other",
         ".calkit/workspaces/calkit.io/alice/demo",
     }
@@ -682,6 +686,19 @@ def test_workspace_actions(tmp_path, monkeypatch):
     for bad in ["--force", "-b", "../up", "a b", ""]:
         with pytest.raises(ValueError):
             operator.new_workspace(wdir, bad)
+    # One from ~/dev goes beside it, and one from elsewhere in ~/calkit
+    calls: list[list[str]] = []
+    with monkeypatch.context() as m:
+        m.setattr(operator, "_calkit", lambda args, wdir: calls.append(args))
+        for source, parent in [
+            (os.path.join(tmp_path, "dev", "tool"), "dev"),
+            (os.path.join(tmp_path, "src", "tool"), "calkit"),
+        ]:
+            made = operator.new_workspace(source, "x")
+            assert made["path"] == os.path.join(
+                os.path.realpath(tmp_path), parent, "tool-x"
+            )
+            assert calls[-1][-1] == made["path"]
     subprocess.run(["git", "checkout", "--", "."], cwd=wdir, check=True)
     # Changes to DVC-tracked files show up too, and discarding puts back
     # what was committed with either

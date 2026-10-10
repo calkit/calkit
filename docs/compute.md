@@ -122,7 +122,7 @@ On Windows, the Operator starts at login and can do everything except
 open shell sessions, which aren't supported there yet.
 
 By default, the Operator will detect long-lived personal workspaces
-in your `~/calkit` folder.
+in your `~/calkit` and `~/dev` folders.
 Projects cloned elsewhere can be added with:
 
 ```sh

@@ -210,7 +210,8 @@ when it started, and the end of the `log`, however that run was started.
 `workspace.stop` interrupts the run in progress, as Ctrl+C would.
 `workspace.new` runs `calkit new workspace` to make another workspace for
 the project on `branch`, a Git worktree sharing the workspace's DVC cache,
-in `~/calkit`, where the Operator finds it, and returns its `path`.
+beside it if it's in `~/calkit` or `~/dev`, where the Operator finds it,
+else in `~/calkit`, and returns its `path`.
 
 `workspaces.clone`, with `id` and `git_repo_url`, clones a project into
 `~/calkit` with the machine's own Git credentials, where it becomes a

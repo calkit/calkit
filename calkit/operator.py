@@ -46,6 +46,8 @@ MAX_INPUT_BUFFER_BYTES = 1024 * 1024
 # In cron mode, the Operator exits after this long with no sessions or
 # browsers, and cron starts it again when the hub asks
 CRON_IDLE_EXIT_SECONDS = 900
+# Folders in the home directory whose Calkit projects are workspaces
+WORKSPACE_ROOTS = ["calkit", "dev"]
 # How often to check whether Calkit was upgraded or a restart was asked for
 RESTART_CHECK_SECONDS = 30
 
@@ -449,8 +451,9 @@ def release_workspace(wdir: str) -> None:
 def discover_workspaces(cfg: dict) -> list[dict]:
     """Find the workspaces this Operator gives the hub access to.
 
-    These are Calkit projects directly under ``~/calkit``, ones registered
-    in the config, and the managed ones Calkit creates for running stages.
+    These are Calkit projects directly under ``~/calkit`` or ``~/dev``,
+    ones registered in the config, and the managed ones Calkit creates for
+    running stages.
     """
 
     def _git_status(path: str) -> dict:
@@ -484,10 +487,11 @@ def discover_workspaces(cfg: dict) -> list[dict]:
 
     home = config.get_user_home()
     candidates: list[tuple[str, str]] = []
-    root = os.path.join(home, "calkit")
-    if os.path.isdir(root):
-        for name in sorted(os.listdir(root)):
-            candidates.append((os.path.join(root, name), "personal"))
+    for root_name in WORKSPACE_ROOTS:
+        root = os.path.join(home, root_name)
+        if os.path.isdir(root):
+            for name in sorted(os.listdir(root)):
+                candidates.append((os.path.join(root, name), "personal"))
     for path in cfg.get("workspaces", []):
         candidates.append((os.path.expanduser(path), "personal"))
     # Managed workspaces are laid out as <hub>/<owner>/<name>, and only
@@ -1030,18 +1034,23 @@ def clone_project(git_repo_url: str) -> str:
 
 def new_workspace(wdir: str, branch: str) -> dict:
     """Create another workspace for the project in ``wdir`` on ``branch``,
-    as a worktree sharing its DVC cache, in ``~/calkit`` where it's found,
-    returning its path.
+    as a worktree sharing its DVC cache, returning its path.
+
+    It goes beside ``wdir`` if that's in a folder workspaces are found in,
+    else in ``~/calkit``.
     """
-    # A branch name, which can't be an option or climb out of ~/calkit
+    # A branch name, which can't be an option or climb out of the folder
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch) or (
         ".." in branch
     ):
         raise ValueError(f"Invalid branch name '{branch}'")
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-.")
-    path = os.path.join(
-        config.get_user_home(), "calkit", f"{os.path.basename(wdir)}-{name}"
-    )
+    home = config.get_user_home()
+    roots = [os.path.realpath(os.path.join(home, r)) for r in WORKSPACE_ROOTS]
+    parent = os.path.dirname(os.path.realpath(wdir))
+    if parent not in roots:
+        parent = roots[0]
+    path = os.path.join(parent, f"{os.path.basename(wdir)}-{name}")
     _calkit(["new", "workspace", branch, "--path", path], wdir)
     return {"path": path}
 

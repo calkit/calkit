@@ -253,6 +253,15 @@ def test_platform_entries_prerequisites_and_record(
     # Aliases share entries by reference
     assert install.INSTALLERS["mamba"] is install.INSTALLERS["conda"]
     assert install.INSTALLERS["Rscript"] is install.INSTALLERS["R"]
+    # LibreOffice is found by its soffice command, and on Linux comes with
+    # the Math component distributions package separately
+    assert install.INSTALLERS["soffice"] is install.INSTALLERS["libreoffice"]
+    for platform in ("darwin", "linux", "win32"):
+        with mock.patch("calkit.install.sys.platform", platform):
+            lo = install.get_installer("libreoffice")
+            assert lo is not None and lo.get("binary") == "soffice"
+            if platform == "linux":
+                assert "libreoffice-math" in lo["script"]
     # A fake registry with a prerequisite: installing the tool installs the
     # prerequisite first, both land on PATH, and both are recorded
     fake_bin = tmp_dir / "bin"
@@ -288,6 +297,16 @@ def test_platform_entries_prerequisites_and_record(
     assert [rec["app"] for rec in log] == ["prereq", "tool"]
     assert log[1]["script"] == "install-tool"
     assert log[1]["installed_at"]
+    # An app whose command is named otherwise is checked for by that name
+    registry["suite"] = {
+        "script": "install-suite",
+        "path_add": str(fake_bin),
+        "binary": "tool",
+    }
+    with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):
+        assert install.install("suite") is True
+        del registry["suite"]["binary"]
+        assert install.install("suite") is False
     # A prerequisite that's already present isn't reinstalled
     ran.clear()
     with mock.patch("calkit.install.subprocess.run", side_effect=fake_run):

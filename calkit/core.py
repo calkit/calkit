@@ -750,6 +750,14 @@ def _normalize_requirement(req) -> dict:
     ``kind: cpu-count`` already says everything there is to say about which
     property it constrains -- so the kind is used as the name in messages.
     """
+
+    def malformed() -> ValueError:
+        return ValueError(
+            f"Malformed requirement {req!r}; list an app by name, e.g., "
+            "'- sbatch' or '- python>=3.11', or give the requirement's "
+            "'kind', e.g., '- kind: env-var' with 'name: TOKEN'"
+        )
+
     dep = req
     if isinstance(dep, str):
         # Split on the first version operator so a string like
@@ -757,14 +765,14 @@ def _normalize_requirement(req) -> dict:
         # the caller can validate.
         m = re.match(r"^([A-Za-z0-9_.\-]+)(.*)$", dep.strip())
         if m is None:
-            raise ValueError(f"Malformed requirement: {dep}")
+            raise malformed()
         out: dict = {"name": m.group(1), "kind": "app"}
         spec = m.group(2).strip()
         if spec:
             out["version_spec"] = spec
         return out
     if not isinstance(dep, dict):
-        raise ValueError(f"Malformed requirement: {dep}")
+        raise malformed()
     keys = list(dep.keys())
     # Flat form with explicit kind: only requires ``name`` for kinds where
     # name is the identity (app, env-var). Setup requirements may omit it,
@@ -789,12 +797,12 @@ def _normalize_requirement(req) -> dict:
         out.setdefault("kind", "app")
         return out
     if len(keys) != 1:
-        raise ValueError(f"Malformed requirement: {dep}")
+        raise malformed()
     # Single-key form: {name: {kind: ..., ...}}
     name = keys[0]
     attrs = dep[name] or {}
     if not isinstance(attrs, dict):
-        raise ValueError(f"Malformed requirement: {dep}")
+        raise malformed()
     out = dict(attrs)
     out["name"] = name
     out.setdefault("kind", "app")

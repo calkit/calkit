@@ -2841,11 +2841,13 @@ def run(
     ):
         gate_stage_names = calkit.pipeline.get_stages_to_gate(targets)
     # Get system information, with the app versions requirements check
-    system_info = calkit.get_system_info(
-        apps=calkit.get_version_checked_app_names(
+    try:
+        version_checked_apps = calkit.get_version_checked_app_names(
             ck_info, stage_names=gate_stage_names
         )
-    )
+    except ValueError as e:
+        raise_error(str(e))
+    system_info = calkit.get_system_info(apps=version_checked_apps)
     # Save the system to .calkit/local/systems unconditionally
     local_sysinfo_fpath = os.path.join(
         calkit.ensure_local_dir(), "systems", system_info["id"] + ".json"

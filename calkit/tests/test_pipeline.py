@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import warnings
@@ -3927,6 +3928,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
                 ],
             },
             "here": {"kind": "system"},
+            "queue-here": {"kind": "slurm"},
             "pinned": {"kind": "system", "lock": ["hostname"]},
             "follows": {
                 "kind": "system",
@@ -3953,6 +3955,31 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
                     "kind": "shell-command",
                     "command": "true",
                     "environment": "cluster-only",
+                    "outputs": ["cluster.txt", "made"],
+                },
+                "uses-cluster": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["cluster.txt"],
+                    "outputs": [{"path": "used.txt"}],
+                },
+                "after-that": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": [{"from_stage_outputs": "uses-cluster"}],
+                },
+                "uses-made": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["made/x.txt"],
+                },
+                "queued": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "queue-here",
                 },
                 "in-lab": {
                     "kind": "shell-command",
@@ -3963,6 +3990,13 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
                     "kind": "shell-command",
                     "command": "true",
                     "environment": "far",
+                    "outputs": ["far.txt"],
+                },
+                "uses-far": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["far.txt"],
                 },
                 "far-free": {
                     "kind": "shell-command",
@@ -4025,12 +4059,17 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
         with open(lock_fpath, "w") as f:
             json.dump({"hostname": "calkit-test.invalid"}, f)
+    # One of a skipped stage's outputs is already here, e.g., pulled
+    os.makedirs("made")
     gated, errors = calkit.pipeline.get_gated_stages(
         ck_info, interactive=False
     )
-    assert set(gated) == {
+    no_sbatch = shutil.which("sbatch") is None
+    assert set(gated) - {"queued"} == {
         "needs-token",
         "on-cluster",
+        "uses-cluster",
+        "after-that",
         "in-lab",
         "no-pick",
         "here-token",
@@ -4038,13 +4077,21 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         "by-id",
         "no-app",
     }
+    # A scheduler with no host is this machine's, which needs it installed
+    if no_sbatch:
+        assert "app 'sbatch' not found" in gated["queued"]
+        assert "giving environment 'queue-here' a 'host'" in gated["queued"]
+    # A stage needing an output a skipped stage hasn't made is skipped
+    # too, as are those after it, but not one whose input is already here
+    assert "'cluster.txt' from stage 'on-cluster'" in gated["uses-cluster"]
+    assert "'used.txt' from stage 'uses-cluster'" in gated["after-that"]
     # A machine named by ID alone isn't one that can be reached, and one
     # with nothing to check isn't connected to
     assert "has no 'host' to reach it" in gated["by-id"]
     # Checks never print to stdout, which, e.g., 'status --json' writes to
     assert capsys.readouterr().out == ""
     # Something being wrong isn't the project saying the stage can't run
-    assert set(errors) == {"far-away", "bad-switch"}
+    assert set(errors) == {"far-away", "uses-far", "bad-switch"}
     assert "hostname_match" in errors["bad-switch"]
     assert "locked to another machine" in gated["elsewhere"]
     assert "relock: auto" in gated["elsewhere"]
@@ -4058,8 +4105,11 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     assert "picks no environment" in gated["no-pick"]
     # Meeting the requirement lets the stages run
     monkeypatch.setenv("CK_TEST_TOKEN", "x")
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
     gated, errors = calkit.pipeline.get_gated_stages(
-        ck_info, stage_names=["needs-token", "in-lab"], interactive=False
+        ck_info,
+        stage_names=["needs-token", "in-lab", "queued"],
+        interactive=False,
     )
     assert gated == {} and errors == {}
 

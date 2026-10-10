@@ -922,6 +922,20 @@ def get_gated_stages(
         )
         return workspace.ensure_reachable(ws, interactive=interactive)
 
+    def machine_requirements(env: dict) -> list:
+        """An env's requirements, plus its scheduler when that's here."""
+        from calkit.cli.scheduler import _BINARIES, _mock_enabled
+
+        requirements = list(env.get("requirements") or [])
+        kind = env.get("kind")
+        if (
+            kind in _BINARIES
+            and not _mock_enabled()
+            and envs_mod.host_is_local(env.get("host") or "localhost")
+        ):
+            requirements.append(_BINARIES[kind]["submit"])
+        return requirements
+
     def requirements_problem(
         requirements: list, machine_name: str | None, machine: dict
     ) -> tuple[str | None, bool]:
@@ -990,6 +1004,39 @@ def get_gated_stages(
             "'relock: auto' on it to follow whichever machine runs it"
         ), False
 
+    def paths(items: list) -> list[str]:
+        """The literal paths among a stage's inputs or outputs."""
+        out = []
+        for item in items:
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str) and "{" not in path:
+                out.append(Path(path).as_posix().rstrip("/"))
+        return out
+
+    def missing_output(stage: dict) -> tuple[str, str] | None:
+        """A skipped stage, and its output this stage needs but lacks."""
+        for input_path in paths(stage.get("inputs") or []):
+            for upstream in list(gated) + list(errors):
+                for output in paths(stages[upstream].get("outputs") or []):
+                    related = (
+                        input_path == output
+                        or input_path.startswith(output + "/")
+                        or output.startswith(input_path + "/")
+                    )
+                    if related and not os.path.exists(output):
+                        return upstream, output
+        for item in stage.get("inputs") or []:
+            source = (
+                item.get("from_stage_outputs", "")
+                if isinstance(item, dict)
+                else ""
+            )
+            if source in gated or source in errors:
+                for output in paths(stages[source].get("outputs") or []):
+                    if not os.path.exists(output):
+                        return source, output
+        return None
+
     for name, stage in stages.items():
         if stage_names is not None and name not in stage_names:
             continue
@@ -1052,7 +1099,7 @@ def get_gated_stages(
         if reason is None:
             requirements = list(stage.get("requirements") or [])
             for _, env in resolved:
-                requirements += env.get("requirements") or []
+                requirements += machine_requirements(env)
             reason, is_error = check(
                 ["requirements", machine_name, requirements],
                 lambda: requirements_problem(
@@ -1064,9 +1111,9 @@ def get_gated_stages(
             local_machines = [
                 n
                 for n, env in resolved
-                if env.get("kind") == "system"
+                if env.get("kind") in ("system", "slurm", "pbs")
                 and not env.get("host")
-                and env.get("requirements")
+                and machine_requirements(env)
             ]
             if (
                 reason is not None
@@ -1076,7 +1123,9 @@ def get_gated_stages(
                 and check(
                     ["requirements", None, envs[local_machines[0]]],
                     lambda: requirements_problem(
-                        envs[local_machines[0]]["requirements"], None, {}
+                        machine_requirements(envs[local_machines[0]]),
+                        None,
+                        {},
                     ),
                 )[0]
                 is not None
@@ -1100,6 +1149,29 @@ def get_gated_stages(
                     break
         if reason is not None:
             (errors if is_error else gated)[name] = reason
+    # A stage that needs an output a skipped stage hasn't made can't run
+    # either, and nor can the stages after it
+    added = True
+    while added:
+        added = False
+        for name, stage in stages.items():
+            if (
+                (stage_names is not None and name not in stage_names)
+                or name in gated
+                or name in errors
+                or stage.get("frozen")
+            ):
+                continue
+            found = missing_output(stage)
+            if found is None:
+                continue
+            upstream, output = found
+            (errors if upstream in errors else gated)[name] = (
+                f"it needs '{output}' from stage '{upstream}', which "
+                "can't run here and hasn't made it; if it was made "
+                "elsewhere, 'calkit pull' gets it"
+            )
+            added = True
     return gated, errors
 
 

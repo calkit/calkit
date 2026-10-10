@@ -524,3 +524,7 @@ def test_get_version_checked_app_names():
     assert calkit.get_version_checked_app_names(
         ck_info, stage_names={"s"}
     ) == ["jq", "ffmpeg"]
+    # A malformed requirement says how to write one
+    ck_info["environments"]["ml"]["requirements"] = [{"app": "sbatch"}]
+    with pytest.raises(ValueError, match="list an app by name"):
+        calkit.get_version_checked_app_names(ck_info)

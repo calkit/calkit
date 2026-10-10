@@ -1237,6 +1237,9 @@ class Operator:
             msg: dict[str, Any] = {"type": "sessions.output"}
             msg["session"] = session.id
             msg["data"] = chunk
+            # So the browser doesn't answer queries in it again, e.g., for
+            # the cursor position, which would reach the shell as text
+            msg["replay"] = True
             if i == 0:
                 msg["reset"] = True
             self.send_soon(ch, msg)

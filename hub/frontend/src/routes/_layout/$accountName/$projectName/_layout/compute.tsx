@@ -327,9 +327,15 @@ function TerminalPane({
     fit.fit()
     termRef.current = term
     fitRef.current = fit
-    const input = term.onData((data) =>
-      conn.send({ type: "sessions.input", session: pane.session, data }),
-    )
+    // Replayed chunks still being written, during which the terminal's
+    // replies to queries in them, e.g., a cursor position report, are
+    // dropped: they were answered when first asked, and would now reach the
+    // shell as text
+    let replaying = 0
+    const input = term.onData((data) => {
+      if (replaying) return
+      conn.send({ type: "sessions.input", session: pane.session, data })
+    })
     const resize = term.onResize(({ cols, rows }) =>
       conn.send({ type: "sessions.resize", session: pane.session, cols, rows }),
     )
@@ -338,7 +344,13 @@ function TerminalPane({
         // Replays start by clearing the screen they redraw. It's written as
         // a reset sequence rather than calling reset(), which would take
         // effect before earlier writes that are still queued
-        term.write(msg.reset ? `\x1bc${msg.data}` : msg.data)
+        const data = msg.reset ? `\x1bc${msg.data}` : msg.data
+        if (msg.replay) {
+          replaying++
+          term.write(data, () => replaying--)
+        } else {
+          term.write(data)
+        }
       }
       if (msg.type === "sessions.exit") setExited(msg.code)
     })

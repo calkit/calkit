@@ -293,6 +293,12 @@ async def test_sessions(tmp_path, monkeypatch):
     op.on_relay_message({"type": "channel.open", "ch": "b", "grant": grant()})
     message("b", {"type": "sessions.attach", "id": 4, "session": sid})
     await wait_for(lambda: "HI-42" in output("b"))
+    # Marked, so the browser doesn't answer queries in it a second time
+    outputs = [(c, m) for c, m in sent if m["type"] == "sessions.output"]
+    assert all(m.get("replay") for c, m in outputs if c == "b")
+    assert not any(
+        m.get("replay") for c, m in outputs if c == "a" and "HI" in m["data"]
+    )
     # Sessions outlive the channels attached to them
     op.on_relay_message({"type": "channel.close", "ch": "a"})
     op.on_relay_message({"type": "channel.close", "ch": "b"})

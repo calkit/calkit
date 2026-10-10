@@ -361,6 +361,27 @@ def test_operators(
         json={"mode": "cron", "connected": False},
     )
     assert not r.json()["connect"]
+    # A restart is asked for once, and shows as pending until the Operator
+    # stops reporting it
+    r = client.post(
+        f"/operators/{op['id']}/restart", headers=superuser_token_headers
+    )
+    assert r.status_code == 404
+    r = client.post(
+        f"/operators/{op['id']}/restart", headers=normal_user_token_headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["restart_pending"]
+    for restart, reported in [(True, True), (False, True), (False, False)]:
+        r = client.post(
+            "/operators/check-in",
+            headers=op_headers,
+            json={"restart_pending": reported},
+        )
+        assert r.json()["restart"] == restart
+        r = client.get("/operators", headers=normal_user_token_headers)
+        listed = {o["id"]: o for o in r.json()}
+        assert listed[op["id"]]["restart_pending"] == reported
     # Revoking stops its token working
     r = client.delete(
         f"/operators/{op['id']}", headers=normal_user_token_headers

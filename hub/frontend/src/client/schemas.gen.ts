@@ -564,6 +564,11 @@ export const CheckInSchema = {
       title: "Connected",
       default: true,
     },
+    restart_pending: {
+      type: "boolean",
+      title: "Restart Pending",
+      default: false,
+    },
     workspaces: {
       items: {
         $ref: "#/components/schemas/WorkspaceInfo",
@@ -615,6 +620,11 @@ export const CheckInRespSchema = {
     connect: {
       type: "boolean",
       title: "Connect",
+      default: false,
+    },
+    restart: {
+      type: "boolean",
+      title: "Restart",
       default: false,
     },
   },
@@ -4811,6 +4821,16 @@ export const OperatorOutSchema = {
       ],
       title: "Connect Requested At",
     },
+    restart_pending: {
+      type: "boolean",
+      title: "Restart Pending",
+      default: false,
+    },
+    restart_requested: {
+      type: "boolean",
+      title: "Restart Requested",
+      default: false,
+    },
     is_active: {
       type: "boolean",
       title: "Is Active",
@@ -5030,6 +5050,16 @@ export const OperatorRegisteredSchema = {
         },
       ],
       title: "Connect Requested At",
+    },
+    restart_pending: {
+      type: "boolean",
+      title: "Restart Pending",
+      default: false,
+    },
+    restart_requested: {
+      type: "boolean",
+      title: "Restart Requested",
+      default: false,
     },
     is_active: {
       type: "boolean",

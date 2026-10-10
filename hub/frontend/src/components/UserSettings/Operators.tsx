@@ -15,6 +15,7 @@ import {
   Text,
   Th,
   Thead,
+  Tooltip,
   Tr,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -277,6 +278,14 @@ function Operators() {
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ["user", "operators"] }),
   })
+  const restartMutation = useMutation({
+    mutationFn: (operatorId: string) =>
+      OperatorsService.postOperatorRestart({ operator_id: operatorId }),
+    onError: (e: any) =>
+      showToast("Could not restart Operator", e.message, "error"),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["user", "operators"] }),
+  })
   return (
     <Container maxW="full">
       <Heading size="md" py={4}>
@@ -333,8 +342,15 @@ function Operators() {
                     {op.platform ? ` (${op.platform})` : ""}
                   </Td>
                   <Td>
-                    {/* Dev versions carry a long local suffix */}
-                    {op.calkit_version?.split("+")[0]}
+                    <Flex align="center" gap={2}>
+                      {/* Dev versions carry a long local suffix */}
+                      {op.calkit_version?.split("+")[0]}
+                      {op.restart_pending && (
+                        <Tooltip label="It restarts, e.g., to run a newer Calkit, once no session or run is using it">
+                          <Badge fontSize="2xs">restart pending</Badge>
+                        </Tooltip>
+                      )}
+                    </Flex>
                   </Td>
                   <Td>
                     {op.last_seen
@@ -343,6 +359,20 @@ function Operators() {
                   </Td>
                   <Td>{op.workspace_count}</Td>
                   <Td>
+                    {op.is_online && !op.restart_pending && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        mr={2}
+                        isLoading={
+                          restartMutation.isPending &&
+                          restartMutation.variables === op.id
+                        }
+                        onClick={() => restartMutation.mutate(String(op.id))}
+                      >
+                        Restart
+                      </Button>
+                    )}
                     <Button
                       size="xs"
                       colorScheme="red"

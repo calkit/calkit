@@ -303,6 +303,10 @@ export type CheckIn = {
    */
   connected?: boolean
   /**
+   * Restart Pending
+   */
+  restart_pending?: boolean
+  /**
    * Workspaces
    */
   workspaces?: Array<WorkspaceInfo>
@@ -346,6 +350,10 @@ export type CheckInResp = {
    * Connect
    */
   connect?: boolean
+  /**
+   * Restart
+   */
+  restart?: boolean
 }
 
 /**
@@ -2808,6 +2816,14 @@ export type OperatorOut = {
    */
   connect_requested_at?: string | null
   /**
+   * Restart Pending
+   */
+  restart_pending?: boolean
+  /**
+   * Restart Requested
+   */
+  restart_requested?: boolean
+  /**
    * Is Active
    */
   is_active?: boolean
@@ -2915,6 +2931,14 @@ export type OperatorRegistered = {
    * Connect Requested At
    */
   connect_requested_at?: string | null
+  /**
+   * Restart Pending
+   */
+  restart_pending?: boolean
+  /**
+   * Restart Requested
+   */
+  restart_requested?: boolean
   /**
    * Is Active
    */
@@ -15686,6 +15710,38 @@ export type PostOperatorWakeResponses = {
 
 export type PostOperatorWakeResponse =
   PostOperatorWakeResponses[keyof PostOperatorWakeResponses]
+
+export type PostOperatorRestartData = {
+  body?: never
+  path: {
+    /**
+     * Operator Id
+     */
+    operator_id: string
+  }
+  query?: never
+  url: "/operators/{operator_id}/restart"
+}
+
+export type PostOperatorRestartErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostOperatorRestartError =
+  PostOperatorRestartErrors[keyof PostOperatorRestartErrors]
+
+export type PostOperatorRestartResponses = {
+  /**
+   * Successful Response
+   */
+  200: OperatorOut
+}
+
+export type PostOperatorRestartResponse =
+  PostOperatorRestartResponses[keyof PostOperatorRestartResponses]
 
 export type PostOperatorRelayTokenData = {
   body?: never

@@ -625,6 +625,10 @@ class OperatorPublic(SQLModel):
     connected: bool = False
     # When the owner last asked it to connect, for Operators in cron mode
     connect_requested_at: datetime | None = Field(default=None)
+    # Whether it will restart once idle, e.g., after Calkit was upgraded
+    restart_pending: bool = False
+    # Whether its owner asked it to restart and it hasn't heard yet
+    restart_requested: bool = False
     is_active: bool = True
 
 

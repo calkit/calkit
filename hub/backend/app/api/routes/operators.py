@@ -271,6 +271,8 @@ class CheckIn(BaseModel):
     mode: Literal["service", "foreground", "cron"] | None = None
     # False when an Operator in cron mode is only asking whether to connect
     connected: bool = True
+    # Whether it will restart once idle, e.g., after Calkit was upgraded
+    restart_pending: bool = False
     workspaces: list[WorkspaceInfo] = Field(default=[], max_length=1000)
 
 
@@ -287,6 +289,8 @@ class CheckInResp(BaseModel):
     grant_public_key: str
     # Whether an Operator in cron mode should connect
     connect: bool = False
+    # Whether to restart once idle, as its owner asked
+    restart: bool = False
 
 
 def _update_workspaces(
@@ -343,6 +347,10 @@ def post_operator_check_in(
     # A request to connect is answered once it has
     if req.connected:
         operator.connect_requested_at = None
+    # As is a request to restart, which stays pending until it has
+    restart = operator.restart_requested
+    operator.restart_requested = False
+    operator.restart_pending = req.restart_pending or restart
     session.add(operator)
     session.commit()
     session.refresh(operator)
@@ -358,6 +366,7 @@ def post_operator_check_in(
             expires_delta=timedelta(minutes=OPERATOR_RELAY_TOKEN_MINUTES),
         ),
         connect=connect_requested(operator),
+        restart=restart,
         grant_public_key=get_operator_grant_public_key(),
     )
 
@@ -369,6 +378,22 @@ def post_operator_wake(
     """Ask an Operator in cron mode to connect at its next check-in."""
     operator = _get_owned_operator(session, current_user, operator_id)
     operator.connect_requested_at = utcnow()
+    session.add(operator)
+    session.commit()
+    session.refresh(operator)
+    return _out(operator)
+
+
+@router.post("/operators/{operator_id}/restart")
+def post_operator_restart(
+    session: SessionDep, current_user: CurrentUser, operator_id: uuid.UUID
+) -> OperatorOut:
+    """Ask an Operator to restart, e.g., to run a newer Calkit, once no
+    session or run is using it.
+    """
+    operator = _get_owned_operator(session, current_user, operator_id)
+    operator.restart_requested = True
+    operator.restart_pending = True
     session.add(operator)
     session.commit()
     session.refresh(operator)

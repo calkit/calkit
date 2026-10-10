@@ -634,7 +634,7 @@ so it follows the pipeline integration phase.
    long run isn't lost to sleep, and forwarding a workspace's ports
    through the relay, e.g., to open its Jupyter server from the hub,
    within the relay's traffic budget.
-   Upgrading Calkit and restarting an Operator from the hub,
+   Upgrading Calkit from the hub,
    loops and fleet rollouts (#90), parallel `group` stages (#185),
    a startup command for sessions, agent notifications, and an ACP chat
    view.

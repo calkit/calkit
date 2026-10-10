@@ -338,6 +338,8 @@ import type {
   PostOperatorRelayTokenErrors,
   PostOperatorRelayTokenResponses,
   PostOperatorResponses,
+  PostOperatorRestartErrors,
+  PostOperatorRestartResponses,
   PostOperatorWakeErrors,
   PostOperatorWakeResponses,
   PostOrgErrors,
@@ -9721,6 +9723,39 @@ export class OperatorsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/operators/{operator_id}/wake",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Operator Restart
+   *
+   * Ask an Operator to restart, e.g., to run a newer Calkit, once no
+   * session or run is using it.
+   */
+  public static postOperatorRestart<ThrowOnError extends boolean = true>(
+    parameters: {
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorRestartResponses,
+    PostOperatorRestartErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "operator_id" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorRestartResponses,
+      PostOperatorRestartErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}/restart",
       ...options,
       ...params,
     })

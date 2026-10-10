@@ -100,7 +100,9 @@ calkit operator logs
 
 On the Hub, if you go to your settings, you'll see an "Operators"
 tab that lists your installed Operators and their status.
-You can revoke them from there if desired.
+You can restart or revoke them from there if desired.
+After Calkit is upgraded, Operators restart with the new version on their
+own once no session or run is using them.
 
 To install the Operator for a hub other than your default one, e.g., one
 run by your institution, pass its URL with `--hub`:

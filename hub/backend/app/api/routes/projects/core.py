@@ -4210,8 +4210,18 @@ def get_project_comments(
         query = query.where(ProjectComment.artifact_type == artifact_type)
     if artifact_path is not None:
         query = query.where(ProjectComment.artifact_path == artifact_path)
-    # Ones moved into a LaTeX document's source are kept there now
-    query = query.where(col(ProjectComment.moved_to_source).is_(None))
+    # Ones moved into a LaTeX document's source are kept there now, along
+    # with any replies to them
+    moved = select(ProjectComment.id).where(
+        ProjectComment.project_id == project.id,
+        col(ProjectComment.moved_to_source).is_not(None),
+    )
+    query = query.where(col(ProjectComment.moved_to_source).is_(None)).where(
+        or_(
+            col(ProjectComment.parent_id).is_(None),
+            col(ProjectComment.parent_id).not_in(moved),
+        )
+    )
     comments = list(session.exec(query).all())
     _sync_github_issue_resolutions(session, comments, current_user)
     return comments
@@ -4502,6 +4512,10 @@ def post_project_comment_reply(
         if thread_root_id != comment_id
         else comment
     )
+    if thread_root and thread_root.moved_to_source:
+        raise HTTPException(
+            409, "This thread was moved into the document's source"
+        )
     if thread_root and thread_root.external_url:
         _try_post_github_issue_comment(
             session, current_user, thread_root.external_url, reply.body

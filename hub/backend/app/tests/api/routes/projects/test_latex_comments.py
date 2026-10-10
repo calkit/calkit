@@ -414,10 +414,26 @@ def test_post_project_latex_comments_move(
         )
     ]
     assert top == ['On "A final paragraph": Cut this?', "Nice paper."]
-    # And they're no longer listed as kept here
+    # And they're no longer listed as kept here, nor is a reply that reached
+    # one after it moved, and another can't be added
+    db.add(
+        ProjectComment(
+            comment="Late reply.",
+            parent_id=on_text.id,
+            created=utcnow(),
+            **common,
+        )
+    )
+    db.commit()
     resp = client.get(
         f"{url}/comments",
         params={"artifact_type": "publication", "artifact_path": path},
         headers=headers,
     )
     assert resp.status_code == 200 and resp.json() == []
+    resp = client.post(
+        f"{url}/comments/{on_text.id}/replies",
+        json={"body": "Too late."},
+        headers=headers,
+    )
+    assert resp.status_code == 409, resp.text

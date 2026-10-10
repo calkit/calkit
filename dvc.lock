@@ -55,20 +55,20 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: aac6dcb0a4fe5ea44486d1830a2329b5
-      size: 173958
+      md5: adf9a8da2e08dee394a2de3a2d4e831a
+      size: 173951
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: aac6dcb0a4fe5ea44486d1830a2329b5
-      size: 173958
+      md5: adf9a8da2e08dee394a2de3a2d4e831a
+      size: 173951
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 166cf2dcebaab8b68a390434c03651ac
-      size: 36151
+      md5: 049078255db86f481f1c25cf5121387c
+      size: 36780
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 7a4f2a5c49e4797da524868431e9fc9b
-      size: 121661
+      md5: 8a762bfecffae74e8bb4411e088a0e7b
+      size: 124116
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/plot-latex-word-round-trip.py
@@ -79,16 +79,16 @@ stages:
       size: 5
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: aac6dcb0a4fe5ea44486d1830a2329b5
-      size: 173958
+      md5: adf9a8da2e08dee394a2de3a2d4e831a
+      size: 173951
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: aac6dcb0a4fe5ea44486d1830a2329b5
-      size: 173958
+      md5: adf9a8da2e08dee394a2de3a2d4e831a
+      size: 173951
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 7a4f2a5c49e4797da524868431e9fc9b
-      size: 121661
+      md5: 8a762bfecffae74e8bb4411e088a0e7b
+      size: 124116
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: d9d7b45c12044f5ae8f54491c383ecd4
@@ -100,8 +100,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: e5bd6ed3398794eaceced8ad697e7cf3
-      size: 207280
+      md5: bea3808742325828ad6c42965a5a6d01
+      size: 276946
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py

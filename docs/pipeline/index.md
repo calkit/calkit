@@ -104,6 +104,10 @@ Set `delete_before_run: false` for an output the stage appends to
 or updates in place;
 this maps to DVC's `persist`.
 
+If the pipeline has been run and outputs are already tracked,
+changing an output's storage location
+can be done with `calkit update path-storage`.
+
 ### Depending on another stage's outputs
 
 Instead of repeating paths, an input can name a stage

@@ -290,8 +290,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 5db7b68ce6087c3a0a35ae0f0cdb946d
-      size: 9440
+      md5: 6fd403e9d923292f67fd712441301773
+      size: 9570
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
@@ -319,5 +319,5 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 51a17bb845a9b801e9c9a9e08ac9abef
-      size: 137243
+      md5: f9719237ae754463ea36aa2215166baf
+      size: 137550

@@ -845,6 +845,7 @@ function Publications() {
                 )}
                 {selectedPub && (
                   <CommentsPanel
+                    key={selectedPub.path}
                     comments={[
                       ...(isLatexPub
                         ? latexThreads.flatMap(latexThreadToPanelComments)

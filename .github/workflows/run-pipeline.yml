@@ -47,10 +47,13 @@ jobs:
       # The LaTeX/Word round trip converts with LibreOffice, which runners
       # don't have, so a change to the conversion is rerun here rather than
       # needing it on the machine of whoever made it
+      # Without its Math component, the equations TeX4ht makes come out of
+      # LibreOffice empty
       - name: Install LibreOffice
         run: |
           sudo apt-get update -q
-          sudo apt-get install -yq --no-install-recommends libreoffice-writer
+          sudo apt-get install -yq --no-install-recommends \
+            libreoffice-writer libreoffice-math
       - name: Run Calkit
         uses: ./actions/run
         with:

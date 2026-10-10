@@ -23,13 +23,14 @@ import {
   FiPlay,
   FiPlus,
   FiRefreshCw,
+  FiTerminal,
 } from "react-icons/fi"
 
 import type { Workspace } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Tooltip from "../Common/Tooltip"
-import type { OperatorConnection } from "../Operators/connection"
+import type { OperatorConnection, SessionInfo } from "../Operators/connection"
 import AddPath from "./AddPath"
 import DiscardChanges from "./DiscardChanges"
 import IgnorePath from "./IgnorePath"
@@ -83,6 +84,10 @@ export default function WorkspacePanel({
   confirmRun,
   clearConfirmRun,
   narrow,
+  sessions,
+  activeSession,
+  onOpenSession,
+  onNewSession,
 }: {
   ws: Workspace
   conn: OperatorConnection
@@ -94,9 +99,15 @@ export default function WorkspacePanel({
   clearConfirmRun: () => void
   // Shown with sessions, which it sits beside on wide screens
   narrow?: boolean
+  // The workspace's sessions, listed here when given
+  sessions?: SessionInfo[]
+  activeSession?: string
+  onOpenSession?: (session: string) => void
+  onNewSession?: () => void
 }) {
   const showToast = useCustomToast()
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
+  const hoverBg = useColorModeValue("gray.100", "whiteAlpha.100")
   const editable = ws.kind === "personal"
   const request = useCallback(
     (type: string, fields: object = {}) =>
@@ -628,6 +639,54 @@ export default function WorkspacePanel({
                   ))}
               </Flex>
             </PanelSection>
+            {sessions && (
+              <PanelSection
+                title={`Sessions (${sessions.length})`}
+                actions={
+                  onNewSession && (
+                    <Button
+                      size="xs"
+                      leftIcon={<FiPlus />}
+                      onClick={onNewSession}
+                    >
+                      New
+                    </Button>
+                  )
+                }
+              >
+                {sessions.length === 0 && (
+                  <Text fontSize="sm" color="ui.dim">
+                    No sessions
+                  </Text>
+                )}
+                {sessions.map((session) => (
+                  <Flex
+                    key={session.id}
+                    align="center"
+                    gap={2}
+                    minH="24px"
+                    px={1}
+                    borderRadius="md"
+                    cursor="pointer"
+                    fontWeight={
+                      session.id === activeSession ? "semibold" : undefined
+                    }
+                    _hover={{ bg: hoverBg }}
+                    onClick={() => onOpenSession?.(session.id)}
+                  >
+                    <FiTerminal />
+                    <Text fontSize="sm" fontFamily="mono" noOfLines={1}>
+                      {session.label}
+                    </Text>
+                    {session.attached > 0 && (
+                      <Tooltip label="Browsers attached">
+                        <Badge fontSize="2xs">{session.attached}</Badge>
+                      </Tooltip>
+                    )}
+                  </Flex>
+                ))}
+              </PanelSection>
+            )}
             {Object.keys(envStates).length > 0 && (
               <PanelSection title="Environments">
                 {Object.entries(envStates).map(([name, state]) => (

@@ -486,45 +486,71 @@ function Compute() {
                     Open project
                   </Button>
                 )}
-                {selectedWorkspace.kind === "personal" &&
-                  selectedWorkspace.operator_online &&
-                  selectedWorkspace.operator_platform !== "windows" && (
-                    <Button
-                      size="xs"
-                      leftIcon={<FiPlus />}
-                      isDisabled={!selectedConn?.connected}
-                      onClick={() => newSession(selectedWorkspace)}
-                    >
-                      Session
-                    </Button>
-                  )}
               </Flex>
             </Flex>
-            {search.session && selectedConn ? (
-              <TerminalPane
-                key={search.session}
-                conn={selectedConn}
-                pane={{ operatorId: sessionOperator, session: sessionId }}
-                label={selectedSession?.label ?? "shell"}
-                connected={selectedConn.connected}
-                onClose={() => closeSession(true)}
-                onDetach={() => closeSession(false)}
-                height="60vh"
-              />
-            ) : selectedWorkspace.operator_online && selectedConn ? (
-              <WorkspacePanel
-                key={search.workspace}
-                ws={selectedWorkspace}
-                conn={selectedConn}
-                connected={selectedConn.connected}
-                modal={search.modal}
-                setModal={(modal) =>
-                  navigate({ search: (prev) => ({ ...prev, modal }) })
+            {selectedWorkspace.operator_online && selectedConn ? (
+              // The details and the session side by side, when there's
+              // room for both
+              <Grid
+                templateColumns={
+                  search.session
+                    ? {
+                        base: "minmax(0, 1fr)",
+                        xl: "minmax(0, 2fr) minmax(0, 3fr)",
+                      }
+                    : "minmax(0, 1fr)"
                 }
-                onChanged={() => workspacesQuery.refetch()}
-                confirmRun={undefined}
-                clearConfirmRun={() => {}}
-              />
+                gap={4}
+                alignItems="start"
+              >
+                <Box minW={0}>
+                  <WorkspacePanel
+                    key={search.workspace}
+                    ws={selectedWorkspace}
+                    conn={selectedConn}
+                    connected={selectedConn.connected}
+                    modal={search.modal}
+                    setModal={(modal) =>
+                      navigate({ search: (prev) => ({ ...prev, modal }) })
+                    }
+                    onChanged={() => workspacesQuery.refetch()}
+                    confirmRun={undefined}
+                    clearConfirmRun={() => {}}
+                    narrow={Boolean(search.session)}
+                    sessions={
+                      selectedWorkspace.operator_platform === "windows"
+                        ? undefined
+                        : getSessions(selectedWorkspace)
+                    }
+                    activeSession={sessionId}
+                    onOpenSession={(id) =>
+                      select({
+                        workspace: search.workspace,
+                        session: `${selectedWorkspace.operator_id}:${id}`,
+                      })
+                    }
+                    onNewSession={
+                      selectedWorkspace.kind === "personal"
+                        ? () => newSession(selectedWorkspace)
+                        : undefined
+                    }
+                  />
+                </Box>
+                {search.session && (
+                  <Box minW={0}>
+                    <TerminalPane
+                      key={search.session}
+                      conn={selectedConn}
+                      pane={{ operatorId: sessionOperator, session: sessionId }}
+                      label={selectedSession?.label ?? "shell"}
+                      connected={selectedConn.connected}
+                      onClose={() => closeSession(true)}
+                      onDetach={() => closeSession(false)}
+                      height="70vh"
+                    />
+                  </Box>
+                )}
+              </Grid>
             ) : (
               <Text color="ui.dim">
                 {selectedWorkspace.operator_name} isn't connected.

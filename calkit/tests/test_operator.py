@@ -754,6 +754,47 @@ def test_workspace_actions(tmp_path, monkeypatch):
     path = operator.clone_project(url)
     assert path == os.path.join(tmp_path, "calkit", "other")
     assert calls == [["clone", url, path, "--no-dvc-pull"]]
+
+    # Pulling only fast-forwards unless asked to merge, which is undone if
+    # it conflicts
+    def git(*args, cwd=wdir):
+        return subprocess.run(
+            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+        ).stdout
+
+    remote = os.path.join(tmp_path, "remote.git")
+    other = os.path.join(tmp_path, "other-clone")
+    git("clone", "-q", "--bare", wdir, remote)
+    git("remote", "add", "origin", remote)
+    git("fetch", "-q", "origin")
+    git("branch", "-u", f"origin/{git('branch', '--show-current').strip()}")
+    git("clone", "-q", remote, other)
+
+    def commit(path, text, cwd):
+        with open(os.path.join(cwd, path), "w") as f:
+            f.write(text)
+        git("add", path, cwd=cwd)
+        git("commit", "-qm", f"Change {path}", cwd=cwd)
+
+    commit("a.txt", "a", other)
+    git("push", "-q", cwd=other)
+    assert operator.pull_workspace(wdir) == {"diverged": False}
+    assert os.path.isfile(os.path.join(wdir, "a.txt"))
+    commit("b.txt", "b", other)
+    git("push", "-q", cwd=other)
+    commit("c.txt", "c", wdir)
+    assert operator.pull_workspace(wdir) == {"diverged": True}
+    assert not os.path.isfile(os.path.join(wdir, "b.txt"))
+    assert operator.pull_workspace(wdir, merge=True) == {"diverged": False}
+    assert os.path.isfile(os.path.join(wdir, "b.txt"))
+    commit("notes.txt", "theirs", other)
+    git("push", "-q", cwd=other)
+    commit("notes.txt", "ours", wdir)
+    with pytest.raises(ValueError, match="notes.txt"):
+        operator.pull_workspace(wdir, merge=True)
+    assert not os.path.isfile(os.path.join(wdir, ".git", "MERGE_HEAD"))
+    with open(os.path.join(wdir, "notes.txt")) as f:
+        assert f.read() == "ours"
     for bad in [
         url.replace("other", "demo"),
         "https://github.com/x/..",

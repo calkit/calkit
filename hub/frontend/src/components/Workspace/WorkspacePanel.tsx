@@ -439,7 +439,7 @@ export default function WorkspacePanel({
                       onClick={() => syncMutation.mutate("pull")}
                       isLoading={
                         syncMutation.isPending &&
-                        syncMutation.variables === "pull"
+                        syncMutation.variables !== "push"
                       }
                     >
                       Pull
@@ -458,6 +458,25 @@ export default function WorkspacePanel({
                 )
               }
             >
+              {diverged && (
+                <Alert status="warning" borderRadius="md" mb={2} gap={2}>
+                  <AlertIcon />
+                  {/* TODO: copy for a human to write */}
+                  <Text flex={1} fontSize="sm">
+                    This branch and its remote have diverged.
+                  </Text>
+                  <Button
+                    size="xs"
+                    isLoading={
+                      syncMutation.isPending &&
+                      syncMutation.variables === "merge"
+                    }
+                    onClick={() => syncMutation.mutate("merge")}
+                  >
+                    Merge
+                  </Button>
+                </Alert>
+              )}
               {outOfSync ? (
                 [
                   ahead ? `${ahead} commits to push` : "",

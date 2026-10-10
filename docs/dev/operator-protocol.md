@@ -183,25 +183,34 @@ shell exits.
 These act on a workspace with Git, DVC, and the network, so the Operator
 runs them in a thread, one at a time per workspace, and replies when
 they're done.
-Each takes `id` and `workspace`, and only `workspace.status` and
-`workspace.run_log` work on managed workspaces, which are checked out with
-`--force` to run stages.
-While a run goes, `workspace.status`, `workspace.run_log`, and
-`workspace.stop` answer without waiting for it.
+Each takes `id` and `workspace`, and only `workspace.status`,
+`workspace.git_status`, and `workspace.run_log` work on managed
+workspaces, which are checked out with `--force` to run stages.
+`workspace.git_status` and `workspace.run_log` never wait on another
+action, and while a run goes, `workspace.status` and `workspace.stop`
+don't either.
 
-| Browser sends         | Other fields                                                          |
-| --------------------- | --------------------------------------------------------------------- |
-| `workspace.status`    | `fetch`                                                               |
-| `workspace.pull`      |                                                                       |
-| `workspace.push`      |                                                                       |
-| `workspace.save`      | `paths`, `message`, `to` (`git` or `dvc`), `push`                     |
-| `workspace.ignore`    | `path`, `commit`                                                      |
-| `workspace.run`       | `stages`                                                              |
-| `workspace.run_log`   |                                                                       |
-| `workspace.stop`      |                                                                       |
-| `workspace.new`       | `branch`                                                              |
-| `workspace.discard`   |                                                                       |
-| `workspace.add_stage` | `name`, `cmd`, `deps`, `outs`, `calkit_type`, `calkit_object`, `push` |
+| Browser sends          | Other fields                                                          |
+| ---------------------- | --------------------------------------------------------------------- |
+| `workspace.status`     | `fetch`                                                               |
+| `workspace.git_status` | `fetch`                                                               |
+| `workspace.pull`       | `merge`                                                               |
+| `workspace.push`       |                                                                       |
+| `workspace.save`       | `paths`, `message`, `to` (`git` or `dvc`), `push`                     |
+| `workspace.ignore`     | `path`, `commit`                                                      |
+| `workspace.run`        | `stages`                                                              |
+| `workspace.run_log`    |                                                                       |
+| `workspace.stop`       |                                                                       |
+| `workspace.new`        | `branch`                                                              |
+| `workspace.discard`    |                                                                       |
+| `workspace.add_stage`  | `name`, `cmd`, `deps`, `outs`, `calkit_type`, `calkit_object`, `push` |
+
+`workspace.git_status` returns the Git part of `workspace.status`, which is
+quick, while the rest can take a while for a large pipeline, so the
+browser asks for both and shows Git's first.
+`workspace.pull` only fast-forwards, returning `diverged` when it can't,
+unless `merge` is true, in which case it merges, undoing a merge that
+conflicts.
 
 `workspace.run` runs without a terminal and replies when it's done, with
 `ok` and the end of its `output`; meanwhile the browser follows it with

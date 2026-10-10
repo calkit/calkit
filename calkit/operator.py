@@ -785,10 +785,41 @@ def get_run_state(wdir: str) -> dict:
     return state
 
 
-def pull_workspace(wdir: str) -> None:
-    """Pull with Git, fast-forward only, then with DVC."""
-    calkit.git.get_repo(wdir).git.pull("--ff-only")
+def pull_workspace(wdir: str, merge: bool = False) -> dict:
+    """Pull with Git, then with DVC.
+
+    Only fast-forwards unless asked to merge, saying when the branches have
+    diverged so that can be asked. A merge with conflicts is undone, since
+    resolving them takes a session.
+    """
+    from git.exc import GitCommandError
+
+    git_repo = calkit.git.get_repo(wdir)
+    if not merge:
+        try:
+            git_repo.git.pull("--ff-only")
+        except GitCommandError as e:
+            if "Not possible to fast-forward" in str(e):
+                return {"diverged": True}
+            raise
+    else:
+        try:
+            git_repo.git.pull("--no-rebase", "--no-edit")
+        except GitCommandError:
+            conflicts = git_repo.git.diff(
+                "--name-only", "--diff-filter=U"
+            ).split()
+            if not conflicts:
+                raise
+            git_repo.git.merge("--abort")
+            raise ValueError(
+                "Merging would conflict in "
+                + ", ".join(conflicts[:10])
+                + (", ..." if len(conflicts) > 10 else "")
+                + "; resolve it in a session"
+            )
     _calkit(["dvc", "pull"], wdir)
+    return {"diverged": False}
 
 
 def push_workspace(wdir: str) -> None:

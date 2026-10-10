@@ -1377,7 +1377,6 @@ def update_path_storage(
     """
     from pathlib import Path
 
-    from git import GitCommandError
     from ruamel.yaml.comments import CommentedMap
 
     import calkit.dvc
@@ -1454,18 +1453,6 @@ def update_path_storage(
     def in_git(path: str) -> bool:
         return bool(repo.git.ls_files("--", os.path.abspath(path)).strip())
 
-    def dirty_gitignores() -> dict[str, str]:
-        # Each .gitignore with changes not yet committed, and what it holds
-        status = repo.git.status("--porcelain", "--untracked-files=all")
-        dirty = {}
-        for line in status.splitlines():
-            path = line[3:].strip('"')
-            if path.endswith(".gitignore"):
-                fpath = os.path.join(repo.working_dir, path)
-                exists = os.path.isfile(fpath)
-                dirty[path] = open(fpath).read() if exists else ""
-        return dirty
-
     def dvc(*args: str) -> None:
         if calkit.dvc.run_dvc_command(list(args)) != 0:
             raise_error(f"'dvc {' '.join(args)}' failed")
@@ -1528,7 +1515,7 @@ def update_path_storage(
                         "whole; move that instead"
                     )
             others.append(path)
-    gitignores = dirty_gitignores()
+    gitignores = calkit.git.get_dirty_gitignores(repo)
     # Recording an output in DVC records its stage's inputs too, which would
     # pass off a stage that's out of date as current, so the pipeline as
     # calkit.yaml has it now must be known to be up to date
@@ -1587,27 +1574,8 @@ def update_path_storage(
                     repo.git.add("-A", "--", os.path.abspath(pointer))
             calkit.git.ensure_path_is_not_ignored(repo, os.path.abspath(path))
             repo.git.add("--", os.path.abspath(path))
-    # Staging one that already had changes would commit those too, though
-    # DVC may have staged it already if it autostages
-    for gitignore, text in sorted(dirty_gitignores().items()):
-        if gitignore in gitignores:
-            if text == gitignores[gitignore]:
-                continue
-            if repo.git.diff("--name-only", "--", gitignore).strip():
-                warn(
-                    f"{gitignore} already had changes, so the rules added "
-                    "to it aren't staged; stage it when it's ready"
-                )
-            else:
-                warn(
-                    f"{gitignore} already had changes, which DVC staged "
-                    "with the rules added to it; check them before committing"
-                )
-            continue
-        try:
-            repo.git.add("-A", "--", gitignore)
-        except GitCommandError:
-            warn(f"Couldn't stage {gitignore}")
+    for message in calkit.git.stage_gitignores(repo, gitignores):
+        warn(message)
     system = "Git" if to == "git" else "DVC"
     for path in [*outputs, *others]:
         typer.echo(f"{path} is now stored in {system}")

@@ -1085,6 +1085,17 @@ def test_status(tmp_dir):
         ["calkit", "status", "-c", "questions"]
     ).decode()
     assert "Questions" not in out
+    # Paths tracked where they shouldn't be are pointed out with DVC's status
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
+    subprocess.check_call(["git", "add", "-f", "data.csv"])
+    out = subprocess.check_output(["calkit", "status", "-c", "dvc"], text=True)
+    assert "data.csv is tracked by both Git and DVC" in out
+    status_json = json.loads(
+        subprocess.check_output(["calkit", "status", "-c", "dvc", "--json"])
+    )
+    assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
 
 
 def test_save(tmp_dir):

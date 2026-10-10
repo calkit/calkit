@@ -54,6 +54,7 @@ import {
   pipelineLatexDiffs,
   type PipelineLatexDiff,
 } from "./latex/core";
+import { PDF_REVIEW_VIEW_TYPE, PdfReviewProvider } from "./latex/review";
 import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
@@ -101,6 +102,11 @@ const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
 const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
 const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
+const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
+const COMMAND_SHOW_IN_PDF_TO_SIDE = "calkit-vscode.showInPdfToSide";
+const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
+const COMMAND_PDF_GO_TO_SOURCE_TO_SIDE = "calkit-vscode.pdfGoToSourceToSide";
+const COMMAND_TOGGLE_PDF_SOURCE = "calkit-vscode.togglePdfSource";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -150,7 +156,7 @@ const DATASET_EXTENSIONS = new Set([
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.41.15";
+const DEFAULT_MIN_CALKIT_VERSION = "0.48.2";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const WINDOWS_INSTALL_SCRIPT = "irm install-ps1.calkit.org | iex";
@@ -383,6 +389,19 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  const pdfReview = new PdfReviewProvider(context, {
+    getWorkspaceRoot,
+    getStages: () => currentCalkitConfig?.pipeline?.stages ?? {},
+    getNonce,
+  });
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      PDF_REVIEW_VIEW_TYPE,
+      pdfReview,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
+
   const activeTabUri = (uri?: vscode.Uri): vscode.Uri | undefined =>
     uri ??
     vscode.window.activeTextEditor?.document.uri ??
@@ -480,15 +499,103 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           return;
         }
-        if (!isLatexWorkshopInstalled()) {
-          await vscode.env.openExternal(pdfUri);
-          return;
-        }
         await swapActiveTab(fileUri, () =>
-          openPdfInLatexWorkshop(context, pdfUri),
+          Promise.resolve(
+            vscode.commands.executeCommand(
+              "vscode.openWith",
+              pdfUri,
+              PDF_REVIEW_VIEW_TYPE,
+              vscode.ViewColumn.Active,
+            ),
+          ),
         );
       },
     ),
+  );
+
+  // Go from a line of LaTeX to where it is in the PDF, in the same group
+  // of tabs, the one beside it, or where the PDF is showing
+  const showInPdf = async (
+    toSide: boolean,
+    keepShown = false,
+  ): Promise<void> => {
+    const editor = vscode.window.activeTextEditor;
+    const workspaceRoot = getWorkspaceRoot();
+    if (!editor || !workspaceRoot) {
+      return;
+    }
+    const texFile = path
+      .relative(workspaceRoot, editor.document.uri.fsPath)
+      .replace(/\\/g, "/");
+    const line = editor.selection.active.line + 1;
+    const column = toSide
+      ? vscode.ViewColumn.Beside
+      : editor.viewColumn ?? vscode.ViewColumn.Active;
+    if (await pdfReview.reveal(texFile, line, column, keepShown)) {
+      return;
+    }
+    // Not in an open PDF yet, so open the one its stage builds, or for a
+    // file it inputs, the only one there is
+    const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+    const latexPdfs = Object.values(stages)
+      .map((stage) => {
+        const st = stage as {
+          kind?: string;
+          wdir?: string;
+          target_path?: string;
+        };
+        return st?.kind === "latex" && st.target_path
+          ? latexStagePdf(
+              stages,
+              path.posix.join(st.wdir ?? "", st.target_path),
+            )
+          : undefined;
+      })
+      .filter((p): p is string => p !== undefined);
+    const pdfFile =
+      latexStagePdf(stages, texFile) ??
+      (latexPdfs.length === 1 ? latexPdfs[0] : undefined);
+    const pdfUri = pdfFile
+      ? vscode.Uri.file(path.join(workspaceRoot, pdfFile))
+      : undefined;
+    const built =
+      pdfUri !== undefined &&
+      (await vscode.workspace.fs.stat(pdfUri).then(
+        () => true,
+        () => false,
+      ));
+    if (!built) {
+      void vscode.window.showInformationMessage(
+        "No built PDF found for this document. Open its PDF first.",
+      );
+      return;
+    }
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      pdfUri,
+      PDF_REVIEW_VIEW_TYPE,
+      column,
+    );
+    await pdfReview.reveal(texFile, line, column);
+  };
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF, () =>
+      showInPdf(false),
+    ),
+    vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF_TO_SIDE, () =>
+      showInPdf(true),
+    ),
+    vscode.commands.registerCommand(COMMAND_PDF_GO_TO_SOURCE, () =>
+      pdfReview.goToSource("here", true),
+    ),
+    vscode.commands.registerCommand(COMMAND_PDF_GO_TO_SOURCE_TO_SIDE, () =>
+      pdfReview.goToSource("side", true),
+    ),
+    vscode.commands.registerCommand(COMMAND_TOGGLE_PDF_SOURCE, async () => {
+      if (!pdfReview.goToSource("shown", false)) {
+        await showInPdf(false, true);
+      }
+    }),
   );
 
   context.subscriptions.push(

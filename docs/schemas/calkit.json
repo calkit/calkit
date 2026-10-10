@@ -3294,6 +3294,76 @@
       "title": "MarimoHtmlWasmStage",
       "type": "object"
     },
+    "MarkdownPdf": {
+      "additionalProperties": false,
+      "description": "How a Markdown stage's file is built into a PDF.\n\nPandoc turns it into LaTeX and LaTeX builds the PDF, both in one\nenvironment, e.g., Calkit's LaTeX image, which includes both, so their\nversions are pinned with it.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "Other pandoc arguments, e.g., '--shift-heading-level-by=-1'.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "environment": {
+          "description": "Environment that runs pandoc and LaTeX.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "filters": {
+          "default": [],
+          "description": "Pandoc Lua filters, applied in order.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Filters",
+          "type": "array"
+        },
+        "output_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where to write the PDF. Defaults to the Markdown file's path with a .pdf extension.",
+          "title": "Output Path"
+        },
+        "storage": {
+          "default": "dvc",
+          "description": "Where to store the PDF.",
+          "enum": [
+            "git",
+            "dvc"
+          ],
+          "title": "Storage",
+          "type": "string"
+        },
+        "template_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pandoc template for the LaTeX.",
+          "title": "Template Path"
+        }
+      },
+      "required": [
+        "environment"
+      ],
+      "title": "MarkdownPdf",
+      "type": "object"
+    },
     "MarkdownStage": {
       "additionalProperties": false,
       "description": "A stage sourced from a Markdown file's annotated code blocks.\n\nThis stands in for however many stages the file declares. It is\nreplaced by them at compile time (see\n``calkit.markdown.expand_ck_info``), so nothing downstream needs to\nknow Markdown was involved.\n\n``inputs``, ``always_run``, ``frozen``, and ``scheduler`` apply to\nevery stage the file declares. A file can't iterate or declare\noutputs as a whole, since those belong to the individual stages in\nit, and its stages always run in the project root, where the scripts\nextracted from it are written.",
@@ -3396,6 +3466,18 @@
           "description": "Not supported; declare outputs on the file's blocks.",
           "title": "Outputs",
           "type": "null"
+        },
+        "pdf": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MarkdownPdf"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Also build the file into a PDF with pandoc and LaTeX. A file that only builds a PDF needs no code blocks."
         },
         "scheduler": {
           "anyOf": [

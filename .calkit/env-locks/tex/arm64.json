@@ -1,0 +1,27 @@
+{
+    "RepoDigests": [
+        "sha256:a6df16eb0634a94defc9c794f6a4a94addca2cc41857f2e89c4db332591676c0"
+    ],
+    "Architecture": "arm64",
+    "Os": "linux",
+    "RootFS": {
+        "Type": "layers",
+        "Layers": [
+            "sha256:1e9178dc90058fa454a60803300219ee8c17e515be8718817ed824b96fa1207b",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "sha256:1b7eb283ff126198a9f292a2511133a8ab8c82bda9c4d4819cbe6f4be53f6dc4",
+            "sha256:eb05c3b16772fda838693e3621020572ef46903a9480f57cd7347bd6e30f5cfc",
+            "sha256:608ed5df5926ca9cf8ea98ee0c4b06b8cd7fae822caeaa9153d6a88569707e74",
+            "sha256:e23d740627c00ac7d052a5ba064c71e07ebf6a97a335c259f44feb0bd3c1c4e8",
+            "sha256:921b4a27c98023d4ee54c3713d11ed094201b1448a590eebb8739296b9978799",
+            "sha256:7449d2f5a570e6301afc4b03a710a7006950d9d85372e20fde07f863a8aee3b0",
+            "sha256:e28e00624817a4447d03fbd25e6533747ce1ce6bbbc08cc157050bcc88129b30",
+            "sha256:bae81d2da5d28845b37687b158dc3c03b6fb7d1629c475432d35166a3dd0ad1b",
+            "sha256:d4c5c89019ab226aac376b4574f957689a126740a2e759a02be63157e11a292c",
+            "sha256:e9db30e578d1626eb17b4121b169932e7935bf41660e5a7be2b2627d6d4870c1",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+        ]
+    },
+    "DockerfileMD5": null,
+    "DepsMD5s": {}
+}

@@ -1950,18 +1950,33 @@ def update_hub(
     # A project that already exists on the hub, e.g., one created there
     # for this repo, is connected to rather than created again, which the
     # hub would refuse since a repo belongs to one project
-    exists = False
-    if owner is not None:
+    project = None
+    if git_repo_url is not None and git_repo_url.startswith(
+        "https://github.com/"
+    ):
+        github_repo = git_repo_url.removeprefix("https://github.com/")
         try:
-            calkit.hub.get(f"/projects/{owner}/{name}", max_retries=1)
-            exists = True
+            found = calkit.hub.get(
+                "/projects",
+                params=dict(github_repo=github_repo),
+                max_retries=1,
+            )
+            if found.get("data"):
+                project = found["data"][0]
+        except Exception:
+            pass
+    elif owner is not None:
+        try:
+            project = calkit.hub.get(
+                f"/projects/{owner}/{name}", max_retries=1
+            )
         except Exception:
             pass
     # Creating it is the step that can already be done, so a project that
     # exists is not an error: the point is to end up connected
     resp = None
     try:
-        if exists:
+        if project is not None:
             raise RuntimeError("Project already exists")
         resp = calkit.hub.post(
             "/projects",
@@ -1992,6 +2007,22 @@ def update_hub(
             typer.echo(f"Adding Git remote: {git_repo_url}")
             repo.git.remote(["add", "origin", git_repo_url])
         ck_info["git_repo_url"] = git_repo_url
+    # The hub decides who owns the project, e.g., an org's repo belongs to
+    # the org, under an account name that's lowercase even when the Git
+    # remote's isn't
+    for info in (project, resp):
+        if isinstance(info, dict) and info.get("owner_account_name"):
+            owner = info["owner_account_name"]
+            name = info.get("name") or name
+    if owner is not None and ck_info.get("owner") != owner:
+        ck_info["owner"] = owner
+    if ck_info.get("name") != name:
+        ck_info["name"] = name
+    if ck_info.get("hub") is None:
+        ck_info["hub"] = hub_url
+    # The DVC remote is named from calkit.yaml, so it has to be written first
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
     try:
         remote_name = configure_remote()
         set_remote_auth(remote_name=remote_name)
@@ -2005,14 +2036,6 @@ def update_hub(
         raise_error("Current directory is not a Git repository")
     except (ValueError, RuntimeError) as e:
         raise_error(f"Failed to set up DVC remote: {e}")
-    if owner is not None and ck_info.get("owner") != owner:
-        ck_info["owner"] = owner
-    if ck_info.get("name") != name:
-        ck_info["name"] = name
-    if ck_info.get("hub") is None:
-        ck_info["hub"] = hub_url
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
     paths = [".dvc/config", "calkit.yaml"]
     # The hub would have written one, and a repo it didn't scaffold has none
     if not os.path.isfile("README.md"):

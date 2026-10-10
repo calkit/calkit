@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pytest
 
@@ -171,6 +172,26 @@ def test_latex_source_helpers(project: Path) -> None:
         False,
     )
     assert back.entries[0].email == "email@mail.com"
+    # An ID, an issue, and attributes from a newer schema survive a rewrite
+    newer = [
+        "% COMMENT id=0a1b2c3d issue=https://github.com/o/r/issues/7",
+        '%   origin={tool: "x", v: 2} note="two words"',
+        "%   A:",
+        "%     Hi.",
+    ]
+    back = calkit.latex.parse_comments(newer)[0]
+    assert (back.id, back.issue) == (
+        "0a1b2c3d",
+        "https://github.com/o/r/issues/7",
+    )
+    assert back.attrs == {"origin": {"tool": "x", "v": 2}, "note": "two words"}
+    again = calkit.latex.parse_comments(back.render())[0]
+    assert (again.id, again.issue, again.attrs, again.entries) == (
+        back.id,
+        back.issue,
+        back.attrs,
+        back.entries,
+    )
     assert calkit.latex.word_date("2026-09-06T08:44:00Z") == "2026-09-06 08:44"
     assert calkit.latex.make_bookmark_name("paper/main.tex", 19).startswith(
         "ck_"
@@ -467,13 +488,27 @@ def test_docx_round_trip(
     )
     assert "Figures were changed in Word" in out and "image1.png" in out
     main = Path("paper/main.tex").read_text(encoding="utf-8")
-    # A thread resolved in Word is marked resolved in the source, and
-    # exports back to Word as resolved
+    # A thread resolved in Word is marked resolved in the source, keeping
+    # the ID and issue Word can't carry, and exports back to Word as
+    # resolved
+    methods = Path("paper/methods.tex").read_text(encoding="utf-8")
+    assert "% COMMENT\n%   T. Author:" in methods
+    Path("paper/methods.tex").write_text(
+        methods.replace(
+            "% COMMENT\n%   T. Author:",
+            "% COMMENT id=0a1b2c3d issue=https://github.com/o/r/issues/7\n"
+            "%   T. Author:",
+        ),
+        encoding="utf-8",
+    )
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/resolved.docx"], check=True
     )
     methods = Path("paper/methods.tex").read_text(encoding="utf-8")
-    assert "% COMMENT resolved=true\n%   T. Author:" in methods
+    assert (
+        "% COMMENT id=0a1b2c3d resolved=true "
+        "issue=https://github.com/o/r/issues/7\n%   T. Author:"
+    ) in methods
     parsed = calkit.latex.parse_comments(methods.split("\n"))
     assert [c.resolved for c in parsed] == [True]
     # With --log, the record is kept in the project too
@@ -604,6 +639,13 @@ def test_docx_round_trip(
         assert lo_sent is not None and len(lo_sent.equations) == 1
         assert len(lo_sent.paragraphs) >= 15
         assert any(p.text == "(1)" for p in lo.paragraphs)
+        # A reference to an equation links to it inside the document, not
+        # to TeX4ht's build directory
+        body = lo.parts["word/document.xml"].decode("utf-8")
+        anchors = re.findall(r'w:anchor="([^"]+)"', body)
+        marks = set(re.findall(r'w:bookmarkStart [^>]*w:name="([^"]+)"', body))
+        assert anchors and set(anchors) <= marks
+        assert "HYPERLINK" not in body and ".4om" not in body
         main = Path("paper/main.tex").read_text(encoding="utf-8")
         methods = Path("paper/methods.tex").read_text(encoding="utf-8")
         res = subprocess.run(
@@ -615,3 +657,48 @@ def test_docx_round_trip(
         assert "Applied 0 edits" in res.stdout
         assert Path("paper/main.tex").read_text(encoding="utf-8") == main
         assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods
+
+
+def test_equation_links() -> None:
+    content = (
+        "<text:p>See (<text:a xlink:href='main-m7.4om#x7-3001r2' "
+        "xlink:type='simple'>2</text:a>), "
+        '<text:a xlink:href="main-m7.4om#x7-3001r3">3</text:a>, '
+        "<text:a xlink:href='#Xsmith2020'>Smith</text:a>, "
+        "<text:a xlink:href='https://calkit.io/a.html#b'>web</text:a> and "
+        "<text:a xlink:href='other.4om#x9'>gone</text:a>.</text:p>"
+        "<text:p><draw:frame draw:name='obj-7'><draw:object "
+        "xlink:href='./main-m7' xlink:show='embed'/></draw:frame></text:p>"
+    )
+    out = calkit.docx._link_into_objects(content)
+    # Links into an object point at bookmarks beside it
+    assert "xlink:href='#x7-3001r2'" in out
+    assert 'xlink:href="#x7-3001r3"' in out
+    assert (
+        "<text:p><text:bookmark text:name='x7-3001r2'/>"
+        "<text:bookmark text:name='x7-3001r3'/><draw:frame" in out
+    )
+    # Links within the document or out of it, or to an object that isn't
+    # there, are left alone
+    assert "xlink:href='#Xsmith2020'" in out
+    assert "xlink:href='https://calkit.io/a.html#b'" in out
+    assert "xlink:href='other.4om#x9'" in out
+    assert calkit.docx._link_into_objects(out) == out
+    # A kept bookmark goes on the row it's for, not just the first
+    doc = calkit.docx.Document(str(FIXTURES / "export.docx"))
+    w, m = calkit.docx.W, calkit.docx.M
+    before = next(doc.doc.iter(calkit.docx._tag(w, "p")))
+    rows = [
+        (ET.Element(calkit.docx._tag(m, "oMath")), "4", "ck_a"),
+        (ET.Element(calkit.docx._tag(m, "oMath")), "5", "ck_a_r2"),
+    ]
+    doc.insert_equations(before, rows, 100, keep={1: [("x13-3004r5", "7")]})
+    tbl = next(doc.doc.iter(calkit.docx._tag(w, "tbl")))
+    names = [
+        [
+            b.get(calkit.docx._tag(w, "name"))
+            for b in tr.iter(calkit.docx._tag(w, "bookmarkStart"))
+        ]
+        for tr in tbl.iter(calkit.docx._tag(w, "tr"))
+    ]
+    assert names == [["ck_a"], ["ck_a_r2", "x13-3004r5"]]

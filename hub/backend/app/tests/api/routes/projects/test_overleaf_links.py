@@ -400,12 +400,15 @@ def test_get_user_overleaf_sync_scans_lazily(
 
     def _lookup(**params):
         # The scan reads calkit.yaml from GitHub rather than cloning, so a
-        # stubbed response stands in for the repo
+        # stubbed response stands in for the repo; other tests' projects
+        # indexed with the same link ask it for a permission, which is none
         with (
             patch(
                 "app.projects.requests.get",
                 return_value=SimpleNamespace(
-                    status_code=200, text=ryaml_dumps(ck_info)
+                    status_code=200,
+                    text=ryaml_dumps(ck_info),
+                    json=lambda: {"permission": "none"},
                 ),
             ),
             patch(

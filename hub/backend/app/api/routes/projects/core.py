@@ -372,18 +372,17 @@ def get_projects(
             where_clause,
             Project.owner_account.has(Account.name == owner_name.lower()),  # type: ignore
         )
+    repo_clause = None
     if github_repo is not None:
         # An exact repo lookup, e.g. for resolving the project behind a
         # GitHub page. The repo URL is stored with or without the .git
         # suffix depending on how the project was created.
         repo_url = f"https://github.com/{github_repo.strip('/')}"
-        where_clause = and_(
-            where_clause,
-            or_(
-                func.lower(Project.git_repo_url) == repo_url.lower(),
-                func.lower(Project.git_repo_url) == f"{repo_url.lower()}.git",
-            ),
+        repo_clause = or_(
+            func.lower(Project.git_repo_url) == repo_url.lower(),
+            func.lower(Project.git_repo_url) == f"{repo_url.lower()}.git",
         )
+        where_clause = and_(where_clause, repo_clause)
     if search_for is not None:
         search_for = f"%{search_for}%"
         where_clause = and_(
@@ -418,6 +417,24 @@ def get_projects(
         .offset(offset)
     )
     projects = session.exec(select_query).all()
+    if repo_clause is not None and current_user is not None and not projects:
+        # GitHub-derived access is only in the clause above once it's been
+        # cached, so a collaborator who has never opened the project has it
+        # resolved here rather than being told the repo has no project
+        project = session.exec(select(Project).where(repo_clause)).first()
+        if project is not None:
+            try:
+                project = app.projects.get_project(
+                    session=session,
+                    owner_name=project.owner_account_name,
+                    project_name=project.name,
+                    current_user=current_user,
+                    min_access_level=min_access_level,
+                )
+                projects = [project]
+                count = 1
+            except HTTPException:
+                pass
     return ProjectsPublic(data=projects, count=count)  # type: ignore
 
 
@@ -923,7 +940,9 @@ def post_project(
             ) and membership.role_name in ["owner", "admin", "write"]:
                 is_user_org = True
                 break
-        if not is_user_org:
+        # Adding an existing repo can instead rest on managing that repo on
+        # GitHub, which is checked once it's fetched below
+        if not is_user_org and not project_in.git_repo_exists:
             raise HTTPException(
                 403,
                 "Can only create projects for yourself or organizations you "
@@ -1213,32 +1232,88 @@ def post_project(
                 400, "Templates can only be used with new repos"
             )
         repo = resp.json()
+        github_access: str | None = None
         if owner_name != current_user.github_username:
             # This is either an org repo, or someone else's that we shouldn't
             # be able to import
             if repo["owner"]["type"] != "Organization":
                 raise HTTPException(400, "Non-user repos must be from an org")
-            # This org must exist in Calkit and the user must have access to it
-            # First check if this org exists in Calkit and try to create it
-            # if it doesn't
             org = orgs.get_org_by_github_name(
                 session=session, github_name=owner_name
             )
+            role = None
+            for membership in current_user.org_memberships:
+                if org is not None and membership.org_id == org.id:
+                    role = membership.role_name
+            # A collaborator outside the org can be the one working in the
+            # repo, and adding it writes nothing they couldn't push themselves
+            permissions = repo.get("permissions") or {}
+            if role not in ["owner", "admin"] and not permissions.get("push"):
+                logger.info("User can't write to this org or repo")
+                raise HTTPException(
+                    403,
+                    (
+                        "Must be an owner or admin of an org, or have write "
+                        "access to the repo, to create projects for it"
+                    ),
+                )
+            if role not in ["owner", "admin"]:
+                github_access = (
+                    "admin" if permissions.get("admin") else "write"
+                )
             if org is None:
-                logger.info(f"Org '{owner_name}' does not exist in DB")
-                # Try to create the org
-                post_org(
-                    req=OrgPost(github_name=owner_name),
-                    session=session,
-                    current_user=current_user,
+                # The app installed on the repo stands in for an org owner's
+                # approval; the org has no members here until one claims it
+                install_resp = requests.get(
+                    f"{repo_api_url}/installation",
+                    headers={
+                        "Authorization": (
+                            f"Bearer {github.create_app_token()}"
+                        ),
+                        "Accept": "application/vnd.github+json",
+                    },
+                    timeout=15,
                 )
-                org = orgs.get_org_by_github_name(
-                    session=session, github_name=owner_name
+                if install_resp.status_code == 404:
+                    raise HTTPException(
+                        400,
+                        "The Calkit GitHub App is not installed for this "
+                        "repo; ask an owner of the org to install it by "
+                        "visiting "
+                        "https://github.com/apps/calkit/installations/"
+                        "select_target",
+                    )
+                if install_resp.status_code != 200:
+                    logger.warning(
+                        "Could not look up the app installation for "
+                        f"{owner_name}/{repo_name}: "
+                        f"{install_resp.status_code}"
+                    )
+                    raise HTTPException(
+                        502,
+                        "Could not verify the GitHub App installation; "
+                        "try again",
+                    )
+                logger.info(f"Adding org '{owner_name}' with no members")
+                github_name = repo["owner"]["login"]
+                org = Org(
+                    account=Account(
+                        name=github_name.lower(),
+                        display_name=github_name,
+                        github_name=github_name,
+                    ),
+                    subscription=OrgSubscription(
+                        plan_id=0,
+                        n_users=1,
+                        price=0.0,
+                        period_months=1,
+                        subscriber_user_id=current_user.id,
+                    ),
                 )
-            assert isinstance(org, Org)
-            account_id = org.account.id
-            subscription = org.subscription
-            if subscription is None:
+                session.add(org)
+                session.commit()
+                session.refresh(org)
+            if org.subscription is None:
                 logger.info(f"Org '{owner_name}' does not have a subscription")
                 # Give the org a free subscription
                 org.subscription = OrgSubscription(
@@ -1252,22 +1327,6 @@ def post_project(
                 session.add(org.subscription)
                 session.commit()
                 session.refresh(org.subscription)
-                subscription = org.subscription
-            # Check access to the org
-            role = None
-            for membership in current_user.org_memberships:
-                if membership.org.account.name.lower() == owner_name.lower():
-                    role = membership.role_name
-            # TODO: If we have no role defined, check on GitHub
-            if role not in ["owner", "admin"]:
-                logger.info("User is not an admin or owner of this org")
-                raise HTTPException(
-                    403,
-                    (
-                        "Must be an owner or admin of an org to create "
-                        "projects for it"
-                    ),
-                )
             owner_account_id = org.account.id
         else:
             owner_account_id = current_user.account.id
@@ -1282,6 +1341,16 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
+        # Recorded up front so a collaborator outside the org sees it listed
+        if github_access is not None:
+            session.add(
+                UserProjectAccess(
+                    project_id=project.id,
+                    user_id=current_user.id,
+                    github_access=github_access,
+                )
+            )
+            session.commit()
     return project  # type: ignore
 
 
@@ -4141,6 +4210,18 @@ def get_project_comments(
         query = query.where(ProjectComment.artifact_type == artifact_type)
     if artifact_path is not None:
         query = query.where(ProjectComment.artifact_path == artifact_path)
+    # Ones moved into a LaTeX document's source are kept there now, along
+    # with any replies to them
+    moved = select(ProjectComment.id).where(
+        ProjectComment.project_id == project.id,
+        col(ProjectComment.moved_to_source).is_not(None),
+    )
+    query = query.where(col(ProjectComment.moved_to_source).is_(None)).where(
+        or_(
+            col(ProjectComment.parent_id).is_(None),
+            col(ProjectComment.parent_id).not_in(moved),
+        )
+    )
     comments = list(session.exec(query).all())
     _sync_github_issue_resolutions(session, comments, current_user)
     return comments
@@ -4431,6 +4512,10 @@ def post_project_comment_reply(
         if thread_root_id != comment_id
         else comment
     )
+    if thread_root and thread_root.moved_to_source:
+        raise HTTPException(
+            409, "This thread was moved into the document's source"
+        )
     if thread_root and thread_root.external_url:
         _try_post_github_issue_comment(
             session, current_user, thread_root.external_url, reply.body

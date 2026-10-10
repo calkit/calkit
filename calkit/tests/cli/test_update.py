@@ -23,7 +23,7 @@ def test_update_project_config(tmp_dir, monkeypatch):
 
     import requests
 
-    monkeypatch.setattr(requests, "get", fail)
+    monkeypatch.setattr(requests.Session, "request", fail)
     subprocess.check_call(["calkit", "init"])
     result = runner.invoke(update_app, ["devcontainer"])
     assert result.exit_code == 0
@@ -561,16 +561,31 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     posted: list[dict] = []
     remote = {"url": ""}
 
+    posted_resp: dict = {}
+
     def post(path, json=None, **kwargs):
         posted.append(json)
-        return {"git_repo_url": remote["url"]}
+        return {"git_repo_url": remote["url"]} | posted_resp
 
     existing: set[str] = set()
+    on_hub: dict[str, dict] = {}
 
-    def get(path, **kwargs):
+    def get(path, params=None, **kwargs):
+        if path == "/projects":
+            found = on_hub.get(params["github_repo"].lower())
+            return {
+                "data": [found] if found else [],
+                "count": int(bool(found)),
+            }
         if path not in existing:
             raise RuntimeError("404: Not found")
         return {}
+
+    remote_names: list[str] = []
+
+    def configure_remote() -> str:
+        remote_names.append(calkit.detect_project_name())
+        return "calkit"
 
     monkeypatch.setattr(calkit.hub, "post", post)
     monkeypatch.setattr(calkit.hub, "get", get)
@@ -578,7 +593,7 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
         calkit.hub, "get_current_user", lambda: {"github_username": "someone"}
     )
     monkeypatch.setattr(calkit.hub, "get_hub_url", lambda: "https://hub.test")
-    monkeypatch.setattr(calkit.dvc, "configure_remote", lambda: "calkit")
+    monkeypatch.setattr(calkit.dvc, "configure_remote", configure_remote)
     monkeypatch.setattr(
         calkit.dvc, "set_remote_auth", lambda remote_name: None
     )
@@ -626,6 +641,37 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert "already exists" in result.output
     assert len(posted) == n_posted
     assert calkit.load_calkit_info()["hub"] == "https://hub.test"
+    # An org's repo already on the hub is found by its URL, and the remote
+    # is named for the account that owns it there, which is lowercase
+    on_hub["acme-lab/widget"] = {
+        "owner_account_name": "acme-lab",
+        "name": "widget",
+    }
+    git("remote", "set-url", "origin", "git@github.com:Acme-Lab/widget.git")
+    with open("calkit.yaml", "w") as f:
+        f.write("title: Widget\n")
+    result = runner.invoke(
+        update_app, ["hub", "https://hub.test", "--no-commit"]
+    )
+    assert result.exit_code == 0, result.output
+    assert len(posted) == n_posted
+    assert remote_names[-1] == "acme-lab/widget"
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["owner"] == "acme-lab"
+    assert ck_info["name"] == "widget"
+    assert "https://hub.test/acme-lab/widget" in result.output
+    # One the client creates takes the owner the hub gave it
+    on_hub.clear()
+    with open("calkit.yaml", "w") as f:
+        f.write("name: widget\ntitle: Widget\n")
+    posted_resp["owner_account_name"] = "acme-lab"
+    result = runner.invoke(
+        update_app, ["hub", "https://hub.test", "--no-commit"]
+    )
+    assert result.exit_code == 0, result.output
+    assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
+    assert remote_names[-1] == "acme-lab/widget"
+    assert calkit.load_calkit_info()["owner"] == "acme-lab"
 
 
 def test_update_path_storage(tmp_dir):

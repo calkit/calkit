@@ -789,8 +789,11 @@ def _nested_type_markdown(
 def generate_stage_kinds_markdown() -> str:
     base_fields = Stage.model_fields
 
+    # Kinds Calkit generates rather than anyone writing them are left out
     stage_classes = [
-        cls for cls in Stage.__subclasses__() if _kind_for_model_class(cls)
+        cls
+        for cls in Stage.__subclasses__()
+        if _kind_for_model_class(cls) and not getattr(cls, "internal", False)
     ]
     stage_classes = sorted(stage_classes, key=_kind_for_model_class)
 

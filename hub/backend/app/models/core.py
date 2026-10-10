@@ -1231,6 +1231,9 @@ class ProjectComment(SQLModel, table=True):
     # Git context at the time the comment was posted
     git_ref: str | None = Field(default=None, max_length=256)
     git_rev: str | None = Field(default=None, max_length=40)
+    # When the thread was moved into the source of the LaTeX document it's
+    # on, after which it's kept there rather than here
+    moved_to_source: datetime | None = Field(default=None)
     # Relationships
     user: User = Relationship(back_populates="project_comments")
     project: Project = Relationship(back_populates="project_comments")

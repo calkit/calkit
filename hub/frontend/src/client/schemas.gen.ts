@@ -11920,6 +11920,18 @@ export const WorkspaceSchema = {
       ],
       title: "In Use By",
     },
+    last_activity: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Activity",
+    },
     operator_id: {
       type: "string",
       format: "uuid",
@@ -11952,6 +11964,10 @@ export const WorkspaceSchema = {
       type: "string",
       title: "Updated",
     },
+    on_hub: {
+      type: "boolean",
+      title: "On Hub",
+    },
   },
   type: "object",
   required: [
@@ -11962,6 +11978,7 @@ export const WorkspaceSchema = {
     "operator_asleep",
     "operator_platform",
     "updated",
+    "on_hub",
   ],
   title: "Workspace",
   description: "A workspace along with the Operator it's on.",
@@ -12097,6 +12114,18 @@ export const WorkspaceInfoSchema = {
         },
       ],
       title: "In Use By",
+    },
+    last_activity: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Activity",
     },
   },
   type: "object",

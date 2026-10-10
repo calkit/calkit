@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 
 from app import users
 from app.api.deps import (
@@ -25,7 +25,14 @@ from app.api.deps import (
 )
 from app.config import settings
 from app.core import utcnow
-from app.models import Operator, OperatorPublic, OperatorWorkspace, User
+from app.models import (
+    Account,
+    Operator,
+    OperatorPublic,
+    OperatorWorkspace,
+    Project,
+    User,
+)
 from app.security import (
     create_operator_grant,
     create_relay_token,
@@ -262,6 +269,8 @@ class WorkspaceInfo(BaseModel):
     # Another hub whose Operator on the same machine is using it, which
     # keeps this one out until it's done
     in_use_by: str | None = Field(default=None, max_length=2048)
+    # When it last changed, e.g., a commit, a checkout, or a run ending
+    last_activity: str | None = Field(default=None, max_length=64)
 
 
 class CheckIn(BaseModel):
@@ -322,6 +331,7 @@ def _update_workspaces(
                 "running_since",
                 "last_run",
                 "in_use_by",
+                "last_activity",
             },
         )
         ws.updated = now
@@ -452,6 +462,9 @@ class Workspace(WorkspaceInfo):
     # Sessions need a POSIX terminal, so they aren't offered on Windows
     operator_platform: str | None
     updated: str
+    # Whether its project is on this hub, which ones only on the machine
+    # aren't
+    on_hub: bool
 
 
 def _list_workspaces(
@@ -473,8 +486,24 @@ def _list_workspaces(
         query = query.where(
             OperatorWorkspace.owner_name == owner_name.lower()
         ).where(OperatorWorkspace.project_name == project_name.lower())
+    rows = session.exec(query).all()
+    # Projects are matched by name, as reported, in one query
+    names = {
+        (ws.owner_name, ws.project_name)
+        for ws, _ in rows
+        if ws.owner_name and ws.project_name
+    }
+    on_hub: set[tuple[str, str]] = set()
+    if names:
+        found = session.exec(
+            select(Account.name, Project.name)
+            .join(Project, col(Project.owner_account_id) == Account.id)
+            .where(col(Account.name).in_({o for o, _ in names}))
+            .where(func.lower(Project.name).in_({n for _, n in names}))
+        ).all()
+        on_hub = {(o.lower(), n.lower()) for o, n in found}
     resp = []
-    for ws, operator in session.exec(query).all():
+    for ws, operator in rows:
         project = None
         if ws.owner_name and ws.project_name:
             project = f"{ws.owner_name}/{ws.project_name}"
@@ -493,7 +522,9 @@ def _list_workspaces(
                 running_since=ws.run_state.get("running_since"),
                 last_run=ws.run_state.get("last_run"),
                 in_use_by=ws.run_state.get("in_use_by"),
+                last_activity=ws.run_state.get("last_activity"),
                 updated=ws.updated.isoformat(),
+                on_hub=(ws.owner_name, ws.project_name) in on_hub,
                 operator_id=operator.id,
                 operator_name=operator.name,
                 operator_online=is_online(operator),

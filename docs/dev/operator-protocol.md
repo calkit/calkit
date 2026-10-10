@@ -42,8 +42,8 @@ rejects its token and the Operator shuts down.
   `cron`), whether it's `connected` to the relay, and what workspaces it
   has, each with its Git state and pipeline run state: `running`,
   `running_stages`, `running_since`, and `last_run` (`status`, `started`,
-  `ended`, and `failed_stages`), and whether a restart is pending
-  (`restart_pending`).
+  `ended`, and `failed_stages`), and when it was last active
+  (`last_activity`), and whether a restart is pending (`restart_pending`).
   It returns the relay URL, an Operator relay token, `connect`, which
   tells an Operator in cron mode whether to connect, and `restart`, which
   passes on a restart its owner asked for.

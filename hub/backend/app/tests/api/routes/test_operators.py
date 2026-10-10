@@ -13,7 +13,7 @@ from starlette.websockets import WebSocketDisconnect
 from app import users
 from app.config import settings
 from app.core import utcnow
-from app.models import Operator, RefreshToken, User, UserTOTP
+from app.models import Operator, Project, RefreshToken, User, UserTOTP
 from app.security import (
     create_access_token,
     create_second_factor_token,
@@ -121,6 +121,14 @@ def test_operators(
     operator = db.get(Operator, uuid.UUID(op["id"]))
     assert operator is not None
     assert len(operator.hashed_verifier) == 64
+    hub_project = Project(
+        name=f"on-hub-{uuid.uuid4().hex[:6]}",
+        title="On the hub",
+        git_repo_url="https://github.com/someone/on-hub",
+        owner_account_id=user.account.id,
+    )
+    db.add(hub_project)
+    db.commit()
     # Checking in again updates workspaces in place, drops ones that are gone,
     # and reports runs in progress, which stages, and how the last run ended,
     # so the hub can show them without connecting
@@ -143,22 +151,32 @@ def test_operators(
                     "running_since": "2026-09-29T12:05:00+00:00",
                     "last_run": last_run,
                     "in_use_by": "http://localhost",
+                    "last_activity": "2026-09-29T12:00:00+00:00",
                 },
                 {"path": "/home/me/calkit/b", "project": "someone/other"},
+                {
+                    "path": "/home/me/calkit/d",
+                    "project": f"{user.account.name}/{hub_project.name.upper()}",
+                },
                 {"path": "/home/me/misc"},
             ]
         },
     )
     assert r.status_code == 200, r.text
-    # All of the user's workspaces are listed across Operators
+    # All of the user's workspaces are listed across Operators, saying which
+    # projects are on the hub
     r = client.get("/workspaces", headers=normal_user_token_headers)
     mine = [w for w in r.json() if w["operator_id"] == op["id"]]
     assert [w["path"] for w in mine] == [
         "/home/me/calkit/a",
         "/home/me/calkit/b",
+        "/home/me/calkit/d",
         "/home/me/misc",
     ]
-    assert mine[2]["project"] is None
+    assert [w["on_hub"] for w in mine] == [False, False, True, False]
+    assert mine[0]["last_activity"] == "2026-09-29T12:00:00+00:00"
+    assert mine[1]["last_activity"] is None
+    assert mine[3]["project"] is None
     assert mine[0]["running"] and mine[0]["running_stages"] == ["train"]
     assert mine[0]["running_since"] == "2026-09-29T12:05:00+00:00"
     assert mine[0]["last_run"] == last_run

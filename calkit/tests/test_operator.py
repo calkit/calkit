@@ -140,6 +140,8 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     assert demo["project"] == "alice/demo"
     assert demo["dirty"]
     assert len(demo["commit"]) == 40
+    assert demo["last_activity"] is not None
+    assert workspaces["dev/tool"]["last_activity"] is not None
     assert demo["branch"] is not None
     assert not workspaces["src/other"]["dirty"]
     assert workspaces["src/other"]["project"] == "alice/other"

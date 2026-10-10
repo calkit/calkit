@@ -485,6 +485,49 @@ def discover_workspaces(cfg: dict) -> list[dict]:
                 info["dirty"] = True
         return info
 
+    def _last_activity(path: str, last_run: dict | None) -> str | None:
+        """When a checkout last changed, as far as is cheap to tell: its
+        latest commit, Git's index, which staging and checkouts write, or
+        its latest run ending.
+        """
+        from datetime import datetime, timezone
+
+        times = []
+        try:
+            out = subprocess.run(
+                ["git", "log", "-1", "--format=%ct"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ).stdout.strip()
+            if out:
+                times.append(float(out))
+        except (subprocess.SubprocessError, OSError, ValueError):
+            pass
+        # A worktree's .git is a file pointing at its Git directory
+        git_dir = os.path.join(path, ".git")
+        try:
+            if os.path.isfile(git_dir):
+                with open(git_dir) as f:
+                    git_dir = os.path.join(
+                        path, f.read().removeprefix("gitdir:").strip()
+                    )
+            times.append(os.path.getmtime(os.path.join(git_dir, "index")))
+        except OSError:
+            pass
+        if last_run and last_run.get("ended"):
+            try:
+                ended = datetime.fromisoformat(last_run["ended"])
+                if ended.tzinfo is None:
+                    ended = ended.replace(tzinfo=timezone.utc)
+                times.append(ended.timestamp())
+            except (TypeError, ValueError):
+                pass
+        if not times:
+            return None
+        return datetime.fromtimestamp(max(times), timezone.utc).isoformat()
+
     home = config.get_user_home()
     candidates: list[tuple[str, str]] = []
     for root_name in WORKSPACE_ROOTS:
@@ -522,16 +565,13 @@ def discover_workspaces(cfg: dict) -> list[dict]:
         in_use_by = None
         if holder is not None and holder.get("hub") != get_hub_url():
             in_use_by = holder.get("hub")
-        workspaces.append(
-            dict(
-                path=path,
-                kind=kind,
-                project=project,
-                in_use_by=in_use_by,
-            )
+        ws = (
+            dict(path=path, kind=kind, project=project, in_use_by=in_use_by)
             | _git_status(path)
             | get_run_state(path)
         )
+        ws["last_activity"] = _last_activity(path, ws["last_run"])
+        workspaces.append(ws)
     return workspaces
 
 

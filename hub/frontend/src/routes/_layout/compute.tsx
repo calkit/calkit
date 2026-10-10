@@ -2,10 +2,11 @@ import {
   Badge,
   Box,
   Button,
-  ButtonGroup,
   Code,
   Flex,
+  Grid,
   Heading,
+  Select,
   Spinner,
   Text,
   useColorModeValue,
@@ -17,7 +18,7 @@ import {
   redirect,
 } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { FiPlus, FiTerminal } from "react-icons/fi"
+import { FiChevronDown, FiChevronRight, FiTerminal } from "react-icons/fi"
 import { z } from "zod"
 
 import {
@@ -45,7 +46,13 @@ const computeSearchSchema = z.object({
   modal: z.enum(["save", "discard", "new_stage", "new_workspace"]).optional(),
   // Narrowing the list down
   q: z.string().optional(),
-  show: z.enum(["running", "changes", "out_of_sync"]).optional(),
+  show: z
+    .enum(["running", "changes", "out_of_sync", "sessions", "not_on_hub"])
+    .optional(),
+  // Most recently active first, unless sorted by name
+  sort: z.enum(["name"]).optional(),
+  // IDs of Operators whose workspaces are hidden
+  collapsed: z.array(z.string()).optional(),
 })
 
 type ComputeSearch = z.infer<typeof computeSearchSchema>
@@ -182,21 +189,40 @@ function Compute() {
     select({ workspace: search.workspace })
     refreshSessions()
   }
-  // What the filters leave, by the text in the box and the state chosen
+  const getSessions = (ws: Workspace) =>
+    (sessions[ws.operator_id] ?? []).filter((s) => s.workspace === ws.path)
+  // What the filters leave, by the text in the box and the state chosen;
+  // projects that aren't on the hub are only shown when asked for
   const query = (search.q ?? "").toLowerCase()
   const shown = (ws: Workspace) =>
     (!query ||
       `${ws.project ?? ""} ${ws.path} ${ws.operator_name}`
         .toLowerCase()
         .includes(query)) &&
+    (search.show === "not_on_hub" ? !ws.on_hub : ws.on_hub) &&
     (search.show === "running"
       ? ws.running
       : search.show === "changes"
         ? ws.dirty
         : search.show === "out_of_sync"
           ? Boolean(ws.ahead || ws.behind)
-          : true)
+          : search.show === "sessions"
+            ? getSessions(ws).length > 0
+            : true)
   const filtering = Boolean(query || search.show)
+  const byActivity = (a: Workspace, b: Workspace) =>
+    (b.last_activity ?? "").localeCompare(a.last_activity ?? "")
+  const collapsed = new Set(search.collapsed ?? [])
+  const toggleCollapsed = (opId: string) => {
+    const next = new Set(collapsed)
+    next.has(opId) ? next.delete(opId) : next.add(opId)
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        collapsed: next.size ? [...next] : undefined,
+      }),
+    })
+  }
   // Online first, since that's what can be used
   const sortedOperators = [...operators].sort(
     (a, b) =>
@@ -267,26 +293,44 @@ function Compute() {
           data-form-type="other"
           data-lpignore="true"
         />
-        <ButtonGroup size="xs" isAttached variant="outline" mb={3}>
-          {(
-            [
-              [undefined, "All"],
-              ["running", "Running"],
-              ["changes", "Uncommitted"],
-              ["out_of_sync", "Out of sync"],
-            ] as const
-          ).map(([show, label]) => (
-            <Button
-              key={label}
-              variant={search.show === show ? "primary" : "outline"}
-              onClick={() =>
-                navigate({ search: (prev) => ({ ...prev, show }) })
-              }
-            >
-              {label}
-            </Button>
-          ))}
-        </ButtonGroup>
+        <Flex gap={2} mb={3}>
+          <Select
+            size="sm"
+            aria-label="Show"
+            value={search.show ?? ""}
+            onChange={(e) =>
+              navigate({
+                search: (prev) => ({
+                  ...prev,
+                  show: (e.target.value || undefined) as ComputeSearch["show"],
+                }),
+              })
+            }
+          >
+            <option value="">All</option>
+            <option value="running">Running</option>
+            <option value="changes">Uncommitted</option>
+            <option value="out_of_sync">Out of sync</option>
+            <option value="sessions">With sessions</option>
+            <option value="not_on_hub">Not on the hub</option>
+          </Select>
+          <Select
+            size="sm"
+            aria-label="Sort"
+            value={search.sort ?? ""}
+            onChange={(e) =>
+              navigate({
+                search: (prev) => ({
+                  ...prev,
+                  sort: e.target.value === "name" ? "name" : undefined,
+                }),
+              })
+            }
+          >
+            <option value="">Recently active</option>
+            <option value="name">Name</option>
+          </Select>
+        </Flex>
         {operators.length === 0 && (
           <Text color="ui.dim" fontSize="sm">
             You have no Operators. Install one with{" "}
@@ -298,7 +342,9 @@ function Compute() {
           const opWorkspaces = workspaces.filter(
             (ws) => ws.operator_id === opId && shown(ws),
           )
+          if (search.sort !== "name") opWorkspaces.sort(byActivity)
           if (filtering && opWorkspaces.length === 0) return null
+          const isCollapsed = collapsed.has(opId)
           const conn = connections.get(opId)
           // Listed over the relay once it connects, which takes a moment
           const sessionsLoading =
@@ -308,7 +354,14 @@ function Compute() {
             sessions[opId] === undefined
           return (
             <Box key={opId} mb={4}>
-              <Flex align="center" gap={2} mb={1}>
+              <Flex
+                align="center"
+                gap={2}
+                mb={1}
+                cursor="pointer"
+                onClick={() => toggleCollapsed(opId)}
+              >
+                {isCollapsed ? <FiChevronRight /> : <FiChevronDown />}
                 <Box
                   w={2}
                   h={2}
@@ -329,6 +382,9 @@ function Compute() {
                     {op.name}
                   </Text>
                 </Tooltip>
+                <Text fontSize="xs" color="ui.dim">
+                  {opWorkspaces.length}
+                </Text>
                 {op.restart_pending && (
                   <Badge fontSize="2xs">restart pending</Badge>
                 )}
@@ -339,22 +395,23 @@ function Compute() {
                     ml="auto"
                     isLoading={waking.has(opId)}
                     loadingText="Waking"
-                    onClick={() => wakeOperator(opId)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      wakeOperator(opId)
+                    }}
                   >
                     Wake
                   </Button>
                 )}
               </Flex>
-              {opWorkspaces.length === 0 && (
+              {!isCollapsed && opWorkspaces.length === 0 && (
                 <Text fontSize="sm" color="ui.dim" pl={4}>
                   No workspaces
                 </Text>
               )}
-              {opWorkspaces.map((ws) => {
+              {(isCollapsed ? [] : opWorkspaces).map((ws) => {
                 const key = workspaceKey(ws)
-                const wsSessions = (sessions[opId] ?? []).filter(
-                  (s) => s.workspace === ws.path,
-                )
+                const wsSessions = getSessions(ws)
                 return (
                   <Box key={key}>
                     <Box

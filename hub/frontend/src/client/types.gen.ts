@@ -6776,6 +6776,10 @@ export type Workspace = {
    */
   in_use_by?: string | null
   /**
+   * Last Activity
+   */
+  last_activity?: string | null
+  /**
    * Operator Id
    */
   operator_id: string
@@ -6799,6 +6803,10 @@ export type Workspace = {
    * Updated
    */
   updated: string
+  /**
+   * On Hub
+   */
+  on_hub: boolean
 }
 
 /**
@@ -6856,6 +6864,10 @@ export type WorkspaceInfo = {
    * In Use By
    */
   in_use_by?: string | null
+  /**
+   * Last Activity
+   */
+  last_activity?: string | null
 }
 
 /**

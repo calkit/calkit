@@ -2566,6 +2566,7 @@ Update objects.
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`path-storage`](#subcommand-update-path-storage)     | Move paths between Git and DVC storage without rerunning anything.                   |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 | [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
 
@@ -2950,6 +2951,32 @@ Options:
 | `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
 | `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
 
+<a id="subcommand-update-path-storage"></a>
+
+#### `calkit update path-storage`
+
+Move paths between Git and DVC storage without rerunning anything.
+
+A pipeline output's storage is changed where the pipeline declares it, e.g., an output's 'storage' or a LaTeX stage's 'pdf_storage', and a file added on its own is added again with the other system. Either way it's untracked from where it was, so it isn't left in both. The tracking changes are staged, and calkit.yaml and dvc.yaml are left to commit.
+
+Usage:
+
+```text
+calkit update path-storage [OPTIONS] PATHS...
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------- |
+| `paths`  | str  | yes      |         | Files or directories to move, from the project. |
+
+Options:
+
+| Option       | Type | Required | Default | Description                      |
+| ------------ | ---- | -------- | ------- | -------------------------------- |
+| `--to`, `-t` | str  | yes      |         | Where to store them: git or dvc. |
+
 <a id="subcommand-update-dataset"></a>
 
 #### `calkit update dataset`
@@ -3032,6 +3059,7 @@ Check things.
 | [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that a project's system-level requirements are met.                                                    |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
+| [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
 | [`questions`](#subcommand-check-questions)                  | Check that answered questions are backed by current evidence.                                                |
 
@@ -3328,6 +3356,27 @@ Options:
 | Option            | Type    | Required | Default | Description                                                 |
 | ----------------- | ------- | -------- | ------- | ----------------------------------------------------------- |
 | `--compile`, `-c` | boolean | no       | False   | Compile the pipeline to DVC stages and merge into dvc.yaml. |
+
+<a id="subcommand-check-storage"></a>
+
+#### `calkit check storage`
+
+Check that paths are tracked where they're declared to be stored.
+
+That is, nothing is tracked by both Git and DVC, no pipeline output stored in Git is ignored by it, and nothing in Git is too large for it. With --fix, the pipeline's declarations, or a file's .dvc file, decide where each path belongs, and the changes are staged.
+
+Usage:
+
+```text
+calkit check storage [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description                                         |
+| -------- | ------- | -------- | ------- | --------------------------------------------------- |
+| `--fix`  | boolean | no       | False   | Move each path to where it's declared to be stored. |
+| `--json` | boolean | no       | False   | Output the problems as JSON.                        |
 
 <a id="subcommand-check-call"></a>
 

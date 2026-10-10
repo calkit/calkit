@@ -631,3 +631,96 @@ def test_ck_fs_reads_content_only_for_dirs() -> None:
     with pytest.raises(FileNotFoundError):
         fs.info(paths)
     assert len(calls) == 2
+
+
+def test_get_storage_problems(tmp_dir):
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def problems(**kwargs) -> dict:
+        return {
+            p["path"]: p
+            for p in calkit.dvc.get_storage_problems(large_mb=None, **kwargs)
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt && echo yo > kept.txt",
+                "outputs": ["out.txt", {"path": "kept.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
+    subprocess.check_call(["calkit", "run"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    assert problems() == {}
+    # Cached by DVC and tracked by Git, which DVC's stage or .dvc file says
+    # is wrong
+    git("add", "-f", "out.txt", "data.csv")
+    found = problems()
+    # Only the project's own paths count, not those of another sharing its
+    # DVC repo
+    os.makedirs("sub")
+    assert problems(wdir="sub") == {}
+    assert found["out.txt"]["kind"] == "both"
+    assert found["out.txt"]["stage"] == "make"
+    assert found["out.txt"]["store_in"] == "dvc"
+    assert found["data.csv"]["dvc_file"] == "data.csv.dvc"
+    assert found["data.csv"]["store_in"] == "dvc"
+    # Unless the file differs from its .dvc file, which leaves it unclear
+    with open("data.csv", "a") as f:
+        f.write("1,2\n")
+    assert problems()["data.csv"]["store_in"] is None
+    git("reset", "-q", "--", "out.txt", "data.csv")
+    # A Git-stored output that's ignored, e.g., left over from DVC
+    git("rm", "-q", "--cached", "kept.txt")
+    with open(".gitignore", "a") as f:
+        f.write("/kept.txt\n")
+    found = problems()
+    assert list(found) == ["kept.txt"]
+    assert found["kept.txt"]["kind"] == "ignored"
+    assert found["kept.txt"]["store_in"] == "git"
+    # Including generated LaTeX, which is stored in Git unless it says
+    # otherwise
+    ck_info["pipeline"]["stages"]["values"] = {
+        "kind": "json-to-latex",
+        "inputs": ["values.json"],
+        "outputs": ["values.tex"],
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("values.tex", "w") as f:
+        f.write("x")
+    with open(".gitignore", "a") as f:
+        f.write("/values.tex\n")
+    assert problems()["values.tex"]["kind"] == "ignored"
+    os.remove("values.tex")
+    # A path stored zipped and tracked by Git
+    os.makedirs("zipped")
+    with open("zipped/a.txt", "w") as f:
+        f.write("z")
+    calkit.dvc.zip.write_zip_path_map({"zipped": "zips/zipped.zip"})
+    git("add", "zipped")
+    assert problems()["zipped"]["kind"] == "zipped"
+    # Large files in Git, but not those in Git LFS
+    for path in ["big.txt", "big.bin"]:
+        with open(path, "w") as f:
+            f.write("x" * 2048)
+    with open(".gitattributes", "w") as f:
+        f.write("*.bin filter=lfs\n")
+    git("add", "big.txt", "big.bin", ".gitattributes")
+    large = [
+        p["path"]
+        for p in calkit.dvc.get_storage_problems(large_mb=0.001)
+        if p["kind"] == "large"
+    ]
+    assert "big.txt" in large
+    assert "big.bin" not in large

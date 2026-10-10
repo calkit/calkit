@@ -922,27 +922,86 @@ def add_stage(
         repo.git.push(["origin", repo.active_branch.name])
 
 
+# Runs the hub started, by workspace, so they can be stopped
+_runs: dict[str, subprocess.Popen] = {}
+
+
 def run_pipeline(wdir: str, stages: list[str] | None = None) -> dict:
     """Run the pipeline, or some of its stages, without a terminal,
     returning whether it succeeded and the end of its output.
 
-    This is for Operators that can't run sessions, i.e., on Windows; others
-    run the pipeline in a session so its output can be watched.
+    The hub follows it meanwhile through its log, as it does runs started
+    any other way.
     """
     # Stage names become arguments, so they can't be options
     for stage in stages or []:
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@:/-]*", str(stage)):
             raise ValueError(f"Invalid stage name '{stage}'")
-    result = subprocess.run(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "calkit", "run", *(stages or [])],
         cwd=wdir,
         env=child_env(),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        # Its own process group, so stopping it reaches its stages too
+        start_new_session=sys.platform != "win32",
     )
-    output = result.stdout + result.stderr
+    _runs[wdir] = proc
+    try:
+        output, _ = proc.communicate()
+    finally:
+        _runs.pop(wdir, None)
     # Kept well under the relay's message limit
-    return {"ok": result.returncode == 0, "output": output[-50_000:]}
+    return {"ok": proc.returncode == 0, "output": output[-50_000:]}
+
+
+def stop_run(wdir: str) -> dict:
+    """Stop the run in progress, as Ctrl+C would, whether the hub or
+    someone in a terminal started it.
+    """
+    import signal
+
+    import psutil
+
+    proc = _runs.get(wdir)
+    if proc is not None:
+        pids = [proc.pid]
+    else:
+        pids = [
+            p["pid"]
+            for p in calkit.dvc.get_running_pipeline_processes(wdir)
+            if p.get("pid")
+        ]
+    if not pids:
+        raise ValueError("No run is in progress")
+    for pid in pids:
+        try:
+            if sys.platform == "win32":
+                psutil.Process(pid).terminate()
+            elif proc is not None:
+                os.killpg(pid, signal.SIGINT)
+            else:
+                os.kill(pid, signal.SIGINT)
+        except (OSError, psutil.Error):
+            pass
+    return {}
+
+
+def get_run_log(wdir: str) -> dict:
+    """The latest run's log, as far as it has got, for following a run."""
+    from calkit.cli.main.core import _get_latest_run_log_path
+
+    fpath = _get_latest_run_log_path(wdir)
+    if fpath is None:
+        return {"name": None, "log": None}
+    try:
+        with open(fpath, errors="replace") as f:
+            log = f.read()
+    except OSError:
+        return {"name": None, "log": None}
+    # Named by when it started
+    return {"name": os.path.basename(fpath), "log": log[-50_000:]}
 
 
 def clone_project(git_repo_url: str) -> str:
@@ -980,7 +1039,12 @@ WORKSPACE_ACTIONS: dict[str, Any] = {
     "workspace.discard": discard_changes,
     "workspace.add_stage": add_stage,
     "workspace.run": run_pipeline,
+    "workspace.stop": stop_run,
+    "workspace.run_log": get_run_log,
 }
+# Actions that change nothing, so needn't take the workspace from other
+# hubs' Operators, and may act on managed workspaces too
+READ_ONLY_ACTIONS = {"workspace.status", "workspace.run_log"}
 
 
 @dataclass
@@ -1378,7 +1442,7 @@ class Operator:
             else:
                 wdir = self.get_workspace(
                     msg.get("workspace", ""),
-                    personal=kind != "workspace.status",
+                    personal=kind not in READ_ONLY_ACTIONS,
                 )
                 kwargs = {
                     k: v
@@ -1387,19 +1451,17 @@ class Operator:
                 }
                 lock = self.workspace_locks.setdefault(wdir, asyncio.Lock())
                 action = WORKSPACE_ACTIONS[kind]
-                # A run holds DVC's lock for as long as it goes, so status
-                # only reports its progress then, changing nothing, and
-                # needn't wait for it to finish
-                if (
-                    kind == "workspace.status"
-                    and self.workspace_actions.get(wdir) == "workspace.run"
+                # A run holds the workspace for as long as it goes, so what
+                # follows or stops it can't wait for it to finish
+                if kind in READ_ONLY_ACTIONS | {"workspace.stop"} and (
+                    self.workspace_actions.get(wdir) == "workspace.run"
                 ):
                     result = await asyncio.to_thread(action, wdir, **kwargs)
                 else:
                     async with lock:
                         # Reading status changes nothing, but anything else
                         # takes the workspace from other hubs' Operators
-                        if kind != "workspace.status":
+                        if kind not in READ_ONLY_ACTIONS:
                             claim_workspace(wdir)
                             self.claimed.add(wdir)
                         self.workspace_actions[wdir] = kind

@@ -457,7 +457,6 @@ function WorkspacePanel({
   connected,
   modal,
   setModal,
-  runInSession,
   onChanged,
   confirmRun,
   clearConfirmRun,
@@ -468,7 +467,6 @@ function WorkspacePanel({
   connected: boolean
   modal: Modal | undefined
   setModal: (modal: Modal | undefined) => void
-  runInSession: (command: string) => void
   onChanged: () => void
   confirmRun: string | undefined
   clearConfirmRun: () => void
@@ -561,8 +559,7 @@ function WorkspacePanel({
     ].filter(Boolean)
     return reasons.join("; ") || "out of date"
   }
-  // Windows has no sessions to watch a run in, so it runs without one
-  const runsInSession = ws.operator_platform !== "windows"
+  // Runs without a terminal, followed here through the run's log
   const runMutation = useMutation({
     mutationFn: (stages?: string[]) =>
       request("workspace.run", stages ? { stages } : {}),
@@ -571,19 +568,40 @@ function WorkspacePanel({
         ? showToast("Success!", "The pipeline ran.", "success")
         : showToast("Error", "The pipeline failed.", "error"),
     onError: (err: Error) => showToast("Error", err.message, "error"),
-    onSettled: refresh,
+    onSettled: () => {
+      refresh()
+      runLogQuery.refetch()
+    },
+  })
+  const stopMutation = useMutation({
+    mutationFn: () => request("workspace.stop"),
+    onError: (err: Error) => showToast("Error", err.message, "error"),
   })
   // The whole pipeline, or just some stages
   const run = (stages?: string[]) => {
-    if (runsInSession) {
-      setRunStartedAt(Date.now())
-      // Quoted for the POSIX shells sessions run
-      const quoted = (stages ?? []).map((s) => `'${s.replace(/'/g, "'\\''")}'`)
-      runInSession(["calkit run", ...quoted].join(" "))
-    } else {
-      runMutation.mutate(stages)
-    }
+    setRunStartedAt(Date.now())
+    runMutation.mutate(stages)
   }
+  // The latest run's log, however it was started, followed while it runs
+  const runLogQuery = useQuery({
+    queryKey: ["workspace-run-log", ws.operator_id, ws.path],
+    queryFn: () => request("workspace.run_log"),
+    enabled: connected,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: running || runMutation.isPending ? 2000 : false,
+  })
+  const runLogRef = useRef<HTMLPreElement>(null)
+  const runLog: string | null = runLogQuery.data?.log ?? null
+  // Logs are named by when the run started, e.g., 2026-10-10T14-02-59-...
+  const runLogStarted = (runLogQuery.data?.name ?? "").match(
+    /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})/,
+  )
+  useEffect(() => {
+    // Kept at the end, where a running log grows
+    const el = runLogRef.current
+    if (el && runLog) el.scrollTop = el.scrollHeight
+  }, [runLog])
   // Collapsing is remembered per browser, since it's how someone prefers
   // to see the page rather than anything about the workspace
   const [collapsed, setCollapsed] = useState(() => {
@@ -847,6 +865,7 @@ function WorkspacePanel({
                       size="xs"
                       variant="primary"
                       isLoading={runMutation.isPending}
+                      isDisabled={running}
                       onClick={() => run()}
                     >
                       Run
@@ -933,20 +952,52 @@ function WorkspacePanel({
               </PanelSection>
             )}
           </SimpleGrid>
-          {runMutation.data?.output && (
-            <Box
-              as="pre"
-              fontSize="xs"
-              mt={3}
-              p={2}
-              maxH="240px"
-              overflowY="auto"
-              bg="black"
-              color="white"
-              borderRadius="md"
-              whiteSpace="pre-wrap"
-            >
-              {runMutation.data.output}
+          {(runLog || running || runMutation.isPending) && (
+            <Box mt={3}>
+              <PanelSection
+                title={
+                  running || runMutation.isPending
+                    ? "Run in progress"
+                    : runLogStarted
+                      ? `Last run, ${new Date(
+                          `${runLogStarted[1]}T${runLogStarted[2]}:${runLogStarted[3]}:${runLogStarted[4]}Z`,
+                        ).toLocaleString()}`
+                      : "Last run"
+                }
+                actions={
+                  editable &&
+                  (running || runMutation.isPending) && (
+                    <Button
+                      size="xs"
+                      variant="danger"
+                      isLoading={stopMutation.isPending}
+                      onClick={() => stopMutation.mutate()}
+                    >
+                      Stop
+                    </Button>
+                  )
+                }
+              >
+                <Box
+                  as="pre"
+                  ref={runLogRef}
+                  fontSize="xs"
+                  p={2}
+                  maxH="320px"
+                  overflowY="auto"
+                  bg="black"
+                  color="white"
+                  borderRadius="md"
+                  whiteSpace="pre-wrap"
+                >
+                  {/* A run that failed before it logged anything, e.g.,
+                      because the pipeline doesn't compile, says why in its
+                      output instead */}
+                  {runMutation.data && !runMutation.data.ok && !running
+                    ? runMutation.data.output
+                    : runLog ?? "Starting"}
+                </Box>
+              </PanelSection>
             </Box>
           )}
           {errors.length > 0 && (
@@ -1503,7 +1554,6 @@ function Compute() {
               connected={getConnection(selected.operator_id).connected}
               modal={search.modal}
               setModal={setModal}
-              runInSession={(command) => newSession(selected, command)}
               narrow={panes.length > 0}
               onChanged={() => workspacesQuery.refetch()}
               confirmRun={search.confirm_run}

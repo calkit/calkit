@@ -183,8 +183,11 @@ shell exits.
 These act on a workspace with Git, DVC, and the network, so the Operator
 runs them in a thread, one at a time per workspace, and replies when
 they're done.
-Each takes `id` and `workspace`, and only `workspace.status` works on
-managed workspaces, which are checked out with `--force` to run stages.
+Each takes `id` and `workspace`, and only `workspace.status` and
+`workspace.run_log` work on managed workspaces, which are checked out with
+`--force` to run stages.
+While a run goes, `workspace.status`, `workspace.run_log`, and
+`workspace.stop` answer without waiting for it.
 
 | Browser sends         | Other fields                                                          |
 | --------------------- | --------------------------------------------------------------------- |
@@ -193,9 +196,17 @@ managed workspaces, which are checked out with `--force` to run stages.
 | `workspace.push`      |                                                                       |
 | `workspace.save`      | `paths`, `message`, `to` (`git` or `dvc`), `push`                     |
 | `workspace.ignore`    | `path`, `commit`                                                      |
-| `workspace.run`       |                                                                       |
+| `workspace.run`       | `stages`                                                              |
+| `workspace.run_log`   |                                                                       |
+| `workspace.stop`      |                                                                       |
 | `workspace.discard`   |                                                                       |
 | `workspace.add_stage` | `name`, `cmd`, `deps`, `outs`, `calkit_type`, `calkit_object`, `push` |
+
+`workspace.run` runs without a terminal and replies when it's done, with
+`ok` and the end of its `output`; meanwhile the browser follows it with
+`workspace.run_log`, which returns the latest run's log `name`, named by
+when it started, and the end of the `log`, however that run was started.
+`workspace.stop` interrupts the run in progress, as Ctrl+C would.
 
 `workspaces.clone`, with `id` and `git_repo_url`, clones a project into
 `~/calkit` with the machine's own Git credentials, where it becomes a

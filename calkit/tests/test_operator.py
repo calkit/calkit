@@ -657,6 +657,21 @@ def test_workspace_actions(tmp_path, monkeypatch):
     for bad in ["--force", "-f", "a b", "x;y", ""]:
         with pytest.raises(ValueError):
             operator.run_pipeline(wdir, stages=[bad])
+    # The hub follows a run through its log, named by when it started
+    run_log = operator.get_run_log(wdir)
+    assert run_log["name"].endswith(".log") and "plot" in run_log["log"]
+    # Stopping needs a run in progress, and a run the hub started stops
+    # with everything it started
+    with pytest.raises(ValueError):
+        operator.stop_run(wdir)
+    if sys.platform != "win32":
+        sleeper = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        operator._runs[wdir] = sleeper
+        try:
+            operator.stop_run(wdir)
+            assert sleeper.wait(timeout=10) != 0
+        finally:
+            operator._runs.pop(wdir, None)
     subprocess.run(["git", "checkout", "--", "."], cwd=wdir, check=True)
     # Changes to DVC-tracked files show up too, and discarding puts back
     # what was committed with either

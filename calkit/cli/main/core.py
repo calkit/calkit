@@ -2296,7 +2296,19 @@ def _prune_run_logs(
 
 
 def _get_latest_run_log_content(wdir: str = ".") -> str | None:
-    """Return the contents of the most recent run log, or ``None``.
+    """Return the contents of the most recent run log, or ``None``."""
+    latest = _get_latest_run_log_path(wdir)
+    if latest is None:
+        return None
+    try:
+        with open(latest) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _get_latest_run_log_path(wdir: str = ".") -> str | None:
+    """Return the path of the most recent run log, or ``None``.
 
     Looks in the private ``.calkit/local/logs`` directory (always written)
     and the tracked ``.calkit/logs`` directory, choosing the latest ``.log``
@@ -2313,12 +2325,7 @@ def _get_latest_run_log_content(wdir: str = ".") -> str | None:
             ]
     if not candidates:
         return None
-    latest = max(candidates, key=os.path.basename)
-    try:
-        with open(latest) as f:
-            return f.read()
-    except OSError:
-        return None
+    return max(candidates, key=os.path.basename)
 
 
 def _format_run_elapsed(start_iso: str) -> str:

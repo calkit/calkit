@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: e86637123cc1b383ceda4c915653fe92
-      size: 119157
+      md5: 187ece7ca15063da14b750bfabc63d8c
+      size: 128246
     - path: calkit/docx.py
       hash: md5
       md5: 7862d8079e091ea3c6b36208478f377c
       size: 55141
     - path: calkit/latex.py
       hash: md5
-      md5: 513d57f30dc4abfd2bf4c1bbf6002f2e
-      size: 46100
+      md5: abedc72b9d65b5cc05a887a48b922041
+      size: 54256
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -63,12 +63,12 @@ stages:
       size: 173958
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 02706de8ed1449be9ac70748f1eb84e9
-      size: 36149
+      md5: 59ee8d6c175abc470f75a20903508c60
+      size: 36146
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 574b50e537bc7d5785db1fb4449ece48
-      size: 121663
+      md5: 90c84ef766f129bdd691bcdfc722a4b8
+      size: 121662
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/plot-latex-word-round-trip.py
@@ -87,8 +87,8 @@ stages:
       size: 173958
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 574b50e537bc7d5785db1fb4449ece48
-      size: 121663
+      md5: 90c84ef766f129bdd691bcdfc722a4b8
+      size: 121662
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: d9d7b45c12044f5ae8f54491c383ecd4
@@ -100,8 +100,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: 27110b7014197152244ff9e88083ec8e
-      size: 207228
+      md5: 9a46f487ab6c559f9b6ff8977f874b12
+      size: 207240
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: 513d57f30dc4abfd2bf4c1bbf6002f2e
-      size: 46100
+      md5: abedc72b9d65b5cc05a887a48b922041
+      size: 54256
     - path: uv.lock
       hash: md5
       md5: aaf65e2ccae7622d9d2044b218258449

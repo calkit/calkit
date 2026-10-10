@@ -4209,16 +4209,16 @@ Options:
 
 Manage this machine's Operator, which lets the hub use it.
 
-| Command                                               | Description                                                          |
-| ----------------------------------------------------- | -------------------------------------------------------------------- |
-| [`install`](#subcommand-operator-install)             | Register this machine as an Operator and run it as a service.        |
-| [`start`](#subcommand-operator-start)                 | Run the Operator in the foreground, e.g., inside tmux.               |
-| [`status`](#subcommand-operator-status)               | Show this machine's Operators and the workspaces they allow.         |
-| [`stop`](#subcommand-operator-stop)                   | Stop the Operator's service until it's restarted.                    |
-| [`restart`](#subcommand-operator-restart)             | Restart the Operator's service, e.g., after updating Calkit.         |
-| [`logs`](#subcommand-operator-logs)                   | Show the Operator service's logs.                                    |
-| [`add-workspace`](#subcommand-operator-add-workspace) | Let the hub use a project outside ~/calkit and ~/dev as a workspace. |
-| [`uninstall`](#subcommand-operator-uninstall)         | Revoke this machine's Operator on the hub and remove it here.        |
+| Command                                               | Description                                                                                     |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [`install`](#subcommand-operator-install)             | Register this machine as an Operator and run it as a service.                                   |
+| [`start`](#subcommand-operator-start)                 | Run the Operator in the foreground, e.g., inside tmux.                                          |
+| [`status`](#subcommand-operator-status)               | Show this machine's Operators and the workspaces they allow.                                    |
+| [`stop`](#subcommand-operator-stop)                   | Stop the Operator's service until it's restarted, for every hub unless one is given.            |
+| [`restart`](#subcommand-operator-restart)             | Restart the Operator's service, e.g., after updating Calkit, for every hub unless one is given. |
+| [`logs`](#subcommand-operator-logs)                   | Show the Operator service's logs.                                                               |
+| [`add-workspace`](#subcommand-operator-add-workspace) | Let the hub use a project outside ~/calkit and ~/dev as a workspace.                            |
+| [`uninstall`](#subcommand-operator-uninstall)         | Revoke this machine's Operator on the hub and remove it here.                                   |
 
 <a id="subcommand-operator-install"></a>
 
@@ -4285,7 +4285,7 @@ Options:
 
 #### `calkit operator stop`
 
-Stop the Operator's service until it's restarted.
+Stop the Operator's service until it's restarted, for every hub unless one is given.
 
 Usage:
 
@@ -4303,7 +4303,7 @@ Options:
 
 #### `calkit operator restart`
 
-Restart the Operator's service, e.g., after updating Calkit.
+Restart the Operator's service, e.g., after updating Calkit, for every hub unless one is given.
 
 Usage:
 

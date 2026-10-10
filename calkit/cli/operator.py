@@ -7,7 +7,7 @@ import os
 import typer
 from typing_extensions import Annotated
 
-from calkit.cli import AliasGroup, raise_error
+from calkit.cli import AliasGroup, raise_error, warn
 
 operator_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -41,6 +41,18 @@ def _select_hub(hub: str | None, installing: bool = False) -> None:
             + "); choose one with --hub"
         )
     operator.select_hub(hubs[0] if hubs else None)
+
+
+def _each_hub(hub: str | None) -> list[str | None]:
+    """The hubs a command acts on: the one asked for, else every one this
+    machine has an Operator for.
+    """
+    from calkit import operator
+
+    if hub is not None:
+        return [hub]
+    # None, for the user's own hub, so a machine with none says so
+    return list(operator.list_configured_hubs()) or [None]
 
 
 def _require_config() -> dict:
@@ -225,12 +237,7 @@ def status(hub: HubOption = None) -> None:
     """Show this machine's Operators and the workspaces they allow."""
     from calkit import operator
 
-    # Each hub's Operator, unless one was asked for
-    hubs = [hub] if hub is not None else operator.list_configured_hubs()
-    if not hubs:
-        _select_hub(None)
-        _require_config()
-    for i, hub_url in enumerate(hubs):
+    for i, hub_url in enumerate(_each_hub(hub)):
         if i:
             typer.echo()
         _select_hub(hub_url)
@@ -249,32 +256,52 @@ def status(hub: HubOption = None) -> None:
 
 @operator_app.command(name="stop")
 def stop(hub: HubOption = None) -> None:
-    """Stop the Operator's service until it's restarted."""
+    """Stop the Operator's service until it's restarted, for every hub
+    unless one is given.
+    """
     from calkit import operator
 
-    _select_hub(hub)
-    _require_config()
-    try:
-        operator.set_service_running(False)
-    except RuntimeError as e:
-        raise_error(str(e))
-    typer.echo("Stopped the Operator")
+    hubs = _each_hub(hub)
+    failed = False
+    for hub_url in hubs:
+        _select_hub(hub_url)
+        _require_config()
+        name = f" for {operator.get_hub_url()}" if len(hubs) > 1 else ""
+        try:
+            operator.set_service_running(False)
+        except RuntimeError as e:
+            warn(f"Couldn't stop the Operator{name}: {e}")
+            failed = True
+            continue
+        typer.echo(f"Stopped the Operator{name}")
+    if failed:
+        raise typer.Exit(1)
 
 
 @operator_app.command(name="restart")
 def restart(hub: HubOption = None) -> None:
-    """Restart the Operator's service, e.g., after updating Calkit."""
+    """Restart the Operator's service, e.g., after updating Calkit, for
+    every hub unless one is given.
+    """
     import subprocess
 
     from calkit import operator
 
-    _select_hub(hub)
-    _require_config()
-    try:
-        operator.restart_service()
-    except (RuntimeError, subprocess.CalledProcessError) as e:
-        raise_error(str(e))
-    typer.echo("Restarted the Operator")
+    hubs = _each_hub(hub)
+    failed = False
+    for hub_url in hubs:
+        _select_hub(hub_url)
+        _require_config()
+        name = f" for {operator.get_hub_url()}" if len(hubs) > 1 else ""
+        try:
+            operator.restart_service()
+        except (RuntimeError, subprocess.CalledProcessError) as e:
+            warn(f"Couldn't restart the Operator{name}: {e}")
+            failed = True
+            continue
+        typer.echo(f"Restarted the Operator{name}")
+    if failed:
+        raise typer.Exit(1)
 
 
 @operator_app.command(name="logs")

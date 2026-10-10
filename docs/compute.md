@@ -114,6 +114,7 @@ calkit operator install --hub https://hub.example.edu
 A machine can have an Operator for each hub you use,
 and the other `calkit operator` commands take `--hub` to choose which one
 to act on.
+Without it, `status`, `stop`, and `restart` act on all of them.
 A project folder can be used from one hub at a time:
 while one hub has a session open in it or is changing it,
 the others show it as in use and wait.

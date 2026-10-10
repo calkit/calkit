@@ -663,12 +663,9 @@ def _calkit(args: list[str], wdir: str) -> None:
         )
 
 
-def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
-    """A workspace's status as ``calkit status --json`` reports it, the same
-    as the VS Code extension shows, plus how far it is from its remote.
-
-    This is too expensive to run at every check-in, so the hub asks for it
-    when someone is looking at the workspace.
+def get_workspace_git_status(wdir: str, fetch: bool = True) -> dict:
+    """The Git part of a workspace's status and how far it is from its
+    remote, which is quick, unlike the rest, so the hub shows it first.
     """
     errors = []
     git_repo = calkit.git.get_repo(wdir)
@@ -683,6 +680,31 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     match = re.search(r"#\sbranch\.ab\s\+(\d+)\s-(\d+)", repo_status)
     if match:
         ahead, behind = int(match.group(1)), int(match.group(2))
+    return {
+        "git": {
+            "branch": None
+            if git_repo.head.is_detached
+            else git_repo.active_branch.name,
+            "changed_files": calkit.git.get_changed_files(repo=git_repo),
+            "staged_files": calkit.git.get_staged_files(repo=git_repo),
+            "untracked_files": calkit.git.get_untracked_files(repo=git_repo),
+        },
+        "commits_ahead": ahead,
+        "commits_behind": behind,
+        "errors": errors,
+    }
+
+
+def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
+    """A workspace's status as ``calkit status --json`` reports it, the same
+    as the VS Code extension shows, plus how far it is from its remote.
+
+    This is too expensive to run at every check-in, so the hub asks for it
+    when someone is looking at the workspace, along with the Git part on its
+    own, which a large pipeline can't hold up.
+    """
+    git_status = get_workspace_git_status(wdir, fetch=fetch)
+    errors = git_status["errors"]
     result = subprocess.run(
         # Checking environments can build them, running whatever a repo's
         # specs say, which viewing status shouldn't do; the record of their
@@ -706,8 +728,8 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
         )
     return {
         "status": status,
-        "commits_ahead": ahead,
-        "commits_behind": behind,
+        "commits_ahead": git_status["commits_ahead"],
+        "commits_behind": git_status["commits_behind"],
         "errors": errors,
     }
 
@@ -1059,6 +1081,7 @@ def new_workspace(wdir: str, branch: str) -> dict:
 # they wait on Git, DVC, and the network
 WORKSPACE_ACTIONS: dict[str, Any] = {
     "workspace.status": get_workspace_status,
+    "workspace.git_status": get_workspace_git_status,
     "workspace.pull": pull_workspace,
     "workspace.push": push_workspace,
     "workspace.save": save_workspace,
@@ -1072,7 +1095,14 @@ WORKSPACE_ACTIONS: dict[str, Any] = {
 }
 # Actions that change nothing, so needn't take the workspace from other
 # hubs' Operators, and may act on managed workspaces too
-READ_ONLY_ACTIONS = {"workspace.status", "workspace.run_log"}
+READ_ONLY_ACTIONS = {
+    "workspace.status",
+    "workspace.git_status",
+    "workspace.run_log",
+}
+# Ones quick and harmless enough to not wait on what else is going on there,
+# e.g., the rest of the status, which can take a while for a large pipeline
+LOCK_FREE_ACTIONS = {"workspace.git_status", "workspace.run_log"}
 
 
 @dataclass
@@ -1481,8 +1511,9 @@ class Operator:
                 action = WORKSPACE_ACTIONS[kind]
                 # A run holds the workspace for as long as it goes, so what
                 # follows or stops it can't wait for it to finish
-                if kind in READ_ONLY_ACTIONS | {"workspace.stop"} and (
-                    self.workspace_actions.get(wdir) == "workspace.run"
+                if kind in LOCK_FREE_ACTIONS or (
+                    kind in READ_ONLY_ACTIONS | {"workspace.stop"}
+                    and self.workspace_actions.get(wdir) == "workspace.run"
                 ):
                     result = await asyncio.to_thread(action, wdir, **kwargs)
                 else:

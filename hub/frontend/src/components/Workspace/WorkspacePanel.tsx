@@ -105,9 +105,19 @@ export default function WorkspacePanel({
   )
   // When a run was started from here, which may take a moment to show up
   const [runStartedAt, setRunStartedAt] = useState(0)
+  // Git's part comes quickly, so it's shown while the rest, which can take
+  // a while for a large pipeline, is worked out; it fetches, so the rest
+  // needn't
+  const gitQuery = useQuery({
+    queryKey: ["workspace-git-status", ws.operator_id, ws.path],
+    queryFn: () => request("workspace.git_status", { fetch: true }),
+    enabled: connected,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
   const statusQuery = useQuery({
     queryKey: ["workspace-status", ws.operator_id, ws.path],
-    queryFn: () => request("workspace.status", { fetch: true }),
+    queryFn: () => request("workspace.status", { fetch: false }),
     enabled: connected,
     retry: false,
     refetchOnWindowFocus: false,
@@ -121,24 +131,43 @@ export default function WorkspacePanel({
         : false,
   })
   const refresh = () => {
+    gitQuery.refetch()
     statusQuery.refetch()
     onChanged()
   }
+  // Set when a pull can't fast-forward, so merging can be offered
+  const [diverged, setDiverged] = useState(false)
   const syncMutation = useMutation({
-    mutationFn: (kind: "pull" | "push") => request(`workspace.${kind}`),
-    onSuccess: (_, kind) =>
-      showToast("Success!", kind === "pull" ? "Pulled." : "Pushed.", "success"),
+    mutationFn: (kind: "pull" | "merge" | "push") =>
+      kind === "push"
+        ? request("workspace.push")
+        : request("workspace.pull", { merge: kind === "merge" }),
+    onSuccess: (result, kind) => {
+      setDiverged(Boolean(result?.diverged))
+      if (!result?.diverged) {
+        showToast(
+          "Success!",
+          kind === "push"
+            ? "Pushed."
+            : kind === "merge"
+              ? "Merged."
+              : "Pulled.",
+          "success",
+        )
+      }
+    },
     onError: (err: Error) => showToast("Error", err.message, "error"),
     onSettled: refresh,
   })
   // What `calkit status --json` reports, the same as VS Code shows
   const status = statusQuery.data?.status
-  const untracked: string[] = status?.git?.untracked_files ?? []
+  const git = gitQuery.data?.git ?? status?.git
+  const untracked: string[] = git?.untracked_files ?? []
   // DVC calls a path committed when its DVC file is staged
-  const changed: string[] = (status?.git?.changed_files ?? []).concat(
+  const changed: string[] = (git?.changed_files ?? []).concat(
     status?.dvc?.uncommitted?.modified ?? [],
   )
-  const staged: string[] = (status?.git?.staged_files ?? []).concat(
+  const staged: string[] = (git?.staged_files ?? []).concat(
     status?.dvc?.committed?.modified ?? [],
   )
   const staleStages: string[] = status?.pipeline?.stale_stage_names ?? []
@@ -151,13 +180,16 @@ export default function WorkspacePanel({
   const envStates: Record<string, any> =
     status?.pipeline?.environment_states ?? {}
   const running = Boolean(status?.pipeline?.running) || ws.running
-  const ahead = statusQuery.data?.commits_ahead ?? 0
-  const behind = statusQuery.data?.commits_behind ?? 0
+  const ahead =
+    gitQuery.data?.commits_ahead ?? statusQuery.data?.commits_ahead ?? 0
+  const behind =
+    gitQuery.data?.commits_behind ?? statusQuery.data?.commits_behind ?? 0
   const dvcToPull = (status?.dvc?.not_in_cache ?? []).length > 0
   const dvcToPush = (status?.dvc?.not_in_remote ?? []).length > 0
-  const errors: string[] = (statusQuery.data?.errors ?? []).map(
-    (e: any) => e.info,
-  )
+  const errors: string[] = [
+    ...(gitQuery.data?.errors ?? []),
+    ...(statusQuery.data?.errors ?? []),
+  ].map((e: any) => e.info)
   // Why the pipeline's status couldn't be worked out, e.g., it doesn't
   // compile, in which case it can't be said to be up to date
   const pipelineErrors: string[] = (status?.pipeline?.errors ?? []).map(
@@ -250,6 +282,8 @@ export default function WorkspacePanel({
     .filter(Boolean)
     .join(", ")
   const changeCount = untracked.length + changed.length + staged.length
+  // An Operator from before Git's part came on its own only has the rest
+  const gitReady = connected && Boolean(gitQuery.data || statusQuery.data)
   const ready = connected && !statusQuery.isPending && !statusQuery.error
   const fileRow = (path: string, mark: string, color: string) => (
     <Flex key={`${mark}:${path}`} align="center" gap={2} minH="24px">
@@ -285,16 +319,22 @@ export default function WorkspacePanel({
             {ws.path}
           </Code>
         </Tooltip>
-        {ready && (
-          <Flex gap={1} wrap="wrap">
-            <Tooltip label="Compared with the project's remotes">
-              <Badge colorScheme={outOfSync ? "yellow" : "green"}>
-                {outOfSync ? syncSummary : "in sync"}
+        <Flex gap={1} wrap="wrap">
+          {gitReady && (
+            <>
+              <Tooltip label="Compared with the project's remotes">
+                <Badge colorScheme={outOfSync ? "yellow" : "green"}>
+                  {outOfSync ? syncSummary : "in sync"}
+                </Badge>
+              </Tooltip>
+              <Badge colorScheme={changeCount ? "yellow" : "green"}>
+                {changeCount
+                  ? `${changeCount} uncommitted`
+                  : "nothing to commit"}
               </Badge>
-            </Tooltip>
-            <Badge colorScheme={changeCount ? "yellow" : "green"}>
-              {changeCount ? `${changeCount} uncommitted` : "nothing to commit"}
-            </Badge>
+            </>
+          )}
+          {ready && (
             <Badge
               colorScheme={
                 running
@@ -314,8 +354,8 @@ export default function WorkspacePanel({
                     ? `${staleStages.length} stage${staleStages.length === 1 ? "" : "s"} out of date`
                     : "pipeline up to date"}
             </Badge>
-          </Flex>
-        )}
+          )}
+        </Flex>
         {editable && (
           <Tooltip label="Another workspace for this project, on a branch">
             <Button
@@ -337,7 +377,7 @@ export default function WorkspacePanel({
           variant="ghost"
           ml={editable ? undefined : "auto"}
           onClick={refresh}
-          isLoading={statusQuery.isFetching}
+          isLoading={gitQuery.isFetching || statusQuery.isFetching}
           isDisabled={!connected}
         />
       </Flex>
@@ -373,12 +413,12 @@ export default function WorkspacePanel({
         <Text mt={3} color="ui.dim">
           Waiting for the Operator to connect.
         </Text>
-      ) : statusQuery.isPending ? (
+      ) : !gitReady && (gitQuery.isPending || statusQuery.isPending) ? (
         <LoadingSpinner />
-      ) : statusQuery.error ? (
+      ) : !gitReady ? (
         <Alert status="error" borderRadius="md" mt={3}>
           <AlertIcon />
-          {statusQuery.error.message}
+          {(statusQuery.error ?? gitQuery.error)?.message}
         </Alert>
       ) : (
         <>
@@ -517,12 +557,19 @@ export default function WorkspacePanel({
                 )
               }
             >
+              {statusQuery.isPending && <Spinner size="sm" color="ui.dim" />}
+              {statusQuery.error && (
+                <Text fontSize="sm" color="red.400">
+                  {statusQuery.error.message}
+                </Text>
+              )}
               {pipelineErrors.map((e) => (
                 <Text key={e} fontSize="sm" color="red.400" mb={1}>
                   {e}
                 </Text>
               ))}
-              {!running &&
+              {ready &&
+                !running &&
                 staleStages.length === 0 &&
                 pipelineErrors.length === 0 && (
                   <Text fontSize="sm" color="ui.dim">

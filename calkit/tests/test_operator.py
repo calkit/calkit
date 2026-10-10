@@ -492,6 +492,13 @@ def test_workspace_actions(tmp_path, monkeypatch):
     assert status["errors"] == []
     git = status["status"]["git"]
     assert set(git["untracked_files"]) == {"notes.txt", "scratch.log"}
+    # The Git part on its own says the same, without the pipeline's wait
+    git_status = operator.get_workspace_git_status(wdir, fetch=False)
+    assert git_status["git"] == {
+        k: git[k]
+        for k in ["branch", "changed_files", "staged_files", "untracked_files"]
+    }
+    assert git_status["commits_ahead"] == 0
     assert status["status"]["pipeline"]["stale_stage_names"] == []
     assert status["commits_ahead"] == 0
     # What the pipeline is doing, or last did, comes cheaply from the files

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import time
@@ -4376,3 +4377,77 @@ def new_release(
             # TODO: Upload assets for GitHub release if they're not too big?
     typer.echo(f"New {release_kind} release {name} successfully created")
     return release
+
+
+@new_app.command(name="workspace")
+def new_workspace(
+    branch: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The branch to work on there, created from the current "
+                "commit unless it exists."
+            )
+        ),
+    ],
+    path: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            help=(
+                "Where to put it; defaults to beside this one, named after "
+                "it and the branch."
+            ),
+        ),
+    ] = None,
+    start_point: Annotated[
+        str | None,
+        typer.Option(
+            "--from",
+            help="What to start a new branch from, e.g., another branch.",
+        ),
+    ] = None,
+) -> None:
+    """Create another workspace for this project, e.g., to work on a change
+    without disturbing this one.
+
+    It's a Git worktree that shares this workspace's DVC cache, so its data
+    is checked out without being pulled again.
+    """
+    import calkit.dvc.zip
+
+    repo = calkit.git.get_repo()
+    root = str(repo.working_dir)
+    if path is None:
+        name = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-.")
+        path = os.path.join(
+            os.path.dirname(root), f"{os.path.basename(root)}-{name}"
+        )
+    path = os.path.abspath(path)
+    if os.path.exists(path):
+        raise_error(f"{path} already exists")
+    if branch in repo.heads:
+        if start_point is not None:
+            raise_error(f"Branch '{branch}' exists, so it can't start --from")
+        args = [path, branch]
+    else:
+        args = ["-b", branch, path] + ([start_point] if start_point else [])
+    try:
+        repo.git.worktree("add", *args)
+    except Exception as e:
+        raise_error(f"Could not create the worktree: {e}")
+    if os.path.isdir(os.path.join(root, ".dvc")):
+        # The remotes' settings, e.g., their auth, live in the local config,
+        # which Git doesn't carry over
+        local_config = os.path.join(root, ".dvc", "config.local")
+        if os.path.isfile(local_config):
+            shutil.copy(local_config, os.path.join(path, ".dvc"))
+        cache_dir = calkit.dvc.get_dvc_repo(root).cache.local_cache_dir
+        calkit.dvc.run_dvc_command(
+            ["config", "--local", "cache.dir", cache_dir], cwd=path
+        )
+        # Data that was never pulled here stays missing until it is
+        if calkit.dvc.run_dvc_command(["checkout", "--quiet"], cwd=path):
+            warn("Some data isn't in the cache; run 'calkit pull' there")
+        calkit.dvc.zip.sync_all(direction="to-workspace", wdir=path)
+    typer.echo(f"Created a workspace at {path} on branch '{branch}'")

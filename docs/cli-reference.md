@@ -818,35 +818,36 @@ calkit config github-codespace
 
 Create a new Calkit object.
 
-| Command                                                                   | Description                                                           |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`project`](#subcommand-new-create-project)                               | Create a new project.                                                 |
-| [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                  |
-| [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                 |
-| [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                           |
-| [`question`](#subcommand-new-create-question)                             | Add a new question.                                                   |
-| [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                   |
-| [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                      |
-| [`foreach-stage`](#subcommand-new-create-foreach-stage)                   | Create a new DVC 'foreach' stage.                                     |
-| [`dataset`](#subcommand-new-create-dataset)                               | Create a new dataset.                                                 |
-| [`publication\|pub`](#subcommand-new-create-publication-pub)              | Create a new publication.                                             |
-| [`conda-env`](#subcommand-new-create-conda-env)                           | Create a new Conda environment.                                       |
-| [`uv-env`](#subcommand-new-create-uv-env)                                 | Create a new uv project environment.                                  |
-| [`slurm-env`](#subcommand-new-create-slurm-env)                           | Create a new SLURM environment.                                       |
-| [`pbs-env`](#subcommand-new-create-pbs-env)                               | Create a new PBS environment.                                         |
-| [`uv-venv`](#subcommand-new-create-uv-venv)                               | Create a new uv virtual environment.                                  |
-| [`venv`](#subcommand-new-create-venv)                                     | Create a new Python virtual environment with venv.                    |
-| [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                |
-| [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml. |
-| [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                 |
-| [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                             |
-| [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                  |
-| [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                |
-| [`julia-script-stage`](#subcommand-new-create-julia-script-stage)         | Add a stage to the pipeline that runs a Julia script.                 |
-| [`matlab-script-stage`](#subcommand-new-create-matlab-script-stage)       | Add a stage to the pipeline that runs a MATLAB script.                |
-| [`latex-stage`](#subcommand-new-create-latex-stage)                       | Add a stage to the pipeline that compiles a LaTeX document.           |
-| [`jupyter-notebook-stage`](#subcommand-new-create-jupyter-notebook-stage) | Add a stage to the pipeline that runs a Jupyter notebook.             |
-| [`release`](#subcommand-new-create-release)                               | Create a new release.                                                 |
+| Command                                                                   | Description                                                                                       |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [`project`](#subcommand-new-create-project)                               | Create a new project.                                                                             |
+| [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                                              |
+| [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                                             |
+| [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                                                       |
+| [`question`](#subcommand-new-create-question)                             | Add a new question.                                                                               |
+| [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                                               |
+| [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                                                  |
+| [`foreach-stage`](#subcommand-new-create-foreach-stage)                   | Create a new DVC 'foreach' stage.                                                                 |
+| [`dataset`](#subcommand-new-create-dataset)                               | Create a new dataset.                                                                             |
+| [`publication\|pub`](#subcommand-new-create-publication-pub)              | Create a new publication.                                                                         |
+| [`conda-env`](#subcommand-new-create-conda-env)                           | Create a new Conda environment.                                                                   |
+| [`uv-env`](#subcommand-new-create-uv-env)                                 | Create a new uv project environment.                                                              |
+| [`slurm-env`](#subcommand-new-create-slurm-env)                           | Create a new SLURM environment.                                                                   |
+| [`pbs-env`](#subcommand-new-create-pbs-env)                               | Create a new PBS environment.                                                                     |
+| [`uv-venv`](#subcommand-new-create-uv-venv)                               | Create a new uv virtual environment.                                                              |
+| [`venv`](#subcommand-new-create-venv)                                     | Create a new Python virtual environment with venv.                                                |
+| [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                                            |
+| [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml.                             |
+| [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                                             |
+| [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                                                         |
+| [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                                              |
+| [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                                            |
+| [`julia-script-stage`](#subcommand-new-create-julia-script-stage)         | Add a stage to the pipeline that runs a Julia script.                                             |
+| [`matlab-script-stage`](#subcommand-new-create-matlab-script-stage)       | Add a stage to the pipeline that runs a MATLAB script.                                            |
+| [`latex-stage`](#subcommand-new-create-latex-stage)                       | Add a stage to the pipeline that compiles a LaTeX document.                                       |
+| [`jupyter-notebook-stage`](#subcommand-new-create-jupyter-notebook-stage) | Add a stage to the pipeline that runs a Jupyter notebook.                                         |
+| [`release`](#subcommand-new-create-release)                               | Create a new release.                                                                             |
+| [`workspace`](#subcommand-new-create-workspace)                           | Create another workspace for this project, e.g., to work on a change without disturbing this one. |
 
 <a id="subcommand-new-create-project"></a>
 
@@ -1676,6 +1677,33 @@ Options:
 | `--draft`                 | boolean | no       | False   | Create draft record with reserved DOI but do not publish.                                                                                                                                             |
 | `--license`               | str     | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                              |
 | `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                 |
+
+<a id="subcommand-new-create-workspace"></a>
+
+#### `calkit new|create workspace`
+
+Create another workspace for this project, e.g., to work on a change without disturbing this one.
+
+It's a Git worktree that shares this workspace's DVC cache, so its data is checked out without being pulled again.
+
+Usage:
+
+```text
+calkit new|create workspace [OPTIONS] BRANCH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                    |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------ |
+| `branch` | str  | yes      |         | The branch to work on there, created from the current commit unless it exists. |
+
+Options:
+
+| Option   | Type | Required | Default | Description                                                                  |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--path` | str  | no       |         | Where to put it; defaults to beside this one, named after it and the branch. |
+| `--from` | str  | no       |         | What to start a new branch from, e.g., another branch.                       |
 
 <a id="command-group-delete-rm"></a>
 

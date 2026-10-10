@@ -1449,8 +1449,10 @@ def update_path_storage(
         else:
             stage[key] = to
 
+    # Git runs from the repo root, which may be above the project, so it's
+    # given absolute paths
     def in_git(path: str) -> bool:
-        return bool(repo.git.ls_files("--", path).strip())
+        return bool(repo.git.ls_files("--", os.path.abspath(path)).strip())
 
     def dirty_gitignores() -> dict[str, str]:
         # Each .gitignore with changes not yet committed, and what it holds
@@ -1477,6 +1479,17 @@ def update_path_storage(
     outputs: dict[str, tuple[str, str]] = {}
     others: list[str] = []
     zipped = calkit.dvc.zip.get_zip_path_map()
+    # What DVC tracks, and the stage producing each, if any, to catch a path
+    # inside one, or from a stage whose storage calkit.yaml doesn't declare
+    dvc_repo = calkit.dvc.get_dvc_repo()
+    dvc_outs = [
+        (
+            Path(out.fs_path).resolve(),
+            None if out.stage.is_data_source else out.stage.addressing,
+        )
+        for out in dvc_repo.index.outs
+    ]
+    dvc_repo.close()
     for raw in paths:
         path = Path(os.path.normpath(raw)).as_posix()
         if not os.path.exists(path):
@@ -1498,6 +1511,22 @@ def update_path_storage(
         else:
             if path in zipped:
                 raise_error(f"{path} is stored zipped, which can't move yet")
+            abs_path = Path(path).resolve()
+            for out_path, producer in dvc_outs:
+                out_rel = Path(os.path.relpath(out_path)).as_posix()
+                if abs_path == out_path and producer is not None:
+                    raise_error(
+                        f"{path} comes from DVC stage '{producer}', whose "
+                        "storage can't be set here"
+                    )
+                if abs_path != out_path and (
+                    abs_path.is_relative_to(out_path)
+                    or out_path.is_relative_to(abs_path)
+                ):
+                    raise_error(
+                        f"{path} overlaps {out_rel}, which DVC tracks as a "
+                        "whole; move that instead"
+                    )
             others.append(path)
     gitignores = dirty_gitignores()
     # Recording an output in DVC records its stage's inputs too, which would
@@ -1527,10 +1556,12 @@ def update_path_storage(
     for path, (stage_name, _) in outputs.items():
         if to == "dvc":
             if in_git(path):
-                repo.git.rm("-r", "-q", "--cached", "--", path)
+                repo.git.rm(
+                    "-r", "-q", "--cached", "--", os.path.abspath(path)
+                )
         else:
-            calkit.git.ensure_path_is_not_ignored(repo, path)
-            repo.git.add("--", path)
+            calkit.git.ensure_path_is_not_ignored(repo, os.path.abspath(path))
+            repo.git.add("--", os.path.abspath(path))
     if to == "dvc":
         # Into the cache, and ignored by Git, without running anything
         for stage_name in dict.fromkeys(s for s, _ in outputs.values()):
@@ -1540,20 +1571,22 @@ def update_path_storage(
         if to == "dvc":
             # Which also repairs a file DVC tracks that Git does too
             if in_git(path):
-                repo.git.rm("-r", "-q", "--cached", "--", path)
+                repo.git.rm(
+                    "-r", "-q", "--cached", "--", os.path.abspath(path)
+                )
             if os.path.isfile(pointer):
-                calkit.git.ensure_path_is_ignored(repo, path)
+                calkit.git.ensure_path_is_ignored(repo, os.path.abspath(path))
             else:
                 dvc("add", "-q", path)
-            repo.git.add("--", pointer)
+            repo.git.add("--", os.path.abspath(pointer))
         else:
             if os.path.isfile(pointer):
                 tracked = in_git(pointer)
                 dvc("remove", "-q", pointer)
                 if tracked:
-                    repo.git.add("-A", "--", pointer)
-            calkit.git.ensure_path_is_not_ignored(repo, path)
-            repo.git.add("--", path)
+                    repo.git.add("-A", "--", os.path.abspath(pointer))
+            calkit.git.ensure_path_is_not_ignored(repo, os.path.abspath(path))
+            repo.git.add("--", os.path.abspath(path))
     # Staging one that already had changes would commit those too, though
     # DVC may have staged it already if it autostages
     for gitignore, text in sorted(dirty_gitignores().items()):

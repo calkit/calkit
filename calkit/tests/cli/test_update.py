@@ -674,7 +674,7 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert calkit.load_calkit_info()["owner"] == "acme-lab"
 
 
-def test_update_path_storage(tmp_dir):
+def test_update_path_storage(tmp_dir, tmp_path_factory):
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], text=True)
 
@@ -716,6 +716,12 @@ def test_update_path_storage(tmp_dir):
                 "command": "echo z > z.txt",
                 "outputs": [{"path": "z.txt", "storage": "dvc-zip"}],
             },
+            "figs": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p figs && echo f > figs/a.txt",
+                "outputs": ["figs"],
+            },
         }
     }
     calkit.save_calkit_info(ck_info)
@@ -727,7 +733,7 @@ def test_update_path_storage(tmp_dir):
     with open("data.csv", "w") as f:
         f.write("a,b\n")
     subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
-    subprocess.check_call(["calkit", "run", "make", "sub"])
+    subprocess.check_call(["calkit", "run", "make", "sub", "figs"])
     git("add", "-A")
     git("commit", "-qm", "Set up")
     # Nothing that isn't here, only Git or DVC, and nothing zipped yet
@@ -736,6 +742,12 @@ def test_update_path_storage(tmp_dir):
     result = update("z.txt", "--to", "git")
     assert result.exit_code != 0
     assert "zipped" in result.output
+    # Nor part of something DVC tracks as a whole, which would leave it in
+    # both
+    result = update("figs/a.txt", "--to", "git")
+    assert result.exit_code != 0
+    assert "overlaps" in result.output
+    assert not git("ls-files", "--", "figs").strip()
     # A Git-stored output moves to DVC without its stage rerunning, and its
     # storage goes back to the default rather than being spelled out
     result = update("out.txt", "--to", "dvc")
@@ -797,3 +809,36 @@ def test_update_path_storage(tmp_dir):
     result = update("paper/main.pdf", "--to", "dvc")
     assert result.exit_code != 0
     assert "out of date" in result.output
+    # A project in a subdirectory of its repo, where Git runs from above it
+    os.chdir(tmp_path_factory.mktemp("parent"))
+    git("init", "-q")
+    os.makedirs("proj")
+    subprocess.check_call(["calkit", "-C", "proj", "init"])
+    os.chdir("proj")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt",
+                "outputs": [{"path": "out.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("notes.txt", "w") as f:
+        f.write("x")
+    subprocess.check_call(["calkit", "run"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    result = update("out.txt", "notes.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert not git("ls-files", "--", "out.txt", "notes.txt").strip()
+    assert git("ls-files", "--", "notes.txt.dvc").strip() == "notes.txt.dvc"
+    result = update("out.txt", "notes.txt", "--to", "git")
+    assert result.exit_code == 0, result.output
+    assert git("ls-files", "--", "out.txt", "notes.txt").split() == [
+        "notes.txt",
+        "out.txt",
+    ]

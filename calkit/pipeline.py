@@ -81,6 +81,32 @@ def frozen_tainted_stage_names(
     tainted = frozen_stage_base_names(ck_info=ck_info, wdir=wdir)
     if not tainted:
         return set()
+    # One whose deps and outs still match dvc.lock is as current as any
+    # other stage, so only one that would be out of date if unfrozen taints;
+    # reading just this project's dvc.yaml keeps that cheap
+    try:
+        import dvc.repo
+
+        dvc_repo = calkit.dvc.get_dvc_repo(wdir)
+        try:
+            dvc_yaml = os.path.join(os.path.abspath(wdir or "."), "dvc.yaml")
+            current: set[str] = set()
+            changed: set[str] = set()
+            with dvc.repo.lock_repo(dvc_repo):
+                for stage in dvc_repo.stage.load_all(path=dvc_yaml):
+                    base = stage.name.split("@")[0]
+                    if base not in tainted or not stage.frozen:
+                        continue
+                    stage.frozen = False
+                    if stage.changed():
+                        changed.add(base)
+                    else:
+                        current.add(base)
+            tainted -= current - changed
+        finally:
+            dvc_repo.close()
+    except Exception:
+        pass
     stages: dict = {}
     for fname in ("dvc.lock", "dvc.yaml"):
         fpath = os.path.join(wdir or ".", fname)

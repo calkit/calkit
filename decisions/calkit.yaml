@@ -1,0 +1,78 @@
+name: decisions
+title: Decisions
+description: >-
+  Evidence behind decisions made in developing Calkit, so a claim made to
+  justify one can be checked and rerun. Its stages are frozen once run,
+  since each records a decision at the time it was made, so the parent
+  project's pipeline skips them.
+
+questions:
+  - question: >-
+      How much faster does DVC parse a large dvc.lock with ruamel.yaml's C
+      loader, from ruamel.yaml.clib, installed?
+    answer:
+      if speedup > 1: >-
+        {speedup:.1f}x faster: DVC parsed a generated {kb:.0f} KB dvc.lock
+        with {paths} paths in {clib_s:.2f} s with ruamel.yaml.clib
+        installed, and {pure_s:.2f} s without it.
+      else: >-
+        It isn't: DVC parsed a generated {kb:.0f} KB dvc.lock with {paths}
+        paths in {clib_s:.2f} s with ruamel.yaml.clib installed, and
+        {pure_s:.2f} s without it.
+    evidence:
+      - kind: result
+        path: results/ruamel-yaml-clib.json
+        values:
+          speedup: speedup
+          pure_s: seconds.pure
+          clib_s: seconds.clib
+          paths: lock.paths
+          kb: lock.kb
+
+environments:
+  pure:
+    kind: uv-venv
+    path: requirements-pure.txt
+    prefix: .venv-pure
+    python: "3.12"
+    description: DVC with ruamel.yaml alone, which parses in pure Python.
+  clib:
+    kind: uv-venv
+    path: requirements-clib.txt
+    prefix: .venv-clib
+    python: "3.12"
+    description: The same, plus ruamel.yaml.clib for its C loader.
+
+pipeline:
+  stages:
+    parse-dvc-lock-pure:
+      kind: python-script
+      frozen: true
+      script_path: scripts/parse-dvc-lock.py
+      environment: pure
+      args:
+        - --out=results/ruamel-yaml-clib/pure.json
+      outputs:
+        - path: results/ruamel-yaml-clib/pure.json
+          storage: git
+    parse-dvc-lock-clib:
+      kind: python-script
+      frozen: true
+      script_path: scripts/parse-dvc-lock.py
+      environment: clib
+      args:
+        - --out=results/ruamel-yaml-clib/clib.json
+      outputs:
+        - path: results/ruamel-yaml-clib/clib.json
+          storage: git
+    compare-dvc-lock-parsing:
+      kind: python-script
+      frozen: true
+      script_path: scripts/compare-dvc-lock-parsing.py
+      environment: pure
+      inputs:
+        - results/ruamel-yaml-clib/pure.json
+        - results/ruamel-yaml-clib/clib.json
+      outputs:
+        - path: results/ruamel-yaml-clib.json
+          storage: git

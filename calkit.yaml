@@ -239,3 +239,8 @@ tables:
 
 references:
   - path: references.bib
+
+subprojects:
+  - path: decisions
+    description: >-
+      Evidence behind decisions made in developing Calkit, frozen once run.

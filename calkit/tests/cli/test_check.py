@@ -1329,3 +1329,83 @@ def test_check_questions(tmp_dir):
         calkit.ryaml.dump({}, f)
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "No questions defined." in out
+
+
+def test_check_storage(tmp_dir):
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def check(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "check", "storage", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt && echo yo > kept.txt",
+                "outputs": ["out.txt", {"path": "kept.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    for path in ["data.csv", "other.csv"]:
+        with open(path, "w") as f:
+            f.write("a,b\n")
+        subprocess.check_call(["calkit", "add", "--to", "dvc", path])
+    subprocess.check_call(["calkit", "run"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    result = check()
+    assert result.returncode == 0, result.stderr
+    assert "stored where" in result.stdout
+    # An output and a file tracked twice, a Git-stored output that's
+    # ignored, and a file tracked twice that differs from its .dvc file
+    git("add", "-f", "out.txt", "data.csv")
+    git("rm", "-q", "--cached", "kept.txt")
+    with open(".gitignore", "a") as f:
+        f.write("/kept.txt\n")
+    with open("other.csv", "a") as f:
+        f.write("1,2\n")
+    git("add", "-f", "other.csv")
+    result = check()
+    assert result.returncode != 0
+    for path in ["out.txt", "data.csv", "kept.txt", "other.csv"]:
+        assert path in result.stdout
+    result = check("--json")
+    assert result.returncode != 0
+    assert len(json.loads(result.stdout)) == 4
+    # Each is fixed but the one that's unclear, which fails the check
+    result = check("--fix")
+    assert result.returncode != 0
+    assert "other.csv" in result.stdout
+    assert not git("ls-files", "--", "out.txt", "data.csv").strip()
+    assert git("check-ignore", "out.txt", "data.csv").split() == [
+        "out.txt",
+        "data.csv",
+    ]
+    assert git("ls-files", "--", "kept.txt").strip() == "kept.txt"
+    assert "up to date" in subprocess.check_output(
+        ["dvc", "status", "make"], text=True
+    )
+    # Which is left to the user
+    subprocess.check_call(
+        ["calkit", "update", "path-storage", "other.csv", "--to", "dvc"]
+    )
+    result = check()
+    assert result.returncode == 0, result.stderr
+    # An output that's tracked twice from a stage that's out of date is
+    # taken out of Git, but left for the stage to record
+    git("add", "-f", "out.txt")
+    ck_info["pipeline"]["stages"]["make"]["command"] += " && echo"
+    calkit.save_calkit_info(ck_info)
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert "Run 'make'" in result.stdout
+    assert not git("ls-files", "--", "out.txt").strip()

@@ -1085,6 +1085,17 @@ def test_status(tmp_dir):
         ["calkit", "status", "-c", "questions"]
     ).decode()
     assert "Questions" not in out
+    # Paths tracked where they shouldn't be are pointed out with DVC's status
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
+    subprocess.check_call(["git", "add", "-f", "data.csv"])
+    out = subprocess.check_output(["calkit", "status", "-c", "dvc"], text=True)
+    assert "data.csv is tracked by both Git and DVC" in out
+    status_json = json.loads(
+        subprocess.check_output(["calkit", "status", "-c", "dvc", "--json"])
+    )
+    assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
 
 
 def test_save(tmp_dir):
@@ -1218,6 +1229,11 @@ def test_run(tmp_dir):
     # Check we can run for inputs and outputs
     subprocess.check_call(["calkit", "run", "--input", "script.py"])
     subprocess.check_call(["calkit", "run", "--output", "test.txt"])
+    # An output Git tracks too is pointed out before anything runs
+    subprocess.check_call(["git", "add", "-f", "test.txt"])
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    assert "test.txt is tracked by both Git and DVC" in out
+    subprocess.check_call(["git", "reset", "-q", "--", "test.txt"])
     # A DVC repo that can't be opened is reported as such, not mistaken for
     # a missing one that 'dvc init' would then refuse to create
     with open("not-a-dir", "w") as f:

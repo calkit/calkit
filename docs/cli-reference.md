@@ -3059,6 +3059,7 @@ Check things.
 | [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that a project's system-level requirements are met.                                                    |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
+| [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
 | [`questions`](#subcommand-check-questions)                  | Check that answered questions are backed by current evidence.                                                |
 
@@ -3355,6 +3356,27 @@ Options:
 | Option            | Type    | Required | Default | Description                                                 |
 | ----------------- | ------- | -------- | ------- | ----------------------------------------------------------- |
 | `--compile`, `-c` | boolean | no       | False   | Compile the pipeline to DVC stages and merge into dvc.yaml. |
+
+<a id="subcommand-check-storage"></a>
+
+#### `calkit check storage`
+
+Check that paths are tracked where they're declared to be stored.
+
+That is, nothing is tracked by both Git and DVC, no pipeline output stored in Git is ignored by it, and nothing in Git is too large for it. With --fix, the pipeline's declarations, or a file's .dvc file, decide where each path belongs, and the changes are staged.
+
+Usage:
+
+```text
+calkit check storage [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description                                         |
+| -------- | ------- | -------- | ------- | --------------------------------------------------- |
+| `--fix`  | boolean | no       | False   | Move each path to where it's declared to be stored. |
+| `--json` | boolean | no       | False   | Output the problems as JSON.                        |
 
 <a id="subcommand-check-call"></a>
 

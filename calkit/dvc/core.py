@@ -1098,6 +1098,183 @@ def restore_output_ignores(wdir: str | None = None) -> list[str]:
     return written
 
 
+def get_storage_problems(
+    wdir: str | None = None, large_mb: float | None = 50
+) -> list[dict]:
+    """Find paths whose tracking disagrees with where they're declared to be
+    stored.
+
+    Each has the ``path``, relative to ``wdir``, its ``kind``, the pipeline
+    ``stage`` or ``dvc_file`` that declares it, if any, ``store_in``, the
+    system it belongs in, or None if that can't be told, and a ``message``.
+    The kinds are:
+
+    - ``both``: tracked by Git and cached by DVC, so it belongs in DVC,
+      unless it was added on its own and differs from its ``.dvc`` file.
+    - ``ignored``: a pipeline output stored in Git that Git ignores.
+    - ``zipped``: stored zipped with DVC, but tracked by Git too.
+    - ``large``: tracked by Git, and larger than ``large_mb``, which is only
+      advice; None skips this check.
+    """
+    import bisect
+
+    import calkit.dvc.zip
+    import calkit.git
+    from calkit.models.pipeline import (
+        JupyterNotebookStage,
+        LatexStage,
+        MarimoHtmlWasmStage,
+        PathOutput,
+        Pipeline,
+    )
+
+    base = Path(wdir or ".").resolve()
+    repo = calkit.git.get_repo(wdir)
+    root = Path(repo.working_dir).resolve()
+    # Every file Git tracks, sorted so a directory's can be found by prefix
+    tracked = sorted(
+        (root / p).as_posix() for p in repo.git.ls_files("-z").split("\0") if p
+    )
+
+    def in_git(path: Path) -> bool:
+        posix = path.as_posix()
+        n = bisect.bisect_left(tracked, posix)
+        if n < len(tracked) and tracked[n] == posix:
+            return True
+        n = bisect.bisect_left(tracked, posix + "/")
+        return n < len(tracked) and tracked[n].startswith(posix + "/")
+
+    def rel(path: Path) -> str:
+        return Path(os.path.relpath(path, base)).as_posix()
+
+    problems: list[dict] = []
+    # Cached by DVC, so not to be tracked by Git
+    dvc_repo = get_dvc_repo(wdir)
+    try:
+        for out in dvc_repo.index.outs:
+            path = Path(out.fs_path).resolve()
+            if not out.use_cache or not in_git(path):
+                continue
+            message = f"{rel(path)} is tracked by both Git and DVC"
+            problem = dict(
+                path=rel(path),
+                kind="both",
+                stage=None,
+                dvc_file=None,
+                store_in="dvc",
+                message=message,
+            )
+            if out.stage.is_data_source:
+                problem["dvc_file"] = rel(Path(out.stage.path).resolve())
+                # Without a stage to say which is right, differing content
+                # leaves it to the user
+                if out.workspace_status():
+                    problem["store_in"] = None
+                    problem["message"] = (
+                        f"{message}, which differ; move it with 'calkit "
+                        f"update path-storage {rel(path)} --to git' or "
+                        "'--to dvc'"
+                    )
+            else:
+                problem["stage"] = out.stage.addressing
+            problems.append(problem)
+    finally:
+        dvc_repo.close()
+    # Declared to be stored in Git, so not to be ignored by it
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    try:
+        stages = Pipeline.model_validate(ck_info["pipeline"]).stages
+    except Exception:
+        stages = {}
+    in_git_declared: list[tuple[Path, str]] = []
+    for name, stage in stages.items():
+        # An iterated stage's paths are templates
+        if stage.iterate_over:
+            continue
+        outs = [o for o in stage.outputs or [] if isinstance(o, PathOutput)]
+        if isinstance(stage, JupyterNotebookStage):
+            outs += stage.notebook_outputs
+        elif isinstance(stage, MarimoHtmlWasmStage):
+            outs += stage.app_outputs
+        if stage.scheduler_log_output is not None:
+            outs.append(stage.scheduler_log_output)
+        paths = [out.path for out in outs if out.storage == "git"]
+        if isinstance(stage, LatexStage) and stage.pdf_storage == "git":
+            paths.append(stage.pdf_path)
+        for p in paths:
+            path = Path(os.path.normpath(base / (stage.wdir or "") / p))
+            if path.exists() and not in_git(path):
+                in_git_declared.append((path, name))
+    if in_git_declared:
+        ignored = set(
+            repo.ignored(
+                *[p.relative_to(root).as_posix() for p, _ in in_git_declared]
+            )
+        )
+        for path, name in in_git_declared:
+            if path.relative_to(root).as_posix() in ignored:
+                problems.append(
+                    dict(
+                        path=rel(path),
+                        kind="ignored",
+                        stage=name,
+                        dvc_file=None,
+                        store_in="git",
+                        message=f"{rel(path)} is stored in Git, but Git "
+                        "ignores it",
+                    )
+                )
+    # Zipped, so tracked by DVC as an archive and not by Git
+    for workspace_path in calkit.dvc.zip.get_zip_path_map(wdir):
+        path = base / workspace_path
+        if in_git(path):
+            problems.append(
+                dict(
+                    path=rel(path),
+                    kind="zipped",
+                    stage=None,
+                    dvc_file=None,
+                    store_in="dvc",
+                    message=f"{rel(path)} is stored zipped with DVC, but "
+                    "Git tracks it too",
+                )
+            )
+    if large_mb is None:
+        return problems
+    # Large files in Git, leaving out those Git LFS stores
+    large = {}
+    for posix in tracked:
+        path = Path(posix)
+        if not path.is_relative_to(base):
+            continue
+        try:
+            size = os.lstat(path).st_size
+        except OSError:
+            continue
+        if size > large_mb * 1024**2:
+            large[path.relative_to(root).as_posix()] = (path, size)
+    if large:
+        attrs = repo.git.check_attr("filter", "--", *large)
+        for line in attrs.splitlines():
+            git_path, _, value = line.rsplit(": ", 2)
+            if value == "lfs":
+                large.pop(git_path, None)
+    for path, size in large.values():
+        problems.append(
+            dict(
+                path=rel(path),
+                kind="large",
+                stage=None,
+                dvc_file=None,
+                store_in=None,
+                message=f"{rel(path)} is {size / 1024**2:.0f} MB and tracked "
+                f"by Git; consider 'calkit update path-storage {rel(path)} "
+                "--to dvc'",
+            )
+        )
+    return problems
+
+
 def hash_file(path: str) -> dict:
     """Compute MD5 hash and size of a file.
 

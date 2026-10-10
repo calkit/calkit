@@ -138,6 +138,15 @@ def test_operators(
         "ended": "2026-09-28T09:10:00+00:00",
         "failed_stages": ["plot"],
     }
+    agent = {
+        "tool": "claude",
+        "pid": 123,
+        "started": "2026-09-29T11:00:00+00:00",
+        "where": "tmux",
+        "app": "Terminal",
+        "name": "Fix plots",
+        "status": "busy",
+    }
     r = client.post(
         "/operators/check-in",
         headers=op_headers,
@@ -152,6 +161,7 @@ def test_operators(
                     "last_run": last_run,
                     "in_use_by": "http://localhost",
                     "last_activity": "2026-09-29T12:00:00+00:00",
+                    "agents": [agent],
                 },
                 {"path": "/home/me/calkit/b", "project": "someone/other"},
                 {
@@ -176,6 +186,9 @@ def test_operators(
     assert [w["on_hub"] for w in mine] == [False, False, True, False]
     assert mine[0]["last_activity"] == "2026-09-29T12:00:00+00:00"
     assert mine[1]["last_activity"] is None
+    # And which agents are running in them
+    assert mine[0]["agents"] == [agent]
+    assert mine[1]["agents"] == []
     assert mine[3]["project"] is None
     assert mine[0]["running"] and mine[0]["running_stages"] == ["train"]
     assert mine[0]["running_since"] == "2026-09-29T12:05:00+00:00"

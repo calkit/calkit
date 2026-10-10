@@ -22,6 +22,7 @@ export type {
   AddOrgMemberErrors,
   AddOrgMemberResponse,
   AddOrgMemberResponses,
+  AgentInfo,
   AppApiRoutesLoginOAuthCodeExchange,
   AppApiRoutesUsersOAuthCodeExchange,
   BodyLoginLoginAccessToken,

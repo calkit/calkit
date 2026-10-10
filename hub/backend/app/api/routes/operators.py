@@ -245,6 +245,22 @@ class LastRun(BaseModel):
     )
 
 
+class AgentInfo(BaseModel):
+    """A coding agent running in a workspace, e.g., Claude Code."""
+
+    tool: str = Field(max_length=32)
+    pid: int
+    started: str | None = Field(default=None, max_length=64)
+    # In one of the Operator's sessions, a tmux pane, which can be attached
+    # to, or another terminal, e.g., an editor's
+    where: Literal["session", "tmux", "terminal"] = "terminal"
+    # What it was started from, e.g., 'Code'
+    app: str | None = Field(default=None, max_length=256)
+    # What it was named, and what it's doing, if it says
+    name: str | None = Field(default=None, max_length=256)
+    status: str | None = Field(default=None, max_length=64)
+
+
 class WorkspaceInfo(BaseModel):
     """A workspace as an Operator reports it at check-in."""
 
@@ -271,6 +287,7 @@ class WorkspaceInfo(BaseModel):
     in_use_by: str | None = Field(default=None, max_length=2048)
     # When it last changed, e.g., a commit, a checkout, or a run ending
     last_activity: str | None = Field(default=None, max_length=64)
+    agents: list[AgentInfo] = Field(default=[], max_length=20)
 
 
 class CheckIn(BaseModel):
@@ -332,6 +349,7 @@ def _update_workspaces(
                 "last_run",
                 "in_use_by",
                 "last_activity",
+                "agents",
             },
         )
         ws.updated = now
@@ -523,6 +541,7 @@ def _list_workspaces(
                 last_run=ws.run_state.get("last_run"),
                 in_use_by=ws.run_state.get("in_use_by"),
                 last_activity=ws.run_state.get("last_activity"),
+                agents=ws.run_state.get("agents") or [],
                 updated=ws.updated.isoformat(),
                 on_hub=(ws.owner_name, ws.project_name) in on_hub,
                 operator_id=operator.id,

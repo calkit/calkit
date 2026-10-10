@@ -20,13 +20,14 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import {
   FiChevronDown,
   FiChevronRight,
+  FiCpu,
   FiPlay,
   FiPlus,
   FiRefreshCw,
   FiTerminal,
 } from "react-icons/fi"
 
-import type { Workspace } from "../../client"
+import type { AgentInfo, Workspace } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Tooltip from "../Common/Tooltip"
@@ -88,6 +89,9 @@ export default function WorkspacePanel({
   activeSession,
   onOpenSession,
   onNewSession,
+  activeAgent,
+  onViewAgent,
+  onAttachAgent,
 }: {
   ws: Workspace
   conn: OperatorConnection
@@ -104,6 +108,11 @@ export default function WorkspacePanel({
   activeSession?: string
   onOpenSession?: (session: string) => void
   onNewSession?: () => void
+  // Following an agent running there outside the Operator's sessions, or
+  // attaching to one in tmux
+  activeAgent?: number
+  onViewAgent?: (pid: number) => void
+  onAttachAgent?: (pid: number) => void
 }) {
   const showToast = useCustomToast()
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
@@ -293,6 +302,10 @@ export default function WorkspacePanel({
     .filter(Boolean)
     .join(", ")
   const changeCount = untracked.length + changed.length + staged.length
+  // Ones in the Operator's sessions are listed as those
+  const agents: AgentInfo[] = (ws.agents ?? []).filter(
+    (a) => a.where !== "session",
+  )
   // An Operator from before Git's part came on its own only has the rest
   const gitReady = connected && Boolean(gitQuery.data || statusQuery.data)
   const ready = connected && !statusQuery.isPending && !statusQuery.error
@@ -641,7 +654,7 @@ export default function WorkspacePanel({
             </PanelSection>
             {sessions && (
               <PanelSection
-                title={`Sessions (${sessions.length})`}
+                title={`Sessions (${sessions.length + agents.length})`}
                 actions={
                   onNewSession && (
                     <Button
@@ -654,7 +667,7 @@ export default function WorkspacePanel({
                   )
                 }
               >
-                {sessions.length === 0 && (
+                {sessions.length + agents.length === 0 && (
                   <Text fontSize="sm" color="ui.dim">
                     No sessions
                   </Text>
@@ -682,6 +695,54 @@ export default function WorkspacePanel({
                       <Tooltip label="Browsers attached">
                         <Badge fontSize="2xs">{session.attached}</Badge>
                       </Tooltip>
+                    )}
+                  </Flex>
+                ))}
+                {agents.map((agent) => (
+                  <Flex
+                    key={agent.pid}
+                    align="center"
+                    gap={2}
+                    minH="24px"
+                    px={1}
+                    borderRadius="md"
+                    cursor="pointer"
+                    fontWeight={
+                      agent.pid === activeAgent ? "semibold" : undefined
+                    }
+                    _hover={{ bg: hoverBg }}
+                    onClick={() => onViewAgent?.(agent.pid)}
+                  >
+                    <FiCpu />
+                    <Text fontSize="sm" fontFamily="mono" flexShrink={0}>
+                      {agent.tool}
+                    </Text>
+                    {agent.name && (
+                      <Text fontSize="sm" noOfLines={1}>
+                        {agent.name}
+                      </Text>
+                    )}
+                    <Text fontSize="xs" color="ui.dim" flexShrink={0}>
+                      {agent.where === "tmux"
+                        ? "in tmux"
+                        : agent.app
+                          ? `in ${agent.app}`
+                          : ""}
+                    </Text>
+                    {agent.status && (
+                      <Badge fontSize="2xs">{agent.status}</Badge>
+                    )}
+                    {agent.where === "tmux" && onAttachAgent && (
+                      <Button
+                        size="xs"
+                        ml="auto"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onAttachAgent(agent.pid)
+                        }}
+                      >
+                        Attach
+                      </Button>
                     )}
                   </Flex>
                 ))}

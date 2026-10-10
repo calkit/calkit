@@ -157,6 +157,183 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
         op.get_workspace(home)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Agents are POSIX here")
+def test_agents(tmp_path, monkeypatch):
+    home = os.path.realpath(tmp_path)
+    monkeypatch.setenv("CALKIT_USER_HOME", home)
+    wdir = os.path.join(home, "calkit", "demo")
+    _init_project(wdir)
+    other = os.path.join(home, "calkit", "other")
+    _init_project(other, name="other")
+    os.makedirs(os.path.join(wdir, "src"))
+    # Stand-ins for agents, which are found by their command, from Python
+    # rather than, e.g., sleep, since macOS hides its own programs'
+    # environments
+    bin_dir = os.path.join(home, "bin")
+    os.makedirs(bin_dir)
+    for tool in ["claude", "codex", "not-an-agent"]:
+        os.symlink(
+            os.path.realpath(sys.executable), os.path.join(bin_dir, tool)
+        )
+    pids = []
+
+    def start(tool, cwd, env=None):
+        # Through a shell that exits, as an editor's terminal might, rather
+        # than as a child of this process, which would make it a session's
+        out = subprocess.run(
+            [
+                "sh",
+                "-c",
+                f'"{bin_dir}/{tool}" -c "import time; time.sleep(60)" '
+                ">/dev/null 2>&1 & echo $!",
+            ],
+            cwd=cwd,
+            env=dict(os.environ, **(env or {})),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        pids.append(int(out))
+        return pids[-1]
+
+    try:
+        claude = start("claude", os.path.join(wdir, "src"))
+        codex = start(
+            "codex",
+            wdir,
+            {"TMUX": "/tmp/tmux-1/default,1,0", "TMUX_PANE": "%3"},
+        )
+        start("not-an-agent", wdir)
+        start("claude", home)
+        # Claude Code's record of the process names its conversation
+        sessions_dir = os.path.join(home, ".claude", "sessions")
+        os.makedirs(sessions_dir)
+        claude_cwd = os.path.join(wdir, "src")
+        with open(os.path.join(sessions_dir, f"{claude}.json"), "w") as f:
+            json.dump(
+                {
+                    "sessionId": "abc",
+                    "cwd": claude_cwd,
+                    "name": "Fix plots",
+                    "status": "busy",
+                },
+                f,
+            )
+        found = operator.find_agents([wdir, other])
+        assert set(found) == {wdir}
+        agents = {a["tool"]: a for a in found[wdir]}
+        assert set(agents) == {"claude", "codex"}
+        assert agents["claude"]["pid"] == claude
+        assert agents["claude"]["name"] == "Fix plots"
+        assert agents["claude"]["status"] == "busy"
+        assert agents["claude"]["where"] == "terminal"
+        assert agents["claude"]["tmux"] is None
+        assert agents["codex"]["where"] == "tmux"
+        assert agents["codex"]["tmux"] == {
+            "socket": "/tmp/tmux-1/default",
+            "pane": "%3",
+        }
+        # Only ones in tmux can be attached to, and only in their workspace
+        op = operator.Operator({"workspaces": []})
+        op.workspaces = [{"path": wdir, "kind": "personal"}]
+        with pytest.raises(ValueError, match="tmux"):
+            op.open_session(wdir, 80, 24, attach=claude)
+        with pytest.raises(ValueError):
+            operator.get_agent_log(other, claude)
+        # Their conversations are read from the logs they keep, ending with
+        # the latest, leaving out what isn't said or done
+        transcript = os.path.join(
+            home,
+            ".claude",
+            "projects",
+            claude_cwd.replace("/", "-").replace(".", "-").replace("_", "-"),
+            "abc.jsonl",
+        )
+        os.makedirs(os.path.dirname(transcript))
+        lines = [
+            {"type": "user", "timestamp": "t1", "message": {"content": "Hi"}},
+            {"type": "mode", "mode": "normal"},
+            {
+                "type": "assistant",
+                "timestamp": "t2",
+                "message": {
+                    "content": [
+                        {"type": "thinking", "thinking": "Hmm"},
+                        {"type": "text", "text": "Plotting"},
+                        {
+                            "type": "tool_use",
+                            "name": "Bash",
+                            "input": {"description": "Run the plots"},
+                        },
+                    ]
+                },
+            },
+        ]
+        with open(transcript, "w") as f:
+            f.write("".join(json.dumps(line) + "\n" for line in lines))
+        log = operator.get_agent_log(wdir, claude)
+        assert log["entries"] == [
+            {"role": "user", "text": "Hi", "time": "t1"},
+            {"role": "assistant", "text": "Plotting", "time": "t2"},
+            {"role": "tool", "text": "Bash: Run the plots", "time": "t2"},
+        ]
+        assert operator.get_agent_log(wdir, claude, limit=1)["entries"] == [
+            {"role": "tool", "text": "Bash: Run the plots", "time": "t2"}
+        ]
+        # Codex's are found by where they were started
+        rollouts = os.path.join(home, ".codex", "sessions", "2026", "10")
+        os.makedirs(rollouts)
+        for name, cwd, said in [
+            ("a", other, "Elsewhere"),
+            ("b", wdir, "Done"),
+        ]:
+            with open(os.path.join(rollouts, f"{name}.jsonl"), "w") as f:
+                for line in [
+                    {"type": "session_meta", "payload": {"cwd": cwd}},
+                    {
+                        "type": "response_item",
+                        "timestamp": "t3",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "<env>x</env>"},
+                                {"type": "input_text", "text": "Go"},
+                            ],
+                        },
+                    },
+                    {
+                        "type": "response_item",
+                        "timestamp": "t4",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": said}],
+                        },
+                    },
+                ]:
+                    f.write(json.dumps(line) + "\n")
+        assert operator.get_agent_log(wdir, codex)["entries"] == [
+            {"role": "user", "text": "Go", "time": "t3"},
+            {"role": "assistant", "text": "Done", "time": "t4"},
+        ]
+        # The hub hears about them at check-in, without what's only for
+        # attaching or reading their logs
+        demo = next(
+            ws
+            for ws in operator.discover_workspaces({"workspaces": []})
+            if ws["path"] == wdir
+        )
+        assert sorted(a["tool"] for a in demo["agents"]) == ["claude", "codex"]
+        assert all("tmux" not in a and "cwd" not in a for a in demo["agents"])
+    finally:
+        for pid in pids:
+            try:
+                os.kill(pid, 15)
+            except OSError:
+                pass
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="Sessions need a PTY")
 @pytest.mark.asyncio
 async def test_sessions(tmp_path, monkeypatch):

@@ -44,6 +44,78 @@ export const AccountPublicSchema = {
   title: "AccountPublic",
 } as const
 
+export const AgentInfoSchema = {
+  properties: {
+    tool: {
+      type: "string",
+      maxLength: 32,
+      title: "Tool",
+    },
+    pid: {
+      type: "integer",
+      title: "Pid",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    where: {
+      type: "string",
+      enum: ["session", "tmux", "terminal"],
+      title: "Where",
+      default: "terminal",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    status: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Status",
+    },
+  },
+  type: "object",
+  required: ["tool", "pid"],
+  title: "AgentInfo",
+  description: "A coding agent running in a workspace, e.g., Claude Code.",
+} as const
+
 export const Body_login_login_access_tokenSchema = {
   properties: {
     analytics_consent: {
@@ -11932,6 +12004,15 @@ export const WorkspaceSchema = {
       ],
       title: "Last Activity",
     },
+    agents: {
+      items: {
+        $ref: "#/components/schemas/AgentInfo",
+      },
+      type: "array",
+      maxItems: 20,
+      title: "Agents",
+      default: [],
+    },
     operator_id: {
       type: "string",
       format: "uuid",
@@ -12126,6 +12207,15 @@ export const WorkspaceInfoSchema = {
         },
       ],
       title: "Last Activity",
+    },
+    agents: {
+      items: {
+        $ref: "#/components/schemas/AgentInfo",
+      },
+      type: "array",
+      maxItems: 20,
+      title: "Agents",
+      default: [],
     },
   },
   type: "object",

@@ -50,6 +50,8 @@ CRON_IDLE_EXIT_SECONDS = 900
 WORKSPACE_ROOTS = ["calkit", "dev"]
 # How often to check whether Calkit was upgraded or a restart was asked for
 RESTART_CHECK_SECONDS = 30
+# Coding agents found running in workspaces, by command
+AGENT_TOOLS = ("claude", "codex", "opencode")
 
 # The hub the Operator commands in this process act on, by its web URL.
 # Each hub's Operator has its own config, service, lock, and log, named by
@@ -572,6 +574,18 @@ def discover_workspaces(cfg: dict) -> list[dict]:
         )
         ws["last_activity"] = _last_activity(path, ws["last_run"])
         workspaces.append(ws)
+    # What the hub is told of each, leaving out what's only for attaching
+    # or reading its log
+    agents = find_agents([ws["path"] for ws in workspaces])
+    for ws in workspaces:
+        ws["agents"] = [
+            {
+                k: agent[k]
+                for k in ["tool", "pid", "started", "where", "app", "name"]
+            }
+            | {"status": agent["status"]}
+            for agent in agents.get(ws["path"], [])
+        ]
     return workspaces
 
 
@@ -772,6 +786,228 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
         "commits_behind": git_status["commits_behind"],
         "errors": errors,
     }
+
+
+def _agent_tool(cmdline: list[str]) -> str | None:
+    """Which coding agent a command line runs, if any, e.g., 'claude'."""
+    names = [os.path.basename(arg) for arg in cmdline[:2]]
+    if names and names[0] in AGENT_TOOLS:
+        return names[0]
+    # Ones run as scripts, e.g., with Node
+    if len(names) == 2 and names[0] in ("node", "bun"):
+        name = names[1].removesuffix(".js")
+        if name in AGENT_TOOLS:
+            return name
+    return None
+
+
+def find_agents(paths: list[str]) -> dict[str, list[dict]]:
+    """Coding agents running in workspaces, by workspace, however they were
+    started, e.g., in an editor's terminal, tmux, or a session.
+    """
+    from datetime import datetime, timezone
+
+    import psutil
+
+    found: dict[str, list[dict]] = {}
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            tool = _agent_tool(proc.info["cmdline"] or [])
+            if tool is None:
+                continue
+            cwd = os.path.realpath(proc.cwd())
+            parents = proc.parents()
+        except (psutil.Error, OSError):
+            continue
+
+        def runs_tool(p: Any) -> bool:
+            try:
+                return _agent_tool(p.cmdline()) == tool
+            except (psutil.Error, OSError):
+                return False
+
+        # An agent's own helpers, e.g., subagents, aren't others
+        if any(runs_tool(p) for p in parents):
+            continue
+        wdir = next(
+            (p for p in paths if cwd == p or cwd.startswith(p + os.sep)), None
+        )
+        if wdir is None:
+            continue
+        try:
+            env = proc.environ()
+        except (psutil.Error, OSError):
+            env = {}
+        # tmux names its socket and the pane in what it starts
+        tmux = None
+        if env.get("TMUX") and env.get("TMUX_PANE"):
+            tmux = dict(
+                socket=env["TMUX"].split(",")[0], pane=env["TMUX_PANE"]
+            )
+        if any(p.pid == os.getpid() for p in parents):
+            where = "session"
+        elif tmux is not None:
+            where = "tmux"
+        else:
+            where = "terminal"
+        # What it was started from, e.g., 'Code' or 'Terminal', is the
+        # furthest ancestor short of the system's own
+        apps = [p for p in parents if p.pid > 1]
+        try:
+            app = apps[-1].name() if apps else None
+        except psutil.Error:
+            app = None
+        agent: dict[str, Any] = dict(
+            tool=tool,
+            pid=proc.pid,
+            started=datetime.fromtimestamp(
+                proc.create_time(), timezone.utc
+            ).isoformat(),
+            where=where,
+            app=app,
+            name=None,
+            status=None,
+            tmux=tmux,
+            cwd=cwd,
+        )
+        # Claude Code keeps a record of each process, with its
+        # conversation, the name it was given, and what it's doing
+        if tool == "claude":
+            try:
+                with open(
+                    os.path.join(
+                        config.get_user_home(),
+                        ".claude",
+                        "sessions",
+                        f"{proc.pid}.json",
+                    )
+                ) as f:
+                    record = json.load(f)
+                agent["name"] = record.get("name")
+                agent["status"] = record.get("status")
+                agent["conversation"] = record.get("sessionId")
+                agent["cwd"] = record.get("cwd") or cwd
+            except (OSError, ValueError, AttributeError):
+                pass
+        found.setdefault(wdir, []).append(agent)
+    return found
+
+
+def _get_agent(wdir: str, pid: int) -> dict:
+    agent = next(
+        (a for a in find_agents([wdir]).get(wdir, []) if a["pid"] == pid),
+        None,
+    )
+    if agent is None:
+        raise ValueError("No agent with that PID is running in this workspace")
+    return agent
+
+
+def get_agent_log(wdir: str, pid: int, limit: int = 40) -> dict:
+    """The end of a running agent's conversation, from the log it keeps,
+    which is how one that can't be attached to can be followed.
+    """
+    from datetime import datetime
+
+    agent = _get_agent(wdir, pid)
+    home = config.get_user_home()
+    path = None
+    if agent["tool"] == "claude" and agent.get("conversation"):
+        # Logs are kept by folder, named for it with anything but letters
+        # and digits as dashes
+        path = os.path.join(
+            home,
+            ".claude",
+            "projects",
+            re.sub(r"[^A-Za-z0-9]", "-", agent["cwd"]),
+            f"{agent['conversation']}.jsonl",
+        )
+    elif agent["tool"] == "codex":
+        # Kept by day, each saying where it was started first, so the
+        # latest from here since the process started is its own
+        started = datetime.fromisoformat(agent["started"])
+        candidates = []
+        sessions_dir = os.path.join(home, ".codex", "sessions")
+        for root, _, files in os.walk(sessions_dir):
+            for name in files:
+                full = os.path.join(root, name)
+                try:
+                    if (
+                        name.endswith(".jsonl")
+                        and os.path.getmtime(full) >= started.timestamp()
+                    ):
+                        candidates.append(full)
+                except OSError:
+                    pass
+        for full in sorted(candidates, key=os.path.getmtime, reverse=True):
+            try:
+                with open(full) as f:
+                    meta = json.loads(f.readline())
+            except (OSError, ValueError):
+                continue
+            cwd = (meta.get("payload") or {}).get("cwd")
+            if cwd and os.path.realpath(cwd) == agent["cwd"]:
+                path = full
+                break
+    if path is None or not os.path.isfile(path):
+        return {"entries": None, "tool": agent["tool"]}
+    # Logs can be large, so only the end is read
+    with open(path, "rb") as log_file:
+        log_file.seek(0, os.SEEK_END)
+        size = log_file.tell()
+        log_file.seek(max(0, size - 2_000_000))
+        lines = log_file.read().decode("utf-8", errors="replace").splitlines()
+    if size > 2_000_000:
+        lines = lines[1:]
+    entries = []
+
+    def add(role: str, text: Any, time: str | None) -> None:
+        if isinstance(text, str) and text.strip():
+            entries.append(
+                dict(role=role, text=text.strip()[:4000], time=time)
+            )
+
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        time = item.get("timestamp")
+        if agent["tool"] == "claude":
+            if item.get("type") not in ("user", "assistant"):
+                continue
+            content = (item.get("message") or {}).get("content")
+            if isinstance(content, str):
+                add(item["type"], content, time)
+                continue
+            for part in content or []:
+                if part.get("type") == "text":
+                    add(item["type"], part.get("text"), time)
+                elif part.get("type") == "tool_use":
+                    tool_input = part.get("input") or {}
+                    detail = tool_input.get("description") or (
+                        tool_input.get("command")
+                        or tool_input.get("file_path")
+                        or ""
+                    )
+                    add("tool", f"{part.get('name')}: {detail}", time)
+        else:
+            payload = item.get("payload") or {}
+            if item.get("type") != "response_item":
+                continue
+            if payload.get("type") == "message" and payload.get("role") in (
+                "user",
+                "assistant",
+            ):
+                for part in payload.get("content") or []:
+                    text = part.get("text")
+                    # Context Codex adds itself comes as tagged user text
+                    if payload["role"] == "user" and str(text).startswith("<"):
+                        continue
+                    add(payload["role"], text, time)
+            elif payload.get("type") in ("function_call", "custom_tool_call"):
+                add("tool", str(payload.get("name")), time)
+    return {"entries": entries[-limit:], "tool": agent["tool"]}
 
 
 def get_run_state(wdir: str) -> dict:
@@ -1153,6 +1389,7 @@ def new_workspace(wdir: str, branch: str) -> dict:
 WORKSPACE_ACTIONS: dict[str, Any] = {
     "workspace.status": get_workspace_status,
     "workspace.git_status": get_workspace_git_status,
+    "workspace.agent_log": get_agent_log,
     "workspace.pull": pull_workspace,
     "workspace.push": push_workspace,
     "workspace.save": save_workspace,
@@ -1170,10 +1407,15 @@ READ_ONLY_ACTIONS = {
     "workspace.status",
     "workspace.git_status",
     "workspace.run_log",
+    "workspace.agent_log",
 }
 # Ones quick and harmless enough to not wait on what else is going on there,
 # e.g., the rest of the status, which can take a while for a large pipeline
-LOCK_FREE_ACTIONS = {"workspace.git_status", "workspace.run_log"}
+LOCK_FREE_ACTIONS = {
+    "workspace.git_status",
+    "workspace.run_log",
+    "workspace.agent_log",
+}
 
 
 @dataclass
@@ -1200,8 +1442,13 @@ class Session:
         import psutil
 
         try:
-            return str(psutil.Process(os.tcgetpgrp(self.fd)).name())
-        except (OSError, psutil.Error):
+            proc = psutil.Process(os.tcgetpgrp(self.fd))
+            name = str(proc.name())
+            # Some name their process for their version, e.g., Claude Code
+            if name[:1].isdigit():
+                name = os.path.basename(proc.cmdline()[0]) or name
+            return name
+        except (OSError, IndexError, psutil.Error):
             return "shell"
 
     def info(self) -> dict:
@@ -1278,13 +1525,40 @@ class Operator:
         raise ValueError("Not a workspace this Operator allows")
 
     def open_session(
-        self, workspace: str, cols: int, rows: int, command: str | None = None
+        self,
+        workspace: str,
+        cols: int,
+        rows: int,
+        command: str | None = None,
+        attach: int | None = None,
     ) -> Session:
+        """Start a shell in a workspace, running a command first if given,
+        or attaching to the tmux pane of an agent running there.
+        """
         if platform.system() == "Windows":
             raise ValueError("Sessions aren't supported on Windows yet")
         import pty
 
         workspace = self.get_workspace(workspace)
+        if attach is not None:
+            tmux = _get_agent(workspace, attach).get("tmux")
+            if tmux is None:
+                raise ValueError("Only agents running in tmux can be attached")
+            # Unset, in case the Operator itself runs in tmux, which won't
+            # attach inside itself
+            command = shlex.join(
+                [
+                    "env",
+                    "-u",
+                    "TMUX",
+                    "tmux",
+                    "-S",
+                    tmux["socket"],
+                    "attach-session",
+                    "-t",
+                    tmux["pane"],
+                ]
+            )
         claim_workspace(workspace)
         self.claimed.add(workspace)
         # Everything the child needs is prepared here, since it's forked
@@ -1481,6 +1755,7 @@ class Operator:
                 msg.get("cols", 80),
                 msg.get("rows", 24),
                 msg.get("command"),
+                msg.get("attach"),
             )
             self.attach(session, ch)
             return {"session": session.id}

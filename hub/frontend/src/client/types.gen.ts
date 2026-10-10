@@ -31,6 +31,42 @@ export type AccountPublic = {
 }
 
 /**
+ * AgentInfo
+ *
+ * A coding agent running in a workspace, e.g., Claude Code.
+ */
+export type AgentInfo = {
+  /**
+   * Tool
+   */
+  tool: string
+  /**
+   * Pid
+   */
+  pid: number
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Where
+   */
+  where?: "session" | "tmux" | "terminal"
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Status
+   */
+  status?: string | null
+}
+
+/**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
@@ -6780,6 +6816,10 @@ export type Workspace = {
    */
   last_activity?: string | null
   /**
+   * Agents
+   */
+  agents?: Array<AgentInfo>
+  /**
    * Operator Id
    */
   operator_id: string
@@ -6868,6 +6908,10 @@ export type WorkspaceInfo = {
    * Last Activity
    */
   last_activity?: string | null
+  /**
+   * Agents
+   */
+  agents?: Array<AgentInfo>
 }
 
 /**

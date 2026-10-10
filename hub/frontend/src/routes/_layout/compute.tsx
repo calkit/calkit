@@ -6,6 +6,7 @@ import {
   Flex,
   Grid,
   Heading,
+  IconButton,
   Select,
   Spinner,
   Text,
@@ -17,8 +18,8 @@ import {
   createFileRoute,
   redirect,
 } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
-import { FiChevronDown, FiChevronRight, FiTerminal } from "react-icons/fi"
+import { useEffect, useRef, useState } from "react"
+import { FiChevronDown, FiChevronRight, FiTerminal, FiX } from "react-icons/fi"
 import { z } from "zod"
 
 import {
@@ -31,7 +32,10 @@ import LoadingSpinner from "../../components/Common/LoadingSpinner"
 import Tooltip from "../../components/Common/Tooltip"
 import SecondFactorPrompt from "../../components/Operators/SecondFactorPrompt"
 import TerminalPane from "../../components/Operators/TerminalPane"
-import type { SessionInfo } from "../../components/Operators/connection"
+import type {
+  OperatorConnection,
+  SessionInfo,
+} from "../../components/Operators/connection"
 import useOperatorConnections from "../../components/Operators/useOperatorConnections"
 import WorkspaceBadges from "../../components/Workspace/WorkspaceBadges"
 import WorkspacePanel from "../../components/Workspace/WorkspacePanel"
@@ -53,6 +57,9 @@ const computeSearchSchema = z.object({
   sort: z.enum(["name"]).optional(),
   // IDs of Operators whose workspaces are hidden
   collapsed: z.array(z.string()).optional(),
+  // An agent followed in the workspace, by its PID, when it isn't in one
+  // of the Operator's sessions
+  agent: z.coerce.number().optional(),
 })
 
 type ComputeSearch = z.infer<typeof computeSearchSchema>
@@ -86,6 +93,98 @@ export const Route = createFileRoute("/_layout/compute")({
 })
 
 const workspaceKey = (ws: Workspace) => `${ws.operator_id}:${ws.path}`
+
+// The end of an agent's conversation, from the log it keeps, followed while
+// it runs
+function AgentLog({
+  conn,
+  workspace,
+  pid,
+  onClose,
+}: {
+  conn: OperatorConnection
+  workspace: Workspace
+  pid: number
+  onClose: () => void
+}) {
+  const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
+  const agent = (workspace.agents ?? []).find((a) => a.pid === pid)
+  const logQuery = useQuery({
+    queryKey: ["agent-log", workspace.operator_id, workspace.path, pid],
+    queryFn: () =>
+      conn.request("workspace.agent_log", { workspace: workspace.path, pid }),
+    enabled: conn.connected,
+    retry: false,
+    refetchInterval: 5000,
+  })
+  const entries: { role: string; text: string; time: string | null }[] | null =
+    logQuery.data?.entries ?? null
+  const logRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // Kept at the end, where the conversation goes on
+    const el = logRef.current
+    if (el && entries) el.scrollTop = el.scrollHeight
+  }, [entries])
+  return (
+    <Box bg={bg} borderRadius="lg" p={3}>
+      <Flex align="center" gap={2} mb={2}>
+        <Code fontSize="xs">{agent?.tool ?? "agent"}</Code>
+        {agent?.name && (
+          <Text fontWeight="semibold" noOfLines={1}>
+            {agent.name}
+          </Text>
+        )}
+        {agent?.status && <Badge fontSize="2xs">{agent.status}</Badge>}
+        {logQuery.isFetching && <Spinner size="xs" color="ui.dim" />}
+        <IconButton
+          aria-label="Close"
+          icon={<FiX />}
+          size="xs"
+          variant="ghost"
+          ml="auto"
+          onClick={onClose}
+        />
+      </Flex>
+      {logQuery.isPending ? (
+        <Spinner size="sm" />
+      ) : logQuery.error ? (
+        <Text color="red.400" fontSize="sm">
+          {logQuery.error.message}
+        </Text>
+      ) : entries === null ? (
+        // TODO: copy for a human to write
+        <Text color="ui.dim" fontSize="sm">
+          This agent's conversation can't be read here.
+        </Text>
+      ) : (
+        <Box ref={logRef} maxH="70vh" overflowY="auto">
+          {entries.map((e, i) => (
+            <Box key={i} mb={2}>
+              {e.role === "tool" ? (
+                <Text fontSize="xs" fontFamily="mono" color="ui.dim">
+                  {e.text}
+                </Text>
+              ) : (
+                <>
+                  <Text
+                    fontSize="xs"
+                    fontWeight="semibold"
+                    color={e.role === "user" ? "ui.main" : "ui.dim"}
+                  >
+                    {e.role === "user" ? "You" : agent?.tool ?? "Agent"}
+                  </Text>
+                  <Text fontSize="sm" whiteSpace="pre-wrap">
+                    {e.text}
+                  </Text>
+                </>
+              )}
+            </Box>
+          ))}
+        </Box>
+      )}
+    </Box>
+  )
+}
 
 function Compute() {
   const navigate = Route.useNavigate()
@@ -152,6 +251,7 @@ function Compute() {
         ...prev,
         workspace: undefined,
         session: undefined,
+        agent: undefined,
         modal: undefined,
         ...next,
       }),
@@ -163,13 +263,15 @@ function Compute() {
   const selectedSession = sessionId
     ? sessions[sessionOperator]?.find((s) => s.id === sessionId)
     : undefined
-  const newSession = async (ws: Workspace) => {
+  // A shell, or one attached to an agent's tmux pane
+  const newSession = async (ws: Workspace, attach?: number) => {
     const conn = getConnection(ws.operator_id)
     try {
       const { session } = await conn.request("sessions.open", {
         workspace: ws.path,
         cols: 80,
         rows: 24,
+        attach,
       })
       select({
         workspace: workspaceKey(ws),
@@ -207,7 +309,7 @@ function Compute() {
         : search.show === "out_of_sync"
           ? Boolean(ws.ahead || ws.behind)
           : search.show === "sessions"
-            ? getSessions(ws).length > 0
+            ? getSessions(ws).length > 0 || (ws.agents ?? []).length > 0
             : true)
   const filtering = Boolean(query || search.show)
   const byActivity = (a: Workspace, b: Workspace) =>
@@ -311,7 +413,7 @@ function Compute() {
             <option value="running">Running</option>
             <option value="changes">Uncommitted</option>
             <option value="out_of_sync">Out of sync</option>
-            <option value="sessions">With sessions</option>
+            <option value="sessions">With sessions or agents</option>
             <option value="not_on_hub">Not on the hub</option>
           </Select>
           <Select
@@ -444,6 +546,21 @@ function Compute() {
                           </Text>
                         </Tooltip>
                         <WorkspaceBadges ws={ws} />
+                        {(ws.agents ?? [])
+                          .filter((a) => a.where !== "session")
+                          .map((a) => (
+                            <Tooltip
+                              key={a.pid}
+                              label={[a.name, a.status]
+                                .filter(Boolean)
+                                .join(", ")}
+                              isDisabled={!a.name && !a.status}
+                            >
+                              <Badge ml={1} fontSize="2xs" colorScheme="purple">
+                                {a.tool}
+                              </Badge>
+                            </Tooltip>
+                          ))}
                       </Flex>
                     </Box>
                     {wsSessions.map((s) => sessionRow(ws, s))}
@@ -493,7 +610,7 @@ function Compute() {
               // room for both
               <Grid
                 templateColumns={
-                  search.session
+                  search.session || search.agent
                     ? {
                         base: "minmax(0, 1fr)",
                         xl: "minmax(0, 2fr) minmax(0, 3fr)",
@@ -516,7 +633,7 @@ function Compute() {
                     onChanged={() => workspacesQuery.refetch()}
                     confirmRun={undefined}
                     clearConfirmRun={() => {}}
-                    narrow={Boolean(search.session)}
+                    narrow={Boolean(search.session || search.agent)}
                     sessions={
                       selectedWorkspace.operator_platform === "windows"
                         ? undefined
@@ -534,8 +651,28 @@ function Compute() {
                         ? () => newSession(selectedWorkspace)
                         : undefined
                     }
+                    activeAgent={search.agent}
+                    onViewAgent={(pid) =>
+                      select({ workspace: search.workspace, agent: pid })
+                    }
+                    onAttachAgent={
+                      selectedWorkspace.kind === "personal"
+                        ? (pid) => newSession(selectedWorkspace, pid)
+                        : undefined
+                    }
                   />
                 </Box>
+                {search.agent !== undefined && !search.session && (
+                  <Box minW={0}>
+                    <AgentLog
+                      key={search.agent}
+                      conn={selectedConn}
+                      workspace={selectedWorkspace}
+                      pid={search.agent}
+                      onClose={() => select({ workspace: search.workspace })}
+                    />
+                  </Box>
+                )}
                 {search.session && (
                   <Box minW={0}>
                     <TerminalPane

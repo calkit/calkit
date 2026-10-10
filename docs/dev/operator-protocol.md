@@ -42,8 +42,14 @@ rejects its token and the Operator shuts down.
   `cron`), whether it's `connected` to the relay, and what workspaces it
   has, each with its Git state and pipeline run state: `running`,
   `running_stages`, `running_since`, and `last_run` (`status`, `started`,
-  `ended`, and `failed_stages`), and when it was last active
-  (`last_activity`), and whether a restart is pending (`restart_pending`).
+  `ended`, and `failed_stages`), when it was last active
+  (`last_activity`), and the coding agents running there (`agents`), and
+  whether a restart is pending (`restart_pending`).
+  Each agent, e.g., Claude Code, Codex, or opencode, is found by its
+  command and working directory, however it was started, and has its
+  `tool`, `pid`, when it `started`, `where` it runs (`session`, one of the
+  Operator's, `tmux`, or another `terminal`), the `app` it was started
+  from, e.g., `Code`, and the `name` and `status` it gives itself, if any.
   It returns the relay URL, an Operator relay token, `connect`, which
   tells an Operator in cron mode whether to connect, and `restart`, which
   passes on a restart its owner asked for.
@@ -167,6 +173,8 @@ Requests carry an `id`, answered by `{"type": "result", "id": ...,
 and attaches the channel to it.
 An optional `command` is typed into the shell once it starts, e.g.,
 `calkit run`, and the session carries on as a shell afterwards.
+With `attach`, an agent's PID, it attaches to the tmux pane the agent runs
+in instead.
 Sessions aren't supported on Windows yet.
 Attaching sends the session's recent output first, so a reattaching
 browser sees the screen.
@@ -184,10 +192,11 @@ These act on a workspace with Git, DVC, and the network, so the Operator
 runs them in a thread, one at a time per workspace, and replies when
 they're done.
 Each takes `id` and `workspace`, and only `workspace.status`,
-`workspace.git_status`, and `workspace.run_log` work on managed
-workspaces, which are checked out with `--force` to run stages.
-`workspace.git_status` and `workspace.run_log` never wait on another
-action, and while a run goes, `workspace.status` and `workspace.stop`
+`workspace.git_status`, `workspace.run_log`, and `workspace.agent_log`
+work on managed workspaces, which are checked out with `--force` to run
+stages.
+`workspace.git_status`, `workspace.run_log`, and `workspace.agent_log`
+never wait on another action, and while a run goes, `workspace.status` and `workspace.stop`
 don't either.
 
 | Browser sends          | Other fields                                                          |
@@ -200,6 +209,7 @@ don't either.
 | `workspace.ignore`     | `path`, `commit`                                                      |
 | `workspace.run`        | `stages`                                                              |
 | `workspace.run_log`    |                                                                       |
+| `workspace.agent_log`  | `pid`, `limit`                                                        |
 | `workspace.stop`       |                                                                       |
 | `workspace.new`        | `branch`                                                              |
 | `workspace.discard`    |                                                                       |
@@ -211,6 +221,11 @@ browser asks for both and shows Git's first.
 `workspace.pull` only fast-forwards, returning `diverged` when it can't,
 unless `merge` is true, in which case it merges, undoing a merge that
 conflicts.
+
+`workspace.agent_log` returns the end of a running agent's conversation as
+`entries`, each with a `role` (`user`, `assistant`, or `tool`), `text`, and
+`time`, read from the log the agent keeps, or `null` for one whose log
+can't be read, e.g., opencode's.
 
 `workspace.run` runs without a terminal and replies when it's done, with
 `ok` and the end of its `output`; meanwhile the browser follows it with

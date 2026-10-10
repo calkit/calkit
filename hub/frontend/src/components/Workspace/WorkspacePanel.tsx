@@ -34,9 +34,10 @@ import AddPath from "./AddPath"
 import DiscardChanges from "./DiscardChanges"
 import IgnorePath from "./IgnorePath"
 import NewStage from "./NewStage"
+import NewWorkspace from "./NewWorkspace"
 import SaveFiles from "./SaveFiles"
 
-export type Modal = "save" | "discard" | "new_stage"
+export type Modal = "save" | "discard" | "new_stage" | "new_workspace"
 
 const PANEL_COLLAPSED_KEY = "calkit-workspace-panel-collapsed"
 
@@ -315,12 +316,26 @@ export default function WorkspacePanel({
             </Badge>
           </Flex>
         )}
+        {editable && (
+          <Tooltip label="Another workspace for this project, on a branch">
+            <Button
+              size="xs"
+              variant="ghost"
+              leftIcon={<FiPlus />}
+              ml="auto"
+              isDisabled={!connected}
+              onClick={() => setModal("new_workspace")}
+            >
+              Workspace
+            </Button>
+          </Tooltip>
+        )}
         <IconButton
           aria-label="Refresh status"
           icon={<FiRefreshCw />}
           size="xs"
           variant="ghost"
-          ml="auto"
+          ml={editable ? undefined : "auto"}
           onClick={refresh}
           isLoading={statusQuery.isFetching}
           isDisabled={!connected}
@@ -656,6 +671,12 @@ export default function WorkspacePanel({
             onClose={() => setModal(undefined)}
             request={request}
             onDone={refresh}
+          />
+          <NewWorkspace
+            isOpen={modal === "new_workspace"}
+            onClose={() => setModal(undefined)}
+            request={request}
+            onDone={onChanged}
           />
         </>
       )}

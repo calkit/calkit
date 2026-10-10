@@ -42,7 +42,7 @@ const computeSearchSchema = z.object({
   // The workspace whose details are shown, as "<operator ID>:<path>"
   workspace: z.string().optional(),
   // An open modal for acting on that workspace
-  modal: z.enum(["save", "discard", "new_stage"]).optional(),
+  modal: z.enum(["save", "discard", "new_stage", "new_workspace"]).optional(),
   // A run asked for from another page, e.g., the pipeline's, which waits
   // for a click here: a stage's name, or "*" for the whole pipeline
   confirm_run: z.string().optional(),

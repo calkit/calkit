@@ -1028,6 +1028,24 @@ def clone_project(git_repo_url: str) -> str:
     return dest
 
 
+def new_workspace(wdir: str, branch: str) -> dict:
+    """Create another workspace for the project in ``wdir`` on ``branch``,
+    as a worktree sharing its DVC cache, in ``~/calkit`` where it's found,
+    returning its path.
+    """
+    # A branch name, which can't be an option or climb out of ~/calkit
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch) or (
+        ".." in branch
+    ):
+        raise ValueError(f"Invalid branch name '{branch}'")
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-.")
+    path = os.path.join(
+        config.get_user_home(), "calkit", f"{os.path.basename(wdir)}-{name}"
+    )
+    _calkit(["new", "workspace", branch, "--path", path], wdir)
+    return {"path": path}
+
+
 # Browser requests that act on a workspace, run off the event loop since
 # they wait on Git, DVC, and the network
 WORKSPACE_ACTIONS: dict[str, Any] = {
@@ -1041,6 +1059,7 @@ WORKSPACE_ACTIONS: dict[str, Any] = {
     "workspace.run": run_pipeline,
     "workspace.stop": stop_run,
     "workspace.run_log": get_run_log,
+    "workspace.new": new_workspace,
 }
 # Actions that change nothing, so needn't take the workspace from other
 # hubs' Operators, and may act on managed workspaces too
@@ -1479,6 +1498,9 @@ class Operator:
                     ch, {"type": "error", "id": req_id, "error": str(e)}
                 )
             return
+        # So the hub lists a new workspace right away
+        if kind == "workspace.new":
+            await self.check_in_quietly()
         if req_id is not None:
             await self.send(
                 ch, {"type": "result", "id": req_id, "result": result}

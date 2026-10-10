@@ -42,7 +42,7 @@ const computeSearchSchema = z.object({
   // The session shown, as "<operator ID>:<session ID>", in its workspace
   session: z.string().optional(),
   // An open modal for acting on the workspace
-  modal: z.enum(["save", "discard", "new_stage"]).optional(),
+  modal: z.enum(["save", "discard", "new_stage", "new_workspace"]).optional(),
   // Narrowing the list down
   q: z.string().optional(),
   show: z.enum(["running", "changes", "out_of_sync"]).optional(),

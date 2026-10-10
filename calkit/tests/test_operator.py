@@ -672,6 +672,16 @@ def test_workspace_actions(tmp_path, monkeypatch):
             assert sleeper.wait(timeout=10) != 0
         finally:
             operator._runs.pop(wdir, None)
+    # Another workspace for the project goes beside it in ~/calkit, where
+    # it's found, and branch names can't be options or climb out of there
+    created = operator.new_workspace(wdir, "fix/axes")
+    assert created["path"] == os.path.join(tmp_path, "calkit", "demo-fix-axes")
+    assert created["path"] in [
+        ws["path"] for ws in operator.discover_workspaces({"workspaces": []})
+    ]
+    for bad in ["--force", "-b", "../up", "a b", ""]:
+        with pytest.raises(ValueError):
+            operator.new_workspace(wdir, bad)
     subprocess.run(["git", "checkout", "--", "."], cwd=wdir, check=True)
     # Changes to DVC-tracked files show up too, and discarding puts back
     # what was committed with either

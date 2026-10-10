@@ -199,6 +199,7 @@ While a run goes, `workspace.status`, `workspace.run_log`, and
 | `workspace.run`       | `stages`                                                              |
 | `workspace.run_log`   |                                                                       |
 | `workspace.stop`      |                                                                       |
+| `workspace.new`       | `branch`                                                              |
 | `workspace.discard`   |                                                                       |
 | `workspace.add_stage` | `name`, `cmd`, `deps`, `outs`, `calkit_type`, `calkit_object`, `push` |
 
@@ -207,6 +208,9 @@ While a run goes, `workspace.status`, `workspace.run_log`, and
 `workspace.run_log`, which returns the latest run's log `name`, named by
 when it started, and the end of the `log`, however that run was started.
 `workspace.stop` interrupts the run in progress, as Ctrl+C would.
+`workspace.new` runs `calkit new workspace` to make another workspace for
+the project on `branch`, a Git worktree sharing the workspace's DVC cache,
+in `~/calkit`, where the Operator finds it, and returns its `path`.
 
 `workspaces.clone`, with `id` and `git_repo_url`, clones a project into
 `~/calkit` with the machine's own Git credentials, where it becomes a

@@ -201,7 +201,13 @@ def _resolve_repo_and_ignore_path(
     else:
         abs_path = (repo_root / path_obj).resolve()
     # If the path is inside a submodule, use that repo and relative path.
-    for submodule in repo.submodules:
+    # Listing submodules runs Git, so first look for a checkout to be in.
+    in_checkout = any(
+        (parent / ".git").exists()
+        for parent in abs_path.parents
+        if parent != repo_root and parent.is_relative_to(repo_root)
+    )
+    for submodule in repo.submodules if in_checkout else []:
         submodule_root = (repo_root / submodule.path).resolve()
         if abs_path == submodule_root:
             continue

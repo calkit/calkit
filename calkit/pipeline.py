@@ -996,16 +996,18 @@ def get_status(
                     Path(os.path.relpath(out.fs_path)).as_posix()
                     for out in dvc_repo.index.outs
                 ]
-                if with_data_status:
-                    try:
-                        dvc_data_status = dict(dvc_repo.data_status())
-                    except Exception:
-                        pass
                 if with_storage_problems:
                     try:
                         storage_problems = calkit.dvc.get_storage_problems(
                             dvc_repo=dvc_repo, ck_info=ck_info
                         )
+                    except Exception:
+                        pass
+                # Last, since switching to HEAD to diff against it drops the
+                # workspace index
+                if with_data_status:
+                    try:
+                        dvc_data_status = dict(dvc_repo.data_status())
                     except Exception:
                         pass
             raw_status = calkit.dvc.status_as_posix(raw_status)

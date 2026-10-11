@@ -1,0 +1,58 @@
+name: example-multi-hpc
+title: Calkit multi-HPC example
+
+environments:
+  cluster1:
+    kind: slurm
+    host: cluster.inst1.edu
+    default_options:
+      - --gpus=1
+    default_setup:
+      - module load something
+  cluster2:
+    kind: pbs
+    host: other-cluster.inst2.edu
+    default_options:
+      - --nodes=10
+      - --partition=my-partition
+    default_setup:
+      - module load something_else
+  default_system:
+    kind: system
+  either-cluster:
+    kind: switch
+    switch:
+      - when:
+          - host_equals: cluster.inst1.edu
+        use: cluster1
+      - when:
+          - host_equals: other-cluster.inst2.edu
+        use: cluster2
+      - use: default_system
+    # Lock 'environment' if you want stage-specific environment settings to be
+    # enforced, and for stages to be invalidated when moving to a different
+    # cluster.
+    lock: []
+  # This environment automatically determines if there is a scheduler
+  # available, uses it if so, and doesn't if it's not
+  maybe-scheduler:
+    kind: auto-scheduler
+  plotting:
+    kind: uv-venv
+    path: envs/plotting.txt
+    python: "3.14"
+
+pipeline:
+  stages:
+    my-simulation:
+      kind: shell-script
+      script_path: scripts/run.sh
+      environment: either-cluster
+      outputs:
+        - data/simulation
+    figures:
+      kind: python-script
+      script_path: scripts/plot.py
+      environment: plotting
+      inputs:
+        - from_stage_outputs: my-simulation

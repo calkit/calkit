@@ -1141,12 +1141,9 @@ def get_agent_log(wdir: str, pid: int, limit: int = 40) -> dict:
                 continue
             content = (item.get("message") or {}).get("content")
             if isinstance(content, str):
-                add(item["type"], content, time)
-                continue
+                content = [dict(type="text", text=content)]
             for part in content or []:
-                if part.get("type") == "text":
-                    add(item["type"], part.get("text"), time)
-                elif part.get("type") == "tool_use":
+                if part.get("type") == "tool_use":
                     tool_input = part.get("input") or {}
                     detail = tool_input.get("description") or (
                         tool_input.get("command")
@@ -1154,6 +1151,39 @@ def get_agent_log(wdir: str, pid: int, limit: int = 40) -> dict:
                         or ""
                     )
                     add("tool", f"{part.get('name')}: {detail}", time)
+                    continue
+                text = part.get("text")
+                if part.get("type") != "text" or not isinstance(text, str):
+                    continue
+                # What Claude Code adds itself comes as tagged user text,
+                # e.g., notices of background tasks and slash commands
+                tag = re.match(r"<([\w-]+)>", text.lstrip())
+                if item["type"] == "assistant" or tag is None:
+                    add(item["type"], text, time)
+                elif tag[1] == "task-notification":
+                    summary = re.search(
+                        r"<summary>(.*?)</summary>", text, re.S
+                    )
+                    if summary:
+                        add("event", summary[1], time)
+                elif tag[1] == "command-name":
+                    command = re.search(r"<command-name>(.*?)</", text, re.S)
+                    args = re.search(r"<command-args>(.*?)</", text, re.S)
+                    add(
+                        "user",
+                        " ".join(m[1].strip() for m in (command, args) if m),
+                        time,
+                    )
+                elif tag[1] == "local-command-stdout":
+                    stdout = re.search(r">(.*)</", text, re.S)
+                    if stdout:
+                        add(
+                            "event",
+                            re.sub(r"\x1b\[[0-9;]*m", "", stdout[1]),
+                            time,
+                        )
+                elif tag[1] not in ("local-command-caveat", "system-reminder"):
+                    add("user", text, time)
         else:
             payload = item.get("payload") or {}
             if item.get("type") != "response_item":

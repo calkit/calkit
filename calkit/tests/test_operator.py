@@ -268,6 +268,24 @@ def test_agents(tmp_path, monkeypatch):
                     ]
                 },
             },
+            # What Claude Code adds itself reads as what happened
+            *[
+                {"type": "user", "timestamp": "t3", "message": {"content": c}}
+                for c in [
+                    "<task-notification>\n<task-id>b1</task-id>\n"
+                    "<status>completed</status>\n<summary>Background "
+                    'command "Wait" completed (exit code 1)</summary>\n'
+                    "</task-notification>",
+                    "<local-command-caveat>Caveat</local-command-caveat>",
+                    "<command-name>/export</command-name>\n"
+                    "<command-message>export</command-message>\n"
+                    "<command-args>notes.txt</command-args>",
+                    "<local-command-stdout>\x1b[1mExported\x1b[22m"
+                    "</local-command-stdout>",
+                    "<system-reminder>Context</system-reminder>",
+                    '\n<pasted_content id="1">x</pasted_content>',
+                ]
+            ],
         ]
         with open(transcript, "w") as f:
             f.write("".join(json.dumps(line) + "\n" for line in lines))
@@ -276,9 +294,21 @@ def test_agents(tmp_path, monkeypatch):
             {"role": "user", "text": "Hi", "time": "t1"},
             {"role": "assistant", "text": "Plotting", "time": "t2"},
             {"role": "tool", "text": "Bash: Run the plots", "time": "t2"},
+            {
+                "role": "event",
+                "text": 'Background command "Wait" completed (exit code 1)',
+                "time": "t3",
+            },
+            {"role": "user", "text": "/export notes.txt", "time": "t3"},
+            {"role": "event", "text": "Exported", "time": "t3"},
+            {
+                "role": "user",
+                "text": '<pasted_content id="1">x</pasted_content>',
+                "time": "t3",
+            },
         ]
         assert operator.get_agent_log(wdir, claude, limit=1)["entries"] == [
-            {"role": "tool", "text": "Bash: Run the plots", "time": "t2"}
+            log["entries"][-1]
         ]
         # Codex's are found by where they were started
         rollouts = os.path.join(home, ".codex", "sessions", "2026", "10")

@@ -6,6 +6,7 @@ import {
   Flex,
   Grid,
   Heading,
+  Icon,
   IconButton,
   Select,
   Spinner,
@@ -19,7 +20,13 @@ import {
   redirect,
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
-import { FiChevronDown, FiChevronRight, FiTerminal, FiX } from "react-icons/fi"
+import {
+  FiChevronDown,
+  FiChevronRight,
+  FiInfo,
+  FiTerminal,
+  FiX,
+} from "react-icons/fi"
 import { z } from "zod"
 
 import {
@@ -166,6 +173,19 @@ function AgentLog({
                 <Text fontSize="xs" fontFamily="mono" color="ui.dim">
                   {e.text}
                 </Text>
+              ) : e.role === "event" ? (
+                <Flex
+                  align="center"
+                  gap={2}
+                  fontSize="xs"
+                  color="ui.dim"
+                  borderLeftWidth="2px"
+                  borderColor="ui.dim"
+                  pl={2}
+                >
+                  <Icon as={FiInfo} flexShrink={0} />
+                  <Text whiteSpace="pre-wrap">{e.text}</Text>
+                </Flex>
               ) : (
                 <>
                   <Text

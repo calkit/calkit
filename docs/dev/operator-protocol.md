@@ -231,8 +231,8 @@ unless `merge` is true, in which case it merges, undoing a merge that
 conflicts.
 
 `workspace.agent_log` returns the end of a running agent's conversation as
-`entries`, each with a `role` (`user`, `assistant`, or `tool`), `text`, and
-`time`, read from the log the agent keeps, or `null` for one whose log
+`entries`, each with a `role` (`user`, `assistant`, `tool`, or `event`,
+e.g., a background task finishing), `text`, and `time`, read from the log the agent keeps, or `null` for one whose log
 can't be read, e.g., opencode's.
 
 `workspace.run` runs without a terminal and replies when it's done, with

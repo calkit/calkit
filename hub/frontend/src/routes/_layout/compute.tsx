@@ -65,7 +65,8 @@ const computeSearchSchema = z.object({
     .optional(),
   // Most recently active first, unless sorted by name
   sort: z.enum(["name"]).optional(),
-  // IDs of Operators whose workspaces are hidden
+  // IDs of Operators whose workspaces are hidden, and projects whose are,
+  // as "<operator ID>:<project>"
   collapsed: z.array(z.string()).optional(),
   // An agent followed in the workspace, by its PID, when it isn't in one
   // of the Operator's sessions
@@ -345,9 +346,11 @@ function Compute() {
   const byActivity = (a: Workspace, b: Workspace) =>
     (b.last_activity ?? "").localeCompare(a.last_activity ?? "")
   const collapsed = new Set(search.collapsed ?? [])
-  const toggleCollapsed = (opId: string) => {
+  // Operators by ID, and projects' groups of workspaces as
+  // "<operator ID>:<project>"
+  const toggleCollapsed = (key: string) => {
     const next = new Set(collapsed)
-    next.has(opId) ? next.delete(opId) : next.add(opId)
+    next.has(key) ? next.delete(key) : next.add(key)
     navigate({
       search: (prev) => ({
         ...prev,
@@ -362,14 +365,14 @@ function Compute() {
   )
   const operatorStatus = (op: OperatorOut) =>
     op.is_online ? "online" : op.is_asleep ? "asleep" : "offline"
-  const sessionRow = (ws: Workspace, s: SessionInfo) => {
+  const sessionRow = (ws: Workspace, s: SessionInfo, nested: boolean) => {
     const key = `${ws.operator_id}:${s.id}`
     return (
       <Flex
         key={s.id}
         align="center"
         gap={2}
-        pl={8}
+        pl={nested ? 12 : 8}
         pr={2}
         py={1}
         cursor="pointer"
@@ -388,6 +391,58 @@ function Compute() {
           </Tooltip>
         )}
       </Flex>
+    )
+  }
+  // A workspace, under its Operator, or its project when it has others
+  const workspaceRow = (ws: Workspace, nested: boolean) => {
+    const key = workspaceKey(ws)
+    const wsSessions = getSessions(ws)
+    return (
+      <Box key={key}>
+        <Box
+          pl={nested ? 8 : 4}
+          pr={2}
+          py={1}
+          cursor="pointer"
+          borderRadius="md"
+          bg={
+            search.workspace === key && !search.session ? selectedBg : undefined
+          }
+          _hover={{ bg: selectedBg }}
+          onClick={() => select({ workspace: key })}
+        >
+          <Flex align="center" gap={2}>
+            <Text fontSize="sm" fontWeight="medium" noOfLines={1}>
+              {nested
+                ? ws.path.split("/").pop()
+                : ws.project ?? ws.path.split("/").pop()}
+            </Text>
+            {ws.kind === "managed" && <Badge fontSize="2xs">managed</Badge>}
+          </Flex>
+          <Flex align="center" wrap="wrap" rowGap={1}>
+            <Tooltip label={ws.path}>
+              <Text fontSize="xs" color="ui.dim" noOfLines={1}>
+                {ws.branch ?? "detached"}@{ws.commit?.slice(0, 7) ?? "?"}
+              </Text>
+            </Tooltip>
+            <WorkspaceBadges ws={ws} />
+            {(ws.agents ?? [])
+              .filter((a) => a.where !== "session")
+              .map((a) => (
+                <Tooltip
+                  key={a.pid}
+                  label={[a.name, a.status].filter(Boolean).join(", ")}
+                  isDisabled={!a.name && !a.status}
+                >
+                  <Badge ml={1} fontSize="2xs" colorScheme="purple">
+                    {a.tool}
+                  </Badge>
+                </Tooltip>
+              ))}
+          </Flex>
+        </Box>
+        {wsSessions.map((s) => sessionRow(ws, s, nested))}
+      </Box>
     )
   }
   if (operatorsQuery.isPending || workspacesQuery.isPending) {
@@ -476,6 +531,13 @@ function Compute() {
           )
           if (search.sort !== "name") opWorkspaces.sort(byActivity)
           if (filtering && opWorkspaces.length === 0) return null
+          // A project's workspaces together, where its first one would be
+          const projectGroups: [string, Workspace[]][] = []
+          for (const ws of opWorkspaces) {
+            const project = ws.project ?? ws.path
+            const group = projectGroups.find(([p]) => p === project)
+            group ? group[1].push(ws) : projectGroups.push([project, [ws]])
+          }
           const isCollapsed = collapsed.has(opId)
           const conn = connections.get(opId)
           // Listed over the relay once it connects, which takes a moment
@@ -541,62 +603,44 @@ function Compute() {
                   No workspaces
                 </Text>
               )}
-              {(isCollapsed ? [] : opWorkspaces).map((ws) => {
-                const key = workspaceKey(ws)
-                const wsSessions = getSessions(ws)
-                return (
-                  <Box key={key}>
-                    <Box
-                      pl={4}
-                      pr={2}
-                      py={1}
-                      cursor="pointer"
-                      borderRadius="md"
-                      bg={
-                        search.workspace === key && !search.session
-                          ? selectedBg
-                          : undefined
-                      }
-                      _hover={{ bg: selectedBg }}
-                      onClick={() => select({ workspace: key })}
-                    >
-                      <Flex align="center" gap={2}>
+              {!isCollapsed &&
+                projectGroups.map(([project, group]) => {
+                  if (group.length === 1) return workspaceRow(group[0], false)
+                  const groupKey = `${opId}:${project}`
+                  const isGroupCollapsed = collapsed.has(groupKey)
+                  return (
+                    <Box key={groupKey}>
+                      <Flex
+                        align="center"
+                        gap={2}
+                        pl={4}
+                        pr={2}
+                        py={1}
+                        cursor="pointer"
+                        borderRadius="md"
+                        _hover={{ bg: selectedBg }}
+                        onClick={() => toggleCollapsed(groupKey)}
+                      >
+                        {isGroupCollapsed ? (
+                          <FiChevronRight />
+                        ) : (
+                          <FiChevronDown />
+                        )}
                         <Text fontSize="sm" fontWeight="medium" noOfLines={1}>
-                          {ws.project ?? ws.path.split("/").pop()}
+                          {project}
                         </Text>
-                        {ws.kind === "managed" && (
-                          <Badge fontSize="2xs">managed</Badge>
+                        <Text fontSize="xs" color="ui.dim">
+                          {group.length}
+                        </Text>
+                        {group.some((ws) => ws.running) && (
+                          <Spinner size="xs" color="blue.400" />
                         )}
                       </Flex>
-                      <Flex align="center" wrap="wrap" rowGap={1}>
-                        <Tooltip label={ws.path}>
-                          <Text fontSize="xs" color="ui.dim" noOfLines={1}>
-                            {ws.branch ?? "detached"}@
-                            {ws.commit?.slice(0, 7) ?? "?"}
-                          </Text>
-                        </Tooltip>
-                        <WorkspaceBadges ws={ws} />
-                        {(ws.agents ?? [])
-                          .filter((a) => a.where !== "session")
-                          .map((a) => (
-                            <Tooltip
-                              key={a.pid}
-                              label={[a.name, a.status]
-                                .filter(Boolean)
-                                .join(", ")}
-                              isDisabled={!a.name && !a.status}
-                            >
-                              <Badge ml={1} fontSize="2xs" colorScheme="purple">
-                                {a.tool}
-                              </Badge>
-                            </Tooltip>
-                          ))}
-                      </Flex>
+                      {!isGroupCollapsed &&
+                        group.map((ws) => workspaceRow(ws, true))}
                     </Box>
-                    {wsSessions.map((s) => sessionRow(ws, s))}
-                  </Box>
-                )
-              })}
+                  )
+                })}
             </Box>
           )
         })}

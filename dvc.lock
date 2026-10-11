@@ -73,6 +73,10 @@ stages:
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
+    - path: calkit/docx.py
+      hash: md5
+      md5: 3f34445a3e65cf2c10f908b84de55fd2
+      size: 55475
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: aac6dcb0a4fe5ea44486d1830a2329b5
@@ -286,8 +290,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 86ea8968302219126aa1f673ce764b8c
-      size: 9390
+      md5: bd413de62914535938002f8c83feac18
+      size: 9415
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
@@ -315,5 +319,5 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: cfe6696e64e7f76bcd5c11721d0cf1cd
+      md5: f9719237ae754463ea36aa2215166baf
       size: 137550

@@ -28,6 +28,7 @@ stages:
       scripts/plot-latex-word-round-trip.py
     deps:
       - scripts/plot-latex-word-round-trip.py
+      - calkit/docx.py
       - results/latex-word-round-trip/original.pdf
       - results/latex-word-round-trip/review.docx
       - results/latex-word-round-trip/rebuilt.pdf

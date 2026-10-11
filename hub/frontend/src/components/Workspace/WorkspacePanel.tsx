@@ -16,7 +16,14 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
+import {
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import {
   FiChevronDown,
   FiChevronRight,
@@ -30,6 +37,7 @@ import {
 import type { AgentInfo, Workspace } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import LoadingSpinner from "../Common/LoadingSpinner"
+import Markdown from "../Common/Markdown"
 import Tooltip from "../Common/Tooltip"
 import type { OperatorConnection, SessionInfo } from "../Operators/connection"
 import AddPath from "./AddPath"
@@ -201,9 +209,16 @@ export default function WorkspacePanel({
     status?.dvc?.committed?.modified ?? [],
   )
   const staleStages: string[] = status?.pipeline?.stale_stage_names ?? []
-  const questionText = (index: number): string =>
-    status?.questions?.questions?.find((q: any) => q.index === index)
-      ?.question ?? `Question ${index}`
+  // Rendered as the project's pages do, with its math
+  const showQuestion = (index: number, numbered = false): ReactNode => (
+    <>
+      {numbered && `Q${index}: `}
+      <Markdown inline>
+        {status?.questions?.questions?.find((q: any) => q.index === index)
+          ?.question ?? `Question ${index}`}
+      </Markdown>
+    </>
+  )
   const staleDetail: Record<string, any> = status?.pipeline?.stale_stages ?? {}
   // From the latest check-in until the live status arrives
   const runningStages: string[] =
@@ -695,7 +710,7 @@ export default function WorkspacePanel({
                       </Tooltip>
                       <Flex gap={1} ml="auto" flexShrink={0} align="center">
                         {stage.questions.map((index) => (
-                          <Tooltip key={index} label={questionText(index)}>
+                          <Tooltip key={index} label={showQuestion(index)}>
                             <Badge fontSize="2xs" colorScheme="teal">
                               Q{index}
                             </Badge>
@@ -704,10 +719,10 @@ export default function WorkspacePanel({
                         {stage.feeds_questions.length > 0 && (
                           <Tooltip
                             label={
-                              <Box whiteSpace="pre-line">
-                                {stage.feeds_questions
-                                  .map((i) => `Q${i}: ${questionText(i)}`)
-                                  .join("\n")}
+                              <Box>
+                                {stage.feeds_questions.map((i) => (
+                                  <Box key={i}>{showQuestion(i, true)}</Box>
+                                ))}
                               </Box>
                             }
                           >
@@ -930,8 +945,12 @@ export default function WorkspacePanel({
                         <Code fontSize="xs">{stage.name}</Code>{" "}
                         {[...stage.questions, ...stage.feeds_questions]
                           .slice(0, 5)
-                          .map((i) => `Q${i}: ${questionText(i)}`)
-                          .join("; ")}
+                          .map((i, n) => (
+                            <Fragment key={i}>
+                              {n > 0 && "; "}
+                              {showQuestion(i, true)}
+                            </Fragment>
+                          ))}
                         {stage.questions.length + stage.feeds_questions.length >
                           5 &&
                           ` (+${stage.questions.length + stage.feeds_questions.length - 5} more)`}

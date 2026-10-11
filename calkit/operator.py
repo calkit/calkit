@@ -2473,6 +2473,9 @@ def _launchd_plist(at_boot: bool) -> bytes:
         "StandardOutPath": get_log_path(),
         "StandardErrorPath": get_log_path(),
         "EnvironmentVariables": {"HOME": config.get_user_home()},
+        # Without one, launchd throttles its CPU and disk use, which made
+        # looking over workspaces take minutes while people waited on it
+        "ProcessType": "Interactive",
     }
     if at_boot:
         import pwd

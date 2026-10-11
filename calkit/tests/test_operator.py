@@ -528,6 +528,8 @@ def test_service_files(tmp_path, monkeypatch):
     assert agent["KeepAlive"] == {"SuccessfulExit": False}
     assert agent["StandardOutPath"] == operator.get_log_path()
     assert "UserName" not in agent
+    # Not throttled like a background job
+    assert agent["ProcessType"] == "Interactive"
     assert operator._launchd_plist_path(at_boot=False).startswith(
         str(tmp_path)
     )

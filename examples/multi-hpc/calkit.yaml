@@ -2,19 +2,20 @@ name: example-multi-hpc
 title: Calkit multi-HPC example
 
 environments:
+  # With no 'host', each scheduler is the one on the machine Calkit runs on,
+  # which the switch below picks by hostname
   cluster1:
     kind: slurm
-    host: cluster.inst1.edu
     default_options:
       - --gpus=1
     default_setup:
       - module load something
   cluster2:
     kind: pbs
-    host: other-cluster.inst2.edu
+    # Passed to qsub as is, so these are PBS options
     default_options:
-      - --nodes=10
-      - --partition=my-partition
+      - -l select=10
+      - -q my-queue
     default_setup:
       - module load something_else
   default_system:
@@ -23,20 +24,32 @@ environments:
     kind: switch
     switch:
       - when:
-          - host_equals: cluster.inst1.edu
+          - hostname_matches: "*.inst1.edu"
         use: cluster1
       - when:
-          - host_equals: other-cluster.inst2.edu
+          - hostname_matches: "*.inst2.edu"
         use: cluster2
-      - use: default_system
-    # Lock 'environment' if you want stage-specific environment settings to be
-    # enforced, and for stages to be invalidated when moving to a different
-    # cluster.
-    lock: []
-  # This environment automatically determines if there is a scheduler
-  # available, uses it if so, and doesn't if it's not
+    # Elsewhere, e.g., on a laptop, this picks nothing, so the simulation is
+    # skipped and stays out of date in 'calkit status' rather than running
+    # there. Stages depend on each option's definition, so editing, e.g.,
+    # cluster1's 'default_setup' reruns them, but moving between clusters
+    # doesn't.
+  # This environment uses whichever scheduler is available, and runs
+  # directly on the machine if there's none
+  any-slurm:
+    kind: slurm
+  any-pbs:
+    kind: pbs
   maybe-scheduler:
-    kind: auto-scheduler
+    kind: switch
+    switch:
+      - when:
+          - app_exists: sbatch
+        use: any-slurm
+      - when:
+          - app_exists: qsub
+        use: any-pbs
+      - use: default_system
   plotting:
     kind: uv-venv
     path: envs/plotting.txt
@@ -56,3 +69,5 @@ pipeline:
       environment: plotting
       inputs:
         - from_stage_outputs: my-simulation
+      outputs:
+        - figures/simulation.png

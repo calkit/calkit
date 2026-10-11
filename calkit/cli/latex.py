@@ -2010,11 +2010,6 @@ def to_docx(
             return out
 
         existing = listing() - {job + ".bbl"}
-        # Dated like the PDF, so \today matches it and a rebuild of an
-        # unchanged source doesn't change
-        tex_env_vars = _tex_env_vars(
-            calkit.latex.get_source_date_epoch(source)
-        )
         # TeX can loop forever, e.g., older TeX4ht on a cases environment,
         # so a run gets a time limit, and loses its LaTeX child with it
         import time
@@ -2028,7 +2023,6 @@ def to_docx(
                 proc = subprocess.Popen(
                     m4h,
                     cwd=src_dir,
-                    env=os.environ | tex_env_vars,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     start_new_session=sys.platform != "win32",
@@ -2061,7 +2055,6 @@ def to_docx(
                         no_check=True,
                         verbose=False,
                         dep="make4ht",
-                        env_vars=tex_env_vars,
                     ),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -2580,20 +2573,7 @@ def to_docx(
         dirty = any(repo.is_dirty(path=p) for p in {ln.path for ln in lines})
     except Exception:
         pass
-    # At random, so each export can be told apart, unless the build is asked
-    # to be reproducible, in which case it comes from what was exported
-    if os.environ.get("SOURCE_DATE_EPOCH"):
-        doc.save()
-        export_id = str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                json.dumps(
-                    [calkit.get_md5(output), rev, source, original, equations]
-                ),
-            )
-        )
-    else:
-        export_id = str(uuid.uuid4())
+    export_id = str(uuid.uuid4())
     doc.write_original(
         calkit.docx.Original(
             export_id,

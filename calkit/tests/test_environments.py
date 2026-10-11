@@ -2060,6 +2060,39 @@ def test_switch_env(tmp_dir, monkeypatch):
     # A switch of runtimes can't wrap another env
     envs_def["rt"] = {"kind": "switch", "switch": [option("py")]}
     assert not envs.switch_is_outer("rt", envs_def)
+    # An option only the switch uses can be defined in place, named after
+    # the switch and its position, and is recorded by that name
+    envs_def["inline"] = {
+        "kind": "switch",
+        "switch": [
+            {
+                "when": [is_linux],
+                "use": {"kind": "slurm", "max_concurrent_jobs": 2},
+            },
+            {"use": {"kind": "system"}},
+        ],
+    }
+    assert envs.get_switch_options("inline", envs_def) == [
+        "inline.1",
+        "inline.2",
+    ]
+    assert envs.switch_is_outer("inline", envs_def)
+    assert envs.resolve_switch("inline", envs_def) == "inline.2"
+    assert envs.get_env("inline.2", envs_def) == {"kind": "system"}
+    assert envs.get_env("here", envs_def) == {"kind": "system"}
+    for missing in ["inline.3", "inline.0", "inline.x", "here.1", "nope.1"]:
+        assert envs.get_env(missing, envs_def) is None
+    with open(envs.write_switch_env_lock("inline", envs_def)) as f:
+        inline_lock = json.load(f)
+    assert [o["use"] for o in inline_lock["switch"]] == [
+        "inline.1",
+        "inline.2",
+    ]
+    assert inline_lock["options"]["inline.1"] == {"kind": "slurm"}
+    envs_def["inline.1"] = {"kind": "system"}
+    with pytest.raises(ValueError, match="already has that name"):
+        envs.get_switch_options("inline", envs_def)
+    del envs_def["inline"], envs_def["inline.1"]
     # The definitions lock is the same on every machine, and changes when an
     # option's definition or spec does
     with open("requirements.txt", "w") as f:

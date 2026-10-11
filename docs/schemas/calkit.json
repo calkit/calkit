@@ -9439,7 +9439,7 @@
       "type": "object"
     },
     "SwitchEnvironment": {
-      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_exists``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.",
+      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_exists``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.",
       "properties": {
         "description": {
           "anyOf": [
@@ -9554,9 +9554,74 @@
       "description": "An environment a switch picks, and when.",
       "properties": {
         "use": {
-          "description": "Name of the environment to use.",
-          "title": "Use",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "discriminator": {
+                "mapping": {
+                  "conda": "#/$defs/CondaEnvironment",
+                  "docker": "#/$defs/DockerEnvironment",
+                  "julia": "#/$defs/JuliaEnvironment",
+                  "matlab": "#/$defs/MatlabEnvironment",
+                  "nix": "#/$defs/NixEnvironment",
+                  "pbs": "#/$defs/PBSEnvironment",
+                  "pixi": "#/$defs/PixiEnvironment",
+                  "renv": "#/$defs/REnvironment",
+                  "slurm": "#/$defs/SlurmEnvironment",
+                  "system": "#/$defs/SystemEnvironment",
+                  "uv": "#/$defs/UvEnvironment",
+                  "uv-venv": "#/$defs/UvVenvEnvironment",
+                  "venv": "#/$defs/VenvEnvironment"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/CondaEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/DockerEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/JuliaEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/MatlabEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/PixiEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/REnvironment"
+                },
+                {
+                  "$ref": "#/$defs/SlurmEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/PBSEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/VenvEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/UvEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/UvVenvEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/NixEnvironment"
+                },
+                {
+                  "$ref": "#/$defs/SystemEnvironment"
+                }
+              ]
+            }
+          ],
+          "description": "Name of the environment to use, or its definition, e.g., 'kind: slurm', for one only this switch uses.",
+          "title": "Use"
         },
         "when": {
           "anyOf": [

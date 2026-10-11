@@ -1064,14 +1064,14 @@ def get_gated_stages(
             if picked is None:
                 reason = envs_mod.describe_switch_no_match(env_name, env)
                 break
-            resolved.append((picked, envs[picked]))
+            resolved.append((picked, (envs_mod.get_env(picked, envs) or {})))
             if env.get("lock"):
                 switch_locks.append(
                     (
                         env_name,
                         envs_mod.switch_machine_lock_env(env),
                         picked,
-                        envs[picked],
+                        (envs_mod.get_env(picked, envs) or {}),
                     )
                 )
         # Checked on the machine the stage runs on, which a remote outer
@@ -1121,9 +1121,11 @@ def get_gated_stages(
                 and machine_name is None
                 and local_machines
                 and check(
-                    ["requirements", None, envs[local_machines[0]]],
+                    ["requirements", None, dict(resolved)[local_machines[0]]],
                     lambda: requirements_problem(
-                        machine_requirements(envs[local_machines[0]]),
+                        machine_requirements(
+                            dict(resolved)[local_machines[0]]
+                        ),
                         None,
                         {},
                     ),
@@ -2166,6 +2168,7 @@ def to_dvc(
     import calkit.questions
     from calkit.environments import (
         SWITCH_KIND,
+        get_env,
         get_env_input_env_vars,
         get_env_input_paths,
         get_env_lock_fpath,
@@ -2446,7 +2449,9 @@ def to_dvc(
             names += get_env_input_env_vars(env)
             if env.get("kind") == SWITCH_KIND:
                 for option in get_switch_options(env_name, environments):
-                    names += get_env_input_env_vars(environments[option])
+                    names += get_env_input_env_vars(
+                        get_env(option, environments) or {}
+                    )
         stage._env_var_names = sorted(set(names))
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows

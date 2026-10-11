@@ -3652,7 +3652,7 @@ def run_in_env(
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
     env_name = res.name
-    env = envs[env_name]
+    env = res.env
     if env.get("kind") == calkit.environments.SWITCH_KIND:
         from calkit.cli.scheduler import _gate_switch_machine_lock
 
@@ -3667,7 +3667,10 @@ def run_in_env(
         _gate_switch_machine_lock(env_name, env, picked, envs, ck_info)
         if verbose:
             typer.echo(f"Environment '{env_name}' picks '{picked}' here")
-        env_name, env = picked, envs[picked]
+        env_name, env = (
+            picked,
+            (calkit.environments.get_env(picked, envs) or {}),
+        )
     # Only a system env runs setup commands here; a scheduler env's go
     # through 'calkit scheduler batch', and the other kinds hand the
     # command to a runtime with no shell of its own to prepare. Refused

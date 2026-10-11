@@ -3091,16 +3091,16 @@ def test_run_switch_env(tmp_dir):
             "cluster": {
                 "kind": "switch",
                 "switch": [
+                    # Defined in place, since only the switch uses it
                     {
                         "when": [{"env_var_equals": "CK_TEST_SITE=cluster"}],
-                        "use": "slurm-env",
+                        "use": {
+                            "kind": "slurm",
+                            "default_setup": ["export WHERE=slurm"],
+                        },
                     },
                     {"use": "here"},
                 ],
-            },
-            "slurm-env": {
-                "kind": "slurm",
-                "default_setup": ["export WHERE=slurm"],
             },
             "here": {"kind": "system", "default_setup": ["export WHERE=here"]},
         },

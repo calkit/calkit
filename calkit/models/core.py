@@ -1350,6 +1350,25 @@ SwitchCondition = Annotated[
 ]
 
 
+# Any environment but a switch, for one a switch defines in place
+InlineEnvironment = Annotated[
+    CondaEnvironment
+    | DockerEnvironment
+    | JuliaEnvironment
+    | MatlabEnvironment
+    | PixiEnvironment
+    | REnvironment
+    | SlurmEnvironment
+    | PBSEnvironment
+    | VenvEnvironment
+    | UvEnvironment
+    | UvVenvEnvironment
+    | NixEnvironment
+    | SystemEnvironment,
+    Discriminator("kind"),
+]
+
+
 class SwitchOption(BaseModel):
     """An environment a switch picks, and when."""
 
@@ -1360,7 +1379,10 @@ class SwitchOption(BaseModel):
         "option to be picked. Only the last option may leave it out, to "
         "be picked when no other is.",
     )
-    use: str = Field(description="Name of the environment to use.")
+    use: str | InlineEnvironment = Field(
+        description="Name of the environment to use, or its definition, "
+        "e.g., 'kind: slurm', for one only this switch uses."
+    )
 
 
 class SwitchEnvironment(Environment):
@@ -1403,6 +1425,11 @@ class SwitchEnvironment(Environment):
     where the pick is made, even when the option picked is another
     machine.
 
+    An environment only the switch uses can be defined in place instead of
+    named, e.g., ``use: {kind: slurm}``. It's named after the switch and
+    its position, e.g., ``cluster.1`` for the first option, which is what
+    ``calkit xenv -n`` and messages call it.
+
     The options are either all machines (``system``, ``slurm`` or
     ``pbs``), so the switch can be the outer half of a composite
     environment like ``cluster:py``, or all runtimes, e.g., one per
@@ -1442,12 +1469,11 @@ class SwitchEnvironment(Environment):
     def check_default_is_last(
         cls, v: list[SwitchOption]
     ) -> list[SwitchOption]:
-        for option in v[:-1]:
+        for n, option in enumerate(v[:-1], start=1):
             if option.when is None:
                 raise ValueError(
-                    f"Option '{option.use}' has no 'when', so it "
-                    "would always be picked; only the last option may "
-                    "leave it out"
+                    f"Option {n} has no 'when', so it would always be "
+                    "picked; only the last option may leave it out"
                 )
         return v
 

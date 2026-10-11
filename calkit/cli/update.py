@@ -1083,7 +1083,8 @@ def update_environment(
 
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
-    if env_name not in envs:
+    found = calkit.environments.get_env(env_name, envs)
+    if found is None:
         raise_error(f"Environment '{env_name}' does not exist")
     if lock:
         if add_packages:
@@ -1093,7 +1094,7 @@ def update_environment(
                 "spec of an environment that has packages, which no system "
                 "environment does"
             )
-        env = envs[env_name]
+        env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
             raise_error(
@@ -1112,7 +1113,10 @@ def update_environment(
                 raise_error(
                     calkit.environments.describe_switch_no_match(env_name, env)
                 )
-            machine_name, machine_env = picked, envs[picked]
+            machine_name, machine_env = (
+                picked,
+                (calkit.environments.get_env(picked, envs) or {}),
+            )
             env = calkit.environments.switch_machine_lock_env(env)
         if not calkit.environments.system_env_locks_anything(env):
             raise_error(
@@ -1172,7 +1176,7 @@ def update_environment(
             "No updates specified. Use --add to specify packages to add, or "
             "--lock to re-lock a system environment to this machine."
         )
-    env = envs[env_name]
+    env = found
     assert isinstance(add_packages, list)
     kind = env.get("kind")
     if kind == "julia":

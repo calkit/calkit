@@ -505,9 +505,10 @@ def check_environment(
     if isinstance(envs, list):
         raise_error("Error: Environments should be a dict, not a list")
     assert isinstance(envs, dict)
-    if env_name not in envs:
+    found = calkit.environments.get_env(env_name, envs)
+    if found is None:
         raise_error(f"Environment '{env_name}' does not exist")
-    env = envs[env_name]
+    env = found
     # Docker records its inputs in its lock, which rebuilds it already
     try:
         rebuild = force or (
@@ -688,7 +689,10 @@ def check_environment(
             machine_env = calkit.environments.switch_machine_lock_env(env)
             try:
                 system_info = calkit.environments.picked_machine_info(
-                    picked, envs[picked], ck_info, lock=env.get("lock")
+                    picked,
+                    (calkit.environments.get_env(picked, envs) or {}),
+                    ck_info,
+                    lock=env.get("lock"),
                 )
                 write_system_env_lock(
                     env_name=env_name, env=machine_env, system_info=system_info
@@ -2095,9 +2099,10 @@ def check_matlab_env(
     """
     ck_info = calkit.load_calkit_info()
     environments = ck_info.get("environments", {})
-    if env_name not in environments:
+    found = calkit.environments.get_env(env_name, environments)
+    if found is None:
         raise_error(f"Environment '{env_name}' not found in calkit.yaml")
-    env = environments[env_name]
+    env = found
     if env.get("kind") != "matlab":
         raise_error(f"Environment '{env_name}' is not a MATLAB environment")
     if "version" not in env:

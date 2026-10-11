@@ -1026,8 +1026,12 @@ def get_version_checked_app_names(
         # A switch may pick any of its options here that are local
         for env in list(stage_envs):
             if env.get("kind") == SWITCH_KIND:
+                # An option is named or, when only the switch uses it,
+                # defined in place
                 options = [
-                    envs.get(o.get("use")) or {}
+                    o["use"]
+                    if isinstance(o.get("use"), dict)
+                    else envs.get(o.get("use")) or {}
                     for o in env.get("switch") or []
                     if isinstance(o, dict)
                 ]

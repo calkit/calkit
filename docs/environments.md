@@ -1297,6 +1297,11 @@ The conditions are checked on the machine Calkit runs on, which is
 where the pick is made, even when the option picked is another
 machine.
 
+An environment only the switch uses can be defined in place instead of
+named, e.g., `use: {kind: slurm}`. It's named after the switch and
+its position, e.g., `cluster.1` for the first option, which is what
+`calkit xenv -n` and messages call it.
+
 The options are either all machines (`system`, `slurm` or
 `pbs`), so the switch can be the outer half of a composite
 environment like `cluster:py`, or all runtimes, e.g., one per

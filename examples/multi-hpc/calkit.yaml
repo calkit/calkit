@@ -2,54 +2,50 @@ name: example-multi-hpc
 title: Calkit multi-HPC example
 
 environments:
-  # With no 'host', each scheduler is the one on the machine Calkit runs on,
-  # which the switch below picks by hostname
-  cluster1:
-    kind: slurm
-    default_options:
-      - --gpus=1
-    default_setup:
-      - module load something
-  cluster2:
-    kind: pbs
-    # Passed to qsub as is, so these are PBS options
-    default_options:
-      - -l select=10
-      - -q my-queue
-    default_setup:
-      - module load something_else
-  default_system:
-    kind: system
   either-cluster:
     kind: switch
+    # Each option is the scheduler on the machine Calkit runs on, defined in
+    # place since only this switch uses it
     switch:
       - when:
           - hostname_matches: "*.inst1.edu"
-        use: cluster1
+        use:
+          kind: slurm
+          default_options:
+            - --gpus=1
+          default_setup:
+            - module load something
       - when:
           - hostname_matches: "*.inst2.edu"
-        use: cluster2
+        use:
+          kind: pbs
+          # Passed to qsub as is, so these are PBS options
+          default_options:
+            - -l select=10
+            - -q my-queue
+          default_setup:
+            - module load something_else
     # Elsewhere, e.g., on a laptop, this picks nothing, so the simulation is
     # skipped and stays out of date in 'calkit status' rather than running
     # there. Stages depend on each option's definition, so editing, e.g.,
-    # cluster1's 'default_setup' reruns them, but moving between clusters
-    # doesn't.
+    # the first one's 'default_setup' reruns them, but moving between
+    # clusters doesn't.
   # This environment uses whichever scheduler is available, and runs
   # directly on the machine if there's none
-  any-slurm:
-    kind: slurm
-  any-pbs:
-    kind: pbs
   maybe-scheduler:
     kind: switch
     switch:
       - when:
           - app_exists: sbatch
-        use: any-slurm
+        use:
+          kind: slurm
       - when:
           - app_exists: qsub
-        use: any-pbs
-      - use: default_system
+        use:
+          kind: pbs
+      - use:
+          kind: system
+  # Runs anywhere uv is installed, including either cluster
   plotting:
     kind: uv-venv
     path: envs/plotting.txt

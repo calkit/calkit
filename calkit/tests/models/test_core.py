@@ -312,6 +312,27 @@ def test_switch_env_model():
         SwitchEnvironment.model_validate(
             {"kind": "switch", "use": {"else": "a"}}
         )
+    # An option can be defined in place, as any kind but a switch
+    env = SwitchEnvironment.model_validate(
+        switch(
+            {
+                "when": [{"app_exists": "sbatch"}],
+                "use": {"kind": "slurm", "default_options": ["--gpus=1"]},
+            },
+            {"use": "d"},
+        )
+    )
+    assert isinstance(env.switch[0].use, SlurmEnvironment)
+    for inline, problem in [
+        ({"kind": "switch", "switch": [{"use": "a"}]}, "slurm"),
+        ({"kind": "uv-venv"}, "path"),
+        (
+            {"kind": "uv-venv", "path": "r.txt", "requirements": ["x"]},
+            "describe a machine",
+        ),
+    ]:
+        with pytest.raises(ValidationError, match=problem):
+            SwitchEnvironment.model_validate(switch({"use": inline}))
     # Only environments that describe a machine have requirements
     reqs = ["sbatch", {"kind": "cpu-count", "min": 4}]
     slurm = SlurmEnvironment.model_validate(

@@ -769,6 +769,32 @@ def env_can_be_outer(env_name: str, envs: dict) -> bool:
     return kind in VALID_OUTER_ENV_KINDS
 
 
+def get_env(name: str, envs: dict) -> dict | None:
+    """An environment by name, including one a switch defines in place.
+
+    A switch's option written as a definition rather than a name is named
+    after the switch and its position, e.g., 'cluster.2', so it can be
+    picked, locked and run like any other.
+    """
+    if name in envs:
+        env: dict | None = envs[name]
+        return env
+    switch_name, _, position = name.rpartition(".")
+    switch = envs.get(switch_name)
+    if (
+        not isinstance(switch, dict)
+        or switch.get("kind") != SWITCH_KIND
+        or not position.isdigit()
+    ):
+        return None
+    options = switch.get("switch") or []
+    if not 1 <= int(position) <= len(options):
+        return None
+    option = options[int(position) - 1]
+    use = option.get("use") if isinstance(option, dict) else None
+    return use if isinstance(use, dict) else None
+
+
 def get_switch_options(env_name: str, envs: dict) -> list[str]:
     """The environments a switch picks from, in the order written.
 
@@ -776,8 +802,18 @@ def get_switch_options(env_name: str, envs: dict) -> list[str]:
     switch, or mixes machines with runtimes.
     """
     options: list[str] = []
-    for option in [o.use for o in _load_switch(env_name, envs)]:
-        option_env = envs.get(option)
+    for n, option_model in enumerate(_load_switch(env_name, envs), start=1):
+        if isinstance(option_model.use, str):
+            option = option_model.use
+        else:
+            option = f"{env_name}.{n}"
+            if option in envs:
+                raise ValueError(
+                    f"Switch environment '{env_name}' defines option {n} "
+                    f"in place, which is named '{option}', but an "
+                    "environment already has that name"
+                )
+        option_env = get_env(option, envs)
         if option_env is None and option == "_system":
             raise ValueError(
                 f"Switch environment '{env_name}' uses '_system'; to pick "
@@ -797,7 +833,9 @@ def get_switch_options(env_name: str, envs: dict) -> list[str]:
         if option not in options:
             options.append(option)
     machines = [
-        o for o in options if envs[o].get("kind") in VALID_OUTER_ENV_KINDS
+        o
+        for o in options
+        if (get_env(o, envs) or {}).get("kind") in VALID_OUTER_ENV_KINDS
     ]
     if machines and len(machines) != len(options):
         runtimes = [o for o in options if o not in machines]
@@ -812,9 +850,8 @@ def get_switch_options(env_name: str, envs: dict) -> list[str]:
 def switch_is_outer(env_name: str, envs: dict) -> bool:
     """Whether a switch picks a machine, so it can wrap an inner env."""
     options = get_switch_options(env_name, envs)
-    return bool(options) and envs[options[0]].get("kind") in (
-        VALID_OUTER_ENV_KINDS
-    )
+    first = get_env(options[0], envs) if options else None
+    return (first or {}).get("kind") in VALID_OUTER_ENV_KINDS
 
 
 def _load_switch(env_name: str, envs: dict) -> list["SwitchOption"]:
@@ -884,9 +921,11 @@ def resolve_switch(env_name: str, envs: dict) -> str | None:
         raise TypeError(f"Unknown switch condition: {condition!r}")
 
     get_switch_options(env_name, envs)
-    for option in _load_switch(env_name, envs):
+    for n, option in enumerate(_load_switch(env_name, envs), start=1):
         if option.when is None or all(holds(c) for c in option.when):
-            return option.use
+            if isinstance(option.use, str):
+                return option.use
+            return f"{env_name}.{n}"
     return None
 
 
@@ -975,7 +1014,7 @@ def write_switch_env_lock(
     specs = {}
     locks = {}
     for option in options:
-        option_env = envs[option]
+        option_env = get_env(option, envs) or {}
         paths = get_env_input_paths(option_env, option)
         if option_env.get("path"):
             paths = [option_env["path"]] + paths
@@ -1004,12 +1043,18 @@ def write_switch_env_lock(
             if os.path.exists(full):
                 locks[option] = content_md5(full)
     lock_data = {
-        "switch": env["switch"],
+        # An option defined in place is recorded with the others, by name
+        "switch": [
+            {**o, "use": f"{env_name}.{n}"}
+            if isinstance(o.get("use"), dict)
+            else o
+            for n, o in enumerate(env["switch"], start=1)
+        ],
         "lock": env.get("lock") or [],
         "options": {
             o: {
                 k: v
-                for k, v in envs[o].items()
+                for k, v in (get_env(o, envs) or {}).items()
                 if k not in SCHEDULER_DISPATCH_ONLY_KEYS
             }
             for o in options
@@ -1021,7 +1066,8 @@ def write_switch_env_lock(
     from calkit.cli.scheduler import _mock_enabled
 
     if _mock_enabled() and any(
-        envs[o].get("kind") in ("slurm", "pbs") for o in options
+        (get_env(o, envs) or {}).get("kind") in ("slurm", "pbs")
+        for o in options
     ):
         lock_data["mocked"] = True
     lock_dir = os.path.join(get_env_lock_dir(wdir=wdir), env_name)
@@ -1195,7 +1241,7 @@ def remove_built_env(env_name: str, envs: dict) -> str | None:
     e.g., a system or Nix env, return None, and checking them is all a
     rebuild is. Julia and MATLAB envs are rebuilt by forcing their check.
     """
-    env = envs[env_name]
+    env = get_env(env_name, envs) or {}
     kind = env.get("kind")
     path = os.path.expandvars(env.get("path") or "")
     spec_dir = os.path.dirname(path)
@@ -1791,10 +1837,11 @@ def calc_data_for_env(
         except ValueError as e:
             picked = f"error: {e}"
         hashes["switch_pick"] = picked
-        if picked is not None and picked in envs:
-            hashes["switch_pick_cacheable"] = cacheable(envs[picked])
+        picked_env = get_env(picked, envs) if picked is not None else None
+        if picked is not None and picked_env is not None:
+            hashes["switch_pick_cacheable"] = cacheable(picked_env)
             hashes["switch_pick_hashes"] = calc_data_for_env(
-                env_name=picked, env=envs[picked], wdir=wdir
+                env_name=picked, env=picked_env, wdir=wdir
             )["hashes"]
     return {"hashes": hashes, "checked_at": calkit.utcnow()}
 
@@ -2347,14 +2394,14 @@ def env_from_name_and_or_path(
         ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     path = _as_posix_path(path) if path else None
-    if name and name in envs:
-        env = envs[name]
-        if path and _as_posix_path(env.get("path", "")) != path:
+    named = get_env(name, envs) if name else None
+    if name and named is not None:
+        if path and _as_posix_path(named.get("path", "")) != path:
             raise ValueError(
                 f"Environment '{name}' exists but has a different path "
-                f"('{env.get('path')}') than provided ('{path}')"
+                f"('{named.get('path')}') than provided ('{path}')"
             )
-        return EnvDetectResult(name=name, env=envs[name], exists=True)
+        return EnvDetectResult(name=name, env=named, exists=True)
     # Detect composite environments
     if name and name.count(COMPOSITE_ENV_SEP) == 1:
         outer_env_name, sub_env_name = name.split(COMPOSITE_ENV_SEP)

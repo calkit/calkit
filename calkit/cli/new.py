@@ -4411,17 +4411,20 @@ def new_workspace(
     """Create another workspace for this project, e.g., to work on a change
     without disturbing this one.
 
-    It's a Git worktree that shares this workspace's DVC cache, so its data
+    It's a Git worktree that shares the main checkout's DVC cache, so its data
     is checked out without being pulled again.
     """
     import calkit.dvc.zip
 
     repo = calkit.git.get_repo()
     root = str(repo.working_dir)
+    # The main checkout, which differs when this is a worktree itself, so
+    # every workspace is named after it and shares its DVC cache
+    main_root = os.path.dirname(os.path.abspath(repo.common_dir))
     if path is None:
         name = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-.")
         path = os.path.join(
-            os.path.dirname(root), f"{os.path.basename(root)}-{name}"
+            os.path.dirname(main_root), f"{os.path.basename(main_root)}-{name}"
         )
     path = os.path.abspath(path)
     if os.path.exists(path):
@@ -4439,10 +4442,15 @@ def new_workspace(
     if os.path.isdir(os.path.join(root, ".dvc")):
         # The remotes' settings, e.g., their auth, live in the local config,
         # which Git doesn't carry over
-        local_config = os.path.join(root, ".dvc", "config.local")
-        if os.path.isfile(local_config):
-            shutil.copy(local_config, os.path.join(path, ".dvc"))
-        cache_dir = calkit.dvc.get_dvc_repo(root).cache.local_cache_dir
+        cache_root = root
+        if os.path.isdir(os.path.join(main_root, ".dvc")):
+            cache_root = main_root
+        for source in (root, main_root):
+            local_config = os.path.join(source, ".dvc", "config.local")
+            if os.path.isfile(local_config):
+                shutil.copy(local_config, os.path.join(path, ".dvc"))
+                break
+        cache_dir = calkit.dvc.get_dvc_repo(cache_root).cache.local_cache_dir
         calkit.dvc.run_dvc_command(
             ["config", "--local", "cache.dir", cache_dir], cwd=path
         )

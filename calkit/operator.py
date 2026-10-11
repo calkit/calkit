@@ -1523,10 +1523,19 @@ def new_workspace(wdir: str, branch: str) -> dict:
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-.")
     home = config.get_user_home()
     roots = [os.path.realpath(os.path.join(home, r)) for r in WORKSPACE_ROOTS]
-    parent = os.path.dirname(os.path.realpath(wdir))
+    import git
+
+    # Named after the main checkout when this is a worktree itself
+    main = wdir
+    try:
+        repo = git.Repo(wdir)
+        main = os.path.dirname(os.path.abspath(repo.common_dir))
+    except (git.InvalidGitRepositoryError, git.NoSuchPathError):
+        pass
+    parent = os.path.dirname(os.path.realpath(main))
     if parent not in roots:
         parent = roots[0]
-    path = os.path.join(parent, f"{os.path.basename(wdir)}-{name}")
+    path = os.path.join(parent, f"{os.path.basename(main)}-{name}")
     _calkit(["new", "workspace", branch, "--path", path], wdir)
     return {"path": path}
 

@@ -872,6 +872,19 @@ def test_workspace_actions(tmp_path, monkeypatch):
     for bad in ["--force", "-b", "../up", "a b", ""]:
         with pytest.raises(ValueError):
             operator.new_workspace(wdir, bad)
+    # One from a worktree is named after the main checkout
+    wt = os.path.join(tmp_path, "dev", "demo-wt")
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "wt", wt], cwd=wdir, check=True
+    )
+    created = operator.new_workspace(wt, "from-wt")
+    assert created["path"] == os.path.join(tmp_path, "calkit", "demo-from-wt")
+    # A calkit package in the workspace, e.g., in a checkout of Calkit
+    # itself, doesn't stand in for the Operator's own
+    os.makedirs(os.path.join(wt, "calkit"))
+    with open(os.path.join(wt, "calkit", "__init__.py"), "w") as f:
+        f.write("raise SystemExit('shadowed')\n")
+    operator._calkit(["--version"], wt)
     # One from ~/dev goes beside it, and one from elsewhere in ~/calkit
     calls: list[list[str]] = []
     with monkeypatch.context() as m:

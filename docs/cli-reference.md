@@ -1684,7 +1684,7 @@ Options:
 
 Create another workspace for this project, e.g., to work on a change without disturbing this one.
 
-It's a Git worktree that shares this workspace's DVC cache, so its data is checked out without being pulled again.
+It's a Git worktree that shares the main checkout's DVC cache, so its data is checked out without being pulled again.
 
 Usage:
 

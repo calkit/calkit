@@ -2603,10 +2603,21 @@ def install_service(at_boot: bool = False) -> list[str]:
         fpath = _launchd_plist_path(at_boot)
         domain = "system" if at_boot else f"gui/{os.getuid()}"
         sudo = ["sudo"] if at_boot else []
+        target = f"{domain}/{service_label()}"
         subprocess.run(
-            [*sudo, "launchctl", "bootout", f"{domain}/{service_label()}"],
-            capture_output=True,
+            [*sudo, "launchctl", "bootout", target], capture_output=True
         )
+        # Bootout returns before the old Operator has stopped, and loading
+        # the new one fails until it has
+        import time
+
+        for _ in range(60):
+            loaded = subprocess.run(
+                [*sudo, "launchctl", "print", target], capture_output=True
+            )
+            if loaded.returncode != 0:
+                break
+            time.sleep(0.5)
         if at_boot:
             import tempfile
 

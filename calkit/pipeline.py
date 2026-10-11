@@ -64,13 +64,15 @@ def frozen_stage_base_names(
 def frozen_tainted_stage_names(
     ck_info: dict | None = None, wdir: str | None = None
 ) -> set[str]:
-    """Base names of frozen stages, plus every stage downstream of one.
+    """Base names of out-of-date frozen stages, plus every stage downstream.
 
     A frozen stage doesn't re-run when its inputs change, so DVC never calls
     it out of date -- and never calls anything built from its outputs out of
     date either. Nothing in a status report will say so, which is the point
     of naming them here: an answer resting on one of those outputs is
-    resting on whatever the stage last happened to produce.
+    resting on whatever the stage last happened to produce. One whose deps
+    and outs still match ``dvc.lock`` is left out, since it's as current as
+    if it weren't frozen.
 
     Read from ``dvc.lock`` where there is one, since its deps and outs are
     concrete, falling back to ``dvc.yaml``. Names come back without their

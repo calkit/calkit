@@ -194,6 +194,8 @@ class Document:
                 # Undated, as Word writes them, so the same content makes
                 # the same file
                 info = zipfile.ZipInfo(name)
+                # As written on Unix, which Windows would otherwise mark
+                info.create_system = 3
                 info.external_attr = 0o600 << 16
                 z.writestr(info, data, zipfile.ZIP_DEFLATED)
 

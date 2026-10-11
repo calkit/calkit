@@ -303,9 +303,20 @@ def test_docx_round_trip(
         calkit.cli.latex.to_docx("paper/main.pdf", engine="word")
     assert runs and runs[0][-3:] == ["calkit", "run", "build-paper"]
     Path("calkit.yaml").write_text("", encoding="utf-8")
+    first = calkit.docx.Document("paper/main-for-review.docx").read_original()
+    assert first is not None
+    # Exported again for a reproducible build, it makes the same file
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
+    exports = []
+    for _ in range(2):
+        calkit.cli.latex.to_docx("paper/main.pdf", engine="word", force=True)
+        exports.append(Path("paper/main-for-review.docx").read_bytes())
+    assert exports[0] == exports[1]
+    monkeypatch.delenv("SOURCE_DATE_EPOCH")
     doc = calkit.docx.Document("paper/main-for-review.docx")
     original = doc.read_original()
     assert original is not None
+    assert original.id != first.id
     assert original.source == "paper/main.tex"
     assert original.id
     assert doc.tracking and doc.protection is None
@@ -348,12 +359,15 @@ def test_docx_round_trip(
     assert comments[1].parent_id == comments[0].para_id
     model = next(p for p in paras if p.text.startswith("The mean velocity"))
     assert comments[0].bookmark == model.bookmark
-    # The record stays on this machine unless asked for, named by time
-    records = os.listdir(calkit.latex.LOCAL_DOCX_EXPORTS_DIR)
-    assert len(records) == 1
-    assert re.fullmatch(
-        rf"\d{{4}}-\d\d-\d\dT\d\d-\d\d-\d\d-{original.id}\.json",
-        records[0],
+    # The record stays on this machine unless asked for, named by time,
+    # one per export
+    records = sorted(os.listdir(calkit.latex.LOCAL_DOCX_EXPORTS_DIR))
+    matches = [
+        re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d(\.\d)?-(.+)\.json", r)
+        for r in records
+    ]
+    assert sorted(m.group(2) for m in matches if m) == sorted(
+        [first.id, original.id, original.id]
     )
     assert not os.path.exists(calkit.latex.DOCX_EXPORTS_DIR)
     export = LatexDocxExport.model_validate_json(

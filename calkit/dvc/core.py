@@ -171,6 +171,61 @@ def _hash_dirs_inside_nested_repos() -> None:
 _hash_dirs_inside_nested_repos()
 
 
+def _parse_safe_yaml_with_libyaml() -> None:
+    """Make DVC read ``dvc.yaml`` and ``dvc.lock`` with libyaml.
+
+    DVC parses them with ruamel.yaml, which is pure Python without
+    ``ruamel.yaml.clib``, and that has no wheels for some platforms. PyYAML's
+    wheels bundle libyaml, and Calkit's loader reads scalars as YAML 1.2 like
+    ruamel does, so it gives the same data several times faster. Anything it
+    rejects, e.g., a duplicate key, which PyYAML would otherwise allow, goes
+    to ruamel, so errors read as before.
+    """
+    import dvc.utils.serialize
+    import dvc.utils.serialize._yaml
+    import dvc.utils.strictyaml
+    import yaml
+
+    from calkit.core import _YamlLoader
+
+    if not yaml.__with_libyaml__:
+        return
+    original = dvc.utils.serialize._yaml.parse_yaml
+
+    class Loader(_YamlLoader):  # type: ignore[no-any-unimported]
+        def construct_mapping(self, node: Any, deep: bool = False) -> Any:
+            keys = [
+                key.value
+                for key, _ in node.value
+                if isinstance(key, yaml.ScalarNode) and key.value != "<<"
+            ]
+            if len(keys) != len(set(keys)):
+                raise yaml.constructor.ConstructorError(
+                    problem="found duplicate key",
+                    problem_mark=node.start_mark,
+                )
+            return super().construct_mapping(node, deep=deep)
+
+    def parse_yaml(text: str, path: str, typ: str = "safe") -> Any:
+        if typ == "safe":
+            try:
+                return yaml.load(text, Loader=Loader) or {}
+            except yaml.YAMLError:
+                pass
+        return original(text, path, typ=typ)
+
+    # Each module holds its own reference to the function
+    for module in (
+        dvc.utils.serialize._yaml,
+        dvc.utils.serialize,
+        dvc.utils.strictyaml,
+    ):
+        module.parse_yaml = parse_yaml  # type: ignore[attr-defined]
+
+
+_parse_safe_yaml_with_libyaml()
+
+
 # Default seconds to wait for DVC's repo-level lock during a pipeline run.
 #
 # DVC's own default is only 3 seconds (``dvc.lock.DEFAULT_TIMEOUT``), after

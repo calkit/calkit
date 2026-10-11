@@ -73,6 +73,47 @@ def test_hash_directory():
     assert res["md5"] == "ca2ffab71e00d528b974e583d789ec97.dir"
 
 
+def test_parse_safe_yaml_with_libyaml(tmp_dir):
+    import dvc.utils.serialize
+    import dvc.utils.serialize._yaml
+    import dvc.utils.strictyaml
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedMap
+
+    import calkit.dvc  # noqa: F401
+
+    parse_yaml = dvc.utils.strictyaml.parse_yaml
+    assert dvc.utils.serialize.parse_yaml is parse_yaml
+    assert dvc.utils.serialize._yaml.parse_yaml is parse_yaml
+    # Scalars that YAML 1.1 and 1.2 read differently, merge keys, and dates
+    text = (
+        "base: &base {a: 1}\n"
+        "stages:\n"
+        "  s:\n"
+        "    <<: *base\n"
+        "    cmd: echo\n"
+        "    vals: [no, on, yes, 010, 0o10, 0x1f, 1:30, 1e3, .5, ~, Null,"
+        " 2024-01-02, '010', +1, 1_000]\n"
+    )
+    assert parse_yaml(text, "dvc.yaml") == YAML(typ="safe").load(text)
+    assert parse_yaml("", "dvc.lock") == {}
+    # Round-trip loads still go to ruamel
+    assert isinstance(parse_yaml(text, "dvc.yaml", typ="rt"), CommentedMap)
+    # Duplicate keys fail as they do with ruamel, including in DVC's loader
+    with pytest.raises(dvc.utils.serialize.YAMLFileCorruptedError):
+        parse_yaml("stages:\n  a: {}\n  a: {}\n", "dvc.yaml")
+    with open("dvc.yaml", "w") as f:
+        f.write("stages:\n  a:\n    cmd: echo\n  a:\n    cmd: echo\n")
+    with pytest.raises(dvc.utils.strictyaml.YAMLSyntaxError):
+        dvc.utils.strictyaml.load("dvc.yaml")
+    # Syntax errors keep ruamel's message
+    with open("dvc.yaml", "w") as f:
+        f.write("stages: [\n")
+    with pytest.raises(dvc.utils.strictyaml.YAMLSyntaxError) as e:
+        dvc.utils.strictyaml.load("dvc.yaml")
+    assert type(e.value.__cause__).__module__.startswith("ruamel.yaml")
+
+
 def test_frozen_stage_reproduce_warning_is_suppressed(caplog):
     # Import side effect: loading calkit.dvc installs the filter on the
     # dvc.repo.reproduce logger.

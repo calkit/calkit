@@ -48,6 +48,8 @@ const computeSearchSchema = z.object({
   session: z.string().optional(),
   // An open modal for acting on the workspace
   modal: z.enum(["save", "discard", "new_stage", "new_workspace"]).optional(),
+  // Which of its pipeline's stages are listed, if not all
+  stages: z.enum(["not_up_to_date", "running"]).optional(),
   // Narrowing the list down
   q: z.string().optional(),
   show: z
@@ -627,6 +629,10 @@ function Compute() {
                     conn={selectedConn}
                     connected={selectedConn.connected}
                     modal={search.modal}
+                    stageFilter={search.stages}
+                    setStageFilter={(stages) =>
+                      navigate({ search: (prev) => ({ ...prev, stages }) })
+                    }
                     setModal={(modal) =>
                       navigate({ search: (prev) => ({ ...prev, modal }) })
                     }

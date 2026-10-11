@@ -8,6 +8,7 @@ import {
   Flex,
   Heading,
   IconButton,
+  Select,
   SimpleGrid,
   Spinner,
   Tag,
@@ -48,6 +49,9 @@ import NewWorkspace from "./NewWorkspace"
 import SaveFiles from "./SaveFiles"
 
 export type Modal = "save" | "discard" | "new_stage" | "new_workspace"
+
+// Which of the pipeline's stages are listed, if not all of them
+export type StageFilter = "not_up_to_date" | "running"
 
 const PANEL_COLLAPSED_KEY = "calkit-workspace-panel-collapsed"
 
@@ -100,6 +104,8 @@ export default function WorkspacePanel({
   activeAgent,
   onViewAgent,
   onAttachAgent,
+  stageFilter,
+  setStageFilter,
 }: {
   ws: Workspace
   conn: OperatorConnection
@@ -121,6 +127,8 @@ export default function WorkspacePanel({
   activeAgent?: number
   onViewAgent?: (pid: number) => void
   onAttachAgent?: (pid: number) => void
+  stageFilter: StageFilter | undefined
+  setStageFilter: (filter: StageFilter | undefined) => void
 }) {
   const showToast = useCustomToast()
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
@@ -231,15 +239,23 @@ export default function WorkspacePanel({
     feeds_questions: number[]
   }
   // Every stage, in order, from Operators that list them, with only the
-  // running ones' state known until the status arrives
-  const stageList: StageInfo[] | undefined =
-    statusQuery.data?.stages ??
-    stagesQuery.data?.stages?.map((stage: StageInfo) => ({
-      ...stage,
-      state: runningStages.some((n) => n.split("@")[0] === stage.name)
-        ? "running"
-        : null,
-    }))
+  // running ones' state known until the status arrives, and a run reported
+  // at check-in shown over a status from before it started
+  const stageList: StageInfo[] | undefined = (
+    statusQuery.data?.stages ?? stagesQuery.data?.stages
+  )?.map((stage: StageInfo) => ({
+    ...stage,
+    state: runningStages.some((n) => n.split("@")[0] === stage.name)
+      ? "running"
+      : stage.state,
+  }))
+  const shownStages = stageList?.filter((stage) =>
+    stageFilter === "running"
+      ? stage.state === "running"
+      : stageFilter === "not_up_to_date"
+        ? stage.state !== "ok"
+        : true,
+  )
   // Environments aren't checked here, since that can build them; this is
   // what the record of their last checks says
   const envStates: Record<string, any> =
@@ -623,26 +639,47 @@ export default function WorkspacePanel({
             <PanelSection
               title="Pipeline"
               actions={
-                editable && (
-                  <>
-                    <Button
+                <>
+                  {stageList && stageList.length > 0 && (
+                    <Select
                       size="xs"
-                      variant="primary"
-                      isLoading={runMutation.isPending}
-                      isDisabled={running}
-                      onClick={() => run()}
+                      w="auto"
+                      aria-label="Show stages"
+                      value={stageFilter ?? ""}
+                      onChange={(e) =>
+                        setStageFilter(
+                          (e.target.value || undefined) as
+                            | StageFilter
+                            | undefined,
+                        )
+                      }
                     >
-                      Run
-                    </Button>
-                    <Button
-                      size="xs"
-                      leftIcon={<FiPlus />}
-                      onClick={() => setModal("new_stage")}
-                    >
-                      New stage
-                    </Button>
-                  </>
-                )
+                      <option value="">All stages</option>
+                      <option value="not_up_to_date">Not up to date</option>
+                      <option value="running">Running</option>
+                    </Select>
+                  )}
+                  {editable && (
+                    <>
+                      <Button
+                        size="xs"
+                        variant="primary"
+                        isLoading={runMutation.isPending}
+                        isDisabled={running}
+                        onClick={() => run()}
+                      >
+                        Run
+                      </Button>
+                      <Button
+                        size="xs"
+                        leftIcon={<FiPlus />}
+                        onClick={() => setModal("new_stage")}
+                      >
+                        New stage
+                      </Button>
+                    </>
+                  )}
+                </>
               }
             >
               {statusQuery.isPending && <Spinner size="sm" color="ui.dim" />}
@@ -664,9 +701,14 @@ export default function WorkspacePanel({
                     Up to date
                   </Text>
                 )}
-              {stageList && stageList.length > 0 && (
+              {stageFilter === "running" && ready && !running && (
+                <Text fontSize="sm" color="ui.dim">
+                  Not running
+                </Text>
+              )}
+              {shownStages && shownStages.length > 0 && (
                 <Box maxH="280px" overflowY="auto">
-                  {stageList.map((stage) => (
+                  {shownStages.map((stage) => (
                     <Flex key={stage.name} align="center" gap={2} minH="24px">
                       <Box w="12px" flexShrink={0}>
                         {stage.state === "running" ? (

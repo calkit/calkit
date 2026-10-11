@@ -15,7 +15,7 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import type { AxiosError } from "axios"
@@ -69,15 +69,13 @@ const VerifyEmailCode = ({ email }: { email: string }) => {
       handleError(err, showToast)
     },
   })
+  // Not a form of its own, since it sits inside the profile form, and a
+  // nested form gets submitted by the browser, reloading the page
+  const confirm = () => {
+    if (code.length === 6) confirmMutation.mutate(code)
+  }
   return (
-    <Box
-      as="form"
-      mt={2}
-      onSubmit={(e: FormEvent) => {
-        e.preventDefault()
-        confirmMutation.mutate(code)
-      }}
-    >
+    <Box mt={2}>
       <FormControl>
         <FormLabel htmlFor="verification_code" fontSize="sm">
           Enter the 6-digit code we emailed to {email}
@@ -95,13 +93,19 @@ const VerifyEmailCode = ({ email }: { email: string }) => {
             w="8em"
             fontFamily="mono"
             letterSpacing="0.2em"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                confirm()
+              }
+            }}
           />
           <Button
-            type="submit"
             variant="primary"
             size="sm"
             isDisabled={code.length !== 6}
             isLoading={confirmMutation.isPending}
+            onClick={confirm}
           >
             Confirm
           </Button>
@@ -170,6 +174,30 @@ const UserInformation = () => {
     setEditMode(!editMode)
   }
 
+  // Changing a verified email takes a code sent to it, so the change waits
+  // here until it's entered
+  const [pendingChange, setPendingChange] = useState<UserUpdateMe | null>(null)
+  const [changeCode, setChangeCode] = useState("")
+  const sendChangeCodeMutation = useMutation({
+    mutationFn: (data: UserUpdateMe) =>
+      UsersService.postUserEmailChangeCode({
+        emailChangeCode: { email: data.email ?? "" },
+      }).then(() => data),
+    onSuccess: (data) => {
+      showToast(
+        "Code sent",
+        `Check ${currentUser?.email} for a 6-digit code.`,
+        "success",
+      )
+      setChangeCode("")
+      setPendingChange(data)
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+      reset()
+    },
+  })
+
   const mutation = useMutation({
     mutationFn: (data: UserUpdateMe) =>
       UsersService.updateCurrentUser({ userUpdateMe: data }).then(
@@ -177,6 +205,7 @@ const UserInformation = () => {
       ),
     onSuccess: () => {
       showToast("Success!", "User updated successfully.", "success")
+      setPendingChange(null)
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
@@ -187,6 +216,13 @@ const UserInformation = () => {
   })
 
   const onSubmit: SubmitHandler<UserUpdateMe> = async (data) => {
+    const emailChanged =
+      !!data.email &&
+      data.email.toLowerCase() !== currentUser?.email.toLowerCase()
+    if (emailChanged && currentUser?.email_verified) {
+      sendChangeCodeMutation.mutate(data)
+      return
+    }
     mutation.mutate(data)
   }
 
@@ -275,6 +311,66 @@ const UserInformation = () => {
           </FormControl>
           {verify && !editMode && !currentUser?.email_verified ? (
             <VerifyEmailCode email={currentUser?.email ?? ""} />
+          ) : null}
+          {pendingChange && !editMode ? (
+            <FormControl mt={2}>
+              <FormLabel htmlFor="email_change_code" fontSize="sm">
+                Enter the 6-digit code we emailed to {currentUser?.email} to
+                change it to {pendingChange.email}
+              </FormLabel>
+              <Flex gap={2} align="center" wrap="wrap">
+                <Input
+                  id="email_change_code"
+                  value={changeCode}
+                  // Inside the profile form, where Enter would submit it
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      if (changeCode.length === 6) {
+                        mutation.mutate({
+                          ...pendingChange,
+                          email_code: changeCode,
+                        })
+                      }
+                    }
+                  }}
+                  onChange={(e) =>
+                    setChangeCode(e.target.value.replace(/\D/g, ""))
+                  }
+                  inputMode="numeric"
+                  maxLength={6}
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  w="8em"
+                  fontFamily="mono"
+                  letterSpacing="0.2em"
+                />
+                <Button
+                  variant="primary"
+                  size="sm"
+                  isDisabled={changeCode.length !== 6}
+                  isLoading={mutation.isPending}
+                  onClick={() =>
+                    mutation.mutate({
+                      ...pendingChange,
+                      email_code: changeCode,
+                    })
+                  }
+                >
+                  Confirm
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setPendingChange(null)
+                    reset()
+                  }}
+                >
+                  Cancel
+                </Button>
+              </Flex>
+            </FormControl>
           ) : null}
           <Flex mt={4} gap={3}>
             <Button

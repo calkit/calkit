@@ -952,6 +952,46 @@ def test_save_to_git_with_all(tmp_dir):
     assert "figure.png" not in calkit.dvc.list_paths()
 
 
+def test_stash(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("data.csv", "w") as f:
+        f.write("1,2\n")
+    with open("notes.txt", "w") as f:
+        f.write("hi")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "data.csv"])
+    repo = git.Repo()
+    repo.git.add(["data.csv.dvc", ".gitignore", "notes.txt"])
+    repo.git.commit(["-m", "Add data"])
+    # Stashing puts back the last commit, DVC-tracked data included, with
+    # the changed data kept in the cache for the stash to point at
+    with open("data.csv", "w") as f:
+        f.write("3,4\n")
+    with open("notes.txt", "w") as f:
+        f.write("changed")
+    subprocess.check_call(["calkit", "stash", "-m", "Work in progress"])
+    with open("data.csv") as f:
+        assert f.read() == "1,2\n"
+    with open("notes.txt") as f:
+        assert f.read() == "hi"
+    assert "Work in progress" in repo.git.stash("list")
+    # Popping brings it all back
+    subprocess.check_call(["calkit", "stash", "pop"])
+    with open("data.csv") as f:
+        assert f.read() == "3,4\n"
+    with open("notes.txt") as f:
+        assert f.read() == "changed"
+    assert repo.git.stash("list") == ""
+    # Including data committed to DVC but not to Git, and with the older
+    # --pop spelling
+    subprocess.check_call(["calkit", "stash", "push"])
+    with open("data.csv") as f:
+        assert f.read() == "1,2\n"
+    subprocess.check_call(["calkit", "stash", "--pop"])
+    with open("data.csv") as f:
+        assert f.read() == "3,4\n"
+    assert subprocess.run(["calkit", "stash", "drop"]).returncode != 0
+
+
 def test_large_folder_many_small_files(tmp_dir, tmp_path):
     subprocess.check_call(["calkit", "init"])
     # Set up a bare git remote and a local DVC remote as siblings of the

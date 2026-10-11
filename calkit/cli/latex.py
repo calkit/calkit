@@ -1962,10 +1962,16 @@ def to_docx(
     elif engine == "libreoffice":
         import shlex
 
-        if calkit.docx.find_soffice() is None:
+        soffice = calkit.docx.find_soffice()
+        if soffice is None:
             raise_error(
                 "Converting without Word requires LibreOffice; install it "
-                "from https://www.libreoffice.org"
+                "with 'calkit install libreoffice'"
+            )
+        if not calkit.docx.libreoffice_has_math(soffice):
+            raise_error(
+                "LibreOffice's Math component is missing, so equations would "
+                "come out empty; install it with 'calkit install libreoffice'"
             )
         typer.echo("Converting the source with TeX4ht and LibreOffice")
         # TeX4ht runs beside the source, since its ODT misses equations

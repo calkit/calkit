@@ -130,6 +130,8 @@ INVALID_ACCOUNT_NAMES = [
     "checks",
     "cloud",
     "clouds",
+    # The user's own Operators, workspaces, and sessions
+    "compute",
     "create",
     "data",
     "datasets",
@@ -230,6 +232,19 @@ def utcnow() -> datetime:
 def params_from_url(url: str) -> dict:
     parsed_url = urlparse(url)
     return parse_qs(parsed_url.query)
+
+
+def web_url_or_none(url: Any) -> str | None:
+    """Return ``url`` if it's an http(s) URL, so it's safe to render as a
+    link, e.g., not ``javascript:``.
+    """
+    if not isinstance(url, str):
+        return None
+    try:
+        scheme = urlparse(url).scheme
+    except ValueError:
+        return None
+    return url if scheme in ("http", "https") else None
 
 
 def read_last_line_from_file(fpath: str) -> str:

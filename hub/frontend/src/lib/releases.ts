@@ -1,6 +1,7 @@
 // Helpers for the releases feature.
 
 import type { ReleaseListItem } from "../client"
+import { safeHref } from "./strings"
 
 // Validate a release name as a Git tag name (a release becomes a Git tag and a
 // calkit.yaml key), following Git's check-ref-format rules. Returns an error
@@ -79,7 +80,7 @@ export const releaseLocation = (
   const label = r.publisher
     ? LOCATION_LABELS[r.publisher.toLowerCase()] ?? r.publisher
     : "External"
-  const href = r.url ?? (r.doi ? `https://doi.org/${r.doi}` : null)
+  const href = safeHref(r.url) ?? (r.doi ? `https://doi.org/${r.doi}` : null)
   return { label, internal: false, href }
 }
 
@@ -98,9 +99,10 @@ export const releaseExternalLink = (
       label: "release page",
       internal: true,
     }
-  if (r.url)
+  const url = safeHref(r.url)
+  if (url)
     return {
-      href: r.url,
+      href: url,
       label: r.publisher === "github" ? "GitHub release" : "external release",
       internal: false,
     }

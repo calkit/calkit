@@ -34,7 +34,6 @@ dependencies = [
   "docx2pdf",
   "dulwich>=1.2.5",
   "dvc[all]==3.67.1",
-  "fastapi",
   "gitpython",
   "keyring",
   "nbconvert",
@@ -46,7 +45,7 @@ dependencies = [
   # DVC) still reads Trie._NONE_STEP in longest_prefix, so every DVC index
   # diff raises AttributeError; see treeverse/sqltrie#97
   "pygtrie<2.6.0",
-  "pyjwt",
+  "pyjwt[crypto]",
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
@@ -55,7 +54,7 @@ dependencies = [
   "ruamel.yaml>=0.19.1,<0.20",
   "rich",
   "typer==0.27.2",
-  "uvicorn",
+  "websockets",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
   "papermill>=2.6.0",

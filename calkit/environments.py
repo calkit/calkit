@@ -1101,28 +1101,16 @@ def save_cache(
     return data
 
 
-def check_all_in_pipeline(
+def get_pipeline_env_names(
     ck_info: dict | None = None,
     wdir: str | None = None,
     targets: list[str] | None = None,
-    force: bool = False,
-) -> dict:
-    """Check all environments in the pipeline, caching for efficiency.
-
-    The cache file is a simple JSON file keyed by project path.
-    Each object inside tracks the last check timestamp, pass/fail,
-    and some sort of hash(es) for the important file content involved.
+) -> tuple[list[str], dict]:
+    """Names of the environments the pipeline's stages use, and the project
+    info with markdown stages expanded, which they're defined in.
     """
     import calkit
-    from calkit.cli.check import check_environment
 
-    # TODO: ``check_environment`` should be able to take a wdir argument
-    if wdir is not None:
-        raise ValueError(
-            "Can currently only run from current working directory"
-        )
-    res = {}
-    # First get a list of environments used in the pipeline
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     # Markdown stages carry no environment of their own; the stages their
@@ -1171,6 +1159,75 @@ def check_all_in_pipeline(
         else:
             split_envs.append(env_name)
     envs_in_pipeline = list(set(split_envs))
+    return envs_in_pipeline, ck_info
+
+
+def get_cached_env_states(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+) -> dict[str, dict]:
+    """What's known about the pipeline's environments without checking them.
+
+    Checking an environment can build it, which runs whatever its spec says,
+    so this only reads the record of the last check: when it was, whether it
+    passed, and whether the spec, lock file, or prefix has changed since.
+    """
+    names, ck_info = get_pipeline_env_names(
+        ck_info=ck_info, wdir=wdir, targets=targets
+    )
+    envs = ck_info.get("environments", {})
+    states: dict[str, dict] = {}
+    for env_name in sorted(names):
+        env = envs.get(env_name)
+        if env is None or env.get("kind") in KINDS_NO_CHECK:
+            continue
+        with get_cache_db() as db:
+            cached = db.get(make_cache_key(env_name=env_name, wdir=wdir))
+        if cached is None:
+            states[env_name] = {
+                "checked_at": None,
+                "success": None,
+                "changed": None,
+            }
+            continue
+        checked_at = cached.get("checked_at")
+        up_to_date = cacheable(env) and check_cache(
+            env_name=env_name, env=env, wdir=wdir, respect_ttl=False
+        )
+        states[env_name] = {
+            "checked_at": checked_at.isoformat() if checked_at else None,
+            "success": cached.get("success", False),
+            # Whether anything it was checked against has changed since,
+            # e.g., its spec or lock file
+            "changed": not up_to_date if cached.get("success") else None,
+        }
+    return states
+
+
+def check_all_in_pipeline(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+    force: bool = False,
+) -> dict:
+    """Check all environments in the pipeline, caching for efficiency.
+
+    The cache file is a simple JSON file keyed by project path.
+    Each object inside tracks the last check timestamp, pass/fail,
+    and some sort of hash(es) for the important file content involved.
+    """
+    from calkit.cli.check import check_environment
+
+    # TODO: ``check_environment`` should be able to take a wdir argument
+    if wdir is not None:
+        raise ValueError(
+            "Can currently only run from current working directory"
+        )
+    res = {}
+    envs_in_pipeline, ck_info = get_pipeline_env_names(
+        ck_info=ck_info, wdir=wdir, targets=targets
+    )
     envs = ck_info.get("environments", {})
     for env_name in envs_in_pipeline:
         env = envs.get(env_name)

@@ -1126,6 +1126,23 @@ def find_soffice() -> str | None:
     return next((c for c in candidates if os.path.isfile(c)), None)
 
 
+def libreoffice_has_math(soffice: str) -> bool:
+    """Whether LibreOffice has its Math component, without which equations
+    come out empty.
+
+    Only Linux distributions package it separately, so only there can it be
+    missing.
+    """
+    if not sys.platform.startswith("linux"):
+        return True
+    program = os.path.dirname(os.path.realpath(soffice))
+    try:
+        names = os.listdir(program)
+    except OSError:
+        return True
+    return any(name.startswith("libsmlo.") for name in names)
+
+
 def _link_into_objects(content: str) -> str:
     """Point links into embedded objects at the objects themselves.
 

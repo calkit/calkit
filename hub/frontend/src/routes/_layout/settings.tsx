@@ -18,6 +18,7 @@ import ChangePassword from "../../components/UserSettings/ChangePassword"
 import ConnectedAccounts from "../../components/UserSettings/ConnectedAccounts"
 import DeleteAccount from "../../components/UserSettings/DeleteAccount"
 import OnboardingChecklists from "../../components/UserSettings/OnboardingChecklists"
+import Operators from "../../components/UserSettings/Operators"
 import Privacy from "../../components/UserSettings/Privacy"
 import Subscription from "../../components/UserSettings/Subscription"
 import UserInformation from "../../components/UserSettings/UserInformation"
@@ -38,14 +39,18 @@ const tabsConfig = [
   { title: "Privacy", component: Privacy, slug: "privacy" },
   { title: "Setup", component: OnboardingChecklists, slug: "setup" },
   { title: "Tokens", component: UserTokens, slug: "tokens" },
+  { title: "Operators", component: Operators, slug: "operators" },
   { title: "Danger zone", component: DeleteAccount, slug: "delete-account" },
 ]
 
-// `verify` opens the email verification code form on the profile tab, so
-// a reload or a shared link lands on the same step
+// `verify` opens the email verification code form on the profile tab, and
+// `verify_2fa` the one that comes before setting up two-factor
+// authentication, so a reload or a shared link lands on the same step.
+// They're kept apart so only one code form is ever on the page.
 const tabSearchSchema = z.object({
   tab: z.string().catch(""),
   verify: z.boolean().optional().catch(undefined),
+  verify_2fa: z.boolean().optional().catch(undefined),
 })
 
 export const Route = createFileRoute("/_layout/settings")({

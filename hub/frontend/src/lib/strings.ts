@@ -134,3 +134,23 @@ export const trimForSave = (text: string, original?: string): string => {
   // An empty document stays empty rather than becoming a lone newline.
   return trimmed === "" ? "" : `${trimmed}\n`
 }
+
+// The URL if it's safe to put in an href, i.e., same-origin relative or
+// http(s)/mailto, so project data can't smuggle in a javascript: link.
+export const safeHref = (url?: string | null): string | undefined => {
+  if (!url) return undefined
+  if (/^[/#]/.test(url)) {
+    const base = "https://base.invalid"
+    try {
+      return new URL(url, base).origin === base ? url : undefined
+    } catch {
+      return undefined
+    }
+  }
+  try {
+    const { protocol } = new URL(url)
+    return ["http:", "https:", "mailto:"].includes(protocol) ? url : undefined
+  } catch {
+    return undefined
+  }
+}

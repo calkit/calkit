@@ -347,7 +347,13 @@ def test_get_project_releases_includes_calkit_yaml(
                 "date": "2025-10-31",
                 "doi": "10.22002/640bx-nbn45",
                 "url": "https://doi.org/10.22002/640bx-nbn45",
-            }
+            },
+            # A link that isn't http(s) is dropped rather than rendered
+            "v0.2": {
+                "kind": "project",
+                "path": ".",
+                "url": "javascript:alert(1)",
+            },
         }
     }
     with (
@@ -367,8 +373,10 @@ def test_get_project_releases_includes_calkit_yaml(
         resp = client.get("/projects/test-owner/test-project/releases")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    item = data[0]
+    assert len(data) == 2
+    item = next(d for d in data if d["name"] == "v0.1")
+    assert item["url"] == "https://doi.org/10.22002/640bx-nbn45"
+    assert next(d for d in data if d["name"] == "v0.2")["url"] is None
     assert item["source"] == "calkit"
     assert item["name"] == "v0.1"
     # A missing ``public`` key means the release is public.

@@ -1641,3 +1641,69 @@ def test_env_inputs_must_be_inside_the_project():
     assert envs.get_env_input_paths(
         {"kind": "docker", "inputs": ["../outside.C"]}
     ) == ["../outside.C"]
+
+
+def test_get_cached_env_states(tmp_dir):
+    env = {"kind": "conda", "path": "environment.yml"}
+    ck_info = {
+        "environments": {"py": env, "other": env | {"path": "other.yml"}},
+        "pipeline": {
+            "stages": {
+                "a": {
+                    "kind": "shell-command",
+                    "command": "echo",
+                    "environment": "py",
+                },
+                "b": {
+                    "kind": "shell-command",
+                    "command": "echo",
+                    "environment": "other",
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("environment.yml", "w") as f:
+        f.write("dependencies:\n  - python\n")
+    lock = calkit.environments.get_env_lock_fpath(env_name="py", env=env)
+    os.makedirs(os.path.dirname(lock), exist_ok=True)
+    with open(lock, "w") as f:
+        f.write("locked\n")
+    # Never checked
+    states = calkit.environments.get_cached_env_states()
+    assert states["py"] == {
+        "checked_at": None,
+        "success": None,
+        "changed": None,
+    }
+    # Checked and unchanged, which is reported without checking again
+    calkit.environments.save_cache(env_name="py", env=env, success=True)
+    calkit.environments.save_cache(
+        env_name="other", env=ck_info["environments"]["other"], success=False
+    )
+    with mock.patch("calkit.cli.check.check_environment") as check:
+        states = calkit.environments.get_cached_env_states()
+    check.assert_not_called()
+    assert states["py"]["success"] and states["py"]["checked_at"]
+    assert states["py"]["changed"] is False
+    # A failed check says so, rather than whether anything changed since
+    assert states["other"]["success"] is False
+    assert states["other"]["changed"] is None
+    # Editing the spec shows up as a change since the last check
+    with open("environment.yml", "w") as f:
+        f.write("dependencies:\n  - python\n  - numpy\n")
+    assert calkit.environments.get_cached_env_states()["py"]["changed"]
+    # So does its lock file
+    with open("environment.yml", "w") as f:
+        f.write("dependencies:\n  - python\n")
+    assert not calkit.environments.get_cached_env_states()["py"]["changed"]
+    with open(lock, "w") as f:
+        f.write("relocked\n")
+    assert calkit.environments.get_cached_env_states()["py"]["changed"]
+    # Status reports these instead of checking when told not to check
+    status = calkit.pipeline.get_status(
+        check_environments=False, compile_to_dvc=False, clean_notebooks=False
+    )
+    assert set(status.environment_states) == {"py", "other"}
+    assert status.environment_checks == {}

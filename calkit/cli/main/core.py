@@ -60,6 +60,7 @@ from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
+from calkit.cli.operator import operator_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.scheduler import scheduler_app
 from calkit.cli.show import show_app
@@ -98,6 +99,11 @@ app.add_typer(
 )
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
 app.add_typer(sync_app, name="sync", help="Sync with external systems.")
+app.add_typer(
+    operator_app,
+    name="operator",
+    help="Manage this machine's Operator, which lets the hub use it.",
+)
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:
@@ -1993,20 +1999,6 @@ def ignore(
             repo.git.commit(["-m", f"Ignore {path}"])
 
 
-@app.command(name="local-server")
-def run_local_server() -> None:
-    """Run the local server to interact over HTTP."""
-    import uvicorn
-
-    uvicorn.run(
-        "calkit.server:app",
-        port=8866,
-        host="localhost",
-        reload=True,
-        reload_dirs=[os.path.dirname(os.path.dirname(__file__))],
-    )
-
-
 # Stage output is teed into the run log and can look exactly like a DVC log
 # record (the "%(asctime)s - %(levelname)s - %(message)s" format is a common
 # one in user scripts), so it's bracketed by these and skipped when parsing.
@@ -2320,8 +2312,20 @@ def _prune_run_logs(
             pass
 
 
-def _get_latest_run_log_content() -> str | None:
-    """Return the contents of the most recent run log, or ``None``.
+def _get_latest_run_log_content(wdir: str = ".") -> str | None:
+    """Return the contents of the most recent run log, or ``None``."""
+    latest = _get_latest_run_log_path(wdir)
+    if latest is None:
+        return None
+    try:
+        with open(latest) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _get_latest_run_log_path(wdir: str = ".") -> str | None:
+    """Return the path of the most recent run log, or ``None``.
 
     Looks in the private ``.calkit/local/logs`` directory (always written)
     and the tracked ``.calkit/logs`` directory, choosing the latest ``.log``
@@ -2329,8 +2333,8 @@ def _get_latest_run_log_content() -> str | None:
     """
     candidates = []
     for d in [
-        os.path.join(".calkit", "local", "logs"),
-        os.path.join(".calkit", "logs"),
+        os.path.join(wdir, ".calkit", "local", "logs"),
+        os.path.join(wdir, ".calkit", "logs"),
     ]:
         if os.path.isdir(d):
             candidates += [
@@ -2338,12 +2342,7 @@ def _get_latest_run_log_content() -> str | None:
             ]
     if not candidates:
         return None
-    latest = max(candidates, key=os.path.basename)
-    try:
-        with open(latest) as f:
-            return f.read()
-    except OSError:
-        return None
+    return max(candidates, key=os.path.basename)
 
 
 def _format_run_elapsed(start_iso: str) -> str:
@@ -2381,7 +2380,7 @@ def _stage_target_from_cmd(cmd: str) -> str | None:
     return targets[-1] if targets else None
 
 
-def _get_running_pipeline_status() -> dict | None:
+def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
     """Return live pipeline run progress, or ``None`` if no run is running.
 
     A run is in progress when a live process holds DVC's rwlock. The most
@@ -2390,7 +2389,7 @@ def _get_running_pipeline_status() -> dict | None:
     their own processes before the run log exists, so their stage names are
     also recovered from the lock's command strings.
     """
-    processes = calkit.dvc.get_running_pipeline_processes()
+    processes = calkit.dvc.get_running_pipeline_processes(wdir)
     if not processes:
         return None
     # Stage targets in the lock commands identify concurrently-run scheduler
@@ -2410,7 +2409,7 @@ def _get_running_pipeline_status() -> dict | None:
             "stages": {},
             "running_stages": concurrent_stages,
         }
-    content = _get_latest_run_log_content()
+    content = _get_latest_run_log_content(wdir)
     stages = (
         _stage_run_info_from_log_content(content)
         if content is not None
@@ -4095,7 +4094,8 @@ def run_in_env(
     name="install",
     help=(
         "Install a registered native dependency (e.g., pixi, uv) via its "
-        "upstream installer for the current platform."
+        "upstream installer for the current platform, or 'operator' to let "
+        "the hub use this machine."
     ),
 )
 def install_app(
@@ -4113,9 +4113,68 @@ def install_app(
             help="Skip the confirmation prompt and install immediately.",
         ),
     ] = False,
+    at_boot: Annotated[
+        bool,
+        typer.Option(
+            "--boot",
+            help=(
+                "For the operator on macOS, start at boot rather than at "
+                "login, which needs sudo."
+            ),
+        ),
+    ] = False,
+    cron: Annotated[
+        bool,
+        typer.Option(
+            "--cron",
+            help=(
+                "For the operator, have cron start it when the hub asks "
+                "rather than running it as a service, e.g., on a cluster's "
+                "login node."
+            ),
+        ),
+    ] = False,
+    ssh: Annotated[
+        str | None,
+        typer.Option(
+            "--ssh",
+            help=(
+                "For the operator, install it on another machine over SSH, "
+                "e.g., 'user@cluster.example.edu' or a host from "
+                "~/.ssh/config, installing Calkit there if needed."
+            ),
+        ),
+    ] = None,
+    no_service: Annotated[
+        bool,
+        typer.Option(
+            "--no-service",
+            help=(
+                "For the operator, only register it, e.g., to run it with "
+                "'calkit operator start' inside tmux on a cluster."
+            ),
+        ),
+    ] = False,
+    hub: Annotated[
+        str | None,
+        typer.Option(
+            "--hub",
+            help=(
+                "For the operator, the URL of the hub it's for, e.g., "
+                "https://calkit.io; a machine can have one per hub."
+            ),
+        ),
+    ] = None,
 ) -> None:
     from calkit import install as _install
 
+    if name == "operator":
+        from calkit.cli.operator import install as install_operator
+
+        install_operator(
+            hub=hub, at_boot=at_boot, cron=cron, ssh=ssh, no_service=no_service
+        )
+        return
     # Surface a platform-specific "use X instead" message before the
     # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
     unsupported = _install.get_unsupported_message(name)
@@ -4404,31 +4463,67 @@ def switch_branch(
 
 @app.command(name="stash")
 def stash(
+    action: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "'push' to stash changes, which is the default, or 'pop' to "
+                "bring back the most recent stash."
+            )
+        ),
+    ] = "push",
+    message: Annotated[
+        str | None,
+        typer.Option(
+            "--message", "-m", help="A message to stash the changes with."
+        ),
+    ] = None,
     pop: Annotated[
-        bool, typer.Option("--pop", help="Pop the most recent stash.")
+        bool, typer.Option("--pop", help="Same as 'calkit stash pop'.")
     ] = False,
 ) -> None:
-    """Stash or restore workspace changes including dvc-zip tracked dirs.
+    """Stash workspace changes, including DVC-tracked data, or bring them
+    back.
 
-    Without --pop: zips any modified workspace dirs into the DVC cache, then
-    git-stashes (saving the updated .dvc files), checks out the committed DVC
-    state, and unzips it to the workspace.
-
-    With --pop: pops the git stash (restoring the saved .dvc files), checks
-    out the stashed DVC state, and unzips it to the workspace.
+    Stashing commits changed DVC-tracked data to the DVC cache, including
+    zipped folders, so the Git stash holds pointers to it, then checks out
+    the committed data. Popping restores the stash and checks out the data
+    it points to.
     """
     if pop:
+        action = "pop"
+    if action not in ("push", "pop"):
+        raise_error(f"Unknown action '{action}'; use 'push' or 'pop'")
+
+    def changed_data() -> list[str]:
+        # DVC-tracked data that doesn't match what its pointers say
+        if not os.path.isdir(".dvc"):
+            return []
+        status = calkit.dvc.get_dvc_repo().data_status()
+        return list(status.get("uncommitted", {}).get("modified", []))
+
+    def check_out_changed_data() -> None:
+        for path in changed_data():
+            if calkit.dvc.run_dvc_command(["checkout", path, "--force"]):
+                raise_error(f"Failed to check out {path}")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+
+    if action == "pop":
         subprocess.check_call(["git", "stash", "pop"])
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
-    else:
-        # Zip any modified workspace dirs so their current state is in the DVC
-        # cache (the updated .dvc file will be captured by git stash)
-        calkit.dvc.zip.sync_all(direction="to-zip")
-        subprocess.check_call(["git", "stash"])
-        # Restore the committed zip versions and unzip them
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
+        check_out_changed_data()
+        return
+    # Zipped folders go into their zips, and changed data into the cache, so
+    # the stash can point at both
+    calkit.dvc.zip.sync_all(direction="to-zip")
+    modified = changed_data()
+    if modified and calkit.dvc.run_dvc_command(
+        ["commit", "--force", *modified]
+    ):
+        raise_error("Failed to commit changed data to the DVC cache")
+    subprocess.check_call(
+        ["git", "stash", "push"] + (["-m", message] if message else [])
+    )
+    check_out_changed_data()
 
 
 @app.command(

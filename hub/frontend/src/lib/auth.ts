@@ -21,6 +21,16 @@ export const storeTokens = (
 export const clearTokens = () => {
   localStorage.removeItem("access_token")
   localStorage.removeItem("refresh_token")
+  localStorage.removeItem("second_factor_token")
+}
+
+// Proof that this browser entered a two-factor code recently, which the
+// API asks for before opening shells on the user's machines
+export const getSecondFactorToken = (): string | null =>
+  localStorage.getItem("second_factor_token")
+
+export const storeSecondFactorToken = (token: string | null | undefined) => {
+  if (token) localStorage.setItem("second_factor_token", token)
 }
 
 const shouldBypassRefreshForRequest = (requestUrl?: string): boolean => {

@@ -100,6 +100,9 @@ class UserUpdateMe(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     github_username: str | None = Field(default=None, max_length=255)
     analytics_consent: bool | None = None
+    # The code emailed to the current address, which changing a verified
+    # one takes
+    email_code: str | None = Field(default=None, max_length=8)
 
 
 class UpdatePassword(SQLModel):
@@ -213,6 +216,11 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    operators: list["Operator"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
+    totp: Union["UserTOTP", None] = Relationship(cascade_delete=True)
     external_credentials: list[UserExternalCredential] = Relationship(
         back_populates="user",
         cascade_delete=True,
@@ -565,6 +573,129 @@ class UserToken(UserTokenPublic, table=True):
         return self.expires < utcnow()
 
 
+class UserTOTP(SQLModel, table=True):
+    """An authenticator app generating time-based one-time passwords
+    (TOTP), used as a second factor before sensitive actions, e.g.,
+    opening sessions on an Operator.
+    """
+
+    user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True)
+    # Encrypted with the app's Fernet keys
+    secret: str = Field(max_length=512)
+    created: datetime = Field(default_factory=utcnow)
+    # Null until the user proves the app works by entering a code from it
+    confirmed_at: datetime | None = Field(default=None)
+    last_verified_at: datetime | None = Field(default=None)
+    # So a code can't be used twice
+    last_used_step: int | None = Field(
+        default=None, sa_type=sqlalchemy.BigInteger
+    )
+    failed_attempts: int = 0
+    locked_until: datetime | None = Field(default=None)
+    # A code emailed when setting it up, so a leaked token alone can't add an
+    # attacker's app; stored as an HMAC like email verification codes
+    email_code_hash: str | None = Field(default=None, max_length=64)
+    email_code_expires: datetime | None = Field(default=None)
+    email_code_attempts: int = 0
+
+
+class OperatorPublic(SQLModel):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    name: str = Field(min_length=1, max_length=64)
+    hostname: str | None = Field(default=None, max_length=255)
+    machine_id: str | None = Field(default=None, max_length=255)
+    platform: str | None = Field(default=None, max_length=64)
+    calkit_version: str | None = Field(default=None, max_length=64)
+    # Hosts this Operator serves, so stages whose environment names one can
+    # run through it
+    hosts: list[str] = Field(
+        default_factory=list,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="[]"
+        ),
+    )
+    created: datetime = Field(default_factory=utcnow)
+    last_seen: datetime | None = Field(default=None)
+    # How it runs: "service", "foreground", or "cron", which only connects
+    # when asked
+    mode: str | None = Field(default=None, max_length=16)
+    # Whether it was connected to the relay at its latest check-in, which an
+    # Operator in cron mode that's only asking whether to connect isn't
+    connected: bool = False
+    # When the owner last asked it to connect, for Operators in cron mode
+    connect_requested_at: datetime | None = Field(default=None)
+    # Whether it will restart once idle, e.g., after Calkit was upgraded
+    restart_pending: bool = False
+    # Whether its owner asked it to restart and it hasn't heard yet
+    restart_requested: bool = False
+    is_active: bool = True
+
+
+class Operator(OperatorPublic, table=True):
+    # Names are unique among the user's active Operators, so a revoked
+    # one's name can be used again
+    __table_args__ = (
+        sqlalchemy.Index(
+            "uq_operator_user_name_active",
+            "user_id",
+            "name",
+            unique=True,
+            postgresql_where=sqlalchemy.text("is_active"),
+        ),
+    )
+    selector: str = Field(index=True, unique=True, max_length=32)
+    hashed_verifier: str = Field(max_length=64)
+    # Relationships
+    user: User = Relationship(back_populates="operators")
+    workspaces: list["OperatorWorkspace"] = Relationship(
+        back_populates="operator", cascade_delete=True
+    )
+
+
+class OperatorWorkspace(SQLModel, table=True):
+    """A project checkout on an Operator's machine, as of its latest
+    check-in.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "operator_id", "path", name="uq_operatorworkspace_operator_path"
+        ),
+        sqlalchemy.Index(
+            "ix_operatorworkspace_project", "owner_name", "project_name"
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operator_id: uuid.UUID = Field(
+        foreign_key="operator.id", index=True, ondelete="CASCADE"
+    )
+    path: str = Field(max_length=4096)
+    # "personal" checkouts, or "managed" ones Calkit uses to run stages
+    kind: str = Field(max_length=16)
+    # The project, lowercased for matching, if the Operator could tell
+    owner_name: str | None = Field(default=None, max_length=255)
+    project_name: str | None = Field(default=None, max_length=255)
+    branch: str | None = Field(default=None, max_length=256)
+    commit: str | None = Field(default=None, max_length=64)
+    dirty: bool | None = None
+    ahead: int | None = None
+    behind: int | None = None
+    # Whether a pipeline run held DVC's lock at the check-in
+    running: bool = False
+    # Which stages were running and since when, and how the latest run
+    # ended, as the Operator reported them
+    run_state: dict = Field(
+        default_factory=dict,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="{}"
+        ),
+    )
+    updated: datetime = Field(default_factory=utcnow)
+    # Relationships
+    operator: Operator = Relationship(back_populates="workspaces")
+
+
 class DeviceAuth(SQLModel, table=True):
     """A pending CLI device auth request."""
 
@@ -608,6 +739,14 @@ class RefreshToken(SQLModel, table=True):
     expires: datetime
     is_active: bool = True
     description: str | None = Field(default=None, max_length=256)
+    # Shared by every token rotated from the same sign-in, so it names that
+    # sign-in for as long as it lasts
+    session_id: uuid.UUID | None = Field(default=None, index=True)
+    # Whether a person signed in through the web app, rather than a script
+    # or the CLI, which some actions, e.g., opening a shell, require
+    interactive: bool = Field(
+        default=False, sa_column_kwargs=dict(server_default=sqlalchemy.false())
+    )
     # Relationships
     user: "User" = Relationship(back_populates="refresh_tokens")
 

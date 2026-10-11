@@ -151,8 +151,13 @@ INVALID_ACCOUNT_NAMES = [
     "hubs",
     "latex",
     "login",
+    # Kept for pages about the machines Operators run on
+    "machines",
     "new",
     "notifications",
+    # Kept for pages about Operators
+    "operators",
+    "ops",
     "organizations",
     "orgs",
     "pipeline",
@@ -185,6 +190,8 @@ INVALID_ACCOUNT_NAMES = [
     "user",
     "users",
     "workflows",
+    # Kept for pages about Operators' workspaces
+    "workspaces",
 ]
 
 # Names reserved for organizations, so a user can't claim the product's

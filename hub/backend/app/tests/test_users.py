@@ -58,7 +58,19 @@ def test_create_user_reserved_account_names(db: Session) -> None:
     # which org creation still permits.
     assert "calkit" not in INVALID_ACCOUNT_NAMES
     assert "calkit" in ORG_ONLY_ACCOUNT_NAMES
-    for name in ["hub", "cloud", "calkit", "Hub", "CLOUD", "settings"]:
+    for name in [
+        "hub",
+        "cloud",
+        "calkit",
+        "Hub",
+        "CLOUD",
+        "settings",
+        "compute",
+        "operators",
+        "ops",
+        "machines",
+        "workspaces",
+    ]:
         user_in = UserCreate(
             email=random_email(),
             password=random_lower_string(),

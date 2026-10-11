@@ -35,29 +35,6 @@ def digest(paths: list[str]) -> str:
     return h.hexdigest()
 
 
-def to_pdf(docx: Path, pdf: Path) -> None:
-    # As LibreOffice lays it out, which is available everywhere this runs
-    soffice = calkit.docx.find_soffice()
-    if soffice is None:
-        sys.exit("LibreOffice is needed to show the Word copy")
-    with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(
-            [
-                soffice,
-                f"-env:UserInstallation={Path(tmp, 'profile').as_uri()}",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                tmp,
-                str(docx),
-            ],
-            check=True,
-            capture_output=True,
-        )
-        shutil.move(Path(tmp, docx.stem + ".pdf"), pdf)
-
-
 OUT.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory() as tmp:
     proj = Path(tmp, "latex-word")
@@ -112,7 +89,6 @@ with tempfile.TemporaryDirectory() as tmp:
         "paper/review.docx",
     )
     shutil.copy(docx, OUT / "review.docx")
-    to_pdf(docx, OUT / "review.pdf")
     calkit_cmd(proj, "latex", "merge-docx", "paper/review.docx")
     after = digest(sources)
     # And to PDF again, rebuilding only the paper: forcing the stage would

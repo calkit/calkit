@@ -1,21 +1,14 @@
 """Show the LaTeX/Word round trip: the PDF, its Word copy, and the PDF
 built again after merging the copy back."""
 
-import subprocess
-import sys
-import tempfile
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import pypdfium2 as pdfium
 from matplotlib.patches import FancyArrowPatch
 
-import calkit.docx
-
 IN = "results/latex-word-round-trip"
 PANELS = [
     ("original.pdf", "LaTeX (PDF)"),
-    ("review.docx", "Word (.docx)"),
+    ("review.pdf", "Word (.docx)"),
     ("rebuilt.pdf", "LaTeX again (PDF)"),
 ]
 STEPS = ["calkit latex to-docx", "calkit latex merge-docx"]
@@ -23,32 +16,7 @@ STEPS = ["calkit latex to-docx", "calkit latex merge-docx"]
 
 def page_image(path: str):
     # The first page, so each panel shows the same part of the paper
-    if not path.endswith(".docx"):
-        return pdfium.PdfDocument(path)[0].render(scale=2).to_pil()
-    # As LibreOffice lays it out, which is available everywhere this runs,
-    # in a PDF that isn't kept, since LibreOffice stamps it with the time
-    soffice = calkit.docx.find_soffice()
-    if soffice is None:
-        sys.exit("LibreOffice is needed to show the Word copy")
-    with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(
-            [
-                soffice,
-                f"-env:UserInstallation={Path(tmp, 'profile').as_uri()}",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                tmp,
-                path,
-            ],
-            check=True,
-            capture_output=True,
-        )
-        pdf = pdfium.PdfDocument(Path(tmp, Path(path).stem + ".pdf"))
-        image = pdf[0].render(scale=2).to_pil()
-        pdf.close()
-        return image
+    return pdfium.PdfDocument(path)[0].render(scale=2).to_pil()
 
 
 fig, axes = plt.subplots(1, 3, figsize=(13, 6.2))

@@ -1,6 +1,7 @@
 stages:
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python
+      scripts/latex-word-round-trip.py
     deps:
       - scripts/latex-word-round-trip.py
       - calkit/cli/latex.py
@@ -16,19 +17,19 @@ stages:
     outs:
       - results/latex-word-round-trip/original.pdf
       - results/latex-word-round-trip/review.docx
-      - results/latex-word-round-trip/review.pdf
       - results/latex-word-round-trip/rebuilt.pdf
       - results/latex-word-round-trip.json:
           cache: false
           persist: false
-    desc: Automatically generated from the 'latex-word-round-trip' stage in calkit.yaml.
-      Changes made here will be overwritten.
+    desc: Automatically generated from the 'latex-word-round-trip' stage in
+      calkit.yaml. Changes made here will be overwritten.
   latex-word-round-trip-figure:
-    cmd: calkit xenv -n dev --no-check -- python scripts/plot-latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python
+      scripts/plot-latex-word-round-trip.py
     deps:
       - scripts/plot-latex-word-round-trip.py
       - results/latex-word-round-trip/original.pdf
-      - results/latex-word-round-trip/review.pdf
+      - results/latex-word-round-trip/review.docx
       - results/latex-word-round-trip/rebuilt.pdf
       - uv.lock
       - .python-version
@@ -36,8 +37,8 @@ stages:
       - docs/img/latex-word-round-trip.png:
           cache: false
           persist: false
-    desc: Automatically generated from the 'latex-word-round-trip-figure' stage in
-      calkit.yaml. Changes made here will be overwritten.
+    desc: Automatically generated from the 'latex-word-round-trip-figure' stage
+      in calkit.yaml. Changes made here will be overwritten.
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
     deps:
@@ -49,8 +50,8 @@ stages:
       - results/research-flow.json:
           cache: false
           persist: false
-    desc: Automatically generated from the 'research-flow' stage in calkit.yaml. Changes
-      made here will be overwritten.
+    desc: Automatically generated from the 'research-flow' stage in calkit.yaml.
+      Changes made here will be overwritten.
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -62,11 +63,11 @@ stages:
       - docs/img/research-flow.png
       - docs/img/research-flow-goals.png
       - docs/img/research-flow-waste.png
-    desc: Automatically generated from the 'research-flow-figure' stage in calkit.yaml.
-      Changes made here will be overwritten.
+    desc: Automatically generated from the 'research-flow-figure' stage in
+      calkit.yaml. Changes made here will be overwritten.
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4 --attendees=25
-      --supported=20 --indirect-rate=0
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4
+      --attendees=25 --supported=20 --indirect-rate=0
     deps:
       - scripts/budget.py
       - docs/one-pager/2027-budget.csv
@@ -76,11 +77,12 @@ stages:
       - results/2027-budget.json:
           cache: false
           persist: false
-    desc: Automatically generated from the 'budget-2027' stage in calkit.yaml. Changes
-      made here will be overwritten.
+    desc: Automatically generated from the 'budget-2027' stage in calkit.yaml.
+      Changes made here will be overwritten.
   one-pager/pdf:
-    cmd: calkit latex from-markdown docs/one-pager/main.md -o docs/one-pager/main.pdf
-      -e tex --no-check --template docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua
+    cmd: calkit latex from-markdown docs/one-pager/main.md -o
+      docs/one-pager/main.pdf -e tex --no-check --template
+      docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua
       --pandoc-arg=--shift-heading-level-by=-1
     deps:
       - docs/one-pager/main.md
@@ -94,10 +96,11 @@ stages:
     outs:
       - docs/one-pager/main.pdf:
           cache: true
-    desc: Automatically generated from the 'one-pager/pdf' stage in calkit.yaml. Changes
-      made here will be overwritten.
+    desc: Automatically generated from the 'one-pager/pdf' stage in calkit.yaml.
+      Changes made here will be overwritten.
   latex-image-readme/sizes:
-    cmd: calkit xenv -n dev --no-check -- python .calkit/markdown/images/latex/README.md/sizes.py
+    cmd: calkit xenv -n dev --no-check -- python
+      .calkit/markdown/images/latex/README.md/sizes.py
     deps:
       - .calkit/markdown/images/latex/README.md/sizes.py
       - calkit/latex.py
@@ -107,5 +110,5 @@ stages:
       - images/latex/sizes.json:
           cache: false
           persist: false
-    desc: Automatically generated from the 'latex-image-readme/sizes' stage in calkit.yaml.
-      Changes made here will be overwritten.
+    desc: Automatically generated from the 'latex-image-readme/sizes' stage in
+      calkit.yaml. Changes made here will be overwritten.

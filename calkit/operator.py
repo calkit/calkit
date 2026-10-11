@@ -549,15 +549,15 @@ def discover_workspaces(cfg: dict) -> list[dict]:
                 continue
             for name in sorted(os.listdir(owner_path)):
                 candidates.append((os.path.join(owner_path, name), "managed"))
-    workspaces = []
-    seen = set()
+    found: dict[str, str] = {}
     for path, kind in candidates:
         path = os.path.realpath(path)
-        if path in seen:
-            continue
-        if not os.path.isfile(os.path.join(path, "calkit.yaml")):
-            continue
-        seen.add(path)
+        if path not in found and os.path.isfile(
+            os.path.join(path, "calkit.yaml")
+        ):
+            found[path] = kind
+
+    def describe(path: str, kind: str) -> dict:
         try:
             project = calkit.detect_project_name(wdir=path)
         except Exception:
@@ -573,7 +573,13 @@ def discover_workspaces(cfg: dict) -> list[dict]:
             | get_run_state(path)
         )
         ws["last_activity"] = _last_activity(path, ws["last_run"])
-        workspaces.append(ws)
+        return ws
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Mostly waiting on Git, so they're looked at together
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        workspaces = list(pool.map(describe, found, found.values()))
     # What the hub is told of each, leaving out what's only for attaching
     # or reading its log
     agents = find_agents([ws["path"] for ws in workspaces])

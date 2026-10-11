@@ -36,6 +36,7 @@ import {
 } from "../../client"
 import ClearableInput from "../../components/Common/ClearableInput"
 import LoadingSpinner from "../../components/Common/LoadingSpinner"
+import Markdown from "../../components/Common/Markdown"
 import Tooltip from "../../components/Common/Tooltip"
 import SecondFactorPrompt from "../../components/Operators/SecondFactorPrompt"
 import TerminalPane from "../../components/Operators/TerminalPane"
@@ -195,9 +196,16 @@ function AgentLog({
                   >
                     {e.role === "user" ? "You" : agent?.tool ?? "Agent"}
                   </Text>
-                  <Text fontSize="sm" whiteSpace="pre-wrap">
-                    {e.text}
-                  </Text>
+                  {e.role === "assistant" ? (
+                    // Agents write Markdown, as their terminals render it
+                    <Box fontSize="sm">
+                      <Markdown>{e.text}</Markdown>
+                    </Box>
+                  ) : (
+                    <Text fontSize="sm" whiteSpace="pre-wrap">
+                      {e.text}
+                    </Text>
+                  )}
                 </>
               )}
             </Box>

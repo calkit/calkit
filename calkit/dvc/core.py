@@ -192,7 +192,7 @@ def _parse_safe_yaml_with_libyaml() -> None:
         return
     original = dvc.utils.serialize._yaml.parse_yaml
 
-    class Loader(_YamlLoader):  # type: ignore[no-any-unimported]
+    class Loader(_YamlLoader):
         def construct_mapping(self, node: Any, deep: bool = False) -> Any:
             keys = [
                 key.value
@@ -220,7 +220,7 @@ def _parse_safe_yaml_with_libyaml() -> None:
         dvc.utils.serialize,
         dvc.utils.strictyaml,
     ):
-        module.parse_yaml = parse_yaml  # type: ignore[attr-defined]
+        module.parse_yaml = parse_yaml
 
 
 _parse_safe_yaml_with_libyaml()

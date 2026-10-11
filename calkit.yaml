@@ -131,7 +131,6 @@ pipeline:
       outputs:
         - results/latex-word-round-trip/original.pdf
         - results/latex-word-round-trip/review.docx
-        - results/latex-word-round-trip/review.pdf
         - results/latex-word-round-trip/rebuilt.pdf
         - path: results/latex-word-round-trip.json
           storage: git
@@ -140,8 +139,9 @@ pipeline:
       script_path: scripts/plot-latex-word-round-trip.py
       environment: dev
       inputs:
+        - calkit/docx.py
         - results/latex-word-round-trip/original.pdf
-        - results/latex-word-round-trip/review.pdf
+        - results/latex-word-round-trip/review.docx
         - results/latex-word-round-trip/rebuilt.pdf
       outputs:
         - path: docs/img/latex-word-round-trip.png

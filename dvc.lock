@@ -10,12 +10,12 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 59d82d297a2c8fc4f9b1395209405421
-      size: 129201
+      md5: 60abe492ce85986d5be6e0c9b5f06b27
+      size: 128426
     - path: calkit/docx.py
       hash: md5
-      md5: 3f34445a3e65cf2c10f908b84de55fd2
-      size: 55475
+      md5: 7862d8079e091ea3c6b36208478f377c
+      size: 55141
     - path: calkit/latex.py
       hash: md5
       md5: abedc72b9d65b5cc05a887a48b922041
@@ -42,8 +42,8 @@ stages:
       size: 500
     - path: scripts/latex-word-round-trip.py
       hash: md5
-      md5: 01d52e13bad40d7509a49f7c99efceac
-      size: 4747
+      md5: a12fe2fedab33ecb8aba9a91329a0878
+      size: 5515
     - path: uv.lock
       hash: md5
       md5: 2f919b9832e2db434ac468a89e027f9f
@@ -63,8 +63,12 @@ stages:
       size: 173958
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 924c363644f0b92cdf3c1294fcea0b00
-      size: 36151
+      md5: 8508821c85cd3d73a3eacf02667e1a87
+      size: 36147
+    - path: results/latex-word-round-trip/review.pdf
+      hash: md5
+      md5: de907e9cf52ee58b97f7b6d72011e940
+      size: 121665
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/plot-latex-word-round-trip.py
@@ -81,14 +85,14 @@ stages:
       hash: md5
       md5: aac6dcb0a4fe5ea44486d1830a2329b5
       size: 173958
-    - path: results/latex-word-round-trip/review.docx
+    - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 924c363644f0b92cdf3c1294fcea0b00
-      size: 36151
+      md5: de907e9cf52ee58b97f7b6d72011e940
+      size: 121665
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
-      md5: 53cbdd1fe8da4d6897b3b0856b749857
-      size: 2652
+      md5: d9d7b45c12044f5ae8f54491c383ecd4
+      size: 1662
     - path: uv.lock
       hash: md5
       md5: 2f919b9832e2db434ac468a89e027f9f
@@ -96,8 +100,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: 319b8e33bb3087f6bf7a95b1d4e4a9ab
-      size: 207540
+      md5: ae5e4cd65eff4db1f3e3335c625ecefe
+      size: 207208
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -286,8 +290,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 8bab6cce79cec610258cffb24b6beaa5
-      size: 9520
+      md5: 6fd403e9d923292f67fd712441301773
+      size: 9570
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38

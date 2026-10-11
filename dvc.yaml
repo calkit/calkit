@@ -17,6 +17,7 @@ stages:
     outs:
       - results/latex-word-round-trip/original.pdf
       - results/latex-word-round-trip/review.docx
+      - results/latex-word-round-trip/review.pdf
       - results/latex-word-round-trip/rebuilt.pdf
       - results/latex-word-round-trip.json:
           cache: false
@@ -29,7 +30,7 @@ stages:
     deps:
       - scripts/plot-latex-word-round-trip.py
       - results/latex-word-round-trip/original.pdf
-      - results/latex-word-round-trip/review.docx
+      - results/latex-word-round-trip/review.pdf
       - results/latex-word-round-trip/rebuilt.pdf
       - uv.lock
       - .python-version

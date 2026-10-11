@@ -700,12 +700,25 @@ def child_env() -> dict[str, str]:
     return env
 
 
+# The Operator's own Calkit, since "-m calkit" would import a calkit package
+# in the working directory first, e.g., in a checkout of Calkit itself
+CALKIT_COMMAND = [
+    sys.executable,
+    "-c",
+    "import sys\n"
+    "if sys.path[0] == '': del sys.path[0]\n"
+    "sys.argv[0] = 'calkit'\n"
+    "from calkit.cli import run\n"
+    "run()",
+]
+
+
 def _calkit(args: list[str], wdir: str) -> None:
     """Run Calkit in the Operator's interpreter, raising with its output if
     it fails.
     """
     result = subprocess.run(
-        [sys.executable, "-m", "calkit", *args],
+        [*CALKIT_COMMAND, *args],
         cwd=wdir,
         env=child_env(),
         capture_output=True,
@@ -896,7 +909,7 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
         # Checking environments can build them, running whatever a repo's
         # specs say, which viewing status shouldn't do; the record of their
         # last checks is reported instead
-        [sys.executable, "-m", "calkit", "status", "--json", "--no-env-check"],
+        [*CALKIT_COMMAND, "status", "--json", "--no-env-check"],
         cwd=wdir,
         env=child_env(),
         capture_output=True,
@@ -1405,7 +1418,7 @@ def run_pipeline(wdir: str, stages: list[str] | None = None) -> dict:
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@:/-]*", str(stage)):
             raise ValueError(f"Invalid stage name '{stage}'")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "calkit", "run", *(stages or [])],
+        [*CALKIT_COMMAND, "run", *(stages or [])],
         cwd=wdir,
         env=child_env(),
         stdout=subprocess.PIPE,

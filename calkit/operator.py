@@ -767,7 +767,8 @@ def get_stage_list(wdir: str, status: dict | None) -> list[dict]:
     the questions whose answers rest on it, as evidence or upstream of it.
 
     Read from the DVC pipeline ``calkit status`` compiled, with the state and
-    the questions' evidence from what it reported.
+    the questions' evidence from what it reported, if anything, else with no
+    state.
     """
     from calkit.core import _load_yaml_readonly
 
@@ -883,7 +884,9 @@ def get_stage_list(wdir: str, status: dict | None) -> list[dict]:
                 kind=ck_stage.get("kind")
                 if isinstance(ck_stage, dict)
                 else None,
-                state="running"
+                state=None
+                if status is None
+                else "running"
                 if name in running
                 else "stale"
                 if name in stale
@@ -893,6 +896,13 @@ def get_stage_list(wdir: str, status: dict | None) -> list[dict]:
             )
         )
     return stages
+
+
+def get_workspace_stages(wdir: str) -> dict:
+    """The stage list without the status, which is quick to read, so it
+    shows while the status is on its way.
+    """
+    return {"stages": get_stage_list(wdir, None)}
 
 
 def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
@@ -1545,6 +1555,7 @@ def new_workspace(wdir: str, branch: str) -> dict:
 WORKSPACE_ACTIONS: dict[str, Any] = {
     "workspace.status": get_workspace_status,
     "workspace.git_status": get_workspace_git_status,
+    "workspace.stages": get_workspace_stages,
     "workspace.agent_log": get_agent_log,
     "workspace.pull": pull_workspace,
     "workspace.push": push_workspace,
@@ -1562,6 +1573,7 @@ WORKSPACE_ACTIONS: dict[str, Any] = {
 READ_ONLY_ACTIONS = {
     "workspace.status",
     "workspace.git_status",
+    "workspace.stages",
     "workspace.run_log",
     "workspace.agent_log",
 }
@@ -1569,6 +1581,7 @@ READ_ONLY_ACTIONS = {
 # e.g., the rest of the status, which can take a while for a large pipeline
 LOCK_FREE_ACTIONS = {
     "workspace.git_status",
+    "workspace.stages",
     "workspace.run_log",
     "workspace.agent_log",
 }

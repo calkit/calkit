@@ -192,17 +192,18 @@ These act on a workspace with Git, DVC, and the network, so the Operator
 runs them in a thread, one at a time per workspace, and replies when
 they're done.
 Each takes `id` and `workspace`, and only `workspace.status`,
-`workspace.git_status`, `workspace.run_log`, and `workspace.agent_log`
-work on managed workspaces, which are checked out with `--force` to run
-stages.
-`workspace.git_status`, `workspace.run_log`, and `workspace.agent_log`
-never wait on another action, and while a run goes, `workspace.status` and `workspace.stop`
-don't either.
+`workspace.git_status`, `workspace.stages`, `workspace.run_log`, and
+`workspace.agent_log` work on managed workspaces, which are checked out
+with `--force` to run stages.
+`workspace.git_status`, `workspace.stages`, `workspace.run_log`, and
+`workspace.agent_log` never wait on another action, and while a run goes,
+`workspace.status` and `workspace.stop` don't either.
 
 | Browser sends          | Other fields                                                          |
 | ---------------------- | --------------------------------------------------------------------- |
 | `workspace.status`     | `fetch`                                                               |
 | `workspace.git_status` | `fetch`                                                               |
+| `workspace.stages`     |                                                                       |
 | `workspace.pull`       | `merge`                                                               |
 | `workspace.push`       |                                                                       |
 | `workspace.save`       | `paths`, `message`, `to` (`git` or `dvc`), `push`                     |
@@ -223,6 +224,8 @@ upstream of that (`feeds_questions`).
 `workspace.git_status` returns the Git part of `workspace.status`, which is
 quick, while the rest can take a while for a large pipeline, so the
 browser asks for both and shows Git's first.
+`workspace.stages` likewise returns `stages` without the status, so with a
+`state` of `null` and no questions.
 `workspace.pull` only fast-forwards, returning `diverged` when it can't,
 unless `merge` is true, in which case it merges, undoing a merge that
 conflicts.

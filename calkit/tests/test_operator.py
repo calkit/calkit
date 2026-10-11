@@ -1021,6 +1021,11 @@ def test_workspace_actions(tmp_path, monkeypatch):
         },
     ]
     assert operator.get_stage_list(str(tmp_path), None) == []
+    # Without the status, every stage is there, with no state or questions
+    quick = operator.get_workspace_stages(pipeline_dir)["stages"]
+    assert [s["name"] for s in quick] == ["fetch", "sim", "plot", "other"]
+    assert {s["state"] for s in quick} == {None}
+    assert quick[2]["kind"] == "python-script" and not quick[2]["questions"]
 
     # Pulling only fast-forwards unless asked to merge, which is undone if
     # it conflicts

@@ -150,9 +150,19 @@ export default function WorkspacePanel({
         ? 5000
         : false,
   })
+  // The stage list alone is quick too, so every stage shows before their
+  // states do
+  const stagesQuery = useQuery({
+    queryKey: ["workspace-stages", ws.operator_id, ws.path],
+    queryFn: () => request("workspace.stages"),
+    enabled: connected,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
   const refresh = () => {
     gitQuery.refetch()
     statusQuery.refetch()
+    stagesQuery.refetch()
     onChanged()
   }
   // Set when a pull can't fast-forward, so merging can be offered
@@ -191,16 +201,6 @@ export default function WorkspacePanel({
     status?.dvc?.committed?.modified ?? [],
   )
   const staleStages: string[] = status?.pipeline?.stale_stage_names ?? []
-  // Every stage, in order, from Operators that list them
-  const stageList:
-    | {
-        name: string
-        kind: string | null
-        state: "running" | "stale" | "ok"
-        questions: number[]
-        feeds_questions: number[]
-      }[]
-    | undefined = statusQuery.data?.stages
   const questionText = (index: number): string =>
     status?.questions?.questions?.find((q: any) => q.index === index)
       ?.question ?? `Question ${index}`
@@ -208,6 +208,23 @@ export default function WorkspacePanel({
   // From the latest check-in until the live status arrives
   const runningStages: string[] =
     status?.pipeline?.running_stages ?? ws.running_stages ?? []
+  type StageInfo = {
+    name: string
+    kind: string | null
+    state: "running" | "stale" | "ok" | null
+    questions: number[]
+    feeds_questions: number[]
+  }
+  // Every stage, in order, from Operators that list them, with only the
+  // running ones' state known until the status arrives
+  const stageList: StageInfo[] | undefined =
+    statusQuery.data?.stages ??
+    stagesQuery.data?.stages?.map((stage: StageInfo) => ({
+      ...stage,
+      state: runningStages.some((n) => n.split("@")[0] === stage.name)
+        ? "running"
+        : null,
+    }))
   // Environments aren't checked here, since that can build them; this is
   // what the record of their last checks says
   const envStates: Record<string, any> =
@@ -647,7 +664,9 @@ export default function WorkspacePanel({
                             bg={
                               stage.state === "stale"
                                 ? "yellow.400"
-                                : "ui.success"
+                                : stage.state === "ok"
+                                  ? "ui.success"
+                                  : "gray.400"
                             }
                           />
                         )}

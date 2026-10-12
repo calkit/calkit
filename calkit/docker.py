@@ -1109,7 +1109,71 @@ def get_lock_archs(env: dict) -> list[str]:
 
 
 def image_exists(ref: str) -> bool:
-    """Return True if an image is present in the local image store."""
+    """Return True if an image is present in the local image store.
+
+    Docker's socket is asked directly where there is one, since starting the
+    CLI takes a few tenths of a second, which every status pays.
+    """
+    import hashlib
+    import http.client
+    import socket
+    import urllib.parse
+
+    def socket_path() -> str | None:
+        # Docker's own order: DOCKER_HOST, then the current context
+        host = os.environ.get("DOCKER_HOST")
+        if not host:
+            config_dir = Path(
+                os.environ.get("DOCKER_CONFIG") or Path.home() / ".docker"
+            )
+            context = os.environ.get("DOCKER_CONTEXT")
+            if not context:
+                try:
+                    with open(config_dir / "config.json") as f:
+                        context = json.load(f).get("currentContext")
+                except (OSError, ValueError):
+                    pass
+            if context and context != "default":
+                meta = (
+                    config_dir
+                    / "contexts"
+                    / "meta"
+                    / hashlib.sha256(context.encode()).hexdigest()
+                    / "meta.json"
+                )
+                with open(meta) as f:
+                    host = json.load(f)["Endpoints"]["docker"]["Host"]
+            elif sys.platform != "win32":
+                host = "unix:///var/run/docker.sock"
+        if host and host.startswith("unix://"):
+            return host.removeprefix("unix://")
+        return None
+
+    class UnixConnection(http.client.HTTPConnection):
+        def __init__(self, path: str) -> None:
+            super().__init__("localhost", timeout=5)
+            self.socket_path = path
+
+        def connect(self) -> None:
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(self.timeout)
+            self.sock.connect(self.socket_path)
+
+    try:
+        path = socket_path()
+        if path is not None and hasattr(socket, "AF_UNIX"):
+            conn = UnixConnection(path)
+            try:
+                quoted = urllib.parse.quote(ref, safe="/:")
+                conn.request("GET", f"/images/{quoted}/json")
+                code = conn.getresponse().status
+            finally:
+                conn.close()
+            if code in (200, 404):
+                return code == 200
+    except Exception:
+        pass
+    # Anything else, e.g., a remote host, is left to the CLI
     try:
         subprocess.check_output(
             ["docker", "image", "inspect", "--format", "{{.Id}}", ref],

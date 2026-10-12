@@ -1253,7 +1253,8 @@ class SystemEnvironment(Environment):
         "needs to run there is skipped by 'calkit run', and refused by "
         "'calkit xenv', until 'calkit update env --lock' is run. "
         "'auto' rewrites the lock, rerunning the stages that depend on it, "
-        "for results that should follow the machine, e.g., benchmarks.",
+        "for results that should follow the machine, e.g., ones that "
+        "depend on the version of a tool Calkit doesn't manage.",
     )
     requirements: list[RequirementType] = Field(
         default=[],
@@ -1461,7 +1462,8 @@ class SwitchEnvironment(Environment):
         "needs to run there is skipped by 'calkit run', and refused by "
         "'calkit xenv', until 'calkit update env --lock' is run. "
         "'auto' rewrites the lock, rerunning the stages that depend on it, "
-        "for results that should follow the machine, e.g., benchmarks.",
+        "for results that should follow the machine, e.g., ones that "
+        "depend on the version of a tool Calkit doesn't manage.",
     )
 
     @field_validator("switch")

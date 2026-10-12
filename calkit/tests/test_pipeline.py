@@ -4094,7 +4094,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     assert set(errors) == {"far-away", "uses-far", "bad-switch"}
     assert "hostname_match" in errors["bad-switch"]
     assert "locked to another machine" in gated["elsewhere"]
-    assert "relock: auto" in gated["elsewhere"]
+    assert "update env -n pinned --lock" in gated["elsewhere"]
     # A stage's own requirement isn't one a host would help with
     assert "'host'" not in gated["here-token"]
     assert "CK_TEST_TOKEN" in gated["needs-token"]

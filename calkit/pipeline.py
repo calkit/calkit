@@ -1000,8 +1000,7 @@ def get_gated_stages(
         return (
             f"environment '{lock_name}' is locked to another machine "
             f"({props}); to make this machine the one its results come "
-            f"from, run 'calkit update env -n {lock_name} --lock', or set "
-            "'relock: auto' on it to follow whichever machine runs it"
+            f"from, run 'calkit update env -n {lock_name} --lock'"
         ), False
 
     def paths(items: list) -> list[str]:

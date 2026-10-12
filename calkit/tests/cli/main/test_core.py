@@ -2989,8 +2989,22 @@ def test_save_new_files_in_git_stored_output_dir(tmp_dir):
                     }
                 ],
             },
+            "plot": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "wdir": "sub",
+                "command": "mkdir -p figs && echo 1 > figs/1.txt",
+                "outputs": [
+                    {
+                        "path": "figs",
+                        "storage": "git",
+                        "delete_before_run": False,
+                    }
+                ],
+            },
         }
     }
+    os.makedirs("sub")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     subprocess.check_call(["calkit", "run"])
@@ -2999,16 +3013,37 @@ def test_save_new_files_in_git_stored_output_dir(tmp_dir):
     assert "data/github/1.json" in repo.git.ls_files("data").splitlines()
     # A later run adds files to the persistent output, which belong in Git
     # with the rest of it, not ignored as if DVC cached the output, and not
-    # sent to DVC by extension either
-    new_files = ["data/github/2.json", "data/github/plot.png"]
+    # sent to DVC by extension either, including for a stage with a wdir
+    new_files = [
+        "data/github/2.json",
+        "data/github/plot.png",
+        "sub/figs/plot.png",
+    ]
     for path in new_files:
         with open(path, "w") as f:
             f.write("2")
     subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
-    tracked = repo.git.ls_files("data").splitlines()
+    tracked = repo.git.ls_files().splitlines()
     assert set(new_files) <= set(tracked)
     assert not any(repo.ignored(path) for path in new_files)
     assert not os.path.exists("data/.gitignore")
+    # Projects an older Calkit already broke have the output ignored, once
+    # per file it saw, so both run and save have to undo that
+    for run_first in [True, False]:
+        with open("data/.gitignore", "w") as f:
+            f.write("/github\n/github\n/github\n")
+        repo.git.add("data/.gitignore")
+        repo.git.commit("-m", "Ignore output")
+        with open("data/github/3.json", "w") as f:
+            f.write("3")
+        if run_first:
+            subprocess.check_call(["calkit", "run"])
+        subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+        assert "data/github/3.json" in repo.git.ls_files("data").splitlines()
+        with open("data/.gitignore") as f:
+            assert "github" not in f.read()
+        repo.git.rm("-q", "data/github/3.json")
+        repo.git.commit("-m", "Remove 3")
 
 
 @skipif_windows_docker

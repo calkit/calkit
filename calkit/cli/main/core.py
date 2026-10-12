@@ -1028,6 +1028,22 @@ def add(
         )
         repo.git.add(".dvc/config")
     dvc_paths = [] if dvc_repo is None else calkit.dvc.list_paths()
+    pipeline_output_storage = calkit.pipeline.get_output_storage_map()
+    # An ignore rule left on an output stored in Git, e.g., by an older
+    # Calkit, would hide its new files from everything below
+    for out in calkit.git.get_ignored_by_rule(
+        repo,
+        *[
+            out
+            for out, storage in pipeline_output_storage.items()
+            if storage == "git" and os.path.exists(out)
+        ],
+    ):
+        if dry_run:
+            typer.echo(f"Would un-ignore {out} since it's stored in Git")
+        else:
+            typer.echo(f"Un-ignoring {out} since it's stored in Git")
+            calkit.git.ensure_path_is_not_ignored(repo, out)
     untracked_git_files = repo.untracked_files
     if auto_commit_message:
         # See if this path is in the repo already
@@ -1135,7 +1151,6 @@ def add(
             ]:
                 paths.append(changed_file)
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
-        pipeline_output_storage = calkit.pipeline.get_output_storage_map()
         lock_out_paths = calkit.dvc.get_lock_out_paths()
         cached_out_paths: set[str] | None = None
         dvc_scm = None

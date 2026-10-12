@@ -1113,6 +1113,7 @@ def image_exists(ref: str) -> bool:
 
     Docker's socket is asked directly where there is one, since starting the
     CLI takes a few tenths of a second, which every status pays.
+    decisions/calkit.yaml has a question on how much faster that is.
     """
     import hashlib
     import http.client

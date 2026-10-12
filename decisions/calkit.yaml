@@ -28,6 +28,24 @@ questions:
           clib_s: seconds.clib
           paths: lock.paths
           kb: lock.kb
+  - question: >-
+      How much faster is checking whether a Docker image exists through
+      Docker's socket than through its CLI?
+    answer: >-
+      {speedup:.0f}x faster: {socket_ms:.0f} ms through the socket and
+      {cli_ms:.0f} ms through the CLI for an image that's there, and
+      {missing_socket_ms:.0f} ms and {missing_cli_ms:.0f} ms for one that
+      isn't. Medians of {n} checks each, taking turns.
+    evidence:
+      - kind: result
+        path: results/docker-image-check.json
+        values:
+          speedup: speedup.present
+          socket_ms: ms.present.socket
+          cli_ms: ms.present.cli
+          missing_socket_ms: ms.missing.socket
+          missing_cli_ms: ms.missing.cli
+          n: repeats
 
 environments:
   pure:
@@ -42,6 +60,10 @@ environments:
     prefix: .venv-clib
     python: "3.12"
     description: The same, plus ruamel.yaml.clib for its C loader.
+  calkit:
+    kind: uv
+    path: ../pyproject.toml
+    description: Calkit itself, from this checkout.
 
 pipeline:
   stages:
@@ -75,4 +97,16 @@ pipeline:
         - results/ruamel-yaml-clib/clib.json
       outputs:
         - path: results/ruamel-yaml-clib.json
+          storage: git
+    time-docker-image-check:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-docker-image-check.py
+      environment: calkit
+      args:
+        - --out=results/docker-image-check.json
+      inputs:
+        - ../calkit/docker.py
+      outputs:
+        - path: results/docker-image-check.json
           storage: git

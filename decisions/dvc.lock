@@ -62,3 +62,28 @@ stages:
       hash: md5
       md5: 22a356bf921c83405a4bf97ffd9a4d5b
       size: 657
+  time-docker-image-check:
+    cmd: calkit xenv -n calkit --no-check -- python 
+      scripts/time-docker-image-check.py --out=results/docker-image-check.json
+    deps:
+    - path: ../.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: ../calkit/docker.py
+      hash: md5
+      md5: 31317c47b86ac1de15a732d094cd78ce
+      size: 53114
+    - path: ../uv.lock
+      hash: md5
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
+    - path: scripts/time-docker-image-check.py
+      hash: md5
+      md5: b7e0b7ee287c112851299d0594a2d703
+      size: 2764
+    outs:
+    - path: results/docker-image-check.json
+      hash: md5
+      md5: bdd84f9de61cde9c44676ef72203729e
+      size: 4121

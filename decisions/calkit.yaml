@@ -28,6 +28,24 @@ questions:
           clib_s: seconds.clib
           paths: lock.paths
           kb: lock.kb
+  - question: >-
+      How much CPU time does building only the command being run save Typer
+      on each command?
+    answer: >-
+      {saved_ms:.0f} ms: building the CLI for 'calkit status' took
+      {status_ms:.0f} ms, against {all_ms:.0f} ms building all {commands}
+      commands, which '--help' still does, in {help_ms:.0f} ms. Medians of
+      {n} fresh interpreters each.
+    evidence:
+      - kind: result
+        path: results/cli-build.json
+        values:
+          saved_ms: saved_ms
+          status_ms: cpu_ms.status
+          all_ms: cpu_ms.all
+          help_ms: cpu_ms.help
+          commands: commands.all
+          n: repeats
 
 environments:
   pure:
@@ -42,6 +60,10 @@ environments:
     prefix: .venv-clib
     python: "3.12"
     description: The same, plus ruamel.yaml.clib for its C loader.
+  calkit:
+    kind: uv
+    path: ../pyproject.toml
+    description: Calkit itself, from this checkout.
 
 pipeline:
   stages:
@@ -75,4 +97,16 @@ pipeline:
         - results/ruamel-yaml-clib/clib.json
       outputs:
         - path: results/ruamel-yaml-clib.json
+          storage: git
+    time-cli-build:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-cli-build.py
+      environment: calkit
+      args:
+        - --out=results/cli-build.json
+      inputs:
+        - ../calkit/cli/__init__.py
+      outputs:
+        - path: results/cli-build.json
           storage: git

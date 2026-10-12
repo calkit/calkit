@@ -37,6 +37,7 @@ def _only_invoked(
     of Calkit's takes a few tenths of a second, so this leaves out the ones
     that won't run. Anything else, e.g., ``--help`` or a misspelled command,
     keeps them all, so help and suggestions list everything.
+    decisions/calkit.yaml has a question on how much that saves.
     """
     import copy
     import re

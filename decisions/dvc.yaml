@@ -40,3 +40,18 @@ stages:
     frozen: true
     desc: Automatically generated from the 'compare-dvc-lock-parsing' stage in
       calkit.yaml. Changes made here will be overwritten.
+  time-cli-build:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-cli-build.py
+      --out=results/cli-build.json
+    deps:
+      - scripts/time-cli-build.py
+      - ../calkit/cli/__init__.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/cli-build.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-cli-build' stage in
+      calkit.yaml. Changes made here will be overwritten.

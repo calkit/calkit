@@ -1033,6 +1033,7 @@ def write_switch_env_lock(
 
     def content_md5(fpath: str) -> str:
         """Hash a file or directory, with line endings normalized."""
+        # Named so a reader knows what to check it with
         if os.path.isdir(fpath):
             parts = [
                 f"{Path(os.path.relpath(f, fpath)).as_posix()}:" + file_md5(f)
@@ -1042,8 +1043,8 @@ def write_switch_env_lock(
                     for name in names
                 )
             ]
-            return hashlib.md5("\n".join(parts).encode()).hexdigest()
-        return file_md5(fpath)
+            return "md5:" + hashlib.md5("\n".join(parts).encode()).hexdigest()
+        return "md5:" + file_md5(fpath)
 
     options = get_switch_options(env_name, envs)
     env = envs[env_name]
@@ -1599,7 +1600,8 @@ def env_spec_hash(spec_fpath: str, python: str | None = None) -> str:
         content = "\n".join(requirement_lines(text.splitlines(), spec_dir))
     if python is not None:
         content += f"\npython={python}"
-    return hashlib.md5(content.encode()).hexdigest()
+    # Named so a reader knows what to check it with
+    return "md5:" + hashlib.md5(content.encode()).hexdigest()
 
 
 def _env_spec_hash_key(lock_fpath: str, wdir: str | None) -> str:

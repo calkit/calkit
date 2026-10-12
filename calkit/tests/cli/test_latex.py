@@ -1186,7 +1186,9 @@ def test_from_markdown(tmp_dir):
     # the first to cite its file
     assert r"\href{https://calkit.io/someone/proj/questions/2}{2.0}" in tex
     assert "from calkit.io/someone/proj." in tex
-    assert "Built by " + calkit.__version__.split("+")[0] in tex
+    # Without what changes from one development commit to the next
+    version = re.sub(r"\.dev\d+$", ".dev", calkit.__version__.split("+")[0])
+    assert f"Built by {version} from" in tex
     # The Markdown itself is kept current too
     assert "-->2.0<!--" in open("main.md").read()
     # Only PDFs and LaTeX can be written

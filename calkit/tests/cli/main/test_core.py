@@ -7,6 +7,7 @@ import socket
 import stat
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
@@ -1125,6 +1126,17 @@ def test_status(tmp_dir):
         ["calkit", "status", "-c", "questions"]
     ).decode()
     assert "Questions" not in out
+    # Paths tracked where they shouldn't be are pointed out with DVC's status
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
+    subprocess.check_call(["git", "add", "-f", "data.csv"])
+    out = subprocess.check_output(["calkit", "status", "-c", "dvc"], text=True)
+    assert "data.csv is tracked by both Git and DVC" in out
+    status_json = json.loads(
+        subprocess.check_output(["calkit", "status", "-c", "dvc", "--json"])
+    )
+    assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
 
 
 def test_save(tmp_dir):
@@ -1540,11 +1552,21 @@ def _spawn_lock_holder(*signature: str):
     and holder verification see a realistic command. Args must be space-free so
     the recorded command tokenizes the same way DVC's does.
     """
+    from calkit.dvc.core import _rwlock_holder_is_live
+
     with open("holder.py", "w") as f:
         f.write("import time\ntime.sleep(120)\n")
     argv = [sys.executable, "holder.py", *signature]
     proc = subprocess.Popen(argv)
-    return proc, " ".join(argv)
+    cmd = " ".join(argv)
+    # Until it's recognized, e.g., on a busy runner where it's still
+    # starting, a test would see one fewer holder than it spawned
+    deadline = time.monotonic() + 10
+    while not _rwlock_holder_is_live(proc.pid, cmd):
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"Lock holder never started: {cmd}")
+        time.sleep(0.05)
+    return proc, cmd
 
 
 def _write_fake_run_log() -> None:
@@ -2988,6 +3010,80 @@ def test_outputs_stay_out_of_git_after_failed_run(tmp_dir):
     assert not set(outputs) & set(tracked)
     assert all(repo.ignored(path) for path in outputs)
     assert "dvc.lock" in repo.git.ls_files().splitlines()
+
+
+def test_save_new_files_in_git_stored_output_dir(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "fetch": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p data/github && echo 1 > data/github/1.json",
+                "outputs": [
+                    {
+                        "path": "data/github",
+                        "storage": "git",
+                        "delete_before_run": False,
+                    }
+                ],
+            },
+            "plot": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "wdir": "sub",
+                "command": "mkdir -p figs && echo 1 > figs/1.txt",
+                "outputs": [
+                    {
+                        "path": "figs",
+                        "storage": "git",
+                        "delete_before_run": False,
+                    }
+                ],
+            },
+        }
+    }
+    os.makedirs("sub")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+    repo = git.Repo()
+    assert "data/github/1.json" in repo.git.ls_files("data").splitlines()
+    # A later run adds files to the persistent output, which belong in Git
+    # with the rest of it, not ignored as if DVC cached the output, and not
+    # sent to DVC by extension either, including for a stage with a wdir
+    new_files = [
+        "data/github/2.json",
+        "data/github/plot.png",
+        "sub/figs/plot.png",
+    ]
+    for path in new_files:
+        with open(path, "w") as f:
+            f.write("2")
+    subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+    tracked = repo.git.ls_files().splitlines()
+    assert set(new_files) <= set(tracked)
+    assert not any(repo.ignored(path) for path in new_files)
+    assert not os.path.exists("data/.gitignore")
+    # Projects an older Calkit already broke have the output ignored, once
+    # per file it saw, so both run and save have to undo that
+    for run_first in [True, False]:
+        with open("data/.gitignore", "w") as f:
+            f.write("/github\n/github\n/github\n")
+        repo.git.add("data/.gitignore")
+        repo.git.commit("-m", "Ignore output")
+        with open("data/github/3.json", "w") as f:
+            f.write("3")
+        if run_first:
+            subprocess.check_call(["calkit", "run"])
+        subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+        assert "data/github/3.json" in repo.git.ls_files("data").splitlines()
+        with open("data/.gitignore") as f:
+            assert "github" not in f.read()
+        repo.git.rm("-q", "data/github/3.json")
+        repo.git.commit("-m", "Remove 3")
 
 
 @skipif_windows_docker

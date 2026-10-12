@@ -589,6 +589,7 @@ def get_status(
             clean_notebooks=True,
             compile_to_dvc=True,
             with_data_status="dvc" in categories,
+            with_storage_problems="dvc" in categories,
         )
         if pipeline_status.failed_environment_checks:
             warn(
@@ -629,6 +630,17 @@ def get_status(
             frozen_stages=frozen_stages,
             check_history=False,
         )
+    # Paths tracked where they shouldn't be, found with the pipeline's status,
+    # which builds the DVC index this needs anyway, unless it stopped short
+    storage_problems = None
+    if "dvc" in categories and running_status is None:
+        if pipeline_status is not None:
+            storage_problems = pipeline_status.storage_problems
+        if storage_problems is None:
+            try:
+                storage_problems = calkit.dvc.get_storage_problems()
+            except Exception:
+                pass
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:
@@ -694,6 +706,7 @@ def get_status(
                 )
             except Exception as e:
                 status_dict["dvc"] = {"error": f"{e.__class__.__name__}: {e}"}
+            status_dict["storage"] = storage_problems
         if "pipeline" in categories or "dvc" in categories:
             if running_status is not None:
                 status_dict["pipeline"] = running_status
@@ -760,6 +773,10 @@ def get_status(
             raw.pop("git", None)
             raw = calkit.dvc.data_status_as_posix(raw)
             typer.echo(_format_dvc_data_status(raw, zip_path_map))
+            for problem in storage_problems or []:
+                warn(problem["message"])
+            if storage_problems:
+                typer.echo("Run 'calkit check storage' for detail.\n")
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
         if running_status is not None:
@@ -1029,6 +1046,22 @@ def add(
         )
         repo.git.add(".dvc/config")
     dvc_paths = [] if dvc_repo is None else calkit.dvc.list_paths()
+    pipeline_output_storage = calkit.pipeline.get_output_storage_map()
+    # An ignore rule left on an output stored in Git, e.g., by an older
+    # Calkit, would hide its new files from everything below
+    for out in calkit.git.get_ignored_by_rule(
+        repo,
+        *[
+            out
+            for out, storage in pipeline_output_storage.items()
+            if storage == "git" and os.path.exists(out)
+        ],
+    ):
+        if dry_run:
+            typer.echo(f"Would un-ignore {out} since it's stored in Git")
+        else:
+            typer.echo(f"Un-ignoring {out} since it's stored in Git")
+            calkit.git.ensure_path_is_not_ignored(repo, out)
     untracked_git_files = repo.untracked_files
     if auto_commit_message:
         # See if this path is in the repo already
@@ -1136,12 +1169,31 @@ def add(
             ]:
                 paths.append(changed_file)
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
-        pipeline_output_storage = calkit.pipeline.get_output_storage_map()
         lock_out_paths = calkit.dvc.get_lock_out_paths()
+        cached_out_paths: set[str] | None = None
         dvc_scm = None
         for path in paths:
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()
+            # A file inside an output stored in Git, e.g., one written to a
+            # persistent output directory, goes to Git like the output does
+            output_storage = pipeline_output_storage.get(posix_path)
+            if output_storage is None and any(
+                posix_path.startswith(out + "/")
+                for out, storage in pipeline_output_storage.items()
+                if storage == "git"
+            ):
+                output_storage = "git"
+            locked_out = next(
+                (
+                    out
+                    for out in lock_out_paths
+                    if posix_path == out or posix_path.startswith(out + "/")
+                ),
+                None,
+            )
+            if locked_out is not None and cached_out_paths is None:
+                cached_out_paths = calkit.dvc.get_cached_out_paths()
             if posix_path in zip_path_map:
                 if dry_run:
                     typer.echo(f"Would add {path} via DVC zip")
@@ -1173,10 +1225,9 @@ def add(
                     )
                     calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
                     calkit.dvc.run_dvc_command(["add", path])
-            elif posix_path in pipeline_output_storage:
+            elif output_storage is not None:
                 # Respect storage explicitly set in the pipeline definition
-                pipeline_storage = pipeline_output_storage[posix_path]
-                if pipeline_storage == "git":
+                if output_storage == "git":
                     if dry_run:
                         typer.echo(
                             f"Would add {path} to Git "
@@ -1187,7 +1238,7 @@ def add(
                             f"Adding {path} to Git per pipeline output storage"
                         )
                         git_add(path)
-                elif pipeline_storage == "dvc-zip":
+                elif output_storage == "dvc-zip":
                     if dry_run:
                         typer.echo(
                             f"Would add {path} as a DVC zip "
@@ -1211,22 +1262,13 @@ def add(
                             f"({path} is a DVC pipeline output)"
                         )
                         git_add("dvc.lock")
-            elif (
-                locked_out := next(
-                    (
-                        out
-                        for out in lock_out_paths
-                        if posix_path == out
-                        or posix_path.startswith(out + "/")
-                    ),
-                    None,
-                )
-            ) is not None:
+            elif locked_out in (cached_out_paths or set()):
                 # DVC already caches this, and it's only showing up at all
                 # because its ignore entry went missing, e.g., DVC removes
                 # every entry a failed repro added, including those for the
                 # stages that succeeded. Sized up like a new file, a small
-                # one would go to Git alongside DVC's copy.
+                # one would go to Git alongside DVC's copy. Outputs DVC
+                # doesn't cache were never ignored, so they don't count.
                 if dry_run:
                     typer.echo(
                         f"Would ignore {path} ({path} is a DVC pipeline output)"

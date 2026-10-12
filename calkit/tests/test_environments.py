@@ -84,6 +84,17 @@ def test_check_all_in_pipeline(tmp_dir):
     print(res)
     assert res["py1"]["success"]
     assert res["py1"]["cached"]
+    # A frozen stage never runs, so its environment isn't checked or built
+    shutil.rmtree(env_prefix)
+    ck_info["pipeline"]["stages"]["run-thing"]["frozen"] = True
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert calkit.environments.check_all_in_pipeline() == {}
+    assert (
+        calkit.environments.check_all_in_pipeline(targets=["run-thing"]) == {}
+    )
+    assert not os.path.exists(env_prefix)
+    del ck_info["pipeline"]["stages"]["run-thing"]["frozen"]
     # Editing an input's contents, not just its path, invalidates the cache
     with open("local.txt", "w") as f:
         f.write("one\n")

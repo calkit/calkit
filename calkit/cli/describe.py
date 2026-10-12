@@ -9,7 +9,6 @@ import typer
 
 import calkit
 from calkit.cli import AliasGroup, echo_json, raise_error
-from calkit.environments import get_env_lock_fpath
 
 describe_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -20,6 +19,10 @@ def _describe_env(env: dict, env_name: str) -> dict:
     The keys here are a stable contract for tools consuming ``--json``, so
     they are always present, even if their value is null.
     """
+    # Here rather than at the top, since every command imports this module;
+    # what that saves is a question in decisions/calkit.yaml
+    from calkit.environments import get_env_lock_fpath
+
     return {
         "kind": env.get("kind"),
         "spec_path": env.get("path"),

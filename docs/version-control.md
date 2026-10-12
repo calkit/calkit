@@ -1,7 +1,10 @@
 # Version control
 
-Version control is one of the pillars of reproducibility.
-However, the current de facto version control system (VCS),
+Keeping a history of all changes to the project
+is one of the pillars of reproducibility,
+and using a real version control system (VCS) instead of, e.g., ad hoc
+file name suffixes is a must to improve efficiency and avoid mistakes.
+However, the current de facto VCS,
 [Git](https://git-scm.com),
 was designed primarily for complex software development projects,
 and thus provides lots of control and flexibility,
@@ -275,3 +278,23 @@ pipeline:
         - path: results
           storage: dvc-zip
 ```
+
+## Moving files between Git and DVC
+
+If a file is stored in Git and it would be better in DVC,
+e.g., because it's large and its changes are starting to make the
+repo expensive to clone or download,
+its storage location can be changed with:
+
+```sh
+calkit update path-storage
+```
+
+Note that this will not clean out all the previous versions stored in
+Git.
+That can be achieved with
+[git-filter-repo](https://github.com/newren/git-filter-repo).
+Likewise, old versions of files kept in DVC will still live in the local
+and remote caches.
+These can be managed with DVC's garbage collection functionality,
+accessible at `calkit dvc gc`.

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import Field, model_validator
+
+from calkit.models.base import Model
 
 
-class RequirementAttrs(BaseModel):
+class RequirementAttrs(Model):
     """A requirement's properties, as written under ``{name: {...}}``.
 
     ``Requirement`` is this plus the name; the mapping form supplies the
@@ -24,7 +26,7 @@ class RequirementAttrs(BaseModel):
     notes: str | None = None
 
 
-class Requirement(BaseModel):
+class Requirement(Model):
     """Something that must be true of a machine before the project runs.
 
     Four kinds are supported:
@@ -105,7 +107,7 @@ SystemValueProperty = Literal[
 ]
 
 
-class SystemNumberRequirement(BaseModel):
+class SystemNumberRequirement(Model):
     """A bound on a numeric property of the machine.
 
     A property can't be installed, so there is nothing to name and nothing
@@ -145,7 +147,7 @@ class SystemNumberRequirement(BaseModel):
         return self
 
 
-class SystemValueRequirement(BaseModel):
+class SystemValueRequirement(Model):
     """A constraint on a string-valued property of the machine.
 
     ``equals`` matches exactly and ``matches`` as a glob, both

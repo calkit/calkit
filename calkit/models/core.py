@@ -11,7 +11,6 @@ from typing import Literal, get_args
 
 from pydantic import (
     AliasChoices,
-    BaseModel,
     BeforeValidator,
     ConfigDict,
     Discriminator,
@@ -24,6 +23,7 @@ from pydantic import (
 from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
+from calkit.models.base import Model
 from calkit.models.io import EnvVarInput
 from calkit.models.iteration import ParametersType
 from calkit.models.pipeline import Pipeline, RelativeChildPathString
@@ -42,7 +42,7 @@ from calkit.models.requirements import (  # noqa: F401
 )
 
 
-class _ImportedFromProject(BaseModel):
+class _ImportedFromProject(Model):
     # An unrecognized key is refused rather than dropped. These entries
     # exist to be trusted, and an untagged union silently ignoring what it
     # doesn't understand means a misspelled key, a key at the wrong level,
@@ -74,7 +74,7 @@ class _ImportedFromProject(BaseModel):
     )
 
 
-class _ImportedFromUrl(BaseModel):
+class _ImportedFromUrl(Model):
     # An unrecognized key is refused rather than dropped. These entries
     # exist to be trusted, and an untagged union silently ignoring what it
     # doesn't understand means a misspelled key, a key at the wrong level,
@@ -100,7 +100,7 @@ class _ImportedFromUrl(BaseModel):
     )
 
 
-class _ImportedFromDoi(BaseModel):
+class _ImportedFromDoi(Model):
     """Data published under a DOI, which is a citation, not just a link.
 
     Kept apart from a URL so it can be cited and resolved as a DOI rather
@@ -153,7 +153,7 @@ class _ImportedFromDoi(BaseModel):
     )
 
 
-class _ImportedFromGit(BaseModel):
+class _ImportedFromGit(Model):
     """Data from a Git repo that isn't a Calkit project.
 
     Written flat, the way a project source is: everything here is already
@@ -219,7 +219,7 @@ class _ImportedFromGit(BaseModel):
         return v
 
 
-class _Person(BaseModel):
+class _Person(Model):
     """A person credited with producing something in the project.
 
     Extra keys are refused rather than ignored: a mistyped ``oricd``, or a
@@ -327,7 +327,7 @@ class _Person(BaseModel):
         return self
 
 
-class _CalkitObject(BaseModel):
+class _CalkitObject(Model):
     path: str = Field(
         description="Path to the file, relative to the project root."
     )
@@ -345,7 +345,7 @@ class _CalkitObject(BaseModel):
 
 # Every place an artifact can have come from. One union shared by every
 # artifact that can be imported, so they all accept the same forms.
-class _ImportedFromDescription(BaseModel):
+class _ImportedFromDescription(Model):
     """Data whose origin can be stated but not resolved.
 
     Some things arrive by other means --- emailed by a person, provided
@@ -659,12 +659,12 @@ class Publication(_CalkitObject):
         return self.doi is not None
 
 
-class ReferenceFile(BaseModel):
+class ReferenceFile(Model):
     path: str
     key: str
 
 
-class ReferenceCollection(BaseModel):
+class ReferenceCollection(Model):
     path: str
     files: list[ReferenceFile] = []
 
@@ -688,7 +688,7 @@ def env_requirements_problem(env: dict) -> str | None:
     )
 
 
-class Environment(BaseModel):
+class Environment(Model):
     """Base class for environments, which is never used directly.
 
     Environments are always one of the ``kind``-specific subclasses below;
@@ -1274,21 +1274,21 @@ _OsName = Literal["linux", "macos", "windows"]
 _EnvVarSetting = Annotated[str, Field(pattern=r"^[^=]+=")]
 
 
-class AppExistsCondition(BaseModel):
+class AppExistsCondition(Model):
     model_config = ConfigDict(extra="forbid")
     app_exists: str | list[str] = Field(
         description="App that must be on PATH, e.g., 'sbatch'."
     )
 
 
-class EnvVarExistsCondition(BaseModel):
+class EnvVarExistsCondition(Model):
     model_config = ConfigDict(extra="forbid")
     env_var_exists: str | list[str] = Field(
         description="Environmental variable that must be set."
     )
 
 
-class EnvVarEqualsCondition(BaseModel):
+class EnvVarEqualsCondition(Model):
     model_config = ConfigDict(extra="forbid")
     env_var_equals: _EnvVarSetting | list[_EnvVarSetting] = Field(
         description="'NAME=value' an environmental variable must be set to, "
@@ -1296,7 +1296,7 @@ class EnvVarEqualsCondition(BaseModel):
     )
 
 
-class HostnameMatchesCondition(BaseModel):
+class HostnameMatchesCondition(Model):
     model_config = ConfigDict(extra="forbid")
     hostname_matches: str | list[str] = Field(
         description="Glob the hostname must match, case-insensitively, "
@@ -1304,14 +1304,14 @@ class HostnameMatchesCondition(BaseModel):
     )
 
 
-class OsIsCondition(BaseModel):
+class OsIsCondition(Model):
     model_config = ConfigDict(extra="forbid")
     os_is: _OsName | list[_OsName] = Field(
         description="Operating system: 'linux', 'macos' or 'windows'."
     )
 
 
-class MachineIdEqualsCondition(BaseModel):
+class MachineIdEqualsCondition(Model):
     model_config = ConfigDict(extra="forbid")
     machine_id_equals: str | list[str] = Field(
         description="ID of the machine, as 'calkit describe system' shows "
@@ -1319,7 +1319,7 @@ class MachineIdEqualsCondition(BaseModel):
     )
 
 
-_SWITCH_CONDITIONS: list[type[BaseModel]] = [
+_SWITCH_CONDITIONS: list[type[Model]] = [
     AppExistsCondition,
     EnvVarExistsCondition,
     EnvVarEqualsCondition,
@@ -1331,7 +1331,7 @@ _SWITCH_CONDITIONS: list[type[BaseModel]] = [
 
 def _switch_condition_name(value: object) -> str | None:
     # A condition is a one-key map, and the key says which it is
-    if isinstance(value, BaseModel):
+    if isinstance(value, Model):
         return next(iter(type(value).model_fields))
     if isinstance(value, dict) and len(value) == 1:
         return str(next(iter(value)))
@@ -1375,7 +1375,7 @@ InlineEnvironment = Annotated[
 ]
 
 
-class SwitchOption(BaseModel):
+class SwitchOption(Model):
     """An environment a switch picks, and when."""
 
     model_config = ConfigDict(extra="forbid")
@@ -1485,13 +1485,13 @@ class SwitchEnvironment(Environment):
         return v
 
 
-class Software(BaseModel):
+class Software(Model):
     title: str
     path: str
     description: str
 
 
-class Notebook(BaseModel):
+class Notebook(Model):
     """A Jupyter notebook.
 
     Unlike the other objects, a notebook entry can be created just to record
@@ -1520,7 +1520,7 @@ class Notebook(BaseModel):
     )
 
 
-class ProcedureInput(BaseModel):
+class ProcedureInput(Model):
     """An input that might be entered while running a procedure.
 
     Attributes
@@ -1543,7 +1543,7 @@ class ProcedureInput(BaseModel):
     description: str | None = None
 
 
-class ProcedureStep(BaseModel):
+class ProcedureStep(Model):
     summary: str
     details: str | None = None
     cmd: str | None = None
@@ -1552,7 +1552,7 @@ class ProcedureStep(BaseModel):
     inputs: dict[str, ProcedureInput] | None = None
 
 
-class Timedelta(BaseModel):
+class Timedelta(Model):
     days: float | None = None
     seconds: float | None = None
     microseconds: float | None = None
@@ -1565,7 +1565,7 @@ class Timedelta(BaseModel):
         return timedelta(**self.model_dump())
 
 
-class Procedure(BaseModel):
+class Procedure(Model):
     """A procedure, typically executed by a human, written out in full."""
 
     # Mirrors ``ProcedureFile``'s refusal of inline keys, so the published
@@ -1579,7 +1579,7 @@ class Procedure(BaseModel):
     imported_from: str | None = None
 
 
-class ProcedureFile(BaseModel):
+class ProcedureFile(Model):
     """A procedure kept in its own YAML or JSON file.
 
     The file holds what an inline ``Procedure`` would: ``title``,
@@ -1629,7 +1629,7 @@ ProcedureEntry = Annotated[
 ]
 
 
-class Release(BaseModel):
+class Release(Model):
     kind: Literal[
         "project",
         "publication",
@@ -1669,7 +1669,7 @@ class Release(BaseModel):
     includes_pipeline: bool = False
 
 
-class StaticHtmlApp(BaseModel):
+class StaticHtmlApp(Model):
     """An app served as static files, with no backend.
 
     ``path`` points at the HTML file itself rather than its directory, since
@@ -1723,42 +1723,42 @@ class StaticHtmlApp(BaseModel):
         return PurePosixPath(self.path).parent.as_posix()
 
 
-class ShowcaseFigure(BaseModel):
+class ShowcaseFigure(Model):
     figure: str
 
 
-class ShowcaseText(BaseModel):
+class ShowcaseText(Model):
     text: str
 
 
-class ShowcaseMarkdown(BaseModel):
+class ShowcaseMarkdown(Model):
     markdown: str
 
 
-class ShowcasePublication(BaseModel):
+class ShowcasePublication(Model):
     publication: str
 
 
-class ShowcaseMarkdownFile(BaseModel):
+class ShowcaseMarkdownFile(Model):
     markdown_file: str
 
 
-class ShowcaseYamlFile(BaseModel):
+class ShowcaseYamlFile(Model):
     yaml_file: str
     object_name: str | None = None
 
 
-class ShowcaseNotebook(BaseModel):
+class ShowcaseNotebook(Model):
     notebook: str
 
 
-class ShowcaseApp(BaseModel):
+class ShowcaseApp(Model):
     """Show an app in the project's showcase, by its key in ``apps``."""
 
     app: str
 
 
-class Subproject(BaseModel):
+class Subproject(Model):
     """A smaller project executed as part of this one."""
 
     path: str = Field(
@@ -1768,7 +1768,7 @@ class Subproject(BaseModel):
     description: str | None = None
 
 
-class OverleafSync(BaseModel):
+class OverleafSync(Model):
     """Configuration for syncing a directory with an Overleaf project."""
 
     url: str | None = Field(
@@ -1784,19 +1784,19 @@ class OverleafSync(BaseModel):
     )
 
 
-class DerivedFromProject(BaseModel):
+class DerivedFromProject(Model):
     project: str
     git_repo_url: str
     git_rev: str
 
 
-class ProjectStatus(BaseModel):
+class ProjectStatus(Model):
     timestamp: datetime
     status: Literal["in-progress", "on-hold", "completed"]
     message: str | None = None
 
 
-class FigureEvidence(BaseModel):
+class FigureEvidence(Model):
     """Evidence to back up the answer to a question."""
 
     kind: Literal["figure"] = "figure"
@@ -1811,7 +1811,7 @@ class FigureEvidence(BaseModel):
     )
 
 
-class ResultsEvidence(BaseModel):
+class ResultsEvidence(Model):
     """Evidence in the form of a results file: a set of values, a table, a
     map, whatever the pipeline wrote.
 
@@ -1861,7 +1861,7 @@ _KEY_DESCRIPTION = (
 )
 
 
-class ValueEvidence(BaseModel):
+class ValueEvidence(Model):
     """Evidence in the form of one value from a results file.
 
     The value is never copied into ``calkit.yaml``: the pipeline owns it,
@@ -1892,7 +1892,7 @@ class ValueEvidence(BaseModel):
     )
 
 
-class TableEvidence(BaseModel):
+class TableEvidence(Model):
     """Evidence in the form of a table."""
 
     kind: Literal["table"] = "table"
@@ -1907,7 +1907,7 @@ class TableEvidence(BaseModel):
     )
 
 
-class PublicationEvidence(BaseModel):
+class PublicationEvidence(Model):
     """Evidence in the form of a publication.
 
     The pointer to *where* in the publication the evidence lives is split in
@@ -1945,7 +1945,7 @@ class PublicationEvidence(BaseModel):
     )
 
 
-class DocumentEvidence(BaseModel):
+class DocumentEvidence(Model):
     """Evidence in the form of a document cited by path, e.g., a Markdown
     write-up, without declaring it as a publication.
 
@@ -1973,7 +1973,7 @@ class DocumentEvidence(BaseModel):
     )
 
 
-class Question(BaseModel):
+class Question(Model):
     """A question the project hopes to answer.
 
     Each piece of evidence defines what it points at inline, discriminated by
@@ -2049,7 +2049,7 @@ class Question(BaseModel):
         return v
 
 
-class ProjectInfo(BaseModel):
+class ProjectInfo(Model):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
 

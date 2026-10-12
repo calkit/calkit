@@ -65,13 +65,15 @@ def frozen_stage_base_names(
 def frozen_tainted_stage_names(
     ck_info: dict | None = None, wdir: str | None = None
 ) -> set[str]:
-    """Base names of frozen stages, plus every stage downstream of one.
+    """Base names of out-of-date frozen stages, plus every stage downstream.
 
     A frozen stage doesn't re-run when its inputs change, so DVC never calls
     it out of date -- and never calls anything built from its outputs out of
     date either. Nothing in a status report will say so, which is the point
     of naming them here: an answer resting on one of those outputs is
-    resting on whatever the stage last happened to produce.
+    resting on whatever the stage last happened to produce. One whose deps
+    and outs still match ``dvc.lock`` is left out, since it's as current as
+    if it weren't frozen.
 
     Read from ``dvc.lock`` where there is one, since its deps and outs are
     concrete, falling back to ``dvc.yaml``. Names come back without their
@@ -82,6 +84,32 @@ def frozen_tainted_stage_names(
     tainted = frozen_stage_base_names(ck_info=ck_info, wdir=wdir)
     if not tainted:
         return set()
+    # One whose deps and outs still match dvc.lock is as current as any
+    # other stage, so only one that would be out of date if unfrozen taints;
+    # reading just this project's dvc.yaml keeps that cheap
+    try:
+        import dvc.repo
+
+        dvc_repo = calkit.dvc.get_dvc_repo(wdir)
+        try:
+            dvc_yaml = os.path.join(os.path.abspath(wdir or "."), "dvc.yaml")
+            current: set[str] = set()
+            changed: set[str] = set()
+            with dvc.repo.lock_repo(dvc_repo):
+                for stage in dvc_repo.stage.load_all(path=dvc_yaml):
+                    base = stage.name.split("@")[0]
+                    if base not in tainted or not stage.frozen:
+                        continue
+                    stage.frozen = False
+                    if stage.changed():
+                        changed.add(base)
+                    else:
+                        current.add(base)
+            tainted -= current - changed
+        finally:
+            dvc_repo.close()
+    except Exception:
+        pass
     stages: dict = {}
     for fname in ("dvc.lock", "dvc.yaml"):
         fpath = os.path.join(wdir or ".", fname)
@@ -160,6 +188,9 @@ class PipelineStatus(BaseModel):
     # DVC's data status, when asked for, computed alongside the stage status
     # so it reuses that index and those hashes; not part of the output
     dvc_data_status: dict | None = Field(default=None, exclude=True)
+    # Likewise for paths tracked where they shouldn't be, from
+    # calkit.dvc.get_storage_problems
+    storage_problems: list[dict] | None = Field(default=None, exclude=True)
 
     @field_validator("stale_stages", mode="before")
     @classmethod
@@ -1185,6 +1216,7 @@ def get_status(
     compile_to_dvc: bool = True,
     force_env_check: bool = False,
     with_data_status: bool = False,
+    with_storage_problems: bool = False,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
@@ -1305,6 +1337,7 @@ def get_status(
             # Held across all of these so DVC builds its index and hashes
             # each path once, rather than dropping them between calls
             dvc_data_status = None
+            storage_problems = None
             with (
                 dvc.repo.lock_repo(dvc_repo),
                 calkit.dvc.memoized_hashes(),
@@ -1314,6 +1347,15 @@ def get_status(
                     Path(os.path.relpath(out.fs_path)).as_posix()
                     for out in dvc_repo.index.outs
                 ]
+                if with_storage_problems:
+                    try:
+                        storage_problems = calkit.dvc.get_storage_problems(
+                            dvc_repo=dvc_repo, ck_info=ck_info
+                        )
+                    except Exception:
+                        pass
+                # Last, since switching to HEAD to diff against it drops the
+                # workspace index
                 if with_data_status:
                     try:
                         dvc_data_status = dict(dvc_repo.data_status())
@@ -1682,6 +1724,7 @@ def get_status(
             switches=result.get("switches", {}),
             gated_stages=result.get("gated_stages", {}),
             dvc_data_status=dvc_data_status,
+            storage_problems=storage_problems,
         )
     finally:
         if wdir is not None:
@@ -1737,9 +1780,12 @@ def get_output_storage_map(
     for stage in stages.values():
         if not isinstance(stage, dict):
             continue
+        # Output paths are relative to the stage's working directory
+        wdir = stage.get("wdir") or "."
         for out in stage.get("outputs", []):
             if isinstance(out, dict) and "path" in out and "storage" in out:
-                result[Path(out["path"]).as_posix()] = out["storage"]
+                path = Path(os.path.normpath(os.path.join(wdir, out["path"])))
+                result[path.as_posix()] = out["storage"]
     return result
 
 

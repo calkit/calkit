@@ -28,6 +28,7 @@ from pydantic.json_schema import SkipJsonSchema
 from typing_extensions import Annotated
 
 import calkit.latex
+from calkit.models.base import Model
 from calkit.models.io import (
     EnvVarInput,
     InputsFromStageOutputs,
@@ -96,7 +97,7 @@ def _non_glob_prefix(path: str) -> str:
     return "/".join(kept)
 
 
-class StageIteration(BaseModel):
+class StageIteration(Model):
     """A model for the ``iterate_over`` key in a stage definition.
 
     If ``arg_name`` is a list, ``values`` also must be a list of lists with
@@ -179,7 +180,7 @@ class StageIteration(BaseModel):
 EnvDefaultsMode = Literal["ignore", "replace", "merge"]
 
 
-class StageSchedulerOptions(BaseModel):
+class StageSchedulerOptions(Model):
     """Parameters for running a stage on a job scheduler (SLURM or PBS).
 
     The environment-level ``default_options`` are applied by ``calkit
@@ -255,7 +256,7 @@ def _unique_paths(paths: list[str]) -> list[str]:
     return unique
 
 
-class Stage(BaseModel):
+class Stage(Model):
     """A stage in the pipeline."""
 
     name: str | None = Field(
@@ -900,7 +901,7 @@ class PythonScriptStage(Stage):
 
 
 class MapPathsStage(Stage):
-    class CopyFileToFile(BaseModel):
+    class CopyFileToFile(Model):
         """Copy a single file to a single destination path."""
 
         kind: Literal["file-to-file"] = Field(
@@ -924,7 +925,7 @@ class MapPathsStage(Stage):
         def out_path(self) -> str:
             return self.dest
 
-    class CopyFileToDir(BaseModel):
+    class CopyFileToDir(Model):
         """Copy a single file into a directory, keeping its name."""
 
         kind: Literal["file-to-dir"] = Field(
@@ -948,7 +949,7 @@ class MapPathsStage(Stage):
         def out_path(self) -> str:
             return Path(self.dest, Path(self.src).name).as_posix()
 
-    class DirToDirMerge(BaseModel):
+    class DirToDirMerge(Model):
         """Copy a directory's contents into another, keeping what's there."""
 
         kind: Literal["dir-to-dir-merge"] = Field(
@@ -972,7 +973,7 @@ class MapPathsStage(Stage):
         def out_path(self) -> str:
             return self.dest
 
-    class DirToDirReplace(BaseModel):
+    class DirToDirReplace(Model):
         """Replace a directory with the contents of another."""
 
         kind: Literal["dir-to-dir-replace"] = Field(
@@ -1094,7 +1095,7 @@ MapPathsStage.model_rebuild()
 
 
 class LatexStage(Stage):
-    class PythonScriptDiffFilter(BaseModel):
+    class PythonScriptDiffFilter(Model):
         """A Python script each marked-up document is piped through."""
 
         kind: Literal["python-script"] = Field(
@@ -2302,7 +2303,7 @@ class ProcedureStage(Stage):
         return outs
 
 
-class MarkdownPdf(BaseModel):
+class MarkdownPdf(Model):
     """How a Markdown stage's file is built into a PDF.
 
     Pandoc turns it into LaTeX and LaTeX builds the PDF, both in one
@@ -2466,7 +2467,7 @@ class MarkdownStage(Stage):
         return Path(self.target_path).as_posix()
 
 
-class Pipeline(BaseModel):
+class Pipeline(Model):
     """The project's reproducible pipeline."""
 
     stages: dict[

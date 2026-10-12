@@ -28,6 +28,27 @@ questions:
           clib_s: seconds.clib
           paths: lock.paths
           kb: lock.kb
+  - question: >-
+      How much would checking whether a Docker image exists through Docker's
+      socket, rather than its CLI, save?
+    answer: >-
+      Too little to be worth the code to find the socket the way Docker
+      does, so Calkit uses the CLI: {socket_ms:.0f} ms through the socket
+      against {cli_ms:.0f} ms through the CLI for the TeX Live image, most
+      of which is Docker inspecting it, however it's asked, and
+      {missing_socket_ms:.0f} ms against {missing_cli_ms:.0f} ms for an
+      image that isn't there. Medians of {n} checks each, taking turns,
+      with the code from #1817, which was closed.
+    evidence:
+      - kind: result
+        path: results/docker-image-check.json
+        git_ref: decisions/docker-socket
+        values:
+          socket_ms: ms.present.socket
+          cli_ms: ms.present.cli
+          missing_socket_ms: ms.missing.socket
+          missing_cli_ms: ms.missing.cli
+          n: repeats
 
 environments:
   pure:

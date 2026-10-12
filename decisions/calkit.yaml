@@ -71,11 +71,10 @@ questions:
       of which is Docker inspecting it, however it's asked, and
       {missing_socket_ms:.0f} ms against {missing_cli_ms:.0f} ms for an
       image that isn't there. Medians of {n} checks each, taking turns,
-      with the code from #1817, which was closed.
+      with the socket check from #1817, which was closed.
     evidence:
       - kind: result
         path: results/docker-image-check.json
-        git_ref: decisions/docker-socket
         values:
           socket_ms: ms.present.socket
           cli_ms: ms.present.cli
@@ -147,4 +146,16 @@ pipeline:
         - ../calkit/models/base.py
       outputs:
         - path: results/imports.json
+          storage: git
+    time-docker-image-check:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-docker-image-check.py
+      environment: calkit
+      args:
+        - --out=results/docker-image-check.json
+      inputs:
+        - ../calkit/docker.py
+      outputs:
+        - path: results/docker-image-check.json
           storage: git

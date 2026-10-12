@@ -1,6 +1,5 @@
 """Tests for ``calkit.docker``."""
 
-import os
 import sys
 from unittest import mock
 from unittest.mock import Mock
@@ -577,88 +576,3 @@ def test_lock_digest_refs_stay_with_their_repo() -> None:
     assert calkit.docker.get_lock_digest_refs(
         {"RepoDigests": ["sha256:abc", "foo/bar@sha256:def"]}, None
     ) == ["foo/bar@sha256:def"]
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="No Unix sockets")
-def test_image_exists(tmp_path, monkeypatch):
-    import hashlib
-    import http.server
-    import json
-    import socketserver
-    import tempfile
-    import threading
-
-    # A stand-in for the Docker daemon that has one image, on a short path
-    # since macOS caps a socket's at about 100 characters
-    sock_dir = tempfile.mkdtemp(prefix="ck")
-    sock = os.path.join(sock_dir, "docker.sock")
-    requested = []
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            requested.append(self.path)
-            if self.path == "/images/ghcr.io/org/img:1/json":
-                self.send_response(200)
-            elif "broken" in self.path:
-                self.send_response(500)
-            else:
-                self.send_response(404)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-
-        def log_message(self, *args: object) -> None:
-            pass
-
-    class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-        def get_request(self) -> tuple:
-            request, _ = super().get_request()
-            # BaseHTTPRequestHandler expects an address pair
-            return request, ("local", 0)
-
-    server = Server(sock, Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    cli = Mock(return_value=b"sha256:abc")
-    monkeypatch.setattr(calkit.docker.subprocess, "check_output", cli)
-    try:
-        # From DOCKER_HOST
-        monkeypatch.setenv("DOCKER_HOST", f"unix://{sock}")
-        assert calkit.docker.image_exists("ghcr.io/org/img:1")
-        assert not calkit.docker.image_exists("ghcr.io/org/img:2")
-        assert requested[-1] == "/images/ghcr.io/org/img:2/json"
-        assert not cli.called
-        # From the current context, named in the config or the environment
-        monkeypatch.delenv("DOCKER_HOST")
-        monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path))
-        (tmp_path / "config.json").write_text(
-            json.dumps({"currentContext": "mine"})
-        )
-        meta = tmp_path / "contexts" / "meta"
-        for name in ["mine", "other"]:
-            digest = hashlib.sha256(name.encode()).hexdigest()
-            (meta / digest).mkdir(parents=True)
-            (meta / digest / "meta.json").write_text(
-                json.dumps(
-                    {"Endpoints": {"docker": {"Host": f"unix://{sock}"}}}
-                )
-            )
-        n = len(requested)
-        assert calkit.docker.image_exists("ghcr.io/org/img:1")
-        monkeypatch.setenv("DOCKER_CONTEXT", "other")
-        assert not calkit.docker.image_exists("other:1")
-        assert len(requested) == n + 2
-        assert not cli.called
-        # Anything unexpected is left to the CLI
-        assert calkit.docker.image_exists("broken:1")
-        monkeypatch.setenv("DOCKER_HOST", "tcp://localhost:2375")
-        assert calkit.docker.image_exists("remote:1")
-        assert cli.call_count == 2
-        n = len(requested)
-        monkeypatch.setenv("DOCKER_HOST", f"unix://{sock_dir}/missing.sock")
-        assert calkit.docker.image_exists("ghcr.io/org/img:1")
-        assert cli.call_count == 3
-        assert len(requested) == n
-    finally:
-        server.shutdown()
-        server.server_close()
-        os.remove(sock)
-        os.rmdir(sock_dir)

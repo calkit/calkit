@@ -1,0 +1,42 @@
+stages:
+  parse-dvc-lock-pure:
+    cmd: calkit xenv -n pure --no-check -- python scripts/parse-dvc-lock.py
+      --out=results/ruamel-yaml-clib/pure.json
+    deps:
+      - scripts/parse-dvc-lock.py
+      - .calkit/env-locks/pure
+    outs:
+      - results/ruamel-yaml-clib/pure.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'parse-dvc-lock-pure' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  parse-dvc-lock-clib:
+    cmd: calkit xenv -n clib --no-check -- python scripts/parse-dvc-lock.py
+      --out=results/ruamel-yaml-clib/clib.json
+    deps:
+      - scripts/parse-dvc-lock.py
+      - .calkit/env-locks/clib
+    outs:
+      - results/ruamel-yaml-clib/clib.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'parse-dvc-lock-clib' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  compare-dvc-lock-parsing:
+    cmd: calkit xenv -n pure --no-check -- python
+      scripts/compare-dvc-lock-parsing.py
+    deps:
+      - scripts/compare-dvc-lock-parsing.py
+      - results/ruamel-yaml-clib/pure.json
+      - results/ruamel-yaml-clib/clib.json
+      - .calkit/env-locks/pure
+    outs:
+      - results/ruamel-yaml-clib.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'compare-dvc-lock-parsing' stage in
+      calkit.yaml. Changes made here will be overwritten.

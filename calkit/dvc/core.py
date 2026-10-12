@@ -322,6 +322,70 @@ def memoized_hashes() -> Iterator[None]:
             index_build.build_entries = original_build_entries
 
 
+@contextlib.contextmanager
+def head_diff_only_if_dvc_files_changed() -> Iterator[None]:
+    """Skip ``data_status``'s diff against HEAD when it can't find anything.
+
+    To list what's committed to DVC but not to Git, DVC builds its whole index
+    again from HEAD's files, but nothing can differ unless a DVC file does,
+    which the Git status it gets anyway shows, so that's checked first.
+    """
+    import dvc.repo.data
+    from dvc.scm import SCMError
+
+    def is_dvc_file(path: str) -> bool:
+        name = os.path.basename(path)
+        dvc_names = ("dvc.yaml", "dvc.lock", ".dvcignore")
+        return name in dvc_names or name.endswith(".dvc")
+
+    with _memoized_hashes_lock:
+        original_git_info = dvc.repo.data._git_info
+        original_diff = dvc.repo.data._diff_head_to_index
+        git_infos: dict[tuple, Any] = {}
+
+        def _git_info(scm: Any, untracked_files: str = "all") -> Any:
+            key = (id(scm), untracked_files)
+            if key not in git_infos:
+                git_infos[key] = original_git_info(scm, untracked_files)
+            return git_infos[key]
+
+        def _diff_head_to_index(repo: Any, *args: Any, **kwargs: Any) -> Any:
+            if kwargs.get("head", "HEAD") != "HEAD":
+                return original_diff(repo, *args, **kwargs)
+            try:
+                info = _git_info(repo.scm, "no")
+                changed = [
+                    p for paths in info["staged"].values() for p in paths
+                ] + list(info["unstaged"])
+                # Including any that Git doesn't track yet, reading its index
+                # once rather than per file
+                tracked = {
+                    os.fsdecode(p)
+                    for p in repo.scm.dulwich.repo.open_index().paths()
+                }
+                needed = any(map(is_dvc_file, changed)) or any(
+                    Path(
+                        os.path.relpath(s.dvcfile.path, repo.scm.root_dir)
+                    ).as_posix()
+                    not in tracked
+                    for s in repo.index.stages
+                )
+            except Exception:
+                needed = True
+            if needed:
+                return original_diff(repo, *args, **kwargs)
+            # DVC takes this to mean there's nothing to compare with
+            raise SCMError("No DVC file differs from HEAD")
+
+        dvc.repo.data._git_info = _git_info
+        dvc.repo.data._diff_head_to_index = _diff_head_to_index
+        try:
+            yield
+        finally:
+            dvc.repo.data._git_info = original_git_info
+            dvc.repo.data._diff_head_to_index = original_diff
+
+
 class CalkitDVCFileSystem(ObjectFileSystem):
     """DVC-facing filesystem wrapper for the ``ck://`` scheme."""
 

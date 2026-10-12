@@ -1,7 +1,17 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from .core import *  # noqa: F403
+
+if TYPE_CHECKING:
+    import typer
 
 
 def run() -> None:
+    import os
+    import sys
+
     # Intercept ``--use-version`` before Typer/Click parses argv: Click
     # processes eager options like ``--help`` and ``--version`` (and the
     # group's ``no_args_is_help``) ahead of the callback body, so an
@@ -11,7 +21,55 @@ def run() -> None:
     _maybe_exec_with_version()
     from .main import app
 
-    app()
+    # Completion lists commands, so needs them all
+    if any(k.startswith("_") and k.endswith("_COMPLETE") for k in os.environ):
+        app()
+    else:
+        _only_invoked(app, sys.argv[1:])()
+
+
+def _only_invoked(
+    app: typer.Typer, args: list[str], top: bool = True
+) -> typer.Typer:
+    """Narrow ``app`` to the command or group ``args`` invoke.
+
+    Typer builds every command's options before running one, which for all
+    of Calkit's takes a few tenths of a second, so this leaves out the ones
+    that won't run. Anything else, e.g., ``--help`` or a misspelled command,
+    keeps them all, so help and suggestions list everything.
+    """
+    import copy
+    import re
+
+    from typer.main import get_command_name, solve_typer_info_defaults
+
+    # Find the command name, skipping the top level's options
+    i = 0
+    while i < len(args) and args[i].startswith("-") and top:
+        i += 2 if args[i] in ("-C", "--directory", "--use-version") else 1
+    if i >= len(args) or args[i].startswith("-"):
+        return app
+    name, rest = args[i], args[i + 1 :]
+
+    def names(spec: str | None) -> list[str]:
+        return re.split(r" ?[,|] ?", spec) if spec else []
+
+    narrowed = copy.copy(app)
+    for cmd in app.registered_commands:
+        default = cmd.callback and get_command_name(cmd.callback.__name__)
+        if name in names(cmd.name or default):
+            narrowed.registered_commands = [cmd]
+            narrowed.registered_groups = []
+            return narrowed
+    for group in app.registered_groups:
+        sub_app = group.typer_instance
+        if sub_app and name in names(solve_typer_info_defaults(group).name):
+            group = copy.copy(group)
+            group.typer_instance = _only_invoked(sub_app, rest, top=False)
+            narrowed.registered_commands = []
+            narrowed.registered_groups = [group]
+            return narrowed
+    return app
 
 
 def _maybe_exec_with_version() -> None:

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from calkit.models.base import Model
 
 
-class RangeIterationParams(BaseModel):
+class RangeIterationParams(Model):
     start: int | float = Field(
         description="First value in the range, which is included."
     )
@@ -17,7 +19,7 @@ class RangeIterationParams(BaseModel):
     )
 
 
-class RangeIteration(BaseModel):
+class RangeIteration(Model):
     range: RangeIterationParams = Field(
         description="Bounds of the range over which to iterate."
     )
@@ -49,7 +51,7 @@ ParametersType = dict[
 ExpandedParametersType = dict[str, int | float | str | list[int | float | str]]
 
 
-class ParameterIteration(BaseModel):
+class ParameterIteration(Model):
     parameter: str = Field(
         description="Name of a project parameter whose list of values to "
         "iterate over."

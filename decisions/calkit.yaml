@@ -29,6 +29,39 @@ questions:
           paths: lock.paths
           kb: lock.kb
   - question: >-
+      How much CPU time does every command save by not importing
+      calkit.environments, and with it pydantic, until a command needs it?
+    answer: >-
+      {saved_ms:.0f} ms: importing the CLI took {cli_ms:.0f} ms, and
+      {with_env_ms:.0f} ms with calkit.environments imported first, as it
+      was when calkit.cli.describe imported it at the top. Medians of {n}
+      fresh interpreters each.
+    evidence:
+      - kind: result
+        path: results/imports.json
+        values:
+          saved_ms: saved_ms.environments
+          cli_ms: cpu_ms.cli
+          with_env_ms: cpu_ms.cli_with_environments
+          n: repeats
+  - question: >-
+      How much CPU time does deferring the schemas of Calkit's models, until
+      each is first used, save on importing them?
+    answer: >-
+      {saved_ms:.0f} ms: importing calkit.models took {deferred_ms:.0f} ms
+      with its {models} models' schemas deferred, and {built_ms:.0f} ms with
+      all of them built, as defining them did before. Medians of {n} fresh
+      interpreters each.
+    evidence:
+      - kind: result
+        path: results/imports.json
+        values:
+          saved_ms: saved_ms.models
+          deferred_ms: cpu_ms.models_deferred
+          built_ms: cpu_ms.models_built
+          models: models
+          n: repeats
+  - question: >-
       How much would checking whether a Docker image exists through Docker's
       socket, rather than its CLI, save?
     answer: >-
@@ -63,6 +96,10 @@ environments:
     prefix: .venv-clib
     python: "3.12"
     description: The same, plus ruamel.yaml.clib for its C loader.
+  calkit:
+    kind: uv
+    path: ../pyproject.toml
+    description: Calkit itself, from this checkout.
 
 pipeline:
   stages:
@@ -96,4 +133,18 @@ pipeline:
         - results/ruamel-yaml-clib/clib.json
       outputs:
         - path: results/ruamel-yaml-clib.json
+          storage: git
+    time-imports:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-imports.py
+      environment: calkit
+      args:
+        - --out=results/imports.json
+      inputs:
+        - ../calkit/calc.py
+        - ../calkit/cli/describe.py
+        - ../calkit/models/base.py
+      outputs:
+        - path: results/imports.json
           storage: git

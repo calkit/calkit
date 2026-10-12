@@ -40,3 +40,20 @@ stages:
     frozen: true
     desc: Automatically generated from the 'compare-dvc-lock-parsing' stage in
       calkit.yaml. Changes made here will be overwritten.
+  time-imports:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-imports.py
+      --out=results/imports.json
+    deps:
+      - scripts/time-imports.py
+      - ../calkit/calc.py
+      - ../calkit/cli/describe.py
+      - ../calkit/models/base.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/imports.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-imports' stage in calkit.yaml.
+      Changes made here will be overwritten.

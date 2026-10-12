@@ -732,8 +732,10 @@ The lock is written the first time the environment is checked,
 so check it on the machine results should come from and commit the lock
 file.
 Otherwise, whichever machine checks it first becomes the locked one.
-Similarly, a property added to `lock` later is read from the machine
-it's added on.
+The same goes for adding a property to `lock`:
+the whole lock is rewritten from whichever machine checks the
+environment next,
+putting every stage using it out of date.
 To keep a stage's results no matter where the project runs,
 freeze the stage with `frozen: true`.
 
@@ -1395,7 +1397,8 @@ since opting out of isolation is the whole point of this kind, so
 results actually depend on.
 
 Locked properties are recorded in the environment's lock file, which
-stages depend on, the first time the environment is checked. After
+stages depend on, the first time the environment is checked, and
+again from scratch when a property is added to `lock`. After
 that, the lock is not rewritten when the project moves to a machine
 where they differ, so stages that are up to date stay up to date.
 Checking the environment there warns about the difference, and a stage

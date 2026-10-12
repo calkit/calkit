@@ -1100,7 +1100,8 @@ class SystemEnvironment(Environment):
     results actually depend on.
 
     Locked properties are recorded in the environment's lock file, which
-    stages depend on, the first time the environment is checked. After
+    stages depend on, the first time the environment is checked, and
+    again from scratch when a property is added to ``lock``. After
     that, the lock is not rewritten when the project moves to a machine
     where they differ, so stages that are up to date stay up to date.
     Checking the environment there warns about the difference, and a stage

@@ -1400,8 +1400,8 @@ def system_env_lock_mismatch(
     """Compare a ``system`` environment's lock against the machine.
 
     Returns ``{property: {"locked": ..., "actual": ...}}`` for each locked
-    property that differs. A property the lock doesn't carry yet is not a
-    mismatch.
+    property that differs. A lock missing a locked property has none,
+    since the next check here replaces it whole.
     """
     locked = read_system_env_lock(env_name=env_name, env=env, wdir=wdir)
     if not locked:
@@ -1409,10 +1409,12 @@ def system_env_lock_mismatch(
     actual = get_system_lock_data(
         env.get("lock") or [], system_info=system_info
     )
+    if not actual.keys() <= locked.keys():
+        return {}
     return {
         prop: {"locked": locked[prop], "actual": value}
         for prop, value in actual.items()
-        if prop in locked and locked[prop] != value
+        if locked[prop] != value
     }
 
 
@@ -1450,7 +1452,9 @@ def write_system_env_lock(
     Unlike the other lock files, this one describes the machine rather than
     a spec the project controls, so machine properties already recorded
     are kept unless ``relock``. Otherwise a clone on another machine would
-    rewrite the lock and rerun every stage that depends on it.
+    rewrite the lock and rerun every stage that depends on it. Locking a
+    property the file doesn't have replaces the whole lock with this
+    machine's, since keeping the rest would describe no one machine.
 
     A non-default ``shell`` is recorded alongside the machine properties.
     It isn't a property of the machine, but it feeds the same question: a
@@ -1480,12 +1484,8 @@ def write_system_env_lock(
         if relock
         else read_system_env_lock(env_name=env_name, env=env, wdir=wdir)
     )
-    if existing:
-        # A property newly added to ``lock`` is read from this machine
-        lock_data = {
-            prop: existing.get(prop, value)
-            for prop, value in lock_data.items()
-        }
+    if existing and lock_data.keys() <= existing.keys():
+        lock_data = {prop: existing[prop] for prop in lock_data}
     # Named so it can't collide with a locked property, now or when the set
     # of them grows. The setup commands themselves are not recorded: they
     # go into the stage's command when the pipeline is compiled, so DVC

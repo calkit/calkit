@@ -1666,6 +1666,20 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
     assert not envs.system_env_lock_mismatch(
         env_name="bench", env=env, system_info=elsewhere
     )
+    # Locking another property relocks every one on the machine checking it
+    added = env | {"lock": ["cpu-count", "os", "machine"]}
+    assert not envs.system_env_lock_mismatch(env_name="bench", env=added)
+    envs.write_system_env_lock(env_name="bench", env=added)
+    assert envs.read_system_env_lock(
+        env_name="bench", env=added
+    ) == envs.get_system_lock_data(["cpu-count", "os", "machine"])
+    # Locking fewer keeps the rest
+    envs.write_system_env_lock(
+        env_name="bench", env=env, system_info=elsewhere
+    )
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["cpu-count", "os"])
     # No lock yet is not a mismatch
     assert not envs.system_env_lock_mismatch(env_name="never-locked", env=env)
     # An unreadable lock is an error rather than treated as missing
@@ -1732,12 +1746,6 @@ def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):
     with open(lock_fpath) as f:
         data = json.load(f)
     assert data["shell"] == "fish"
-    # A property newly added to 'lock' is read from this machine
-    env["lock"] = ["os", "cpu-count"]
-    envs.write_system_env_lock(env_name="shell", env=env)
-    with open(lock_fpath) as f:
-        data = json.load(f)
-    assert data["cpu-count"] == calkit.get_system_info()["cpu_count"]
 
 
 def test_system_env_checks_are_not_cached():

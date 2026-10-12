@@ -589,7 +589,7 @@ def test_image_exists(tmp_path, monkeypatch):
     import threading
 
     # A stand-in for the Docker daemon that has one image, on a short path
-    # since macOS caps a socket's at about 100 characters
+    # since macOS caps a socket's path at about 100 characters
     sock_dir = tempfile.mkdtemp(prefix="ck")
     sock = os.path.join(sock_dir, "docker.sock")
     requested = []
@@ -626,8 +626,10 @@ def test_image_exists(tmp_path, monkeypatch):
         assert not calkit.docker.image_exists("ghcr.io/org/img:2")
         assert requested[-1] == "/images/ghcr.io/org/img:2/json"
         assert not cli.called
-        # From the current context, named in the config or the environment
+        # From the current context, named in the config or the environment,
+        # ignoring any context this machine's environment names
         monkeypatch.delenv("DOCKER_HOST")
+        monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
         monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path))
         (tmp_path / "config.json").write_text(
             json.dumps({"currentContext": "mine"})

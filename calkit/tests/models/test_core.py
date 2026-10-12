@@ -225,6 +225,14 @@ def test_machine_property_requirements():
     )
     assert len(env.requirements) == 2
     assert env.lock == ["cpu-count", "julia-version"]
+    # A version can be locked to fewer parts, but only major or minor
+    lock = ["python-version-minor", "gcc-version-major"]
+    env = SystemEnvironment.model_validate({"kind": "system", "lock": lock})
+    assert env.lock == lock
+    with pytest.raises(ValidationError):
+        SystemEnvironment.model_validate(
+            {"kind": "system", "lock": ["gcc-version-patch"]}
+        )
 
 
 def test_env_var_inputs():

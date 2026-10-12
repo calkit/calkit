@@ -1718,18 +1718,69 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
 def test_lock_any_app_version(tmp_dir):
     import calkit.environments as envs
 
-    assert envs.lock_app_names(["os", "git-version", "jq-version"]) == ["jq"]
-    # Any app's version can be locked, read from the machine like the rest
-    data = envs.get_system_lock_data(
-        ["jq-version"], system_info={"jq_version": "jq-1.7.1"}
+    assert envs.lock_app_names(
+        ["os", "git-version", "jq-version", "cc-version-minor"]
+    ) == ["jq", "cc"]
+    # Any app's version can be locked, read from the machine like the rest,
+    # and recorded as the number alone
+    clang = (
+        "Apple clang version 21.0.0 (clang-2100.3.34.2)\n"
+        "InstalledDir: /Library/Developer/CommandLineTools/usr/bin"
     )
-    assert data == {"jq-version": "jq-1.7.1"}
+    info = {
+        "jq_version": "jq-1.7.1",
+        "cc_version": clang,
+        "docker_version": "Docker version 27.3.1, build ce12230",
+        "python_version": "3.12.8",
+        "os_version": "6.8.0-45-generic",
+        "pandoc_version": "a version with no number",
+    }
+    lock = [
+        "jq-version",
+        "cc-version",
+        "docker-version-major",
+        "python-version-minor",
+        "os-version",
+        "os-version-minor",
+        "pandoc-version",
+    ]
+    assert envs.get_system_lock_data(lock, system_info=info) == {
+        "jq-version": "1.7.1",
+        "cc-version": "21.0.0",
+        "docker-version-major": "27",
+        "python-version-minor": "3.12",
+        "os-version": "6.8.0-45-generic",
+        "os-version-minor": "6.8",
+        "pandoc-version": "a version with no number",
+    }
+    # A lock recorded in full before versions were trimmed still matches
+    env = {"kind": "system", "lock": ["docker-version"]}
+    os.makedirs(".calkit/env-locks/old")
+    with open(".calkit/env-locks/old/info.json", "w") as f:
+        json.dump({"docker-version": "Docker version 27.3.1, build abc"}, f)
+    rebuilt = {"docker_version": "Docker version 27.3.1, build def"}
+    assert not envs.system_env_lock_mismatch("old", env, system_info=rebuilt)
+    upgraded = {"docker_version": "Docker version 28.0.0, build def"}
+    assert envs.system_env_lock_mismatch("old", env, system_info=upgraded) == {
+        "docker-version": {"locked": "27.3.1", "actual": "28.0.0"}
+    }
+    # Only the versions locked to fewer parts move with them
+    minor = {"kind": "system", "lock": ["python-version-minor"]}
+    envs.write_system_env_lock("minor", minor, system_info=info)
+    patched = info | {"python_version": "3.12.9"}
+    assert not envs.system_env_lock_mismatch(
+        "minor", minor, system_info=patched
+    )
+    newer = info | {"python_version": "3.13.0"}
+    assert envs.system_env_lock_mismatch("minor", minor, system_info=newer)
     data = envs.get_system_lock_data(["calkit-version"])
     assert data["calkit-version"]
     with pytest.raises(ValueError, match="not available"):
         envs.get_system_lock_data(["calkit-test-no-such-app-version"])
     with pytest.raises(ValueError, match="'<app>-version' for any app"):
         envs.get_system_lock_data(["bogus"])
+    with pytest.raises(ValueError, match="'-major' or '-minor'"):
+        envs.get_system_lock_data(["python-version-patch"])
 
 
 def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):

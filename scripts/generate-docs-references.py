@@ -997,7 +997,15 @@ def generate_system_lock_properties_markdown() -> str:
     return (
         "The properties that can be locked are:\n\n"
         + make_table(rows, ["Property", "Description"]).rstrip()
-        + "\n\nRun `calkit describe system` to see what these are on the "
+        + "\n\nAny app's version can be locked too, as `<app>-version`, "
+        "e.g., `gcc-version`.\n"
+        "A version is recorded as its number alone,\n"
+        "e.g., `27.3.1` from `Docker version 27.3.1, build ce12230`.\n"
+        "Any version can end in `-major` or `-minor` to lock only those "
+        "parts,\n"
+        "e.g., `python-version-minor` records `3.12` for Python 3.12.8,\n"
+        "so only a move to another minor version counts as a change.\n"
+        "\nRun `calkit describe system` to see what these are on the "
         "machine you're on.\n"
     )
 

@@ -1084,9 +1084,11 @@ SystemLockProperty = Literal[
     "rscript-version",
     "brew-version",
 ]
-# Any other app's version, as reported by '<app> --version'
+# Any other app's version, as reported by '<app> --version', or any version
+# to fewer parts
 AppVersionLockProperty = Annotated[
-    str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.+-]*-version$")
+    str,
+    Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.+-]*-version(-major|-minor)?$"),
 ]
 
 
@@ -1243,7 +1245,9 @@ class SystemEnvironment(Environment):
         default=[],
         description="Properties of the machine this environment's results "
         "depend on, recorded the first time it is checked. Besides those "
-        "listed, any app's version can be locked as '<app>-version'. "
+        "listed, any app's version can be locked as '<app>-version', and "
+        "any version to fewer parts with '-major' or '-minor', e.g., "
+        "'python-version-minor'. "
         "'relock' says what happens on a machine where they differ. Empty "
         "means nothing about the machine is pinned.",
     )

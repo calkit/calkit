@@ -155,9 +155,45 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
 # reserves a little more or less moves that without changing anything a
 # result could depend on. Rounding it is the difference between pinning how
 # much memory the machine has and pinning what it happened to report.
-# Everything else is recorded as given: an OS version or a CPU count means
-# exactly what it says.
+# An app's version is trimmed to its number in ``lock_value``. Everything
+# else is recorded as given: an OS version or a CPU count means exactly what
+# it says.
 SYSTEM_LOCK_PROPERTY_PRECISION = {"memory-gb": lambda v: round(float(v), 1)}
+
+
+# A version can be locked to fewer parts, e.g., 'python-version-minor'
+VERSION_LOCK_PARTS = {"major": 1, "minor": 2}
+
+
+def split_version_lock(prop: str) -> tuple[str, int | None]:
+    """A property's source, and how many version parts it keeps if fewer."""
+    source, _, part = prop.rpartition("-")
+    if source.endswith("-version") and part in VERSION_LOCK_PARTS:
+        return source, VERSION_LOCK_PARTS[part]
+    return prop, None
+
+
+def lock_value(prop: str, value: object) -> object:
+    """A locked property as it's recorded and compared.
+
+    An app's version is its number alone, e.g., '27.3.1' from 'Docker
+    version 27.3.1, build ce12230', since what a tool prints around it, like
+    a build or where it's installed, can change while the version doesn't.
+    Comparing a lock recorded in full the same way keeps it matching. An OS
+    version is kept whole unless it's locked to fewer parts.
+    """
+    if prop in SYSTEM_LOCK_PROPERTY_PRECISION:
+        return SYSTEM_LOCK_PROPERTY_PRECISION[prop](value)
+    source, parts = split_version_lock(prop)
+    if not source.endswith("-version") or (
+        source == "os-version" and parts is None
+    ):
+        return value
+    version = calkit.extract_version(str(value))
+    if version is None:
+        return value
+    return ".".join(version.split(".")[:parts]) if parts else version
+
 
 # Properties only one platform can supply, since ``get_system_info`` collects
 # package manager versions per OS. Locking one from another platform raises
@@ -1296,12 +1332,13 @@ def remove_built_env(env_name: str, envs: dict) -> str | None:
 
 def lock_app_names(lock: list[str] | None) -> list[str]:
     """Apps whose versions a lock names beyond the ones always reported."""
+    sources = [split_version_lock(prop)[0] for prop in lock or []]
     return [
-        prop.removesuffix("-version")
-        for prop in lock or []
-        if prop not in SYSTEM_LOCK_PROPERTIES
-        and prop.endswith("-version")
-        and len(prop) > len("-version")
+        source.removesuffix("-version")
+        for source in sources
+        if source not in SYSTEM_LOCK_PROPERTIES
+        and source.endswith("-version")
+        and len(source) > len("-version")
     ]
 
 
@@ -1323,16 +1360,18 @@ def get_system_lock_data(
         system_info = calkit.get_system_info(apps=lock_app_names(lock))
     data = {}
     for prop in lock:
-        key = SYSTEM_LOCK_PROPERTIES.get(prop)
-        if key is None and prop in [
+        source = split_version_lock(prop)[0]
+        key = SYSTEM_LOCK_PROPERTIES.get(source)
+        if key is None and source in [
             f"{a}-version" for a in lock_app_names(lock)
         ]:
-            key = prop.removesuffix("-version") + "_version"
+            key = source.removesuffix("-version") + "_version"
         if key is None:
             raise ValueError(
                 f"Unknown system property to lock: '{prop}'; valid options "
                 f"are {', '.join(sorted(SYSTEM_LOCK_PROPERTIES))}, or "
-                "'<app>-version' for any app"
+                "'<app>-version' for any app, and any version can end in "
+                "'-major' or '-minor' to lock only those parts"
             )
         value = system_info.get(key)
         if value is None:
@@ -1349,9 +1388,7 @@ def get_system_lock_data(
                 f"System property '{prop}' is not available on this machine"
                 + hint
             )
-        data[prop] = SYSTEM_LOCK_PROPERTY_PRECISION.get(prop, lambda v: v)(
-            value
-        )
+        data[prop] = lock_value(prop, value)
     return data
 
 
@@ -1412,9 +1449,9 @@ def system_env_lock_mismatch(
     if not actual.keys() <= locked.keys():
         return {}
     return {
-        prop: {"locked": locked[prop], "actual": value}
+        prop: {"locked": lock_value(prop, locked[prop]), "actual": value}
         for prop, value in actual.items()
-        if locked[prop] != value
+        if lock_value(prop, locked[prop]) != value
     }
 
 

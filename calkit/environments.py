@@ -1132,6 +1132,12 @@ def check_all_in_pipeline(
     md_stages = calkit.markdown.get_markdown_stages(ck_info)
     ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
     stages = ck_info.get("pipeline", {}).get("stages", {})
+    # A frozen stage never runs, so its environment isn't needed
+    stages = {
+        k: v
+        for k, v in stages.items()
+        if not (isinstance(v, dict) and v.get("frozen"))
+    }
     if targets:
         # Split targets by "@" to handle sub-stages from iterations
         targets = [t.split("@")[0] for t in targets]

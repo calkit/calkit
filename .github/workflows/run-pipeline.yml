@@ -31,6 +31,11 @@ jobs:
           # The branch itself rather than the merge commit, so results can
           # be pushed back to it
           ref: ${{ github.head_ref || github.ref_name }}
+          # All of history and tags, since a built document is dated by the
+          # last commit to touch it and stamped with Calkit's version, and a
+          # shallow clone gets both wrong, so outputs wouldn't match a local
+          # build
+          fetch-depth: 0
       - name: Configure Git credentials
         run: |
           git config user.name 'github-actions[bot]'
@@ -46,11 +51,13 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # The LaTeX/Word round trip converts with LibreOffice, which runners
       # don't have, so a change to the conversion is rerun here rather than
-      # needing it on the machine of whoever made it
+      # needing it on the machine of whoever made it. Without Math, Writer
+      # renders a Word equation as blank space.
       - name: Install LibreOffice
         run: |
           sudo apt-get update -q
-          sudo apt-get install -yq --no-install-recommends libreoffice-writer
+          sudo apt-get install -yq --no-install-recommends \
+            libreoffice-writer libreoffice-math
       - name: Run Calkit
         uses: ./actions/run
         with:

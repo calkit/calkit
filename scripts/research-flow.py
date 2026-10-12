@@ -381,8 +381,23 @@ results = {
         "min": min(min(r) for r in ratio_grid),
     },
 }
+
+
+def rounded(value: Any) -> Any:
+    # Draws are seeded, but macOS and Linux math libraries can differ in a
+    # float's last digits, so keep 12 significant figures to write the same
+    # file wherever it's run
+    if isinstance(value, float):
+        return float(f"{value:.12g}")
+    if isinstance(value, dict):
+        return {k: rounded(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [rounded(v) for v in value]
+    return value
+
+
 OUT.parent.mkdir(parents=True, exist_ok=True)
-OUT.write_text(json.dumps(results, indent=2) + "\n")
+OUT.write_text(json.dumps(rounded(results), indent=2) + "\n")
 print(json.dumps(results["ratio"], indent=2))
 for k, v in adoption.items():
     print(k, {pp: round(vv["days_ratio"], 2) for pp, vv in v.items()})

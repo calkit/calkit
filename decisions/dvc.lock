@@ -1,0 +1,64 @@
+schema: '2.0'
+stages:
+  parse-dvc-lock-pure:
+    cmd: calkit xenv -n pure --no-check -- python scripts/parse-dvc-lock.py 
+      --out=results/ruamel-yaml-clib/pure.json
+    deps:
+    - path: .calkit/env-locks/pure
+      hash: md5
+      md5: 79da332a4050c667c0e8595b21a1e1a0.dir
+      size: 1689
+      nfiles: 1
+    - path: scripts/parse-dvc-lock.py
+      hash: md5
+      md5: d7de3afa6f38aceb89a0016b92afc1f2
+      size: 3178
+    outs:
+    - path: results/ruamel-yaml-clib/pure.json
+      hash: md5
+      md5: 745cedf7c1f28cf8f54fca0c6d46c565
+      size: 456
+  parse-dvc-lock-clib:
+    cmd: calkit xenv -n clib --no-check -- python scripts/parse-dvc-lock.py 
+      --out=results/ruamel-yaml-clib/clib.json
+    deps:
+    - path: .calkit/env-locks/clib
+      hash: md5
+      md5: a1193b3fd3140cae8a1bad631cb8b01f.dir
+      size: 1714
+      nfiles: 1
+    - path: scripts/parse-dvc-lock.py
+      hash: md5
+      md5: d7de3afa6f38aceb89a0016b92afc1f2
+      size: 3178
+    outs:
+    - path: results/ruamel-yaml-clib/clib.json
+      hash: md5
+      md5: c04199da0b7773812f5a1ab3f1d96a3a
+      size: 460
+  compare-dvc-lock-parsing:
+    cmd: calkit xenv -n pure --no-check -- python 
+      scripts/compare-dvc-lock-parsing.py
+    deps:
+    - path: .calkit/env-locks/pure
+      hash: md5
+      md5: 79da332a4050c667c0e8595b21a1e1a0.dir
+      size: 1689
+      nfiles: 1
+    - path: results/ruamel-yaml-clib/clib.json
+      hash: md5
+      md5: c04199da0b7773812f5a1ab3f1d96a3a
+      size: 460
+    - path: results/ruamel-yaml-clib/pure.json
+      hash: md5
+      md5: 745cedf7c1f28cf8f54fca0c6d46c565
+      size: 456
+    - path: scripts/compare-dvc-lock-parsing.py
+      hash: md5
+      md5: 8f66256addb8836fa2241efabbe59c41
+      size: 1186
+    outs:
+    - path: results/ruamel-yaml-clib.json
+      hash: md5
+      md5: 22a356bf921c83405a4bf97ffd9a4d5b
+      size: 657

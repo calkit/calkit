@@ -10,8 +10,8 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: b431d4e72ba1e0ed48a0d0e58c75903d
-      size: 129021
+      md5: 59d82d297a2c8fc4f9b1395209405421
+      size: 129201
     - path: calkit/docx.py
       hash: md5
       md5: 3f34445a3e65cf2c10f908b84de55fd2
@@ -46,8 +46,8 @@ stages:
       size: 4747
     - path: uv.lock
       hash: md5
-      md5: aaf65e2ccae7622d9d2044b218258449
-      size: 1708735
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5
@@ -95,8 +95,8 @@ stages:
       size: 2652
     - path: uv.lock
       hash: md5
-      md5: aaf65e2ccae7622d9d2044b218258449
-      size: 1708735
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
@@ -120,13 +120,13 @@ stages:
       size: 54256
     - path: uv.lock
       hash: md5
-      md5: aaf65e2ccae7622d9d2044b218258449
-      size: 1708735
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: f211bfc03530ce5c6156fe8e1e772e73
-      size: 384
+      md5: 638add45f2e8df495453b950c26a6e24
+      size: 386
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
     deps:
@@ -140,17 +140,17 @@ stages:
       size: 36026
     - path: scripts/research-flow.py
       hash: md5
-      md5: 7116a10dcfefc35ad2336d1a87d8ead1
-      size: 13739
+      md5: c626580f6f61f1f7f6b05abb88ad5f5f
+      size: 14225
     - path: uv.lock
       hash: md5
-      md5: aaf65e2ccae7622d9d2044b218258449
-      size: 1708735
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
     outs:
     - path: results/research-flow.json
       hash: md5
-      md5: f68a8c12af506415f953110d5e1d5e2a
-      size: 79854
+      md5: ad60cc07e5c53f0803252e215ff43141
+      size: 75297
   research-flow-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
     deps:
@@ -160,16 +160,16 @@ stages:
       size: 5
     - path: results/research-flow.json
       hash: md5
-      md5: f68a8c12af506415f953110d5e1d5e2a
-      size: 79854
+      md5: ad60cc07e5c53f0803252e215ff43141
+      size: 75297
     - path: scripts/plot-research-flow.py
       hash: md5
       md5: 19f5cc7b755ecf4c3c11b1bf734ee1e6
       size: 12155
     - path: uv.lock
       hash: md5
-      md5: aaf65e2ccae7622d9d2044b218258449
-      size: 1708735
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
@@ -181,8 +181,8 @@ stages:
       size: 115898
     - path: docs/img/research-flow.png
       hash: md5
-      md5: ca7da1bd62f56df0a24295159d142ea8
-      size: 335468
+      md5: ecdd9b9085bd15268d23a349a2e8de2d
+      size: 335476
   one-pager-latex:
     cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
     deps:
@@ -270,8 +270,8 @@ stages:
       size: 1861
     - path: uv.lock
       hash: md5
-      md5: aaf65e2ccae7622d9d2044b218258449
-      size: 1708735
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
     outs:
     - path: results/2027-budget.json
       hash: md5
@@ -290,8 +290,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: bd413de62914535938002f8c83feac18
-      size: 9415
+      md5: 30d882ba1fc7c1d3285eee2986069351
+      size: 9545
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
@@ -314,10 +314,10 @@ stages:
       size: 1649
     - path: results/research-flow.json
       hash: md5
-      md5: f68a8c12af506415f953110d5e1d5e2a
-      size: 79854
+      md5: ad60cc07e5c53f0803252e215ff43141
+      size: 75297
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: f9719237ae754463ea36aa2215166baf
-      size: 137550
+      md5: 62d4174727fbddf9dce2d54cb549ee47
+      size: 137554

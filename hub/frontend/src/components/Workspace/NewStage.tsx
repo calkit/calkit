@@ -69,7 +69,7 @@ const NewStage = ({ isOpen, onClose, request, onDone }: NewStageProps) => {
   })
   const mutation = useMutation({
     mutationFn: (data: Stage) => {
-      mixpanel.track("Clicked save new stage on compute page")
+      mixpanel.track("Clicked save new stage on workspaces page")
       let deps = null
       if (data.deps) {
         deps = data.deps.split(",")

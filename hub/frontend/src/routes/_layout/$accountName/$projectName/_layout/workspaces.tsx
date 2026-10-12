@@ -35,7 +35,7 @@ import WorkspacePanel, {
 import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
 
-const computeSearchSchema = z.object({
+const workspacesSearchSchema = z.object({
   // Open terminal panes, as "<operator ID>:<session ID>", so a link reopens
   // them
   panes: z.array(z.string()).optional(),
@@ -52,12 +52,12 @@ const computeSearchSchema = z.object({
 
 // The open panes and workspace, kept for the browser tab so leaving for
 // another page and coming back, e.g., through the sidebar, restores them
-type ComputeState = { panes?: string[]; workspace?: string }
+type WorkspacesState = { panes?: string[]; workspace?: string }
 
-const computeStateKey = (accountName: string, projectName: string) =>
-  `calkit-compute:${accountName}/${projectName}`
+const workspacesStateKey = (accountName: string, projectName: string) =>
+  `calkit-workspaces:${accountName}/${projectName}`
 
-function readComputeState(key: string): ComputeState {
+function readWorkspacesState(key: string): WorkspacesState {
   try {
     return JSON.parse(sessionStorage.getItem(key) ?? "{}")
   } catch {
@@ -66,15 +66,15 @@ function readComputeState(key: string): ComputeState {
 }
 
 export const Route = createFileRoute(
-  "/_layout/$accountName/$projectName/_layout/compute",
+  "/_layout/$accountName/$projectName/_layout/workspaces",
 )({
-  component: Compute,
-  validateSearch: (search) => computeSearchSchema.parse(search),
+  component: Workspaces,
+  validateSearch: (search) => workspacesSearchSchema.parse(search),
   beforeLoad: ({ cause, params, search }) => {
     // Only on arriving, since closing the last pane leaves none on purpose
     if (cause !== "enter") return
-    const stored = readComputeState(
-      computeStateKey(params.accountName, params.projectName),
+    const stored = readWorkspacesState(
+      workspacesStateKey(params.accountName, params.projectName),
     )
     const restored = {
       panes: search.panes ?? stored.panes,
@@ -87,7 +87,7 @@ export const Route = createFileRoute(
       return
     }
     throw redirect({
-      to: "/$accountName/$projectName/compute",
+      to: "/$accountName/$projectName/workspaces",
       params,
       search: { ...search, ...restored },
       replace: true,
@@ -95,7 +95,7 @@ export const Route = createFileRoute(
   },
 })
 
-function Compute() {
+function Workspaces() {
   const { accountName, projectName } = Route.useParams()
   const navigate = Route.useNavigate()
   const search = Route.useSearch()
@@ -127,13 +127,13 @@ function Compute() {
     workspaces.filter((w) => w.operator_online).map((w) => w.operator_id),
   )
   useEffect(() => {
-    const state: ComputeState = {
+    const state: WorkspacesState = {
       panes: search.panes,
       workspace: search.workspace,
     }
     try {
       sessionStorage.setItem(
-        computeStateKey(accountName, projectName),
+        workspacesStateKey(accountName, projectName),
         JSON.stringify(state),
       )
     } catch {

@@ -76,7 +76,7 @@ in it.
 The Operator replaces `calkit local-server` and the hub's "local machine"
 tab completely.
 The local server's endpoints become the Operator's first set of commands,
-and the hub's "compute" views replace the tab.
+and the hub's Workspaces pages replace the tab.
 
 ### Transport
 
@@ -320,7 +320,7 @@ reach the others through commits, pushes, pulls, and DVC.
 This is how the laptop and managed workspaces already interact, and it is
 the only model that stays predictable with an agent editing in one
 workspace while stages run from another.
-The hub makes divergence visible instead of hiding it: its compute page
+The hub makes divergence visible instead of hiding it: its Workspaces page
 lists every workspace of the project with its commit, whether it has
 uncommitted changes, and how far ahead of or behind the hub it is, plus the
 sessions running in it.
@@ -480,7 +480,9 @@ can broker them the way it brokers storage: the user adds and names
 compute there and enables projects to use it, and a hub environment
 names it, optionally locking its properties so a change on the hub
 shows up in the project (#1749).
-The compute page can list Operators and brokered compute together.
+The hub names its pages for workspaces rather than compute, leaving
+"Compute" for brokered compute, and pipeline runs from anywhere, e.g.,
+GitHub Actions, belong on the pipeline page rather than with workspaces.
 
 ### Editor builds
 
@@ -598,7 +600,7 @@ so it follows the pipeline integration phase.
 
 ### Phases
 
-1. Daemon, service install, registration, Operator token, hub compute tab
+1. Daemon, service install, registration, Operator token, hub Workspaces tab
    with liveness, the local server's features moved onto the relay, and
    persistent shell sessions. Done, along with cron mode, `--ssh`
    install, and two-factor authentication.

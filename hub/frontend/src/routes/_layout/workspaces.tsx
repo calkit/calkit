@@ -49,7 +49,7 @@ import WorkspaceBadges from "../../components/Workspace/WorkspaceBadges"
 import WorkspacePanel from "../../components/Workspace/WorkspacePanel"
 import useCustomToast from "../../hooks/useCustomToast"
 
-const computeSearchSchema = z.object({
+const workspacesSearchSchema = z.object({
   // The workspace shown, as "<operator ID>:<path>"
   workspace: z.string().optional(),
   // The session shown, as "<operator ID>:<session ID>", in its workspace
@@ -73,18 +73,18 @@ const computeSearchSchema = z.object({
   agent: z.coerce.number().optional(),
 })
 
-type ComputeSearch = z.infer<typeof computeSearchSchema>
+type WorkspacesSearch = z.infer<typeof workspacesSearchSchema>
 
 // What's shown, kept for the browser tab so coming back through the top bar
 // restores it
-const STATE_KEY = "calkit-compute"
+const STATE_KEY = "calkit-workspaces"
 
-export const Route = createFileRoute("/_layout/compute")({
-  component: Compute,
-  validateSearch: (search) => computeSearchSchema.parse(search),
+export const Route = createFileRoute("/_layout/workspaces")({
+  component: Workspaces,
+  validateSearch: (search) => workspacesSearchSchema.parse(search),
   beforeLoad: ({ cause, search }) => {
     if (cause !== "enter" || search.workspace || search.session) return
-    let stored: ComputeSearch = {}
+    let stored: WorkspacesSearch = {}
     try {
       stored = JSON.parse(sessionStorage.getItem(STATE_KEY) ?? "{}")
     } catch {
@@ -92,7 +92,7 @@ export const Route = createFileRoute("/_layout/compute")({
     }
     if (!stored.workspace && !stored.session) return
     throw redirect({
-      to: "/compute",
+      to: "/workspaces",
       search: {
         ...search,
         workspace: stored.workspace,
@@ -217,7 +217,7 @@ function AgentLog({
   )
 }
 
-function Compute() {
+function Workspaces() {
   const navigate = Route.useNavigate()
   const search = Route.useSearch()
   const showToast = useCustomToast()
@@ -276,7 +276,7 @@ function Compute() {
       showToast("Could not wake Operator", e.message, "error")
     }
   }
-  const select = (next: Partial<ComputeSearch>) =>
+  const select = (next: Partial<WorkspacesSearch>) =>
     navigate({
       search: (prev) => ({
         ...prev,
@@ -463,7 +463,7 @@ function Compute() {
         maxH={{ lg: "100%" }}
       >
         <Heading size="md" mb={3}>
-          Compute
+          Workspaces
         </Heading>
         <ClearableInput
           size="sm"
@@ -489,7 +489,8 @@ function Compute() {
               navigate({
                 search: (prev) => ({
                   ...prev,
-                  show: (e.target.value || undefined) as ComputeSearch["show"],
+                  show: (e.target.value ||
+                    undefined) as WorkspacesSearch["show"],
                 }),
               })
             }
@@ -669,7 +670,7 @@ function Compute() {
                     as={RouterLink}
                     size="xs"
                     variant="outline"
-                    to={`/${selectedWorkspace.project}/compute` as any}
+                    to={`/${selectedWorkspace.project}/workspaces` as any}
                     search={
                       { workspace: workspaceKey(selectedWorkspace) } as any
                     }

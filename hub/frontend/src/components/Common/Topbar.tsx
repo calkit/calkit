@@ -43,7 +43,7 @@ const NAV_LINKS: {
   { label: "Orgs", to: "/orgs" },
   { label: "Projects", to: "/projects" },
   { label: "Datasets", to: "/datasets" },
-  { label: "Compute", to: "/compute", signedIn: true },
+  { label: "Workspaces", to: "/workspaces", signedIn: true },
   { label: "Docs", href: "https://docs.calkit.org" },
 ]
 

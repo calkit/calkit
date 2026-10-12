@@ -135,12 +135,12 @@ plus the ones Calkit creates for running stages on that machine,
 and only to you.
 When viewing a project on the Hub,
 if there is a workspace connected to a live Operator, you'll see
-a green dot next to the compute link in the sidebar.
+a green dot next to the Workspaces link in the sidebar.
 
-The compute page replaces the project's "local machine" page,
+The Workspaces page replaces the project's "local machine" page,
 and the Operator replaces `calkit local-server`.
 
-On the project's compute page,
+On the project's Workspaces page,
 you'll see the project's workspaces on all of your Operators in a table,
 e.g., a clone on your laptop and another on a cluster,
 along with which commit each is on,
@@ -183,7 +183,7 @@ into alignment with each other.
 
 ## Monitoring cluster jobs
 
-If an Operator is running on a cluster, a workspace's compute page shows
+If an Operator is running on a cluster, a workspace's page shows
 its scheduler jobs, the same ones listed by
 [`calkit scheduler queue`](hpc.md#monitoring),
 along with their logs.

@@ -65,8 +65,8 @@ export const projectNavItems: ProjectNavItem[] = [
   { icon: FiFolder, title: "All files", path: "/files" },
   {
     icon: FiServer,
-    title: "Compute",
-    path: "/compute",
+    title: "Workspaces",
+    path: "/workspaces",
     requiresLogin: true,
   },
 ]
@@ -89,9 +89,9 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     strict: false,
   }) as any
   const currentRef: string | undefined = layoutSearch?.ref
-  // Colors the compute icon green when one of the user's Operators is
+  // Colors the Workspaces icon green when one of the user's Operators is
   // online with a workspace for this project, and says when the pipeline is
-  // running on one. Same key as the compute and pipeline pages, so they
+  // running on one. Same key as the Workspaces and pipeline pages, so they
   // share one request.
   const workspacesQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "workspaces"],
@@ -106,7 +106,7 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     // As often as Operators check in
     refetchInterval: 60000,
   })
-  const computeColor = workspacesQuery.data?.some((ws) => ws.operator_online)
+  const workspacesColor = workspacesQuery.data?.some((ws) => ws.operator_online)
     ? "ui.success"
     : "default"
   // A pipeline that has run but no longer matches the code. The checklist
@@ -162,7 +162,7 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
       >
         <Icon
           as={icon}
-          color={title === "Compute" ? computeColor : "default"}
+          color={title === "Workspaces" ? workspacesColor : "default"}
           alignSelf="center"
         />
         <Text ml={2}>{title}</Text>

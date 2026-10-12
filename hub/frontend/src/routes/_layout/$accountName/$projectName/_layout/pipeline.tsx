@@ -388,7 +388,7 @@ function ProjectPipeline() {
   const { user } = useAuth()
   // Where the pipeline is running, or how it last ran, on the user's own
   // machines, from their Operators' check-ins; the same request as the
-  // sidebar's and the compute page's
+  // sidebar's and the Workspaces page's
   const workspacesQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "workspaces"],
     queryFn: () =>
@@ -414,10 +414,10 @@ function ProjectPipeline() {
       !ws.running &&
       !ws.in_use_by,
   )
-  // Runs wait for a click on the compute page, so a link can't start one
+  // Runs wait for a click on the Workspaces page, so a link can't start one
   const runOn = (ws: (typeof runTargets)[number]) =>
     navigate({
-      to: "/$accountName/$projectName/compute",
+      to: "/$accountName/$projectName/workspaces",
       params: { accountName, projectName },
       search: {
         workspace: `${ws.operator_id}:${ws.path}`,
@@ -592,7 +592,7 @@ function ProjectPipeline() {
                               on{" "}
                               <Link
                                 as={RouterLink}
-                                to={`/${accountName}/${projectName}/compute`}
+                                to={`/${accountName}/${projectName}/workspaces`}
                               >
                                 {ws.operator_name}
                               </Link>

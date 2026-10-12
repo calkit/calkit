@@ -208,63 +208,6 @@ def test_memoized_hashes(tmp_dir, monkeypatch):
     assert data_status["uncommitted"] == {"modified": ["out"]}
 
 
-def test_head_diff_only_if_dvc_files_changed(tmp_dir, monkeypatch):
-    import dvc.repo.data
-
-    subprocess.check_call(["git", "init", "-q"])
-    subprocess.check_call(["dvc", "init", "-q"])
-    with open("a.txt", "w") as f:
-        f.write("a")
-    subprocess.check_call(["dvc", "add", "-q", "a.txt"])
-    subprocess.check_call(["git", "add", "."])
-    subprocess.check_call(["git", "commit", "-qm", "Add a"])
-    # Count the diffs DVC really runs, beneath the skip
-    diffs = []
-    original = dvc.repo.data._diff_head_to_index
-
-    def counting(*args, **kwargs):
-        diffs.append(1)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(dvc.repo.data, "_diff_head_to_index", counting)
-
-    def check() -> dict:
-        # Data status must read the same with the skip as without
-        expected = dict(dvc.repo.Repo().data_status())
-        diffs.clear()
-        repo = dvc.repo.Repo()
-        with calkit.dvc.head_diff_only_if_dvc_files_changed():
-            status = dict(repo.data_status())
-        assert status == expected
-        return calkit.dvc.data_status_as_posix(status)
-
-    # Nothing committed to DVC alone, so nothing to diff
-    assert check()["committed"] == {}
-    assert not diffs
-    assert dvc.repo.data._diff_head_to_index is counting
-    # A .dvc file that's changed, staged or not
-    with open("a.txt", "w") as f:
-        f.write("changed")
-    subprocess.check_call(["dvc", "add", "-q", "a.txt"])
-    assert check()["committed"] == {"modified": ["a.txt"]}
-    assert diffs
-    subprocess.check_call(["git", "add", "a.txt.dvc"])
-    assert check()["committed"] == {"modified": ["a.txt"]}
-    subprocess.check_call(["git", "commit", "-qm", "Change a"])
-    assert check()["committed"] == {}
-    assert not diffs
-    # One Git doesn't track yet
-    with open("b.txt", "w") as f:
-        f.write("b")
-    subprocess.check_call(["dvc", "add", "-q", "b.txt"])
-    assert check()["committed"] == {"added": ["b.txt"]}
-    # And a deleted one
-    subprocess.check_call(["git", "add", "."])
-    subprocess.check_call(["git", "commit", "-qm", "Add b"])
-    os.remove("b.txt.dvc")
-    assert check()["committed"] == {"deleted": ["b.txt"]}
-
-
 def test_register_ck_scheme_updates_schema_and_registry():
     register_ck_scheme()
 

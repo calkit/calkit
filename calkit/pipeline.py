@@ -990,7 +990,6 @@ def get_status(
             with (
                 dvc.repo.lock_repo(dvc_repo),
                 calkit.dvc.memoized_hashes(),
-                calkit.dvc.head_diff_only_if_dvc_files_changed(),
             ):
                 raw_status = dvc_repo.status()
                 dvc_out_paths = [

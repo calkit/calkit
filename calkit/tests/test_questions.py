@@ -745,6 +745,66 @@ def test_check_questions_pipeline_and_pins(tmp_dir):
     assert checked.evidence[0].git_ref == sha
 
 
+def test_check_questions_frozen_subproject(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("decisions")
+    with open("decisions/n.txt", "w") as f:
+        f.write("2\n")
+    sub_info = {
+        "pipeline": {
+            "stages": {
+                "measure": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo '{\"v\": 2}' > result.json",
+                    "inputs": ["n.txt"],
+                    "outputs": [{"path": "result.json", "storage": "git"}],
+                }
+            }
+        },
+        "questions": [
+            {
+                "question": "How big?",
+                "answer": "{v}.",
+                "evidence": [
+                    {
+                        "kind": "value",
+                        "path": "result.json",
+                        "key": "v",
+                        "name": "v",
+                    }
+                ],
+            }
+        ],
+    }
+    with open("decisions/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["subprojects"] = [{"path": "decisions"}]
+    _write_yaml(ck_info)
+    subprocess.check_call(["calkit", "run"])
+    # Frozen once run, and still matching dvc.lock, so as current as ever
+    sub_info["pipeline"]["stages"]["measure"]["frozen"] = True
+    with open("decisions/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    subprocess.check_call(["calkit", "run"])
+    assert frozen_tainted_stage_names(wdir="decisions") == set()
+    # And checked from the parent, with where it came from
+    status = check_questions(wdir=".")
+    assert [(q.project, q.index, q.status) for q in status.questions] == [
+        ("decisions", 1, "ok")
+    ]
+    assert status.ok
+    assert "decisions: 1. [ok] How big?" in format_status(status, True)
+    # Once its input moves, it won't be rerun, which is worth a look
+    with open("decisions/n.txt", "w") as f:
+        f.write("3\n")
+    assert frozen_tainted_stage_names(wdir="decisions") == {"measure"}
+    status = check_questions(wdir=".")
+    assert [q.status for q in status.questions] == ["frozen"]
+    assert status.ok
+
+
 def test_conditional_answers(tmp_dir):
     values = {"p": 0.007, "rho": 0.8373, "n": 17, "leader": "turns-max"}
     # Comparisons, chaining, boolean operators, strings, and arithmetic

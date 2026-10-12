@@ -328,8 +328,10 @@ def from_markdown(
         if "://" not in hub:
             hub = "https://" + hub
         project_url = f"{hub}/{ck_info['owner']}/{ck_info['name']}"
-    # A local version's commit is the project's own, which isn't Calkit's
-    version = calkit.__version__.split("+")[0]
+    # A local version's commit is the project's own, which isn't Calkit's,
+    # and a development build's count of commits since the last release
+    # changes with every commit, which would change the PDF on every rebuild
+    version = re.sub(r"\.dev\d+$", ".dev", calkit.__version__.split("+")[0])
     with open(md_path, encoding="utf-8") as f:
         text = f.read()
     try:

@@ -7,6 +7,7 @@ import socket
 import stat
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
@@ -1511,11 +1512,21 @@ def _spawn_lock_holder(*signature: str):
     and holder verification see a realistic command. Args must be space-free so
     the recorded command tokenizes the same way DVC's does.
     """
+    from calkit.dvc.core import _rwlock_holder_is_live
+
     with open("holder.py", "w") as f:
         f.write("import time\ntime.sleep(120)\n")
     argv = [sys.executable, "holder.py", *signature]
     proc = subprocess.Popen(argv)
-    return proc, " ".join(argv)
+    cmd = " ".join(argv)
+    # Until it's recognized, e.g., on a busy runner where it's still
+    # starting, a test would see one fewer holder than it spawned
+    deadline = time.monotonic() + 10
+    while not _rwlock_holder_is_live(proc.pid, cmd):
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"Lock holder never started: {cmd}")
+        time.sleep(0.05)
+    return proc, cmd
 
 
 def _write_fake_run_log() -> None:

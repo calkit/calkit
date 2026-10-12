@@ -2972,6 +2972,45 @@ def test_outputs_stay_out_of_git_after_failed_run(tmp_dir):
     assert "dvc.lock" in repo.git.ls_files().splitlines()
 
 
+def test_save_new_files_in_git_stored_output_dir(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "fetch": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p data/github && echo 1 > data/github/1.json",
+                "outputs": [
+                    {
+                        "path": "data/github",
+                        "storage": "git",
+                        "delete_before_run": False,
+                    }
+                ],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+    repo = git.Repo()
+    assert "data/github/1.json" in repo.git.ls_files("data").splitlines()
+    # A later run adds files to the persistent output, which belong in Git
+    # with the rest of it, not ignored as if DVC cached the output, and not
+    # sent to DVC by extension either
+    new_files = ["data/github/2.json", "data/github/plot.png"]
+    for path in new_files:
+        with open(path, "w") as f:
+            f.write("2")
+    subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+    tracked = repo.git.ls_files("data").splitlines()
+    assert set(new_files) <= set(tracked)
+    assert not any(repo.ignored(path) for path in new_files)
+    assert not os.path.exists("data/.gitignore")
+
+
 @skipif_windows_docker
 def test_xenv_env_var(tmp_dir):
     subprocess.check_call(["calkit", "init"])

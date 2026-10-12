@@ -1137,10 +1137,30 @@ def add(
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
         pipeline_output_storage = calkit.pipeline.get_output_storage_map()
         lock_out_paths = calkit.dvc.get_lock_out_paths()
+        cached_out_paths: set[str] | None = None
         dvc_scm = None
         for path in paths:
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()
+            # A file inside an output stored in Git, e.g., one written to a
+            # persistent output directory, goes to Git like the output does
+            output_storage = pipeline_output_storage.get(posix_path)
+            if output_storage is None and any(
+                posix_path.startswith(out + "/")
+                for out, storage in pipeline_output_storage.items()
+                if storage == "git"
+            ):
+                output_storage = "git"
+            locked_out = next(
+                (
+                    out
+                    for out in lock_out_paths
+                    if posix_path == out or posix_path.startswith(out + "/")
+                ),
+                None,
+            )
+            if locked_out is not None and cached_out_paths is None:
+                cached_out_paths = calkit.dvc.get_cached_out_paths()
             if posix_path in zip_path_map:
                 if dry_run:
                     typer.echo(f"Would add {path} via DVC zip")
@@ -1172,10 +1192,9 @@ def add(
                     )
                     calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
                     calkit.dvc.run_dvc_command(["add", path])
-            elif posix_path in pipeline_output_storage:
+            elif output_storage is not None:
                 # Respect storage explicitly set in the pipeline definition
-                pipeline_storage = pipeline_output_storage[posix_path]
-                if pipeline_storage == "git":
+                if output_storage == "git":
                     if dry_run:
                         typer.echo(
                             f"Would add {path} to Git "
@@ -1186,7 +1205,7 @@ def add(
                             f"Adding {path} to Git per pipeline output storage"
                         )
                         git_add(path)
-                elif pipeline_storage == "dvc-zip":
+                elif output_storage == "dvc-zip":
                     if dry_run:
                         typer.echo(
                             f"Would add {path} as a DVC zip "
@@ -1210,22 +1229,13 @@ def add(
                             f"({path} is a DVC pipeline output)"
                         )
                         git_add("dvc.lock")
-            elif (
-                locked_out := next(
-                    (
-                        out
-                        for out in lock_out_paths
-                        if posix_path == out
-                        or posix_path.startswith(out + "/")
-                    ),
-                    None,
-                )
-            ) is not None:
+            elif locked_out in (cached_out_paths or set()):
                 # DVC already caches this, and it's only showing up at all
                 # because its ignore entry went missing, e.g., DVC removes
                 # every entry a failed repro added, including those for the
                 # stages that succeeded. Sized up like a new file, a small
-                # one would go to Git alongside DVC's copy.
+                # one would go to Git alongside DVC's copy. Outputs DVC
+                # doesn't cache were never ignored, so they don't count.
                 if dry_run:
                     typer.echo(
                         f"Would ignore {path} ({path} is a DVC pipeline output)"

@@ -7,7 +7,9 @@ shifting the bottleneck to verification and validation.
 Meanwhile, the reproducibility crisis remains unsolved.
 For example, the open-access publisher PLOS found
 [only 12% of articles sharing code openly](https://doi.org/10.1371/journal.pone.0311493),
-and even fewer share code that is quick to verify.
+and even fewer share code that is quick to verify,
+i.e., what's shared doesn't actually run without significant reverse
+engineering.
 Thus, it's now more important than
 ever to make it intuitive and enjoyable for both humans and AI agents
 to work transparently and reproducibly.
@@ -67,10 +69,10 @@ projects.
 She used Calkit to create single-button reproducible pipelines that integrated
 MATLAB, Python, Julia, LaTeX, and more.
 She used Calkit's Overleaf integration
-to allow collaborators to contribute without learning Git,
-producing three journal article submissions and a dissertation.
+to allow collaborators to contribute without the complexity of Git,
+submitting three journal articles along with her dissertation.
 
-Becca's testimonial regarding how Calkit helped her research:
+Read how Calkit helped Becca with her research in her own words:
 
 > In the first conference paper I wrote back in 2022,
 > I had a scare where my process of manually screenshotting MATLAB figures and uploading them to Overleaf

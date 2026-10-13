@@ -363,15 +363,25 @@ def from_markdown(
     epoch = calkit.latex.get_source_date_epoch(md_path)
     if epoch is not None:
         env["SOURCE_DATE_EPOCH"] = epoch
+    # A document can fail after it's typeset, e.g., one that checks its
+    # length, so what a failed build got as far as is worth a look, and
+    # without an older PDF there it can't be mistaken for one
+    pdf = Path(tex_path).with_suffix(".pdf")
+    pdf.unlink(missing_ok=True)
     try:
         subprocess.check_call(cmd + [tex_path], env=env)
     except subprocess.CalledProcessError:
+        if pdf.is_file():
+            raise_error(
+                f"LaTeX failed to build {tex_path}; the PDF it got as far "
+                f"as is at {pdf.as_posix()}"
+            )
         raise_error(f"LaTeX failed to build {tex_path}")
     for output in outputs:
         if output.endswith(".pdf"):
             if os.path.dirname(output):
                 os.makedirs(os.path.dirname(output), exist_ok=True)
-            shutil.copyfile(Path(tex_path).with_suffix(".pdf"), output)
+            shutil.copyfile(pdf, output)
 
 
 def _tex_cmd(

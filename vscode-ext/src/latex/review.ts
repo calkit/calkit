@@ -1472,9 +1472,9 @@ window.addEventListener("message", (e) => {
     count.hidden = !open;
     document.getElementById("toggle-comments").title = "Show or hide comments (" + open + " open, "
       + (threads.length - open) + " resolved)";
-    setStatus(!msg.synctex ? "Comments placed by text, without SyncTeX"
-      : msg.stale.length ? msg.stale.join(", ") + " changed since this PDF was built; rebuild it to place comments exactly"
-      : "");
+    // Which sources changed goes in the tooltip, since there can be many
+    setStatus(msg.synctex && msg.stale.length ? "Rebuild to place comments exactly" : "");
+    if (msg.synctex && msg.stale.length) statusEl.title = "Changed since this PDF was built: " + msg.stale.join(", ");
     renderPanel();
     void draw();
   } else if (msg.type === "status") setStatus(msg.text);

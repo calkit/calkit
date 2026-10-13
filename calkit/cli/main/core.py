@@ -594,6 +594,9 @@ def get_status(
         # DVC's progress bars would each be printed above the spinner, and
         # they're shown only if this is at or below their level
         logging.getLogger("dvc.progress").setLevel(logging.CRITICAL + 1)
+        # Importing DVC sets up its logging and colorama on the streams it
+        # finds, which would otherwise be the spinner's stand-ins for them
+        import dvc  # noqa: F401
     with spinner:
         pipeline_status = None
         running_status = None

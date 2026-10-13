@@ -521,6 +521,8 @@ def get_status(
     ] = False,
 ) -> None:
     """View status (project, version control, and/or pipeline)."""
+    from contextlib import AbstractContextManager, nullcontext
+
     import git
     from git.exc import InvalidGitRepositoryError
 
@@ -581,78 +583,94 @@ def get_status(
                 )
     else:
         categories = valid_categories
-    pipeline_status = None
-    running_status = None
-    if "pipeline" in categories or "dvc" in categories:
-        # If a run is in progress it holds the DVC lock, so computing the full
-        # status would just error out (and would mutate files like dvc.yaml or
-        # notebooks mid-run). Report the running stage from the run log instead.
-        running_status = _get_running_pipeline_status()
-    if running_status is None and (
-        "pipeline" in categories or "dvc" in categories
-    ):
-        # Sync zips so the zip files reflect current workspace state before
-        # reporting status
-        calkit.dvc.zip.sync_all(direction="to-zip")
-        pipeline_status = calkit.pipeline.get_status(
-            ck_info=ck_info,
-            targets=targets,
-            check_environments=not no_check_envs,
-            clean_notebooks=True,
-            compile_to_dvc=True,
-            with_data_status="dvc" in categories,
-            with_storage_problems="dvc" in categories,
-        )
-        if pipeline_status.failed_environment_checks:
-            warn(
-                "Failed pipeline environment checks for: "
-                + ", ".join(pipeline_status.failed_environment_checks)
-            )
-    # Checking questions needs to know which stages are stale, which is the
-    # expensive part of the pipeline status computed above, so reuse that
-    # rather than asking DVC a second time
-    questions_status = None
-    if "questions" in categories and ck_info.get("questions"):
-        from calkit.pipeline import frozen_tainted_stage_names
-        from calkit.questions import check_questions
+    # Everything is worked out before anything is shown, which can take a
+    # while, e.g., when environments are checked again, so a spinner shows
+    # until then. It writes to its own copy of the terminal, since what the
+    # environment checks' tools print is discarded.
+    spinner: AbstractContextManager = nullcontext()
+    if not as_json and sys.stderr.isatty():
+        from rich.console import Console
 
-        stale_stages = None
-        frozen_stages = None
-        # A pipeline status that bailed out, e.g., on a failed environment
-        # check, has no staleness in it; let the check work it out itself
-        # rather than reporting evidence as current because nothing was
-        # computed
-        if (
-            pipeline_status is not None
-            and not pipeline_status.errors
-            and not pipeline_status.failed_environment_checks
-        ):
-            stale_stages = {
-                n.split("@")[0] for n in pipeline_status.stale_stage_names
-            }
-            try:
-                frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
-            except Exception:
-                frozen_stages = set()
-        # The summary doesn't say what changed since an answer was edited,
-        # which is the only part that needs history, so skip reading it
-        questions_status = check_questions(
-            ck_info=ck_info,
-            stale_stages=stale_stages,
-            frozen_stages=frozen_stages,
-            check_history=False,
+        spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
+            "Checking status..."
         )
-    # Paths tracked where they shouldn't be, found with the pipeline's status,
-    # which builds the DVC index this needs anyway, unless it stopped short
-    storage_problems = None
-    if "dvc" in categories and running_status is None:
-        if pipeline_status is not None:
-            storage_problems = pipeline_status.storage_problems
-        if storage_problems is None:
-            try:
-                storage_problems = calkit.dvc.get_storage_problems()
-            except Exception:
-                pass
+    with spinner:
+        pipeline_status = None
+        running_status = None
+        if "pipeline" in categories or "dvc" in categories:
+            # If a run is in progress it holds the DVC lock, so computing
+            # the full status would just error out (and would mutate files
+            # like dvc.yaml or notebooks mid-run). Report the running stage
+            # from the run log instead.
+            running_status = _get_running_pipeline_status()
+        if running_status is None and (
+            "pipeline" in categories or "dvc" in categories
+        ):
+            # Sync zips so the zip files reflect current workspace state before
+            # reporting status
+            calkit.dvc.zip.sync_all(direction="to-zip")
+            pipeline_status = calkit.pipeline.get_status(
+                ck_info=ck_info,
+                targets=targets,
+                check_environments=not no_check_envs,
+                clean_notebooks=True,
+                compile_to_dvc=True,
+                with_data_status="dvc" in categories,
+                with_storage_problems="dvc" in categories,
+                quiet_environment_checks=True,
+            )
+            if pipeline_status.failed_environment_checks:
+                warn(
+                    "Failed pipeline environment checks for: "
+                    + ", ".join(pipeline_status.failed_environment_checks)
+                    + ". Run 'calkit check env -n <name>' for details."
+                )
+        # Checking questions needs to know which stages are stale, which is the
+        # expensive part of the pipeline status computed above, so reuse that
+        # rather than asking DVC a second time
+        questions_status = None
+        if "questions" in categories and ck_info.get("questions"):
+            from calkit.pipeline import frozen_tainted_stage_names
+            from calkit.questions import check_questions
+
+            stale_stages = None
+            frozen_stages = None
+            # A pipeline status that bailed out, e.g., on a failed environment
+            # check, has no staleness in it; let the check work it out itself
+            # rather than reporting evidence as current because nothing was
+            # computed
+            if (
+                pipeline_status is not None
+                and not pipeline_status.errors
+                and not pipeline_status.failed_environment_checks
+            ):
+                stale_stages = {
+                    n.split("@")[0] for n in pipeline_status.stale_stage_names
+                }
+                try:
+                    frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
+                except Exception:
+                    frozen_stages = set()
+            # The summary doesn't say what changed since an answer was edited,
+            # which is the only part that needs history, so skip reading it
+            questions_status = check_questions(
+                ck_info=ck_info,
+                stale_stages=stale_stages,
+                frozen_stages=frozen_stages,
+                check_history=False,
+            )
+        # Paths tracked where they shouldn't be, found with the pipeline's
+        # status, which builds the DVC index this needs anyway, unless it
+        # stopped short
+        storage_problems = None
+        if "dvc" in categories and running_status is None:
+            if pipeline_status is not None:
+                storage_problems = pipeline_status.storage_problems
+            if storage_problems is None:
+                try:
+                    storage_problems = calkit.dvc.get_storage_problems()
+                except Exception:
+                    pass
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:

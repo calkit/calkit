@@ -1106,15 +1106,51 @@ def check_all_in_pipeline(
     wdir: str | None = None,
     targets: list[str] | None = None,
     force: bool = False,
+    quiet: bool = False,
 ) -> dict:
     """Check all environments in the pipeline, caching for efficiency.
 
     The cache file is a simple JSON file keyed by project path.
     Each object inside tracks the last check timestamp, pass/fail,
     and some sort of hash(es) for the important file content involved.
+
+    With ``quiet``, what the checks' tools print, e.g., uv or Julia, is
+    discarded.
     """
+    import sys
+    from collections.abc import Iterator
+    from contextlib import contextmanager, redirect_stderr, redirect_stdout
+
     import calkit
     from calkit.cli.check import check_environment
+
+    @contextmanager
+    def silenced() -> Iterator[None]:
+        # Tools write to the terminal directly, so this is done at the file
+        # descriptor level as well as Python's
+        if not quiet:
+            yield
+            return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        saved = [os.dup(1), os.dup(2)]
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            with (
+                open(os.devnull, "w") as null,
+                redirect_stdout(null),
+                redirect_stderr(null),
+            ):
+                yield
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.dup2(saved[0], 1)
+            os.dup2(saved[1], 2)
+            for fd in [*saved, devnull]:
+                os.close(fd)
 
     # TODO: ``check_environment`` should be able to take a wdir argument
     if wdir is not None:
@@ -1190,7 +1226,8 @@ def check_all_in_pipeline(
                 res[env_name] = {"success": True, "cached": True}
                 continue
         try:
-            check_environment(env_name, verbose=False)
+            with silenced():
+                check_environment(env_name, verbose=False)
             res[env_name] = save_cache(
                 env_name=env_name, env=env, wdir=wdir, success=True
             )

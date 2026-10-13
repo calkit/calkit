@@ -889,6 +889,7 @@ def get_status(
     force_env_check: bool = False,
     with_data_status: bool = False,
     with_storage_problems: bool = False,
+    quiet_environment_checks: bool = False,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
@@ -934,6 +935,7 @@ def get_status(
                     ck_info=ck_info,
                     targets=targets,
                     force=force_env_check,
+                    quiet=quiet_environment_checks,
                 )
                 result["environment_checks"] = env_checks
             except Exception as e:

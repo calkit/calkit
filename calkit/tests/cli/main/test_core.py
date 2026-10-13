@@ -2808,6 +2808,48 @@ def test_commit(tmp_dir):
     assert not repo.is_dirty()
 
 
+def test_commit_skips_the_dvc_push_only_when_nothing_dvc_changed(
+    monkeypatch, tmp_dir
+):
+    import calkit.cli.main.core as core
+
+    pushed: list[bool] = []
+    monkeypatch.setattr(core, "push", lambda **kw: pushed.append(kw["no_dvc"]))
+    subprocess.check_call(["calkit", "init"])
+    # A commit that only moves Git-tracked files skips the DVC push
+    Path("plain.txt").write_text("plain\n")
+    subprocess.check_call(["calkit", "add", "plain.txt"])
+    core.commit(message="Add plain.txt", push_commit=True)
+    assert pushed[-1] is True
+    # A subproject's own pipeline lock is still a DVC file
+    os.makedirs("sub", exist_ok=True)
+    Path("sub/dvc.lock").write_text("schema: '2.0'\n")
+    subprocess.check_call(["calkit", "add", "sub/dvc.lock"])
+    core.commit(message="Touch sub lock", push_commit=True)
+    assert pushed[-1] is False
+    # A pointer whose name holds a space still counts
+    Path("my data.dvc").write_text("outs: []\n")
+    subprocess.check_call(["calkit", "add", "my data.dvc"])
+    core.commit(message="Add spaced pointer", push_commit=True)
+    assert pushed[-1] is False
+    # A merge that carries in a pointer counts too
+    repo = calkit.git.get_repo()
+    default_branch = repo.active_branch.name
+    repo.git.checkout("-b", "incoming", "HEAD~1")
+    Path("incoming.dvc").write_text("outs: []\n")
+    subprocess.check_call(["git", "add", "incoming.dvc"])
+    subprocess.check_call(
+        ["git", "commit", "-q", "-m", "Add incoming pointer"]
+    )
+    repo.git.checkout(default_branch)
+    subprocess.run(
+        ["git", "merge", "incoming", "--no-commit", "--no-ff"],
+        capture_output=True,
+    )
+    core.commit(message="Merge incoming", push_commit=True)
+    assert pushed[-1] is False
+
+
 def test_push_only_reports_to_a_connected_hub(monkeypatch, tmp_dir):
     import calkit.cli.main.core as cli_core
 

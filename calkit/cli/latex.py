@@ -346,10 +346,12 @@ def from_markdown(
             to_latex(output)
     if not any(o.endswith(".pdf") for o in outputs):
         return
-    # A PDF is built where Calkit keeps what it derives from the file, and
-    # dated by the file's last commit rather than the build directory's,
-    # which has none of its own
-    build_dir = Path(".calkit", "markdown", md_path, "pdf").as_posix()
+    # A PDF is built in the machine-local directory, which is kept out of
+    # version control, and dated by the file's last commit rather than the
+    # build directory's, which has none of its own
+    build_dir = Path(
+        calkit.ensure_local_dir(), "markdown", md_path, "pdf"
+    ).as_posix()
     tex_path = f"{build_dir}/{Path(md_path).stem}.tex"
     to_latex(tex_path)
     cmd = [sys.executable, "-m", "calkit", "latex", "build"]

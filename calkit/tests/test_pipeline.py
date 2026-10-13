@@ -1719,7 +1719,7 @@ def test_get_status(tmp_dir):
     assert steps == [
         "Checking environments",
         "Checking environment 'py'",
-        "Compiling the pipeline",
+        "Compiling pipeline",
         "Cleaning notebooks",
         "Finding stale stages",
     ]

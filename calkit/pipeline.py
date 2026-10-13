@@ -964,7 +964,7 @@ def get_status(
             ck_info.get("pipeline", {}).get("stages", {})
             or ck_info.get("subprojects")
         ):
-            step("Compiling the pipeline")
+            step("Compiling pipeline")
             try:
                 to_dvc(ck_info=ck_info, write=True, manage_gitignore=False)
             except Exception as e:

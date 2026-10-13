@@ -302,6 +302,134 @@ def test_list_questions(tmp_dir):
     assert "None" not in out
 
 
+def test_list_comments(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\input{intro}\n\nA paragraph.\n")
+    with open("paper/intro.tex", "w") as f:
+        f.write("Intro text.\n")
+    os.makedirs("docs")
+    with open("docs/note.md", "w") as f:
+        f.write("# Note\n\nSome text.\n")
+    with open("README.md", "w") as f:
+        f.write("Not built into a PDF.\n")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "paper": {
+                            "kind": "latex",
+                            "target_path": "main.tex",
+                            "wdir": "paper",
+                            "environment": "_system",
+                        },
+                        "note": {
+                            "kind": "markdown",
+                            "target_path": "docs/note.md",
+                            "pdf": {"environment": "_system"},
+                        },
+                        "readme": {
+                            "kind": "markdown",
+                            "target_path": "README.md",
+                        },
+                    }
+                }
+            },
+            f,
+        )
+    with open("README.md") as f:
+        readme = f.read()
+    intro_id = ck(
+        "new",
+        "comment",
+        "paper/intro.tex",
+        "-l",
+        "1",
+        "-m",
+        "Why?",
+        "--author",
+        "A",
+    )
+    note_id = ck(
+        "new",
+        "comment",
+        "docs/note.md",
+        "-l",
+        "3",
+        "-m",
+        "Hm.",
+        "--author",
+        "B",
+    )
+    ck(
+        "new",
+        "comment",
+        "paper/main.tex",
+        "-l",
+        "3",
+        "-m",
+        "Ok.",
+        "--author",
+        "C",
+    )
+    # Without a path, every document built into a PDF is listed, with the
+    # files it inputs, but nothing else
+    listed = json.loads(ck("list", "comments", "--json"))
+    assert {c["path"] for c in listed} == {
+        "paper/intro.tex",
+        "paper/main.tex",
+        "docs/note.md",
+    }
+    with open("README.md") as f:
+        assert f.read() == readme
+    assert [
+        c["id"]
+        for c in json.loads(ck("list", "comments", "docs/note.md", "--json"))
+    ] == [note_id]
+    # An ID finds its thread in any of them, to reply and resolve at once
+    ck(
+        "update",
+        "comment",
+        "--id",
+        intro_id,
+        "-r",
+        "Because.",
+        "--resolve",
+        "--author",
+        "D",
+    )
+    thread = next(
+        c
+        for c in json.loads(ck("list", "comments", "--json"))
+        if c["id"] == intro_id
+    )
+    assert thread["resolved"]
+    assert [m["text"] for m in thread["messages"]] == ["Why?", "Because."]
+    assert intro_id not in ck("list", "comments", "-u")
+    ck("update", "comment", "paper/intro.tex", "-l", "1", "--reopen")
+    assert intro_id in ck("list", "comments", "-u")
+    ck("delete", "comment", "--id", note_id)
+    with open("docs/note.md") as f:
+        assert f.read() == "# Note\n\nSome text.\n"
+    # Bad references fail
+    for args in [
+        ["update", "comment", "--id", "nope", "--resolve"],
+        ["update", "comment", "-l", "1", "--resolve"],
+        ["update", "comment", "--id", intro_id],
+        ["update", "comment", "--id", intro_id, "--resolve", "--reopen"],
+        ["delete", "comment", "--id", "nope"],
+        ["list", "comments", "missing.md"],
+    ]:
+        res = subprocess.run(["calkit", *args], capture_output=True)
+        assert res.returncode != 0, args
+
+
 def test_list_remotes(tmp_dir):
     # Outside a repo: should warn but not fail
     result = subprocess.run(

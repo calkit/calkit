@@ -55,7 +55,7 @@ from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
 from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
-from calkit.cli.latex import comments_app, latex_app
+from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
@@ -89,11 +89,6 @@ app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
-app.add_typer(
-    comments_app,
-    name="comments",
-    help="Work with review comments in LaTeX or Markdown source.",
-)
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(

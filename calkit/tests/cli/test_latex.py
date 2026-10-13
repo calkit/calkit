@@ -1107,8 +1107,7 @@ def test_comments(tmp_dir):
             ["calkit", "latex", "comments", *args], capture_output=True
         )
         assert res.returncode != 0
-    # In Markdown, threads are HTML comments, which Pandoc leaves out, and
-    # the top-level group works the same
+    # In Markdown, threads are HTML comments, which Pandoc leaves out
     with open("main.md", "w") as f:
         f.write(
             "# _A_ title\n"
@@ -1126,15 +1125,7 @@ def test_comments(tmp_dir):
             "```\n"
         )
 
-    def ck_md(*args: str) -> str:
-        return subprocess.run(
-            ["calkit", "comments", *args],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-    md_id = ck_md(
+    md_id = ck(
         "add",
         "main.md",
         "-l",
@@ -1145,9 +1136,7 @@ def test_comments(tmp_dir):
         "A",
     )
     # On code, it goes above the directive, which must stay just above it
-    code_id = ck_md(
-        "add", "main.md", "-l", "16", "-m", "Code.", "--author", "B"
-    )
+    code_id = ck("add", "main.md", "-l", "16", "-m", "Code.", "--author", "B")
     with open("main.md") as f:
         md = f.read().split("\n")
     assert md[4:9] == [
@@ -1160,30 +1149,28 @@ def test_comments(tmp_dir):
     assert md[5].startswith("  A (")
     assert md[11] == f"<!-- COMMENT id={code_id}"
     assert md[15] == "<!-- calkit stage name=s -->"
-    listed = json.loads(ck_md("list", "main.md", "--json"))
+    listed = json.loads(ck("list", "main.md", "--json"))
     assert [c["id"] for c in listed] == [md_id, code_id]
     assert listed[0]["anchor"]["text"] == (
         "Some bold text with a link, it's 2x."
     )
-    ck_md("reply", "main.md", "--id", md_id, "-m", "Yes.", "--author", "C")
-    ck_md("resolve", "main.md", "--line", "5")
-    thread = json.loads(ck_md("list", "main.md", "--json"))[0]
+    ck("reply", "main.md", "--id", md_id, "-m", "Yes.", "--author", "C")
+    ck("resolve", "main.md", "--line", "5")
+    thread = json.loads(ck("list", "main.md", "--json"))[0]
     assert thread["resolved"]
     assert [m["text"] for m in thread["messages"]] == [
         "Is -- > this right?",
         "Yes.",
     ]
-    found = json.loads(
-        ck_md("locate", "main.md", "--text", "A title", "--json")
-    )
+    found = json.loads(ck("locate", "main.md", "--text", "A title", "--json"))
     assert found["line"] == 1
-    ck_md("delete", "main.md", "--id", code_id)
+    ck("delete", "main.md", "--id", code_id)
     with open("main.md") as f:
         assert "Code." not in f.read()
     # Hand-written threads can close on a message's last line
     with open("main.md", "a") as f:
         f.write("<!-- COMMENT\n  D:\n    Short. -->\nEnd.\n")
-    listed = json.loads(ck_md("list", "main.md", "--json"))
+    listed = json.loads(ck("list", "main.md", "--json"))
     assert listed[-1]["messages"][0]["text"] == "Short."
     assert listed[-1]["anchor"]["text"] == "End."
 

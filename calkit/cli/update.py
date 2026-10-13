@@ -2055,3 +2055,57 @@ def update_hub(
             repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
         _adopt_hub_history(repo)
     typer.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
+
+
+@update_app.command(name="comment")
+def update_comment(
+    path: Annotated[
+        str | None,
+        typer.Argument(help="File the thread is in, if not found by --id."),
+    ] = None,
+    id: Annotated[
+        str | None,
+        typer.Option(
+            "--id",
+            help="ID of the thread, which finds it in any of the project's documents.",
+        ),
+    ] = None,
+    line: Annotated[
+        int | None,
+        typer.Option("--line", "-l", help="Number of any line in the thread."),
+    ] = None,
+    reply: Annotated[
+        str | None, typer.Option("--reply", "-r", help="Reply to the thread.")
+    ] = None,
+    resolve: Annotated[
+        bool, typer.Option("--resolve", help="Mark the thread resolved.")
+    ] = False,
+    reopen: Annotated[
+        bool, typer.Option("--reopen", help="Mark the thread open again.")
+    ] = False,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", help="Defaults to Git's user.name."),
+    ] = None,
+    email: Annotated[
+        str | None,
+        typer.Option("--email", help="Defaults to Git's user.email."),
+    ] = None,
+) -> None:
+    """Reply to, resolve, or reopen a review comment thread, printing its
+    ID."""
+    from calkit.cli.latex import comment_entry, edit_comment
+
+    if resolve and reopen:
+        raise_error("Specify only one of --resolve or --reopen")
+    if reply is None and not resolve and not reopen:
+        raise_error("Specify --reply, --resolve, or --reopen")
+    entry = None if reply is None else comment_entry(reply, author, email)
+
+    def edit(tc: calkit.latex.TexComment) -> None:
+        if entry is not None:
+            tc.entries.append(entry)
+        if resolve or reopen:
+            tc.resolved = resolve
+
+    typer.echo(edit_comment(path, id, line, edit).id)

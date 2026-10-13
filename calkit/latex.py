@@ -1462,7 +1462,7 @@ def _math_chars(text: str) -> str:
 def comment_to_dict(
     path: str, tc: TexComment, blks: list[Block]
 ) -> dict[str, Any]:
-    """A thread as `calkit latex comments list --json` reports it, with the
+    """A thread as `calkit list comments --json` reports it, with the
     paragraph it's about from its file's blocks."""
     anchor = comment_anchor(blks, tc)
     return {
@@ -1517,6 +1517,36 @@ def list_comments(
         ]
     out.sort(key=lambda c: order.get((c["path"], c["line"]), 0))
     return out
+
+
+def comment_documents(ck_info: dict) -> list[str]:
+    """The documents the pipeline builds into PDFs, whose threads, with
+    those in the files they input, are the project's: each latex stage's,
+    and each markdown stage's with a PDF."""
+    out = []
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict) or not stage.get("target_path"):
+            continue
+        if stage.get("kind") == "latex":
+            target = Path(stage.get("wdir") or "", stage["target_path"])
+        elif stage.get("kind") == "markdown" and stage.get("pdf"):
+            target = Path(stage["target_path"])
+        else:
+            continue
+        out.append(target.as_posix())
+    return list(dict.fromkeys(out))
+
+
+def find_comment_path(ck_info: dict, id: str) -> str | None:
+    """The file with a thread, by its ID, among the project's documents and
+    the files they input."""
+    for doc in comment_documents(ck_info):
+        for path in dict.fromkeys(ln.path for ln in flatten(doc)):
+            lines = (read_file(path) or "").split("\n")
+            if find_comment(lines, id=id) is not None:
+                return path
+    return None
 
 
 def locate_block(

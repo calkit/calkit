@@ -2400,6 +2400,9 @@ async function refreshPipelineOutputContext(
   currentCalkitConfig = calkitConfig;
   currentEnvDescriptions = envDescriptions;
   pdfReviewProvider?.stagesChanged();
+  void refreshActiveFileBuildsPdfContext(
+    vscode.window.activeTextEditor?.document,
+  );
   // Gate the sidebar on the presence of a calkit.yaml file. When absent, the
   // tree is left empty so the "Initialize Calkit Project" welcome view shows.
   const calkitYamlExists = await fileExists(
@@ -8450,6 +8453,27 @@ async function restartCalkitJobForActiveNotebook(
   }
 }
 
+// Whether a stage builds the active file into a PDF, for the buttons that go
+// between them. It depends on the config as well as the file, so it's
+// refreshed when either changes.
+async function refreshActiveFileBuildsPdfContext(
+  document: vscode.TextDocument | undefined,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  const buildsPdf =
+    workspaceRoot !== undefined &&
+    document !== undefined &&
+    documentStagePdf(
+      currentCalkitConfig?.pipeline?.stages ?? {},
+      path.relative(workspaceRoot, document.uri.fsPath).replace(/\\/g, "/"),
+    ) !== undefined;
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.activeFileBuildsPdf",
+    buildsPdf,
+  );
+}
+
 async function refreshActiveFileStageContext(
   document: vscode.TextDocument | undefined,
 ): Promise<void> {
@@ -8469,19 +8493,8 @@ async function refreshActiveFileStageContext(
     document !== undefined &&
     path.extname(document.uri.fsPath).toLowerCase() === ".json" &&
     isPlotlyJsonText(document.getText());
-  const buildsPdf =
-    workspaceRoot !== undefined &&
-    fileUri !== undefined &&
-    documentStagePdf(
-      currentCalkitConfig?.pipeline?.stages ?? {},
-      path.relative(workspaceRoot, fileUri.fsPath).replace(/\\/g, "/"),
-    ) !== undefined;
   await Promise.all([
-    vscode.commands.executeCommand(
-      "setContext",
-      "calkit.activeFileBuildsPdf",
-      buildsPdf,
-    ),
+    refreshActiveFileBuildsPdfContext(document),
     vscode.commands.executeCommand(
       "setContext",
       "calkit.activeFileHasStage",

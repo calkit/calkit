@@ -42,19 +42,6 @@ See
 [this published article](https://doi.org/10.1088/1538-3873/ae6fef)
 for an example.
 
-<!-- calkit values path=results/research-flow.json -->
-
-## By the numbers
-
-- **<!-- calkit value key=goals.steps.1.correct_gain format="{:.0%}" -->20%<!-- /calkit value -->**
-  more error-free findings published per year with agents alone
-- **<!-- calkit value key=goals.correct_gain format="{:.0%}" -->149%<!-- /calkit value -->**
-  more with agents and Calkit together
-
-From a simulation
-in Calkit's own pipeline
-([view source](https://calkit.io/calkit/calkit/pipeline?stage=research-flow)).
-
 ## A success story
 
 [Rebecca (Becca) McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en)

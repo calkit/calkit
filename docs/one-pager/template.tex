@@ -64,13 +64,15 @@
     font=\bfseries\fontsize{17}{21}\selectfont]
     at ([xshift=0.6in,yshift=-0.45in]current page.north west) {$title$};
 \end{tikzpicture}
+% With numbers, the lead image sits beside them above the columns, and
+% without, at the top of the first
+$if(numbers)$
 \noindent
 $if(hero)$
 \begin{minipage}[c]{0.6\linewidth}
   \includegraphics[width=\linewidth]{$hero$}
 \end{minipage}\hfill
 $endif$
-$if(numbers)$
 \begin{minipage}[c]{0.37\linewidth}
   \begin{tcolorbox}[colback=ckpale,colframe=ckpale,boxrule=0pt,arc=4pt,
     left=8pt,right=8pt,top=6pt,bottom=4pt]
@@ -81,13 +83,19 @@ $if(numbers)$
     $endif$
   \end{tcolorbox}
 \end{minipage}
-$endif$
 \par\vspace{6pt}
+$endif$
 \begin{multicols}{2}
 \fontsize{10.6}{14}\selectfont
 % Justified, breaking words only now and then, and never names, e.g.,
 % MATLAB
 \uchyph=0\hyphenpenalty=500\tolerance=1000\emergencystretch=0.8em
+$if(numbers)$
+$else$
+$if(hero)$
+\noindent\includegraphics[width=\linewidth]{$hero$}\par
+$endif$
+$endif$
 $body$
 \end{multicols}
 \end{document}

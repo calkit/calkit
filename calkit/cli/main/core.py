@@ -623,7 +623,8 @@ def get_status(
                 warn(
                     "Failed pipeline environment checks for: "
                     + ", ".join(pipeline_status.failed_environment_checks)
-                    + ". Run 'calkit check env -n <name>' for details."
+                    + ". Run 'calkit check env -n <name>' for details.",
+                    err=as_json,
                 )
         # Checking questions needs to know which stages are stale, which is the
         # expensive part of the pipeline status computed above, so reuse that

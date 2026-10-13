@@ -10,6 +10,7 @@ import re
 import socket
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -1107,6 +1108,7 @@ def check_all_in_pipeline(
     targets: list[str] | None = None,
     force: bool = False,
     quiet: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> dict:
     """Check all environments in the pipeline, caching for efficiency.
 
@@ -1115,7 +1117,7 @@ def check_all_in_pipeline(
     and some sort of hash(es) for the important file content involved.
 
     With ``quiet``, what the checks' tools print, e.g., uv or Julia, is
-    discarded.
+    discarded, and ``progress`` is told which environment is being checked.
     """
     import sys
     from collections.abc import Iterator
@@ -1225,6 +1227,8 @@ def check_all_in_pipeline(
             if up_to_date:
                 res[env_name] = {"success": True, "cached": True}
                 continue
+        if progress is not None:
+            progress(f"Checking environment '{env_name}'")
         try:
             with silenced():
                 check_environment(env_name, verbose=False)

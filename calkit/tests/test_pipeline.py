@@ -1713,7 +1713,16 @@ def test_get_status(tmp_dir):
             "with open('my-output.out', 'w') as f:\n"
             "    f.write('Hello, world!')\n"
         )
-    status = calkit.pipeline.get_status(ck_info=ck_info)
+    # Each step is reported as it starts, with each environment checked
+    steps: list[str] = []
+    status = calkit.pipeline.get_status(ck_info=ck_info, progress=steps.append)
+    assert steps == [
+        "Checking environments",
+        "Checking environment 'py'",
+        "Compiling the pipeline",
+        "Cleaning notebooks",
+        "Finding stale stages",
+    ]
     assert not status.failed_environment_checks
     assert status.is_stale
     assert "get-data" in status.stale_stage_names

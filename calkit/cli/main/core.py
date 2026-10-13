@@ -520,6 +520,12 @@ def get_status(
 
     import git
     from git.exc import InvalidGitRepositoryError
+    from rich.status import Status
+
+    def step(text: str) -> None:
+        # Say what's being worked out, while there's a spinner to say it
+        if isinstance(spinner, Status):
+            spinner.update(text + "...")
 
     def get_dvc_data_status() -> dict:
         # Reuse what the pipeline status computed under the same DVC lock
@@ -611,6 +617,7 @@ def get_status(
         ):
             # Sync zips so the zip files reflect current workspace state before
             # reporting status
+            step("Syncing zip files")
             calkit.dvc.zip.sync_all(direction="to-zip")
             pipeline_status = calkit.pipeline.get_status(
                 ck_info=ck_info,
@@ -621,6 +628,7 @@ def get_status(
                 with_data_status="dvc" in categories,
                 with_storage_problems="dvc" in categories,
                 quiet_environment_checks=True,
+                progress=step,
             )
             if pipeline_status.failed_environment_checks:
                 warn(
@@ -657,6 +665,7 @@ def get_status(
                     frozen_stages = set()
             # The summary doesn't say what changed since an answer was edited,
             # which is the only part that needs history, so skip reading it
+            step("Checking questions")
             questions_status = check_questions(
                 ck_info=ck_info,
                 stale_stages=stale_stages,
@@ -671,6 +680,7 @@ def get_status(
             if pipeline_status is not None:
                 storage_problems = pipeline_status.storage_problems
             if storage_problems is None:
+                step("Checking where files are stored")
                 try:
                     storage_problems = calkit.dvc.get_storage_problems()
                 except Exception:

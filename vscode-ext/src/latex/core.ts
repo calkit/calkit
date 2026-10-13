@@ -82,10 +82,43 @@ export function pipelineLatexDiffs(
   return diffs;
 }
 
-interface LatexStageFields {
+interface DocumentStageFields {
   kind?: string;
   wdir?: string;
   target_path?: string;
+  pdf?: { output_path?: string } | null;
+}
+
+// Each document a stage builds into a PDF, i.e., a latex stage's or a
+// markdown stage's with `pdf` set
+function stageDocuments(
+  stages: Record<string, unknown>,
+): { kind: string; source: string; pdf: string }[] {
+  const out = [];
+  for (const raw of Object.values(stages)) {
+    const stage = raw as DocumentStageFields;
+    if (typeof stage?.target_path !== "string") {
+      continue;
+    }
+    if (stage.kind === "latex") {
+      const source = path.posix.join(stage.wdir ?? "", stage.target_path);
+      out.push({
+        kind: stage.kind,
+        source,
+        pdf: source.replace(/\.tex$/, ".pdf"),
+      });
+    } else if (stage.kind === "markdown" && stage.pdf) {
+      const source = path.posix.normalize(stage.target_path);
+      out.push({
+        kind: stage.kind,
+        source,
+        pdf: path.posix.normalize(
+          stage.pdf.output_path ?? source.replace(/\.(md|markdown)$/i, ".pdf"),
+        ),
+      });
+    }
+  }
+  return out;
 }
 
 // The PDF a latex stage builds from `texFile`, if one does.
@@ -93,17 +126,9 @@ export function latexStagePdf(
   stages: Record<string, unknown>,
   texFile: string,
 ): string | undefined {
-  for (const raw of Object.values(stages)) {
-    const stage = raw as LatexStageFields;
-    if (stage?.kind !== "latex" || typeof stage.target_path !== "string") {
-      continue;
-    }
-    const target = path.posix.join(stage.wdir ?? "", stage.target_path);
-    if (target === texFile) {
-      return target.replace(/\.tex$/, ".pdf");
-    }
-  }
-  return undefined;
+  return stageDocuments(stages).find(
+    (d) => d.kind === "latex" && d.source === texFile,
+  )?.pdf;
 }
 
 // The document a latex stage builds `pdfFile` from, if one does.
@@ -111,17 +136,25 @@ export function latexStageSource(
   stages: Record<string, unknown>,
   pdfFile: string,
 ): string | undefined {
-  for (const raw of Object.values(stages)) {
-    const stage = raw as LatexStageFields;
-    if (stage?.kind !== "latex" || typeof stage.target_path !== "string") {
-      continue;
-    }
-    const target = path.posix.join(stage.wdir ?? "", stage.target_path);
-    if (target.replace(/\.tex$/, ".pdf") === pdfFile) {
-      return target;
-    }
-  }
-  return undefined;
+  return stageDocuments(stages).find(
+    (d) => d.kind === "latex" && d.pdf === pdfFile,
+  )?.source;
+}
+
+// The PDF any stage builds from a document, LaTeX or Markdown.
+export function documentStagePdf(
+  stages: Record<string, unknown>,
+  file: string,
+): string | undefined {
+  return stageDocuments(stages).find((d) => d.source === file)?.pdf;
+}
+
+// The document, LaTeX or Markdown, any stage builds `pdfFile` from.
+export function documentStageSource(
+  stages: Record<string, unknown>,
+  pdfFile: string,
+): string | undefined {
+  return stageDocuments(stages).find((d) => d.pdf === pdfFile)?.source;
 }
 
 // A comment thread as `calkit latex comments list --json` reports it.

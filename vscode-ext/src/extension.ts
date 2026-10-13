@@ -48,6 +48,8 @@ import {
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import {
+  documentStagePdf,
+  documentStageSource,
   latexStagePdf,
   latexStageSource,
   latexWorkingDiffPath,
@@ -450,7 +452,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  // A LaTeX document and the PDF its stage builds take each other's place,
+  // A document and the PDF its stage builds take each other's place,
   // like a Plotly figure and its preview. The other file opens in the same
   // group first, since closing the last tab first can close the group too.
   const swapActiveTab = async (
@@ -477,16 +479,16 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!fileUri || !workspaceRoot) {
           return;
         }
-        const texFile = path
+        const docFile = path
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
-        const pdfFile = latexStagePdf(
+        const pdfFile = documentStagePdf(
           currentCalkitConfig?.pipeline?.stages ?? {},
-          texFile,
+          docFile,
         );
         if (!pdfFile) {
           void vscode.window.showInformationMessage(
-            "No LaTeX stage in the pipeline builds this document.",
+            "No stage in the pipeline builds this document into a PDF.",
           );
           return;
         }
@@ -513,7 +515,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  // Go from a line of LaTeX to where it is in the PDF, in the same group
+  // Go from a line of a document to where it is in the PDF, in the same group
   // of tabs, the one beside it, or where the PDF is showing
   const showInPdf = async (
     toSide: boolean,
@@ -553,7 +555,7 @@ export function activate(context: vscode.ExtensionContext): void {
       })
       .filter((p): p is string => p !== undefined);
     const pdfFile =
-      latexStagePdf(stages, texFile) ??
+      documentStagePdf(stages, texFile) ??
       (latexPdfs.length === 1 ? latexPdfs[0] : undefined);
     const pdfUri = pdfFile
       ? vscode.Uri.file(path.join(workspaceRoot, pdfFile))
@@ -610,20 +612,20 @@ export function activate(context: vscode.ExtensionContext): void {
         const pdfFile = path
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
-        const texFile = latexStageSource(
+        const sourceFile = documentStageSource(
           currentCalkitConfig?.pipeline?.stages ?? {},
           pdfFile,
         );
-        if (!texFile) {
+        if (!sourceFile) {
           void vscode.window.showInformationMessage(
-            "No LaTeX stage in the pipeline builds this PDF.",
+            "No stage in the pipeline builds this PDF.",
           );
           return;
         }
-        const texUri = vscode.Uri.file(path.join(workspaceRoot, texFile));
+        const sourceUri = vscode.Uri.file(path.join(workspaceRoot, sourceFile));
         await swapActiveTab(fileUri, () =>
           Promise.resolve(
-            vscode.window.showTextDocument(texUri, {
+            vscode.window.showTextDocument(sourceUri, {
               viewColumn: vscode.ViewColumn.Active,
               preview: false,
             }),
@@ -8457,7 +8459,19 @@ async function refreshActiveFileStageContext(
     document !== undefined &&
     path.extname(document.uri.fsPath).toLowerCase() === ".json" &&
     isPlotlyJsonText(document.getText());
+  const buildsPdf =
+    workspaceRoot !== undefined &&
+    fileUri !== undefined &&
+    documentStagePdf(
+      currentCalkitConfig?.pipeline?.stages ?? {},
+      path.relative(workspaceRoot, fileUri.fsPath).replace(/\\/g, "/"),
+    ) !== undefined;
   await Promise.all([
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activeFileBuildsPdf",
+      buildsPdf,
+    ),
     vscode.commands.executeCommand(
       "setContext",
       "calkit.activeFileHasStage",

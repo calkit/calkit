@@ -7,9 +7,9 @@ import * as vscode from "vscode";
 
 import {
   LIGATURES,
+  documentStageSource,
   findInSource,
   findText,
-  latexStageSource,
   lineMap,
   normalizeSelection,
   paragraphLines,
@@ -64,9 +64,9 @@ interface Viewer {
   pendingReveal?: object;
 }
 
-// A PDF viewer for LaTeX documents that shows the comment threads in their
-// source, following the Calkit LaTeX comment schema, and goes between the
-// PDF and source with SyncTeX.
+// A PDF viewer for LaTeX and Markdown documents that shows the comment
+// threads in their source, following the Calkit comment schema, and goes
+// between the PDF and source with SyncTeX, or by text without it.
 export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   private viewers = new Set<Viewer>();
 
@@ -75,7 +75,9 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     private readonly deps: PdfReviewDeps,
   ) {
     // Comments are in the source, so any change to it can change them
-    const texWatcher = vscode.workspace.createFileSystemWatcher("**/*.tex");
+    const texWatcher = vscode.workspace.createFileSystemWatcher(
+      "**/*.{tex,md,markdown}",
+    );
     let debounce: ReturnType<typeof setTimeout> | undefined;
     const refresh = (): void => {
       clearTimeout(debounce);
@@ -104,7 +106,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     const pdf = rel(root, document.uri.fsPath);
     const stem = pdf.replace(/\.pdf$/i, "");
     const tex =
-      latexStageSource(this.deps.getStages(), pdf) ??
+      documentStageSource(this.deps.getStages(), pdf) ??
       (fs.existsSync(path.join(root, `${stem}.tex`))
         ? `${stem}.tex`
         : undefined);
@@ -206,12 +208,20 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     return false;
   }
 
-  // Run a `calkit latex comments` command in the project
-  private async calkit(args: string[]): Promise<string> {
+  // Run a comments command on a file in the project. Markdown needs the
+  // top-level group, which a calkit too old to know Markdown doesn't have.
+  private async calkit(
+    command: string,
+    file: string,
+    args: string[] = [],
+  ): Promise<string> {
+    const group = /\.(md|markdown)$/i.test(file)
+      ? ["comments"]
+      : ["latex", "comments"];
     try {
       const { stdout } = await execFileAsync(
         "calkit",
-        ["latex", "comments", ...args],
+        [...group, command, file, ...args],
         { cwd: this.root(), maxBuffer: 64 * 1024 * 1024 },
       );
       return stdout;
@@ -238,7 +248,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     }
     try {
       return JSON.parse(
-        await this.calkit(["locate", v.tex, ...args, "--json"]),
+        await this.calkit("locate", v.tex, [...args, "--json"]),
       );
     } catch {
       return undefined;
@@ -351,13 +361,13 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     if (!v.tex) {
       void v.panel.webview.postMessage({
         type: "status",
-        text: "No LaTeX source found for this PDF, so no comments to show.",
+        text: "No source found for this PDF, so no comments to show.",
       });
       return;
     }
     let threads: TexThread[];
     try {
-      threads = JSON.parse(await this.calkit(["list", v.tex, "--json"]));
+      threads = JSON.parse(await this.calkit("list", v.tex, ["--json"]));
     } catch (err) {
       void v.panel.webview.postMessage({
         type: "status",
@@ -392,7 +402,11 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
 
   // Run a comments command that edits a file, after making sure the editor
   // doesn't hold unsaved changes the edit would clash with.
-  private async edit(file: string, args: string[]): Promise<string> {
+  private async edit(
+    command: string,
+    file: string,
+    args: string[] = [],
+  ): Promise<string> {
     const abs = path.join(this.root(), file);
     const open = vscode.workspace.textDocuments.find(
       (d) => d.uri.fsPath === abs && d.isDirty,
@@ -406,7 +420,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         throw new Error("Comment not changed, since the file isn't saved.");
       }
     }
-    return (await this.calkit(args)).trim();
+    return (await this.calkit(command, file, args)).trim();
   }
 
   // Open the source at a line, selecting some rendered text there if it
@@ -560,14 +574,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         return;
       }
       case "add": {
-        const args = [
-          "add",
-          String(msg.file),
-          "--line",
-          String(msg.line),
-          "-m",
-          String(msg.text),
-        ];
+        const args = ["--line", String(msg.line), "-m", String(msg.text)];
         if (typeof msg.highlight === "string" && msg.highlight) {
           args.push(
             "--highlight",
@@ -576,24 +583,22 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
             String(msg.occ ?? 0),
           );
         }
-        await this.edit(String(msg.file), args);
+        await this.edit("add", String(msg.file), args);
         break;
       }
       case "reply":
-        await this.edit(String(msg.file), [
-          "reply",
-          String(msg.file),
+        await this.edit("reply", String(msg.file), [
           ...ref(),
           "-m",
           String(msg.text),
         ]);
         break;
       case "resolve":
-        await this.edit(String(msg.file), [
+        await this.edit(
           msg.resolved ? "resolve" : "reopen",
           String(msg.file),
-          ...ref(),
-        ]);
+          ref(),
+        );
         break;
       case "delete": {
         const choice = await vscode.window.showWarningMessage(
@@ -604,11 +609,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         if (choice !== "Delete") {
           return;
         }
-        await this.edit(String(msg.file), [
-          "delete",
-          String(msg.file),
-          ...ref(),
-        ]);
+        await this.edit("delete", String(msg.file), ref());
         break;
       }
       case "openSource":
@@ -789,8 +790,8 @@ function buildHtml(
     </div>
     <div id="select-actions">
       <button id="select-comment" class="primary">Comment</button>
-      <button id="select-source" title="Open the LaTeX source at this text">Go to source</button>
-      <button id="select-source-side" title="Open the LaTeX source at this text, beside the PDF">To the side</button>
+      <button id="select-source" title="Open the source at this text">Go to source</button>
+      <button id="select-source-side" title="Open the source at this text, beside the PDF">To the side</button>
     </div>
   </div>
   <div id="resizer"></div>

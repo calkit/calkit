@@ -10,6 +10,7 @@
 \definecolor{ckpale}{HTML}{EAF4F1}
 \definecolor{ckink}{HTML}{1E2A2E}
 \definecolor{ckmuted}{HTML}{66737A}
+\definecolor{ckquote}{HTML}{48555B}
 \usepackage{graphicx}
 \usepackage{multicol}
 \usepackage{tikz}
@@ -35,9 +36,10 @@
   \begin{minipage}[c]{0.6\linewidth}\raggedright
     \small\color{ckink}#2%
   \end{minipage}\par\vspace{5pt}}
-% A quote, e.g., a testimonial, is set apart by its size and slant rather
-% than by indenting it, which a column is too narrow for
-\renewenvironment{quote}{\par\fontsize{9.4}{12.4}\selectfont\itshape}{\par}
+% A quote, e.g., a testimonial, is set apart by its size, slant, and shade
+% rather than by indenting it, which a column is too narrow for
+\renewenvironment{quote}{\par\fontsize{9.4}{12.4}\selectfont\itshape
+  \color{ckquote}}{\par}
 \color{ckink}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{5pt}

@@ -928,3 +928,79 @@ def test_update_path_storage(tmp_dir, tmp_path_factory):
         "notes.txt",
         "out.txt",
     ]
+
+
+def test_update_comment(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\input{intro}\n\nA paragraph.\n")
+    with open("paper/intro.tex", "w") as f:
+        f.write("% COMMENT id=aaaa0001\n%   A:\n%     Why?\nIntro text.\n")
+    with open("note.md", "w") as f:
+        f.write("<!-- COMMENT id=bbbb0002\n  B:\n    Hm.\n-->\nSome text.\n")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "paper": {
+                            "kind": "latex",
+                            "target_path": "main.tex",
+                            "wdir": "paper",
+                            "environment": "_system",
+                        },
+                        "note": {
+                            "kind": "markdown",
+                            "target_path": "note.md",
+                            "pdf": {"environment": "_system"},
+                        },
+                    }
+                }
+            },
+            f,
+        )
+
+    def thread(id_: str) -> dict:
+        listed = json.loads(ck("list", "comments", "--json"))
+        return next(c for c in listed if c["id"] == id_)
+
+    # An ID finds its thread in any of the project's documents, including
+    # what they input, to reply and resolve at once
+    assert (
+        ck(
+            "update",
+            "comment",
+            "--id",
+            "aaaa0001",
+            "-r",
+            "Because.",
+            "--resolve",
+            "--author",
+            "C",
+        )
+        == "aaaa0001"
+    )
+    t = thread("aaaa0001")
+    assert t["resolved"]
+    assert [m["text"] for m in t["messages"]] == ["Why?", "Because."]
+    # A line needs its file, and a thread without an ID gets one
+    ck("update", "comment", "paper/intro.tex", "-l", "1", "--reopen")
+    assert not thread("aaaa0001")["resolved"]
+    with open("note.md", "w") as f:
+        f.write("<!-- COMMENT\n  B:\n    Hm.\n-->\nSome text.\n")
+    new_id = ck("update", "comment", "note.md", "-l", "2", "--resolve")
+    with open("note.md") as f:
+        assert f.read().startswith(f"<!-- COMMENT id={new_id} resolved=true\n")
+    for args in [
+        ["update", "comment", "--id", "nope", "--resolve"],
+        ["update", "comment", "-l", "1", "--resolve"],
+        ["update", "comment", "--id", "aaaa0001"],
+        ["update", "comment", "--id", "aaaa0001", "--resolve", "--reopen"],
+    ]:
+        res = subprocess.run(["calkit", *args], capture_output=True)
+        assert res.returncode != 0, args

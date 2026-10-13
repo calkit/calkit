@@ -820,35 +820,36 @@ calkit config github-codespace
 
 Create a new Calkit object.
 
-| Command                                                                   | Description                                                           |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`project`](#subcommand-new-create-project)                               | Create a new project.                                                 |
-| [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                  |
-| [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                 |
-| [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                           |
-| [`question`](#subcommand-new-create-question)                             | Add a new question.                                                   |
-| [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                   |
-| [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                      |
-| [`foreach-stage`](#subcommand-new-create-foreach-stage)                   | Create a new DVC 'foreach' stage.                                     |
-| [`dataset`](#subcommand-new-create-dataset)                               | Create a new dataset.                                                 |
-| [`publication\|pub`](#subcommand-new-create-publication-pub)              | Create a new publication.                                             |
-| [`conda-env`](#subcommand-new-create-conda-env)                           | Create a new Conda environment.                                       |
-| [`uv-env`](#subcommand-new-create-uv-env)                                 | Create a new uv project environment.                                  |
-| [`slurm-env`](#subcommand-new-create-slurm-env)                           | Create a new SLURM environment.                                       |
-| [`pbs-env`](#subcommand-new-create-pbs-env)                               | Create a new PBS environment.                                         |
-| [`uv-venv`](#subcommand-new-create-uv-venv)                               | Create a new uv virtual environment.                                  |
-| [`venv`](#subcommand-new-create-venv)                                     | Create a new Python virtual environment with venv.                    |
-| [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                |
-| [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml. |
-| [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                 |
-| [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                             |
-| [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                  |
-| [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                |
-| [`julia-script-stage`](#subcommand-new-create-julia-script-stage)         | Add a stage to the pipeline that runs a Julia script.                 |
-| [`matlab-script-stage`](#subcommand-new-create-matlab-script-stage)       | Add a stage to the pipeline that runs a MATLAB script.                |
-| [`latex-stage`](#subcommand-new-create-latex-stage)                       | Add a stage to the pipeline that compiles a LaTeX document.           |
-| [`jupyter-notebook-stage`](#subcommand-new-create-jupyter-notebook-stage) | Add a stage to the pipeline that runs a Jupyter notebook.             |
-| [`release`](#subcommand-new-create-release)                               | Create a new release.                                                 |
+| Command                                                                   | Description                                                                                       |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [`project`](#subcommand-new-create-project)                               | Create a new project.                                                                             |
+| [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                                              |
+| [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                                             |
+| [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                                                       |
+| [`question`](#subcommand-new-create-question)                             | Add a new question.                                                                               |
+| [`comment`](#subcommand-new-create-comment)                               | Start a review comment thread above a paragraph of a LaTeX or Markdown document, printing its ID. |
+| [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                                               |
+| [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                                                  |
+| [`foreach-stage`](#subcommand-new-create-foreach-stage)                   | Create a new DVC 'foreach' stage.                                                                 |
+| [`dataset`](#subcommand-new-create-dataset)                               | Create a new dataset.                                                                             |
+| [`publication\|pub`](#subcommand-new-create-publication-pub)              | Create a new publication.                                                                         |
+| [`conda-env`](#subcommand-new-create-conda-env)                           | Create a new Conda environment.                                                                   |
+| [`uv-env`](#subcommand-new-create-uv-env)                                 | Create a new uv project environment.                                                              |
+| [`slurm-env`](#subcommand-new-create-slurm-env)                           | Create a new SLURM environment.                                                                   |
+| [`pbs-env`](#subcommand-new-create-pbs-env)                               | Create a new PBS environment.                                                                     |
+| [`uv-venv`](#subcommand-new-create-uv-venv)                               | Create a new uv virtual environment.                                                              |
+| [`venv`](#subcommand-new-create-venv)                                     | Create a new Python virtual environment with venv.                                                |
+| [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                                            |
+| [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml.                             |
+| [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                                             |
+| [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                                                         |
+| [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                                              |
+| [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                                            |
+| [`julia-script-stage`](#subcommand-new-create-julia-script-stage)         | Add a stage to the pipeline that runs a Julia script.                                             |
+| [`matlab-script-stage`](#subcommand-new-create-matlab-script-stage)       | Add a stage to the pipeline that runs a MATLAB script.                                            |
+| [`latex-stage`](#subcommand-new-create-latex-stage)                       | Add a stage to the pipeline that compiles a LaTeX document.                                       |
+| [`jupyter-notebook-stage`](#subcommand-new-create-jupyter-notebook-stage) | Add a stage to the pipeline that runs a Jupyter notebook.                                         |
+| [`release`](#subcommand-new-create-release)                               | Create a new release.                                                                             |
 
 <a id="subcommand-new-create-project"></a>
 
@@ -1000,6 +1001,36 @@ Options:
 | Option     | Type    | Required | Default | Description |
 | ---------- | ------- | -------- | ------- | ----------- |
 | `--commit` | boolean | no       | False   |             |
+
+<a id="subcommand-new-create-comment"></a>
+
+#### `calkit new|create comment`
+
+Start a review comment thread above a paragraph of a LaTeX or Markdown document, printing its ID.
+
+Usage:
+
+```text
+calkit new|create comment [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `path`   | str  | yes      |         | File to comment in. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                            |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--line`, `-l` | int     | yes      |         | A line in, or just above, the paragraph to comment on. |
+| `--text`, `-m` | str     | yes      |         | The comment.                                           |
+| `--highlight`  | str     | no       |         | Rendered text in the paragraph it's about.             |
+| `--occ`        | int     | no       | 0       | Which occurrence of the highlight text, from 0.        |
+| `--author`     | str     | no       |         | Defaults to Git's user.name.                           |
+| `--email`      | str     | no       |         | Defaults to Git's user.email.                          |
+| `--json`       | boolean | no       | False   | Output the thread as JSON.                             |
 
 <a id="subcommand-new-create-notebook-nb"></a>
 
@@ -1685,9 +1716,10 @@ Options:
 
 Delete a Calkit object.
 
-| Command                                      | Description                             |
-| -------------------------------------------- | --------------------------------------- |
-| [`question`](#subcommand-delete-rm-question) | Remove a question by its 1-based index. |
+| Command                                      | Description                                     |
+| -------------------------------------------- | ----------------------------------------------- |
+| [`question`](#subcommand-delete-rm-question) | Remove a question by its 1-based index.         |
+| [`comment`](#subcommand-delete-rm-comment)   | Delete a review comment thread and its replies. |
 
 <a id="subcommand-delete-rm-question"></a>
 
@@ -1706,6 +1738,31 @@ Arguments:
 | Argument | Type | Required | Default | Description                                                            |
 | -------- | ---- | -------- | ------- | ---------------------------------------------------------------------- |
 | `index`  | int  | yes      |         | 1-based index of the question to remove (see `calkit list questions`). |
+
+<a id="subcommand-delete-rm-comment"></a>
+
+#### `calkit delete|rm comment`
+
+Delete a review comment thread and its replies.
+
+Usage:
+
+```text
+calkit delete|rm comment [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                  |
+| -------- | ---- | -------- | ------- | -------------------------------------------- |
+| `path`   | str  | no       |         | File the thread is in, if not found by --id. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                                                         |
+| -------------- | ---- | -------- | ------- | ------------------------------------------------------------------- |
+| `--id`         | str  | no       |         | ID of the thread, which finds it in any of the project's documents. |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread.                                   |
 
 <a id="command-group-notebooks-nb"></a>
 
@@ -1868,6 +1925,7 @@ List Calkit objects.
 | [`results`](#subcommand-list-ls-results)                        | List results in the project.                                                                   |
 | [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.                                                             |
 | [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).                                                      |
+| [`comments`](#subcommand-list-ls-comments)                      | List review comment threads in LaTeX and Markdown documents.                                   |
 | [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.                                                              |
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
 | [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.                                                     |
@@ -1995,6 +2053,31 @@ Options:
 | -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
 | `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
 | `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
+
+<a id="subcommand-list-ls-comments"></a>
+
+#### `calkit list|ls comments`
+
+List review comment threads in LaTeX and Markdown documents.
+
+Usage:
+
+```text
+calkit list|ls comments [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                          |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `path`   | str  | no       |         | Document to list threads from, including files it inputs. Defaults to every document the pipeline builds into a PDF. |
+
+Options:
+
+| Option               | Type    | Required | Default | Description             |
+| -------------------- | ------- | -------- | ------- | ----------------------- |
+| `--unresolved`, `-u` | boolean | no       | False   | Only list open threads. |
+| `--json`             | boolean | no       | False   | Output result as JSON.  |
 
 <a id="subcommand-list-ls-publications-pubs"></a>
 
@@ -2570,6 +2653,7 @@ Update objects.
 | [`path-storage`](#subcommand-update-path-storage)     | Move paths between Git and DVC storage without rerunning anything.                   |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 | [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
+| [`comment`](#subcommand-update-comment)               | Reply to, resolve, or reopen a review comment thread, printing its ID.               |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -3041,6 +3125,36 @@ Options:
 | `--create-repo` | boolean | no       | False   | Let the hub create a Git repository without asking, for a project that has no remote. Asked about interactively when not given. |
 | `--no-commit`   | boolean | no       | False   | Do not commit the changes.                                                                                                      |
 
+<a id="subcommand-update-comment"></a>
+
+#### `calkit update comment`
+
+Reply to, resolve, or reopen a review comment thread, printing its ID.
+
+Usage:
+
+```text
+calkit update comment [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                  |
+| -------- | ---- | -------- | ------- | -------------------------------------------- |
+| `path`   | str  | no       |         | File the thread is in, if not found by --id. |
+
+Options:
+
+| Option          | Type    | Required | Default | Description                                                         |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------- |
+| `--id`          | str     | no       |         | ID of the thread, which finds it in any of the project's documents. |
+| `--line`, `-l`  | int     | no       |         | Number of any line in the thread.                                   |
+| `--reply`, `-r` | str     | no       |         | Reply to the thread.                                                |
+| `--resolve`     | boolean | no       | False   | Mark the thread resolved.                                           |
+| `--reopen`      | boolean | no       | False   | Mark the thread open again.                                         |
+| `--author`      | str     | no       |         | Defaults to Git's user.name.                                        |
+| `--email`       | str     | no       |         | Defaults to Git's user.email.                                       |
+
 <a id="command-group-check"></a>
 
 ### `calkit check`
@@ -3450,7 +3564,7 @@ Work with LaTeX.
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
 | [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
-| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX source.                    |
+| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX or Markdown source.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3677,7 +3791,7 @@ Options:
 
 #### `calkit latex|tex comments`
 
-Work with review comments in LaTeX source.
+Work with review comments in LaTeX or Markdown source.
 
 Usage:
 

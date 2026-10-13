@@ -21,6 +21,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from calkit.core import USER_HOME_ENV_VAR, get_env_suffix, get_user_home
+
 
 def _probe_keyring() -> bool:
     """Check if the system supports the Python keyring library with a usable
@@ -145,17 +147,6 @@ def _get_project_hub() -> str | None:
     return hub
 
 
-# Where set_env_vars keeps the user's own home directory when a project's
-# env_vars change it, e.g., to /tmp for a tool a stage runs, so Calkit still
-# finds its config, credentials, and caches
-USER_HOME_ENV_VAR = "CALKIT_USER_HOME"
-
-
-def get_user_home() -> str:
-    """The home directory Calkit keeps its own files in."""
-    return os.environ.get(USER_HOME_ENV_VAR) or os.path.expanduser("~")
-
-
 @contextmanager
 def _keyring_home() -> Iterator[None]:
     """Point HOME at the user's own home for a keyring call.
@@ -245,20 +236,6 @@ def get_hub() -> str:
     if env is not None:
         return env
     return hub
-
-
-def get_env_suffix(sep: str = "-") -> str:
-    """Suffix for the config file name, keyring service, and env var
-    prefix.
-
-    All real hubs share a single config file and keyring service, with
-    hub credentials scoped inside them (see ``_hub_storage_key``); only
-    the test environment gets its own isolated config, so tests never
-    touch real credentials.
-    """
-    if os.getenv("CALKIT_ENV") == "test":
-        return sep + "test"
-    return ""
 
 
 # The fields that are per-hub credentials; everything else in the config

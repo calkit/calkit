@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 59d82d297a2c8fc4f9b1395209405421
-      size: 129201
+      md5: 834363b1b70d1e8cdb2ee4cc529137ef
+      size: 127782
     - path: calkit/docx.py
       hash: md5
       md5: 3f34445a3e65cf2c10f908b84de55fd2
       size: 55475
     - path: calkit/latex.py
       hash: md5
-      md5: abedc72b9d65b5cc05a887a48b922041
-      size: 54256
+      md5: 9c0a167e3f16dbd9302105481a9b2a1f
+      size: 60505
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -55,16 +55,16 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: aac6dcb0a4fe5ea44486d1830a2329b5
-      size: 173958
+      md5: adf9a8da2e08dee394a2de3a2d4e831a
+      size: 173951
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: aac6dcb0a4fe5ea44486d1830a2329b5
-      size: 173958
+      md5: adf9a8da2e08dee394a2de3a2d4e831a
+      size: 173951
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 924c363644f0b92cdf3c1294fcea0b00
-      size: 36151
+      md5: 66f2e7c5c7ac323267430f7faf196687
+      size: 36782
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/plot-latex-word-round-trip.py
@@ -79,16 +79,16 @@ stages:
       size: 55475
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: aac6dcb0a4fe5ea44486d1830a2329b5
-      size: 173958
+      md5: adf9a8da2e08dee394a2de3a2d4e831a
+      size: 173951
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: aac6dcb0a4fe5ea44486d1830a2329b5
-      size: 173958
+      md5: adf9a8da2e08dee394a2de3a2d4e831a
+      size: 173951
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 924c363644f0b92cdf3c1294fcea0b00
-      size: 36151
+      md5: 66f2e7c5c7ac323267430f7faf196687
+      size: 36782
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: 53cbdd1fe8da4d6897b3b0856b749857
@@ -100,8 +100,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: 319b8e33bb3087f6bf7a95b1d4e4a9ab
-      size: 207540
+      md5: a6b63aff2556cb6d3fe743105eb2adfe
+      size: 277313
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: abedc72b9d65b5cc05a887a48b922041
-      size: 54256
+      md5: 9c0a167e3f16dbd9302105481a9b2a1f
+      size: 60505
     - path: uv.lock
       hash: md5
       md5: 2f919b9832e2db434ac468a89e027f9f
@@ -125,7 +125,7 @@ stages:
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: 638add45f2e8df495453b950c26a6e24
+      md5: 82b39673dfdcd7ddea621e7b931f6500
       size: 386
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
@@ -298,26 +298,22 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: d5c6e92edb7d06a50adba193b0804d55
-      size: 5019
+      md5: 314b2aeb70af1c75c3af9b994934d95d
+      size: 5418
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 161bbc0cccd2e991cdc03924cedaef55
       size: 2101
     - path: docs/one-pager/template.tex
       hash: md5
-      md5: f0ed0796442f5382792c552c6a59d116
-      size: 3170
+      md5: f9de5dfe6f91b65428b6af9c77ba2b96
+      size: 3649
     - path: results/2027-budget.json
       hash: md5
       md5: d223d73c9ad60723f06e3c13496fd205
       size: 1649
-    - path: results/research-flow.json
-      hash: md5
-      md5: ad60cc07e5c53f0803252e215ff43141
-      size: 75297
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 62d4174727fbddf9dce2d54cb549ee47
-      size: 137554
+      md5: 873f00284cc088a5ecdace22bc9412b9
+      size: 139595

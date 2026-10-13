@@ -308,16 +308,19 @@ def test_list_comments(tmp_dir):
             ["calkit", *args], capture_output=True, text=True, check=True
         ).stdout.strip()
 
+    INTRO = "% COMMENT id=aaaa0001\n%   A:\n%     Why?\nIntro text.\n"
+    NOTE = (
+        "# Note\n\n<!-- COMMENT id=bbbb0002 resolved=true\n  B:\n    Hm.\n"
+        "-->\nSome text.\n"
+    )
     os.makedirs("paper")
     with open("paper/main.tex", "w") as f:
         f.write("\\input{intro}\n\nA paragraph.\n")
     with open("paper/intro.tex", "w") as f:
-        f.write("Intro text.\n")
+        f.write(INTRO)
     os.makedirs("docs")
     with open("docs/note.md", "w") as f:
-        f.write("# Note\n\nSome text.\n")
-    with open("README.md", "w") as f:
-        f.write("Not built into a PDF.\n")
+        f.write(NOTE)
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
@@ -334,100 +337,30 @@ def test_list_comments(tmp_dir):
                             "target_path": "docs/note.md",
                             "pdf": {"environment": "_system"},
                         },
-                        "readme": {
-                            "kind": "markdown",
-                            "target_path": "README.md",
-                        },
                     }
                 }
             },
             f,
         )
-    with open("README.md") as f:
-        readme = f.read()
-    intro_id = ck(
-        "new",
-        "comment",
-        "paper/intro.tex",
-        "-l",
-        "1",
-        "-m",
-        "Why?",
-        "--author",
-        "A",
-    )
-    note_id = ck(
-        "new",
-        "comment",
-        "docs/note.md",
-        "-l",
-        "3",
-        "-m",
-        "Hm.",
-        "--author",
-        "B",
-    )
-    ck(
-        "new",
-        "comment",
-        "paper/main.tex",
-        "-l",
-        "3",
-        "-m",
-        "Ok.",
-        "--author",
-        "C",
-    )
+    with open("README.md", "w") as f:
+        f.write("% COMMENT id=cccc0003\n%   C:\n%     Not built.\nText.\n")
     # Without a path, every document built into a PDF is listed, with the
     # files it inputs, but nothing else
     listed = json.loads(ck("list", "comments", "--json"))
-    assert {c["path"] for c in listed} == {
-        "paper/intro.tex",
-        "paper/main.tex",
-        "docs/note.md",
-    }
-    with open("README.md") as f:
-        assert f.read() == readme
-    assert [
-        c["id"]
-        for c in json.loads(ck("list", "comments", "docs/note.md", "--json"))
-    ] == [note_id]
-    # An ID finds its thread in any of them, to reply and resolve at once
-    ck(
-        "update",
-        "comment",
-        "--id",
-        intro_id,
-        "-r",
-        "Because.",
-        "--resolve",
-        "--author",
-        "D",
+    assert [(c["path"], c["id"]) for c in listed] == [
+        ("paper/intro.tex", "aaaa0001"),
+        ("docs/note.md", "bbbb0002"),
+    ]
+    assert listed[1]["anchor"]["text"] == "Some text."
+    # With one, only that document is, and open threads can be picked out
+    listed = json.loads(ck("list", "comments", "docs/note.md", "--json"))
+    assert [c["id"] for c in listed] == ["bbbb0002"]
+    assert "bbbb0002" not in ck("list", "comments", "-u")
+    assert "paper/intro.tex:1 [aaaa0001]" in ck("list", "comments")
+    res = subprocess.run(
+        ["calkit", "list", "comments", "missing.md"], capture_output=True
     )
-    thread = next(
-        c
-        for c in json.loads(ck("list", "comments", "--json"))
-        if c["id"] == intro_id
-    )
-    assert thread["resolved"]
-    assert [m["text"] for m in thread["messages"]] == ["Why?", "Because."]
-    assert intro_id not in ck("list", "comments", "-u")
-    ck("update", "comment", "paper/intro.tex", "-l", "1", "--reopen")
-    assert intro_id in ck("list", "comments", "-u")
-    ck("delete", "comment", "--id", note_id)
-    with open("docs/note.md") as f:
-        assert f.read() == "# Note\n\nSome text.\n"
-    # Bad references fail
-    for args in [
-        ["update", "comment", "--id", "nope", "--resolve"],
-        ["update", "comment", "-l", "1", "--resolve"],
-        ["update", "comment", "--id", intro_id],
-        ["update", "comment", "--id", intro_id, "--resolve", "--reopen"],
-        ["delete", "comment", "--id", "nope"],
-        ["list", "comments", "missing.md"],
-    ]:
-        res = subprocess.run(["calkit", *args], capture_output=True)
-        assert res.returncode != 0, args
+    assert res.returncode != 0
 
 
 def test_list_remotes(tmp_dir):

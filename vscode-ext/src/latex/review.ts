@@ -34,7 +34,11 @@ export interface PdfReviewDeps {
   getWorkspaceRoot: () => string | undefined;
   getStages: () => Record<string, unknown>;
   getNonce: () => string;
+  // Offer to upgrade the CLI, saying why
+  promptUpgrade: (message: string) => void;
 }
+
+const TOO_OLD = "The calkit on your PATH is too old for comments.";
 
 // A thread with where its paragraph is in the PDF, keyed so the webview can
 // refer back to it whether or not it has an ID yet.
@@ -69,6 +73,8 @@ interface Viewer {
 // between the PDF and source with SyncTeX, or by text without it.
 export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   private viewers = new Set<Viewer>();
+  // Upgrading is offered once, not on every refresh of the comments
+  private offeredUpgrade = false;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -159,9 +165,13 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       this.setOpenContext();
     });
     panel.webview.onDidReceiveMessage((msg) =>
-      this.onMessage(viewer, msg).catch((err) =>
-        vscode.window.showErrorMessage(String(err?.message ?? err)),
-      ),
+      this.onMessage(viewer, msg).catch((err) => {
+        // Upgrading has already been offered
+        const message = String(err?.message ?? err);
+        if (!message.startsWith(TOO_OLD)) {
+          void vscode.window.showErrorMessage(message);
+        }
+      }),
     );
   }
 
@@ -224,9 +234,11 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     } catch (err) {
       const stderr = String((err as { stderr?: string }).stderr ?? "");
       if (/No such command/.test(stderr)) {
-        throw new Error(
-          "The calkit on your PATH is too old for comments. Upgrade it with: calkit upgrade",
-        );
+        if (!this.offeredUpgrade) {
+          this.offeredUpgrade = true;
+          this.deps.promptUpgrade(`${TOO_OLD} Upgrade it to use them here.`);
+        }
+        throw new Error(`${TOO_OLD} Upgrade it with: calkit upgrade`);
       }
       throw new Error(stderr.trim() || String((err as Error).message ?? err));
     }

@@ -395,6 +395,12 @@ export function activate(context: vscode.ExtensionContext): void {
     getWorkspaceRoot,
     getStages: () => currentCalkitConfig?.pipeline?.stages ?? {},
     getNonce,
+    promptUpgrade: (message) =>
+      void promptCalkitInstallOrUpgrade({
+        mode: "upgrade",
+        title: "Calkit CLI upgrade required",
+        message,
+      }),
   });
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(

@@ -930,7 +930,7 @@ def write_system_env_lock(
 
 
 def get_cache_db(name="cache") -> SqliteDict:
-    from calkit.config import get_user_home
+    from calkit.core import get_user_home
 
     env_check_cache_dir = os.path.join(
         get_user_home(), ".calkit", "env-checks"

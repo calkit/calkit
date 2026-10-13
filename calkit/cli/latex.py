@@ -3065,7 +3065,7 @@ comments_app = typer.Typer(no_args_is_help=True)
 latex_app.add_typer(
     comments_app,
     name="comments",
-    help="Work with review comments in LaTeX source.",
+    help="Work with review comments in LaTeX or Markdown source.",
 )
 
 _ID_OPTION = typer.Option("--id", help="ID of the thread.")
@@ -3130,7 +3130,7 @@ def list_comments(
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ) -> None:
-    """List the comment threads in a LaTeX document."""
+    """List the comment threads in a LaTeX or Markdown document."""
     if not os.path.isfile(tex_path):
         raise_error(f"{tex_path} does not exist")
     out = [
@@ -3243,6 +3243,7 @@ def add_comment(
         highlight=highlight or None,
         highlight_occ=occ,
         id=calkit.latex.new_comment_id(),
+        markdown=calkit.latex.is_markdown(tex_path),
     )
     try:
         calkit.latex.add_comment(lines, line, tc)

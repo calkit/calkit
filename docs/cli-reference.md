@@ -46,6 +46,7 @@
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
+| [`comments`](#command-group-comments)            | Work with review comments in LaTeX or Markdown source.                                                       |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
@@ -3442,7 +3443,7 @@ Work with LaTeX.
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
 | [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
-| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX source.                    |
+| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX or Markdown source.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3669,13 +3670,216 @@ Options:
 
 #### `calkit latex|tex comments`
 
-Work with review comments in LaTeX source.
+Work with review comments in LaTeX or Markdown source.
 
 Usage:
 
 ```text
 calkit latex|tex comments COMMAND [ARGS]...
 ```
+
+<a id="command-group-comments"></a>
+
+### `calkit comments`
+
+Work with review comments in LaTeX or Markdown source.
+
+| Command                                   | Description                                                          |
+| ----------------------------------------- | -------------------------------------------------------------------- |
+| [`list`](#subcommand-comments-list)       | List the comment threads in a LaTeX or Markdown document.            |
+| [`locate`](#subcommand-comments-locate)   | Find the paragraph some rendered text is in, or a source line is in. |
+| [`add`](#subcommand-comments-add)         | Start a comment thread above a paragraph, printing its ID.           |
+| [`reply`](#subcommand-comments-reply)     | Reply to a comment thread.                                           |
+| [`resolve`](#subcommand-comments-resolve) | Mark a comment thread resolved.                                      |
+| [`reopen`](#subcommand-comments-reopen)   | Mark a resolved comment thread open again.                           |
+| [`delete`](#subcommand-comments-delete)   | Delete a comment thread and its replies.                             |
+
+<a id="subcommand-comments-list"></a>
+
+#### `calkit comments list`
+
+List the comment threads in a LaTeX or Markdown document.
+
+Usage:
+
+```text
+calkit comments list [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------- |
+| `tex_path` | str  | yes      |         | Document to list comments from, including files it inputs. |
+
+Options:
+
+| Option               | Type    | Required | Default | Description             |
+| -------------------- | ------- | -------- | ------- | ----------------------- |
+| `--unresolved`, `-u` | boolean | no       | False   | Only list open threads. |
+| `--json`             | boolean | no       | False   | Output result as JSON.  |
+
+<a id="subcommand-comments-locate"></a>
+
+#### `calkit comments locate`
+
+Find the paragraph some rendered text is in, or a source line is in.
+
+This is how a place in a PDF built without SyncTeX, or by someone else, can be matched to the source.
+
+Usage:
+
+```text
+calkit comments locate [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                    |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------- |
+| `tex_path` | str  | yes      |         | Document to search, including files it inputs. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                      |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------ |
+| `--text`       | str     | no       |         | Rendered text, e.g., a line copied from the PDF. |
+| `--path`       | str     | no       |         | File with the line to look up.                   |
+| `--line`, `-l` | int     | no       |         | Line to look up in --path.                       |
+| `--json`       | boolean | no       | False   | Output result as JSON.                           |
+
+<a id="subcommand-comments-add"></a>
+
+#### `calkit comments add`
+
+Start a comment thread above a paragraph, printing its ID.
+
+Usage:
+
+```text
+calkit comments add [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description         |
+| ---------- | ---- | -------- | ------- | ------------------- |
+| `tex_path` | str  | yes      |         | File to comment in. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                            |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--line`, `-l` | int     | yes      |         | A line in, or just above, the paragraph to comment on. |
+| `--text`, `-m` | str     | yes      |         | The comment.                                           |
+| `--highlight`  | str     | no       |         | Rendered text in the paragraph it's about.             |
+| `--occ`        | int     | no       | 0       | Which occurrence of the highlight text, from 0.        |
+| `--author`     | str     | no       |         | Defaults to Git's user.name.                           |
+| `--email`      | str     | no       |         | Defaults to Git's user.email.                          |
+| `--json`       | boolean | no       | False   | Output the thread as JSON.                             |
+
+<a id="subcommand-comments-reply"></a>
+
+#### `calkit comments reply`
+
+Reply to a comment thread.
+
+Usage:
+
+```text
+calkit comments reply [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description            |
+| ---------- | ---- | -------- | ------- | ---------------------- |
+| `tex_path` | str  | yes      |         | File the thread is in. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--text`, `-m` | str  | yes      |         | The reply.                        |
+| `--id`         | str  | no       |         | ID of the thread.                 |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
+| `--author`     | str  | no       |         | Defaults to Git's user.name.      |
+| `--email`      | str  | no       |         | Defaults to Git's user.email.     |
+
+<a id="subcommand-comments-resolve"></a>
+
+#### `calkit comments resolve`
+
+Mark a comment thread resolved.
+
+Usage:
+
+```text
+calkit comments resolve [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description            |
+| ---------- | ---- | -------- | ------- | ---------------------- |
+| `tex_path` | str  | yes      |         | File the thread is in. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--id`         | str  | no       |         | ID of the thread.                 |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
+
+<a id="subcommand-comments-reopen"></a>
+
+#### `calkit comments reopen`
+
+Mark a resolved comment thread open again.
+
+Usage:
+
+```text
+calkit comments reopen [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description            |
+| ---------- | ---- | -------- | ------- | ---------------------- |
+| `tex_path` | str  | yes      |         | File the thread is in. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--id`         | str  | no       |         | ID of the thread.                 |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
+
+<a id="subcommand-comments-delete"></a>
+
+#### `calkit comments delete`
+
+Delete a comment thread and its replies.
+
+Usage:
+
+```text
+calkit comments delete [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description            |
+| ---------- | ---- | -------- | ------- | ---------------------- |
+| `tex_path` | str  | yes      |         | File the thread is in. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--id`         | str  | no       |         | ID of the thread.                 |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
 
 <a id="command-group-overleaf-ol"></a>
 

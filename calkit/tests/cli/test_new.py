@@ -1,5 +1,6 @@
 """Tests for ``cli.new``."""
 
+import json
 import os
 import re
 import subprocess
@@ -2296,3 +2297,62 @@ def test_release_detached_head(tmp_dir):
         ],
     )
     assert res.exit_code == 0, res.stdout
+
+
+def test_new_comment(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    with open("main.tex", "w") as f:
+        f.write("First paragraph.\n\nSecond paragraph.\n")
+    with open("note.md", "w") as f:
+        f.write("# Note\n\nSome text.\n")
+    # A thread goes above the paragraph, in each language's own comments
+    id_ = ck(
+        "new", "comment", "main.tex", "-l", "3", "-m", "Why?", "--author", "A"
+    )
+    with open("main.tex") as f:
+        lines = f.read().split("\n")
+    assert lines[2] == f"% COMMENT id={id_}"
+    assert lines[3].startswith("%   A (")
+    assert lines[4:6] == ["%     Why?", "Second paragraph."]
+    added = json.loads(
+        ck(
+            "new",
+            "comment",
+            "note.md",
+            "-l",
+            "3",
+            "-m",
+            "Hm.",
+            "--highlight",
+            "Some",
+            "--author",
+            "B",
+            "--json",
+        )
+    )
+    assert added["anchor"]["text"] == "Some text."
+    assert added["highlight"] == {"text": "Some", "occ": 0}
+    with open("note.md") as f:
+        assert f.read().startswith(
+            f'# Note\n\n<!-- COMMENT id={added["id"]} highlight={{text: "Some"}}\n'
+        )
+    for args in [
+        ["new", "comment", "main.tex", "-l", "99", "-m", "x", "--author", "A"],
+        [
+            "new",
+            "comment",
+            "missing.md",
+            "-l",
+            "1",
+            "-m",
+            "x",
+            "--author",
+            "A",
+        ],
+    ]:
+        res = subprocess.run(["calkit", *args], capture_output=True)
+        assert res.returncode != 0, args

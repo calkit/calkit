@@ -464,6 +464,34 @@ def utcnow(remove_tz=True) -> datetime:
     return dt
 
 
+# Where set_env_vars keeps the user's own home directory when a project's
+# env_vars change it, e.g., to /tmp for a tool a stage runs, so Calkit still
+# finds its config, credentials, and caches
+USER_HOME_ENV_VAR = "CALKIT_USER_HOME"
+
+
+# These are here rather than in calkit.config, which every command's update
+# check would otherwise import, with keyring and pydantic-settings, only to
+# find where its state is kept
+def get_user_home() -> str:
+    """The home directory Calkit keeps its own files in."""
+    return os.environ.get(USER_HOME_ENV_VAR) or os.path.expanduser("~")
+
+
+def get_env_suffix(sep: str = "-") -> str:
+    """Suffix for the config file name, keyring service, and env var
+    prefix.
+
+    All real hubs share a single config file and keyring service, with
+    hub credentials scoped inside them (see ``calkit.config``); only the
+    test environment gets its own isolated config, so tests never touch
+    real credentials.
+    """
+    if os.getenv("CALKIT_ENV") == "test":
+        return sep + "test"
+    return ""
+
+
 LOCAL_DIR = ".calkit/local"
 
 
@@ -1608,10 +1636,8 @@ def set_env_vars(ck_info: dict, cli: bool = True) -> None:
     # A project that points the home directory elsewhere, e.g., at /tmp for
     # a tool a stage runs, would otherwise hide the user's Calkit config,
     # and with it their credentials, from every Calkit command it runs
-    import calkit.config
-
     home = os.path.expanduser("~")
     for k, v in env_vars.items():
         os.environ[str(k)] = str(v)
     if os.path.expanduser("~") != home:
-        os.environ.setdefault(calkit.config.USER_HOME_ENV_VAR, home)
+        os.environ.setdefault(USER_HOME_ENV_VAR, home)

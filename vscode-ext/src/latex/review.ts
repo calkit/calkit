@@ -7,9 +7,9 @@ import * as vscode from "vscode";
 
 import {
   LIGATURES,
+  documentStageSource,
   findInSource,
   findText,
-  latexStageSource,
   lineMap,
   normalizeSelection,
   paragraphLines,
@@ -34,7 +34,11 @@ export interface PdfReviewDeps {
   getWorkspaceRoot: () => string | undefined;
   getStages: () => Record<string, unknown>;
   getNonce: () => string;
+  // Offer to upgrade the CLI, saying why
+  promptUpgrade: (message: string) => void;
 }
+
+const TOO_OLD = "The calkit on your PATH is too old for comments.";
 
 // A thread with where its paragraph is in the PDF, keyed so the webview can
 // refer back to it whether or not it has an ID yet.
@@ -64,18 +68,22 @@ interface Viewer {
   pendingReveal?: object;
 }
 
-// A PDF viewer for LaTeX documents that shows the comment threads in their
-// source, following the Calkit LaTeX comment schema, and goes between the
-// PDF and source with SyncTeX.
+// A PDF viewer for LaTeX and Markdown documents that shows the comment
+// threads in their source, following the Calkit comment schema, and goes
+// between the PDF and source with SyncTeX, or by text without it.
 export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   private viewers = new Set<Viewer>();
+  // Upgrading is offered once, not on every refresh of the comments
+  private offeredUpgrade = false;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly deps: PdfReviewDeps,
   ) {
     // Comments are in the source, so any change to it can change them
-    const texWatcher = vscode.workspace.createFileSystemWatcher("**/*.tex");
+    const texWatcher = vscode.workspace.createFileSystemWatcher(
+      "**/*.{tex,md,markdown}",
+    );
     let debounce: ReturnType<typeof setTimeout> | undefined;
     const refresh = (): void => {
       clearTimeout(debounce);
@@ -103,12 +111,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       this.deps.getWorkspaceRoot() ?? path.dirname(document.uri.fsPath);
     const pdf = rel(root, document.uri.fsPath);
     const stem = pdf.replace(/\.pdf$/i, "");
-    const tex =
-      latexStageSource(this.deps.getStages(), pdf) ??
-      (fs.existsSync(path.join(root, `${stem}.tex`))
-        ? `${stem}.tex`
-        : undefined);
-    const viewer: Viewer = { panel, pdf, tex, ready: false };
+    const viewer: Viewer = { panel, pdf, ready: false };
     this.viewers.add(viewer);
     this.setOpenContext();
     const pdfjs = vscode.Uri.joinPath(
@@ -157,10 +160,39 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       this.setOpenContext();
     });
     panel.webview.onDidReceiveMessage((msg) =>
-      this.onMessage(viewer, msg).catch((err) =>
-        vscode.window.showErrorMessage(String(err?.message ?? err)),
-      ),
+      this.onMessage(viewer, msg).catch((err) => {
+        // Upgrading has already been offered
+        const message = String(err?.message ?? err);
+        if (!message.startsWith(TOO_OLD)) {
+          void vscode.window.showErrorMessage(message);
+        }
+      }),
     );
+  }
+
+  // The document a PDF is built from. The project's config may not have
+  // been read when a viewer opens, e.g., one restored at startup, so it's
+  // looked for until it's found.
+  private source(v: Viewer): string | undefined {
+    if (v.tex === undefined) {
+      const stem = v.pdf.replace(/\.pdf$/i, "");
+      v.tex =
+        documentStageSource(this.deps.getStages(), v.pdf) ??
+        (fs.existsSync(path.join(this.root(), `${stem}.tex`))
+          ? `${stem}.tex`
+          : undefined);
+    }
+    return v.tex;
+  }
+
+  // Show the comments in viewers whose source wasn't known until the
+  // project's config was read
+  stagesChanged(): void {
+    for (const v of this.viewers) {
+      if (v.ready && v.tex === undefined && this.source(v) !== undefined) {
+        void this.sendThreads(v);
+      }
+    }
   }
 
   // Show a source line in an open viewer of a PDF it's part of, returning
@@ -179,7 +211,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       if (s && tag !== undefined) {
         const rect = synctexForward(s, tag, this.lines(v, file).toBefore(line));
         msg = rect && { type: "reveal", rect };
-      } else if (v.tex) {
+      } else if (this.source(v)) {
         const para = await this.locate(v, [
           "--path",
           file,
@@ -206,21 +238,27 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     return false;
   }
 
-  // Run a `calkit latex comments` command in the project
-  private async calkit(args: string[]): Promise<string> {
+  // Run a calkit command on a file in the project, e.g., `new comment`
+  private async calkit(
+    command: string[],
+    file: string,
+    args: string[] = [],
+  ): Promise<string> {
     try {
       const { stdout } = await execFileAsync(
         "calkit",
-        ["latex", "comments", ...args],
+        [...command, file, ...args],
         { cwd: this.root(), maxBuffer: 64 * 1024 * 1024 },
       );
       return stdout;
     } catch (err) {
       const stderr = String((err as { stderr?: string }).stderr ?? "");
       if (/No such command/.test(stderr)) {
-        throw new Error(
-          "The calkit on your PATH is too old for comments. Upgrade it with: calkit upgrade",
-        );
+        if (!this.offeredUpgrade) {
+          this.offeredUpgrade = true;
+          this.deps.promptUpgrade(`${TOO_OLD} Upgrade it to use them here.`);
+        }
+        throw new Error(`${TOO_OLD} Upgrade it with: calkit upgrade`);
       }
       throw new Error(stderr.trim() || String((err as Error).message ?? err));
     }
@@ -233,12 +271,16 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   ): Promise<
     { path: string; line: number; end_line: number; text: string } | undefined
   > {
-    if (!v.tex) {
+    const tex = this.source(v);
+    if (!tex) {
       return undefined;
     }
     try {
       return JSON.parse(
-        await this.calkit(["locate", v.tex, ...args, "--json"]),
+        await this.calkit(["latex", "comments", "locate"], tex, [
+          ...args,
+          "--json",
+        ]),
       );
     } catch {
       return undefined;
@@ -348,16 +390,19 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   private async sendThreads(v: Viewer): Promise<void> {
-    if (!v.tex) {
+    const tex = this.source(v);
+    if (!tex) {
       void v.panel.webview.postMessage({
         type: "status",
-        text: "No LaTeX source found for this PDF, so no comments to show.",
+        text: "No source found for this PDF, so no comments to show.",
       });
       return;
     }
     let threads: TexThread[];
     try {
-      threads = JSON.parse(await this.calkit(["list", v.tex, "--json"]));
+      threads = JSON.parse(
+        await this.calkit(["list", "comments"], tex, ["--json"]),
+      );
     } catch (err) {
       void v.panel.webview.postMessage({
         type: "status",
@@ -392,7 +437,11 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
 
   // Run a comments command that edits a file, after making sure the editor
   // doesn't hold unsaved changes the edit would clash with.
-  private async edit(file: string, args: string[]): Promise<string> {
+  private async edit(
+    command: string[],
+    file: string,
+    args: string[] = [],
+  ): Promise<string> {
     const abs = path.join(this.root(), file);
     const open = vscode.workspace.textDocuments.find(
       (d) => d.uri.fsPath === abs && d.isDirty,
@@ -406,7 +455,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         throw new Error("Comment not changed, since the file isn't saved.");
       }
     }
-    return (await this.calkit(args)).trim();
+    return (await this.calkit(command, file, args)).trim();
   }
 
   // Open the source at a line, selecting some rendered text there if it
@@ -560,14 +609,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         return;
       }
       case "add": {
-        const args = [
-          "add",
-          String(msg.file),
-          "--line",
-          String(msg.line),
-          "-m",
-          String(msg.text),
-        ];
+        const args = ["--line", String(msg.line), "-m", String(msg.text)];
         if (typeof msg.highlight === "string" && msg.highlight) {
           args.push(
             "--highlight",
@@ -576,23 +618,20 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
             String(msg.occ ?? 0),
           );
         }
-        await this.edit(String(msg.file), args);
+        await this.edit(["new", "comment"], String(msg.file), args);
         break;
       }
       case "reply":
-        await this.edit(String(msg.file), [
-          "reply",
-          String(msg.file),
+        await this.edit(["update", "comment"], String(msg.file), [
           ...ref(),
-          "-m",
+          "--reply",
           String(msg.text),
         ]);
         break;
       case "resolve":
-        await this.edit(String(msg.file), [
-          msg.resolved ? "resolve" : "reopen",
-          String(msg.file),
+        await this.edit(["update", "comment"], String(msg.file), [
           ...ref(),
+          msg.resolved ? "--resolve" : "--reopen",
         ]);
         break;
       case "delete": {
@@ -604,11 +643,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         if (choice !== "Delete") {
           return;
         }
-        await this.edit(String(msg.file), [
-          "delete",
-          String(msg.file),
-          ...ref(),
-        ]);
+        await this.edit(["delete", "comment"], String(msg.file), ref());
         break;
       }
       case "openSource":
@@ -789,8 +824,8 @@ function buildHtml(
     </div>
     <div id="select-actions">
       <button id="select-comment" class="primary">Comment</button>
-      <button id="select-source" title="Open the LaTeX source at this text">Go to source</button>
-      <button id="select-source-side" title="Open the LaTeX source at this text, beside the PDF">To the side</button>
+      <button id="select-source" title="Open the source at this text">Go to source</button>
+      <button id="select-source-side" title="Open the source at this text, beside the PDF">To the side</button>
     </div>
   </div>
   <div id="resizer"></div>
@@ -1437,9 +1472,9 @@ window.addEventListener("message", (e) => {
     count.hidden = !open;
     document.getElementById("toggle-comments").title = "Show or hide comments (" + open + " open, "
       + (threads.length - open) + " resolved)";
-    setStatus(!msg.synctex ? "Comments placed by text, without SyncTeX"
-      : msg.stale.length ? msg.stale.join(", ") + " changed since this PDF was built; rebuild it to place comments exactly"
-      : "");
+    // Which sources changed goes in the tooltip, since there can be many
+    setStatus(msg.synctex && msg.stale.length ? "Rebuild to place comments exactly" : "");
+    if (msg.synctex && msg.stale.length) statusEl.title = "Changed since this PDF was built: " + msg.stale.join(", ");
     renderPanel();
     void draw();
   } else if (msg.type === "status") setStatus(msg.text);

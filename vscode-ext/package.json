@@ -75,7 +75,7 @@
         "command": "calkit-vscode.togglePdfSource",
         "key": "ctrl+alt+shift+j",
         "mac": "cmd+alt+shift+j",
-        "when": "editorTextFocus && resourceExtname == .tex || activeCustomEditorId == 'calkit.pdfReview'"
+        "when": "editorTextFocus && (resourceExtname == .tex || calkit.activeFileBuildsPdf) || activeCustomEditorId == 'calkit.pdfReview'"
       }
     ],
     "customEditors": [
@@ -190,7 +190,7 @@
       },
       {
         "command": "calkit-vscode.showLatexSource",
-        "title": "Show LaTeX Source",
+        "title": "Show Source Document",
         "category": "Calkit",
         "icon": "$(file-code)"
       },
@@ -594,7 +594,7 @@
       "editor/title": [
         {
           "command": "calkit-vscode.showLatexPdf",
-          "when": "resourceExtname == .tex && calkit.activeFileHasStage",
+          "when": "resourceExtname == .tex && calkit.activeFileHasStage || calkit.activeFileBuildsPdf",
           "group": "navigation"
         },
         {
@@ -663,12 +663,12 @@
         },
         {
           "command": "calkit-vscode.showInPdf",
-          "when": "resourceExtname == .tex",
+          "when": "resourceExtname == .tex || calkit.activeFileBuildsPdf",
           "group": "navigation@100"
         },
         {
           "command": "calkit-vscode.showInPdfToSide",
-          "when": "resourceExtname == .tex",
+          "when": "resourceExtname == .tex || calkit.activeFileBuildsPdf",
           "group": "navigation@101"
         }
       ],
@@ -823,11 +823,11 @@
         },
         {
           "command": "calkit-vscode.showInPdf",
-          "when": "resourceExtname == .tex"
+          "when": "resourceExtname == .tex || calkit.activeFileBuildsPdf"
         },
         {
           "command": "calkit-vscode.showInPdfToSide",
-          "when": "resourceExtname == .tex"
+          "when": "resourceExtname == .tex || calkit.activeFileBuildsPdf"
         },
         {
           "command": "calkit-vscode.save",
@@ -882,7 +882,7 @@
         },
         {
           "command": "calkit-vscode.togglePdfSource",
-          "when": "resourceExtname == .tex || activeCustomEditorId == 'calkit.pdfReview'"
+          "when": "resourceExtname == .tex || calkit.activeFileBuildsPdf || activeCustomEditorId == 'calkit.pdfReview'"
         }
       ],
       "webview/context": [

@@ -293,6 +293,58 @@ def list_questions(
         _echo_question(n, question)
 
 
+@list_app.command(name="comments")
+def list_comments(
+    path: Annotated[
+        str | None,
+        typer.Argument(
+            help="Document to list threads from, including files it inputs. "
+            "Defaults to every document the pipeline builds into a PDF."
+        ),
+    ] = None,
+    unresolved: Annotated[
+        bool,
+        typer.Option("--unresolved", "-u", help="Only list open threads."),
+    ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """List review comment threads in LaTeX and Markdown documents."""
+    import os
+
+    import calkit.latex
+
+    if path is not None and not os.path.isfile(path):
+        raise_error(f"{path} does not exist")
+    docs = (
+        [path]
+        if path is not None
+        else calkit.latex.comment_documents(calkit.load_calkit_info())
+    )
+    # Documents can input the same files
+    out = []
+    seen = set()
+    for doc in docs:
+        if not os.path.isfile(doc):
+            continue
+        for c in calkit.latex.list_comments(doc):
+            key = (c["path"], c["line"])
+            if key not in seen and not (unresolved and c["resolved"]):
+                seen.add(key)
+                out.append(c)
+    if as_json:
+        echo_json(out)
+        return
+    for c in out:
+        status = " (resolved)" if c["resolved"] else ""
+        typer.echo(f"{c['path']}:{c['line']} [{c['id'] or '-'}]{status}")
+        if c["highlight"]:
+            typer.echo(f'  On "{c["highlight"]["text"]}"')
+        for m in c["messages"]:
+            typer.echo(f"  {m['author']}: {m['text']}")
+
+
 @list_app.command(name="publications|pubs")
 def list_publications(
     json_output: Annotated[

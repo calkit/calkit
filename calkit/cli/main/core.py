@@ -525,7 +525,7 @@ def get_status(
     def step(text: str) -> None:
         # Say what's being worked out, while there's a spinner to say it
         if isinstance(spinner, Status):
-            spinner.update(text + "...")
+            spinner.update(text)
 
     def get_dvc_data_status() -> dict:
         # Reuse what the pipeline status computed under the same DVC lock
@@ -595,7 +595,7 @@ def get_status(
         from rich.console import Console
 
         spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
-            "Checking status..."
+            "Checking status"
         )
         # DVC's progress bars would each be printed above the spinner, and
         # they're shown only if this is at or below their level

@@ -16,31 +16,14 @@ to work transparently and reproducibly.
 
 Rather than assuming we should simply teach scientists software development
 tools and platforms and leave them to assemble their own systems and workflows,
-Calkit provides a turnkey, vertically integrated,
+Calkit provides a vertically integrated,
 research-focused experience right out of the box: reference management, version
 control (including large data files), computational environments, pipeline
 automation, and a (self-hostable) collaboration platform.
-The extra discipline of working this way, much like a software engineer,
-increases speed and quality simultaneously,
-and with a gentle learning curve,
-it's almost always worth switching from manual, ad hoc workflows.
-
-Calkit is designed to help individuals work more efficiently by allowing all
-stages of research—from asking questions, to data collection and analysis, to
-publication—to live together in the same project, breaking down silos that slow
-down iteration
-(inspired by the Agile, Lean, and DevOps movements)
-while allowing more inclusive collaboration, e.g., from those
-who don't want to learn complex tools like Git.
-
-A Calkit project
-_includes_ the research article, not only supplements it, and is intended to be
-shipped whole, providing full context and fast verifiability, by
-linking all evidence for answers to research questions back to reproducible
-calculations.
-See
-[this published article](https://doi.org/10.1088/1538-3873/ae6fef)
-for an example.
+Everything is totally open source with the ability to interact via web app
+or command line interface (CLI),
+so humans are able to work alongside AI agents and quickly verify that
+both of their work is reproducible.
 
 ## A success story
 

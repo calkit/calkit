@@ -1173,6 +1173,20 @@ def test_comments(tmp_dir):
     listed = json.loads(ck("list", "main.md", "--json"))
     assert listed[-1]["messages"][0]["text"] == "Short."
     assert listed[-1]["anchor"]["text"] == "End."
+    # A thread shown in a fence, e.g., as an example, is code, not a thread
+    example = "````md\n<!-- COMMENT\n  E:\n    Example.\n-->\n```\n````\n"
+    with open("main.md", "a") as f:
+        f.write("\n" + example)
+    assert len(json.loads(ck("list", "main.md", "--json"))) == len(listed)
+    with open("main.md") as f:
+        n = f.read().split("\n").index("    Example.") + 1
+    res = subprocess.run(
+        ["calkit", "latex", "comments", "delete", "main.md", "-l", str(n)],
+        capture_output=True,
+    )
+    assert res.returncode != 0
+    with open("main.md") as f:
+        assert f.read().endswith(example)
 
 
 def test_from_markdown(tmp_dir):

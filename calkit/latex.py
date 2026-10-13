@@ -1315,9 +1315,23 @@ def parse_comments(lines: list[str]) -> list[TexComment]:
     """Comment blocks in a file's lines, with their position and extent,
     in LaTeX or Markdown."""
     out: list[TexComment] = []
+    # The fence of the Markdown code being read, if any, where a thread is
+    # only shown, e.g., as an example. LaTeX's are found regardless, so a
+    # stray line of backticks can't hide them.
+    fence: str | None = None
     i = 0
     while i < len(lines):
-        markdown = re.match(r"<!-- COMMENT( |$)", lines[i]) is not None
+        if fence is None and (m := _MD_FENCE_RE.match(lines[i])):
+            fence = m.group(1)
+        elif fence is not None and re.match(
+            rf"^[ ]{{0,3}}{re.escape(fence[0])}{{{len(fence)},}}\s*$",
+            lines[i],
+        ):
+            fence = None
+        markdown = (
+            fence is None
+            and re.match(r"<!-- COMMENT( |$)", lines[i]) is not None
+        )
         if not markdown and not re.match(r"% COMMENT( |$)", lines[i]):
             i += 1
             continue

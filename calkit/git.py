@@ -165,21 +165,23 @@ def get_staged_files_with_status(
 ) -> list[dict]:
     if repo is None:
         repo = get_repo(path)
-    cmd = ["--staged", "--name-status"]
+    # NUL-delimited so Git doesn't quote paths that need it, e.g., a pointer
+    # whose name holds a space or non-ASCII characters
+    cmd = ["--staged", "--name-status", "-z"]
     if path is not None:
         # A staged deletion's path is gone, so Git would read it as a ref
         cmd += ["--", path]
-    diff = repo.git.diff(cmd)
-    paths = diff.split("\n")
+    fields = [field for field in repo.git.diff(cmd).split("\0") if field]
     res = []
-    for pathi in paths:
-        # Make sure line is not empty, e.g., a trailing newline
-        if pathi:
-            # A rename or copy is reported as 'R100\told\tnew', so the path
-            # the commit is about is the last field, not the second
-            fields = pathi.split("\t")
-            status = fields[0]
-            res.append({"status": status, "path": fields[-1]})
+    index = 0
+    while index < len(fields):
+        status = fields[index]
+        index += 1
+        # A rename or copy is reported as 'R100', then the old and new path,
+        # so the path the commit is about is the second of the two
+        spans_two = status[0] in ("R", "C")
+        res.append({"status": status, "path": fields[index + spans_two]})
+        index += 2 if spans_two else 1
     return res
 
 

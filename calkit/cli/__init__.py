@@ -44,10 +44,15 @@ def _only_invoked(
 
     from typer.main import get_command_name, solve_typer_info_defaults
 
+    from .main.core import APP_OPTIONS_WITH_VALUES
+
     # Find the command name, skipping the top level's options
+    takes_value = {
+        flag for flags in APP_OPTIONS_WITH_VALUES.values() for flag in flags
+    }
     i = 0
     while i < len(args) and args[i].startswith("-") and top:
-        i += 2 if args[i] in ("-C", "--directory", "--use-version") else 1
+        i += 2 if args[i] in takes_value else 1
     if i >= len(args) or args[i].startswith("-"):
         return app
     name, rest = args[i], args[i + 1 :]

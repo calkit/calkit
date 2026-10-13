@@ -589,11 +589,16 @@ def get_status(
     # environment checks' tools print is discarded.
     spinner: AbstractContextManager = nullcontext()
     if not as_json and sys.stderr.isatty():
+        import logging
+
         from rich.console import Console
 
         spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
             "Checking status..."
         )
+        # DVC's progress bars would each be printed above the spinner, and
+        # they're shown only if this is at or below their level
+        logging.getLogger("dvc.progress").setLevel(logging.CRITICAL + 1)
     with spinner:
         pipeline_status = None
         running_status = None

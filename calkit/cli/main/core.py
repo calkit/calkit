@@ -1621,10 +1621,16 @@ def commit(
         typer.echo("Please provide a message describing the changes.")
         typer.echo("Example: Add new data to data/raw")
         message = typer.prompt("Message")
-    # Figure out if we have any DVC files in this commit, and if not, we can
-    # skip pushing to DVC
+    # Figure out if the commit touches any DVC-tracked files (a .dvc pointer,
+    # dvc.yaml, dvc.lock, or a dvc-zip pointer); if not, there is nothing to
+    # push to DVC. Callers use this to know whether the data needs to be
+    # pushed as well. Pipeline files are matched by basename because a
+    # subproject keeps its own dvc.lock under its directory.
     any_dvc = any(
-        [path == "dvc.lock" or path.endswith(".dvc") for path in commit_paths]
+        path.endswith(".dvc")
+        or posixpath.basename(path) in ("dvc.yaml", "dvc.lock")
+        or path.startswith(".calkit/zip/")
+        for path in commit_paths
     )
     cmd = ["-m", message]
     if restrict:
@@ -1645,7 +1651,7 @@ def commit(
     if output:
         typer.echo(output)
     if push_commit:
-        push()
+        push(no_dvc=not any_dvc)
     # Callers use this to know whether the data needs to be pushed as well
     return any_dvc
 

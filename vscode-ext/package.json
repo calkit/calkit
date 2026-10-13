@@ -190,7 +190,7 @@
       },
       {
         "command": "calkit-vscode.showLatexSource",
-        "title": "Show Source",
+        "title": "Show Source Document",
         "category": "Calkit",
         "icon": "$(file-code)"
       },

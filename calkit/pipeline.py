@@ -1422,9 +1422,12 @@ def get_output_storage_map(
     for stage in stages.values():
         if not isinstance(stage, dict):
             continue
+        # Output paths are relative to the stage's working directory
+        wdir = stage.get("wdir") or "."
         for out in stage.get("outputs", []):
             if isinstance(out, dict) and "path" in out and "storage" in out:
-                result[Path(out["path"]).as_posix()] = out["storage"]
+                path = Path(os.path.normpath(os.path.join(wdir, out["path"])))
+                result[path.as_posix()] = out["storage"]
     return result
 
 

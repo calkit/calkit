@@ -753,7 +753,7 @@ def get_status(
         # can't encode
         calkit.echo(format_summary(questions_status))
         if not questions_status.ok:
-            typer.echo("Run 'calkit check questions' for detail.")
+            typer.echo("Run 'calkit check questions' for details.")
         typer.echo()
     if "git" in categories:
         print_sep("Git")

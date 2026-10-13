@@ -15,9 +15,10 @@ never pushed, or pinned to a Git ref that doesn't exist); a reference is
 broken (a key that doesn't resolve, a placeholder that names no evidence, a
 label missing from the LaTeX); the stage that produces it is out of date, so
 what's on disk isn't what the project would produce now; or the stage is
-frozen, or downstream of one, in which case the pipeline will never call it
-out of date however far its inputs have moved -- and only a ``git_ref`` on
-the citation says which version is meant.
+frozen, or downstream of one, and its inputs or outputs have moved from
+what dvc.lock records, in which case the pipeline will never rerun it --
+and only a ``git_ref`` on the citation says which version is meant. A
+frozen stage that still matches dvc.lock is as current as any other.
 
 Evidence pinned with ``git_ref`` is checked at that ref rather than in the
 working tree. A pin is a claim about one version, so nothing about the
@@ -41,6 +42,7 @@ import operator
 import os
 import re
 import string
+from pathlib import Path
 from typing import Any, Literal, TypeGuard
 
 from pydantic import BaseModel, Field
@@ -93,6 +95,8 @@ class QuestionCheck(BaseModel):
 
     #: 1-based, matching ``calkit list questions``
     index: int
+    #: The subproject it belongs to, relative to the project, if not this one
+    project: str | None = None
     question: str
     answered: bool
     status: QuestionStatus
@@ -1302,9 +1306,9 @@ def check_evidence(
                     None,
                     [
                         out.message,
-                        f"stage '{base}' is frozen, or downstream of one, so "
-                        "nothing will report it out of date; cite a git_ref "
-                        "to pin which version this is",
+                        f"stage '{base}' is frozen, or downstream of one, "
+                        "and no longer matches dvc.lock, so it won't be "
+                        "rerun; cite a git_ref to pin which version this is",
                     ],
                 )
             )
@@ -1470,17 +1474,25 @@ def pipeline_stage_sets(
         return set(), set()
     stale: set[str] = set()
     frozen: set[str] = set()
-    try:
-        status = get_status(
-            ck_info=ck_info,
-            wdir=wdir,
-            check_environments=False,
-            clean_notebooks=False,
-            compile_to_dvc=False,
-        )
-        stale = {n.split("@")[0] for n in status.stale_stage_names}
-    except Exception:
-        pass
+    # DVC never calls a frozen stage out of date, so with nothing else in the
+    # pipeline, e.g., a subproject of decisions, there's nothing to ask it
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    all_frozen = all(
+        isinstance(stage, dict) and stage.get("frozen")
+        for stage in stages.values()
+    )
+    if not all_frozen:
+        try:
+            status = get_status(
+                ck_info=ck_info,
+                wdir=wdir,
+                check_environments=False,
+                clean_notebooks=False,
+                compile_to_dvc=False,
+            )
+            stale = {n.split("@")[0] for n in status.stale_stage_names}
+        except Exception:
+            pass
     try:
         frozen = frozen_tainted_stage_names(ck_info=ck_info, wdir=wdir)
     except Exception:
@@ -1527,22 +1539,36 @@ def check_questions(
         stale_stages, frozen_stages = pipeline_stage_sets(
             ck_info, wdir, check_pipeline
         )
-    return QuestionsStatus(
-        questions=[
-            check_question(
-                n,
-                q,
-                ck_info,
-                wdir,
-                repo,
-                history,
-                stale_stages=stale_stages,
-                frozen_stages=frozen_stages,
-                check_history=check_history,
-            )
-            for n, q in enumerate(questions, start=1)
-        ]
-    )
+    checks = [
+        check_question(
+            n,
+            q,
+            ck_info,
+            wdir,
+            repo,
+            history,
+            stale_stages=stale_stages,
+            frozen_stages=frozen_stages,
+            check_history=check_history,
+        )
+        for n, q in enumerate(questions, start=1)
+    ]
+    # A subproject's questions are part of what the project answers
+    for subproject in ck_info.get("subprojects") or []:
+        path = subproject.get("path") if isinstance(subproject, dict) else None
+        if not isinstance(path, str) or not os.path.isfile(
+            os.path.join(wdir, path, "calkit.yaml")
+        ):
+            continue
+        sp_status = check_questions(
+            wdir=os.path.join(wdir, path),
+            check_pipeline=check_pipeline,
+            check_history=check_history,
+        )
+        for q in sp_status.questions:
+            q.project = Path(path, q.project or "").as_posix()
+            checks.append(q)
+    return QuestionsStatus(questions=checks)
 
 
 def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
@@ -1565,7 +1591,8 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
         ) or any(ev.status in ("unattributed", "changed") for ev in q.evidence)
         if not verbose and not needs_attention:
             continue
-        lines.append(f"{q.index}. [{q.status}] {q.question}")
+        where = f"{q.project}: " if q.project else ""
+        lines.append(f"{where}{q.index}. [{q.status}] {q.question}")
         if q.message:
             lines.append(f"     {q.message}")
         for ev in q.evidence:

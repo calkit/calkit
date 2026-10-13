@@ -1078,6 +1078,18 @@ def get_lock_out_paths(wdir: str | None = None) -> list[str]:
     return paths
 
 
+def get_cached_out_paths(wdir: str | None = None) -> set[str]:
+    """Paths of the pipeline outputs DVC caches, and so ignores, as POSIX
+    paths relative to the project root.
+    """
+    repo = get_dvc_repo(wdir)
+    return {
+        Path(os.path.relpath(out.fs_path, repo.root_dir)).as_posix()
+        for out in repo.index.outs
+        if out.use_scm_ignore
+    }
+
+
 def restore_output_ignores(wdir: str | None = None) -> list[str]:
     """Re-ignore the pipeline's cached outputs that exist but aren't ignored.
 

@@ -17,6 +17,7 @@ from pydantic.fields import PydanticUndefined
 from typer.core import TyperArgument, TyperCommand, TyperGroup, TyperOption
 
 from calkit.cli.main.core import app
+from calkit.models.base import Model
 from calkit.models.core import (
     Environment,
 )
@@ -555,8 +556,8 @@ _MAX_UNION_MEMBERS = 4
 def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
     """Return the model base every one of ``types_`` derives from, if any.
 
-    ``BaseModel`` itself doesn't count: it's shared by everything, so it
-    would summarize a union as nothing at all.
+    ``BaseModel`` itself doesn't count, nor Calkit's ``Model``: they're
+    shared by everything, so would summarize a union as nothing at all.
     """
     if not all(
         isinstance(t, type) and issubclass(t, BaseModel) for t in types_
@@ -565,7 +566,7 @@ def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
     # Walk the first member's bases from most to least specific, so the
     # narrowest shared base wins
     for base in types_[0].__mro__[1:]:
-        if base is BaseModel:
+        if base in (BaseModel, Model):
             break
         if all(issubclass(t, base) for t in types_):
             return cast(type[BaseModel], base)

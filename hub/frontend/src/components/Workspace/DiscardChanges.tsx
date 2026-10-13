@@ -7,44 +7,43 @@ import {
   AlertDialogHeader,
   AlertDialogOverlay,
   Button,
+  Code,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
-import axios from "axios"
+import { useMutation } from "@tanstack/react-query"
 import { useRef } from "react"
 
 import useCustomToast from "../../hooks/useCustomToast"
 
 interface DiscardChangesProps {
+  request: (type: string, fields?: object) => Promise<any>
+  onDone: () => void
   isOpen: boolean
   onClose: () => void
 }
 
-const DiscardChanges = ({ isOpen, onClose }: DiscardChangesProps) => {
-  const queryClient = useQueryClient()
+const DiscardChanges = ({
+  isOpen,
+  onClose,
+  request,
+  onDone,
+}: DiscardChangesProps) => {
   const showToast = useCustomToast()
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
   const mutation = useMutation({
     mutationFn: () => {
-      const url = `http://localhost:8866/projects/${accountName}/${projectName}/actions/discard-changes`
-      return axios.post(url)
+      return request("workspace.discard")
     },
-    onSuccess: () => {
-      showToast("Success!", "Changes discarded.", "success")
+    onSuccess: (result: { stashed?: boolean }) => {
+      showToast(
+        "Changes discarded",
+        result?.stashed ? "To get them back, run calkit stash pop." : "",
+        "success",
+      )
       onClose()
     },
-    onError: (err: any) => {
-      showToast("Error", String(err.response.data.detail), "error")
+    onError: (err: Error) => {
+      showToast("Error", err.message, "error")
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "status"],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "pipeline"],
-      })
-    },
+    onSettled: onDone,
   })
   const cancelRef = useRef<HTMLButtonElement | null>(null)
 
@@ -64,7 +63,10 @@ const DiscardChanges = ({ isOpen, onClose }: DiscardChangesProps) => {
             </AlertDialogHeader>
             <AlertDialogCloseButton />
             <AlertDialogBody>
-              Are you sure? You can't undo this action afterwards.
+              This puts the workspace back to its last commit. Changes are
+              stashed, including data tracked with DVC, so{" "}
+              <Code>calkit stash pop</Code> brings them back. New files are left
+              alone.
             </AlertDialogBody>
             <AlertDialogFooter gap={3}>
               <Button

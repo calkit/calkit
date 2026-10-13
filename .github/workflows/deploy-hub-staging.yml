@@ -47,6 +47,7 @@ jobs:
       BACKEND_CORS_ORIGINS: "https://${{ vars.DOMAIN }}"
       STACK_NAME: ${{ vars.STACK_NAME }}
       SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      RELAY_SECRET_KEY: ${{ secrets.RELAY_SECRET_KEY }}
       FERNET_KEY: "${{ secrets.FERNET_KEY }}"
       FIRST_SUPERUSER: ${{ vars.FIRST_SUPERUSER }}
       FIRST_SUPERUSER_PASSWORD: ${{ secrets.FIRST_SUPERUSER_PASSWORD }}

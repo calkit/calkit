@@ -2296,3 +2296,56 @@ def test_release_detached_head(tmp_dir):
         ],
     )
     assert res.exit_code == 0, res.stdout
+
+
+def test_new_workspace(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "data.csv"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-qm", "Add data"])
+    # A remote's settings, e.g., its auth, live in the local config
+    with open(".dvc/config.local", "a") as f:
+        f.write("[core]\n    autostage = true\n")
+    root = os.getcwd()
+    # It's a worktree beside this one on a new branch, using this one's DVC
+    # cache, so its data is there without pulling
+    subprocess.check_call(["calkit", "new", "workspace", "fix/axes"])
+    path = f"{root}-fix-axes"
+    repo = git.Repo(path)
+    assert repo.active_branch.name == "fix/axes"
+    assert repo.git.rev_parse("--git-common-dir") == os.path.join(root, ".git")
+    with open(os.path.join(path, "data.csv")) as f:
+        assert f.read() == "a,b\n"
+    local_config = open(os.path.join(path, ".dvc", "config.local")).read()
+    assert "autostage = true" in local_config
+    assert os.path.join(root, ".dvc", "cache") in local_config
+    assert not os.path.exists(os.path.join(path, ".dvc", "cache"))
+    # One made from a worktree made some other way, without the main
+    # checkout's cache, is still named after it and uses its cache
+    manual = os.path.join(os.path.dirname(root), "manual")
+    git.Repo(root).git.worktree("add", "-b", "manual", manual)
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "from-manual"], cwd=manual
+    )
+    path = f"{root}-from-manual"
+    with open(os.path.join(path, "data.csv")) as f:
+        assert f.read() == "a,b\n"
+    local_config = open(os.path.join(path, ".dvc", "config.local")).read()
+    assert "autostage = true" in local_config
+    assert os.path.join(root, ".dvc", "cache") in local_config
+    # An existing branch is checked out rather than created, and a path
+    # that's taken is refused
+    git.Repo(root).git.branch("other")
+    other = os.path.join(os.path.dirname(root), "elsewhere")
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "other", "--path", other]
+    )
+    assert git.Repo(other).active_branch.name == "other"
+    result = subprocess.run(
+        ["calkit", "new", "workspace", "third", "--path", other],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 and "already exists" in result.stderr

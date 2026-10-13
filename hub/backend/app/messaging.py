@@ -61,7 +61,14 @@ def send_email(
     if settings.SMTP_PASSWORD:
         smtp_options["password"] = settings.SMTP_PASSWORD
     response = message.send(to=email_to, smtp=smtp_options)
-    logging.info(f"send email result: {response}")
+    # A failed send doesn't raise, so it's logged as an error to be seen
+    if response.status_code not in (250, 251):
+        logging.error(
+            f"Failed to send email to {email_to}: {response.status_code} "
+            f"{response.status_text} {response.error!r}"
+        )
+    else:
+        logging.info(f"send email result: {response}")
 
 
 def generate_test_email(email_to: str) -> EmailData:
@@ -108,6 +115,39 @@ def generate_verify_email_email(
             "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
             "valid_hours": EMAIL_VERIFICATION_LINK_HOURS,
             "link": link,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_confirm_two_factor_email(email_to: str, code: str) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your two-factor setup code is {code}"
+    html_content = render_email_template(
+        template_name="confirm_two_factor.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "code": code,
+            "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_confirm_email_change_email(
+    email_to: str, new_email: str, code: str
+) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your email change code is {code}"
+    html_content = render_email_template(
+        template_name="confirm_email_change.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "new_email": new_email,
+            "code": code,
+            "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
         },
     )
     return EmailData(html_content=html_content, subject=subject)

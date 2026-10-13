@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+import uuid
 from datetime import timedelta
 from typing import Annotated, Any
 
@@ -20,6 +21,7 @@ from app import github, mixpanel, security, users
 from app.api.deps import (
     CurrentUser,
     SessionDep,
+    SessionUser,
     get_current_active_superuser,
 )
 from app.config import settings
@@ -36,6 +38,7 @@ from app.models import (
     User,
     UserCreate,
     UserPublic,
+    UserToken,
 )
 from app.security import (
     generate_password_reset_token,
@@ -61,12 +64,21 @@ REFRESH_ROTATION_GRACE_SECONDS = 60
 
 
 def _make_tokens(
-    user_id, description: str | None = None
+    user_id,
+    description: str | None = None,
+    interactive: bool = False,
+    session_id: uuid.UUID | None = None,
 ) -> tuple[str, str, RefreshToken]:
-    """Create a paired short-lived access token and long-lived refresh token."""
+    """Create a paired short-lived access token and long-lived refresh token.
+
+    Both name the sign-in session they belong to, which a rotation carries
+    over, so it can be checked, and ended, as one.
+    """
+    session_id = session_id or uuid.uuid4()
     access_token = security.create_access_token(
         subject=user_id,
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        add_payload={"sid": str(session_id)},
     )
     raw_refresh = generate_refresh_token()
     token_hash = hash_refresh_token(raw_refresh)
@@ -75,6 +87,8 @@ def _make_tokens(
         token_hash=token_hash,
         expires=utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         description=description,
+        session_id=session_id,
+        interactive=interactive,
     )
     return access_token, raw_refresh, refresh_db
 
@@ -113,7 +127,7 @@ def login_access_token(
         user, provider="email", first=_is_first_login(session, user)
     )
     access_token, raw_refresh, refresh_db = _make_tokens(
-        user.id, description="password login"
+        user.id, description="password login", interactive=True
     )
     session.add(refresh_db)
     session.commit()
@@ -174,7 +188,10 @@ def refresh_access_token(
     session.add(refresh_db)
     # Issue new pair
     access_token, raw_refresh, new_refresh_db = _make_tokens(
-        user.id, description=refresh_db.description
+        user.id,
+        description=refresh_db.description,
+        interactive=refresh_db.interactive,
+        session_id=refresh_db.session_id,
     )
     session.add(new_refresh_db)
     session.commit()
@@ -222,6 +239,7 @@ def reset_password(session: SessionDep, body: NewPassword) -> Message:
     hashed_password = get_password_hash(password=body.new_password)
     user.hashed_password = hashed_password
     session.add(user)
+    users.end_sign_in_sessions(session=session, user=user)
     session.commit()
     return Message(message="Password updated successfully")
 
@@ -443,7 +461,7 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
     # Lastly, generate an access token for this user
     mixpanel.user_logged_in(user, provider="github", first=first_login)
     access_token, raw_refresh, refresh_db = _make_tokens(
-        user.id, description="GitHub login"
+        user.id, description="GitHub login", interactive=True
     )
     session.add(refresh_db)
     session.commit()
@@ -524,6 +542,22 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
             )
     else:
         logger.info(f"Found existing user with email: {user.email}")
+        # Anyone could have signed up with this address without proving
+        # it, so whatever they set up to get back in stops working
+        if not user.email_verified:
+            user.hashed_password = get_password_hash(secrets.token_urlsafe(16))
+            session.add(user)
+            users.end_sign_in_sessions(session=session, user=user)
+            if user.totp is not None:
+                session.delete(user.totp)
+            tokens = session.exec(
+                select(UserToken).where(UserToken.user_id == user.id)
+            ).all()
+            for credential in [*tokens, *user.operators]:
+                credential.is_active = False
+                session.add(credential)
+            session.commit()
+            session.refresh(user)
     if not user.is_active:
         raise HTTPException(401, "User is not active")
     users.apply_analytics_consent(
@@ -544,7 +578,7 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
     users.mark_email_verified(session=session, user=user)
     mixpanel.user_logged_in(user, provider="google", first=first_login)
     access_token, raw_refresh, refresh_db = _make_tokens(
-        user.id, description="Google login"
+        user.id, description="Google login", interactive=True
     )
     session.add(refresh_db)
     session.commit()
@@ -849,13 +883,14 @@ def post_login_device(
 @router.post("/login/device/authorize")
 def post_login_device_authorize(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: SessionUser,
     req: DeviceAuthorizeRequest,
 ) -> Message:
     """Authorize a pending CLI device auth request.
 
-    The user must be authenticated. This endpoint is called by the frontend
-    after the user has logged in and clicked "Authorize".
+    The user must be signed in, not using a token, which could otherwise be
+    traded for a login. This endpoint is called by the frontend after the
+    user has logged in and clicked "Authorize".
     """
     auth_request = session.exec(
         select(DeviceAuth).where(DeviceAuth.device_code == req.device_code)

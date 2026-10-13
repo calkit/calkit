@@ -23,6 +23,7 @@ import type {
   BodyProjectsPostProjectPublication,
   BodyProjectsPostProjectUpload,
   BodyProjectsPutProjectContents,
+  CheckIn,
   CommentReply,
   ContentPatch,
   CreateReleaseGithubReleaseErrors,
@@ -35,6 +36,8 @@ import type {
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
+  DeleteOperatorErrors,
+  DeleteOperatorResponses,
   DeleteProjectByIdErrors,
   DeleteProjectByIdResponses,
   DeleteProjectCollaboratorErrors,
@@ -71,12 +74,15 @@ import type {
   DeleteUserResponses,
   DeleteUserTokenErrors,
   DeleteUserTokenResponses,
+  DeleteUserTotpErrors,
+  DeleteUserTotpResponses,
   DetectProjectPipelineStageInputsErrors,
   DetectProjectPipelineStageInputsResponses,
   DeviceAuthorizeRequest,
   DeviceAuthRequest,
   DeviceTokenRequest,
   DiscountCodePost,
+  EmailChangeCode,
   EmailVerificationConfirm,
   EmailVerificationToken,
   Environment,
@@ -105,6 +111,7 @@ import type {
   GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
+  GetOperatorsResponses,
   GetOrgsErrors,
   GetOrgsResponses,
   GetOrgStorageErrors,
@@ -211,6 +218,8 @@ import type {
   GetProjectsResponses,
   GetProjectTablesErrors,
   GetProjectTablesResponses,
+  GetProjectWorkspacesErrors,
+  GetProjectWorkspacesResponses,
   GetProjectZoteroCollectionsErrors,
   GetProjectZoteroCollectionsResponses,
   GetProjectZoteroItemPdfErrors,
@@ -249,7 +258,10 @@ import type {
   GetUserStorageResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
+  GetUserTotpErrors,
+  GetUserTotpResponses,
   GetUserZenodoTokenResponses,
+  GetWorkspacesResponses,
   GitHubReleasePost,
   GlobalSearchErrors,
   GlobalSearchResponses,
@@ -282,6 +294,7 @@ import type {
   NativeCollaboratorPost,
   NewPassword,
   OnboardingFlagPost,
+  OperatorPost,
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
@@ -319,6 +332,16 @@ import type {
   PostLoginDeviceResponses,
   PostLoginDeviceTokenErrors,
   PostLoginDeviceTokenResponses,
+  PostOperatorCheckInErrors,
+  PostOperatorCheckInResponses,
+  PostOperatorErrors,
+  PostOperatorRelayTokenErrors,
+  PostOperatorRelayTokenResponses,
+  PostOperatorResponses,
+  PostOperatorRestartErrors,
+  PostOperatorRestartResponses,
+  PostOperatorWakeErrors,
+  PostOperatorWakeResponses,
   PostOrgErrors,
   PostOrgResponses,
   PostProjectCollaboratorByEmailErrors,
@@ -393,6 +416,8 @@ import type {
   PostProjectZoteroSyncResponses,
   PostReleaseCommentErrors,
   PostReleaseCommentResponses,
+  PostUserEmailChangeCodeErrors,
+  PostUserEmailChangeCodeResponses,
   PostUserEmailVerificationConfirmErrors,
   PostUserEmailVerificationConfirmResponses,
   PostUserEmailVerificationResponses,
@@ -402,6 +427,11 @@ import type {
   PostUserGoogleAuthResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
+  PostUserTotpConfirmErrors,
+  PostUserTotpConfirmResponses,
+  PostUserTotpResponses,
+  PostUserTotpVerifyErrors,
+  PostUserTotpVerifyResponses,
   PostUserZenodoAuthErrors,
   PostUserZenodoAuthResponses,
   PostUserZoteroAuthErrors,
@@ -483,6 +513,8 @@ import type {
   TokenPatch,
   TokenPost,
   TokenPut,
+  TotpCode,
+  TotpConfirm,
   UpdateCurrentUserErrors,
   UpdateCurrentUserPasswordErrors,
   UpdateCurrentUserPasswordResponses,
@@ -972,8 +1004,9 @@ export class LoginService {
    *
    * Authorize a pending CLI device auth request.
    *
-   * The user must be authenticated. This endpoint is called by the frontend
-   * after the user has logged in and clicked "Authorize".
+   * The user must be signed in, not using a token, which could otherwise be
+   * traded for a login. This endpoint is called by the frontend after the
+   * user has logged in and clicked "Authorize".
    */
   public static postLoginDeviceAuthorize<ThrowOnError extends boolean = true>(
     parameters: {
@@ -1205,9 +1238,46 @@ export class UsersService {
   }
 
   /**
+   * Post User Email Change Code
+   *
+   * Email the current address a code for changing it to another.
+   */
+  public static postUserEmailChangeCode<ThrowOnError extends boolean = true>(
+    parameters: {
+      emailChangeCode: EmailChangeCode
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserEmailChangeCodeResponses,
+    PostUserEmailChangeCodeErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "emailChangeCode", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserEmailChangeCodeResponses,
+      PostUserEmailChangeCodeErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/email-change-code",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Update Current User Password
    *
-   * Update own password.
+   * Update own password, signing out everywhere else.
    */
   public static updateCurrentUserPassword<ThrowOnError extends boolean = true>(
     parameters: {
@@ -2218,6 +2288,169 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/onboarding-flags",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete User Totp
+   *
+   * Turn off two-factor authentication, which takes a current code.
+   */
+  public static deleteUserTotp<ThrowOnError extends boolean = true>(
+    parameters: {
+      totpCode: TotpCode
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteUserTotpResponses,
+    DeleteUserTotpErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "totpCode", map: "body" }] }],
+    )
+    return (options?.client ?? client).delete<
+      DeleteUserTotpResponses,
+      DeleteUserTotpErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Totp
+   *
+   * Whether two-factor authentication is set up, and whether this session
+   * has entered a code recently.
+   */
+  public static getUserTotp<ThrowOnError extends boolean = true>(
+    parameters?: {
+      "x-second-factor"?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserTotpResponses, GetUserTotpErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "headers", key: "x-second-factor" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetUserTotpResponses,
+      GetUserTotpErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post User Totp
+   *
+   * Start setting up an authenticator app, emailing a code that
+   * confirming takes along with one from the app.
+   */
+  public static postUserTotp<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostUserTotpResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).post<
+      PostUserTotpResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp",
+      ...options,
+    })
+  }
+
+  /**
+   * Post User Totp Confirm
+   *
+   * Finish setting up an authenticator app with a code from it and the
+   * one emailed.
+   */
+  public static postUserTotpConfirm<ThrowOnError extends boolean = true>(
+    parameters: {
+      totpConfirm: TotpConfirm
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserTotpConfirmResponses,
+    PostUserTotpConfirmErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "totpConfirm", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserTotpConfirmResponses,
+      PostUserTotpConfirmErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp/confirm",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post User Totp Verify
+   *
+   * Enter a code, getting a token that lets this session take sensitive
+   * actions for a while.
+   */
+  public static postUserTotpVerify<ThrowOnError extends boolean = true>(
+    parameters: {
+      totpCode: TotpCode
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserTotpVerifyResponses,
+    PostUserTotpVerifyErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "totpCode", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserTotpVerifyResponses,
+      PostUserTotpVerifyErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/totp/verify",
       ...options,
       ...params,
       headers: {
@@ -9335,6 +9568,299 @@ export class FeedbackService {
       security: [{ scheme: "bearer", type: "http" }],
       url: "/feature-votes",
       ...options,
+    })
+  }
+}
+
+export class OperatorsService {
+  /**
+   * Get Operators
+   *
+   * List the user's Operators that haven't been revoked.
+   */
+  public static getOperators<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetOperatorsResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetOperatorsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators",
+      ...options,
+    })
+  }
+
+  /**
+   * Post Operator
+   *
+   * Register a machine as one of the user's Operators.
+   */
+  public static postOperator<ThrowOnError extends boolean = true>(
+    parameters: {
+      operatorPost: OperatorPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostOperatorResponses, PostOperatorErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "operatorPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorResponses,
+      PostOperatorErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete Operator
+   *
+   * Revoke an Operator, which stops at its next check-in.
+   */
+  public static deleteOperator<ThrowOnError extends boolean = true>(
+    parameters: {
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteOperatorResponses,
+    DeleteOperatorErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "operator_id" }] }],
+    )
+    return (options?.client ?? client).delete<
+      DeleteOperatorResponses,
+      DeleteOperatorErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Operator Check In
+   *
+   * Record that an Operator is alive and what it has, and tell it how
+   * to connect.
+   */
+  public static postOperatorCheckIn<ThrowOnError extends boolean = true>(
+    parameters: {
+      checkIn: CheckIn
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorCheckInResponses,
+    PostOperatorCheckInErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "checkIn", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorCheckInResponses,
+      PostOperatorCheckInErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/check-in",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Operator Wake
+   *
+   * Ask an Operator in cron mode to connect at its next check-in.
+   */
+  public static postOperatorWake<ThrowOnError extends boolean = true>(
+    parameters: {
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorWakeResponses,
+    PostOperatorWakeErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "operator_id" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorWakeResponses,
+      PostOperatorWakeErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}/wake",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Operator Restart
+   *
+   * Ask an Operator to restart, e.g., to run a newer Calkit, once no
+   * session or run is using it.
+   */
+  public static postOperatorRestart<ThrowOnError extends boolean = true>(
+    parameters: {
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorRestartResponses,
+    PostOperatorRestartErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "operator_id" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorRestartResponses,
+      PostOperatorRestartErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}/restart",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Operator Relay Token
+   *
+   * Let the user's browser connect to one of their online Operators.
+   *
+   * This opens a shell on their machine, so it takes a signed-in session,
+   * not a token, that entered a second factor recently.
+   */
+  public static postOperatorRelayToken<ThrowOnError extends boolean = true>(
+    parameters: {
+      "x-second-factor"?: string | null
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorRelayTokenResponses,
+    PostOperatorRelayTokenErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "headers", key: "x-second-factor" },
+            { in: "path", key: "operator_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorRelayTokenResponses,
+      PostOperatorRelayTokenErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}/relay-token",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Workspaces
+   *
+   * List the workspaces on all of the user's Operators.
+   */
+  public static getWorkspaces<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetWorkspacesResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetWorkspacesResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/workspaces",
+      ...options,
+    })
+  }
+
+  /**
+   * Get Project Workspaces
+   *
+   * List a project's workspaces on the user's Operators.
+   */
+  public static getProjectWorkspaces<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectWorkspacesResponses,
+    GetProjectWorkspacesErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectWorkspacesResponses,
+      GetProjectWorkspacesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/workspaces",
+      ...options,
+      ...params,
     })
   }
 }

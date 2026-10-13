@@ -73,6 +73,7 @@ import useProject from "../../../../hooks/useProject"
 import useRefreshProject from "../../../../hooks/useRefreshProject"
 import { isAuthenticationError } from "../../../../lib/auth"
 import { DISMISSED } from "../../../../lib/onboarding"
+import { safeHref } from "../../../../lib/strings"
 
 interface CommitHistory {
   hash: string
@@ -333,7 +334,7 @@ function ProjectMenu({
               <MenuItem
                 icon={<FaGithub fontSize={18} />}
                 as="a"
-                href={codespacesUrl}
+                href={safeHref(codespacesUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -605,7 +606,7 @@ function ProjectLayout() {
               {/* GitHub link */}
               {project?.git_repo_url ? (
                 <Box mr={2}>
-                  <Link href={project?.git_repo_url} isExternal>
+                  <Link href={safeHref(project?.git_repo_url)} isExternal>
                     <Flex alignItems="center">
                       <Icon as={FaGithub} pt={0.5} />
                       <Icon as={ExternalLinkIcon} />

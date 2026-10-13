@@ -27,6 +27,7 @@ import { z } from "zod"
 import { ProjectsService } from "../../client"
 import ClearableInput from "../../components/Common/ClearableInput"
 import { pageWidthNoSidebar } from "../../lib/layout"
+import { safeHref } from "../../lib/strings"
 
 const projectsSearchSchema = z.object({
   page: z.number().catch(1),
@@ -136,7 +137,7 @@ function PublicProjectsTable() {
                     </Link>
                   </Td>
                   <Td isTruncated maxWidth="150px">
-                    <Link href={project.git_repo_url} isExternal>
+                    <Link href={safeHref(project.git_repo_url)} isExternal>
                       <ExternalLinkIcon mx="2px" /> {project.git_repo_url}
                     </Link>
                   </Td>

@@ -129,6 +129,7 @@ You can set several variables, like:
 - `STACK_NAME`: The name of the stack used for Docker Compose labels and project name, this should be different for `staging`, `production`, etc. You could use the same domain replacing dots with dashes, e.g. `fastapi-project-example-com` and `staging-fastapi-project-example-com`.
 - `BACKEND_CORS_ORIGINS`: A list of allowed CORS origins separated by commas.
 - `SECRET_KEY`: The secret key for the FastAPI project, used to sign tokens.
+- `RELAY_SECRET_KEY`: The key for signing relay tokens, kept apart from `SECRET_KEY` since the relay holds it.
 - `FIRST_SUPERUSER`: The email of the first superuser, this superuser will be the one that can create new users.
 - `FIRST_SUPERUSER_PASSWORD`: The password of the first superuser.
 - `SMTP_HOST`: The SMTP server host to send emails, this would come from your email provider (E.g. Mailgun, Sparkpost, Sendgrid, etc).
@@ -178,8 +179,7 @@ The stack includes a `texmf-proxy` service that backs the in-browser LaTeX
 preview. The browser compiler ships only a subset of TeX Live and can't generate
 bitmap fonts, so on a missing file it fetches it from this service, which
 resolves it against a full TeX Live install (see `texmf-proxy/`). It's served at
-`texmf.$DOMAIN`, challenge-free (like the API, since the engine's synchronous XHR
-can't clear the bot wall), with CORS restricted to the site origin.
+`texmf.$DOMAIN`, with CORS restricted to the site origin.
 
 A few deployment notes:
 
@@ -193,6 +193,23 @@ A few deployment notes:
 - Without this service (or with `VITE_TEXMF_PROXY` unset) the preview still works
   for common documents via a fallback, but classes/packages outside the bundled
   subset (e.g. `revtex`/AASTeX) won't compile.
+
+### Operator relay
+
+The stack includes a `relay` service that pairs browsers with Operators, the
+Calkit processes users run on their own machines, over websockets (see
+`docs/dev/adrs/0001-operators.md` and `docs/dev/operator-protocol.md` at the
+repo root). It's served at `relay.$DOMAIN`.
+
+- No extra DNS: `relay.$DOMAIN` is covered by the wildcard subdomain, and
+  Traefik issues its certificate automatically.
+- It runs as a single process on purpose, so both ends of a connection meet in
+  memory; don't scale it to multiple replicas or workers.
+- It only needs `RELAY_SECRET_KEY`, which must match the backend's, since it
+  verifies relay tokens the backend signs.
+  It doesn't get `SECRET_KEY`, so it can't sign logins.
+- The backend tells Operators and browsers where it is with `RELAY_URL`, which
+  defaults to `wss://relay.$DOMAIN`.
 
 ## Continuous Deployment (CD)
 
@@ -283,6 +300,7 @@ The current Github Actions workflows expect these secrets:
 - `FIRST_SUPERUSER_PASSWORD`
 - `POSTGRES_PASSWORD`
 - `SECRET_KEY`
+- `RELAY_SECRET_KEY`
 - `LATEST_CHANGES`
 - `SMOKESHOW_AUTH_KEY`
 
@@ -313,6 +331,8 @@ Adminer: `https://adminer.calkit.io`
 
 LaTeX preview texmf proxy: `https://texmf.calkit.io`
 
+Operator relay: `wss://relay.calkit.io`
+
 ### Staging
 
 Frontend: `https://staging.calkit.io`
@@ -324,3 +344,5 @@ Backend API base URL: `https://api.staging.calkit.io`
 Adminer: `https://adminer.staging.calkit.io`
 
 LaTeX preview texmf proxy: `https://texmf.staging.calkit.io`
+
+Operator relay: `wss://relay.staging.calkit.io`

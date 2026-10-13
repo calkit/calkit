@@ -111,12 +111,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       this.deps.getWorkspaceRoot() ?? path.dirname(document.uri.fsPath);
     const pdf = rel(root, document.uri.fsPath);
     const stem = pdf.replace(/\.pdf$/i, "");
-    const tex =
-      documentStageSource(this.deps.getStages(), pdf) ??
-      (fs.existsSync(path.join(root, `${stem}.tex`))
-        ? `${stem}.tex`
-        : undefined);
-    const viewer: Viewer = { panel, pdf, tex, ready: false };
+    const viewer: Viewer = { panel, pdf, ready: false };
     this.viewers.add(viewer);
     this.setOpenContext();
     const pdfjs = vscode.Uri.joinPath(
@@ -175,6 +170,31 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     );
   }
 
+  // The document a PDF is built from. The project's config may not have
+  // been read when a viewer opens, e.g., one restored at startup, so it's
+  // looked for until it's found.
+  private source(v: Viewer): string | undefined {
+    if (v.tex === undefined) {
+      const stem = v.pdf.replace(/\.pdf$/i, "");
+      v.tex =
+        documentStageSource(this.deps.getStages(), v.pdf) ??
+        (fs.existsSync(path.join(this.root(), `${stem}.tex`))
+          ? `${stem}.tex`
+          : undefined);
+    }
+    return v.tex;
+  }
+
+  // Show the comments in viewers whose source wasn't known until the
+  // project's config was read
+  stagesChanged(): void {
+    for (const v of this.viewers) {
+      if (v.ready && v.tex === undefined && this.source(v) !== undefined) {
+        void this.sendThreads(v);
+      }
+    }
+  }
+
   // Show a source line in an open viewer of a PDF it's part of, returning
   // whether one was found. Without SyncTeX, the line's paragraph is found
   // in the PDF by its text.
@@ -191,7 +211,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       if (s && tag !== undefined) {
         const rect = synctexForward(s, tag, this.lines(v, file).toBefore(line));
         msg = rect && { type: "reveal", rect };
-      } else if (v.tex) {
+      } else if (this.source(v)) {
         const para = await this.locate(v, [
           "--path",
           file,
@@ -251,12 +271,13 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   ): Promise<
     { path: string; line: number; end_line: number; text: string } | undefined
   > {
-    if (!v.tex) {
+    const tex = this.source(v);
+    if (!tex) {
       return undefined;
     }
     try {
       return JSON.parse(
-        await this.calkit(["latex", "comments", "locate"], v.tex, [
+        await this.calkit(["latex", "comments", "locate"], tex, [
           ...args,
           "--json",
         ]),
@@ -369,7 +390,8 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   private async sendThreads(v: Viewer): Promise<void> {
-    if (!v.tex) {
+    const tex = this.source(v);
+    if (!tex) {
       void v.panel.webview.postMessage({
         type: "status",
         text: "No source found for this PDF, so no comments to show.",
@@ -379,7 +401,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     let threads: TexThread[];
     try {
       threads = JSON.parse(
-        await this.calkit(["list", "comments"], v.tex, ["--json"]),
+        await this.calkit(["list", "comments"], tex, ["--json"]),
       );
     } catch (err) {
       void v.panel.webview.postMessage({

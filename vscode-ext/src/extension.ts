@@ -193,6 +193,8 @@ const runningStageNames = new Set<string>();
 const importedArtifactUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
 let currentCalkitConfig: CalkitInfo | undefined;
+// For telling open PDF viewers when the config has been read
+let pdfReviewProvider: PdfReviewProvider | undefined;
 // Whether a calkit.yaml exists in the workspace. The sidebar is gated on this:
 // when false, the config passed to the sidebar is treated as undefined so the
 // "Initialize Calkit Project" welcome view shows and no badge is displayed.
@@ -402,6 +404,7 @@ export function activate(context: vscode.ExtensionContext): void {
         message,
       }),
   });
+  pdfReviewProvider = pdfReview;
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
       PDF_REVIEW_VIEW_TYPE,
@@ -2396,6 +2399,7 @@ async function refreshPipelineOutputContext(
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
   currentEnvDescriptions = envDescriptions;
+  pdfReviewProvider?.stagesChanged();
   // Gate the sidebar on the presence of a calkit.yaml file. When absent, the
   // tree is left empty so the "Initialize Calkit Project" welcome view shows.
   const calkitYamlExists = await fileExists(

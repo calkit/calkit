@@ -123,6 +123,14 @@ def _to_shell_cmd(cmd: list[str]) -> str:
     return " ".join(quoted_cmd)
 
 
+# The top level's options that take a value, which narrowing the CLI to the
+# command being run has to skip along with their values
+APP_OPTIONS_WITH_VALUES = {
+    "directory": ("-C", "--directory"),
+    "use_version": ("--use-version",),
+}
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -133,8 +141,7 @@ def main(
     directory: Annotated[
         Optional[str],
         typer.Option(
-            "-C",
-            "--directory",
+            *APP_OPTIONS_WITH_VALUES["directory"],
             help=(
                 "Change to this directory before doing anything else, so a "
                 "project can be worked with from outside it."
@@ -144,7 +151,7 @@ def main(
     use_version: Annotated[
         Optional[str],
         typer.Option(
-            "--use-version",
+            *APP_OPTIONS_WITH_VALUES["use_version"],
             help=(
                 "Re-invoke the CLI under a specific calkit-python version "
                 "via 'uvx --from'."

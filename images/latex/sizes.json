@@ -1,16 +1,16 @@
 {
   "calkit": {
     "image": "ghcr.io/calkit/latex:0.1.6",
-    "unpacked_mb": 896.2048,
+    "unpacked_mb": 896.053248,
     "download_mb": 432.654288,
-    "unpacked_gb": 0.8962048,
+    "unpacked_gb": 0.896053248,
     "download_gb": 0.432654288
   },
   "texlive_full": {
     "image": "texlive/texlive:latest-full",
-    "unpacked_mb": 6241.386496,
-    "download_mb": 2745.887153,
-    "unpacked_gb": 6.241386496,
-    "download_gb": 2.745887153
+    "unpacked_mb": 6243.278848,
+    "download_mb": 2749.795338,
+    "unpacked_gb": 6.243278848,
+    "download_gb": 2.749795338
   }
 }

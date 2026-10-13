@@ -1755,6 +1755,16 @@ def test_get_status(tmp_dir):
     ]
     assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
     assert status.stale_stages["get-data"].modified_outputs == []
+    # Paths tracked where they shouldn't be are found only when asked for,
+    # with the DVC index the status already built
+    assert status.storage_problems is None
+    subprocess.check_call(["git", "add", "-f", "my-output.out"])
+    status = calkit.pipeline.get_status(
+        ck_info=ck_info, with_storage_problems=True
+    )
+    assert status.storage_problems is not None
+    assert [p["path"] for p in status.storage_problems] == ["my-output.out"]
+    assert "storage_problems" not in status.model_dump()
 
 
 def test_get_status_excludes_frozen_stage(tmp_dir):

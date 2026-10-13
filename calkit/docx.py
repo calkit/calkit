@@ -191,7 +191,13 @@ class Document:
             path or self.path, "w", zipfile.ZIP_DEFLATED
         ) as z:
             for name, data in self.parts.items():
-                z.writestr(name, data)
+                # Undated, as Word writes them, so the same content makes
+                # the same file
+                info = zipfile.ZipInfo(name)
+                # As written on Unix, which Windows would otherwise mark
+                info.create_system = 3
+                info.external_attr = 0o600 << 16
+                z.writestr(info, data, zipfile.ZIP_DEFLATED)
 
     @property
     def paragraphs(self) -> list[Paragraph]:

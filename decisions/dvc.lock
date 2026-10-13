@@ -1,0 +1,97 @@
+schema: '2.0'
+stages:
+  parse-dvc-lock-pure:
+    cmd: calkit xenv -n pure --no-check -- python scripts/parse-dvc-lock.py 
+      --out=results/ruamel-yaml-clib/pure.json
+    deps:
+    - path: .calkit/env-locks/pure
+      hash: md5
+      md5: 79da332a4050c667c0e8595b21a1e1a0.dir
+      size: 1689
+      nfiles: 1
+    - path: scripts/parse-dvc-lock.py
+      hash: md5
+      md5: d7de3afa6f38aceb89a0016b92afc1f2
+      size: 3178
+    outs:
+    - path: results/ruamel-yaml-clib/pure.json
+      hash: md5
+      md5: 745cedf7c1f28cf8f54fca0c6d46c565
+      size: 456
+  parse-dvc-lock-clib:
+    cmd: calkit xenv -n clib --no-check -- python scripts/parse-dvc-lock.py 
+      --out=results/ruamel-yaml-clib/clib.json
+    deps:
+    - path: .calkit/env-locks/clib
+      hash: md5
+      md5: a1193b3fd3140cae8a1bad631cb8b01f.dir
+      size: 1714
+      nfiles: 1
+    - path: scripts/parse-dvc-lock.py
+      hash: md5
+      md5: d7de3afa6f38aceb89a0016b92afc1f2
+      size: 3178
+    outs:
+    - path: results/ruamel-yaml-clib/clib.json
+      hash: md5
+      md5: c04199da0b7773812f5a1ab3f1d96a3a
+      size: 460
+  compare-dvc-lock-parsing:
+    cmd: calkit xenv -n pure --no-check -- python 
+      scripts/compare-dvc-lock-parsing.py
+    deps:
+    - path: .calkit/env-locks/pure
+      hash: md5
+      md5: 79da332a4050c667c0e8595b21a1e1a0.dir
+      size: 1689
+      nfiles: 1
+    - path: results/ruamel-yaml-clib/clib.json
+      hash: md5
+      md5: c04199da0b7773812f5a1ab3f1d96a3a
+      size: 460
+    - path: results/ruamel-yaml-clib/pure.json
+      hash: md5
+      md5: 745cedf7c1f28cf8f54fca0c6d46c565
+      size: 456
+    - path: scripts/compare-dvc-lock-parsing.py
+      hash: md5
+      md5: 8f66256addb8836fa2241efabbe59c41
+      size: 1186
+    outs:
+    - path: results/ruamel-yaml-clib.json
+      hash: md5
+      md5: 22a356bf921c83405a4bf97ffd9a4d5b
+      size: 657
+  time-imports:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-imports.py 
+      --out=results/imports.json
+    deps:
+    - path: ../.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: ../calkit/calc.py
+      hash: md5
+      md5: 82d31f93f1356b8feb16561b8fce2550
+      size: 8096
+    - path: ../calkit/cli/describe.py
+      hash: md5
+      md5: 18c59b216d338d7773584fce4a28e3db
+      size: 3750
+    - path: ../calkit/models/base.py
+      hash: md5
+      md5: aabf77e0059c6d86c1323c737a2fb4b3
+      size: 355
+    - path: ../uv.lock
+      hash: md5
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
+    - path: scripts/time-imports.py
+      hash: md5
+      md5: 352c0ce09376e898c3765490be5d0e15
+      size: 3630
+    outs:
+    - path: results/imports.json
+      hash: md5
+      md5: da57092627a3d9007aa8cd0c6614b801
+      size: 2690

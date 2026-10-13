@@ -18,6 +18,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
+import typer
 
 import calkit.cli.latex
 import calkit.docx
@@ -303,9 +304,68 @@ def test_docx_round_trip(
         calkit.cli.latex.to_docx("paper/main.pdf", engine="word")
     assert runs and runs[0][-3:] == ["calkit", "run", "build-paper"]
     Path("calkit.yaml").write_text("", encoding="utf-8")
+    first = calkit.docx.Document("paper/main-for-review.docx").read_original()
+    assert first is not None
+    # Exported again for a reproducible build, it makes the same file
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
+    exports = []
+    for _ in range(2):
+        calkit.cli.latex.to_docx("paper/main.pdf", engine="word", force=True)
+        exports.append(Path("paper/main-for-review.docx").read_bytes())
+    assert exports[0] == exports[1]
+    # TeX4ht gets the same date, so \today in the Word copy matches the PDF,
+    # run directly or in the stage's environment; it makes no ODT here
+    dated = {"SOURCE_DATE_EPOCH": "1790000000", "FORCE_SOURCE_DATE": "1"}
+    envs: list[dict[str, str]] = []
+
+    class Make4ht:
+        pid = 0
+
+        def __init__(
+            self, cmd: list[str], env: dict | None = None, **kw: object
+        ) -> None:
+            envs.append(env or {})
+
+        def communicate(self, timeout: float) -> tuple[bytes, None]:
+            return b"", None
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(calkit.docx, "find_soffice", lambda: "soffice")
+        mp.setattr(calkit, "check_dep_exists", lambda dep: True)
+        mp.setattr(calkit.cli.latex.subprocess, "Popen", Make4ht)
+        with pytest.raises(typer.Exit):
+            calkit.cli.latex.to_docx(
+                "paper/main.pdf", engine="libreoffice", force=True
+            )
+    assert len(envs) == 1 and dated.items() <= envs[0].items()
+    Path("calkit.yaml").write_text(
+        "pipeline:\n  stages:\n    build-paper:\n      kind: latex\n"
+        "      target_path: paper/main.tex\n      environment: tex\n",
+        encoding="utf-8",
+    )
+    runs = []
+
+    def run_recorded(
+        cmd: list[str], **kw: object
+    ) -> subprocess.CompletedProcess:
+        runs.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(calkit.docx, "find_soffice", lambda: "soffice")
+        mp.setattr(calkit.cli.latex.subprocess, "run", run_recorded)
+        with pytest.raises(typer.Exit):
+            calkit.cli.latex.to_docx(
+                "paper/main.pdf", engine="libreoffice", force=True
+            )
+    xenv = next(cmd for cmd in runs if "xenv" in cmd)
+    assert {f"--env-var={k}={v}" for k, v in dated.items()} <= set(xenv)
+    Path("calkit.yaml").write_text("", encoding="utf-8")
+    monkeypatch.delenv("SOURCE_DATE_EPOCH")
     doc = calkit.docx.Document("paper/main-for-review.docx")
     original = doc.read_original()
     assert original is not None
+    assert original.id != first.id
     assert original.source == "paper/main.tex"
     assert original.id
     assert doc.tracking and doc.protection is None
@@ -348,12 +408,15 @@ def test_docx_round_trip(
     assert comments[1].parent_id == comments[0].para_id
     model = next(p for p in paras if p.text.startswith("The mean velocity"))
     assert comments[0].bookmark == model.bookmark
-    # The record stays on this machine unless asked for, named by time
-    records = os.listdir(calkit.latex.LOCAL_DOCX_EXPORTS_DIR)
-    assert len(records) == 1
-    assert re.fullmatch(
-        rf"\d{{4}}-\d\d-\d\dT\d\d-\d\d-\d\d-{original.id}\.json",
-        records[0],
+    # The record stays on this machine unless asked for, named by time,
+    # one per export
+    records = sorted(os.listdir(calkit.latex.LOCAL_DOCX_EXPORTS_DIR))
+    matches = [
+        re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d(\.\d)?-(.+)\.json", r)
+        for r in records
+    ]
+    assert sorted(m.group(2) for m in matches if m) == sorted(
+        [first.id, original.id, original.id]
     )
     assert not os.path.exists(calkit.latex.DOCX_EXPORTS_DIR)
     export = LatexDocxExport.model_validate_json(

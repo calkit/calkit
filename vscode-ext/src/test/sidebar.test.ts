@@ -97,6 +97,7 @@ test("markdown stages nest the stages their blocks declare", () => {
   // The blocks live in the Markdown file, not calkit.yaml, so listing them
   // flat buries the one stage the user actually wrote
   const provider = new CalkitSidebarProvider();
+  const findBeforeExpanding = new CalkitSidebarProvider();
   provider.refresh(
     "/workspace",
     {
@@ -115,6 +116,24 @@ test("markdown stages nest the stages their blocks declare", () => {
       },
     } as never,
     new Set(["README.md/figure"]),
+  );
+  findBeforeExpanding.refresh(
+    "/workspace",
+    {
+      pipeline: { stages: { "README.md": { kind: "markdown" } } },
+    } as never,
+    {
+      stages: { "README.md/pdf": { cmd: "calkit latex from-markdown" } },
+    } as never,
+    new Set(),
+  );
+  // A block's stage can be found, e.g., to reveal it from its output,
+  // before its file's stage has been expanded
+  const pdfItem = findBeforeExpanding.findStageItem("README.md/pdf");
+  assert.equal(String(pdfItem?.label), "pdf");
+  assert.equal(
+    String(findBeforeExpanding.getParent(pdfItem!)?.label),
+    "README.md",
   );
 
   const top = provider.getChildren(

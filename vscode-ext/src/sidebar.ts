@@ -298,7 +298,21 @@ export class CalkitSidebarProvider
     if (this.stageItemCache.size === 0) {
       this.getStageItems();
     }
-    return this.stageItemCache.get(stageName);
+    const cached = this.stageItemCache.get(stageName);
+    if (cached) {
+      return cached;
+    }
+    // A stage a Markdown file declares isn't made until its file's stage is
+    // expanded
+    for (const [parent, children] of this.markdownStageChildren()) {
+      if (children.includes(stageName)) {
+        return this.makeStageItem(
+          stageName,
+          stageName.slice(parent.length + 1),
+        );
+      }
+    }
+    return undefined;
   }
 
   findEnvItem(envName: string): SidebarItem | undefined {

@@ -800,6 +800,22 @@ def test_check_questions_frozen_subproject(tmp_dir):
     status = check_questions(wdir=".")
     assert [q.status for q in status.questions] == ["frozen"]
     assert status.ok
+    # Pinned to a commit, it's read from there, relative to the subproject,
+    # both to check it and to fill in the answer
+    sha = _commit("Measure")
+    sub_info["questions"][0]["evidence"][0]["git_ref"] = sha
+    with open("decisions/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    with open("decisions/result.json", "w") as f:
+        f.write('{"v": 5}\n')
+    status = check_questions(wdir=".")
+    assert [q.status for q in status.questions] == ["ok"]
+    sub_ck_info = calkit.load_calkit_info(wdir="decisions")
+    rendered = render_question(
+        sub_ck_info["questions"][0], wdir="decisions", strict=True
+    )
+    assert isinstance(rendered, dict)
+    assert rendered["answer"] == "2."
 
 
 def test_format_summary():

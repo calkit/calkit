@@ -393,7 +393,18 @@ def render_question(
         if not keys:
             continue
         try:
-            data = read_evidence_file(os.path.join(wdir, ev["path"]))
+            git_ref = _declared_git_ref(ev)
+            if git_ref is None:
+                data = read_evidence_file(os.path.join(wdir, ev["path"]))
+            else:
+                # Pinned, so read as it was there
+                import calkit.git
+
+                repo = calkit.git.get_repo(wdir)
+                text = _read_at_ref(repo, git_ref, ev["path"], wdir)
+                if text is None:
+                    raise FileNotFoundError(f"not found at {git_ref}")
+                data = parse_evidence_text(text, ev["path"])
         except Exception as e:
             if strict:
                 raise ValueError(f"Can't read {ev['path']}: {e}") from e
@@ -914,10 +925,16 @@ def _declared_git_ref(ev: dict) -> str | None:
     return git_ref if isinstance(git_ref, str) else str(git_ref)
 
 
-def _read_at_ref(repo: Any, git_ref: str, path: str) -> str | None:
-    """The text of ``path`` at ``git_ref``, or None if it isn't there."""
+def _read_at_ref(
+    repo: Any, git_ref: str, path: str, wdir: str = "."
+) -> str | None:
+    """The text of ``path``, relative to ``wdir``, at ``git_ref``, or None if
+    it isn't there.
+    """
+    # The project can be a subproject, and Git reads paths from the root
+    rel = os.path.relpath(os.path.join(wdir, path), repo.working_dir)
     try:
-        return str(repo.git.show(f"{git_ref}:{path}"))
+        return str(repo.git.show(f"{git_ref}:{Path(rel).as_posix()}"))
     except Exception:
         return None
 
@@ -944,9 +961,9 @@ def check_pinned_evidence(
         out.status = "missing"
         out.message = f"Git ref {git_ref!r} was not found; push it or fix it"
         return out
-    text = _read_at_ref(repo, git_ref, out.path)
+    text = _read_at_ref(repo, git_ref, out.path, wdir)
     if text is None:
-        lock = _read_at_ref(repo, git_ref, "dvc.lock")
+        lock = _read_at_ref(repo, git_ref, "dvc.lock", wdir)
         if lock is not None and _lock_hash(lock, out.path) is not None:
             # Tracked by DVC at that commit: present, but its content lives
             # in storage, so a cited value can't be read from here.

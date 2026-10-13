@@ -2081,6 +2081,40 @@ def test_use_version_only_scanned_in_group_options(monkeypatch):
     assert called["exec"] is False
 
 
+def test_only_invoked() -> None:
+    import typer.main
+    from typer.core import TyperGroup
+
+    from calkit.cli import _only_invoked
+    from calkit.cli.main import app
+
+    def built(args: list[str]) -> dict:
+        group = typer.main.get_command(_only_invoked(app, args))
+        assert isinstance(group, TyperGroup)
+        return {
+            name: sorted(getattr(cmd, "commands", {}))
+            for name, cmd in group.commands.items()
+        }
+
+    # A command, by name or alias, after the top level's options
+    assert built(["status"]) == {"status|st": []}
+    assert built(["-C", "sub", "--use-version=1", "st", "-c", "dvc"]) == {
+        "status|st": []
+    }
+    # A command in a group, by the group's alias
+    assert built(["create", "project", "--help"]) == {
+        "new|create": ["project"]
+    }
+    # Help, or a command that doesn't exist, keeps everything
+    everything = built(["--help"])
+    assert len(everything) > 20
+    assert len(everything["new|create"]) > 1
+    assert built(["new", "--help"]) == {"new|create": everything["new|create"]}
+    assert built(["new", "projetc"]) == built(["new", "--help"])
+    assert built(["statsu"]) == everything
+    assert built([]) == everything
+
+
 def test_use_version_without_uvx(monkeypatch):
     # If uvx isn't on PATH, --use-version fails fast with a clear error
     # instead of falling through to running the local calkit.

@@ -57,3 +57,33 @@ stages:
     frozen: true
     desc: Automatically generated from the 'time-imports' stage in calkit.yaml.
       Changes made here will be overwritten.
+  time-docker-image-check:
+    cmd: calkit xenv -n calkit --no-check -- python
+      scripts/time-docker-image-check.py --out=results/docker-image-check.json
+    deps:
+      - scripts/time-docker-image-check.py
+      - ../calkit/docker.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/docker-image-check.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-docker-image-check' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  time-cli-build:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-cli-build.py
+      --out=results/cli-build.json
+    deps:
+      - scripts/time-cli-build.py
+      - ../calkit/cli/__init__.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/cli-build.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-cli-build' stage in
+      calkit.yaml. Changes made here will be overwritten.

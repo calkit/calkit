@@ -157,7 +157,7 @@ export function documentStageSource(
   return stageDocuments(stages).find((d) => d.pdf === pdfFile)?.source;
 }
 
-// A comment thread as `calkit latex comments list --json` reports it.
+// A comment thread as `calkit list comments --json` reports it.
 export interface TexThread {
   id: string | null;
   path: string;

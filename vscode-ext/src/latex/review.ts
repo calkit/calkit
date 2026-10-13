@@ -208,20 +208,16 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     return false;
   }
 
-  // Run a comments command on a file in the project. Markdown needs the
-  // top-level group, which a calkit too old to know Markdown doesn't have.
+  // Run a calkit command on a file in the project, e.g., `new comment`
   private async calkit(
-    command: string,
+    command: string[],
     file: string,
     args: string[] = [],
   ): Promise<string> {
-    const group = /\.(md|markdown)$/i.test(file)
-      ? ["comments"]
-      : ["latex", "comments"];
     try {
       const { stdout } = await execFileAsync(
         "calkit",
-        [...group, command, file, ...args],
+        [...command, file, ...args],
         { cwd: this.root(), maxBuffer: 64 * 1024 * 1024 },
       );
       return stdout;
@@ -248,7 +244,10 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     }
     try {
       return JSON.parse(
-        await this.calkit("locate", v.tex, [...args, "--json"]),
+        await this.calkit(["latex", "comments", "locate"], v.tex, [
+          ...args,
+          "--json",
+        ]),
       );
     } catch {
       return undefined;
@@ -367,7 +366,9 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     }
     let threads: TexThread[];
     try {
-      threads = JSON.parse(await this.calkit("list", v.tex, ["--json"]));
+      threads = JSON.parse(
+        await this.calkit(["list", "comments"], v.tex, ["--json"]),
+      );
     } catch (err) {
       void v.panel.webview.postMessage({
         type: "status",
@@ -403,7 +404,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   // Run a comments command that edits a file, after making sure the editor
   // doesn't hold unsaved changes the edit would clash with.
   private async edit(
-    command: string,
+    command: string[],
     file: string,
     args: string[] = [],
   ): Promise<string> {
@@ -583,22 +584,21 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
             String(msg.occ ?? 0),
           );
         }
-        await this.edit("add", String(msg.file), args);
+        await this.edit(["new", "comment"], String(msg.file), args);
         break;
       }
       case "reply":
-        await this.edit("reply", String(msg.file), [
+        await this.edit(["update", "comment"], String(msg.file), [
           ...ref(),
-          "-m",
+          "--reply",
           String(msg.text),
         ]);
         break;
       case "resolve":
-        await this.edit(
-          msg.resolved ? "resolve" : "reopen",
-          String(msg.file),
-          ref(),
-        );
+        await this.edit(["update", "comment"], String(msg.file), [
+          ...ref(),
+          msg.resolved ? "--resolve" : "--reopen",
+        ]);
         break;
       case "delete": {
         const choice = await vscode.window.showWarningMessage(
@@ -609,7 +609,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         if (choice !== "Delete") {
           return;
         }
-        await this.edit("delete", String(msg.file), ref());
+        await this.edit(["delete", "comment"], String(msg.file), ref());
         break;
       }
       case "openSource":

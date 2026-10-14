@@ -1,5 +1,6 @@
 """Tests for the Overleaf CLI commands."""
 
+import io
 import os
 import subprocess
 import tempfile
@@ -8,11 +9,16 @@ from pathlib import Path
 
 import git
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import calkit
 import calkit.latex
-from calkit.cli.overleaf import _extract_title_from_tex, overleaf_app
+from calkit.cli.overleaf import (
+    _extract_title_from_tex,
+    _get_pulled_overleaf_repo,
+    overleaf_app,
+)
 from calkit.git import ls_files
 
 runner = CliRunner()
@@ -1200,3 +1206,47 @@ def test_overleaf_sync_drops_legacy_sync_paths(tmp_dir):
     # dirty in the working tree
     assert ck_info["overleaf_sync"]["paper"]["push_paths"] == ["figures"]
     assert not repo.git.status("--porcelain")
+
+
+def test_get_pulled_overleaf_repo_asks_for_new_token(monkeypatch):
+    tokens_tried = []
+
+    def get_repo(project_id, token):
+        tokens_tried.append(token)
+        return token
+
+    def pull(repo):
+        if repo == "expired":
+            raise calkit.overleaf.AuthError("Authentication failed")
+        if repo == "offline":
+            raise RuntimeError("Network down")
+
+    monkeypatch.setattr(calkit.overleaf, "get_repo", get_repo)
+    monkeypatch.setattr(calkit.overleaf, "pull", pull)
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr("sys.stdin", Terminal())
+    monkeypatch.setattr("sys.stdout", Terminal())
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: "fresh")
+    saved = []
+    monkeypatch.setattr(
+        type(calkit.config.read()),
+        "write",
+        lambda self: saved.append(self.overleaf_token),
+    )
+    # A rejected token should prompt for a new one, save it, and retry
+    repo, token = _get_pulled_overleaf_repo("abc", "expired")
+    assert tokens_tried == ["expired", "fresh"]
+    assert repo == token == "fresh"
+    assert saved == ["fresh"]
+    # Any other failure should exit with the error rather than prompt
+    with pytest.raises(typer.Exit):
+        _get_pulled_overleaf_repo("abc", "offline")
+    # With nobody to answer a prompt, a rejected token should exit with advice
+    monkeypatch.setattr("sys.stdin", io.StringIO())
+    with pytest.raises(typer.Exit):
+        _get_pulled_overleaf_repo("abc", "expired")
+    assert saved == ["fresh"]

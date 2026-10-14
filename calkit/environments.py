@@ -1050,7 +1050,10 @@ def picked_machine_info(
 
 
 def write_switch_env_lock(
-    env_name: str, envs: dict, wdir: str | None = None
+    env_name: str,
+    envs: dict,
+    wdir: str | None = None,
+    relocked: str | None = None,
 ) -> str:
     """Write a switch's definition, and its options', for stages to depend on.
 
@@ -1058,6 +1061,11 @@ def write_switch_env_lock(
     what it picked here. Spec files, inputs and lock files of the options
     are recorded by checksum, so changing one reruns the stages using the
     switch.
+
+    So are options' machine locks, except one first written after the
+    switch's lock, since that only means a machine took up its option,
+    which results don't depend on. ``relocked`` is an option whose machine
+    lock was just rewritten, which is recorded from then on.
     """
 
     def file_md5(fpath: str) -> str:
@@ -1084,8 +1092,15 @@ def write_switch_env_lock(
     env = envs[env_name]
     specs = {}
     locks = {}
+    machine_locks = {}
     for option in options:
         option_env = get_env(option, envs) or {}
+        if option_env.get("kind") == "system":
+            machine_lock = get_env_lock_fpath(
+                env=option_env, env_name=option, wdir=wdir, as_posix=True
+            )
+            if machine_lock is not None and os.path.isfile(machine_lock):
+                machine_locks[option] = content_md5(machine_lock)
         paths = get_env_input_paths(option_env, option)
         if option_env.get("path"):
             paths = [option_env["path"]] + paths
@@ -1093,8 +1108,7 @@ def write_switch_env_lock(
             full = os.path.join(wdir, path) if wdir else path
             if os.path.isfile(full):
                 specs[Path(path).as_posix()] = content_md5(full)
-        # Only locks resolved from a spec, which are committed and the same
-        # everywhere, not ones written by the first check on a machine
+        # Locks resolved from a spec, which are the same everywhere
         if option_env.get("kind") not in (
             "conda",
             "julia",
@@ -1142,8 +1156,23 @@ def write_switch_env_lock(
     ):
         lock_data["mocked"] = True
     lock_dir = os.path.join(get_env_lock_dir(wdir=wdir), env_name)
-    os.makedirs(lock_dir, exist_ok=True)
     lock_fpath = Path(os.path.join(lock_dir, "switch.json")).as_posix()
+    try:
+        with open(lock_fpath) as f:
+            existing = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        existing = None
+    # Every machine lock there is when the definition changes, which reruns
+    # the switch's stages anyway, and otherwise the ones already recorded
+    tracked = set(machine_locks)
+    if isinstance(existing, dict):
+        recorded = existing.pop("machine_locks", {})
+        if existing == json.loads(json.dumps(lock_data)):
+            tracked = set(recorded) | ({relocked} if relocked else set())
+    machine_locks = {o: v for o, v in machine_locks.items() if o in tracked}
+    if machine_locks:
+        lock_data["machine_locks"] = machine_locks
+    os.makedirs(lock_dir, exist_ok=True)
     content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
     if os.path.isfile(lock_fpath):
         with open(lock_fpath) as f:
@@ -1582,13 +1611,29 @@ def write_system_env_lock(
     parent = os.path.dirname(lock_fpath)
     if parent:
         os.makedirs(parent, exist_ok=True)
+    rewritten = False
     if os.path.isfile(lock_fpath):
         with open(lock_fpath, "r") as f:
             if f.read() == content:
                 return lock_fpath
+        rewritten = True
     # newline="\n" so the file is byte-identical on every platform.
     with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
+    # A switch using this as an option records it from now on, so its
+    # stages rerun as stages using this env directly do
+    if rewritten:
+        envs = calkit.load_calkit_info(wdir=wdir).get("environments") or {}
+        for name, other in envs.items():
+            if other.get("kind") != SWITCH_KIND:
+                continue
+            try:
+                options = get_switch_options(name, envs)
+            except ValueError:
+                # Reported when that switch is checked
+                continue
+            if env_name in options:
+                write_switch_env_lock(name, envs, wdir=wdir, relocked=env_name)
     return lock_fpath
 
 

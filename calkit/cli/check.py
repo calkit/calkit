@@ -682,7 +682,36 @@ def check_environment(
         # when the config changes.
         write_scheduler_env_lock(env_name=env_name, env=env)
     elif env["kind"] == calkit.environments.SWITCH_KIND:
-        # Checking a switch means checking what it picks here
+        # Checking a switch means checking what it picks here. The first
+        # time, options on other machines are locked too, where they can be
+        # reached, so their locks are part of the switch's from the start.
+        switch_lock = os.path.join(
+            calkit.environments.get_env_lock_dir(), env_name, "switch.json"
+        )
+        if not os.path.isfile(switch_lock):
+            try:
+                options = calkit.environments.get_switch_options(
+                    env_name, envs
+                )
+            except ValueError as e:
+                raise_error(str(e))
+            for option in options:
+                option_env = calkit.environments.get_env(option, envs) or {}
+                if (
+                    option_env.get("kind") != "system"
+                    or not option_env.get("lock")
+                    or not option_env.get("host")
+                    or calkit.environments.env_is_local(option_env)
+                ):
+                    continue
+                try:
+                    check_environment(env_name=option, verbose=verbose)
+                except typer.Exit:
+                    warn(
+                        f"Option '{option}' of '{env_name}' couldn't be "
+                        "locked from here, so it will be on its first check "
+                        "there"
+                    )
         try:
             calkit.environments.write_switch_env_lock(env_name, envs)
             picked = calkit.environments.resolve_switch(env_name, envs)

@@ -2282,20 +2282,45 @@ def test_switch_env(tmp_dir, monkeypatch):
     assert os.path.isfile(".calkit/env-locks/rt/info.json")
     # Locks an option's first check on a machine writes don't change it, so
     # moving to that machine doesn't rerun anything
+    here = {"kind": "system", "lock": ["os"]}
+    envs_def["here"] = here
     envs_def["mach"] = {
         "kind": "switch",
         "switch": [option("slurm-env", is_linux), option("here")],
     }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": envs_def}, f)
     mach_lock = envs.write_switch_env_lock("mach", envs_def)
     with open(mach_lock) as f:
         before = json.load(f)
     envs.write_scheduler_env_lock(
         env_name="slurm-env", env=envs_def["slurm-env"]
     )
-    envs.write_system_env_lock(env_name="here", env={"lock": ["os"]})
+    envs.write_system_env_lock(env_name="here", env=here)
     envs.write_switch_env_lock("mach", envs_def)
     with open(mach_lock) as f:
         assert json.load(f) == before
+    # Rewriting one does, from then on, as it reruns the stages using that
+    # option directly
+    for os_name in ["Elsewhere", "Another"]:
+        envs.write_system_env_lock(
+            env_name="here", env=here, system_info={"os": os_name}, relock=True
+        )
+        with open(mach_lock) as f:
+            relocked = json.load(f)
+        assert set(relocked["machine_locks"]) == {"here"}
+        assert relocked["machine_locks"] != before.get("machine_locks")
+        before = relocked
+        envs.write_switch_env_lock("mach", envs_def)
+        with open(mach_lock) as f:
+            assert json.load(f) == relocked
+    # A switch's first lock records the machine locks there are, since
+    # there are no results yet to rerun
+    envs_def["mach2"] = {"kind": "switch", "switch": [option("here")]}
+    with open(envs.write_switch_env_lock("mach2", envs_def)) as f:
+        assert set(json.load(f)["machine_locks"]) == {"here"}
+    del envs_def["mach2"]
+    os.remove("calkit.yaml")
     # A runtime switch's lock gates its stages like a machine switch's
     envs_def["rt"]["lock"] = ["hostname"]
     with open(".calkit/env-locks/rt/info.json", "w") as f:

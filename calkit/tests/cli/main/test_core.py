@@ -7,6 +7,7 @@ import socket
 import stat
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
@@ -1511,11 +1512,21 @@ def _spawn_lock_holder(*signature: str):
     and holder verification see a realistic command. Args must be space-free so
     the recorded command tokenizes the same way DVC's does.
     """
+    from calkit.dvc.core import _rwlock_holder_is_live
+
     with open("holder.py", "w") as f:
         f.write("import time\ntime.sleep(120)\n")
     argv = [sys.executable, "holder.py", *signature]
     proc = subprocess.Popen(argv)
-    return proc, " ".join(argv)
+    cmd = " ".join(argv)
+    # Until it's recognized, e.g., on a busy runner where it's still
+    # starting, a test would see one fewer holder than it spawned
+    deadline = time.monotonic() + 10
+    while not _rwlock_holder_is_live(proc.pid, cmd):
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"Lock holder never started: {cmd}")
+        time.sleep(0.05)
+    return proc, cmd
 
 
 def _write_fake_run_log() -> None:
@@ -2028,6 +2039,40 @@ def test_use_version_only_scanned_in_group_options(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["calkit", "--", "--use-version", "1.0"])
     _maybe_exec_with_version()
     assert called["exec"] is False
+
+
+def test_only_invoked() -> None:
+    import typer.main
+    from typer.core import TyperGroup
+
+    from calkit.cli import _only_invoked
+    from calkit.cli.main import app
+
+    def built(args: list[str]) -> dict:
+        group = typer.main.get_command(_only_invoked(app, args))
+        assert isinstance(group, TyperGroup)
+        return {
+            name: sorted(getattr(cmd, "commands", {}))
+            for name, cmd in group.commands.items()
+        }
+
+    # A command, by name or alias, after the top level's options
+    assert built(["status"]) == {"status|st": []}
+    assert built(["-C", "sub", "--use-version=1", "st", "-c", "dvc"]) == {
+        "status|st": []
+    }
+    # A command in a group, by the group's alias
+    assert built(["create", "project", "--help"]) == {
+        "new|create": ["project"]
+    }
+    # Help, or a command that doesn't exist, keeps everything
+    everything = built(["--help"])
+    assert len(everything) > 20
+    assert len(everything["new|create"]) > 1
+    assert built(["new", "--help"]) == {"new|create": everything["new|create"]}
+    assert built(["new", "projetc"]) == built(["new", "--help"])
+    assert built(["statsu"]) == everything
+    assert built([]) == everything
 
 
 def test_use_version_without_uvx(monkeypatch):
@@ -2959,6 +3004,80 @@ def test_outputs_stay_out_of_git_after_failed_run(tmp_dir):
     assert not set(outputs) & set(tracked)
     assert all(repo.ignored(path) for path in outputs)
     assert "dvc.lock" in repo.git.ls_files().splitlines()
+
+
+def test_save_new_files_in_git_stored_output_dir(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "fetch": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p data/github && echo 1 > data/github/1.json",
+                "outputs": [
+                    {
+                        "path": "data/github",
+                        "storage": "git",
+                        "delete_before_run": False,
+                    }
+                ],
+            },
+            "plot": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "wdir": "sub",
+                "command": "mkdir -p figs && echo 1 > figs/1.txt",
+                "outputs": [
+                    {
+                        "path": "figs",
+                        "storage": "git",
+                        "delete_before_run": False,
+                    }
+                ],
+            },
+        }
+    }
+    os.makedirs("sub")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+    repo = git.Repo()
+    assert "data/github/1.json" in repo.git.ls_files("data").splitlines()
+    # A later run adds files to the persistent output, which belong in Git
+    # with the rest of it, not ignored as if DVC cached the output, and not
+    # sent to DVC by extension either, including for a stage with a wdir
+    new_files = [
+        "data/github/2.json",
+        "data/github/plot.png",
+        "sub/figs/plot.png",
+    ]
+    for path in new_files:
+        with open(path, "w") as f:
+            f.write("2")
+    subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+    tracked = repo.git.ls_files().splitlines()
+    assert set(new_files) <= set(tracked)
+    assert not any(repo.ignored(path) for path in new_files)
+    assert not os.path.exists("data/.gitignore")
+    # Projects an older Calkit already broke have the output ignored, once
+    # per file it saw, so both run and save have to undo that
+    for run_first in [True, False]:
+        with open("data/.gitignore", "w") as f:
+            f.write("/github\n/github\n/github\n")
+        repo.git.add("data/.gitignore")
+        repo.git.commit("-m", "Ignore output")
+        with open("data/github/3.json", "w") as f:
+            f.write("3")
+        if run_first:
+            subprocess.check_call(["calkit", "run"])
+        subprocess.check_call(["calkit", "save", "-am", "Run", "--no-push"])
+        assert "data/github/3.json" in repo.git.ls_files("data").splitlines()
+        with open("data/.gitignore") as f:
+            assert "github" not in f.read()
+        repo.git.rm("-q", "data/github/3.json")
+        repo.git.commit("-m", "Remove 3")
 
 
 @skipif_windows_docker

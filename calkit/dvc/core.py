@@ -591,11 +591,40 @@ def register_ck_scheme() -> None:
 
 
 def run_dvc_cli(argv: list[str] | None = None) -> int:
-    """Run DVC CLI with ``ck://`` scheme pre-registered."""
+    """Run DVC CLI with ``ck://`` scheme pre-registered.
+
+    The help DVC adds to its errors, which points to DVC's support and docs
+    rather than Calkit's, is left out, but not the errors themselves.
+    """
+    import logging
+
+    import dvc.cli
     from dvc.cli import main as dvc_main
 
+    def log_unknown_exceptions() -> None:
+        dvc.cli.logger.exception("unexpected error")
+
+    class DropLinks(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            args = record.args
+            if (
+                isinstance(record.msg, str)
+                and isinstance(args, tuple)
+                and record.msg.startswith(
+                    "%s\nLearn more about configuration settings"
+                )
+            ):
+                record.msg, record.args = "%s", args[:1]
+            return True
+
     register_ck_scheme()
-    return dvc_main(argv)
+    dvc.cli._log_unknown_exceptions = log_unknown_exceptions
+    links = DropLinks()
+    dvc.cli.logger.addFilter(links)
+    try:
+        return dvc_main(argv)
+    finally:
+        dvc.cli.logger.removeFilter(links)
 
 
 def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
@@ -1131,6 +1160,18 @@ def get_lock_out_paths(wdir: str | None = None) -> list[str]:
             if isinstance(out, dict) and "path" in out:
                 paths.append(Path(out["path"]).as_posix())
     return paths
+
+
+def get_cached_out_paths(wdir: str | None = None) -> set[str]:
+    """Paths of the pipeline outputs DVC caches, and so ignores, as POSIX
+    paths relative to the project root.
+    """
+    repo = get_dvc_repo(wdir)
+    return {
+        Path(os.path.relpath(out.fs_path, repo.root_dir)).as_posix()
+        for out in repo.index.outs
+        if out.use_scm_ignore
+    }
 
 
 def restore_output_ignores(wdir: str | None = None) -> list[str]:

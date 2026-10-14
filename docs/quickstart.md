@@ -136,7 +136,7 @@ calkit status
 ```
 --------------------------- Questions ----------------------------
 1 question, 1 with stale evidence
-Run 'calkit check questions' for detail.
+Run 'calkit check questions' for details.
 
 ---------------------------- Pipeline ----------------------------
 Stale stages:

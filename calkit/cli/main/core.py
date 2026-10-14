@@ -123,6 +123,14 @@ def _to_shell_cmd(cmd: list[str]) -> str:
     return " ".join(quoted_cmd)
 
 
+# The top level's options that take a value, which narrowing the CLI to the
+# command being run has to skip along with their values
+APP_OPTIONS_WITH_VALUES = {
+    "directory": ("-C", "--directory"),
+    "use_version": ("--use-version",),
+}
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -133,8 +141,7 @@ def main(
     directory: Annotated[
         Optional[str],
         typer.Option(
-            "-C",
-            "--directory",
+            *APP_OPTIONS_WITH_VALUES["directory"],
             help=(
                 "Change to this directory before doing anything else, so a "
                 "project can be worked with from outside it."
@@ -144,7 +151,7 @@ def main(
     use_version: Annotated[
         Optional[str],
         typer.Option(
-            "--use-version",
+            *APP_OPTIONS_WITH_VALUES["use_version"],
             help=(
                 "Re-invoke the CLI under a specific calkit-python version "
                 "via 'uvx --from'."
@@ -509,8 +516,16 @@ def get_status(
     ] = False,
 ) -> None:
     """View status (project, version control, and/or pipeline)."""
+    from contextlib import AbstractContextManager, nullcontext
+
     import git
     from git.exc import InvalidGitRepositoryError
+    from rich.status import Status
+
+    def step(text: str) -> None:
+        # Say what's being worked out, while there's a spinner to say it
+        if isinstance(spinner, Status):
+            spinner.update(text)
 
     def get_dvc_data_status() -> dict:
         # Reuse what the pipeline status computed under the same DVC lock
@@ -569,78 +584,107 @@ def get_status(
                 )
     else:
         categories = valid_categories
-    pipeline_status = None
-    running_status = None
-    if "pipeline" in categories or "dvc" in categories:
-        # If a run is in progress it holds the DVC lock, so computing the full
-        # status would just error out (and would mutate files like dvc.yaml or
-        # notebooks mid-run). Report the running stage from the run log instead.
-        running_status = _get_running_pipeline_status()
-    if running_status is None and (
-        "pipeline" in categories or "dvc" in categories
-    ):
-        # Sync zips so the zip files reflect current workspace state before
-        # reporting status
-        calkit.dvc.zip.sync_all(direction="to-zip")
-        pipeline_status = calkit.pipeline.get_status(
-            ck_info=ck_info,
-            targets=targets,
-            check_environments=not no_check_envs,
-            clean_notebooks=True,
-            compile_to_dvc=True,
-            with_data_status="dvc" in categories,
-            with_storage_problems="dvc" in categories,
-        )
-        if pipeline_status.failed_environment_checks:
-            warn(
-                "Failed pipeline environment checks for: "
-                + ", ".join(pipeline_status.failed_environment_checks)
-            )
-    # Checking questions needs to know which stages are stale, which is the
-    # expensive part of the pipeline status computed above, so reuse that
-    # rather than asking DVC a second time
-    questions_status = None
-    if "questions" in categories and ck_info.get("questions"):
-        from calkit.pipeline import frozen_tainted_stage_names
-        from calkit.questions import check_questions
+    # Everything is worked out before anything is shown, which can take a
+    # while, e.g., when environments are checked again, so a spinner shows
+    # until then. It writes to its own copy of the terminal, since what the
+    # environment checks' tools print is discarded.
+    spinner: AbstractContextManager = nullcontext()
+    if not as_json and sys.stderr.isatty():
+        import logging
 
-        stale_stages = None
-        frozen_stages = None
-        # A pipeline status that bailed out, e.g., on a failed environment
-        # check, has no staleness in it; let the check work it out itself
-        # rather than reporting evidence as current because nothing was
-        # computed
-        if (
-            pipeline_status is not None
-            and not pipeline_status.errors
-            and not pipeline_status.failed_environment_checks
-        ):
-            stale_stages = {
-                n.split("@")[0] for n in pipeline_status.stale_stage_names
-            }
-            try:
-                frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
-            except Exception:
-                frozen_stages = set()
-        # The summary doesn't say what changed since an answer was edited,
-        # which is the only part that needs history, so skip reading it
-        questions_status = check_questions(
-            ck_info=ck_info,
-            stale_stages=stale_stages,
-            frozen_stages=frozen_stages,
-            check_history=False,
+        from rich.console import Console
+
+        spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
+            "Checking status"
         )
-    # Paths tracked where they shouldn't be, found with the pipeline's status,
-    # which builds the DVC index this needs anyway, unless it stopped short
-    storage_problems = None
-    if "dvc" in categories and running_status is None:
-        if pipeline_status is not None:
-            storage_problems = pipeline_status.storage_problems
-        if storage_problems is None:
-            try:
-                storage_problems = calkit.dvc.get_storage_problems()
-            except Exception:
-                pass
+        # DVC's progress bars would each be printed above the spinner, and
+        # they're shown only if this is at or below their level
+        logging.getLogger("dvc.progress").setLevel(logging.CRITICAL + 1)
+        # Importing DVC sets up its logging and colorama on the streams it
+        # finds, which would otherwise be the spinner's stand-ins for them
+        import dvc  # noqa: F401
+    with spinner:
+        pipeline_status = None
+        running_status = None
+        if "pipeline" in categories or "dvc" in categories:
+            # If a run is in progress it holds the DVC lock, so computing
+            # the full status would just error out (and would mutate files
+            # like dvc.yaml or notebooks mid-run). Report the running stage
+            # from the run log instead.
+            running_status = _get_running_pipeline_status()
+        if running_status is None and (
+            "pipeline" in categories or "dvc" in categories
+        ):
+            # Sync zips so the zip files reflect current workspace state before
+            # reporting status
+            step("Syncing zip files")
+            calkit.dvc.zip.sync_all(direction="to-zip")
+            pipeline_status = calkit.pipeline.get_status(
+                ck_info=ck_info,
+                targets=targets,
+                check_environments=not no_check_envs,
+                clean_notebooks=True,
+                compile_to_dvc=True,
+                with_data_status="dvc" in categories,
+                with_storage_problems="dvc" in categories,
+                quiet_environment_checks=True,
+                progress=step,
+            )
+            if pipeline_status.failed_environment_checks:
+                warn(
+                    "Failed pipeline environment checks for: "
+                    + ", ".join(pipeline_status.failed_environment_checks)
+                    + ". Run 'calkit check env -n <name>' for details.",
+                    err=as_json,
+                )
+        # Checking questions needs to know which stages are stale, which is the
+        # expensive part of the pipeline status computed above, so reuse that
+        # rather than asking DVC a second time
+        questions_status = None
+        if "questions" in categories and ck_info.get("questions"):
+            from calkit.pipeline import frozen_tainted_stage_names
+            from calkit.questions import check_questions
+
+            stale_stages = None
+            frozen_stages = None
+            # A pipeline status that bailed out, e.g., on a failed environment
+            # check, has no staleness in it; let the check work it out itself
+            # rather than reporting evidence as current because nothing was
+            # computed
+            if (
+                pipeline_status is not None
+                and not pipeline_status.errors
+                and not pipeline_status.failed_environment_checks
+            ):
+                stale_stages = {
+                    n.split("@")[0] for n in pipeline_status.stale_stage_names
+                }
+                try:
+                    frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
+                except Exception:
+                    frozen_stages = set()
+            # The summary doesn't say what changed since an answer was edited,
+            # which is the only part that needs history, so skip reading it
+            step("Checking questions")
+            questions_status = check_questions(
+                ck_info=ck_info,
+                stale_stages=stale_stages,
+                frozen_stages=frozen_stages,
+                check_history=False,
+            )
+        # Paths tracked where they shouldn't be, found with the pipeline's
+        # status, which builds the DVC index this needs anyway, unless it
+        # stopped short
+        storage_problems = None
+        if "dvc" in categories and running_status is None:
+            if pipeline_status is not None:
+                storage_problems = pipeline_status.storage_problems
+            if storage_problems is None:
+                step("Checking where files are stored")
+                try:
+                    storage_problems = calkit.dvc.get_storage_problems()
+                except Exception:
+                    pass
     if as_json:
         status_dict: dict[str, Any] = {}
         if "project" in categories:
@@ -746,7 +790,7 @@ def get_status(
         # can't encode
         calkit.echo(format_summary(questions_status))
         if not questions_status.ok:
-            typer.echo("Run 'calkit check questions' for detail.")
+            typer.echo("Run 'calkit check questions' for details.")
         typer.echo()
     if "git" in categories:
         print_sep("Git")
@@ -1028,6 +1072,22 @@ def add(
         )
         repo.git.add(".dvc/config")
     dvc_paths = [] if dvc_repo is None else calkit.dvc.list_paths()
+    pipeline_output_storage = calkit.pipeline.get_output_storage_map()
+    # An ignore rule left on an output stored in Git, e.g., by an older
+    # Calkit, would hide its new files from everything below
+    for out in calkit.git.get_ignored_by_rule(
+        repo,
+        *[
+            out
+            for out, storage in pipeline_output_storage.items()
+            if storage == "git" and os.path.exists(out)
+        ],
+    ):
+        if dry_run:
+            typer.echo(f"Would un-ignore {out} since it's stored in Git")
+        else:
+            typer.echo(f"Un-ignoring {out} since it's stored in Git")
+            calkit.git.ensure_path_is_not_ignored(repo, out)
     untracked_git_files = repo.untracked_files
     if auto_commit_message:
         # See if this path is in the repo already
@@ -1135,12 +1195,31 @@ def add(
             ]:
                 paths.append(changed_file)
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
-        pipeline_output_storage = calkit.pipeline.get_output_storage_map()
         lock_out_paths = calkit.dvc.get_lock_out_paths()
+        cached_out_paths: set[str] | None = None
         dvc_scm = None
         for path in paths:
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()
+            # A file inside an output stored in Git, e.g., one written to a
+            # persistent output directory, goes to Git like the output does
+            output_storage = pipeline_output_storage.get(posix_path)
+            if output_storage is None and any(
+                posix_path.startswith(out + "/")
+                for out, storage in pipeline_output_storage.items()
+                if storage == "git"
+            ):
+                output_storage = "git"
+            locked_out = next(
+                (
+                    out
+                    for out in lock_out_paths
+                    if posix_path == out or posix_path.startswith(out + "/")
+                ),
+                None,
+            )
+            if locked_out is not None and cached_out_paths is None:
+                cached_out_paths = calkit.dvc.get_cached_out_paths()
             if posix_path in zip_path_map:
                 if dry_run:
                     typer.echo(f"Would add {path} via DVC zip")
@@ -1172,10 +1251,9 @@ def add(
                     )
                     calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
                     calkit.dvc.run_dvc_command(["add", path])
-            elif posix_path in pipeline_output_storage:
+            elif output_storage is not None:
                 # Respect storage explicitly set in the pipeline definition
-                pipeline_storage = pipeline_output_storage[posix_path]
-                if pipeline_storage == "git":
+                if output_storage == "git":
                     if dry_run:
                         typer.echo(
                             f"Would add {path} to Git "
@@ -1186,7 +1264,7 @@ def add(
                             f"Adding {path} to Git per pipeline output storage"
                         )
                         git_add(path)
-                elif pipeline_storage == "dvc-zip":
+                elif output_storage == "dvc-zip":
                     if dry_run:
                         typer.echo(
                             f"Would add {path} as a DVC zip "
@@ -1210,22 +1288,13 @@ def add(
                             f"({path} is a DVC pipeline output)"
                         )
                         git_add("dvc.lock")
-            elif (
-                locked_out := next(
-                    (
-                        out
-                        for out in lock_out_paths
-                        if posix_path == out
-                        or posix_path.startswith(out + "/")
-                    ),
-                    None,
-                )
-            ) is not None:
+            elif locked_out in (cached_out_paths or set()):
                 # DVC already caches this, and it's only showing up at all
                 # because its ignore entry went missing, e.g., DVC removes
                 # every entry a failed repro added, including those for the
                 # stages that succeeded. Sized up like a new file, a small
-                # one would go to Git alongside DVC's copy.
+                # one would go to Git alongside DVC's copy. Outputs DVC
+                # doesn't cache were never ignored, so they don't count.
                 if dry_run:
                     typer.echo(
                         f"Would ignore {path} ({path} is a DVC pipeline output)"

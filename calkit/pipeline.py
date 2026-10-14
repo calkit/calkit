@@ -64,13 +64,15 @@ def frozen_stage_base_names(
 def frozen_tainted_stage_names(
     ck_info: dict | None = None, wdir: str | None = None
 ) -> set[str]:
-    """Base names of frozen stages, plus every stage downstream of one.
+    """Base names of out-of-date frozen stages, plus every stage downstream.
 
     A frozen stage doesn't re-run when its inputs change, so DVC never calls
     it out of date -- and never calls anything built from its outputs out of
     date either. Nothing in a status report will say so, which is the point
     of naming them here: an answer resting on one of those outputs is
-    resting on whatever the stage last happened to produce.
+    resting on whatever the stage last happened to produce. One whose deps
+    and outs still match ``dvc.lock`` is left out, since it's as current as
+    if it weren't frozen.
 
     Read from ``dvc.lock`` where there is one, since its deps and outs are
     concrete, falling back to ``dvc.yaml``. Names come back without their
@@ -81,6 +83,32 @@ def frozen_tainted_stage_names(
     tainted = frozen_stage_base_names(ck_info=ck_info, wdir=wdir)
     if not tainted:
         return set()
+    # One whose deps and outs still match dvc.lock is as current as any
+    # other stage, so only one that would be out of date if unfrozen taints;
+    # reading just this project's dvc.yaml keeps that cheap
+    try:
+        import dvc.repo
+
+        dvc_repo = calkit.dvc.get_dvc_repo(wdir)
+        try:
+            dvc_yaml = os.path.join(os.path.abspath(wdir or "."), "dvc.yaml")
+            current: set[str] = set()
+            changed: set[str] = set()
+            with dvc.repo.lock_repo(dvc_repo):
+                for stage in dvc_repo.stage.load_all(path=dvc_yaml):
+                    base = stage.name.split("@")[0]
+                    if base not in tainted or not stage.frozen:
+                        continue
+                    stage.frozen = False
+                    if stage.changed():
+                        changed.add(base)
+                    else:
+                        current.add(base)
+            tainted -= current - changed
+        finally:
+            dvc_repo.close()
+    except Exception:
+        pass
     stages: dict = {}
     for fname in ("dvc.lock", "dvc.yaml"):
         fpath = os.path.join(wdir or ".", fname)
@@ -861,6 +889,8 @@ def get_status(
     force_env_check: bool = False,
     with_data_status: bool = False,
     with_storage_problems: bool = False,
+    quiet_environment_checks: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
@@ -868,7 +898,13 @@ def get_status(
     check pipeline environments, then query DVC for out-of-date stages.
     With ``with_data_status``, DVC's data status is attached as well, left
     None if it fails so the caller can ask again and report why.
+    ``progress`` is told what's being done as each step starts.
     """
+
+    def step(text: str) -> None:
+        if progress is not None:
+            progress(text)
+
     import calkit.environments
     import calkit.markdown
 
@@ -901,11 +937,14 @@ def get_status(
             )
             return PipelineStatus.model_validate(result)
         if check_environments:
+            step("Checking environments")
             try:
                 env_checks = calkit.environments.check_all_in_pipeline(
                     ck_info=ck_info,
                     targets=targets,
                     force=force_env_check,
+                    quiet=quiet_environment_checks,
+                    progress=progress,
                 )
                 result["environment_checks"] = env_checks
             except Exception as e:
@@ -925,6 +964,7 @@ def get_status(
             ck_info.get("pipeline", {}).get("stages", {})
             or ck_info.get("subprojects")
         ):
+            step("Compiling pipeline")
             try:
                 to_dvc(ck_info=ck_info, write=True, manage_gitignore=False)
             except Exception as e:
@@ -933,6 +973,7 @@ def get_status(
                 )
                 return PipelineStatus.model_validate(result)
         if clean_notebooks and ck_info.get("pipeline", {}).get("stages", {}):
+            step("Cleaning notebooks")
             try:
                 cleaned = calkit.notebooks.clean_all_in_pipeline(
                     ck_info=ck_info
@@ -963,21 +1004,26 @@ def get_status(
                 dvc.repo.lock_repo(dvc_repo),
                 calkit.dvc.memoized_hashes(),
             ):
+                step("Finding stale stages")
                 raw_status = dvc_repo.status()
                 dvc_out_paths = [
                     Path(os.path.relpath(out.fs_path)).as_posix()
                     for out in dvc_repo.index.outs
                 ]
-                if with_data_status:
-                    try:
-                        dvc_data_status = dict(dvc_repo.data_status())
-                    except Exception:
-                        pass
                 if with_storage_problems:
+                    step("Checking where files are stored")
                     try:
                         storage_problems = calkit.dvc.get_storage_problems(
                             dvc_repo=dvc_repo, ck_info=ck_info
                         )
+                    except Exception:
+                        pass
+                # Last, since switching to HEAD to diff against it drops the
+                # workspace index
+                if with_data_status:
+                    step("Getting DVC status")
+                    try:
+                        dvc_data_status = dict(dvc_repo.data_status())
                     except Exception:
                         pass
             raw_status = calkit.dvc.status_as_posix(raw_status)
@@ -1392,9 +1438,12 @@ def get_output_storage_map(
     for stage in stages.values():
         if not isinstance(stage, dict):
             continue
+        # Output paths are relative to the stage's working directory
+        wdir = stage.get("wdir") or "."
         for out in stage.get("outputs", []):
             if isinstance(out, dict) and "path" in out and "storage" in out:
-                result[Path(out["path"]).as_posix()] = out["storage"]
+                path = Path(os.path.normpath(os.path.join(wdir, out["path"])))
+                result[path.as_posix()] = out["storage"]
     return result
 
 

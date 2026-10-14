@@ -1,0 +1,52 @@
+name: Check ruamel.yaml.clib wheels
+
+# Calkit depends on ruamel.yaml.clib only where it has wheels, and nothing
+# updates the marker saying where when a release adds or drops some, e.g.,
+# wheels for a new Python, so this compares them weekly and keeps an issue
+# open while they disagree
+permissions:
+  contents: read
+  issues: write
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      # Exits with 3 when they disagree, and anything else nonzero when the
+      # check itself failed, e.g., PyPI was unreachable, which fails the job
+      # rather than filing an issue
+      - name: Compare the marker with the wheels
+        id: check
+        run: |
+          set +e
+          uv run --no-project --python 3.12 --with packaging \
+            python scripts/check-clib-marker.py > report.md
+          code=$?
+          cat report.md
+          if [ "$code" -eq 3 ]; then
+            echo "mismatch=true" >> "$GITHUB_OUTPUT"
+          elif [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
+      - name: Open or update the issue
+        if: steps.check.outputs.mismatch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="ruamel.yaml.clib marker doesn't match its wheels"
+          number=$(gh issue list --state open --search "\"$title\" in:title" \
+            --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file report.md
+          else
+            gh issue create --title "$title" --body-file report.md
+          fi

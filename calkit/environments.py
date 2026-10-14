@@ -10,6 +10,7 @@ import re
 import socket
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -930,7 +931,7 @@ def write_system_env_lock(
 
 
 def get_cache_db(name="cache") -> SqliteDict:
-    from calkit.config import get_user_home
+    from calkit.core import get_user_home
 
     env_check_cache_dir = os.path.join(
         get_user_home(), ".calkit", "env-checks"
@@ -1106,15 +1107,52 @@ def check_all_in_pipeline(
     wdir: str | None = None,
     targets: list[str] | None = None,
     force: bool = False,
+    quiet: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> dict:
     """Check all environments in the pipeline, caching for efficiency.
 
     The cache file is a simple JSON file keyed by project path.
     Each object inside tracks the last check timestamp, pass/fail,
     and some sort of hash(es) for the important file content involved.
+
+    With ``quiet``, what the checks' tools print, e.g., uv or Julia, is
+    discarded, and ``progress`` is told which environment is being checked.
     """
+    import sys
+    from collections.abc import Iterator
+    from contextlib import contextmanager, redirect_stderr, redirect_stdout
+
     import calkit
     from calkit.cli.check import check_environment
+
+    @contextmanager
+    def silenced() -> Iterator[None]:
+        # Tools write to the terminal directly, so this is done at the file
+        # descriptor level as well as Python's
+        if not quiet:
+            yield
+            return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        saved = [os.dup(1), os.dup(2)]
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            with (
+                open(os.devnull, "w") as null,
+                redirect_stdout(null),
+                redirect_stderr(null),
+            ):
+                yield
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.dup2(saved[0], 1)
+            os.dup2(saved[1], 2)
+            for fd in [*saved, devnull]:
+                os.close(fd)
 
     # TODO: ``check_environment`` should be able to take a wdir argument
     if wdir is not None:
@@ -1132,6 +1170,12 @@ def check_all_in_pipeline(
     md_stages = calkit.markdown.get_markdown_stages(ck_info)
     ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
     stages = ck_info.get("pipeline", {}).get("stages", {})
+    # A frozen stage never runs, so its environment isn't needed
+    stages = {
+        k: v
+        for k, v in stages.items()
+        if not (isinstance(v, dict) and v.get("frozen"))
+    }
     if targets:
         # Split targets by "@" to handle sub-stages from iterations
         targets = [t.split("@")[0] for t in targets]
@@ -1183,8 +1227,11 @@ def check_all_in_pipeline(
             if up_to_date:
                 res[env_name] = {"success": True, "cached": True}
                 continue
+        if progress is not None:
+            progress(f"Checking environment '{env_name}'")
         try:
-            check_environment(env_name, verbose=False)
+            with silenced():
+                check_environment(env_name, verbose=False)
             res[env_name] = save_cache(
                 env_name=env_name, env=env, wdir=wdir, success=True
             )

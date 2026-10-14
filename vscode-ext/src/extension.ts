@@ -48,6 +48,8 @@ import {
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import {
+  documentStagePdf,
+  documentStageSource,
   latexStagePdf,
   latexStageSource,
   latexWorkingDiffPath,
@@ -156,7 +158,7 @@ const DATASET_EXTENSIONS = new Set([
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.48.2";
+const DEFAULT_MIN_CALKIT_VERSION = "0.49.0";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const WINDOWS_INSTALL_SCRIPT = "irm install-ps1.calkit.org | iex";
@@ -191,6 +193,8 @@ const runningStageNames = new Set<string>();
 const importedArtifactUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
 let currentCalkitConfig: CalkitInfo | undefined;
+// For telling open PDF viewers when the config has been read
+let pdfReviewProvider: PdfReviewProvider | undefined;
 // Whether a calkit.yaml exists in the workspace. The sidebar is gated on this:
 // when false, the config passed to the sidebar is treated as undefined so the
 // "Initialize Calkit Project" welcome view shows and no badge is displayed.
@@ -393,7 +397,14 @@ export function activate(context: vscode.ExtensionContext): void {
     getWorkspaceRoot,
     getStages: () => currentCalkitConfig?.pipeline?.stages ?? {},
     getNonce,
+    promptUpgrade: (message) =>
+      void promptCalkitInstallOrUpgrade({
+        mode: "upgrade",
+        title: "Calkit CLI upgrade required",
+        message,
+      }),
   });
+  pdfReviewProvider = pdfReview;
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
       PDF_REVIEW_VIEW_TYPE,
@@ -450,7 +461,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  // A LaTeX document and the PDF its stage builds take each other's place,
+  // A document and the PDF its stage builds take each other's place,
   // like a Plotly figure and its preview. The other file opens in the same
   // group first, since closing the last tab first can close the group too.
   const swapActiveTab = async (
@@ -477,16 +488,16 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!fileUri || !workspaceRoot) {
           return;
         }
-        const texFile = path
+        const docFile = path
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
-        const pdfFile = latexStagePdf(
+        const pdfFile = documentStagePdf(
           currentCalkitConfig?.pipeline?.stages ?? {},
-          texFile,
+          docFile,
         );
         if (!pdfFile) {
           void vscode.window.showInformationMessage(
-            "No LaTeX stage in the pipeline builds this document.",
+            "No stage in the pipeline builds this document into a PDF.",
           );
           return;
         }
@@ -513,7 +524,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  // Go from a line of LaTeX to where it is in the PDF, in the same group
+  // Go from a line of a document to where it is in the PDF, in the same group
   // of tabs, the one beside it, or where the PDF is showing
   const showInPdf = async (
     toSide: boolean,
@@ -553,7 +564,7 @@ export function activate(context: vscode.ExtensionContext): void {
       })
       .filter((p): p is string => p !== undefined);
     const pdfFile =
-      latexStagePdf(stages, texFile) ??
+      documentStagePdf(stages, texFile) ??
       (latexPdfs.length === 1 ? latexPdfs[0] : undefined);
     const pdfUri = pdfFile
       ? vscode.Uri.file(path.join(workspaceRoot, pdfFile))
@@ -610,20 +621,20 @@ export function activate(context: vscode.ExtensionContext): void {
         const pdfFile = path
           .relative(workspaceRoot, fileUri.fsPath)
           .replace(/\\/g, "/");
-        const texFile = latexStageSource(
+        const sourceFile = documentStageSource(
           currentCalkitConfig?.pipeline?.stages ?? {},
           pdfFile,
         );
-        if (!texFile) {
+        if (!sourceFile) {
           void vscode.window.showInformationMessage(
-            "No LaTeX stage in the pipeline builds this PDF.",
+            "No stage in the pipeline builds this PDF.",
           );
           return;
         }
-        const texUri = vscode.Uri.file(path.join(workspaceRoot, texFile));
+        const sourceUri = vscode.Uri.file(path.join(workspaceRoot, sourceFile));
         await swapActiveTab(fileUri, () =>
           Promise.resolve(
-            vscode.window.showTextDocument(texUri, {
+            vscode.window.showTextDocument(sourceUri, {
               viewColumn: vscode.ViewColumn.Active,
               preview: false,
             }),
@@ -2388,6 +2399,10 @@ async function refreshPipelineOutputContext(
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
   currentEnvDescriptions = envDescriptions;
+  pdfReviewProvider?.stagesChanged();
+  void refreshActiveFileBuildsPdfContext(
+    vscode.window.activeTextEditor?.document,
+  );
   // Gate the sidebar on the presence of a calkit.yaml file. When absent, the
   // tree is left empty so the "Initialize Calkit Project" welcome view shows.
   const calkitYamlExists = await fileExists(
@@ -8438,6 +8453,27 @@ async function restartCalkitJobForActiveNotebook(
   }
 }
 
+// Whether a stage builds the active file into a PDF, for the buttons that go
+// between them. It depends on the config as well as the file, so it's
+// refreshed when either changes.
+async function refreshActiveFileBuildsPdfContext(
+  document: vscode.TextDocument | undefined,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  const buildsPdf =
+    workspaceRoot !== undefined &&
+    document !== undefined &&
+    documentStagePdf(
+      currentCalkitConfig?.pipeline?.stages ?? {},
+      path.relative(workspaceRoot, document.uri.fsPath).replace(/\\/g, "/"),
+    ) !== undefined;
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.activeFileBuildsPdf",
+    buildsPdf,
+  );
+}
+
 async function refreshActiveFileStageContext(
   document: vscode.TextDocument | undefined,
 ): Promise<void> {
@@ -8458,6 +8494,7 @@ async function refreshActiveFileStageContext(
     path.extname(document.uri.fsPath).toLowerCase() === ".json" &&
     isPlotlyJsonText(document.getText());
   await Promise.all([
+    refreshActiveFileBuildsPdfContext(document),
     vscode.commands.executeCommand(
       "setContext",
       "calkit.activeFileHasStage",

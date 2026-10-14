@@ -490,6 +490,11 @@ _FLOAT_RE = re.compile(
     r"\\(begin|end)\{(figure|table|wrapfigure|sidewaysfigure|sidewaystable)"
     r"\*?\}"
 )
+# Markdown, where review comments can be kept too, in HTML comments
+_MARKDOWN_EXTS = (".md", ".markdown")
+_MD_COMMENT_RE = re.compile(r"^[ ]{0,3}<!--")
+_MD_FENCE_RE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})")
+_MD_HEADING_RE = re.compile(r"^[ ]{0,3}#{1,6}(\s|$)")
 # Inline math, $...$ or \\(...\\), but not $$
 _INLINE_MATH_RE = re.compile(
     r"(?<![\\$])\$(?!\$)((?:\\.|[^$\\])+?)\$|\\\((.+?)\\\)", re.S
@@ -513,6 +518,7 @@ class Block:
     # Inside a figure or table, which can float away from the prose around
     # it in the rendered document
     floating: bool = False
+    markdown: bool = False
 
     @property
     def path(self) -> str:
@@ -526,7 +532,8 @@ class Block:
     def text(self) -> str:
         if self.display:
             return ""
-        return detex("\n".join(ln.text for ln in self.lines))
+        src = "\n".join(ln.text for ln in self.lines)
+        return demarkdown(src) if self.markdown else detex(src)
 
     @property
     def inline_math(self) -> list[tuple[str, str, str]]:
@@ -554,7 +561,7 @@ class Block:
         """The display math environment this block is, if any, e.g.,
         ``equation*``, or ``[`` for ``\\[``."""
         m = _DISPLAY_RE.match(self.lines[0].text)
-        if m is None:
+        if m is None or self.markdown:
             return None
         if m.group(1):
             return m.group(1) + m.group(2)
@@ -621,14 +628,20 @@ def read_file(path: str) -> str | None:
     return p.read_text(encoding="utf-8") if p.is_file() else None
 
 
+def is_markdown(path: str) -> bool:
+    return path.lower().endswith(_MARKDOWN_EXTS)
+
+
 def flatten(
     main_path: str, read: Callable[[str], str | None] = read_file
 ) -> list[SourceLine]:
     """Inline \\input and friends, keeping each line's file and number.
 
     Files are read with ``read``, e.g., to read them at a Git revision.
+    Markdown inputs nothing.
     """
     main = Path(main_path)
+    markdown = is_markdown(main_path)
     out: list[SourceLine] = []
     seen: set[str] = set()
 
@@ -640,7 +653,7 @@ def flatten(
             return
         seen.add(key)
         for i, line in enumerate(text.split("\n"), 1):
-            m = _INCLUDE_RE.match(line.split("%")[0])
+            m = None if markdown else _INCLUDE_RE.match(line.split("%")[0])
             if m:
                 cmd, a, b = m.groups()
                 target = Path(b) if cmd == "import" and b else Path(a)
@@ -689,6 +702,81 @@ def detex(text: str) -> str:
     text = re.sub(r"[{}~]", " ", text).replace("---", " ").replace("--", " ")
     text = text.replace("``", "").replace("''", "")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def demarkdown(text: str) -> str:
+    """Roughly what Pandoc would print for a bit of Markdown."""
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    text = re.sub(r"^[ ]{0,3}(`{3,}|~{3,}).*$", " ", text, flags=re.M)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\$[^$]*\$", " ", text)
+    text = re.sub(r"^\s*(#{1,6}|[-*+]|\d+[.)]|>)\s+", "", text, flags=re.M)
+    text = re.sub(r"[*`]|\b_|_\b", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def markdown_blocks(lines: list[SourceLine]) -> list[Block]:
+    """Split Markdown into paragraph-sized blocks: paragraphs, headings, and
+    fenced code. A Calkit directive belongs to what it precedes; other HTML
+    comments, e.g., comment threads, to none."""
+    out: list[Block] = []
+    cur: list[SourceLine] = []
+    # The fence that closes the code being read, if any
+    fence: str | None = None
+    # Whether the HTML comment being read, if any, is part of a block
+    keep: bool | None = None
+
+    def end() -> None:
+        nonlocal cur
+        if cur:
+            out.append(Block(cur, markdown=True))
+        cur = []
+
+    for ln in lines:
+        text = ln.text
+        if fence is not None:
+            cur.append(ln)
+            if re.match(
+                rf"^[ ]{{0,3}}{re.escape(fence[0])}{{{len(fence)},}}\s*$", text
+            ):
+                end()
+                fence = None
+            continue
+        if keep is not None:
+            if keep:
+                cur.append(ln)
+            if "-->" in text:
+                keep = None
+            continue
+        if not text.strip():
+            end()
+            continue
+        # A comment that takes up whole lines, unless it's a directive, is
+        # like a LaTeX comment: inside a paragraph without ending it
+        whole = _MD_COMMENT_RE.match(text) and not re.match(
+            r"^\s*<!--.*?-->\s*\S", text
+        )
+        if whole:
+            directive = re.match(r"^\s*<!--\s*calkit\s", text) is not None
+            if cur or directive:
+                cur.append(ln)
+            if "-->" not in text:
+                keep = bool(cur) or directive
+            continue
+        m = _MD_FENCE_RE.match(text)
+        if m:
+            fence = m.group(1)
+            cur.append(ln)
+            continue
+        if _MD_HEADING_RE.match(text):
+            end()
+            cur.append(ln)
+            end()
+            continue
+        cur.append(ln)
+    end()
+    return [b for b in out if b.text]
 
 
 def blocks(lines: list[SourceLine]) -> list[Block]:
@@ -1132,7 +1220,9 @@ class Entry:
 class TexComment:
     """A comment thread in the source, above the paragraph it's about.
 
-    The first entry is the comment itself, the rest are replies.
+    The first entry is the comment itself, the rest are replies. In
+    Markdown, the thread is an HTML comment, with the lines LaTeX would
+    have after their ``%``.
     """
 
     entries: list[Entry]
@@ -1147,6 +1237,7 @@ class TexComment:
     issue: str | None = None
     # Attributes this version doesn't know, kept so they survive a rewrite
     attrs: dict[str, Any] = field(default_factory=dict)
+    markdown: bool = False
 
     @property
     def author(self) -> str:
@@ -1165,6 +1256,10 @@ class TexComment:
 
     def render(self) -> list[str]:
         import json
+
+        # Text that would end a Markdown thread's HTML comment early
+        def safe(text: str) -> str:
+            return text.replace("-->", "-- >") if self.markdown else text
 
         def fmt(value: Any) -> str:
             if isinstance(value, dict):
@@ -1188,38 +1283,78 @@ class TexComment:
                 value += f", occ: {self.highlight_occ}"
             attrs.append("highlight={" + value + "}")
         attrs += [f"{k}={fmt(v)}" for k, v in self.attrs.items()]
-        out = ["% COMMENT"]
+        first, indent = (
+            ("<!-- COMMENT", "  ")
+            if self.markdown
+            else (
+                "% COMMENT",
+                "%   ",
+            )
+        )
+        out = [first]
         # Attributes continue onto their own lines when they don't fit
-        for attr in attrs:
-            if len(out[-1]) + 1 + len(attr) <= 79 or out[-1] == "% COMMENT":
+        for attr in map(safe, attrs):
+            if len(out[-1]) + 1 + len(attr) <= 79 or out[-1] == first:
                 out[-1] += " " + attr
             else:
-                out.append(f"%   {attr}")
+                out.append(indent + attr)
         for e in self.entries:
-            out.append(f"%   {e.header()}")
+            out.append(indent + safe(e.header()))
             out += textwrap.wrap(
-                e.text,
+                safe(e.text),
                 width=79,
-                initial_indent="%     ",
-                subsequent_indent="%     ",
+                initial_indent=indent + "  ",
+                subsequent_indent=indent + "  ",
             )
+        if self.markdown:
+            out.append("-->")
         return out
 
 
 def parse_comments(lines: list[str]) -> list[TexComment]:
-    """Comment blocks in a file's lines, with their position and extent."""
+    """Comment blocks in a file's lines, with their position and extent,
+    in LaTeX or Markdown."""
     out: list[TexComment] = []
+    # The fence of the Markdown code being read, if any, where a thread is
+    # only shown, e.g., as an example. LaTeX's are found regardless, so a
+    # stray line of backticks can't hide them.
+    fence: str | None = None
     i = 0
     while i < len(lines):
-        if not re.match(r"% COMMENT( |$)", lines[i]):
+        if fence is None and (m := _MD_FENCE_RE.match(lines[i])):
+            fence = m.group(1)
+        elif fence is not None and re.match(
+            rf"^[ ]{{0,3}}{re.escape(fence[0])}{{{len(fence)},}}\s*$",
+            lines[i],
+        ):
+            fence = None
+        markdown = (
+            fence is None
+            and re.match(r"<!-- COMMENT( |$)", lines[i]) is not None
+        )
+        if not markdown and not re.match(r"% COMMENT( |$)", lines[i]):
             i += 1
             continue
         start = i
-        header = lines[i][len("% COMMENT") :]
-        entries: list[Entry] = []
+        header = lines[i].split("COMMENT", 1)[1]
+        # The lines after the marker, as LaTeX has them after its %
+        body_lines = []
         i += 1
-        while i < len(lines) and re.match(r"%(   |$)", lines[i]):
-            body = lines[i][1:]
+        if markdown:
+            end = next(
+                (j for j in range(i, len(lines)) if "-->" in lines[j]), None
+            )
+            if "-->" in header or end is None:
+                continue
+            body_lines = [" " + ln for ln in lines[i:end]]
+            body_lines.append(" " + lines[end].split("-->")[0])
+            i = end + 1
+        else:
+            while i < len(lines) and re.match(r"%(   |$)", lines[i]):
+                body_lines.append(lines[i][1:])
+                i += 1
+        entries: list[Entry] = []
+        for body in body_lines:
             indent = len(body) - len(body.lstrip())
             author = _AUTHOR_RE.match(body.strip()) if indent == 3 else None
             if not entries and indent == 3 and re.match(r"\s*\w+=", body):
@@ -1236,7 +1371,6 @@ def parse_comments(lines: list[str]) -> list[TexComment]:
             elif indent > 3 and entries:
                 e = entries[-1]
                 e.text = (e.text + " " + body.strip()).strip()
-            i += 1
         if entries:
             attrs = _parse_header(header)
             highlight = attrs.pop("highlight", None)
@@ -1256,6 +1390,7 @@ def parse_comments(lines: list[str]) -> list[TexComment]:
                     id=str(id_) if id_ else None,
                     issue=str(issue) if issue else None,
                     attrs=attrs,
+                    markdown=markdown,
                 )
             )
     return out
@@ -1281,6 +1416,10 @@ def find_comment(
 
 def file_blocks(path: str, lines: list[str]) -> list[Block]:
     """The blocks of one file on its own, without following its inputs."""
+    if is_markdown(path):
+        return markdown_blocks(
+            [SourceLine(path, i, text) for i, text in enumerate(lines, 1)]
+        )
     return blocks(
         [
             SourceLine(path, i, text)
@@ -1337,7 +1476,7 @@ def _math_chars(text: str) -> str:
 def comment_to_dict(
     path: str, tc: TexComment, blks: list[Block]
 ) -> dict[str, Any]:
-    """A thread as `calkit latex comments list --json` reports it, with the
+    """A thread as `calkit list comments --json` reports it, with the
     paragraph it's about from its file's blocks."""
     anchor = comment_anchor(blks, tc)
     return {
@@ -1392,6 +1531,36 @@ def list_comments(
         ]
     out.sort(key=lambda c: order.get((c["path"], c["line"]), 0))
     return out
+
+
+def comment_documents(ck_info: dict) -> list[str]:
+    """The documents the pipeline builds into PDFs, whose threads, with
+    those in the files they input, are the project's: each latex stage's,
+    and each markdown stage's with a PDF."""
+    out = []
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict) or not stage.get("target_path"):
+            continue
+        if stage.get("kind") == "latex":
+            target = Path(stage.get("wdir") or "", stage["target_path"])
+        elif stage.get("kind") == "markdown" and stage.get("pdf"):
+            target = Path(stage["target_path"])
+        else:
+            continue
+        out.append(target.as_posix())
+    return list(dict.fromkeys(out))
+
+
+def find_comment_path(ck_info: dict, id: str) -> str | None:
+    """The file with a thread, by its ID, among the project's documents and
+    the files they input."""
+    for doc in comment_documents(ck_info):
+        for path in dict.fromkeys(ln.path for ln in flatten(doc)):
+            lines = (read_file(path) or "").split("\n")
+            if find_comment(lines, id=id) is not None:
+                return path
+    return None
 
 
 def locate_block(
@@ -1452,10 +1621,8 @@ def locate_block(
 def add_comment(lines: list[str], lineno: int, tc: TexComment) -> None:
     """Put a thread above the block at or after a line, below any threads
     already there, editing the lines in place."""
-    blk = next(
-        (b for b in file_blocks("", lines) if b.lines[-1].lineno >= lineno),
-        None,
-    )
+    blks = file_blocks(".md" if tc.markdown else "", lines)
+    blk = next((b for b in blks if b.lines[-1].lineno >= lineno), None)
     if blk is None:
         raise ValueError(f"No paragraph at or after line {lineno}")
     rendered = tc.render()

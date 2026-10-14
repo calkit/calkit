@@ -1107,6 +1107,86 @@ def test_comments(tmp_dir):
             ["calkit", "latex", "comments", *args], capture_output=True
         )
         assert res.returncode != 0
+    # In Markdown, threads are HTML comments, which Pandoc leaves out
+    with open("main.md", "w") as f:
+        f.write(
+            "# _A_ title\n"
+            "\n"
+            "<!-- calkit values path=r.json -->\n"
+            "\n"
+            "Some **bold** text with a [link](https://x.org),\n"
+            "it's <!-- calkit value key=a -->2<!-- /calkit value -->x.\n"
+            "\n"
+            "<!-- calkit stage name=s -->\n"
+            "```python\n"
+            "print('a')\n"
+            "\n"
+            "print('b')\n"
+            "```\n"
+        )
+
+    md_id = ck(
+        "add",
+        "main.md",
+        "-l",
+        "6",
+        "-m",
+        "Is --> this right?",
+        "--author",
+        "A",
+    )
+    # On code, it goes above the directive, which must stay just above it
+    code_id = ck("add", "main.md", "-l", "16", "-m", "Code.", "--author", "B")
+    with open("main.md") as f:
+        md = f.read().split("\n")
+    assert md[4:9] == [
+        f"<!-- COMMENT id={md_id}",
+        md[5],
+        "    Is -- > this right?",
+        "-->",
+        "Some **bold** text with a [link](https://x.org),",
+    ]
+    assert md[5].startswith("  A (")
+    assert md[11] == f"<!-- COMMENT id={code_id}"
+    assert md[15] == "<!-- calkit stage name=s -->"
+    listed = json.loads(ck("list", "main.md", "--json"))
+    assert [c["id"] for c in listed] == [md_id, code_id]
+    assert listed[0]["anchor"]["text"] == (
+        "Some bold text with a link, it's 2x."
+    )
+    ck("reply", "main.md", "--id", md_id, "-m", "Yes.", "--author", "C")
+    ck("resolve", "main.md", "--line", "5")
+    thread = json.loads(ck("list", "main.md", "--json"))[0]
+    assert thread["resolved"]
+    assert [m["text"] for m in thread["messages"]] == [
+        "Is -- > this right?",
+        "Yes.",
+    ]
+    found = json.loads(ck("locate", "main.md", "--text", "A title", "--json"))
+    assert found["line"] == 1
+    ck("delete", "main.md", "--id", code_id)
+    with open("main.md") as f:
+        assert "Code." not in f.read()
+    # Hand-written threads can close on a message's last line
+    with open("main.md", "a") as f:
+        f.write("<!-- COMMENT\n  D:\n    Short. -->\nEnd.\n")
+    listed = json.loads(ck("list", "main.md", "--json"))
+    assert listed[-1]["messages"][0]["text"] == "Short."
+    assert listed[-1]["anchor"]["text"] == "End."
+    # A thread shown in a fence, e.g., as an example, is code, not a thread
+    example = "````md\n<!-- COMMENT\n  E:\n    Example.\n-->\n```\n````\n"
+    with open("main.md", "a") as f:
+        f.write("\n" + example)
+    assert len(json.loads(ck("list", "main.md", "--json"))) == len(listed)
+    with open("main.md") as f:
+        n = f.read().split("\n").index("    Example.") + 1
+    res = subprocess.run(
+        ["calkit", "latex", "comments", "delete", "main.md", "-l", str(n)],
+        capture_output=True,
+    )
+    assert res.returncode != 0
+    with open("main.md") as f:
+        assert f.read().endswith(example)
 
 
 def test_from_markdown(tmp_dir):
@@ -1186,7 +1266,9 @@ def test_from_markdown(tmp_dir):
     # the first to cite its file
     assert r"\href{https://calkit.io/someone/proj/questions/2}{2.0}" in tex
     assert "from calkit.io/someone/proj." in tex
-    assert "Built by " + calkit.__version__.split("+")[0] in tex
+    # Without what changes from one development commit to the next
+    version = re.sub(r"\.dev\d+$", ".dev", calkit.__version__.split("+")[0])
+    assert f"Built by {version} from" in tex
     # The Markdown itself is kept current too
     assert "-->2.0<!--" in open("main.md").read()
     # Only PDFs and LaTeX can be written

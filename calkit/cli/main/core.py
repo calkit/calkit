@@ -1631,6 +1631,14 @@ def save(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            "--dry",
+            help="Show what would be saved without actually saving it.",
+        ),
+    ] = False,
 ) -> None:
     """Save paths by committing and pushing.
 
@@ -1640,12 +1648,15 @@ def save(
         raise_error("Paths must be provided if not using --all")
     # Asked before anything else runs: the Git and DVC commands below read
     # from the terminal too, and would take an answer typed ahead
-    if not no_push and not _has_somewhere_to_push():
+    if not dry_run and not no_push and not _has_somewhere_to_push():
         no_push = not _offer_to_connect()
     if paths is not None:
-        add(paths, to=to, existing_only=existing_only)
+        add(paths, to=to, existing_only=existing_only, dry_run=dry_run)
     elif save_all:
-        add(paths=["."], to=to, existing_only=existing_only)
+        add(paths=["."], to=to, existing_only=existing_only, dry_run=dry_run)
+    if dry_run:
+        typer.echo("Would commit" + ("" if no_push else " and push"))
+        return
     any_dvc = commit(
         paths=paths,
         all_changed=True if paths is None else False,

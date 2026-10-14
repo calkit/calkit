@@ -242,6 +242,7 @@ Options:
 | `--no-recursive`       | boolean | no       | False   | Do not push to submodules.                                                              |
 | `--overleaf`, `-O`     | boolean | no       | False   | Sync with Overleaf after saving.                                                        |
 | `--verbose`, `-v`      | boolean | no       | False   | Print verbose output.                                                                   |
+| `--dry-run`, `--dry`   | boolean | no       | False   | Show what would be saved without actually saving it.                                    |
 
 <a id="top-command-pull"></a>
 

@@ -1182,6 +1182,23 @@ def test_save(tmp_dir):
     )
     assert repo.head.commit.message.strip() == "Existing only"
     assert not repo.git.ls_files("test4.txt")
+    # A dry run says what would be saved without staging or committing
+    with open("test.txt", "w") as f:
+        f.write("dry")
+    head_before = repo.head.commit.hexsha
+    for args in [["-a"], ["test.txt", "test4.txt"], ["--dry", "-ae"]]:
+        out = subprocess.check_output(
+            ["calkit", "save", "--dry-run", "-m", "Dry", *args], text=True
+        )
+        assert "test.txt" in out
+        assert "Would commit and push" in out
+        assert ("test4.txt" in out) == ("-ae" not in args)
+        assert repo.head.commit.hexsha == head_before
+        assert not calkit.git.get_staged_files()
+    out = subprocess.check_output(
+        ["calkit", "save", "--dry", "-a", "--no-push"], text=True
+    )
+    assert "Would commit\n" in out
 
 
 def test_save_data_not_in_cache(tmp_dir):

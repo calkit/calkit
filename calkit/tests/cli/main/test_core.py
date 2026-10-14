@@ -2,6 +2,7 @@
 
 import json
 import os
+import platform
 import shutil
 import socket
 import stat
@@ -27,6 +28,7 @@ from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
     STAGE_OUTPUT_START,
+    STAGE_RUNS_FPATH,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
     _prune_run_logs,
@@ -1803,15 +1805,38 @@ def test_run_writes_private_logs(tmp_dir):
     assert not os.path.isdir(tracked_dir) or not [
         f for f in os.listdir(tracked_dir) if f.endswith(".log")
     ]
-    # Run info and system info are saved privately without --log too
-    assert os.path.isdir(os.path.join(".calkit", "local", "runs"))
-    assert os.path.isdir(os.path.join(".calkit", "local", "systems"))
+    # Run info is saved privately without --log too, with the system inline
+    local_runs = os.path.join(".calkit", "local", "runs")
+    with open(os.path.join(local_runs, os.listdir(local_runs)[0])) as f:
+        assert json.load(f)["system"]["os"] == platform.system()
+    assert not os.path.exists(os.path.join(".calkit", "local", "systems"))
+    # How each stage's outputs were made is kept with the project, staged
+    with open(STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    entry = stage_runs["s1"]
+    assert list(stage_runs) == ["s1"]
+    assert "environment" not in entry
+    assert entry["calkit_version"] == calkit.__version__
+    assert entry["system"]["os"] == platform.system()
+    assert entry["system"]["machine_id"] == calkit.get_machine_id()
+    assert entry["start_time"] <= entry["end_time"]
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    )
+    assert ".calkit/stage-runs.json" in staged.splitlines()
+    # A stage that's skipped as up to date keeps its entry, as does --dry
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["calkit", "run", "--dry", "--force"])
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f) == stage_runs
     # With --log, the log is also saved to the tracked directory plus run info
     subprocess.check_call(["calkit", "run", "--log", "--force"])
     tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
     assert len(tracked) == 1
     assert os.path.isdir(os.path.join(".calkit", "runs"))
-    assert os.path.isdir(os.path.join(".calkit", "systems"))
+    assert not os.path.exists(os.path.join(".calkit", "systems"))
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f)["s1"]["start_time"] > entry["start_time"]
 
 
 def test_prune_run_logs(tmp_dir):
@@ -3259,6 +3284,12 @@ def test_run_switch_env(tmp_dir):
         run_info = json.load(f)
     assert run_info["switches"] == {"cluster": "here"}
     assert run_info["stages"]["s"]["switches"] == {"cluster": "here"}
+    with open(STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    assert stage_runs["s"]["environment"] == {
+        "name": "cluster",
+        "switch": "here",
+    }
     out = subprocess.check_output(["calkit", "status"], env=env, text=True)
     assert "Environment 'cluster' picks 'here' here" in out
     # Moving to the cluster doesn't make the stage stale, since it doesn't
@@ -3267,10 +3298,14 @@ def test_run_switch_env(tmp_dir):
     subprocess.check_call(["calkit", "run"], env=env)
     with open("out.txt") as f:
         assert f.read().strip() == "here"
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f) == stage_runs
     # Rerunning it there goes through the scheduler
     subprocess.check_call(["calkit", "run", "-K", "-f"], env=env)
     with open("out.txt") as f:
         assert f.read().strip() == "slurm"
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f)["s"]["environment"]["switch"] == "cluster.1"
     # xenv resolves a switch passed by name
     out = subprocess.check_output(
         ["calkit", "xenv", "-n", "cluster", "--", "echo", "picked"],

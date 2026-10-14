@@ -12,7 +12,13 @@ import typer
 
 import calkit
 from calkit.cli import raise_error
-from calkit.cli.main.core import app, init, project_is_initialized, run
+from calkit.cli.main.core import (
+    STAGE_RUNS_FPATH,
+    app,
+    init,
+    project_is_initialized,
+    run,
+)
 from calkit.core import DVC_EXTENSIONS, DVC_SIZE_THRESH_BYTES
 
 
@@ -118,7 +124,14 @@ def _xr_markdown(
     # the pipeline and builds environments too, so everything that writes
     # is covered, not just the files written here.
     snapshot = _snapshot(
-        ["calkit.yaml", "dvc.yaml", "dvc.lock", ".gitignore", ".dvcignore"]
+        [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            ".gitignore",
+            ".dvcignore",
+            STAGE_RUNS_FPATH,
+        ]
     )
     if not dry_run and not project_is_initialized():
         typer.echo(f"Initializing project in {os.getcwd()}")
@@ -448,7 +461,12 @@ def execute_and_record(
     # inspection)
     record_snapshot: dict[str, bytes | None] = {}
     if no_record:
-        for record_path in ["calkit.yaml", "dvc.yaml", "dvc.lock"]:
+        for record_path in [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            STAGE_RUNS_FPATH,
+        ]:
             if os.path.isfile(record_path):
                 with open(record_path, "rb") as fb:
                     record_snapshot[record_path] = fb.read()

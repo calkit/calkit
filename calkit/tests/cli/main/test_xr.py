@@ -864,6 +864,7 @@ def test_xr_markdown_no_record(tmp_dir):
     assert not os.path.isfile("dvc.lock")
     assert not os.path.isdir(".dvc")
     assert not os.path.isfile(".dvcignore")
+    assert not os.path.isfile(".calkit/stage-runs.json")
     repo = git.Repo(".")
     assert not repo.head.is_valid()
     # Nothing the bootstrap staged lingers in the index either; only
@@ -902,3 +903,4 @@ def test_xr_no_record_command(tmp_dir):
         assert f.read() == ck_yaml_before
     assert not os.path.isfile("dvc.yaml")
     assert not os.path.isfile("dvc.lock")
+    assert not os.path.isfile(".calkit/stage-runs.json")

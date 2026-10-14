@@ -2090,6 +2090,18 @@ def run_local_server() -> None:
 # one in user scripts), so it's bracketed by these and skipped when parsing.
 STAGE_OUTPUT_START = "--- calkit stage output ---"
 STAGE_OUTPUT_END = "--- end calkit stage output ---"
+# How each stage's current outputs were made, kept with the project
+STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
+# The machine properties recorded for each stage run
+STAGE_RUN_SYSTEM_PROPERTIES = (
+    "machine_id",
+    "os",
+    "os_version",
+    "machine",
+    "processor",
+    "cpu_count",
+    "memory_gb",
+)
 
 
 def _inject_markdown_stage_output(log_content: str) -> list[str]:
@@ -2936,23 +2948,9 @@ def run(
     except ValueError as e:
         raise_error(str(e))
     system_info = calkit.get_system_info(apps=version_checked_apps)
-    # Save the system to .calkit/local/systems unconditionally
-    local_sysinfo_fpath = os.path.join(
-        calkit.ensure_local_dir(), "systems", system_info["id"] + ".json"
-    )
-    os.makedirs(os.path.dirname(local_sysinfo_fpath), exist_ok=True)
-    with open(local_sysinfo_fpath, "w") as f:
-        json.dump(system_info, f, indent=2)
     if save_logs:
-        for subdir in ("logs", "runs", "systems"):
+        for subdir in ("logs", "runs"):
             os.makedirs(os.path.join(".calkit", subdir), exist_ok=True)
-        if verbose:
-            typer.echo("Saving system information:")
-            typer.echo(system_info)
-        sysinfo_fpath = os.path.join(
-            ".calkit", "systems", system_info["id"] + ".json"
-        )
-        shutil.copy2(local_sysinfo_fpath, sysinfo_fpath)
     # First check the host meets the project's requirements
     if not quiet:
         calkit.echo("🔗 Checking system-level requirements")
@@ -3464,7 +3462,7 @@ def run(
         typer.echo("Saving run info")
     run_info = {
         "id": run_id,
-        "system_id": system_info["id"],
+        "system": system_info,
         "start_time": start_time.isoformat(),
         "end_time": calkit.utcnow(remove_tz=False).isoformat(),
         "targets": targets,
@@ -3497,24 +3495,29 @@ def run(
                 )
             except ValueError:
                 switch_picks[env_name] = None
+    # Each stage's environment, and what the switches in it picked
+    run_stages = ck_info.get("pipeline", {}).get("stages", {})
+    stage_envs = {
+        n: str(
+            (run_stages.get(n.split("@")[0]) or {}).get("environment") or ""
+        )
+        for n in stage_run_info
+    }
+    stage_switch_picks = {
+        n: {
+            part: switch_picks[part]
+            for part in env.split(calkit.environments.COMPOSITE_ENV_SEP)
+            if part in switch_picks
+        }
+        for n, env in stage_envs.items()
+    }
     if skipped_stale:
         run_info["gated"] = skipped_stale
     if switch_picks:
         run_info["switches"] = switch_picks
-        run_stages = ck_info.get("pipeline", {}).get("stages", {})
         for stage_name, info in stage_run_info.items():
-            stage_env = run_stages.get(stage_name.split("@")[0], {}).get(
-                "environment", ""
-            )
-            picks = {
-                n: switch_picks[n]
-                for n in str(stage_env).split(
-                    calkit.environments.COMPOSITE_ENV_SEP
-                )
-                if n in switch_picks
-            }
-            if picks:
-                info["switches"] = picks
+            if stage_switch_picks[stage_name]:
+                info["switches"] = stage_switch_picks[stage_name]
     run_info_fname = run_fname_prefix + ".json"
     local_runs_dir = os.path.join(calkit.ensure_local_dir(), "runs")
     local_run_info_fpath = os.path.join(local_runs_dir, run_info_fname)
@@ -3536,6 +3539,79 @@ def run(
         # Also keep the raw log in the tracked .calkit/logs directory
         saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
         shutil.copy2(log_fpath, saved_log_fpath)
+    # Record how each stage's outputs were made, kept with the project. Only
+    # a completed stage replaces its entry: a skipped one still has the
+    # outputs its entry describes, and a failed one left dvc.lock as it was.
+    ran = [
+        n
+        for n, info in stage_run_info.items()
+        if info.get("status") == "completed"
+    ]
+    if ran and not dry:
+        try:
+            with open(STAGE_RUNS_FPATH) as f:
+                stage_runs = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            stage_runs = {}
+        # By machine env, where None is this machine; a remote machine's
+        # properties were already read once this run
+        machine_info: dict[str, dict | None] = {}
+        for stage_name in ran:
+            env_name = stage_envs[stage_name]
+            picks = stage_switch_picks[stage_name]
+            entry: dict[str, Any] = {
+                "start_time": stage_run_info[stage_name].get("start_time"),
+                "end_time": stage_run_info[stage_name].get("end_time"),
+            }
+            if picks:
+                entry["environment"] = {
+                    "name": env_name,
+                    "switch": picks.get(env_name, picks),
+                }
+            elif env_name:
+                entry["environment"] = env_name
+            entry["calkit_version"] = system_info.get("calkit_version")
+            if system_info.get("calkit_git_rev"):
+                entry["calkit_git_rev"] = system_info["calkit_git_rev"]
+            # The machine is the outer env's, as picked
+            outer = env_name.split(calkit.environments.COMPOSITE_ENV_SEP)[0]
+            outer = switch_picks.get(outer) or outer
+            if outer not in machine_info:
+                outer_env = calkit.environments.get_env(outer, run_envs) or {}
+                try:
+                    machine_info[outer] = (
+                        calkit.environments.picked_machine_info(
+                            outer,
+                            outer_env,
+                            ck_info,
+                            lock=outer_env.get("lock"),
+                        )
+                    )
+                except Exception as e:
+                    warn(
+                        "Couldn't read the properties of the machine "
+                        f"'{outer}' to record them: {e}"
+                    )
+                    machine_info[outer] = {}
+            props = machine_info[outer]
+            if props is None:
+                props = system_info
+            if props:
+                entry["system"] = {
+                    k: props.get(k) for k in STAGE_RUN_SYSTEM_PROPERTIES
+                }
+                if isinstance(props.get("memory_gb"), (int, float)):
+                    entry["system"]["memory_gb"] = round(props["memory_gb"], 1)
+            stage_runs[stage_name] = entry
+        # Sorted so runs on different machines merge cleanly
+        with open(STAGE_RUNS_FPATH, "w") as f:
+            json.dump(dict(sorted(stage_runs.items())), f, indent=2)
+            f.write("\n")
+        if calkit.dvc.autostage_enabled():
+            try:
+                calkit.git.get_repo().git.add("--", STAGE_RUNS_FPATH)
+            except Exception as e:
+                warn(f"Couldn't stage {STAGE_RUNS_FPATH}: {e}")
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)

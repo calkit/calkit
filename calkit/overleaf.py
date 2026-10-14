@@ -6,11 +6,12 @@ import shutil
 import subprocess
 import tempfile
 import warnings
+from contextlib import contextmanager
 from copy import deepcopy
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 import git
 
@@ -71,6 +72,32 @@ def clone(project_id: str, token: str) -> git.Repo:
     )
     _disable_credential_store(repo)
     return repo
+
+
+@contextmanager
+def lock(
+    project_id: str, print_info: Callable[[str], None] = print
+) -> Iterator[None]:
+    """Hold an exclusive lock on the local clone of an Overleaf project.
+
+    Syncs reset the clone and copy files into it, so two at once could wipe
+    each other's files or record Overleaf edits as synced without pulling
+    them. The OS releases the lock if its process dies, so it can't go stale.
+    """
+    from filelock import FileLock, Timeout
+
+    lock_path = get_project_dir(project_id) + ".lock"
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    file_lock = FileLock(lock_path)
+    try:
+        file_lock.acquire(timeout=0)
+    except Timeout:
+        print_info("Waiting for another Overleaf sync of this project")
+        file_lock.acquire()
+    try:
+        yield
+    finally:
+        file_lock.release()
 
 
 def get_repo(project_id: str, token: str) -> git.Repo:

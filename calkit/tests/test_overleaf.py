@@ -194,3 +194,20 @@ def test_pull(tmp_dir):
     msg = str(e.value)
     assert "127.0.0.1" in msg
     assert "secret" not in msg
+
+
+def test_lock(tmp_dir):
+    from filelock import FileLock, Timeout
+
+    lock_path = calkit.overleaf.get_project_dir("abc123") + ".lock"
+    # Another process can't take the lock while a sync holds it
+    with calkit.overleaf.lock("abc123"):
+        with pytest.raises(Timeout):
+            FileLock(lock_path).acquire(timeout=0)
+    # It's released afterwards, even if the sync fails
+    with pytest.raises(RuntimeError):
+        with calkit.overleaf.lock("abc123"):
+            raise RuntimeError("Sync failed")
+    other = FileLock(lock_path)
+    other.acquire(timeout=0)
+    other.release()

@@ -605,45 +605,47 @@ def sync(
                     "Commit or stash them before syncing with Overleaf, "
                     "or use --auto-commit/-a to automatically commit them."
                 )
-        # Ensure we've cloned the Overleaf project
-        overleaf_repo = calkit.overleaf.get_repo(
-            overleaf_project_id, str(overleaf_token)
-        )
-        # Pull the latest version in the Overleaf project
-        typer.echo("Pulling the latest version from Overleaf")
-        try:
-            calkit.overleaf.pull(overleaf_repo)
-        except Exception as e:
-            raise_error(str(e))
-        if resolve:
-            last_sync_commit = resolving_info["last_overleaf_commit"]
-        else:
-            last_sync_commit = sync_data.get("last_sync_commit")
-        commits_since = calkit.overleaf.get_commits_since_last_sync(
-            overleaf_repo=overleaf_repo,
-            last_sync_commit=last_sync_commit,
-        )
-        if commits_since:
-            typer.echo(
-                f"There have been {len(commits_since)} changes on "
-                "Overleaf since last sync"
+        # Keep other processes from using the clone until we're done
+        with calkit.overleaf.lock(overleaf_project_id, typer.echo):
+            # Ensure we've cloned the Overleaf project
+            overleaf_repo = calkit.overleaf.get_repo(
+                overleaf_project_id, str(overleaf_token)
             )
-        try:
-            results[synced_folder] = calkit.overleaf.sync(
-                main_repo=repo,
+            # Pull the latest version in the Overleaf project
+            typer.echo("Pulling the latest version from Overleaf")
+            try:
+                calkit.overleaf.pull(overleaf_repo)
+            except Exception as e:
+                raise_error(str(e))
+            if resolve:
+                last_sync_commit = resolving_info["last_overleaf_commit"]
+            else:
+                last_sync_commit = sync_data.get("last_sync_commit")
+            commits_since = calkit.overleaf.get_commits_since_last_sync(
                 overleaf_repo=overleaf_repo,
-                path_in_project=synced_folder,
-                sync_info_for_path=sync_data,
                 last_sync_commit=last_sync_commit,
-                no_commit=no_commit,
-                verbose=verbose,
-                resolving_conflict=resolve,
-                print_info=typer.echo,
-                push_only=push_only,
-                force=force,
             )
-        except Exception as e:
-            raise_error(str(e))
+            if commits_since:
+                typer.echo(
+                    f"There have been {len(commits_since)} changes on "
+                    "Overleaf since last sync"
+                )
+            try:
+                results[synced_folder] = calkit.overleaf.sync(
+                    main_repo=repo,
+                    overleaf_repo=overleaf_repo,
+                    path_in_project=synced_folder,
+                    sync_info_for_path=sync_data,
+                    last_sync_commit=last_sync_commit,
+                    no_commit=no_commit,
+                    verbose=verbose,
+                    resolving_conflict=resolve,
+                    print_info=typer.echo,
+                    push_only=push_only,
+                    force=force,
+                )
+            except Exception as e:
+                raise_error(str(e))
     if results and not no_push and not no_commit:
         if not repo.remotes:
             raise_error("Project has no Git remotes defined")
@@ -729,58 +731,60 @@ def get_status(
             f"Overleaf project ID {overleaf_project_id}"
         )
         wdir = path_in_project
-        # Ensure we've cloned the Overleaf project
-        overleaf_project_dir = calkit.overleaf.get_project_dir(
-            overleaf_project_id
-        )
-        overleaf_repo = calkit.overleaf.get_repo(
-            overleaf_project_id, str(overleaf_token)
-        )
-        # Pull the latest version in the Overleaf project
-        typer.echo("Pulling the latest version from Overleaf")
-        try:
-            calkit.overleaf.pull(overleaf_repo)
-        except Exception as e:
-            raise_error(str(e))
-        last_sync_commit = sync_data.get("last_sync_commit")
-        if last_sync_commit:
-            commits_since = calkit.overleaf.get_commits_since_last_sync(
+        # Keep other processes from using the clone until we're done
+        with calkit.overleaf.lock(overleaf_project_id, typer.echo):
+            # Ensure we've cloned the Overleaf project
+            overleaf_project_dir = calkit.overleaf.get_project_dir(
+                overleaf_project_id
+            )
+            overleaf_repo = calkit.overleaf.get_repo(
+                overleaf_project_id, str(overleaf_token)
+            )
+            # Pull the latest version in the Overleaf project
+            typer.echo("Pulling the latest version from Overleaf")
+            try:
+                calkit.overleaf.pull(overleaf_repo)
+            except Exception as e:
+                raise_error(str(e))
+            last_sync_commit = sync_data.get("last_sync_commit")
+            if last_sync_commit:
+                commits_since = calkit.overleaf.get_commits_since_last_sync(
+                    overleaf_repo=overleaf_repo,
+                    last_sync_commit=last_sync_commit,
+                )
+                typer.echo(
+                    f"There have been {len(commits_since)} changes on "
+                    "Overleaf since last sync"
+                )
+            # Determine which paths to use for computing diff
+            path_info = calkit.overleaf.OverleafSyncPaths(
+                main_repo=calkit.git.get_repo(),
                 overleaf_repo=overleaf_repo,
-                last_sync_commit=last_sync_commit,
+                path_in_project=path_in_project,
+                sync_info_for_path=sync_data,
             )
-            typer.echo(
-                f"There have been {len(commits_since)} changes on "
-                "Overleaf since last sync"
+            status = compare_folders_recursively(
+                wdir,
+                overleaf_project_dir,
+                paths=path_info.all_synced_files,
             )
-        # Determine which paths to use for computing diff
-        path_info = calkit.overleaf.OverleafSyncPaths(
-            main_repo=calkit.git.get_repo(),
-            overleaf_repo=overleaf_repo,
-            path_in_project=path_in_project,
-            sync_info_for_path=sync_data,
-        )
-        status = compare_folders_recursively(
-            wdir,
-            overleaf_project_dir,
-            paths=path_info.all_synced_files,
-        )
 
-        def print_path(p, fg_color=None):
-            txt = f"    {os.path.join(wdir, p)}"
-            typer.echo(typer.style(txt, fg=fg_color))
+            def print_path(p, fg_color=None):
+                txt = f"    {os.path.join(wdir, p)}"
+                typer.echo(typer.style(txt, fg=fg_color))
 
-        if status["left_only"]:
-            typer.echo("Files only in Calkit project:")
-            for p in status["left_only"]:
-                print_path(p, "green")
-        if status["right_only"]:
-            typer.echo("Files only in Overleaf project:")
-            for p in status["right_only"]:
-                print_path(p, "yellow")
-        if status["diff_files"]:
-            typer.echo("Changed files:")
-            for p in status["diff_files"]:
-                print_path(p, "red")
+            if status["left_only"]:
+                typer.echo("Files only in Calkit project:")
+                for p in status["left_only"]:
+                    print_path(p, "green")
+            if status["right_only"]:
+                typer.echo("Files only in Overleaf project:")
+                for p in status["right_only"]:
+                    print_path(p, "yellow")
+            if status["diff_files"]:
+                typer.echo("Changed files:")
+                for p in status["diff_files"]:
+                    print_path(p, "red")
 
 
 def _prepare_to_sync(

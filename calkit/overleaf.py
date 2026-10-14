@@ -82,9 +82,13 @@ def get_repo(project_id: str, token: str) -> git.Repo:
     the OS credential store is never used.
     """
     dest = get_project_dir(project_id)
+    # Re-clone a cache missing its own .git, since opening it would find the
+    # main project repo in a parent directory instead
+    if os.path.isdir(dest) and not os.path.exists(os.path.join(dest, ".git")):
+        shutil.rmtree(dest)
     if not os.path.isdir(dest):
         return clone(project_id, token)
-    repo = calkit.git.get_repo(dest)
+    repo = git.Repo(dest)
     repo.git.remote(
         "set-url",
         "origin",

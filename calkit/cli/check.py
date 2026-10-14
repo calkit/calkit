@@ -20,13 +20,13 @@ from calkit.cli import AliasGroup, raise_error, warn
 from calkit.core import get_md5
 
 
-def stage_env_locks(*args: object, **kwargs: object) -> None:
-    """Stage the env locks a check wrote, which stages depend on."""
-    calkit.environments.stage_env_locks()
+def stage_calkit_files(*args: object, **kwargs: object) -> None:
+    """Stage what a check wrote, which stages depend on."""
+    calkit.environments.stage_calkit_files()
 
 
 check_app = typer.Typer(
-    cls=AliasGroup, no_args_is_help=True, result_callback=stage_env_locks
+    cls=AliasGroup, no_args_is_help=True, result_callback=stage_calkit_files
 )
 
 

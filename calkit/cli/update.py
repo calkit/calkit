@@ -1151,7 +1151,7 @@ def update_environment(
             )
         except ValueError as e:
             raise_error(f"Environment '{env_name}': {e}")
-        calkit.environments.stage_env_locks()
+        calkit.environments.stage_calkit_files()
         after = calkit.environments.read_system_env_lock(
             env_name=env_name, env=env
         )

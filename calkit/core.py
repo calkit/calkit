@@ -328,6 +328,8 @@ DVC_EXTENSIONS = [
     ".zarr",
 ]
 DVC_SIZE_THRESH_BYTES = 5_000_000
+# How each stage's current outputs were made, kept with the project
+STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
 
 
 def check_or_x(val: bool | int) -> str:

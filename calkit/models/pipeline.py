@@ -568,30 +568,41 @@ class Stage(Model):
         return posixpath.join(".calkit", "env-vars", f"{self.file_stem}.json")
 
     def write_env_var_file(
-        self, values: dict[str, str | None], wdir: str | None = None
+        self,
+        values: dict[str, str | None],
+        wdir: str | None = None,
+        keep_unset: bool = False,
     ) -> str | None:
-        """Write hashes of the env vars this stage depends on."""
+        """Write hashes of the env vars this stage depends on.
+
+        With ``keep_unset``, one with no value here keeps the hash already
+        recorded.
+        """
         import hashlib
         import json
 
         rel_path = self.env_var_file_path
         if rel_path is None:
             return None
+        fpath = os.path.join(wdir, rel_path) if wdir else rel_path
+        try:
+            with open(fpath) as f:
+                existing = f.read()
+            recorded = json.loads(existing)
+        except (OSError, ValueError):
+            existing, recorded = None, {}
         hashes = {
             name: (
-                None
+                (recorded.get(name) if keep_unset else None)
                 if values.get(name) is None
                 else hashlib.sha256(str(values[name]).encode()).hexdigest()
             )
             for name in self._env_var_names
         }
-        fpath = os.path.join(wdir, rel_path) if wdir else rel_path
         os.makedirs(os.path.dirname(fpath), exist_ok=True)
         content = json.dumps(hashes, indent=2, sort_keys=True) + "\n"
-        if os.path.isfile(fpath):
-            with open(fpath) as f:
-                if f.read() == content:
-                    return rel_path
+        if existing == content:
+            return rel_path
         with open(fpath, "w", newline="\n") as f:
             f.write(content)
         return rel_path

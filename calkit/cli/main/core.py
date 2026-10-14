@@ -32,6 +32,7 @@ from calkit import (
     AUTO_IGNORE_SUFFIXES,
     DVC_EXTENSIONS,
     DVC_SIZE_THRESH_BYTES,
+    STAGE_RUNS_FPATH,
 )
 from calkit.cli import (
     AliasGroup,
@@ -2153,8 +2154,6 @@ def run_local_server() -> None:
 # one in user scripts), so it's bracketed by these and skipped when parsing.
 STAGE_OUTPUT_START = "--- calkit stage output ---"
 STAGE_OUTPUT_END = "--- end calkit stage output ---"
-# How each stage's current outputs were made, kept with the project
-STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
 # The machine properties recorded for each stage run
 STAGE_RUN_SYSTEM_PROPERTIES = (
     "machine_id",
@@ -3128,7 +3127,9 @@ def run(
         if not quiet:
             calkit.echo("🔀 Compiling DVC pipeline")
         try:
-            dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+            dvc_stages = calkit.pipeline.to_dvc(
+                ck_info=ck_info, write=True, for_run=True
+            )
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
@@ -3673,15 +3674,10 @@ def run(
         with open(STAGE_RUNS_FPATH, "w") as f:
             json.dump(dict(sorted(stage_runs.items())), f, indent=2)
             f.write("\n")
-        if calkit.dvc.autostage_enabled():
-            try:
-                calkit.git.get_repo().git.add("--", STAGE_RUNS_FPATH)
-            except Exception as e:
-                warn(f"Couldn't stage {STAGE_RUNS_FPATH}: {e}")
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-    calkit.environments.stage_env_locks()
+    calkit.environments.stage_calkit_files()
     if failed:
         try:
             calkit.dvc.restore_output_ignores()

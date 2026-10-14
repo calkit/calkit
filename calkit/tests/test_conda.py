@@ -333,11 +333,20 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     failing: set[str] = set()
     failing_pinned: set[str] = set()
 
+    slow: set[str] = set()
+
     def fake_run(
-        cmd: list[str], capture_output: bool, text: bool, env: dict
+        cmd: list[str],
+        capture_output: bool,
+        text: bool,
+        env: dict,
+        timeout: float,
     ) -> types.SimpleNamespace:
         arch = env["CONDA_SUBDIR"]
         solves[arch] = (cmd, env)
+        assert 0 < timeout <= calkit.conda.CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS
+        if arch in slow:
+            raise subprocess.TimeoutExpired(cmd, timeout)
         if arch in failing or (
             arch in failing_pinned and "CONDA_PINNED_PACKAGES" in env
         ):
@@ -356,6 +365,7 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
         target: str,
         python: str | None,
         constraints: list[str] | None = None,
+        timeout: float | None = None,
     ) -> list[str]:
         compiles.append((pip_deps, constraints))
         return ["iniconfig==2.1.0", "NumPy==2.3.0"]
@@ -440,6 +450,13 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     assert locks() == [osx, win]
     assert "CONDA_PINNED_PACKAGES" not in solves["win-64"][1]
     failing_pinned.clear()
+    # Platforms aren't solved past the time allowed, and a slow one isn't
+    # retried
+    slow.add("osx-arm64")
+    solves.clear()
+    assert locks() == []
+    assert list(solves) == ["osx-arm64"]
+    slow.clear()
     # Relocking removes a lock that can't be solved again, since it's stale,
     # but otherwise a missing one is left for its own machine
     failing.add("win-64")

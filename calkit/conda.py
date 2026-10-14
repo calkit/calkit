@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import Callable, cast
@@ -165,6 +166,9 @@ _VIRTUAL_PACKAGE_OVERRIDES = {
     "linux": ("CONDA_OVERRIDE_GLIBC", "2.28"),
     "osx": ("CONDA_OVERRIDE_OSX", "11.0"),
 }
+# How long locking every other platform may take in all, since it happens
+# during an env check and a solve can take minutes
+CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS = 600
 
 
 def _pkg_name_from_dep(dep: str) -> str:
@@ -1014,7 +1018,9 @@ def write_cross_platform_locks(
     platform's lock where the platform has them, so results agree across
     machines; otherwise only the spec's direct dependencies are. A platform
     that can't be solved, e.g., with no network, or whose pip dependencies
-    name local paths, is left for a machine of that kind to lock.
+    name local paths, is left for a machine of that kind to lock, as is
+    one not solved within ``CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS`` of
+    starting.
 
     Returns the paths written.
     """
@@ -1025,9 +1031,15 @@ def write_cross_platform_locks(
     )
 
     log = log_func or calkit.logger.info
+    deadline = time.monotonic() + CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS
+    # Not retried, since a retry would only time out too
+    timed_out = False
 
     def solve(arch: str, pins: list[str]) -> list | None:
         """Solve the conda part for a platform, or None if that fails."""
+        nonlocal timed_out
+        if timed_out:
+            return None
         cmd = [conda_exe, "create", "--dry-run", "--json", "-n", "calkit-lock"]
         if channels:
             cmd.append("--override-channels")
@@ -1045,10 +1057,21 @@ def write_cross_platform_locks(
             solve_env = {var: vers} | solve_env
         try:
             out = subprocess.run(
-                cmd, capture_output=True, text=True, env=solve_env
+                cmd,
+                capture_output=True,
+                text=True,
+                env=solve_env,
+                timeout=max(deadline - time.monotonic(), 0),
             )
             links: list = json.loads(out.stdout)["actions"]["LINK"]
             return links
+        except subprocess.TimeoutExpired:
+            log(
+                f"Stopped locking {env_fpath} for other platforms after "
+                f"{CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS} seconds"
+            )
+            timed_out = True
+            return None
         except (OSError, ValueError, KeyError, TypeError) as e:
             log(f"Could not solve {env_fpath} for {arch}: {e}")
             return None
@@ -1147,10 +1170,19 @@ def write_cross_platform_locks(
             )
             target = UV_PLATFORM_TARGETS[arch]
             pinned_pip = _compile_pip_deps(
-                pinned_pip_deps, target, python, constraints=pip_pins
+                pinned_pip_deps,
+                target,
+                python,
+                constraints=pip_pins,
+                timeout=max(deadline - time.monotonic(), 0),
             )
             if pinned_pip is None:
-                pinned_pip = _compile_pip_deps(pinned_pip_deps, target, python)
+                pinned_pip = _compile_pip_deps(
+                    pinned_pip_deps,
+                    target,
+                    python,
+                    timeout=max(deadline - time.monotonic(), 0),
+                )
             if pinned_pip is None:
                 log(f"Could not pin pip dependencies for {arch}")
                 links = None
@@ -1193,6 +1225,7 @@ def _compile_pip_deps(
     target: str,
     python: str | None,
     constraints: list[str] | None = None,
+    timeout: float | None = None,
 ) -> list[str] | None:
     """Pin pip dependencies for another platform, or None if that fails."""
     import tempfile
@@ -1219,8 +1252,14 @@ def _compile_pip_deps(
                 f.write("\n".join(constraints) + "\n")
             cmd += ["-c", constraints_fpath]
         try:
-            out = subprocess.check_output(cmd + [reqs], text=True)
-        except (subprocess.CalledProcessError, OSError):
+            out = subprocess.check_output(
+                cmd + [reqs], text=True, timeout=timeout
+            )
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            OSError,
+        ):
             return None
     return [
         line.strip()

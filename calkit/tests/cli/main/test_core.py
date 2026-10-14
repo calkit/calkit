@@ -3376,6 +3376,11 @@ def test_run_switch_env(tmp_dir):
         "name": "cluster",
         "switch": "here",
     }
+    # The command file it runs from is committed, so it's staged
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).splitlines()
+    assert ".calkit/stage-commands/s.sh" in staged
     out = subprocess.check_output(["calkit", "status"], env=env, text=True)
     assert "Environment 'cluster' picks 'here' here" in out
     # Moving to the cluster doesn't make the stage stale, since it doesn't
@@ -3608,6 +3613,16 @@ def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
     subprocess.check_call(["calkit", "run"], env=env)
     with open("out.txt") as f:
         assert f.read().strip() == "b"
+    # A process without the value, e.g., an editor's, doesn't make it stale,
+    # but a run without it does
+    unset = {k: v for k, v in env.items() if k != "CK_TEST_MODE"}
+    out = subprocess.check_output(["calkit", "status"], env=unset, text=True)
+    assert "Pipeline is up to date" in out
+    # The stage itself fails without it
+    subprocess.run(["calkit", "run"], env=unset, capture_output=True)
+    with open(os.path.join(".calkit", "env-vars", "s.json")) as f:
+        assert json.load(f)["CK_TEST_MODE"] is None
+    subprocess.check_call(["calkit", "run"], env=env)
     env["CK_TEST_SITE"] = "y"
     out = subprocess.check_output(["calkit", "status"], env=env, text=True)
     assert "Stale stages" in out

@@ -449,11 +449,22 @@ def get_env_lock_dir(wdir: str | None = None) -> str:
     return env_lock_dir
 
 
-def stage_env_locks(wdir: str | None = None) -> None:
-    """Stage the env lock files Calkit has written, when autostaging.
+# What Calkit writes for the project that's meant to be committed, beside
+# what DVC stages itself
+STAGED_CALKIT_PATHS = [
+    os.path.join(".calkit", "env-locks"),
+    ENV_SPEC_HASHES_FPATH,
+    os.path.join(".calkit", "stage-commands"),
+    calkit.STAGE_RUNS_FPATH,
+]
 
-    DVC stages ``dvc.lock``, which records the locks' hashes, so a commit of
-    it without them leaves a clone without the locks its stages depend on.
+
+def stage_calkit_files(wdir: str | None = None) -> None:
+    """Stage what Calkit has written to be committed, when autostaging.
+
+    DVC stages ``dvc.lock``, which records hashes of, e.g., env locks and
+    stage command files, so a commit of it without them leaves a clone
+    without what its stages depend on.
     """
     import calkit.dvc
     import calkit.git
@@ -463,10 +474,7 @@ def stage_env_locks(wdir: str | None = None) -> None:
         return
     paths = [
         os.path.abspath(p)
-        for p in [
-            get_env_lock_dir(wdir),
-            os.path.join(wdir or "", ENV_SPEC_HASHES_FPATH),
-        ]
+        for p in [os.path.join(wdir or "", p) for p in STAGED_CALKIT_PATHS]
         if os.path.exists(p)
     ]
     if not paths:
@@ -474,7 +482,7 @@ def stage_env_locks(wdir: str | None = None) -> None:
     try:
         calkit.git.get_repo(wdir).git.add("-A", "--", *paths)
     except Exception as e:
-        warn(f"Couldn't stage the environment lock files: {e}")
+        warn(f"Couldn't stage the files Calkit wrote: {e}")
 
 
 def _conda_venv_platform() -> str:

@@ -2223,6 +2223,7 @@ def to_dvc(
     write: bool = False,
     verbose: bool = False,
     manage_gitignore: bool = True,
+    for_run: bool = False,
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline.
 
@@ -2233,6 +2234,10 @@ def to_dvc(
     Returns a dictionary of DVC stages for the `stages` key of a dvc.yaml.
     Returns ``{}`` when the project has no pipeline and no subprojects (e.g.
     a subproject that is a library with no defined pipeline stages).
+
+    ``for_run`` is for compiling where the stages will run, which is the
+    only place an env var a stage depends on is recorded as unset, since
+    elsewhere, e.g., an editor's process, it may just not be set.
     """
     import calkit.dvc.zip
     import calkit.markdown
@@ -2336,6 +2341,7 @@ def to_dvc(
             write=write,
             verbose=verbose,
             manage_gitignore=manage_gitignore,
+            for_run=for_run,
         )
         if not sp_is_isolated:
             continue
@@ -2568,6 +2574,7 @@ def to_dvc(
                         for name in stage._env_var_names
                     },
                     wdir=wdir,
+                    keep_unset=not for_run,
                 )
             )
             is not None

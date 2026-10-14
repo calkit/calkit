@@ -23,16 +23,12 @@ from calkit.core import DVC_EXTENSIONS, DVC_SIZE_THRESH_BYTES
 
 
 def _unstage_record(paths: list[str]) -> None:
-    """Unstage what recorded a run, with the env locks the run stages."""
+    """Unstage what recorded a run, with what the run staged itself."""
     import git
 
     paths = [
         os.path.abspath(p)
-        for p in [
-            *paths,
-            calkit.environments.get_env_lock_dir(),
-            calkit.environments.ENV_SPEC_HASHES_FPATH,
-        ]
+        for p in [*paths, *calkit.environments.STAGED_CALKIT_PATHS]
     ]
     try:
         repo = git.Repo(search_parent_directories=True)

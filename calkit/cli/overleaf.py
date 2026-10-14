@@ -744,6 +744,7 @@ def get_status(
                 raise_error(f"Path '{path}' is not synced with Overleaf")
     # First check our config for an Overleaf token
     overleaf_token = _get_overleaf_token()
+    first = True
     for path_in_project, sync_data in overleaf_info.items():
         if paths is not None and path_in_project not in paths:
             continue
@@ -753,6 +754,10 @@ def get_status(
                 "No Overleaf project ID defined for this folder; "
                 "please set it in the project's Overleaf config"
             )
+        # Separate each folder's status from the one before
+        if not first:
+            typer.echo()
+        first = False
         typer.echo(
             f"Getting status of {path_in_project} with "
             f"Overleaf project ID {overleaf_project_id}"

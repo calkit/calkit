@@ -6913,14 +6913,32 @@ async def post_project_overleaf_publication(
             users.get_overleaf_token(session=session, user=current_user)
         except HTTPException:
             raise HTTPException(400, "No Overleaf token found")
+        # Only reads follow the listing, which a concurrent pull to the same
+        # commit leaves intact, so the lock needn't be held past it
         try:
-            overleaf_repo = get_overleaf_repo(
+            with get_overleaf_repo(
                 project=project,
                 user=current_user,
                 session=session,
                 overleaf_project_id=overleaf_project_id,
-            )
-        except GitCommandError as e:
+            ) as overleaf_repo:
+                overleaf_abs_path = str(overleaf_repo.working_dir)
+                for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
+                    dirnames[:] = [d for d in dirnames if d != ".git"]
+                    for fname in filenames:
+                        incoming_files.append(
+                            Path(
+                                os.path.relpath(
+                                    os.path.join(dirpath, fname),
+                                    overleaf_abs_path,
+                                )
+                            ).as_posix()
+                        )
+        except (
+            GitCommandError,
+            RuntimeError,
+            subprocess.CalledProcessError,
+        ) as e:
             logger.error(f"Failed to clone Overleaf repo: {e}")
             raise HTTPException(
                 400,
@@ -6929,17 +6947,6 @@ async def post_project_overleaf_publication(
                     "and that Git integration is enabled on Overleaf"
                 ),
             )
-        overleaf_abs_path = str(overleaf_repo.working_dir)
-        for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
-            dirnames[:] = [d for d in dirnames if d != ".git"]
-            for fname in filenames:
-                incoming_files.append(
-                    Path(
-                        os.path.relpath(
-                            os.path.join(dirpath, fname), overleaf_abs_path
-                        )
-                    ).as_posix()
-                )
     if replacing:
         # A reference file the Overleaf project also carries stays
         # declared; the rest go with the folder
@@ -7209,21 +7216,23 @@ def post_project_overleaf_sync(
     if path_in_project not in overleaf_sync_info:
         raise HTTPException(404, "Overleaf sync info not found for path")
     overleaf_project_id = overleaf_sync_info[path_in_project]["project_id"]
-    overleaf_repo = get_overleaf_repo(
-        project=project,
-        user=current_user,
-        session=session,
-        overleaf_project_id=overleaf_project_id,
-    )
     try:
-        res = calkit.overleaf.sync(
-            main_repo=repo,
-            overleaf_repo=overleaf_repo,
-            path_in_project=path_in_project,
-            sync_info_for_path=overleaf_sync_info[path_in_project],
-            print_info=logger.info,
-            no_commit=False,
-        )
+        with get_overleaf_repo(
+            project=project,
+            user=current_user,
+            session=session,
+            overleaf_project_id=overleaf_project_id,
+        ) as overleaf_repo:
+            res = calkit.overleaf.sync(
+                main_repo=repo,
+                overleaf_repo=overleaf_repo,
+                path_in_project=path_in_project,
+                sync_info_for_path=overleaf_sync_info[path_in_project],
+                print_info=logger.info,
+                no_commit=False,
+            )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.info(f"Failed to sync: {e}")
         if "in the middle of an am session" in repo.git.status():
@@ -7381,19 +7390,19 @@ def get_project_overleaf_sync_status(
         if not this_overleaf_project_id:
             logger.info(f"No Overleaf project ID for '{path_in_project}'")
             continue
-        overleaf_repo = get_overleaf_repo(
+        with get_overleaf_repo(
             project=project,
             user=current_user,
             session=session,
             overleaf_project_id=this_overleaf_project_id,
-        )
-        status = calkit.overleaf.get_sync_status(
-            main_repo=repo,
-            overleaf_repo=overleaf_repo,
-            path_in_project=path_in_project,
-            sync_info_for_path=sync_info_for_path,
-            ck_info=ck_info,
-        )
+        ) as overleaf_repo:
+            status = calkit.overleaf.get_sync_status(
+                main_repo=repo,
+                overleaf_repo=overleaf_repo,
+                path_in_project=path_in_project,
+                sync_info_for_path=sync_info_for_path,
+                ck_info=ck_info,
+            )
         resp.append(
             OverleafSyncStatus(
                 path=status["path_in_project"],

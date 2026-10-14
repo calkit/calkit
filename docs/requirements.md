@@ -197,7 +197,9 @@ after it.
 It stays out of date in `calkit status`, which says why it can't run
 there, and the run ends by listing the out-of-date stages it skipped.
 Requirements of an environment on another machine, e.g., a `system`
-environment with a `host`, are checked on that machine.
+environment with a `host`, are checked on that machine by `calkit run`.
+`calkit status` doesn't connect to other machines,
+so it doesn't check those.
 
 Some skips still fail the run, after the stages that can run have run:
 

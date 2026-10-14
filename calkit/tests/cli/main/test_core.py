@@ -3478,6 +3478,15 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
     out = subprocess.check_output(["calkit", "status"], env=env, text=True)
     assert "fetch" in out
     assert "can't run on this machine" in out
+    # A variable calkit.yaml sets counts for status, as it does for run
+    with open("calkit.yaml") as f:
+        ck_yaml = f.read()
+    with open("calkit.yaml", "a") as f:
+        f.write("env_vars:\n  CK_TEST_TOKEN: from-yaml\n")
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "can't run on this machine" not in out
+    with open("calkit.yaml", "w") as f:
+        f.write(ck_yaml)
     # Asking for it by name and not getting it is a failure
     res = subprocess.run(
         ["calkit", "run", "fetch"], env=env, capture_output=True, text=True

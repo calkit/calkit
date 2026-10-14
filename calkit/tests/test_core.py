@@ -291,6 +291,10 @@ def test_check_app_version():
     assert extract_version("Python 3.12.10rc1") == "3.12.10"
     assert extract_version("Python 3.12.10rc1", full=True) == "3.12.10rc1"
     assert extract_version("10") == "10"
+    # A dotted number can follow letters, and the first one is the tool's
+    assert extract_version("go version go1.22.0 linux/amd64") == "1.22.0"
+    assert extract_version("OpenSSH_9.6p1, LibreSSL 3.3.6") == "9.6"
+    assert extract_version("ffmpeg version n6.1.1") == "6.1.1"
     # Requirements compare the number, so nvcc's isn't its copyright year
     with pytest.raises(ValueError, match="but '>=13' is required"):
         check_app_version("nvcc", ">=13", system_info={"nvcc_version": nvcc})

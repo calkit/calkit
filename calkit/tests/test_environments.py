@@ -156,6 +156,14 @@ def test_check_all_in_pipeline(tmp_dir):
         "echo",
         "hi",
     ]
+    # The inner env a job runs in is read from its command
+    for argv, name in [
+        (["--", "calkit", "xenv", "-n", "py", "--no-check", "--", "a"], "py"),
+        (["calkit", "xenv", "--name=py", "--", "-n", "x"], "py"),
+        (["calkit", "xenv", "--", "-n", "x"], None),
+        (["echo", "-n", "hi"], None),
+    ]:
+        assert calkit.environments.inner_env_name(argv) == name
 
 
 def test_cache_uses_dir_signature_for_conda_prefix(tmp_dir, monkeypatch):
@@ -1356,6 +1364,21 @@ def test_system_env_lock(tmp_dir):
     with mock.patch.object(calkit, "get_system_info", return_value={}):
         with pytest.raises(ValueError, match="not available on this machine"):
             envs.get_system_lock_data(["os"])
+    # Only the versions a lock names are read, since each is a subprocess
+    probed: list[str] = []
+
+    def fake_version(app: str) -> str:
+        probed.append(app)
+        return f"{app} 1.2.3"
+
+    with mock.patch.object(calkit.core, "get_dep_version", fake_version):
+        envs.get_system_lock_data(["cpu-count", "os-version"])
+        assert envs.gate_system_env_lock("zsh", shell_env) == {}
+        assert probed == []
+        assert envs.get_system_lock_data(
+            ["rscript-version", "git-version-minor"]
+        ) == {"rscript-version": "1.2.3", "git-version-minor": "1.2"}
+        assert sorted(probed) == ["Rscript", "git"]
 
 
 def test_host_is_local_by_address(monkeypatch):

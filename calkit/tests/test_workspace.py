@@ -1420,6 +1420,11 @@ def test_scheduler_dispatches_to_a_remote_host(tmp_dir, monkeypatch):
     monkeypatch.setattr(
         sched.calkit.environments, "host_is_local", lambda h: False
     )
+    monkeypatch.setattr(
+        sched.sys,
+        "argv",
+        ["calkit", "scheduler", "batch", "--name", "sim", "--", "./run.sh"],
+    )
     sched.run_batch(
         name="sim",
         target="./run.sh",

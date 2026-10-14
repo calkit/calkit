@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import functools
 import glob
 import hashlib
 import json
@@ -953,16 +954,18 @@ def extract_version(text: str, full: bool = False) -> str | None:
 
     Tools answer that question in their own way -- 'git version 2.39.5',
     'uv 0.4.18 (a1b2c3d)' -- so the number has to be found rather than
-    read off. It's the first dotted number that isn't part of a word, so a
-    year like nvcc's 'Copyright (c) 2005' or a name like 'x86_64' or
-    'gcc-13' isn't mistaken for it. A build hash that follows is not part
-    of what a specifier compares.
+    read off. It's the first dotted number not inside another number,
+    which may follow letters, e.g., 'go1.22.0' or 'OpenSSH_9.6p1'. Failing
+    that, it's a bare number that isn't part of a word, so a year like
+    nvcc's 'Copyright (c) 2005' or a name like 'x86_64' or 'gcc-13' isn't
+    mistaken for it. A build hash that follows is not part of what a
+    specifier compares.
 
     With ``full``, a suffix attached to the number is kept, e.g.,
     '3.12.10rc1' or '11.4.0-1ubuntu1~22.04'.
     """
     m = re.search(
-        r"(?<![\w.])v?(\d+(?:\.\d+)+)((?:[-+~.]?[0-9A-Za-z]+)*)", text or ""
+        r"(?<![\d.])v?(\d+(?:\.\d+)+)((?:[-+~.]?[0-9A-Za-z]+)*)", text or ""
     ) or re.search(r"(?<![\w.])v?(\d+)()(?![\w.])", text or "")
     if m is None:
         return None
@@ -1036,19 +1039,10 @@ def get_version_checked_app_names(
     from calkit.environments import (
         COMPOSITE_ENV_SEP,
         SWITCH_KIND,
-        env_is_local,
-        host_is_local,
+        runs_elsewhere,
     )
 
     envs = ck_info.get("environments") or {}
-
-    def is_remote(env: dict) -> bool:
-        if env.get("kind") == "system":
-            return not env_is_local({"host": "localhost", **env})
-        if env.get("kind") in ("slurm", "pbs"):
-            return not host_is_local(env.get("host") or "localhost")
-        return False
-
     reqs = list(get_requirements(ck_info))
     stages = (ck_info.get("pipeline") or {}).get("stages", {})
     for name, stage in stages.items():
@@ -1058,7 +1052,7 @@ def get_version_checked_app_names(
             COMPOSITE_ENV_SEP
         )
         stage_envs = [envs.get(n) or {} for n in env_names]
-        if any(is_remote(env) for env in stage_envs):
+        if any(runs_elsewhere(env) for env in stage_envs):
             continue
         # A switch may pick any of its options here that are local
         for env in list(stage_envs):
@@ -1072,7 +1066,7 @@ def get_version_checked_app_names(
                     for o in env.get("switch") or []
                     if isinstance(o, dict)
                 ]
-                stage_envs += [o for o in options if not is_remote(o)]
+                stage_envs += [o for o in options if not runs_elsewhere(o)]
         reqs += stage.get("requirements") or []
         for env in stage_envs:
             reqs += env.get("requirements") or []
@@ -1161,7 +1155,11 @@ def check_requirements(
         # system shells out for a version from every package manager it can
         # find, which is not a cost to pay for a project that has no
         # property requirements at all.
-        info = system_info if system_info is not None else get_system_info()
+        info = (
+            system_info
+            if system_info is not None
+            else get_machine_properties()
+        )
         for dep in buckets["_property"]:
             check_property_requirement(dep, info, described_as=described_as)
     for dep in buckets["env-var"]:
@@ -1577,7 +1575,9 @@ def _read_windows_machine_id() -> str | None:
     return str(value).strip() or None
 
 
+@functools.cache
 def _read_platform_machine_id() -> str | None:
+    # Cached, since it can take a subprocess and is read for every stage
     readers = {
         "Darwin": _read_darwin_machine_id,
         "Linux": _read_linux_machine_id,
@@ -1685,11 +1685,14 @@ ALWAYS_REPORTED_APPS = (
 )
 
 
-def get_system_info(apps: list[str] | None = None) -> dict:
+def get_system_info(
+    apps: list[str] | None = None, all_apps: bool = True
+) -> dict:
     """Get information about the system on which we're currently running.
 
     ``apps`` are reported with a version each, beyond the ones always
-    reported, e.g., the apps a project's requirements name.
+    reported, e.g., the apps a project's requirements name. Without
+    ``all_apps``, only ``apps`` are, since each costs a subprocess.
     """
     system_info = get_machine_properties()
     os_name = system_info["os"]
@@ -1708,18 +1711,15 @@ def get_system_info(apps: list[str] | None = None) -> dict:
         system_info["calkit_git_rev"] = repo.head.commit.hexsha
     except Exception:
         pass
-    # Get versions of important foundational dependencies
-    for dep in ALWAYS_REPORTED_APPS:
-        system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
-    # OS-specific app versions
-    if os_name == "Darwin":
-        for dep in ["brew", "port"]:
-            system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
-    elif os_name == "Linux":
-        for dep in ["apt", "yum"]:
-            system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
-    elif os_name == "Windows":
-        for dep in ["choco", "winget"]:
+    # Get versions of important foundational dependencies, and OS-specific
+    # package managers
+    os_apps = {
+        "Darwin": ["brew", "port"],
+        "Linux": ["apt", "yum"],
+        "Windows": ["choco", "winget"],
+    }.get(os_name, [])
+    for dep in [*ALWAYS_REPORTED_APPS, *os_apps]:
+        if all_apps or dep.lower() in [a.lower() for a in apps or []]:
             system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
     for app in apps or []:
         if f"{app.lower()}_version" not in system_info:

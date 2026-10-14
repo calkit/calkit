@@ -70,6 +70,15 @@ def test_check_venv(tmp_dir):
     with open("lock.txt") as f:
         lock_txt_3 = f.read()
     assert "polars==1.0.0" in lock_txt_3
+    # Removing one removes it from the lock, rather than the old lock or env
+    # bringing it back
+    with open("reqs.txt", "w") as f:
+        f.write("requests")
+    subprocess.check_call(
+        ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    )
+    with open("lock.txt") as f:
+        assert "polars" not in f.read()
     # Test that if we specify a different Python or otherwise fail with an
     # existing prefix, we can still build the environment since it will be
     # deleted and recreated
@@ -1457,6 +1466,32 @@ def test_check_switch_env(tmp_dir):
     )
     assert res.returncode == 0
     assert "picks no environment" in res.stdout + res.stderr
+    # Until a stage has run with a switch, every option's machine lock is
+    # part of its lock, even one written after compiling wrote the lock
+    envs = ck_info["environments"]
+    envs["a"] = {"kind": "system", "lock": ["os"]}
+    envs["b"] = {"kind": "system", "lock": ["machine"]}
+    envs["two"] = {
+        "kind": "switch",
+        "switch": [
+            {"when": [{"env_var_exists": "CK_TEST_NO_SUCH_VAR"}], "use": "b"},
+            {"use": "a"},
+        ],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    switch_lock = calkit.environments.write_switch_env_lock("two", envs)
+    calkit.environments.write_system_env_lock(env_name="a", env=envs["a"])
+    subprocess.check_call(["calkit", "check", "env", "-n", "two"])
+    with open(switch_lock) as f:
+        assert set(json.load(f)["machine_locks"]) == {"a"}
+    # After that, one first written is a machine taking up its option
+    with open("dvc.lock", "w") as f:
+        f.write(f"deps:\n- path: {switch_lock}\n")
+    calkit.environments.write_system_env_lock(env_name="b", env=envs["b"])
+    subprocess.check_call(["calkit", "check", "env", "-n", "two"])
+    with open(switch_lock) as f:
+        assert set(json.load(f)["machine_locks"]) == {"a"}
 
 
 def test_check_env_rebuilds(tmp_dir):

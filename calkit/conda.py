@@ -1114,7 +1114,13 @@ def write_cross_platform_locks(
         elif name not in local_pip_vers:
             pinned_pip_deps.append(dep)
         else:
-            pinned_pip_deps.append(f"{pkg}=={local_pip_vers[name]}")
+            # Keeping any environment marker, without which a dependency
+            # for some platforms is required on all of them
+            _, sep, marker = dep.partition(";")
+            pinned_pip_deps.append(
+                f"{pkg}=={local_pip_vers[name]}"
+                + (f"; {marker.strip()}" if sep else "")
+            )
     here_os = here.split("-")[0]
     for arch in CONDA_VENV_ARCHS:
         out_fpath = os.path.join(lock_dir, arch + ext)

@@ -22,6 +22,39 @@ from calkit.cli.main.core import (
 from calkit.core import DVC_EXTENSIONS, DVC_SIZE_THRESH_BYTES
 
 
+def _unstage_record(paths: list[str]) -> None:
+    """Unstage what recorded a run, with the env locks the run stages."""
+    import git
+
+    paths = [
+        os.path.abspath(p)
+        for p in [
+            *paths,
+            calkit.environments.get_env_lock_dir(),
+            calkit.environments.ENV_SPEC_HASHES_FPATH,
+        ]
+    ]
+    try:
+        repo = git.Repo(search_parent_directories=True)
+    except Exception:
+        return
+    if repo.head.is_valid():
+        # Path by path, since restore errors out on a pathspec that matches
+        # nothing---normal here, where some of these were never created
+        for unstage_path in paths:
+            try:
+                repo.git.restore("--staged", "--", unstage_path)
+            except Exception:
+                pass
+    else:
+        # A just-created repo has no HEAD to restore the index from, and
+        # also nothing tracked, so dropping the entries is right
+        try:
+            repo.git.rm("--cached", "-r", "--ignore-unmatch", "--", *paths)
+        except Exception:
+            pass
+
+
 def _xr_markdown(
     markdown_path: str,
     ck_info: dict,
@@ -178,8 +211,6 @@ def _xr_markdown(
         Derived files under .calkit are left alone: they are what there
         is to inspect, and nothing tracks them.
         """
-        import git
-
         for path, content in snapshot.items():
             if content is None:
                 if os.path.isfile(path):
@@ -189,38 +220,9 @@ def _xr_markdown(
                     fb.write(content)
         if not dvc_existed:
             shutil.rmtree(".dvc", ignore_errors=True)
-        # The bootstrap stages what it creates, as the run does env locks,
-        # so the index has to be put back too, or a deleted calkit.yaml
-        # lingers as a staged addition
-        paths = [
-            os.path.abspath(p)
-            for p in [
-                *snapshot,
-                ".dvc",
-                calkit.environments.get_env_lock_dir(),
-                calkit.environments.ENV_SPEC_HASHES_FPATH,
-            ]
-        ]
-        try:
-            repo = git.Repo(search_parent_directories=True)
-        except Exception:
-            return
-        if repo.head.is_valid():
-            # Path by path, since restore errors out on a pathspec that
-            # matches nothing---normal here, where some of these were
-            # never created
-            for unstage_path in paths:
-                try:
-                    repo.git.restore("--staged", "--", unstage_path)
-                except Exception:
-                    pass
-        else:
-            # A just-created repo has no HEAD to restore the index from,
-            # and also nothing tracked, so dropping the entries is right
-            try:
-                repo.git.rm("--cached", "-r", "--ignore-unmatch", "--", *paths)
-            except Exception:
-                pass
+        # The bootstrap stages what it creates, so the index has to be put
+        # back too, or a deleted calkit.yaml lingers as a staged addition
+        _unstage_record([*snapshot, ".dvc"])
 
     def _cleanup_derived() -> None:
         """Remove the derived files this run created.
@@ -965,6 +967,8 @@ def execute_and_record(
                 else:
                     with open(record_path, "wb") as fw:
                         fw.write(content)
+            # The run stages what it writes when autostaging
+            _unstage_record(list(record_snapshot))
             typer.echo(
                 "Executed without recording; the stage was not added to "
                 "the pipeline"

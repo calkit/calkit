@@ -537,6 +537,9 @@ def get_status(
     dotenv.load_dotenv(dotenv_path=".env")
     # Status only reads calkit.yaml, so skip the slower round-trip parser
     ck_info = calkit.load_calkit_info(read_only=True)
+    # As 'calkit run' does, so requirements and switches see the same
+    # variables in both
+    calkit.set_env_vars(ck_info=ck_info)
     # Status is usually the first command someone runs on a project that
     # isn't theirs, which is exactly when the variables it declares are
     # missing. Ask while there's somebody to answer -- the environment
@@ -3007,7 +3010,11 @@ def run(
         )
     except ValueError as e:
         raise_error(str(e))
-    system_info = calkit.get_system_info(apps=version_checked_apps)
+    # Every tool's version only for the tracked run record, since each
+    # costs a subprocess
+    system_info = calkit.get_system_info(
+        apps=version_checked_apps, all_apps=save_logs
+    )
     if save_logs:
         for subdir in ("logs", "runs"):
             os.makedirs(os.path.join(".calkit", subdir), exist_ok=True)
@@ -3031,7 +3038,6 @@ def run(
     # their environments aren't checked
     gated_stages: dict[str, str] = {}
     gate_errors: dict[str, str] = {}
-
     gate(gate_stage_names)
     # Filled in by the run with the skipped stages that were out of date
     skipped_stale: dict[str, str] = {}
@@ -4291,19 +4297,19 @@ def run_in_env(
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
-        # Gated like the local branch, using the far end's properties
-        if calkit.environments.system_env_locks_anything(env):
+        # Gated like the local branch, using the far end's properties. Its
+        # shell is recorded by the check, with nothing to compare here.
+        if env.get("lock"):
             try:
-                remote_info = workspace.remote_system_info(
-                    ws,
-                    apps=calkit.environments.lock_app_names(env.get("lock")),
-                )
-                # Writes only a first lock, or a new one with 'relock: auto'
-                calkit.environments.write_system_env_lock(
-                    env_name=env_name, env=env, system_info=remote_info
-                )
-                mismatch = calkit.environments.system_env_lock_mismatch(
-                    env_name=env_name, env=env, system_info=remote_info
+                mismatch = calkit.environments.gate_system_env_lock(
+                    env_name,
+                    env,
+                    system_info=workspace.remote_system_info(
+                        ws,
+                        apps=calkit.environments.lock_app_names(
+                            env.get("lock")
+                        ),
+                    ),
                 )
             except (ValueError, subprocess.CalledProcessError) as e:
                 raise_error(str(e))
@@ -4483,19 +4489,7 @@ def run_in_env(
         # Checked even with --no-check, since a stage that needs to run on
         # a machine that doesn't match the lock must not
         try:
-            # Read once for both
-            system_info = None
-            if env.get("lock"):
-                system_info = calkit.get_system_info(
-                    apps=calkit.environments.lock_app_names(env.get("lock"))
-                )
-            # Writes only a first lock, or a new one with 'relock: auto'
-            calkit.environments.write_system_env_lock(
-                env_name=env_name, env=env, system_info=system_info
-            )
-            mismatch = calkit.environments.system_env_lock_mismatch(
-                env_name=env_name, env=env, system_info=system_info
-            )
+            mismatch = calkit.environments.gate_system_env_lock(env_name, env)
         except ValueError as e:
             raise_error(f"Environment '{env_name}': {e}")
         if mismatch:

@@ -904,3 +904,9 @@ def test_xr_no_record_command(tmp_dir):
     assert not os.path.isfile("dvc.yaml")
     assert not os.path.isfile("dvc.lock")
     assert not os.path.isfile(".calkit/stage-runs.json")
+    # Nor is anything the run staged left in the index
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).splitlines()
+    assert ".calkit/stage-runs.json" not in staged
+    assert "dvc.lock" not in staged

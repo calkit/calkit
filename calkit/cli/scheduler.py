@@ -868,6 +868,18 @@ def run_batch(
             ),
         ),
     ] = EnvDefaultsModeChoice.replace,
+    check_inner_env: Annotated[
+        bool,
+        typer.Option(
+            "--check-inner-env",
+            hidden=True,
+            help=(
+                "Check the inner environment the job runs in before "
+                "submitting, which is how a machine that was sent the job "
+                "builds it once for all of a stage's jobs."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Submit a batch job through the scheduler associated with the env.
 
@@ -881,6 +893,43 @@ def run_batch(
     iterated stage does not put all of its jobs into a shared cluster's queue
     at once.
     """
+
+    def check_inner_env_once(argv: list[str]) -> None:
+        """Check the env the job runs in, once for all of a stage's jobs.
+
+        Jobs submitted at the same time take turns, so the first builds it
+        and the rest find it checked.
+        """
+        import zc.lockfile
+
+        from calkit.cli.check import check_environment
+
+        inner = calkit.environments.inner_env_name(argv)
+        inner_env = envs.get(inner) if inner else None
+        if inner is None or inner_env is None:
+            return
+        lock_fpath = os.path.join(
+            calkit.ensure_local_dir(), f"check-env-{inner}.lock"
+        )
+        while True:
+            try:
+                lock = zc.lockfile.LockFile(lock_fpath)
+                break
+            except zc.lockfile.LockError:
+                time.sleep(1)
+        try:
+            if calkit.environments.cacheable(
+                inner_env
+            ) and calkit.environments.check_cache(
+                env_name=inner, env=inner_env
+            ):
+                return
+            check_environment(env_name=inner)
+            calkit.environments.save_cache(
+                env_name=inner, env=inner_env, success=True
+            )
+        finally:
+            lock.close()
 
     def replace_environment_arg(argv: list[str], env_name: str) -> list[str]:
         """Return ``argv`` with its ``--environment`` value replaced."""
@@ -962,7 +1011,9 @@ def run_batch(
         )
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
-    env = envs.get(environment, {})
+    # Including an option a switch defines in place, which a switch on
+    # another machine forwards by name
+    env = calkit.environments.get_env(environment, envs) or {}
     kind = env.get("kind")
     argv = sys.argv[1:]
     if kind == calkit.environments.SWITCH_KIND:
@@ -1036,8 +1087,11 @@ def run_batch(
             # Re-run this same invocation over there. It terminates rather
             # than bouncing onward, since on the cluster the env's host is
             # local and this branch isn't taken.
+            # The job keeps skipping the inner env check, which runs once
+            # there before submitting rather than in every job
+            batch = argv.index("batch") + 1
             remote_command = "calkit " + shlex.join(
-                calkit.environments.check_inner_env_there(argv)
+                [*argv[:batch], "--check-inner-env", *argv[batch:]]
             )
             workspace.run_in_workspace(
                 workspace=ws,
@@ -1051,6 +1105,8 @@ def run_batch(
         except (ValueError, subprocess.CalledProcessError) as e:
             raise_error(str(e))
         return
+    if check_inner_env:
+        check_inner_env_once(argv)
     # Apply env defaults per mode
     env_setup_cmds = env.get("default_setup", []) or []
     if env_default_setup == "merge" and env_setup_cmds:
@@ -1297,18 +1353,15 @@ def _gate_switch_machine_lock(
         return
     machine_env = calkit.environments.switch_machine_lock_env(env)
     try:
-        system_info = calkit.environments.picked_machine_info(
-            picked,
-            (calkit.environments.get_env(picked, envs) or {}),
-            ck_info,
-            lock=env.get("lock"),
-        )
-        # Writes only a first lock, or a new one with 'relock: auto'
-        calkit.environments.write_system_env_lock(
-            env_name=switch_name, env=machine_env, system_info=system_info
-        )
-        mismatch = calkit.environments.system_env_lock_mismatch(
-            env_name=switch_name, env=machine_env, system_info=system_info
+        mismatch = calkit.environments.gate_system_env_lock(
+            switch_name,
+            machine_env,
+            system_info=calkit.environments.picked_machine_info(
+                picked,
+                (calkit.environments.get_env(picked, envs) or {}),
+                ck_info,
+                lock=env.get("lock"),
+            ),
         )
     except ValueError as e:
         raise_error(f"Environment '{switch_name}': {e}")

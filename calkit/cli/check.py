@@ -502,7 +502,6 @@ def check_environment(
         get_default_venv_prefix,
         get_env_lock_fpath,
         write_scheduler_env_lock,
-        write_system_env_lock,
     )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
@@ -682,38 +681,46 @@ def check_environment(
         # when the config changes.
         write_scheduler_env_lock(env_name=env_name, env=env)
     elif env["kind"] == calkit.environments.SWITCH_KIND:
-        # Checking a switch means checking what it picks here. The first
-        # time, options on other machines are locked too, where they can be
-        # reached, so their locks are part of the switch's from the start.
+        # Checking a switch means checking what it picks here. Until a stage
+        # has run with it, i.e., none depends on its lock, options on other
+        # machines are locked too, where they can be reached, and every
+        # option's lock is part of the switch's.
         switch_lock = os.path.join(
             calkit.environments.get_env_lock_dir(), env_name, "switch.json"
         )
-        if not os.path.isfile(switch_lock):
-            try:
-                options = calkit.environments.get_switch_options(
-                    env_name, envs
-                )
-            except ValueError as e:
-                raise_error(str(e))
-            for option in options:
-                option_env = calkit.environments.get_env(option, envs) or {}
-                if (
-                    option_env.get("kind") != "system"
-                    or not option_env.get("lock")
-                    or not option_env.get("host")
-                    or calkit.environments.env_is_local(option_env)
-                ):
-                    continue
-                try:
-                    check_environment(env_name=option, verbose=verbose)
-                except typer.Exit:
-                    warn(
-                        f"Option '{option}' of '{env_name}' couldn't be "
-                        "locked from here, so it will be on its first check "
-                        "there"
-                    )
         try:
-            calkit.environments.write_switch_env_lock(env_name, envs)
+            with open("dvc.lock") as f:
+                ran = switch_lock.replace(os.sep, "/") in f.read()
+        except OSError:
+            ran = False
+        try:
+            options = calkit.environments.get_switch_options(env_name, envs)
+        except ValueError as e:
+            raise_error(str(e))
+        for option in [] if ran else options:
+            option_env = calkit.environments.get_env(option, envs) or {}
+            option_lock = get_env_lock_fpath(
+                env=option_env, env_name=option, as_posix=False
+            )
+            if (
+                option_env.get("kind") != "system"
+                or not option_env.get("lock")
+                or not option_env.get("host")
+                or calkit.environments.env_is_local(option_env)
+                or (option_lock is not None and os.path.isfile(option_lock))
+            ):
+                continue
+            try:
+                check_environment(env_name=option, verbose=verbose)
+            except typer.Exit:
+                warn(
+                    f"Option '{option}' of '{env_name}' couldn't be locked "
+                    "from here, so it will be on its first check there"
+                )
+        try:
+            calkit.environments.write_switch_env_lock(
+                env_name, envs, relocked=None if ran else options
+            )
             picked = calkit.environments.resolve_switch(env_name, envs)
         except ValueError as e:
             raise_error(str(e))
@@ -725,17 +732,15 @@ def check_environment(
         if env.get("lock"):
             machine_env = calkit.environments.switch_machine_lock_env(env)
             try:
-                system_info = calkit.environments.picked_machine_info(
-                    picked,
-                    (calkit.environments.get_env(picked, envs) or {}),
-                    ck_info,
-                    lock=env.get("lock"),
-                )
-                write_system_env_lock(
-                    env_name=env_name, env=machine_env, system_info=system_info
-                )
-                mismatch = calkit.environments.system_env_lock_mismatch(
-                    env_name=env_name, env=machine_env, system_info=system_info
+                mismatch = calkit.environments.gate_system_env_lock(
+                    env_name,
+                    machine_env,
+                    system_info=calkit.environments.picked_machine_info(
+                        picked,
+                        (calkit.environments.get_env(picked, envs) or {}),
+                        ck_info,
+                        lock=env.get("lock"),
+                    ),
                 )
             except ValueError as e:
                 raise_error(f"Environment '{env_name}': {e}")
@@ -760,21 +765,10 @@ def check_environment(
                 calkit.check_requirements(
                     requirements=env.get("requirements", [])
                 )
-                # Read once for both
-                system_info = None
-                if env.get("lock"):
-                    system_info = calkit.get_system_info(
-                        apps=calkit.environments.lock_app_names(
-                            env.get("lock")
-                        )
-                    )
-                # Writes only if unlocked; a mismatch warns, and stages that
-                # need to run are skipped, or fail at the gate in 'xenv'
-                write_system_env_lock(
-                    env_name=env_name, env=env, system_info=system_info
-                )
-                mismatch = calkit.environments.system_env_lock_mismatch(
-                    env_name=env_name, env=env, system_info=system_info
+                # A mismatch warns, and stages that need to run are
+                # skipped, or fail at the gate in 'xenv'
+                mismatch = calkit.environments.gate_system_env_lock(
+                    env_name, env
                 )
                 if mismatch:
                     warn(
@@ -866,15 +860,8 @@ def check_environment(
                     system_info=system_info,
                     verbose=verbose,
                 )
-                # Returns None when the env locks nothing, so nothing is
-                # written for an env with nothing to record
-                write_system_env_lock(
-                    env_name=env_name,
-                    env=env,
-                    system_info=system_info,
-                )
-                mismatch = calkit.environments.system_env_lock_mismatch(
-                    env_name=env_name, env=env, system_info=system_info
+                mismatch = calkit.environments.gate_system_env_lock(
+                    env_name, env, system_info=system_info
                 )
                 if mismatch:
                     warn(
@@ -2079,9 +2066,19 @@ def check_venv(
                         f"{used_legacy_lock}: {e}"
                     )
 
-    # If the lock file exists, try to install with that
+    # A lock resolved from an older spec would bring back what the spec no
+    # longer has, as would the env built from it, so both start over
     dep_file_txt = f"-r {path}"
-    if os.path.isfile(full(reqs_to_use)):
+    if recorded_hash is not None and recorded_hash != spec_hash:
+        if verbose:
+            typer.echo(f"Rebuilding {kind} at {prefix} since its spec changed")
+        try:
+            shutil.rmtree(prefix_full_path)
+            create_venv()
+        except OSError as e:
+            warn(f"Failed to remove {kind} at {prefix}: {e}")
+    elif os.path.isfile(full(reqs_to_use)):
+        # If the lock file exists, try to install with that
         dep_file_txt += f" -r {reqs_to_use}"
     try:
         pip_install_and_freeze(dep_file_txt)

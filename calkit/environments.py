@@ -203,8 +203,7 @@ def lock_value(prop: str, value: object) -> object:
 
 # Properties only one platform can supply, since ``get_system_info`` collects
 # package manager versions per OS. Locking one from another platform raises
-# in ``get_system_lock_data`` rather than recording nothing, so this table is
-# documentation (and a test hook), not a second gate.
+# in ``get_system_lock_data`` rather than recording nothing.
 SYSTEM_LOCK_PROPERTY_PLATFORMS = {"brew-version": "Darwin"}
 
 
@@ -938,6 +937,10 @@ def _load_switch(env_name: str, envs: dict) -> list["SwitchOption"]:
         ) from None
 
 
+# Each hostname's qualified name, looked up once per process
+_FQDNS: dict[str, str] = {}
+
+
 def resolve_switch(env_name: str, envs: dict) -> str | None:
     """The environment a switch picks on this machine, or None."""
     from calkit.models.core import (
@@ -968,16 +971,16 @@ def resolve_switch(env_name: str, envs: dict) -> str | None:
             ]
             return any(os.environ.get(n) == v for n, v in settings)
         if isinstance(condition, HostnameMatchesCondition):
+            patterns = [p.lower() for p in any_of(condition.hostname_matches)]
+            hostname = socket.gethostname().lower()
+            if any(fnmatch.fnmatchcase(hostname, p) for p in patterns):
+                return True
             # Cluster nodes often report a short name, so the qualified one
-            # is tried too
-            hostnames = {
-                socket.gethostname().lower(),
-                socket.getfqdn().lower(),
-            }
+            # is tried too, which can take a slow reverse DNS lookup
+            if hostname not in _FQDNS:
+                _FQDNS[hostname] = socket.getfqdn().lower()
             return any(
-                fnmatch.fnmatchcase(name, p.lower())
-                for name in hostnames
-                for p in any_of(condition.hostname_matches)
+                fnmatch.fnmatchcase(_FQDNS[hostname], p) for p in patterns
             )
         if isinstance(condition, OsIsCondition):
             names = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
@@ -1030,14 +1033,9 @@ def picked_machine_info(
     env_name: str, env: dict, ck_info: dict, lock: list[str] | None = None
 ) -> dict | None:
     """The properties of the machine an env runs on, or None for this one."""
-    host = env.get("host")
     if env.get("kind") == SWITCH_KIND:
         raise ValueError(f"'{env_name}' is a switch, not a machine")
-    if env.get("kind") == "system":
-        local = env_is_local({"host": "localhost", **env})
-    else:
-        local = host_is_local(host or "localhost")
-    if local:
+    if not runs_elsewhere(env):
         return None
     import calkit.workspace as workspace
 
@@ -1053,7 +1051,7 @@ def write_switch_env_lock(
     env_name: str,
     envs: dict,
     wdir: str | None = None,
-    relocked: str | None = None,
+    relocked: list[str] | None = None,
 ) -> str:
     """Write a switch's definition, and its options', for stages to depend on.
 
@@ -1064,8 +1062,8 @@ def write_switch_env_lock(
 
     So are options' machine locks, except one first written after the
     switch's lock, since that only means a machine took up its option,
-    which results don't depend on. ``relocked`` is an option whose machine
-    lock was just rewritten, which is recorded from then on.
+    which results don't depend on. ``relocked`` are options whose machine
+    locks were just rewritten, which are recorded from then on.
     """
 
     def file_md5(fpath: str) -> str:
@@ -1168,7 +1166,7 @@ def write_switch_env_lock(
     if isinstance(existing, dict):
         recorded = existing.pop("machine_locks", {})
         if existing == json.loads(json.dumps(lock_data)):
-            tracked = set(recorded) | ({relocked} if relocked else set())
+            tracked = set(recorded) | set(relocked or [])
     machine_locks = {o: v for o, v in machine_locks.items() if o in tracked}
     if machine_locks:
         lock_data["machine_locks"] = machine_locks
@@ -1406,6 +1404,29 @@ def lock_app_names(lock: list[str] | None) -> list[str]:
     ]
 
 
+def get_lock_system_info(lock: list[str]) -> dict:
+    """This machine's properties, with only the versions a lock names.
+
+    Each version costs a subprocess, and this is read for every stage.
+    """
+    apps = []
+    for prop in lock:
+        source = split_version_lock(prop)[0]
+        key = SYSTEM_LOCK_PROPERTIES.get(source)
+        only_on = SYSTEM_LOCK_PROPERTY_PLATFORMS.get(source)
+        if key in ("os_version", "calkit_python_version") or (
+            only_on is not None and only_on != platform.system()
+        ):
+            continue
+        if source.endswith("-version") and len(source) > len("-version"):
+            apps.append(source.removesuffix("-version"))
+    # The always-reported apps are named in their own case, e.g., 'Rscript'
+    names = {a.lower(): a for a in calkit.ALWAYS_REPORTED_APPS}
+    return calkit.get_system_info(
+        apps=[names.get(a.lower(), a) for a in apps], all_apps=False
+    )
+
+
 def get_system_lock_data(
     lock: list[str], system_info: dict | None = None
 ) -> dict:
@@ -1420,8 +1441,10 @@ def get_system_lock_data(
     environment whose host is somewhere else: what the results depend on is
     the machine the stage runs on, so that is what gets pinned.
     """
+    if not lock:
+        return {}
     if system_info is None:
-        system_info = calkit.get_system_info(apps=lock_app_names(lock))
+        system_info = get_lock_system_info(lock)
     data = {}
     for prop in lock:
         source = split_version_lock(prop)[0]
@@ -1525,6 +1548,29 @@ def system_env_lock_mismatch(
         for prop, value in actual.items()
         if prop in locked and lock_value(prop, locked[prop]) != value
     }
+
+
+def gate_system_env_lock(
+    env_name: str,
+    env: dict,
+    system_info: dict | None = None,
+    wdir: str | None = None,
+) -> dict[str, dict]:
+    """Lock a machine env where that's due, and compare the machine with it.
+
+    Writes only a first lock, a newly locked property, or a new lock with
+    'relock: auto'. ``system_info`` describes the machine when it isn't
+    this one. Returns the mismatch, as ``system_env_lock_mismatch`` does.
+    """
+    # Read once for both
+    if system_info is None and env.get("lock"):
+        system_info = get_lock_system_info(env["lock"])
+    write_system_env_lock(
+        env_name=env_name, env=env, wdir=wdir, system_info=system_info
+    )
+    return system_env_lock_mismatch(
+        env_name=env_name, env=env, wdir=wdir, system_info=system_info
+    )
 
 
 def describe_system_env_lock_mismatch(
@@ -1633,7 +1679,9 @@ def write_system_env_lock(
                 # Reported when that switch is checked
                 continue
             if env_name in options:
-                write_switch_env_lock(name, envs, wdir=wdir, relocked=env_name)
+                write_switch_env_lock(
+                    name, envs, wdir=wdir, relocked=[env_name]
+                )
     return lock_fpath
 
 
@@ -2056,6 +2104,21 @@ def check_inner_env_there(argv: list[str]) -> list[str]:
     return argv
 
 
+def inner_env_name(argv: list[str]) -> str | None:
+    """The env an inner ``calkit xenv`` in a command runs in, if any."""
+    for i in range(len(argv) - 1):
+        if argv[i] == "calkit" and argv[i + 1] in ("xenv", "runenv"):
+            rest = argv[i + 2 :]
+            options = rest[: rest.index("--")] if "--" in rest else rest
+            for j, arg in enumerate(options):
+                if arg in ("-n", "--name") and j + 1 < len(options):
+                    return options[j + 1]
+                if arg.startswith("--name="):
+                    return arg.removeprefix("--name=")
+            return None
+    return None
+
+
 # Stage kinds whose command is sent to their outer env's machine, rather
 # than run here in their inner env, e.g., a notebook
 STAGE_KINDS_SENT_TO_OUTER_ENV = frozenset(
@@ -2074,16 +2137,9 @@ STAGE_KINDS_SENT_TO_OUTER_ENV = frozenset(
 )
 
 
-def _runs_elsewhere(env_name: str, envs: dict) -> bool:
-    """Whether an outer env runs its stages on another machine."""
-    env = envs.get(env_name) or {}
+def runs_elsewhere(env: dict) -> bool:
+    """Whether a machine env runs its stages on another machine."""
     kind = env.get("kind")
-    if kind == SWITCH_KIND:
-        try:
-            picked = resolve_switch(env_name, envs)
-        except ValueError:
-            return False
-        return picked is not None and _runs_elsewhere(picked, envs)
     if kind == "system":
         return not env_is_local({"host": "localhost", **env})
     if kind in ("slurm", "pbs"):
@@ -2115,6 +2171,17 @@ def check_all_in_pipeline(
 
     import calkit
     from calkit.cli.check import check_environment
+
+    @functools.cache
+    def outer_runs_elsewhere(env_name: str) -> bool:
+        env = envs.get(env_name) or {}
+        if env.get("kind") == SWITCH_KIND:
+            try:
+                picked = resolve_switch(env_name, envs)
+            except ValueError:
+                return False
+            env = (get_env(picked, envs) or {}) if picked else {}
+        return runs_elsewhere(env)
 
     @contextmanager
     def silenced() -> Iterator[None]:
@@ -2208,7 +2275,7 @@ def check_all_in_pipeline(
             # outer env is another machine is checked there, not here
             if not (
                 stage.get("kind") in STAGE_KINDS_SENT_TO_OUTER_ENV
-                and _runs_elsewhere(outer_env_name, envs)
+                and outer_runs_elsewhere(outer_env_name)
             ):
                 split_envs.append(sub_env_name)
         else:

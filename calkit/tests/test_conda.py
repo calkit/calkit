@@ -455,6 +455,14 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     write_spec(["iniconfig", git_dep])
     assert locks() == [osx, win]
     assert compiles[-1][0] == ["iniconfig==2.1.0", locked_git]
+    # A platform marker is kept with the pin, so it's not required elsewhere
+    write_local(["iniconfig==2.1.0", "uvloop==0.19.0"])
+    write_spec(["iniconfig", 'uvloop; sys_platform != "win32"'])
+    assert locks() == [osx, win]
+    assert compiles[-1][0] == [
+        "iniconfig==2.1.0",
+        'uvloop==0.19.0; sys_platform != "win32"',
+    ]
     for local in ("-e ./pkg", "./pkg", "pkg @ file:///x", "-r more.txt"):
         assert locks() == [osx, win]
         write_spec(["iniconfig", local])

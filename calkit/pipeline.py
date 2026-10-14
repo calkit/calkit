@@ -893,6 +893,7 @@ def get_gated_stages(
     stage_names: list[str] | set[str] | None = None,
     interactive: bool | None = None,
     system_info: dict | None = None,
+    remote: bool = True,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -906,7 +907,8 @@ def get_gated_stages(
     Requirements are only checked here, never prompted for or installed,
     and anything the checks print goes to stderr, keeping stdout for,
     e.g., ``calkit status --json``. ``interactive`` only decides whether
-    connecting to a machine may prompt.
+    connecting to a machine may prompt. Without ``remote``, nothing is
+    checked on another machine, which would take connecting to it.
     """
     import contextlib
     import json
@@ -924,6 +926,8 @@ def get_gated_stages(
     gated: dict[str, str] = {}
     errors: dict[str, str] = {}
     cache: dict[str, tuple[str | None, bool]] = {}
+    # What each switch picks, resolved once
+    picks: dict[str, str | None] = {}
 
     def check(key: Any, func: Any) -> tuple[str | None, bool]:
         """Memoize a check, returning its problem and whether it's an error."""
@@ -992,7 +996,8 @@ def get_gated_stages(
             system_info = calkit.get_system_info(
                 apps=calkit.get_version_checked_app_names(
                     ck_info, stage_names=stage_names
-                )
+                ),
+                all_apps=False,
             )
         try:
             calkit.check_requirements(
@@ -1087,7 +1092,9 @@ def get_gated_stages(
             if env.get("kind") != envs_mod.SWITCH_KIND:
                 continue
             try:
-                picked = envs_mod.resolve_switch(env_name, envs)
+                if env_name not in picks:
+                    picks[env_name] = envs_mod.resolve_switch(env_name, envs)
+                picked = picks[env_name]
             except ValueError as e:
                 reason, is_error = str(e), True
                 break
@@ -1109,23 +1116,19 @@ def get_gated_stages(
         machine_name = None
         machine: dict = {}
         for env_name, env in resolved:
-            kind = env.get("kind")
-            if kind == "system" and not envs_mod.env_is_local(
-                {"host": "localhost", **env}
-            ):
-                if not env.get("host"):
-                    # Named by its ID alone, so there's no reaching it
-                    reason = reason or (
-                        f"environment '{env_name}' is the machine with ID "
-                        f"{env.get('machine_id')!r}, which isn't this one, "
-                        "and has no 'host' to reach it from here"
-                    )
-                    break
-                machine_name, machine = env_name, env
-            elif kind in ("slurm", "pbs") and not envs_mod.host_is_local(
-                env.get("host") or "localhost"
-            ):
-                machine_name, machine = env_name, env
+            if not envs_mod.runs_elsewhere(env):
+                continue
+            if env.get("kind") == "system" and not env.get("host"):
+                # Named by its ID alone, so there's no reaching it
+                reason = reason or (
+                    f"environment '{env_name}' is the machine with ID "
+                    f"{env.get('machine_id')!r}, which isn't this one, "
+                    "and has no 'host' to reach it from here"
+                )
+                break
+            machine_name, machine = env_name, env
+        if machine_name is not None and not remote and reason is None:
+            continue
         if reason is None:
             requirements = list(stage.get("requirements") or [])
             for _, env in resolved:
@@ -1271,7 +1274,11 @@ def get_status(
             )
             for name in names:
                 env = environments.get(name) or {}
-                if env.get("kind") != calkit.environments.SWITCH_KIND:
+                if env.get(
+                    "kind"
+                ) != calkit.environments.SWITCH_KIND or name in result.get(
+                    "switches", {}
+                ):
                     continue
                 try:
                     result.setdefault("switches", {})[name] = (
@@ -1283,10 +1290,13 @@ def get_status(
         if check_environments:
             step("Checking environments")
             try:
+                # Run often, e.g., by an editor, so it doesn't connect to
+                # other machines; 'calkit run' checks those
                 gated, gate_errors = get_gated_stages(
                     ck_info,
                     stage_names=get_stages_to_gate(targets),
                     interactive=False,
+                    remote=False,
                 )
                 result["gated_stages"] = gated | gate_errors
                 env_checks = calkit.environments.check_all_in_pipeline(

@@ -958,17 +958,21 @@ def extract_version(text: str, full: bool = False) -> str | None:
     'uv 0.4.18 (a1b2c3d)' -- so the number has to be found rather than
     read off. It's the first dotted number not inside another number,
     which may follow letters, e.g., 'go1.22.0' or 'OpenSSH_9.6p1'. Failing
-    that, it's a bare number that isn't part of a word, so a year like
-    nvcc's 'Copyright (c) 2005' or a name like 'x86_64' or 'gcc-13' isn't
-    mistaken for it. A build hash that follows is not part of what a
-    specifier compares.
+    that, it's a bare number that doesn't follow a word, so a name like
+    'x86_64' isn't mistaken for it, though letters may follow, as in
+    Windows Server's release, '2025Server'. A year like nvcc's
+    'Copyright (c) 2005' is only taken if there's no dotted number. A build
+    hash that follows is not part of what a specifier compares.
 
     With ``full``, a suffix attached to the number is kept, e.g.,
     '3.12.10rc1' or '11.4.0-1ubuntu1~22.04'.
     """
     m = re.search(
         r"(?<![\d.])v?(\d+(?:\.\d+)+)((?:[-+~.]?[0-9A-Za-z]+)*)", text or ""
-    ) or re.search(r"(?<![\w.])v?(\d+)()(?![\w.])", text or "")
+    ) or re.search(
+        r"(?<![\w.])v?(\d+)((?:[-+~]?[A-Za-z][0-9A-Za-z]*)*)(?![\d.])",
+        text or "",
+    )
     if m is None:
         return None
     return m.group(1) + m.group(2) if full else m.group(1)

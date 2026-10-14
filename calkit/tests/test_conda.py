@@ -344,7 +344,12 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     ) -> types.SimpleNamespace:
         arch = env["CONDA_SUBDIR"]
         solves[arch] = (cmd, env)
-        assert 0 < timeout <= calkit.conda.CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS
+        # What's left of the time allowed, give or take rounding
+        assert (
+            0
+            < timeout
+            <= (calkit.conda.CROSS_PLATFORM_LOCK_TIMEOUT_SECONDS + 1)
+        )
         if arch in slow:
             raise subprocess.TimeoutExpired(cmd, timeout)
         if arch in failing or (

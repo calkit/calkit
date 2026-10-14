@@ -661,6 +661,10 @@ def test_batch_on_a_switch_pick_reads_a_setup_file(tmp_dir):
     assert "not both" in res.stderr + res.stdout
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: mock scheduler is not yet Windows-compatible",
+)
 def test_batch_sent_to_a_remote_cluster(tmp_dir, monkeypatch):
     import calkit.cli.check
     import calkit.workspace

@@ -1033,6 +1033,9 @@ def add(
     try:
         repo = calkit.git.get_repo()
     except InvalidGitRepositoryError:
+        if dry_run:
+            typer.echo("This is not a Git repository; would offer to init")
+            return
         # Prompt user if they want to run git init here
         warn("Current directory is not a Git repo")
         auto_init = typer.confirm(
@@ -1105,7 +1108,10 @@ def add(
         # untracked file in a directory doesn't come along with it
         existing_paths = []
         for path in paths:
-            if path == "." or Path(path).as_posix().rstrip("/") in dvc_paths:
+            # Without --to, '.' is handled below without untracked files,
+            # but with it, '.' would be passed straight to Git or DVC
+            is_dvc_path = Path(path).as_posix().rstrip("/") in dvc_paths
+            if (path == "." and to is None) or is_dvc_path:
                 existing_paths.append(path)
                 continue
             # Git runs from the repo root and lists paths relative to it

@@ -883,6 +883,13 @@ def test_add(tmp_dir):
     assert "src/code.py" in staged
     assert "src/new.py" not in staged
     assert "dry_small.txt" not in staged
+    # With --to, '.' doesn't bring untracked files along either
+    subprocess.check_call(["git", "reset"])
+    subprocess.check_call(["calkit", "add", "-e", "--to", "git", "."])
+    staged = calkit.git.get_staged_files()
+    assert "src/code.py" in staged
+    assert "src/new.py" not in staged
+    assert "dry_small.txt" not in staged
     # Paths are relative to the working directory
     subprocess.check_call(["git", "reset"])
     subprocess.check_call(
@@ -1199,6 +1206,16 @@ def test_save(tmp_dir):
         ["calkit", "save", "--dry", "-a", "--no-push"], text=True
     )
     assert "Would commit\n" in out
+    # A dry run outside a Git repo doesn't create one
+    os.rename(".git", ".git-moved")
+    try:
+        out = subprocess.check_output(
+            ["calkit", "save", "--dry", "-a"], text=True
+        )
+        assert "would offer to init" in out
+        assert not os.path.exists(".git")
+    finally:
+        os.rename(".git-moved", ".git")
 
 
 def test_save_data_not_in_cache(tmp_dir):

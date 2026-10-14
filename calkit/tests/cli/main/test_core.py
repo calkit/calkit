@@ -907,6 +907,39 @@ def test_add(tmp_dir):
     )
     assert "dry_small.txt" in out and "git" in out
     assert set(calkit.git.get_staged_files()) == staged_before
+    # With --existing, only changed files Git already tracks are added, even
+    # from a directory
+    subprocess.check_call(["git", "reset"])
+    with open("src/code.py", "w") as f:
+        f.write("# Changed again")
+    with open("src/new.py", "w") as f:
+        f.write("# New")
+    subprocess.check_call(["calkit", "add", "-e", "src", "dry_small.txt"])
+    staged = calkit.git.get_staged_files()
+    assert "src/code.py" in staged
+    assert "src/new.py" not in staged
+    assert "dry_small.txt" not in staged
+    subprocess.check_call(["git", "reset"])
+    subprocess.check_call(["calkit", "add", "--existing", "."])
+    staged = calkit.git.get_staged_files()
+    assert "src/code.py" in staged
+    assert "src/new.py" not in staged
+    assert "dry_small.txt" not in staged
+    # With --to, '.' doesn't bring untracked files along either
+    subprocess.check_call(["git", "reset"])
+    subprocess.check_call(["calkit", "add", "-e", "--to", "git", "."])
+    staged = calkit.git.get_staged_files()
+    assert "src/code.py" in staged
+    assert "src/new.py" not in staged
+    assert "dry_small.txt" not in staged
+    # Paths are relative to the working directory
+    subprocess.check_call(["git", "reset"])
+    subprocess.check_call(
+        ["calkit", "add", "-e", "code.py", "new.py"], cwd="src"
+    )
+    staged = calkit.git.get_staged_files()
+    assert "src/code.py" in staged
+    assert "src/new.py" not in staged
 
 
 def test_add_pipeline_output_storage(tmp_dir):
@@ -1172,6 +1205,59 @@ def test_save(tmp_dir):
     )
     last_commit_message = repo.head.commit.message.strip()
     assert last_commit_message == "A unique message"
+    # With --existing, new files are left out
+    with open("test.txt", "w") as f:
+        f.write("sup sup sup")
+    with open("test4.txt", "w") as f:
+        f.write("sup")
+    subprocess.check_call(["calkit", "save", "-aeM", "--no-push"])
+    assert repo.head.commit.message.strip() == "Update test.txt"
+    assert not repo.git.ls_files("test4.txt")
+    assert "test4.txt" in repo.untracked_files
+    # Explicit paths that aren't in the repo yet are left out too
+    with open("test.txt", "w") as f:
+        f.write("sup again")
+    subprocess.check_call(
+        [
+            "calkit",
+            "save",
+            "-e",
+            "test.txt",
+            "test4.txt",
+            "-m",
+            "Existing only",
+            "--no-push",
+        ]
+    )
+    assert repo.head.commit.message.strip() == "Existing only"
+    assert not repo.git.ls_files("test4.txt")
+    # A dry run says what would be saved without staging or committing
+    with open("test.txt", "w") as f:
+        f.write("dry")
+    head_before = repo.head.commit.hexsha
+    for args in [["-a"], ["test.txt", "test4.txt"], ["--dry", "-ae"]]:
+        out = subprocess.check_output(
+            ["calkit", "save", "--dry-run", "-m", "Dry", *args], text=True
+        )
+        assert "test.txt" in out
+        assert "Would commit and push" in out
+        assert ("test4.txt" in out) == ("-ae" not in args)
+        assert repo.head.commit.hexsha == head_before
+        assert not calkit.git.get_staged_files()
+    out = subprocess.check_output(
+        ["calkit", "save", "--dry", "-a", "--no-push"], text=True
+    )
+    assert "Would commit\n" in out
+    # A dry run outside a Git repo doesn't create one
+    os.rename(".git", ".git-moved")
+    try:
+        out = subprocess.check_output(
+            ["calkit", "save", "--dry", "-a"], text=True
+        )
+        assert "would offer to init" in out
+        assert not os.path.exists(".git")
+    finally:
+        os.rename(".git-moved", ".git")
 
 
 def test_save_data_not_in_cache(tmp_dir):
@@ -3516,3 +3602,52 @@ def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
     env["CK_TEST_SITE"] = "y"
     out = subprocess.check_output(["calkit", "status"], env=env, text=True)
     assert "Stale stages" in out
+
+
+def test_stash(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("input.txt", "w") as f:
+        f.write("in")
+    with open("dvc.yaml", "w") as f:
+        yaml.dump(
+            {
+                "stages": {
+                    "my-stage": {
+                        "cmd": (
+                            'python -c "import shutil; '
+                            "shutil.copy('input.txt', 'output.txt')\""
+                        ),
+                        "deps": ["input.txt"],
+                        "outs": ["output.txt"],
+                    }
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["dvc", "repro", "-q"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-qm", "Run"])
+    # A modified DVC-tracked output used to make DVC refuse to check out
+    # after the Git stash had already happened
+    os.chmod("output.txt", stat.S_IWRITE | stat.S_IREAD)
+    with open("output.txt", "w") as f:
+        f.write("edited")
+    with open("input.txt", "w") as f:
+        f.write("new in")
+    subprocess.check_call(["calkit", "stash"])
+    with open("output.txt") as f:
+        assert f.read() == "in"
+    with open("input.txt") as f:
+        assert f.read() == "in"
+    assert not git.Repo().is_dirty()
+    # Popping brings back both, and the stage is still out of date since
+    # its dependency changed
+    subprocess.check_call(["calkit", "stash", "--pop"])
+    with open("output.txt") as f:
+        assert f.read() == "edited"
+    with open("input.txt") as f:
+        assert f.read() == "new in"
+    status = json.loads(
+        subprocess.check_output(["dvc", "status", "--json"], text=True)
+    )
+    assert "my-stage" in status

@@ -169,14 +169,15 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                          |
-| ------------------------ | ------- | -------- | ------- | ---------------------------------------------------- |
-| `-m`, `--commit-message` | str     | no       |         | Automatically commit and use this as a message.      |
-| `--auto-message`, `-M`   | boolean | no       | False   | Commit with an automatically-generated message.      |
-| `--no-auto-ignore`       | boolean | no       | False   | Disable auto-ignore.                                 |
-| `--push`                 | boolean | no       | False   | Push after committing.                               |
-| `--to`, `-t`             | str     | no       |         | System with which to add (git, dvc, or dvc-zip).     |
-| `--dry-run`, `--dry`     | boolean | no       | False   | Show what would be added without actually adding it. |
+| Option                   | Type    | Required | Default | Description                                                                        |
+| ------------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------- |
+| `--existing`, `-e`       | boolean | no       | False   | Only add files that already exist in the repo, i.e., don't add any untracked ones. |
+| `-m`, `--commit-message` | str     | no       |         | Automatically commit and use this as a message.                                    |
+| `--auto-message`, `-M`   | boolean | no       | False   | Commit with an automatically-generated message.                                    |
+| `--no-auto-ignore`       | boolean | no       | False   | Disable auto-ignore.                                                               |
+| `--push`                 | boolean | no       | False   | Push after committing.                                                             |
+| `--to`, `-t`             | str     | no       |         | System with which to add (git, dvc, or dvc-zip).                                   |
+| `--dry-run`, `--dry`     | boolean | no       | False   | Show what would be added without actually adding it.                               |
 
 <a id="top-command-commit"></a>
 
@@ -228,18 +229,20 @@ Arguments:
 
 Options:
 
-| Option                 | Type    | Required | Default | Description                                            |
-| ---------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--all`, `-a`          | boolean | no       | False   | Save all, automatically handling staging and ignoring. |
-| `--message`, `-m`      | str     | no       |         | Commit message.                                        |
-| `--auto-message`, `-M` | boolean | no       | False   | Commit with an automatically-generated message.        |
-| `--to`, `-t`           | str     | no       |         | System with which to add (git or dvc).                 |
-| `--no-push`            | boolean | no       | False   | Do not push to Git and DVC after committing.           |
-| `--git-push`           | str     | no       |         | Additional Git args to pass when pushing.              |
-| `--dvc-push`           | str     | no       |         | Additional DVC args to pass when pushing.              |
-| `--no-recursive`       | boolean | no       | False   | Do not push to submodules.                             |
-| `--overleaf`, `-O`     | boolean | no       | False   | Sync with Overleaf after saving.                       |
-| `--verbose`, `-v`      | boolean | no       | False   | Print verbose output.                                  |
+| Option                 | Type    | Required | Default | Description                                                                             |
+| ---------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------- |
+| `--all`, `-a`          | boolean | no       | False   | Save all, automatically handling staging and ignoring.                                  |
+| `--existing`, `-e`     | boolean | no       | False   | Only save files that already exist in the repo, i.e., don't automatically add new ones. |
+| `--message`, `-m`      | str     | no       |         | Commit message.                                                                         |
+| `--auto-message`, `-M` | boolean | no       | False   | Commit with an automatically-generated message.                                         |
+| `--to`, `-t`           | str     | no       |         | System with which to add (git or dvc).                                                  |
+| `--no-push`            | boolean | no       | False   | Do not push to Git and DVC after committing.                                            |
+| `--git-push`           | str     | no       |         | Additional Git args to pass when pushing.                                               |
+| `--dvc-push`           | str     | no       |         | Additional DVC args to pass when pushing.                                               |
+| `--no-recursive`       | boolean | no       | False   | Do not push to submodules.                                                              |
+| `--overleaf`, `-O`     | boolean | no       | False   | Sync with Overleaf after saving.                                                        |
+| `--verbose`, `-v`      | boolean | no       | False   | Print verbose output.                                                                   |
+| `--dry-run`, `--dry`   | boolean | no       | False   | Show what would be saved without actually saving it.                                    |
 
 <a id="top-command-pull"></a>
 
@@ -570,7 +573,7 @@ Arguments:
 
 Stash or restore workspace changes including dvc-zip tracked dirs.
 
-Without --pop: zips any modified workspace dirs into the DVC cache, then git-stashes (saving the updated .dvc files), checks out the committed DVC state, and unzips it to the workspace.
+Without --pop: zips any modified workspace dirs and commits any other modified DVC-tracked paths into the DVC cache, then git-stashes (saving the updated .dvc files and dvc.lock), checks out the committed DVC state, and unzips it to the workspace.
 
 With --pop: pops the git stash (restoring the saved .dvc files), checks out the stashed DVC state, and unzips it to the workspace.
 

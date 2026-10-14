@@ -683,7 +683,10 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
 
 
 def commit_path(
-    dvc_repo: dvc.repo.Repo, path: str, allow_missing: bool = True
+    dvc_repo: dvc.repo.Repo,
+    path: str,
+    allow_missing: bool = True,
+    outs_only: bool = False,
 ) -> None:
     """Commit a path to DVC, skipping the run cache.
 
@@ -691,6 +694,9 @@ def commit_path(
     saved to the run cache, since doing so requires hashing all of their
     dependencies, which will fail if any are missing from the workspace, e.g.,
     if their data has never been pulled.
+
+    With ``outs_only``, dependencies keep their recorded hashes, so a stage
+    that was out of date stays that way.
     """
     with dvc.repo.lock_repo(dvc_repo):
         groups = groupby(
@@ -701,7 +707,10 @@ def commit_path(
             to_dump = []
             for stage_info in stages_info_group:
                 stage = stage_info.stage
-                stage.save(allow_missing=allow_missing, run_cache=False)
+                if outs_only:
+                    stage.save_outs(allow_missing=allow_missing)
+                else:
+                    stage.save(allow_missing=allow_missing, run_cache=False)
                 stage.commit(
                     filter_info=stage_info.filter_info,
                     allow_missing=allow_missing,

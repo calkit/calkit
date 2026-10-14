@@ -949,6 +949,17 @@ def diff(
 @app.command(name="add")
 def add(
     paths: list[str],
+    existing_only: Annotated[
+        bool,
+        typer.Option(
+            "--existing",
+            "-e",
+            help=(
+                "Only add files that already exist in the repo, i.e., "
+                "don't add any untracked ones."
+            ),
+        ),
+    ] = False,
     commit_message: Annotated[
         str | None,
         typer.Option(
@@ -1038,6 +1049,9 @@ def add(
     try:
         repo = calkit.git.get_repo()
     except InvalidGitRepositoryError:
+        if dry_run:
+            typer.echo("This is not a Git repository; would offer to init")
+            return
         # Prompt user if they want to run git init here
         warn("Current directory is not a Git repo")
         auto_init = typer.confirm(
@@ -1098,6 +1112,30 @@ def add(
             typer.echo(f"Un-ignoring {out} since it's stored in Git")
             calkit.git.ensure_path_is_not_ignored(repo, out)
     untracked_git_files = repo.untracked_files
+    if existing_only:
+        # Swap each path for the changed files Git tracks within it, so an
+        # untracked file in a directory doesn't come along with it
+        existing_paths = []
+        for path in paths:
+            # Without --to, '.' is handled below without untracked files,
+            # but with it, '.' would be passed straight to Git or DVC
+            is_dvc_path = Path(path).as_posix().rstrip("/") in dvc_paths
+            if (path == "." and to is None) or is_dvc_path:
+                existing_paths.append(path)
+                continue
+            # Git runs from the repo root and lists paths relative to it
+            for changed in repo.git.ls_files(
+                "--modified", "--", os.path.abspath(path)
+            ).splitlines():
+                changed = os.path.relpath(
+                    os.path.join(str(repo.working_tree_dir), changed)
+                )
+                if changed not in existing_paths:
+                    existing_paths.append(changed)
+        paths = existing_paths
+        if not paths:
+            typer.echo("No changes to files already in the repo")
+            return
     if auto_commit_message:
         # See if this path is in the repo already
         if paths[0] in dvc_paths or repo.git.ls_files(paths[0]):
@@ -1167,7 +1205,7 @@ def add(
                         f"cache ({paths_txt}); "
                         "run 'calkit pull' to fetch their data"
                     )
-            if not disable_auto_ignore:
+            if not disable_auto_ignore and not existing_only:
                 for untracked_file in untracked_git_files:
                     if (
                         any(
@@ -1196,8 +1234,8 @@ def add(
                                 paths.append(".gitignore")
             # TODO: Figure out if we should group large folders for dvc
             # Now add untracked files automatically
-            for untracked_file in repo.untracked_files:
-                paths.append(untracked_file)
+            if not existing_only:
+                paths += repo.untracked_files
             # Now add changed files
             for changed_file in [
                 d.a_path for d in repo.index.diff(None) if d.a_path is not None
@@ -1548,6 +1586,17 @@ def save(
             help=("Save all, automatically handling staging and ignoring."),
         ),
     ] = False,
+    existing_only: Annotated[
+        bool,
+        typer.Option(
+            "--existing",
+            "-e",
+            help=(
+                "Only save files that already exist in the repo, i.e., "
+                "don't automatically add new ones."
+            ),
+        ),
+    ] = False,
     message: Annotated[
         Optional[str], typer.Option("--message", "-m", help="Commit message.")
     ] = None,
@@ -1597,6 +1646,14 @@ def save(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            "--dry",
+            help="Show what would be saved without actually saving it.",
+        ),
+    ] = False,
 ) -> None:
     """Save paths by committing and pushing.
 
@@ -1606,12 +1663,15 @@ def save(
         raise_error("Paths must be provided if not using --all")
     # Asked before anything else runs: the Git and DVC commands below read
     # from the terminal too, and would take an answer typed ahead
-    if not no_push and not _has_somewhere_to_push():
+    if not dry_run and not no_push and not _has_somewhere_to_push():
         no_push = not _offer_to_connect()
     if paths is not None:
-        add(paths, to=to)
+        add(paths, to=to, existing_only=existing_only, dry_run=dry_run)
     elif save_all:
-        add(paths=["."], to=to)
+        add(paths=["."], to=to, existing_only=existing_only, dry_run=dry_run)
+    if dry_run:
+        typer.echo("Would commit" + ("" if no_push else " and push"))
+        return
     any_dvc = commit(
         paths=paths,
         all_changed=True if paths is None else False,
@@ -4794,9 +4854,10 @@ def stash(
 ) -> None:
     """Stash or restore workspace changes including dvc-zip tracked dirs.
 
-    Without --pop: zips any modified workspace dirs into the DVC cache, then
-    git-stashes (saving the updated .dvc files), checks out the committed DVC
-    state, and unzips it to the workspace.
+    Without --pop: zips any modified workspace dirs and commits any other
+    modified DVC-tracked paths into the DVC cache, then git-stashes (saving
+    the updated .dvc files and dvc.lock), checks out the committed DVC state,
+    and unzips it to the workspace.
 
     With --pop: pops the git stash (restoring the saved .dvc files), checks
     out the stashed DVC state, and unzips it to the workspace.
@@ -4809,6 +4870,12 @@ def stash(
         # Zip any modified workspace dirs so their current state is in the DVC
         # cache (the updated .dvc file will be captured by git stash)
         calkit.dvc.zip.sync_all(direction="to-zip")
+        # Same for other modified DVC-tracked paths, which DVC would otherwise
+        # refuse to check out over since their data isn't in the cache
+        dvc_repo = calkit.dvc.get_dvc_repo()
+        uncommitted = dvc_repo.data_status()["uncommitted"]
+        for path in uncommitted.get("modified", []):
+            calkit.dvc.commit_path(dvc_repo, path, outs_only=True)
         subprocess.check_call(["git", "stash"])
         # Restore the committed zip versions and unzip them
         calkit.dvc.run_dvc_command(["checkout"])

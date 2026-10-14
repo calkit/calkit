@@ -17,20 +17,6 @@ from calkit.cli.sync import sync_app
 
 overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
-# Shown when a pull from Overleaf fails, most commonly due to an invalid or
-# expired token. Calkit authenticates only with the token in its config, but a
-# stale token cached by the OS credential manager from an earlier version can
-# still interfere, so we point users there as a fallback.
-PULL_FAILED_MESSAGE = (
-    "Failed to pull from Overleaf; "
-    "check that your Overleaf token is valid\n"
-    "Run 'calkit config get overleaf_token' and ensure that it matches one in "
-    "your Overleaf account settings (https://overleaf.com/user/settings).\n"
-    "If it looks correct but pulling still fails, delete any saved "
-    "'git.overleaf.com' credential from your OS credential manager (Windows "
-    "Credential Manager, macOS Keychain, or your Linux keyring) and try again."
-)
-
 # How many times the guided commands retry a failed pull before giving up
 # when running unattended, where there's nobody to stop an endless retry
 _MAX_PULL_ATTEMPTS = 3
@@ -626,9 +612,9 @@ def sync(
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
         try:
-            overleaf_repo.git.pull()
-        except Exception:
-            raise_error(PULL_FAILED_MESSAGE)
+            calkit.overleaf.pull(overleaf_repo)
+        except Exception as e:
+            raise_error(str(e))
         if resolve:
             last_sync_commit = resolving_info["last_overleaf_commit"]
         else:
@@ -753,9 +739,9 @@ def get_status(
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
         try:
-            overleaf_repo.git.pull()
-        except Exception:
-            raise_error(PULL_FAILED_MESSAGE)
+            calkit.overleaf.pull(overleaf_repo)
+        except Exception as e:
+            raise_error(str(e))
         last_sync_commit = sync_data.get("last_sync_commit")
         if last_sync_commit:
             commits_since = calkit.overleaf.get_commits_since_last_sync(

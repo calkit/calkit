@@ -94,6 +94,48 @@ def get_repo(project_id: str, token: str) -> git.Repo:
     return repo
 
 
+# Added to a failed fetch's error when Git reports an authentication failure.
+# Calkit authenticates only with the token in its config, but a stale token
+# cached by the OS credential manager from an earlier version can still
+# interfere, so we point users there as a fallback.
+AUTH_FAILED_ADVICE = (
+    "Check that your Overleaf token is valid: "
+    "run 'calkit config get overleaf_token' and ensure that it matches one in "
+    "your Overleaf account settings (https://overleaf.com/user/settings).\n"
+    "If it looks correct but pulling still fails, delete any saved "
+    "'git.overleaf.com' credential from your OS credential manager (Windows "
+    "Credential Manager, macOS Keychain, or your Linux keyring) and try again."
+)
+
+
+def pull(repo: git.Repo) -> None:
+    """Update the local clone of an Overleaf project to match Overleaf.
+
+    The clone is only a cache, so anything left in it by an interrupted or
+    failed sync, e.g., a commit whose push was rejected, is discarded rather
+    than merged, since merging can fail and block every later pull.
+    """
+    import re
+
+    try:
+        repo.git.fetch("origin")
+    except git.GitCommandError as e:
+        # Never show the token embedded in the remote URL
+        details = re.sub(r"://[^/@\s]+@", "://", str(e.stderr)).strip()
+        msg = f"Failed to pull from Overleaf:\n{details}"
+        auth_errors = [
+            "authentication failed",
+            "could not read username",
+            "returned error: 401",
+            "returned error: 403",
+        ]
+        if any(err in details.lower() for err in auth_errors):
+            msg += "\n" + AUTH_FAILED_ADVICE
+        raise RuntimeError(msg)
+    repo.git.reset("--hard", "@{upstream}")
+    repo.git.clean("-fd")
+
+
 def project_id_to_url(project_id: str) -> str:
     return f"https://www.overleaf.com/project/{project_id}"
 

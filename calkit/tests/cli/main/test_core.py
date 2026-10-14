@@ -1903,6 +1903,9 @@ def test_run_writes_private_logs(tmp_dir):
     assert list(stage_runs) == ["s1"]
     assert "environment" not in entry
     assert entry["calkit_version"] == calkit.__version__
+    assert entry["dvc_lock"] == calkit.dvc.stage_lock_md5(
+        calkit.dvc.read_lock_stages()["s1"]
+    )
     assert entry["system"]["os"] == platform.system()
     assert entry["system"]["machine_id"] == calkit.get_machine_id()
     assert entry["start_time"] <= entry["end_time"]

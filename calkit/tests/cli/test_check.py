@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 
+import git
 import pytest
 
 import calkit
@@ -1492,6 +1493,56 @@ def test_check_switch_env(tmp_dir):
     subprocess.check_call(["calkit", "check", "env", "-n", "two"])
     with open(switch_lock) as f:
         assert set(json.load(f)["machine_locks"]) == {"a"}
+
+
+def test_check_stage_runs(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                name: {
+                    "kind": "shell-command",
+                    "command": f"echo {name} > {name}.txt",
+                    "environment": "_system",
+                    "outputs": [{"path": f"{name}.txt", "storage": "git"}],
+                }
+                for name in ["a", "b"]
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check = ["calkit", "check", "stage-runs"]
+    subprocess.check_call(["calkit", "run"])
+    # Each run records what dvc.lock then said about the stage, with the
+    # commit it started from
+    with open(calkit.STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    lock = calkit.dvc.read_lock_stages()
+    assert stage_runs["a"]["dvc_lock"] == calkit.dvc.stage_lock_md5(lock["a"])
+    assert stage_runs["a"]["git_rev"] == git.Repo().head.commit.hexsha
+    assert stage_runs["a"]["git_dirty"]
+    subprocess.check_call(check)
+    # An output edited and committed to dvc.lock without running the stage
+    # doesn't match
+    with open("a.txt", "w") as f:
+        f.write("edited\n")
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "a"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Stage 'a' has changed in dvc.lock" in res.stdout
+    assert "'b'" not in res.stdout
+    # Nor does a stage with no recorded run, e.g., run outside Calkit
+    with open(calkit.STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    del stage_runs["b"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'b' has no recorded run" in res.stdout
+    # Rerunning them records them again
+    subprocess.check_call(["calkit", "run", "--force"])
+    subprocess.check_call(check)
 
 
 def test_check_env_rebuilds(tmp_dir):

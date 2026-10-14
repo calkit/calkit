@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import sys
 import threading
@@ -922,6 +923,58 @@ def init(
     if quiet:
         args.append("--quiet")
     return run_dvc_command(args, cwd=wdir)
+
+
+def read_lock_stages(wdir: str | None = None) -> dict:
+    """The stages a ``dvc.lock`` records, or none if there isn't one."""
+    fpath = os.path.join(wdir or ".", "dvc.lock")
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            data = calkit.core._load_yaml_readonly(f) or {}
+    except OSError:
+        return {}
+    stages = data.get("stages") if isinstance(data, dict) else None
+    return stages if isinstance(stages, dict) else {}
+
+
+def split_lock_stage_name(stage_name: str) -> tuple[str | None, str]:
+    """The directory of the ``dvc.lock`` recording a stage, and its name there.
+
+    A subproject's stage run from its parent is named, e.g.,
+    'sub/dvc.yaml:stage'.
+    """
+    dvc_yaml, sep, name = stage_name.rpartition(":")
+    if sep and posixpath.basename(dvc_yaml) == "dvc.yaml":
+        return posixpath.dirname(dvc_yaml) or None, name
+    return None, stage_name
+
+
+def stage_lock_md5(entry: dict) -> str:
+    """A checksum of what a stage's ``dvc.lock`` entry says it ran and made.
+
+    Built from its command, params, and each dep's and out's path and hash,
+    rather than the entry as written, so a change in how DVC writes the
+    file doesn't change it.
+    """
+
+    def files(key: str) -> list:
+        return sorted(
+            (
+                {k: v for k, v in f.items() if k not in ("size", "nfiles")}
+                for f in entry.get(key) or []
+                if isinstance(f, dict)
+            ),
+            key=lambda f: str(f.get("path")),
+        )
+
+    data = {
+        "cmd": entry.get("cmd"),
+        "params": entry.get("params") or {},
+        "deps": files("deps"),
+        "outs": files("outs"),
+    }
+    content = json.dumps(data, sort_keys=True, default=str).encode()
+    return "md5:" + hashlib.md5(content).hexdigest()
 
 
 def configure_autostage(wdir: str | None = None) -> int:

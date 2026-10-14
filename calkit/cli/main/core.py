@@ -3623,6 +3623,15 @@ def run(
         # By machine env, where None is this machine; a remote machine's
         # properties were already read once this run
         machine_info: dict[str, dict | None] = {}
+        # By directory, for a subproject's stages
+        lock_stages: dict[str | None, dict] = {}
+        # The commit the run started from, which the results' commit will
+        # follow, and whether it was all there was
+        git_dirty = bool(
+            git_changed_files_before
+            or git_staged_files_before
+            or git_untracked_files_before
+        )
         for stage_name in ran:
             env_name = stage_envs[stage_name]
             picks = stage_switch_picks[stage_name]
@@ -3637,6 +3646,17 @@ def run(
                 }
             elif env_name:
                 entry["environment"] = env_name
+            entry["git_rev"] = git_rev
+            entry["git_dirty"] = git_dirty
+            # What dvc.lock records the stage ran and made, so an entry it
+            # got some other way, e.g., 'dvc commit', can be told apart
+            lock_dir, lock_name = calkit.dvc.split_lock_stage_name(stage_name)
+            if lock_dir not in lock_stages:
+                lock_stages[lock_dir] = calkit.dvc.read_lock_stages(lock_dir)
+            if isinstance(lock_stages[lock_dir].get(lock_name), dict):
+                entry["dvc_lock"] = calkit.dvc.stage_lock_md5(
+                    lock_stages[lock_dir][lock_name]
+                )
             entry["calkit_version"] = system_info.get("calkit_version")
             if system_info.get("calkit_git_rev"):
                 entry["calkit_git_rev"] = system_info["calkit_git_rev"]

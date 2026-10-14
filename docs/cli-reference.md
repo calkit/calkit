@@ -3178,6 +3178,7 @@ Check things.
 | [`venv`](#subcommand-check-venv)                            | Check a Python virtual environment (uv or virtualenv).                                                       |
 | [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
 | [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that a project's system-level requirements are met.                                                    |
+| [`stage-runs`](#subcommand-check-stage-runs)                | Check each stage in dvc.lock matches the recorded run that made it.                                          |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
@@ -3446,6 +3447,20 @@ Options:
 | ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
 | `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                    |
 | `--no-cache`      | boolean | no       | False   | Re-probe every setup requirement, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
+
+<a id="subcommand-check-stage-runs"></a>
+
+#### `calkit check stage-runs`
+
+Check each stage in dvc.lock matches the recorded run that made it.
+
+A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone.
+
+Usage:
+
+```text
+calkit check stage-runs
+```
 
 <a id="subcommand-check-env-vars"></a>
 

@@ -15,6 +15,12 @@ and on which machine.
 The entry is replaced each time the stage runs,
 so the file describes how the current outputs were made,
 and its Git history is the stage's run history.
+It also records the commit the run started from,
+whether there were uncommitted changes,
+and a checksum of the stage's `dvc.lock` entry after it ran.
+`calkit check stage-runs` reports any stage whose `dvc.lock` entry
+doesn't match its recorded run,
+e.g., after `dvc commit` of an edited output.
 
 If the `--log` option is specified,
 DVC logs will be sent into `.calkit/logs` while the run is executing,

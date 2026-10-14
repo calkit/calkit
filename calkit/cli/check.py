@@ -2203,6 +2203,54 @@ def check_project_requirements(
     calkit.echo(message)
 
 
+@check_app.command(name="stage-runs")
+def check_stage_runs() -> None:
+    """Check each stage in dvc.lock matches the recorded run that made it.
+
+    A stage's entry in .calkit/stage-runs.json records a checksum of its
+    dvc.lock entry after it ran, so one that disagrees got its dvc.lock
+    entry some other way, e.g., 'dvc commit' after an output was edited, an
+    edit or merge of dvc.lock, or running it outside Calkit. This catches
+    mistakes and shortcuts, not forgery, since a matching entry can be
+    written by anyone.
+    """
+    try:
+        with open(calkit.STAGE_RUNS_FPATH) as f:
+            stage_runs = json.load(f)
+    except OSError:
+        stage_runs = {}
+    except json.JSONDecodeError as e:
+        raise_error(f"Can't read {calkit.STAGE_RUNS_FPATH}: {e}")
+    # By directory, for a subproject's stages
+    lock_stages = {None: calkit.dvc.read_lock_stages()}
+    problems = []
+    for name in sorted(set(lock_stages[None]) | set(stage_runs)):
+        lock_dir, lock_name = calkit.dvc.split_lock_stage_name(name)
+        if lock_dir not in lock_stages:
+            lock_stages[lock_dir] = calkit.dvc.read_lock_stages(lock_dir)
+        locked = lock_stages[lock_dir].get(lock_name)
+        # One no longer in dvc.lock has nothing to vouch for
+        if not isinstance(locked, dict):
+            continue
+        recorded = stage_runs.get(name)
+        if not isinstance(recorded, dict):
+            problems.append(f"Stage '{name}' has no recorded run")
+        elif recorded.get("dvc_lock") != calkit.dvc.stage_lock_md5(locked):
+            problems.append(
+                f"Stage '{name}' has changed in dvc.lock since its last "
+                "recorded run"
+            )
+    for problem in problems:
+        typer.echo(problem)
+    if problems:
+        raise_error(
+            f"{len(problems)} stage(s) in dvc.lock don't match a recorded "
+            f"run in {calkit.STAGE_RUNS_FPATH}; rerunning them with "
+            "'calkit run --force <stage>' records them"
+        )
+    typer.echo("Every stage in dvc.lock matches its recorded run")
+
+
 @check_app.command(name="env-vars")
 def check_env_vars(
     verbose: Annotated[

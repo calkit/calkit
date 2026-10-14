@@ -598,6 +598,7 @@ def sync(
     # Keyed by synced folder, so a sync of multiple folders can be summarized
     # after the loop even if some are skipped
     results: dict[str, dict] = {}
+    first = True
     for synced_folder, sync_data in overleaf_info.items():
         if not sync_data:
             continue
@@ -609,9 +610,13 @@ def sync(
                 "No Overleaf project ID defined for this folder; "
                 "please set 'url' in the Overleaf config"
             )
+        # Separate each folder's output from the one before
+        if not first:
+            typer.echo()
+        first = False
+        folder = typer.style(synced_folder, fg="blue")
         typer.echo(
-            f"Syncing {synced_folder} with "
-            f"Overleaf project ID {overleaf_project_id}"
+            f"Syncing {folder} with Overleaf project ID {overleaf_project_id}"
         )
         wdir = synced_folder
         if resolve and wdir == resolving_info["wdir"]:
@@ -758,8 +763,9 @@ def get_status(
         if not first:
             typer.echo()
         first = False
+        folder = typer.style(path_in_project, fg="blue")
         typer.echo(
-            f"Getting status of {path_in_project} with "
+            f"Getting status of {folder} with "
             f"Overleaf project ID {overleaf_project_id}"
         )
         wdir = path_in_project

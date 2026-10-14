@@ -9500,6 +9500,7 @@
                   "cpu-count",
                   "memory-gb",
                   "python-version",
+                  "calkit-python-version",
                   "python-implementation",
                   "git-version",
                   "docker-version",
@@ -9750,6 +9751,7 @@
                   "cpu-count",
                   "memory-gb",
                   "python-version",
+                  "calkit-python-version",
                   "python-implementation",
                   "git-version",
                   "docker-version",
@@ -9946,7 +9948,7 @@
       "type": "object"
     },
     "SystemValueRequirement": {
-      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``python-version`` where '>=' means something.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
+      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly and ``matches`` as a glob, both\ncase-insensitively, and a list of values means any of them will do.\n``version_spec`` compares as a version, for properties like\n``os-version`` and ``calkit-python-version`` where '>=' means\nsomething.\n\nAt least one of ``equals``, ``matches`` and ``version_spec`` must be\ngiven. To record a property that results depend on rather than\nconstrain it, add it to a ``system`` environment's ``lock``.",
       "properties": {
         "description": {
           "anyOf": [
@@ -9989,7 +9991,7 @@
             "processor",
             "hostname",
             "machine-id",
-            "python-version",
+            "calkit-python-version",
             "python-implementation"
           ],
           "title": "Kind",

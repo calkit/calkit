@@ -92,8 +92,9 @@ SystemNumberProperty = Literal["cpu-count", "memory-gb"]
 # Machine properties whose values are strings. ``*-version`` properties of
 # installed tools are deliberately absent: those are reachable as an ``app``
 # requirement with a ``version_spec``, which is one way to say it rather
-# than two. ``python-version`` stays because it describes the interpreter
-# running Calkit, which need not be whatever ``python`` resolves to.
+# than two. ``calkit-python-version`` is here because it describes the
+# interpreter running Calkit, which need not be whatever ``python`` resolves
+# to.
 SystemValueProperty = Literal[
     "os",
     "os-version",
@@ -102,7 +103,7 @@ SystemValueProperty = Literal[
     "processor",
     "hostname",
     "machine-id",
-    "python-version",
+    "calkit-python-version",
     "python-implementation",
 ]
 
@@ -153,7 +154,8 @@ class SystemValueRequirement(Model):
     ``equals`` matches exactly and ``matches`` as a glob, both
     case-insensitively, and a list of values means any of them will do.
     ``version_spec`` compares as a version, for properties like
-    ``os-version`` and ``python-version`` where '>=' means something.
+    ``os-version`` and ``calkit-python-version`` where '>=' means
+    something.
 
     At least one of ``equals``, ``matches`` and ``version_spec`` must be
     given. To record a property that results depend on rather than

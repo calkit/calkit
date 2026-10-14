@@ -188,7 +188,7 @@ def test_machine_property_requirements():
                 {"kind": "cpu-count", "min": 2},
                 {"kind": "memory-gb", "min": 8, "max": 128},
                 {"kind": "os", "equals": ["Linux", "Darwin"]},
-                {"kind": "python-version", "version_spec": ">=3.11"},
+                {"kind": "calkit-python-version", "version_spec": ">=3.11"},
             ]
         }
     )

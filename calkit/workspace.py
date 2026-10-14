@@ -735,25 +735,27 @@ def remote_system_info(
                 "with 'calkit describe system'. Checking that machine's "
                 f"requirements or lock needs Calkit installed there{too_old}."
             )
-        # Older versions report e.g., 'Rscript_version', where keys are now
-        # all lowercase
-        try:
-            return {k.lower(): v for k, v in json.loads(out).items()}
-        except json.JSONDecodeError:
-            pass
         # A login shell is what makes Calkit findable at all here, and logging
         # in is also what prints a MOTD or whatever else the profile echoes.
         # The description is one JSON object, so take it from where it starts.
-        start = out.find("{")
-        if start != -1:
+        info = None
+        for text in [out, out[out.find("{") :] if "{" in out else ""]:
             try:
-                info = json.loads(out[start:])
-                return {k.lower(): v for k, v in info.items()}
+                info = json.loads(text)
+                break
             except json.JSONDecodeError:
                 pass
-        raise ValueError(
-            f"Got an unreadable system description from '{workspace.host}'"
-        )
+        if not isinstance(info, dict):
+            raise ValueError(
+                f"Got an unreadable system description from '{workspace.host}'"
+            )
+        # Older versions report, e.g., 'Rscript_version', where keys are now
+        # all lowercase, and their own Python as 'python_version', which is
+        # now the one on PATH
+        info = {k.lower(): v for k, v in info.items()}
+        if "python_version" in info and "calkit_python_version" not in info:
+            info["calkit_python_version"] = info.pop("python_version")
+        return info
 
     # One read per machine per 'calkit run', rather than one per stage
     cache_dir = os.environ.get(REMOTE_INFO_CACHE_ENV_VAR)

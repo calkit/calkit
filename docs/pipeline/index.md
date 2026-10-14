@@ -770,19 +770,20 @@ A constraint on a string-valued property of the machine.
 `equals` matches exactly and `matches` as a glob, both
 case-insensitively, and a list of values means any of them will do.
 `version_spec` compares as a version, for properties like
-`os-version` and `python-version` where '>=' means something.
+`os-version` and `calkit-python-version` where '>=' means
+something.
 
 At least one of `equals`, `matches` and `version_spec` must be
 given. To record a property that results depend on rather than
 constrain it, add it to a `system` environment's `lock`.
 
-| Parameter      | Type                                                                                                                                 | Required | Default | Description                                                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `kind`         | Literal['os', 'os-version', 'platform', 'machine', 'processor', 'hostname', 'machine-id', 'python-version', 'python-implementation'] | yes      |         | Which property of the machine to constrain.                                                                           |
-| `equals`       | str \| list[str] \| None                                                                                                             | no       | null    | Value the property must have, matched case-insensitively. A list means any one of them is acceptable.                 |
-| `version_spec` | str \| None                                                                                                                          | no       | null    | PEP 440 version specifier the property must satisfy, e.g., '>=3.11'. For properties that are versions.                |
-| `matches`      | str \| list[str] \| None                                                                                                             | no       | null    | Glob the property must match, case-insensitively, e.g., `*.cluster.edu` for a hostname. A list means any one of them. |
-| `description`  | str \| None                                                                                                                          | no       | null    |                                                                                                                       |
+| Parameter      | Type                                                                                                                                        | Required | Default | Description                                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `kind`         | Literal['os', 'os-version', 'platform', 'machine', 'processor', 'hostname', 'machine-id', 'calkit-python-version', 'python-implementation'] | yes      |         | Which property of the machine to constrain.                                                                           |
+| `equals`       | str \| list[str] \| None                                                                                                                    | no       | null    | Value the property must have, matched case-insensitively. A list means any one of them is acceptable.                 |
+| `version_spec` | str \| None                                                                                                                                 | no       | null    | PEP 440 version specifier the property must satisfy, e.g., '>=3.11'. For properties that are versions.                |
+| `matches`      | str \| list[str] \| None                                                                                                                    | no       | null    | Glob the property must match, case-insensitively, e.g., `*.cluster.edu` for a hostname. A list means any one of them. |
+| `description`  | str \| None                                                                                                                                 | no       | null    |                                                                                                                       |
 
 #### `SetupRequirement`
 

@@ -1809,6 +1809,14 @@ def test_lock_any_app_version(tmp_dir):
         "rscript-version": "4.3.2",
         "Rscript-version": "4.3.2",
     }
+    # The Python stages run isn't necessarily the one running Calkit, and
+    # where there's only 'python3', that's the one to lock
+    pythons = {"python_version": "3.12.8", "calkit_python_version": "3.14.2"}
+    assert envs.get_system_lock_data(
+        ["python-version", "calkit-python-version"], system_info=pythons
+    ) == {"python-version": "3.12.8", "calkit-python-version": "3.14.2"}
+    with pytest.raises(ValueError, match="lock 'python3-version'"):
+        envs.get_system_lock_data(["python-version-minor"], system_info={})
     # A version that can't be read would match any other, so isn't locked,
     # whether nothing was printed or nothing in it is a version
     for printed in ["", "a version with no number"]:

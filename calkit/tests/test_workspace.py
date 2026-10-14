@@ -512,6 +512,19 @@ def test_remote_system_info_reads_the_machine_that_runs_the_stage(
     )
     w = ws.Workspace(host="box", wdir="/w")
     assert ws.remote_system_info(w) == {"cpu_count": 64, "os": "Linux"}
+    # An older Calkit's keys are read as they're named now, after whatever
+    # logging in printed
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, *a, **kw: (
+            b'Welcome\n{"Rscript_version": "4.3", "python_version": "3.11.2"}'
+        ),
+    )
+    assert ws.remote_system_info(w) == {
+        "rscript_version": "4.3",
+        "calkit_python_version": "3.11.2",
+    }
 
     # Calkit has to be there to answer; say so rather than failing obscurely
     def fail(argv, *a, **kw):

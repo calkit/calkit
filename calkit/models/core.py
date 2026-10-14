@@ -1072,6 +1072,7 @@ SystemLockProperty = Literal[
     "cpu-count",
     "memory-gb",
     "python-version",
+    "calkit-python-version",
     "python-implementation",
     "git-version",
     "docker-version",

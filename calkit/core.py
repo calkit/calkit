@@ -1655,7 +1655,7 @@ def get_machine_properties() -> dict:
     return {
         "os": platform.system(),
         "os_version": platform.release(),
-        "python_version": platform.python_version(),
+        "calkit_python_version": platform.python_version(),
         "calkit_version": calkit.__version__,
         "calkit_git_rev": None,
         "hostname": socket.gethostname(),
@@ -1672,6 +1672,7 @@ def get_machine_properties() -> dict:
 
 # Apps whose versions 'calkit describe system' reports on every OS
 ALWAYS_REPORTED_APPS = (
+    "python",
     "git",
     "docker",
     "conda",

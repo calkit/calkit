@@ -104,6 +104,7 @@ SYSTEM_LOCK_PROPERTIES = {
         "cpu-count",
         "memory-gb",
         "python-version",
+        "calkit-python-version",
         "python-implementation",
         "git-version",
         "docker-version",
@@ -138,7 +139,9 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
     "cpu-count": "Number of CPUs, which can change what a run produces "
     "where results depend on how work was divided.",
     "memory-gb": "Total memory in GB.",
-    "python-version": "Version of the Python running Calkit.",
+    "python-version": "Version of the 'python' on PATH, which is what a "
+    "system environment's stages run.",
+    "calkit-python-version": "Version of the Python running Calkit.",
     "python-implementation": "Python implementation, e.g., 'CPython'.",
     "git-version": "Installed Git version.",
     "docker-version": "Installed Docker version.",
@@ -1388,6 +1391,8 @@ def get_system_lock_data(
                     "; no identifier could be read from the platform, so "
                     "give it one with 'calkit config set machine_id <id>'"
                 )
+            elif source == "python-version":
+                hint = "; lock 'python3-version' if it's only 'python3' here"
             raise ValueError(
                 f"System property '{prop}' is not available on this machine"
                 + hint

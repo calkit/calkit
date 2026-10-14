@@ -122,7 +122,7 @@ requirements:
     min: 32
   - kind: os
     equals: [Linux, Darwin]
-  - kind: python-version
+  - kind: calkit-python-version
     version_spec: ">=3.11"
 ```
 

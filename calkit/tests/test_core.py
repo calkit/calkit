@@ -209,7 +209,7 @@ def test_check_property_requirement():
         "cpu_count": 8,
         "memory_gb": 32.0,
         "os": "Linux",
-        "python_version": "3.12.4",
+        "calkit_python_version": "3.12.4",
     }
     # Numeric properties are bounded from either side
     check({"kind": "cpu-count", "min": 8}, info)
@@ -235,9 +235,11 @@ def test_check_property_requirement():
     with pytest.raises(ValueError, match="doesn't match 'win\\*'"):
         check({"kind": "os", "matches": "win*"}, info)
     # Versions compare as versions rather than as strings
-    check({"kind": "python-version", "version_spec": ">=3.11"}, info)
+    check({"kind": "calkit-python-version", "version_spec": ">=3.11"}, info)
     with pytest.raises(ValueError, match=">=3.13"):
-        check({"kind": "python-version", "version_spec": ">=3.13"}, info)
+        check(
+            {"kind": "calkit-python-version", "version_spec": ">=3.13"}, info
+        )
     with pytest.raises(ValueError, match="can't be read as a version"):
         check({"kind": "os", "version_spec": ">=1"}, info)
     # A property the machine doesn't report is unanswered, not satisfied

@@ -2826,6 +2826,17 @@ def run(
             ),
         ),
     ] = False,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help=(
+                "Fail if an out-of-date stage can't run on this machine "
+                "rather than skipping it, e.g., in CI for a project whose "
+                "stages should all run there."
+            ),
+        ),
+    ] = False,
 ) -> dict:
     """Check requirements and run the pipeline."""
     import dvc.log
@@ -3365,11 +3376,15 @@ def run(
     else:
         failed = failed or res != 0
     # A skip is only fine when the project says the stage can't run here and
-    # nobody asked for it by name
+    # nobody asked for it by name, or for every stage with --strict
     targeted = {t.split("@")[0] for t in targets or []}
     error_reasons = set(gate_errors.values())
     for addressing, reason in skipped_stale.items():
-        if reason in error_reasons or addressing.split("@")[0] in targeted:
+        if (
+            strict
+            or reason in error_reasons
+            or addressing.split("@")[0] in targeted
+        ):
             typer.echo(
                 f"Stage '{addressing}' is out of date and couldn't run: "
                 f"{reason}",

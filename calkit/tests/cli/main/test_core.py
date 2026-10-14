@@ -3363,6 +3363,12 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
     )
     assert res.returncode != 0
     assert "out of date and couldn't run" in res.stderr
+    # As is any with --strict, e.g., in CI where every stage should run
+    res = subprocess.run(
+        ["calkit", "run", "--strict"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "'fetch' is out of date and couldn't run" in res.stderr
     # A skipped stage is still caught out of date when a stage it depends
     # on runs after DVC has visited it
     with open("calkit.yaml") as f:

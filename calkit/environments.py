@@ -1514,9 +1514,7 @@ def describe_system_env_lock_mismatch(
         "and a stage that needs to run can't here, since its result would "
         "not be comparable with them. If this machine should take over, "
         f"lock it again with:\n\n  calkit update env -n {env_name} --lock"
-        "\n\nwhich invalidates every stage that depends on the lock. To "
-        "have the lock follow whichever machine runs the stages, e.g., in "
-        "CI, set 'relock: auto' on the environment."
+        "\n\nwhich invalidates every stage that depends on the lock."
     )
 
 

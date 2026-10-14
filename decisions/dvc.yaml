@@ -87,3 +87,18 @@ stages:
     frozen: true
     desc: Automatically generated from the 'time-cli-build' stage in
       calkit.yaml. Changes made here will be overwritten.
+  time-dvc-yaml-parsing:
+    cmd: calkit xenv -n calkit --no-check -- python
+      scripts/time-dvc-yaml-parsing.py --out=results/dvc-yaml-parsing.json
+    deps:
+      - scripts/time-dvc-yaml-parsing.py
+      - ../calkit/core.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/dvc-yaml-parsing.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-dvc-yaml-parsing' stage in
+      calkit.yaml. Changes made here will be overwritten.

@@ -145,3 +145,28 @@ stages:
       hash: md5
       md5: ea56d6f4003cfbe1962f48d34f840410
       size: 2272
+  time-dvc-yaml-parsing:
+    cmd: calkit xenv -n calkit --no-check -- python 
+      scripts/time-dvc-yaml-parsing.py --out=results/dvc-yaml-parsing.json
+    deps:
+    - path: ../.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: ../calkit/core.py
+      hash: md5
+      md5: e3c5f22bbb787cf79c7cb033c23bb811
+      size: 59090
+    - path: ../uv.lock
+      hash: md5
+      md5: 2f919b9832e2db434ac468a89e027f9f
+      size: 1727571
+    - path: scripts/time-dvc-yaml-parsing.py
+      hash: md5
+      md5: 2030486b44426355fb0cd306c77e83f5
+      size: 8210
+    outs:
+    - path: results/dvc-yaml-parsing.json
+      hash: md5
+      md5: f6760254b76465e12d9787fb2adcd3c1
+      size: 8551

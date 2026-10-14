@@ -99,6 +99,35 @@ questions:
           help_ms: cpu_ms.help
           commands: commands.all
           n: repeats
+  - question: >-
+      How much does parsing DVC's YAML with PyYAML's libyaml, rather than
+      ruamel.yaml's C loader from ruamel.yaml.clib, save on 'calkit status'
+      and an up-to-date 'calkit run' for a pipeline the size of a large
+      project's?
+    answer: >-
+      {status_saved_s:.2f} s of {status_s:.2f} s on 'calkit status'
+      ({status_pct:.0%}), whose parsing took {status_libyaml_parse_s:.2f} s
+      instead of {status_clib_parse_s:.2f} s, and {run_saved_s:.2f} s of
+      {run_s:.2f} s on 'calkit run' ({run_pct:.0%}), for a generated
+      pipeline of {stages} stages with {paths} paths, whose dvc.lock is
+      {lock_kb:.0f} KB. Medians of {n} runs each, taking turns, with the
+      parser from the dvc-c-yaml branch, which was closed.
+    evidence:
+      - kind: result
+        path: results/dvc-yaml-parsing.json
+        values:
+          status_saved_s: parse_saved_s.status
+          status_pct: parse_saved_fraction.status
+          status_s: medians.status.clib.wall_s
+          status_clib_parse_s: medians.status.clib.parse_s
+          status_libyaml_parse_s: medians.status.libyaml.parse_s
+          run_saved_s: parse_saved_s.run
+          run_pct: parse_saved_fraction.run
+          run_s: medians.run.clib.wall_s
+          stages: project.stages
+          paths: project.paths
+          lock_kb: project.kb.dvc_lock
+          n: repeats
 
 environments:
   pure:
@@ -188,4 +217,16 @@ pipeline:
         - ../calkit/cli/__init__.py
       outputs:
         - path: results/cli-build.json
+          storage: git
+    time-dvc-yaml-parsing:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-dvc-yaml-parsing.py
+      environment: calkit
+      args:
+        - --out=results/dvc-yaml-parsing.json
+      inputs:
+        - ../calkit/core.py
+      outputs:
+        - path: results/dvc-yaml-parsing.json
           storage: git

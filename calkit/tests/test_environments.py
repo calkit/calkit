@@ -1733,37 +1733,74 @@ def test_lock_any_app_version(tmp_dir):
         ["os", "git-version", "jq-version", "cc-version-minor"]
     ) == ["jq", "cc"]
     # Any app's version can be locked, read from the machine like the rest,
-    # and recorded as the number alone
+    # and recorded as its number up to the patch part
     clang = (
         "Apple clang version 21.0.0 (clang-2100.3.34.2)\n"
         "InstalledDir: /Library/Developer/CommandLineTools/usr/bin"
     )
+    nvcc = (
+        "nvcc: NVIDIA (R) Cuda compiler driver\n"
+        "Copyright (c) 2005-2024 NVIDIA Corporation\n"
+        "Cuda compilation tools, release 12.4, V12.4.131"
+    )
     info = {
         "jq_version": "jq-1.7.1",
         "cc_version": clang,
+        "nvcc_version": nvcc,
+        "perl_version": "This is perl 5, version 34, subversion 1 (v5.34.1)",
+        "gcc_version": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0",
+        "mingw_version": "gcc.exe (x86_64-posix-seh-rev0, MinGW-W64) 8.1.0",
+        "git_version": "git version 2.39.5.windows.1",
         "docker_version": "Docker version 27.3.1, build ce12230",
-        "python_version": "3.12.8",
+        "python_version": "3.12.10rc1",
         "os_version": "6.8.0-45-generic",
-        "pandoc_version": "a version with no number",
+        "rscript_version": "Rscript (R) version 4.3.2 (2023-10-31)",
     }
     lock = [
         "jq-version",
         "cc-version",
+        "nvcc-version",
+        "perl-version",
+        "gcc-version",
+        "gcc-version-patch",
+        "gcc-version-full",
+        "mingw-version",
+        "git-version",
+        "git-version-full",
         "docker-version-major",
         "python-version-minor",
+        "python-version-full",
         "os-version",
-        "os-version-minor",
-        "pandoc-version",
+        "os-version-full",
+        "rscript-version",
+        "Rscript-version",
     ]
     assert envs.get_system_lock_data(lock, system_info=info) == {
         "jq-version": "1.7.1",
         "cc-version": "21.0.0",
+        "nvcc-version": "12.4",
+        "perl-version": "5.34.1",
+        "gcc-version": "11.4.0",
+        "gcc-version-patch": "11.4.0",
+        "gcc-version-full": "11.4.0-1ubuntu1~22.04",
+        "mingw-version": "8.1.0",
+        "git-version": "2.39.5",
+        "git-version-full": "2.39.5.windows.1",
         "docker-version-major": "27",
         "python-version-minor": "3.12",
-        "os-version": "6.8.0-45-generic",
-        "os-version-minor": "6.8",
-        "pandoc-version": "a version with no number",
+        "python-version-full": "3.12.10rc1",
+        "os-version": "6.8.0",
+        "os-version-full": "6.8.0-45-generic",
+        "rscript-version": "4.3.2",
+        "Rscript-version": "4.3.2",
     }
+    # A version that can't be read would match any other, so isn't locked,
+    # whether nothing was printed or nothing in it is a version
+    for printed in ["", "a version with no number"]:
+        with pytest.raises(ValueError, match="has no version"):
+            envs.get_system_lock_data(
+                ["pandoc-version"], system_info={"pandoc_version": printed}
+            )
     # A lock recorded in full before versions were trimmed still matches
     env = {"kind": "system", "lock": ["docker-version"]}
     os.makedirs(".calkit/env-locks/old")
@@ -1775,7 +1812,8 @@ def test_lock_any_app_version(tmp_dir):
     assert envs.system_env_lock_mismatch("old", env, system_info=upgraded) == {
         "docker-version": {"locked": "27.3.1", "actual": "28.0.0"}
     }
-    # Only the versions locked to fewer parts move with them
+    # Only the versions locked to fewer parts move with them, and a
+    # pre-release only counts in full
     minor = {"kind": "system", "lock": ["python-version-minor"]}
     envs.write_system_env_lock("minor", minor, system_info=info)
     patched = info | {"python_version": "3.12.9"}
@@ -1784,14 +1822,22 @@ def test_lock_any_app_version(tmp_dir):
     )
     newer = info | {"python_version": "3.13.0"}
     assert envs.system_env_lock_mismatch("minor", minor, system_info=newer)
+    released = info | {"python_version": "3.12.10"}
+    for name, expected in [("patch", False), ("full", True)]:
+        env = {"kind": "system", "lock": [f"python-version-{name}"]}
+        envs.write_system_env_lock(name, env, system_info=info)
+        mismatch = envs.system_env_lock_mismatch(
+            name, env, system_info=released
+        )
+        assert bool(mismatch) is expected, name
     data = envs.get_system_lock_data(["calkit-version"])
     assert data["calkit-version"]
     with pytest.raises(ValueError, match="not available"):
         envs.get_system_lock_data(["calkit-test-no-such-app-version"])
     with pytest.raises(ValueError, match="'<app>-version' for any app"):
         envs.get_system_lock_data(["bogus"])
-    with pytest.raises(ValueError, match="'-major' or '-minor'"):
-        envs.get_system_lock_data(["python-version-patch"])
+    with pytest.raises(ValueError, match="'-patch', or '-full'"):
+        envs.get_system_lock_data(["python-version-micro"])
 
 
 def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):

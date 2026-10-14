@@ -277,6 +277,23 @@ def test_check_app_version():
     assert extract_version("git version 2.39.5") == "2.39.5"
     assert extract_version("uv 0.4.18 (a1b2c3d 2024-09-20)") == "0.4.18"
     assert extract_version("") is None
+    # Not a year or part of a name, and in full with what's attached to it
+    nvcc = (
+        "Copyright (c) 2005-2024 NVIDIA\nCuda compilation tools, release 12.4"
+    )
+    assert extract_version(nvcc) == "12.4"
+    assert (
+        extract_version("gcc.exe (x86_64-posix, MinGW-W64) 8.1.0") == "8.1.0"
+    )
+    assert extract_version("perl 5, version 34 (v5.34.1)") == "5.34.1"
+    assert extract_version("Python 3.12.10rc1") == "3.12.10"
+    assert extract_version("Python 3.12.10rc1", full=True) == "3.12.10rc1"
+    assert extract_version("10") == "10"
+    # Requirements compare the number, so nvcc's isn't its copyright year
+    with pytest.raises(ValueError, match="but '>=13' is required"):
+        check_app_version("nvcc", ">=13", system_info={"nvcc_version": nvcc})
+    # Keys are lowercase, whatever the app's name
+    check_app_version("Rscript", ">=4", system_info={"rscript_version": "4.3"})
     info = {"git_version": "git version 2.39.5"}
     check_app_version("git", ">=2.30", system_info=info)
     check_app_version("git", "2.39.5", system_info=info)
@@ -295,6 +312,10 @@ def test_check_app_version():
         calls.append((cmd, kwargs))
         if cmd[0] == "hangs":
             raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        if cmd[0] == "java":
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="", stderr='java version "1.8.0_402"\n'
+            )
         return subprocess.CompletedProcess(
             cmd, 0, stdout="25.1.0.2943329 (R2025a)\n"
         )
@@ -302,6 +323,8 @@ def test_check_app_version():
     with mock.patch("calkit.core.subprocess.run", fake_run):
         assert calkit.get_dep_version("matlab") == "25.1.0.2943329 (R2025a)"
         assert calkit.get_dep_version("hangs") is None
+        # Some tools print their version to stderr
+        assert calkit.get_dep_version("java") == 'java version "1.8.0_402"'
         check_app_version("matlab", ">=25", system_info={})
     assert calls[0][0] == ["matlab", "-batch", "disp(version)"]
     assert calls[1][0] == ["hangs", "--version"]

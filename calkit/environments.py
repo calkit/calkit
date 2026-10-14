@@ -89,31 +89,33 @@ def cacheable(env: dict) -> bool:
     return env.get("kind") not in KINDS_NO_CACHE
 
 
-# Maps the kebab-case properties a ``system`` environment can lock onto the
-# keys ``get_system_info`` returns. Not a mechanical transformation, hence
-# the explicit table: note ``Rscript_version``'s capital R.
+# The kebab-case properties a ``system`` environment can lock, mapped onto
+# the keys ``get_system_info`` returns
 SYSTEM_LOCK_PROPERTIES = {
-    "os": "os",
-    "os-version": "os_version",
-    "platform": "platform",
-    "machine": "machine",
-    "processor": "processor",
-    "hostname": "hostname",
-    "machine-id": "machine_id",
-    "cpu-count": "cpu_count",
-    "memory-gb": "memory_gb",
-    "python-version": "python_version",
-    "python-implementation": "python_implementation",
-    "git-version": "git_version",
-    "docker-version": "docker_version",
-    "conda-version": "conda_version",
-    "mamba-version": "mamba_version",
-    "uv-version": "uv_version",
-    "pixi-version": "pixi_version",
-    "julia-version": "julia_version",
-    "juliaup-version": "juliaup_version",
-    "rscript-version": "Rscript_version",
-    "brew-version": "brew_version",
+    prop: prop.replace("-", "_")
+    for prop in [
+        "os",
+        "os-version",
+        "platform",
+        "machine",
+        "processor",
+        "hostname",
+        "machine-id",
+        "cpu-count",
+        "memory-gb",
+        "python-version",
+        "python-implementation",
+        "git-version",
+        "docker-version",
+        "conda-version",
+        "mamba-version",
+        "uv-version",
+        "pixi-version",
+        "julia-version",
+        "juliaup-version",
+        "rscript-version",
+        "brew-version",
+    ]
 }
 
 # What each lockable property means, for the published documentation. Kept
@@ -156,44 +158,44 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
 # reserves a little more or less moves that without changing anything a
 # result could depend on. Rounding it is the difference between pinning how
 # much memory the machine has and pinning what it happened to report.
-# An app's version is trimmed to its number in ``lock_value``. Everything
-# else is recorded as given: an OS version or a CPU count means exactly what
-# it says.
+# A version is trimmed to its number in ``lock_value``. Everything else is
+# recorded as given: a CPU count means exactly what it says.
 SYSTEM_LOCK_PROPERTY_PRECISION = {"memory-gb": lambda v: round(float(v), 1)}
 
 
-# A version can be locked to fewer parts, e.g., 'python-version-minor'
-VERSION_LOCK_PARTS = {"major": 1, "minor": 2}
+# A version is locked up to its patch part unless its property says
+# otherwise, e.g., 'python-version-minor', or 'python-version-full' to keep
+# a suffix too
+VERSION_LOCK_PARTS = {"major": 1, "minor": 2, "patch": 3, "full": None}
 
 
-def split_version_lock(prop: str) -> tuple[str, int | None]:
-    """A property's source, and how many version parts it keeps if fewer."""
+def split_version_lock(prop: str) -> tuple[str, str]:
+    """A property's source, and how much of it is locked if a version."""
     source, _, part = prop.rpartition("-")
     if source.endswith("-version") and part in VERSION_LOCK_PARTS:
-        return source, VERSION_LOCK_PARTS[part]
-    return prop, None
+        return source, part
+    return prop, "patch"
 
 
 def lock_value(prop: str, value: object) -> object:
     """A locked property as it's recorded and compared.
 
-    An app's version is its number alone, e.g., '27.3.1' from 'Docker
-    version 27.3.1, build ce12230', since what a tool prints around it, like
-    a build or where it's installed, can change while the version doesn't.
-    Comparing a lock recorded in full the same way keeps it matching. An OS
-    version is kept whole unless it's locked to fewer parts.
+    A version is its number up to the patch part, e.g., '27.3.1' from
+    'Docker version 27.3.1, build ce12230', since what a tool prints around
+    it, like a build or where it's installed, can change while the version
+    doesn't. Locked in full, it keeps a suffix attached to the number,
+    e.g., '3.12.10rc1'. Comparing a lock recorded in full the same way keeps
+    it matching.
     """
     if prop in SYSTEM_LOCK_PROPERTY_PRECISION:
         return SYSTEM_LOCK_PROPERTY_PRECISION[prop](value)
-    source, parts = split_version_lock(prop)
-    if not source.endswith("-version") or (
-        source == "os-version" and parts is None
-    ):
+    source, part = split_version_lock(prop)
+    if not source.endswith("-version"):
         return value
-    version = calkit.extract_version(str(value))
+    version = calkit.extract_version(str(value), full=part == "full")
     if version is None:
         return value
-    return ".".join(version.split(".")[:parts]) if parts else version
+    return ".".join(version.split(".")[: VERSION_LOCK_PARTS[part]])
 
 
 # Properties only one platform can supply, since ``get_system_info`` collects
@@ -1367,13 +1369,13 @@ def get_system_lock_data(
         if key is None and source in [
             f"{a}-version" for a in lock_app_names(lock)
         ]:
-            key = source.removesuffix("-version") + "_version"
+            key = source.removesuffix("-version").lower() + "_version"
         if key is None:
             raise ValueError(
                 f"Unknown system property to lock: '{prop}'; valid options "
                 f"are {', '.join(sorted(SYSTEM_LOCK_PROPERTIES))}, or "
                 "'<app>-version' for any app, and any version can end in "
-                "'-major' or '-minor' to lock only those parts"
+                "'-major', '-minor', '-patch', or '-full'"
             )
         value = system_info.get(key)
         if value is None:
@@ -1389,6 +1391,14 @@ def get_system_lock_data(
             raise ValueError(
                 f"System property '{prop}' is not available on this machine"
                 + hint
+            )
+        # A version nothing could be read from would match any other
+        if source.endswith("-version") and not calkit.extract_version(
+            str(value)
+        ):
+            raise ValueError(
+                f"System property '{prop}' has no version in what this "
+                f"machine reports for it: {str(value)!r}"
             )
         data[prop] = lock_value(prop, value)
     return data

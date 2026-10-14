@@ -735,8 +735,10 @@ def remote_system_info(
                 "with 'calkit describe system'. Checking that machine's "
                 f"requirements or lock needs Calkit installed there{too_old}."
             )
+        # Older versions report e.g., 'Rscript_version', where keys are now
+        # all lowercase
         try:
-            return json.loads(out)
+            return {k.lower(): v for k, v in json.loads(out).items()}
         except json.JSONDecodeError:
             pass
         # A login shell is what makes Calkit findable at all here, and logging
@@ -745,7 +747,8 @@ def remote_system_info(
         start = out.find("{")
         if start != -1:
             try:
-                return json.loads(out[start:])
+                info = json.loads(out[start:])
+                return {k.lower(): v for k, v in info.items()}
             except json.JSONDecodeError:
                 pass
         raise ValueError(

@@ -664,7 +664,7 @@ def check_dep_exists(
         return getattr(cfg, name, None) is not None
     if name == "calkit":
         return True
-    if system_info is not None and system_info.get(f"{name}_version"):
+    if system_info is not None and system_info.get(f"{name.lower()}_version"):
         return True
     # Conda and mamba are frequently installed but not on the PATH (most
     # commonly on Windows), so search their typical install locations
@@ -948,16 +948,25 @@ def _fmt_prop(value: float) -> str:
     return str(value)
 
 
-def extract_version(text: str) -> str | None:
+def extract_version(text: str, full: bool = False) -> str | None:
     """Pull a comparable version out of what a tool prints for ``--version``.
 
     Tools answer that question in their own way -- 'git version 2.39.5',
     'uv 0.4.18 (a1b2c3d)' -- so the number has to be found rather than
-    read off. The first dotted number is it in every case we've seen; a
-    build hash that follows is not part of what a specifier compares.
+    read off. It's the first dotted number that isn't part of a word, so a
+    year like nvcc's 'Copyright (c) 2005' or a name like 'x86_64' or
+    'gcc-13' isn't mistaken for it. A build hash that follows is not part
+    of what a specifier compares.
+
+    With ``full``, a suffix attached to the number is kept, e.g.,
+    '3.12.10rc1' or '11.4.0-1ubuntu1~22.04'.
     """
-    m = re.search(r"\d+(?:\.\d+)+|\d+", text or "")
-    return m.group(0) if m else None
+    m = re.search(
+        r"(?<![\w.])v?(\d+(?:\.\d+)+)((?:[-+~.]?[0-9A-Za-z]+)*)", text or ""
+    ) or re.search(r"(?<![\w.])v?(\d+)()(?![\w.])", text or "")
+    if m is None:
+        return None
+    return m.group(1) + m.group(2) if full else m.group(1)
 
 
 def check_app_version(
@@ -983,7 +992,7 @@ def check_app_version(
     from packaging.specifiers import SpecifierSet
     from packaging.version import InvalidVersion, Version
 
-    raw = (system_info or {}).get(f"{name}_version")
+    raw = (system_info or {}).get(f"{name.lower()}_version")
     if raw is None and probe_locally:
         raw = get_dep_version(name)
     found = extract_version(raw) if raw else None
@@ -1502,7 +1511,8 @@ def get_dep_version(dep_name: str) -> str | None:
             stdin=subprocess.DEVNULL,
             timeout=120,
         )
-        return result.stdout.strip()
+        # Some tools, e.g., older Java, print their version to stderr
+        return result.stdout.strip() or result.stderr.strip()
     except Exception:
         return None
 
@@ -1699,20 +1709,20 @@ def get_system_info(apps: list[str] | None = None) -> dict:
         pass
     # Get versions of important foundational dependencies
     for dep in ALWAYS_REPORTED_APPS:
-        system_info[f"{dep}_version"] = get_dep_version(dep)
+        system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
     # OS-specific app versions
     if os_name == "Darwin":
         for dep in ["brew", "port"]:
-            system_info[f"{dep}_version"] = get_dep_version(dep)
+            system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
     elif os_name == "Linux":
         for dep in ["apt", "yum"]:
-            system_info[f"{dep}_version"] = get_dep_version(dep)
+            system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
     elif os_name == "Windows":
         for dep in ["choco", "winget"]:
-            system_info[f"{dep}_version"] = get_dep_version(dep)
+            system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
     for app in apps or []:
-        if f"{app}_version" not in system_info:
-            system_info[f"{app}_version"] = get_dep_version(app)
+        if f"{app.lower()}_version" not in system_info:
+            system_info[f"{app.lower()}_version"] = get_dep_version(app)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info

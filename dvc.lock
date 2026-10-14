@@ -46,8 +46,8 @@ stages:
       size: 4747
     - path: uv.lock
       hash: md5
-      md5: 2f919b9832e2db434ac468a89e027f9f
-      size: 1727571
+      md5: 35a59756fc8544a387ff72c703727239
+      size: 1727570
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5
@@ -95,8 +95,8 @@ stages:
       size: 2652
     - path: uv.lock
       hash: md5
-      md5: 2f919b9832e2db434ac468a89e027f9f
-      size: 1727571
+      md5: 35a59756fc8544a387ff72c703727239
+      size: 1727570
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
@@ -120,12 +120,12 @@ stages:
       size: 60505
     - path: uv.lock
       hash: md5
-      md5: 2f919b9832e2db434ac468a89e027f9f
-      size: 1727571
+      md5: 35a59756fc8544a387ff72c703727239
+      size: 1727570
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: 82b39673dfdcd7ddea621e7b931f6500
+      md5: c099335d8b2c401830b9dc46a966ecf9
       size: 386
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
@@ -144,8 +144,8 @@ stages:
       size: 14225
     - path: uv.lock
       hash: md5
-      md5: 2f919b9832e2db434ac468a89e027f9f
-      size: 1727571
+      md5: 35a59756fc8544a387ff72c703727239
+      size: 1727570
     outs:
     - path: results/research-flow.json
       hash: md5
@@ -168,21 +168,21 @@ stages:
       size: 12155
     - path: uv.lock
       hash: md5
-      md5: 2f919b9832e2db434ac468a89e027f9f
-      size: 1727571
+      md5: 35a59756fc8544a387ff72c703727239
+      size: 1727570
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
-      md5: eae4437e9bff4b1d4e30c240ac129253
-      size: 181088
+      md5: 5f7d3774df4a60aeaa15b588b39252d2
+      size: 205892
     - path: docs/img/research-flow-waste.png
       hash: md5
-      md5: a8d262629eb1e6aade04772421f057a6
-      size: 115898
+      md5: 050f2fb5039cd33e738023f2f95e8576
+      size: 127296
     - path: docs/img/research-flow.png
       hash: md5
-      md5: ecdd9b9085bd15268d23a349a2e8de2d
-      size: 335476
+      md5: 5cecfe136c05fb7db5ec3173ae0bae2c
+      size: 373775
   one-pager-latex:
     cmd: calkit xenv -n dev --no-check -- python scripts/one-pager-to-latex.py
     deps:
@@ -270,8 +270,8 @@ stages:
       size: 1861
     - path: uv.lock
       hash: md5
-      md5: 2f919b9832e2db434ac468a89e027f9f
-      size: 1727571
+      md5: 35a59756fc8544a387ff72c703727239
+      size: 1727570
     outs:
     - path: results/2027-budget.json
       hash: md5

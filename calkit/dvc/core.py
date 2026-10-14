@@ -30,6 +30,9 @@ logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
 USE_CK_REMOTE_BY_DEFAULT = True
+# Whether projects have what Calkit and DVC write staged in Git as it's
+# written, e.g., dvc.lock and env locks, so they're committed together
+AUTOSTAGE = True
 
 
 class _FrozenStageWarningFilter(logging.Filter):
@@ -910,6 +913,31 @@ def init(
     if quiet:
         args.append("--quiet")
     return run_dvc_command(args, cwd=wdir)
+
+
+def configure_autostage(wdir: str | None = None) -> int:
+    """Turn on DVC's autostage, if Calkit does, returning the exit code."""
+    if not AUTOSTAGE:
+        return 0
+    return run_dvc_command(["config", "core.autostage", "true"], cwd=wdir)
+
+
+def autostage_enabled(wdir: str | None = None) -> bool:
+    """Whether what Calkit writes for the project is staged in Git.
+
+    The same switch as DVC's own, so a commit gets ``dvc.lock`` and the
+    files it records hashes of together, or neither.
+    """
+    from dvc.config import Config
+
+    if not AUTOSTAGE:
+        return False
+    dvc_dir = os.path.join(wdir or "", ".dvc")
+    if not os.path.isdir(dvc_dir):
+        return False
+    # Unvalidated, since the 'ck' remote scheme may not be registered
+    value = Config(dvc_dir=dvc_dir, validate=False)["core"].get("autostage")
+    return str(value).lower() in ("true", "yes", "1")
 
 
 def run_dvc_command(

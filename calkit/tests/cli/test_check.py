@@ -955,6 +955,39 @@ def test_check_env_rejects_an_invalid_lock_property(tmp_dir):
     assert not os.path.exists(os.path.join(".calkit", "env-locks", "laptop"))
 
 
+def test_check_env_stages_the_lock_it_writes(tmp_dir, monkeypatch):
+    import calkit.dvc.core
+
+    # DVC stages dvc.lock, which records the lock's hash, so the lock is
+    # staged with it rather than left out of the commit
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"laptop": {"kind": "system", "lock": ["os"]}}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    lock_fpath = ".calkit/env-locks/laptop/info.json"
+    subprocess.check_call(["calkit", "check", "env", "-n", "laptop"])
+    repo = calkit.git.get_repo()
+    assert lock_fpath in repo.git.diff("--cached", "--name-only").split()
+    repo.git.commit("-m", "Lock")
+    # Not when the project doesn't autostage, or Calkit doesn't
+    assert calkit.dvc.autostage_enabled()
+    with monkeypatch.context() as m:
+        m.setattr(calkit.dvc.core, "AUTOSTAGE", False)
+        assert not calkit.dvc.autostage_enabled()
+        assert calkit.dvc.configure_autostage() == 0
+    subprocess.check_call(
+        ["calkit", "dvc", "config", "core.autostage", "false"]
+    )
+    assert not calkit.dvc.autostage_enabled()
+    ck_info["environments"]["laptop"]["lock"] = ["os", "machine"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "check", "envs"])
+    assert lock_fpath in repo.git.diff("--name-only").split()
+    assert lock_fpath not in repo.git.diff("--cached", "--name-only").split()
+
+
 def test_check_env_checks_system_requirements(tmp_dir):
     # A system env's requirements gate the machine it names, and are
     # checked before its lock is written, so a machine that doesn't meet

@@ -19,7 +19,15 @@ import calkit
 from calkit.cli import AliasGroup, raise_error, warn
 from calkit.core import get_md5
 
-check_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+
+def stage_env_locks(*args: object, **kwargs: object) -> None:
+    """Stage the env locks a check wrote, which stages depend on."""
+    calkit.environments.stage_env_locks()
+
+
+check_app = typer.Typer(
+    cls=AliasGroup, no_args_is_help=True, result_callback=stage_env_locks
+)
 
 
 def _juliaup_version_installed(julia_version: str) -> bool:

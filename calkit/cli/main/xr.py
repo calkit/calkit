@@ -176,10 +176,18 @@ def _xr_markdown(
                     fb.write(content)
         if not dvc_existed:
             shutil.rmtree(".dvc", ignore_errors=True)
-        # The bootstrap stages what it creates, so the index has to be
-        # put back too, or a deleted calkit.yaml lingers as a staged
-        # addition
-        paths = [os.path.abspath(p) for p in [*snapshot, ".dvc"]]
+        # The bootstrap stages what it creates, as the run does env locks,
+        # so the index has to be put back too, or a deleted calkit.yaml
+        # lingers as a staged addition
+        paths = [
+            os.path.abspath(p)
+            for p in [
+                *snapshot,
+                ".dvc",
+                calkit.environments.get_env_lock_dir(),
+                calkit.environments.ENV_SPEC_HASHES_FPATH,
+            ]
+        ]
         try:
             repo = git.Repo(search_parent_directories=True)
         except Exception:

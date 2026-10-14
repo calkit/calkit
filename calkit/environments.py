@@ -450,6 +450,34 @@ def get_env_lock_dir(wdir: str | None = None) -> str:
     return env_lock_dir
 
 
+def stage_env_locks(wdir: str | None = None) -> None:
+    """Stage the env lock files Calkit has written, when autostaging.
+
+    DVC stages ``dvc.lock``, which records the locks' hashes, so a commit of
+    it without them leaves a clone without the locks its stages depend on.
+    """
+    import calkit.dvc
+    import calkit.git
+    from calkit.cli import warn
+
+    if not calkit.dvc.autostage_enabled(wdir):
+        return
+    paths = [
+        os.path.abspath(p)
+        for p in [
+            get_env_lock_dir(wdir),
+            os.path.join(wdir or "", ENV_SPEC_HASHES_FPATH),
+        ]
+        if os.path.exists(p)
+    ]
+    if not paths:
+        return
+    try:
+        calkit.git.get_repo(wdir).git.add("-A", "--", *paths)
+    except Exception as e:
+        warn(f"Couldn't stage the environment lock files: {e}")
+
+
 def _conda_venv_platform() -> str:
     sys = platform.system().lower()
     mach = platform.machine().lower()

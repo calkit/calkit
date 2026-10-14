@@ -311,9 +311,7 @@ def init(
         result = calkit.dvc.init(force=force or os.path.isdir(".dvc"))
         if result != 0:
             raise_error("Failed to initialize DVC")
-    # Ensure autostage is enabled for DVC
-    result = calkit.dvc.run_dvc_command(["config", "core.autostage", "true"])
-    if result != 0:
+    if calkit.dvc.configure_autostage() != 0:
         raise_error("Failed to configure DVC autostage")
     # Commit the newly created .dvc directory. Paths are made absolute
     # because Git resolves them against the repo root, which is not this
@@ -1080,14 +1078,7 @@ def add(
                 subdir=calkit.dvc.dvc_init_needs_subdir()
             )
     if not dry_run:
-        # Ensure autostage is enabled for DVC
-        calkit.dvc.run_dvc_command(
-            [
-                "config",
-                "core.autostage",
-                "true",
-            ]
-        )
+        calkit.dvc.configure_autostage()
         repo.git.add(".dvc/config")
     dvc_paths = [] if dvc_repo is None else calkit.dvc.list_paths()
     pipeline_output_storage = calkit.pipeline.get_output_storage_map()
@@ -3533,6 +3524,7 @@ def run(
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+    calkit.environments.stage_env_locks()
     if failed:
         try:
             calkit.dvc.restore_output_ignores()

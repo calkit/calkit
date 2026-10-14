@@ -1,13 +1,15 @@
 # Running and logging
 
 When the pipeline is run with the `calkit run` command,
-Calkit will first compile the pipeline into a DVC pipeline with
-some additional stages to handle environment checking.
+Calkit will first compile the pipeline into a DVC pipeline
+with its dependencies set based on [environment](../environments.md)
+lock files, such that a change in an environment causes a rerun.
 
-Each stage that runs to completion gets an entry in
-`.calkit/stage-runs.json`, which is kept with the project,
-saying when it ran, in which environment
-(and which option any switch in it picked),
+Each successfully completed stage is recorded in
+`.calkit/stage-runs.json`, which is intended to be committed
+to the project's Git repository.
+This records when it ran, in which environment
+(and which option any `switch` environment used),
 with which version of Calkit,
 and on which machine.
 The entry is replaced each time the stage runs,
@@ -23,6 +25,8 @@ Again, these can be helpful for traceability and
 diagnosing reproducibility issues down
 the road, e.g., if the project is being run on multiple machines and
 the results are different between them.
+Without `--log`, these are saved in `.calkit/local`, which is kept out
+of version control.
 
 The run metadata can be queried and analyzed, for example,
 with [DuckDB](https://duckdb.org):

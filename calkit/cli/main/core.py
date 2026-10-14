@@ -4539,9 +4539,10 @@ def stash(
 ) -> None:
     """Stash or restore workspace changes including dvc-zip tracked dirs.
 
-    Without --pop: zips any modified workspace dirs into the DVC cache, then
-    git-stashes (saving the updated .dvc files), checks out the committed DVC
-    state, and unzips it to the workspace.
+    Without --pop: zips any modified workspace dirs and commits any other
+    modified DVC-tracked paths into the DVC cache, then git-stashes (saving
+    the updated .dvc files and dvc.lock), checks out the committed DVC state,
+    and unzips it to the workspace.
 
     With --pop: pops the git stash (restoring the saved .dvc files), checks
     out the stashed DVC state, and unzips it to the workspace.
@@ -4554,6 +4555,12 @@ def stash(
         # Zip any modified workspace dirs so their current state is in the DVC
         # cache (the updated .dvc file will be captured by git stash)
         calkit.dvc.zip.sync_all(direction="to-zip")
+        # Same for other modified DVC-tracked paths, which DVC would otherwise
+        # refuse to check out over since their data isn't in the cache
+        dvc_repo = calkit.dvc.get_dvc_repo()
+        uncommitted = dvc_repo.data_status()["uncommitted"]
+        for path in uncommitted.get("modified", []):
+            calkit.dvc.commit_path(dvc_repo, path, outs_only=True)
         subprocess.check_call(["git", "stash"])
         # Restore the committed zip versions and unzip them
         calkit.dvc.run_dvc_command(["checkout"])

@@ -167,12 +167,15 @@ def test_pull(tmp_dir):
     _commit_all(clone, "Sync with Calkit project")
     (clone_dir / "main.tex").write_text("uncommitted")
     (clone_dir / "leftover.tex").write_text("untracked")
+    (clone_dir / ".gitignore").write_text("*.bib\n")
+    (clone_dir / "refs.bib").write_text("ignored")
     (overleaf_dir / "main.tex").write_text("v2")
     _commit_all(overleaf_repo, "Edit on Overleaf")
     calkit.overleaf.pull(clone)
     assert clone.head.commit == overleaf_repo.head.commit
     assert (clone_dir / "main.tex").read_text() == "v2"
     assert not (clone_dir / "leftover.tex").exists()
+    assert not (clone_dir / "refs.bib").exists()
     assert not clone.is_dirty(untracked_files=True)
     # A fetch failure should show Git's error, without the token, and only
     # give token advice for authentication failures

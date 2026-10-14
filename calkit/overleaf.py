@@ -137,7 +137,7 @@ def pull(repo: git.Repo) -> None:
             msg += "\n" + AUTH_FAILED_ADVICE
         raise RuntimeError(msg)
     repo.git.reset("--hard", "@{upstream}")
-    repo.git.clean("-fd")
+    repo.git.clean("-fdx")
 
 
 def project_id_to_url(project_id: str) -> str:

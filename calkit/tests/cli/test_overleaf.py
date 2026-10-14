@@ -1,7 +1,6 @@
 """Tests for the Overleaf CLI commands."""
 
 import os
-import shutil
 import subprocess
 import tempfile
 import uuid
@@ -485,7 +484,9 @@ def test_get_repo_disables_credential_store(tmp_dir):
     # A cache missing its .git should be re-cloned, never resolving to the
     # main project repo in a parent directory
     main_repo = git.Repo.init(".")
-    shutil.rmtree(os.path.join(dest, ".git"))
+    # Move .git aside rather than deleting it, since Git makes its objects
+    # read-only, which Windows won't delete
+    os.rename(os.path.join(dest, ".git"), "moved-git")
     repo3 = calkit.overleaf.get_repo(pid, "sometoken")
     assert os.path.samefile(repo3.working_dir, dest)
     assert not main_repo.remotes

@@ -1677,13 +1677,28 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
     assert not envs.system_env_lock_mismatch(
         env_name="bench", env=env, system_info=elsewhere
     )
-    # Locking another property relocks every one on the machine checking it
+    # Locking another property adds it from a machine matching the rest
     added = env | {"lock": ["cpu-count", "os", "machine"]}
-    assert not envs.system_env_lock_mismatch(env_name="bench", env=added)
-    envs.write_system_env_lock(env_name="bench", env=added)
+    there = elsewhere | {"machine": "riscv64"}
+    assert not envs.system_env_lock_mismatch(
+        env_name="bench", env=added, system_info=there
+    )
+    envs.write_system_env_lock(env_name="bench", env=added, system_info=there)
+    with_machine = {
+        "cpu-count": elsewhere["cpu_count"],
+        "os": "SomeOtherOS",
+        "machine": "riscv64",
+    }
+    assert envs.read_system_env_lock("bench", added) == with_machine
+    # but not from one that doesn't, where it's a mismatch until relocked
+    more = env | {"lock": ["cpu-count", "os", "machine", "processor"]}
+    assert "os" in envs.system_env_lock_mismatch(env_name="bench", env=more)
+    envs.write_system_env_lock(env_name="bench", env=more)
+    assert envs.read_system_env_lock("bench", more) == with_machine
+    envs.write_system_env_lock(env_name="bench", env=more, relock=True)
     assert envs.read_system_env_lock(
-        env_name="bench", env=added
-    ) == envs.get_system_lock_data(["cpu-count", "os", "machine"])
+        env_name="bench", env=more
+    ) == envs.get_system_lock_data(more["lock"])
     # Locking fewer keeps the rest
     envs.write_system_env_lock(
         env_name="bench", env=env, system_info=elsewhere

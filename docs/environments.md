@@ -742,10 +742,12 @@ The lock is written the first time the environment is checked,
 so check it on the machine results should come from and commit the lock
 file.
 Otherwise, whichever machine checks it first becomes the locked one.
-The same goes for adding a property to `lock`:
-the whole lock is rewritten from whichever machine checks the
-environment next,
-putting every stage using it out of date.
+A property added to `lock` later is recorded from the first machine that
+matches the rest of the lock,
+putting every stage using it out of date,
+like adding a dependency to a package spec keeps the versions already
+locked.
+On a machine that doesn't match, it's a mismatch like any other.
 To keep a stage's results no matter where the project runs,
 freeze the stage with `frozen: true`.
 
@@ -1407,9 +1409,9 @@ since opting out of isolation is the whole point of this kind, so
 results actually depend on.
 
 Locked properties are recorded in the environment's lock file, which
-stages depend on, the first time the environment is checked, and
-again from scratch when a property is added to `lock`. After
-that, the lock is not rewritten when the project moves to a machine
+stages depend on, the first time the environment is checked. A
+property added to `lock` later is recorded from the first machine
+matching the rest. After that, the lock is not rewritten when the project moves to a machine
 where they differ, so stages that are up to date stay up to date.
 Checking the environment there warns about the difference, and a stage
 that needs to run is skipped by `calkit run`, since its result would

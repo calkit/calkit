@@ -1104,9 +1104,9 @@ class SystemEnvironment(Environment):
     results actually depend on.
 
     Locked properties are recorded in the environment's lock file, which
-    stages depend on, the first time the environment is checked, and
-    again from scratch when a property is added to ``lock``. After
-    that, the lock is not rewritten when the project moves to a machine
+    stages depend on, the first time the environment is checked. A
+    property added to ``lock`` later is recorded from the first machine
+    matching the rest. After that, the lock is not rewritten when the project moves to a machine
     where they differ, so stages that are up to date stay up to date.
     Checking the environment there warns about the difference, and a stage
     that needs to run is skipped by ``calkit run``, since its result would

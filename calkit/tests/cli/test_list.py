@@ -302,6 +302,67 @@ def test_list_questions(tmp_dir):
     assert "None" not in out
 
 
+def test_list_comments(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    INTRO = "% COMMENT id=aaaa0001\n%   A:\n%     Why?\nIntro text.\n"
+    NOTE = (
+        "# Note\n\n<!-- COMMENT id=bbbb0002 resolved=true\n  B:\n    Hm.\n"
+        "-->\nSome text.\n"
+    )
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\input{intro}\n\nA paragraph.\n")
+    with open("paper/intro.tex", "w") as f:
+        f.write(INTRO)
+    os.makedirs("docs")
+    with open("docs/note.md", "w") as f:
+        f.write(NOTE)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "paper": {
+                            "kind": "latex",
+                            "target_path": "main.tex",
+                            "wdir": "paper",
+                            "environment": "_system",
+                        },
+                        "note": {
+                            "kind": "markdown",
+                            "target_path": "docs/note.md",
+                            "pdf": {"environment": "_system"},
+                        },
+                    }
+                }
+            },
+            f,
+        )
+    with open("README.md", "w") as f:
+        f.write("% COMMENT id=cccc0003\n%   C:\n%     Not built.\nText.\n")
+    # Without a path, every document built into a PDF is listed, with the
+    # files it inputs, but nothing else
+    listed = json.loads(ck("list", "comments", "--json"))
+    assert [(c["path"], c["id"]) for c in listed] == [
+        ("paper/intro.tex", "aaaa0001"),
+        ("docs/note.md", "bbbb0002"),
+    ]
+    assert listed[1]["anchor"]["text"] == "Some text."
+    # With one, only that document is, and open threads can be picked out
+    listed = json.loads(ck("list", "comments", "docs/note.md", "--json"))
+    assert [c["id"] for c in listed] == ["bbbb0002"]
+    assert "bbbb0002" not in ck("list", "comments", "-u")
+    assert "paper/intro.tex:1 [aaaa0001]" in ck("list", "comments")
+    res = subprocess.run(
+        ["calkit", "list", "comments", "missing.md"], capture_output=True
+    )
+    assert res.returncode != 0
+
+
 def test_list_remotes(tmp_dir):
     # Outside a repo: should warn but not fail
     result = subprocess.run(

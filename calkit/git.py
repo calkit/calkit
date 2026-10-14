@@ -223,12 +223,27 @@ def _resolve_repo_and_ignore_path(
     return repo, rel_path
 
 
+def get_ignored_by_rule(repo: git.Repo, *paths: str) -> list[str]:
+    """The given paths an ignore rule matches.
+
+    Unlike ``repo.ignored``, this counts a directory Git already tracks files
+    in, whose new files the rule still hides.
+    """
+    if not paths:
+        return []
+    try:
+        out: str = repo.git.check_ignore("--no-index", "--", *paths)
+    except git.GitCommandError:
+        return []
+    return out.splitlines()
+
+
 def _get_matching_gitignore_details(
     repo: git.Repo, path: str
 ) -> tuple[Path | None, str | None]:
     """Return the repo-local gitignore file and pattern matching ``path``."""
     try:
-        check_ignore = repo.git.check_ignore("-v", "--", path)
+        check_ignore = repo.git.check_ignore("--no-index", "-v", "--", path)
     except git.GitCommandError:
         return None, None
     line = check_ignore.splitlines()[0]
@@ -322,7 +337,7 @@ def ensure_path_is_not_ignored(
     # Resolve whether the unignore rule belongs to this repo or a submodule.
     target_repo, target_path = _resolve_repo_and_ignore_path(repo, path)
     # No-op if Git does not ignore this path.
-    if not target_repo.ignored(target_path):
+    if not get_ignored_by_rule(target_repo, target_path):
         return
     matching_gitignore_path, matched_pattern = _get_matching_gitignore_details(
         target_repo, target_path
@@ -380,7 +395,9 @@ def ensure_path_is_not_ignored(
             (rule for rule in direct_rule_variants if rule in lines), None
         )
         if direct_rule is not None:
-            lines.remove(direct_rule)
+            lines = [
+                line for line in lines if line not in direct_rule_variants
+            ]
         else:
             # Remove any stale negation and re-append at the end so it takes
             # precedence over any later re-ignore rule
@@ -397,7 +414,9 @@ def ensure_path_is_not_ignored(
             (rule for rule in direct_rule_variants if rule in lines), None
         )
         if direct_rule is not None:
-            lines.remove(direct_rule)
+            lines = [
+                line for line in lines if line not in direct_rule_variants
+            ]
             removed_direct_rule = True
         if ancestor_requires_recursive_unignore():
             # Git will not traverse into a directory excluded by a "dir/"
@@ -457,7 +476,7 @@ def ensure_path_is_not_ignored(
     # because a subdirectory .gitignore also contains a matching rule), fix
     # that file as well. Depth-limit guards against pathological gitignore
     # cycles.
-    if target_repo.ignored(target_path) and _depth < 10:
+    if get_ignored_by_rule(target_repo, target_path) and _depth < 10:
         ensure_path_is_not_ignored(target_repo, target_path, _depth + 1)
     return True
 

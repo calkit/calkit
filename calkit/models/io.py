@@ -2,16 +2,18 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from calkit.models.base import Model
 
 
-class InputsFromStageOutputs(BaseModel):
+class InputsFromStageOutputs(Model):
     from_stage_outputs: str = Field(
         description="Name of a stage whose outputs are inputs to this one."
     )
 
 
-class PathInput(BaseModel):
+class PathInput(Model):
     """An input written as an object carrying a path.
 
     Prefer a plain path string. This exists so a stage keeps working when an
@@ -31,7 +33,7 @@ class PathInput(BaseModel):
     path: str = Field(description="Path to the input file or directory.")
 
 
-class Input(BaseModel):
+class Input(Model):
     kind: Literal["path", "python-object", "file-segment", "database-table"]
 
 
@@ -55,7 +57,7 @@ class DatabaseTableInput(Input):
     table_name: str
 
 
-class PathOutput(BaseModel):
+class PathOutput(Model):
     path: str = Field(description="Path to the output file or directory.")
     storage: Literal["git", "dvc", "dvc-zip"] | None = Field(
         default="dvc",
@@ -70,7 +72,7 @@ class PathOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class DatabaseTableOutput(BaseModel):
+class DatabaseTableOutput(Model):
     kind: Literal["database-table"]
     uri: str
     database_name: str | None = None

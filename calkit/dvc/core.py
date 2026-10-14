@@ -536,11 +536,40 @@ def register_ck_scheme() -> None:
 
 
 def run_dvc_cli(argv: list[str] | None = None) -> int:
-    """Run DVC CLI with ``ck://`` scheme pre-registered."""
+    """Run DVC CLI with ``ck://`` scheme pre-registered.
+
+    The help DVC adds to its errors, which points to DVC's support and docs
+    rather than Calkit's, is left out, but not the errors themselves.
+    """
+    import logging
+
+    import dvc.cli
     from dvc.cli import main as dvc_main
 
+    def log_unknown_exceptions() -> None:
+        dvc.cli.logger.exception("unexpected error")
+
+    class DropLinks(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            args = record.args
+            if (
+                isinstance(record.msg, str)
+                and isinstance(args, tuple)
+                and record.msg.startswith(
+                    "%s\nLearn more about configuration settings"
+                )
+            ):
+                record.msg, record.args = "%s", args[:1]
+            return True
+
     register_ck_scheme()
-    return dvc_main(argv)
+    dvc.cli._log_unknown_exceptions = log_unknown_exceptions
+    links = DropLinks()
+    dvc.cli.logger.addFilter(links)
+    try:
+        return dvc_main(argv)
+    finally:
+        dvc.cli.logger.removeFilter(links)
 
 
 def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
@@ -550,7 +579,10 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
 
 
 def commit_path(
-    dvc_repo: dvc.repo.Repo, path: str, allow_missing: bool = True
+    dvc_repo: dvc.repo.Repo,
+    path: str,
+    allow_missing: bool = True,
+    outs_only: bool = False,
 ) -> None:
     """Commit a path to DVC, skipping the run cache.
 
@@ -558,6 +590,9 @@ def commit_path(
     saved to the run cache, since doing so requires hashing all of their
     dependencies, which will fail if any are missing from the workspace, e.g.,
     if their data has never been pulled.
+
+    With ``outs_only``, dependencies keep their recorded hashes, so a stage
+    that was out of date stays that way.
     """
     with dvc.repo.lock_repo(dvc_repo):
         groups = groupby(
@@ -568,7 +603,10 @@ def commit_path(
             to_dump = []
             for stage_info in stages_info_group:
                 stage = stage_info.stage
-                stage.save(allow_missing=allow_missing, run_cache=False)
+                if outs_only:
+                    stage.save_outs(allow_missing=allow_missing)
+                else:
+                    stage.save(allow_missing=allow_missing, run_cache=False)
                 stage.commit(
                     filter_info=stage_info.filter_info,
                     allow_missing=allow_missing,
@@ -1076,6 +1114,18 @@ def get_lock_out_paths(wdir: str | None = None) -> list[str]:
             if isinstance(out, dict) and "path" in out:
                 paths.append(Path(out["path"]).as_posix())
     return paths
+
+
+def get_cached_out_paths(wdir: str | None = None) -> set[str]:
+    """Paths of the pipeline outputs DVC caches, and so ignores, as POSIX
+    paths relative to the project root.
+    """
+    repo = get_dvc_repo(wdir)
+    return {
+        Path(os.path.relpath(out.fs_path, repo.root_dir)).as_posix()
+        for out in repo.index.outs
+        if out.use_scm_ignore
+    }
 
 
 def restore_output_ignores(wdir: str | None = None) -> list[str]:

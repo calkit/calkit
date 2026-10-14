@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  documentStagePdf,
+  documentStageSource,
   findInSource,
   findText,
   latexStagePdf,
@@ -79,6 +81,34 @@ test("latexStagePdf and latexStageSource map a latex stage's document and PDF", 
   // Only latex stages count, and only their own document
   assert.equal(latexStagePdf(stages, "report.qmd"), undefined);
   assert.equal(latexStageSource(stages, "other.pdf"), undefined);
+  // Any document stage counts for documentStage*, including a markdown
+  // stage's PDF, wherever it's written
+  const docs = {
+    ...stages,
+    pager: {
+      kind: "markdown",
+      target_path: "docs/pager/main.md",
+      pdf: { environment: "tex" },
+    },
+    moved: {
+      kind: "markdown",
+      target_path: "notes.markdown",
+      pdf: { environment: "tex", output_path: "out/notes.pdf" },
+    },
+    nopdf: { kind: "markdown", target_path: "README.md" },
+  };
+  assert.equal(
+    documentStageSource(docs, "pubs/paper/main.pdf"),
+    "pubs/paper/main.tex",
+  );
+  assert.equal(
+    documentStageSource(docs, "docs/pager/main.pdf"),
+    "docs/pager/main.md",
+  );
+  assert.equal(documentStageSource(docs, "out/notes.pdf"), "notes.markdown");
+  assert.equal(documentStagePdf(docs, "notes.markdown"), "out/notes.pdf");
+  assert.equal(documentStagePdf(docs, "README.md"), undefined);
+  assert.equal(latexStageSource(docs, "docs/pager/main.pdf"), undefined);
 });
 
 test("SyncTeX maps between source lines and places on the page", () => {

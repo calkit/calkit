@@ -7,55 +7,27 @@ shifting the bottleneck to verification and validation.
 Meanwhile, the reproducibility crisis remains unsolved.
 For example, the open-access publisher PLOS found
 [only 12% of articles sharing code openly](https://doi.org/10.1371/journal.pone.0311493),
-and even fewer share code that is quick to verify.
+and even fewer share code that is quick to verify,
+i.e., what's shared doesn't actually run without significant reverse
+engineering.
 Thus, it's now more important than
 ever to make it intuitive and enjoyable for both humans and AI agents
 to work transparently and reproducibly.
 
 Rather than assuming we should simply teach scientists software development
 tools and platforms and leave them to assemble their own systems and workflows,
-Calkit provides a turnkey, vertically integrated,
+Calkit provides a vertically integrated,
 research-focused experience right out of the box: reference management, version
 control (including large data files), computational environments, pipeline
 automation, and a (self-hostable) collaboration platform.
-The extra discipline of working this way, much like a software engineer,
-increases speed and quality simultaneously,
-and with a gentle learning curve,
-it's almost always worth switching from manual, ad hoc workflows.
-
-Calkit is designed to help individuals work more efficiently by allowing all
-stages of research—from asking questions, to data collection and analysis, to
-publication—to live together in the same project, breaking down silos that slow
-down iteration
-(inspired by the Agile, Lean, and DevOps movements)
-while allowing more inclusive collaboration, e.g., from those
-who don't want to learn complex tools like Git.
-
-A Calkit project
-_includes_ the research article, not only supplements it, and is intended to be
-shipped whole, providing full context and fast verifiability, by
-linking all evidence for answers to research questions back to reproducible
-calculations.
-See
-[this published article](https://doi.org/10.1088/1538-3873/ae6fef)
-for an example.
-
-<!-- calkit values path=results/research-flow.json -->
-
-## By the numbers
-
-- **<!-- calkit value key=goals.steps.1.correct_gain format="{:.0%}" -->20%<!-- /calkit value -->**
-  more error-free findings published per year with agents alone
-- **<!-- calkit value key=goals.correct_gain format="{:.0%}" -->149%<!-- /calkit value -->**
-  more with agents and Calkit together
-
-From a simulation
-in Calkit's own pipeline
-([view source](https://calkit.io/calkit/calkit/pipeline?stage=research-flow)).
+Everything is totally open source with the ability to interact via web app
+or command line interface (CLI),
+so humans are able to work alongside AI agents and quickly verify that
+both of their work is reproducible.
 
 ## A success story
 
-[Rebecca McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en)
+[Rebecca (Becca) McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en)
 recently finished her PhD in Mechanical Engineering at Cornell,
 developing advanced computational methods for multidisciplinary
 optimization of
@@ -67,9 +39,28 @@ projects.
 She used Calkit to create single-button reproducible pipelines that integrated
 MATLAB, Python, Julia, LaTeX, and more.
 She used Calkit's Overleaf integration
-to allow collaborators to contribute without learning Git,
-producing three journal article submissions,
-including one to the prestigious _Journal of Fluid Mechanics_.
+to allow collaborators to contribute without the complexity of Git,
+submitting three journal articles along with her dissertation.
+
+Read how Calkit helped Becca with her research in her own words:
+
+> In the first conference paper I wrote back in 2022,
+> I had a scare where my process of manually screenshotting MATLAB figures and uploading them to Overleaf
+> almost led me to publish inconsistent results when I forgot to rerun some intermediate steps.
+> To ensure the integrity of my research, I resolved to better automate my workflow,
+> and spent too much time creating some clunky one-off reproducibility code that only partially addressed my needs.
+> Then in 2025 I stumbled upon Calkit.
+> With its structured approach, cross-language capabilities, and use of software engineering best practices,
+> Calkit was more comprehensive, flexible, and future-proof than my hacky custom script, and
+> I relied on it heavily for the remainder of my projects.
+> Using Calkit significantly relieved my anxiety about inadvertently contributing to the replication crisis;
+> streamlined review, collaboration, and reproduction workflows that would have been otherwise infeasible;
+> and improved the usability and visibility of my work for other researchers.
+> Importantly, Calkit scales to more complex projects, and I can't imagine how I would have
+> kept the 87 figures and 92 numerical results in my dissertation straight without this tool.
+> I also received impressive technical support, including fast and helpful responses to my questions, bug reports, and feature requests.
+> I would recommend Calkit to software-savvy researchers (and even tech-traditionalist collaborators)
+> who care about the accuracy and transparency of their results.
 
 ## Where we're heading
 

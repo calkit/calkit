@@ -28,6 +28,77 @@ questions:
           clib_s: seconds.clib
           paths: lock.paths
           kb: lock.kb
+  - question: >-
+      How much CPU time does every command save by not importing
+      calkit.environments, and with it pydantic, until a command needs it?
+    answer: >-
+      {saved_ms:.0f} ms: importing the CLI took {cli_ms:.0f} ms, and
+      {with_env_ms:.0f} ms with calkit.environments imported first, as it
+      was when calkit.cli.describe imported it at the top. Medians of {n}
+      fresh interpreters each.
+    evidence:
+      - kind: result
+        path: results/imports.json
+        values:
+          saved_ms: saved_ms.environments
+          cli_ms: cpu_ms.cli
+          with_env_ms: cpu_ms.cli_with_environments
+          n: repeats
+  - question: >-
+      How much CPU time does deferring the schemas of Calkit's models, until
+      each is first used, save on importing them?
+    answer: >-
+      {saved_ms:.0f} ms: importing calkit.models took {deferred_ms:.0f} ms
+      with its {models} models' schemas deferred, and {built_ms:.0f} ms with
+      all of them built, as defining them did before. Medians of {n} fresh
+      interpreters each.
+    evidence:
+      - kind: result
+        path: results/imports.json
+        values:
+          saved_ms: saved_ms.models
+          deferred_ms: cpu_ms.models_deferred
+          built_ms: cpu_ms.models_built
+          models: models
+          n: repeats
+  - question: >-
+      How much would checking whether a Docker image exists through Docker's
+      socket, rather than its CLI, save?
+    answer: >-
+      Too little to be worth the code to find the socket the way Docker
+      does, so Calkit uses the CLI: {socket_ms:.0f} ms through the socket
+      against {cli_ms:.0f} ms through the CLI for the TeX Live image, most
+      of which is Docker inspecting it, however it's asked, and
+      {missing_socket_ms:.0f} ms against {missing_cli_ms:.0f} ms for an
+      image that isn't there. Medians of {n} checks each, taking turns,
+      with the socket check from #1817, which was closed.
+    evidence:
+      - kind: result
+        path: results/docker-image-check.json
+        values:
+          socket_ms: ms.present.socket
+          cli_ms: ms.present.cli
+          missing_socket_ms: ms.missing.socket
+          missing_cli_ms: ms.missing.cli
+          n: repeats
+  - question: >-
+      How much CPU time does building only the command being run save Typer
+      on each command?
+    answer: >-
+      {saved_ms:.0f} ms: building the CLI for 'calkit status' took
+      {status_ms:.0f} ms, against {all_ms:.0f} ms building all {commands}
+      commands, which '--help' still does, in {help_ms:.0f} ms. Medians of
+      {n} fresh interpreters each.
+    evidence:
+      - kind: result
+        path: results/cli-build.json
+        values:
+          saved_ms: saved_ms
+          status_ms: cpu_ms.status
+          all_ms: cpu_ms.all
+          help_ms: cpu_ms.help
+          commands: commands.all
+          n: repeats
 
 environments:
   pure:
@@ -42,6 +113,10 @@ environments:
     prefix: .venv-clib
     python: "3.12"
     description: The same, plus ruamel.yaml.clib for its C loader.
+  calkit:
+    kind: uv
+    path: ../pyproject.toml
+    description: Calkit itself, from this checkout.
 
 pipeline:
   stages:
@@ -75,4 +150,42 @@ pipeline:
         - results/ruamel-yaml-clib/clib.json
       outputs:
         - path: results/ruamel-yaml-clib.json
+          storage: git
+    time-imports:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-imports.py
+      environment: calkit
+      args:
+        - --out=results/imports.json
+      inputs:
+        - ../calkit/calc.py
+        - ../calkit/cli/describe.py
+        - ../calkit/models/base.py
+      outputs:
+        - path: results/imports.json
+          storage: git
+    time-docker-image-check:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-docker-image-check.py
+      environment: calkit
+      args:
+        - --out=results/docker-image-check.json
+      inputs:
+        - ../calkit/docker.py
+      outputs:
+        - path: results/docker-image-check.json
+          storage: git
+    time-cli-build:
+      kind: python-script
+      frozen: true
+      script_path: scripts/time-cli-build.py
+      environment: calkit
+      args:
+        - --out=results/cli-build.json
+      inputs:
+        - ../calkit/cli/__init__.py
+      outputs:
+        - path: results/cli-build.json
           storage: git

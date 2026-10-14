@@ -865,6 +865,32 @@ def test_add(tmp_dir):
     )
     assert "dry_small.txt" in out and "git" in out
     assert set(calkit.git.get_staged_files()) == staged_before
+    # With --existing, only changed files Git already tracks are added, even
+    # from a directory
+    subprocess.check_call(["git", "reset"])
+    with open("src/code.py", "w") as f:
+        f.write("# Changed again")
+    with open("src/new.py", "w") as f:
+        f.write("# New")
+    subprocess.check_call(["calkit", "add", "-e", "src", "dry_small.txt"])
+    staged = calkit.git.get_staged_files()
+    assert "src/code.py" in staged
+    assert "src/new.py" not in staged
+    assert "dry_small.txt" not in staged
+    subprocess.check_call(["git", "reset"])
+    subprocess.check_call(["calkit", "add", "--existing", "."])
+    staged = calkit.git.get_staged_files()
+    assert "src/code.py" in staged
+    assert "src/new.py" not in staged
+    assert "dry_small.txt" not in staged
+    # Paths are relative to the working directory
+    subprocess.check_call(["git", "reset"])
+    subprocess.check_call(
+        ["calkit", "add", "-e", "code.py", "new.py"], cwd="src"
+    )
+    staged = calkit.git.get_staged_files()
+    assert "src/code.py" in staged
+    assert "src/new.py" not in staged
 
 
 def test_add_pipeline_output_storage(tmp_dir):
@@ -1130,6 +1156,32 @@ def test_save(tmp_dir):
     )
     last_commit_message = repo.head.commit.message.strip()
     assert last_commit_message == "A unique message"
+    # With --existing, new files are left out
+    with open("test.txt", "w") as f:
+        f.write("sup sup sup")
+    with open("test4.txt", "w") as f:
+        f.write("sup")
+    subprocess.check_call(["calkit", "save", "-aeM", "--no-push"])
+    assert repo.head.commit.message.strip() == "Update test.txt"
+    assert not repo.git.ls_files("test4.txt")
+    assert "test4.txt" in repo.untracked_files
+    # Explicit paths that aren't in the repo yet are left out too
+    with open("test.txt", "w") as f:
+        f.write("sup again")
+    subprocess.check_call(
+        [
+            "calkit",
+            "save",
+            "-e",
+            "test.txt",
+            "test4.txt",
+            "-m",
+            "Existing only",
+            "--no-push",
+        ]
+    )
+    assert repo.head.commit.message.strip() == "Existing only"
+    assert not repo.git.ls_files("test4.txt")
 
 
 def test_save_data_not_in_cache(tmp_dir):

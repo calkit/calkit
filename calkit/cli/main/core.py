@@ -933,6 +933,17 @@ def diff(
 @app.command(name="add")
 def add(
     paths: list[str],
+    existing_only: Annotated[
+        bool,
+        typer.Option(
+            "--existing",
+            "-e",
+            help=(
+                "Only add files that already exist in the repo, i.e., "
+                "don't add any untracked ones."
+            ),
+        ),
+    ] = False,
     commit_message: Annotated[
         str | None,
         typer.Option(
@@ -1089,6 +1100,27 @@ def add(
             typer.echo(f"Un-ignoring {out} since it's stored in Git")
             calkit.git.ensure_path_is_not_ignored(repo, out)
     untracked_git_files = repo.untracked_files
+    if existing_only:
+        # Swap each path for the changed files Git tracks within it, so an
+        # untracked file in a directory doesn't come along with it
+        existing_paths = []
+        for path in paths:
+            if path == "." or Path(path).as_posix().rstrip("/") in dvc_paths:
+                existing_paths.append(path)
+                continue
+            # Git runs from the repo root and lists paths relative to it
+            for changed in repo.git.ls_files(
+                "--modified", "--", os.path.abspath(path)
+            ).splitlines():
+                changed = os.path.relpath(
+                    os.path.join(str(repo.working_tree_dir), changed)
+                )
+                if changed not in existing_paths:
+                    existing_paths.append(changed)
+        paths = existing_paths
+        if not paths:
+            typer.echo("No changes to files already in the repo")
+            return
     if auto_commit_message:
         # See if this path is in the repo already
         if paths[0] in dvc_paths or repo.git.ls_files(paths[0]):
@@ -1158,7 +1190,7 @@ def add(
                         f"cache ({paths_txt}); "
                         "run 'calkit pull' to fetch their data"
                     )
-            if not disable_auto_ignore:
+            if not disable_auto_ignore and not existing_only:
                 for untracked_file in untracked_git_files:
                     if (
                         any(
@@ -1187,8 +1219,8 @@ def add(
                                 paths.append(".gitignore")
             # TODO: Figure out if we should group large folders for dvc
             # Now add untracked files automatically
-            for untracked_file in repo.untracked_files:
-                paths.append(untracked_file)
+            if not existing_only:
+                paths += repo.untracked_files
             # Now add changed files
             for changed_file in [
                 d.a_path for d in repo.index.diff(None) if d.a_path is not None
@@ -1539,6 +1571,17 @@ def save(
             help=("Save all, automatically handling staging and ignoring."),
         ),
     ] = False,
+    existing_only: Annotated[
+        bool,
+        typer.Option(
+            "--existing",
+            "-e",
+            help=(
+                "Only save files that already exist in the repo, i.e., "
+                "don't automatically add new ones."
+            ),
+        ),
+    ] = False,
     message: Annotated[
         Optional[str], typer.Option("--message", "-m", help="Commit message.")
     ] = None,
@@ -1600,9 +1643,9 @@ def save(
     if not no_push and not _has_somewhere_to_push():
         no_push = not _offer_to_connect()
     if paths is not None:
-        add(paths, to=to)
+        add(paths, to=to, existing_only=existing_only)
     elif save_all:
-        add(paths=["."], to=to)
+        add(paths=["."], to=to, existing_only=existing_only)
     any_dvc = commit(
         paths=paths,
         all_changed=True if paths is None else False,

@@ -1090,7 +1090,10 @@ SystemLockProperty = Literal[
 AppVersionLockProperty = Annotated[
     str,
     Field(
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.+-]*-version(-major|-minor|-patch|-full)?$"
+        pattern=(
+            r"^[A-Za-z0-9][A-Za-z0-9_.+-]*-version"
+            r"(-major|-minor|-patch|-full)?$"
+        )
     ),
 ]
 
@@ -1107,8 +1110,9 @@ class SystemEnvironment(Environment):
     Locked properties are recorded in the environment's lock file, which
     stages depend on, the first time the environment is checked. A
     property added to ``lock`` later is recorded from the first machine
-    matching the rest. After that, the lock is not rewritten when the project moves to a machine
-    where they differ, so stages that are up to date stay up to date.
+    matching the rest. After that, the lock is not rewritten when the
+    project moves to a machine where they differ, so stages that are up
+    to date stay up to date.
     Checking the environment there warns about the difference, and a stage
     that needs to run is skipped by ``calkit run``, since its result would
     not be comparable with the existing ones. To make the new machine the

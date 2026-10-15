@@ -108,8 +108,8 @@ stages:
     deps:
     - path: .calkit/markdown/images/latex/README.md/sizes.py
       hash: md5
-      md5: 8957703e760b2a61772fd845dbcaee5e
-      size: 1765
+      md5: 7ee40f897ceb2046753dc7aee67b09f7
+      size: 1955
     - path: .python-version
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
@@ -125,8 +125,8 @@ stages:
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: bd8c5017906fff7304ba0c57ec5e5498
-      size: 386
+      md5: 6e54c19cc380b0e12a97d4d0866f266e
+      size: 335
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
     deps:

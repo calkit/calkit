@@ -28,7 +28,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
-import { FaCheck, FaPlus, FaRegSquare } from "react-icons/fa"
+import { FaPlus } from "react-icons/fa"
 import {
   GoGitPullRequest,
   GoGitPullRequestClosed,
@@ -46,10 +46,7 @@ import FileEditorModal from "../../../../../components/Files/FileEditorModal"
 import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
-import {
-  isEvidenceMissing,
-  isEvidenceStale,
-} from "../../../../../components/Projects/QuestionModal"
+import { questionMark } from "../../../../../components/Projects/QuestionModal"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
 import RecentChanges from "../../../../../components/Projects/RecentChanges"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
@@ -103,7 +100,7 @@ function ProjectView() {
   }) as any
   const ref: string | undefined = layoutSearch?.ref
   const [showClosedTodos, setShowClosedTodos] = useState(false)
-  const { projectRequest, userHasWriteAccess } = useProject(
+  const { projectRequest, userHasWriteAccess, showcaseRequest } = useProject(
     accountName,
     projectName,
     ref,
@@ -236,33 +233,36 @@ function ProjectView() {
               projectId={projectRequest.data.id}
             />
           ) : null}
-          {/* Showcase */}
-          <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-            <Flex alignItems="center">
-              <Heading size="md">Showcase</Heading>
-              {userHasWriteAccess && !ref ? (
-                <IconButton
-                  aria-label="Edit calkit.yaml"
-                  height="25px"
-                  width="28px"
-                  ml={1.5}
-                  icon={<MdEdit />}
-                  size={"xs"}
-                  onClick={() => setEditFile("calkit.yaml")}
-                />
-              ) : (
-                ""
-              )}
-            </Flex>
-            <ProjectShowcase
-              ownerName={accountName}
-              projectName={projectName}
-              gitRef={ref}
-              onEditLatex={
-                userHasWriteAccess && !ref ? openLatexEditor : undefined
-              }
-            />
-          </Box>
+          {/* Showcase, only once there's one to show, so a project without
+              one doesn't open on an empty card */}
+          {showcaseRequest.data?.elements.length ? (
+            <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+              <Flex alignItems="center">
+                <Heading size="md">Showcase</Heading>
+                {userHasWriteAccess && !ref ? (
+                  <IconButton
+                    aria-label="Edit calkit.yaml"
+                    height="25px"
+                    width="28px"
+                    ml={1.5}
+                    icon={<MdEdit />}
+                    size={"xs"}
+                    onClick={() => setEditFile("calkit.yaml")}
+                  />
+                ) : (
+                  ""
+                )}
+              </Flex>
+              <ProjectShowcase
+                ownerName={accountName}
+                projectName={projectName}
+                gitRef={ref}
+                onEditLatex={
+                  userHasWriteAccess && !ref ? openLatexEditor : undefined
+                }
+              />
+            </Box>
+          ) : null}
           {/* README */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">
@@ -299,7 +299,14 @@ function ProjectView() {
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex>
               <Heading size="md" mb={2}>
-                Questions
+                <Link
+                  as={RouterLink}
+                  to={`/${accountName}/${projectName}/questions`}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  search={{ ref } as any}
+                >
+                  Questions
+                </Link>
               </Heading>
               {userHasWriteAccess ? (
                 <>
@@ -326,45 +333,7 @@ function ProjectView() {
             ) : questions.length ? (
               <Box>
                 {questions.map((question) => {
-                  // One mark per row, worst first: no answer, then an answer
-                  // with nothing behind it, then evidence that can't be found
-                  // at all, then evidence that has merely drifted --
-                  // staleness that only shows once a question is open is
-                  // staleness nobody sees. All four are icons of the same
-                  // size, so they land on one line down the list.
-                  const mark = !question.answer
-                    ? {
-                        icon: FaRegSquare,
-                        color: "red.400",
-                        label: "Not yet answered",
-                      }
-                    : !question.evidence?.length
-                      ? {
-                          icon: FaRegSquare,
-                          color: "orange.300",
-                          label:
-                            "Answered, but nothing is linked to back it up",
-                        }
-                      : question.evidence.some(isEvidenceMissing)
-                        ? {
-                            icon: FaCheck,
-                            color: "red.400",
-                            label:
-                              "Answered, but some of its evidence can't be found -- it may never have been pushed, or it cites a Git ref that doesn't exist.",
-                          }
-                        : question.evidence.some(isEvidenceStale)
-                          ? {
-                              icon: FaCheck,
-                              color: "orange.300",
-                              label:
-                                "Answered, but some of its evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.",
-                            }
-                          : {
-                              icon: FaCheck,
-                              color: "green.400",
-                              label:
-                                "Answered, and every piece of its evidence is up to date",
-                            }
+                  const mark = questionMark(question)
                   return (
                     // The whole row opens the question, mark included, since
                     // the answer and its evidence are the point of listing it

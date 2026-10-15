@@ -2517,10 +2517,10 @@ def _set_evidence_stage(
 
     A frozen stage is the case staleness can't speak to: DVC won't re-run it
     whatever its inputs do, so it reports up to date forever, and so does
-    everything built from its outputs. Naming a Git ref settles it -- the
-    citation then refers to one version of the artifact rather than to
-    whatever the frozen stage last happened to leave behind -- so only an
-    unpinned one is flagged.
+    everything built from its outputs. One that has moved from dvc.lock is
+    flagged, unless a Git ref settles it -- the citation then refers to one
+    version of the artifact rather than to whatever the frozen stage last
+    happened to leave behind.
     """
     stage = (
         (item.figure.stage if item.figure else None)
@@ -2763,7 +2763,9 @@ def _build_questions_public(
                 fs=get_object_fs(),
                 cache_token=resolve_commit_sha(repo, ev_ref),
             )
-            frozen_stages = find_frozen_tainted_stages(dvc_yaml, dvc_lock)
+            frozen_stages = find_frozen_tainted_stages(
+                dvc_yaml, dvc_lock, stage_statuses
+            )
         except Exception as e:
             logger.warning(
                 f"Failed to compute pipeline status for questions at "

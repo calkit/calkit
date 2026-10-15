@@ -3673,7 +3673,7 @@ def run(
             if lock_dir not in lock_stages:
                 lock_stages[lock_dir] = calkit.dvc.read_lock_stages(lock_dir)
             if isinstance(lock_stages[lock_dir].get(lock_name), dict):
-                entry["dvc_lock"] = calkit.dvc.stage_lock_md5(
+                entry["dvc_lock_hash"] = calkit.dvc.stage_lock_md5(
                     lock_stages[lock_dir][lock_name]
                 )
             entry["calkit_version"] = system_info.get("calkit_version")

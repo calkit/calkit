@@ -1519,7 +1519,9 @@ def test_check_stage_runs(tmp_dir):
     with open(calkit.STAGE_RUNS_FPATH) as f:
         stage_runs = json.load(f)
     lock = calkit.dvc.read_lock_stages()
-    assert stage_runs["a"]["dvc_lock"] == calkit.dvc.stage_lock_md5(lock["a"])
+    assert stage_runs["a"]["dvc_lock_hash"] == calkit.dvc.stage_lock_md5(
+        lock["a"]
+    )
     assert stage_runs["a"]["git_rev"] == git.Repo().head.commit.hexsha
     assert stage_runs["a"]["git_dirty"]
     subprocess.check_call(check)

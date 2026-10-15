@@ -2240,7 +2240,7 @@ def check_stage_runs() -> None:
         recorded = stage_runs.get(name)
         if not isinstance(recorded, dict):
             problems.append(f"Stage '{name}' has no recorded run")
-        elif recorded.get("dvc_lock_hash") != calkit.dvc.stage_lock_md5(
+        elif recorded.get("dvc_lock_hash") != calkit.dvc.stage_lock_hash(
             locked
         ):
             problems.append(

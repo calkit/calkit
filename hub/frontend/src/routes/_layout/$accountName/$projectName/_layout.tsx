@@ -28,6 +28,8 @@ import {
   ModalHeader,
   ModalOverlay,
   Portal,
+  Skeleton,
+  SkeletonText,
   Spinner,
   Text,
   VStack,
@@ -56,7 +58,6 @@ import {
   type ProjectPublic,
   ProjectsService,
 } from "../../../../client"
-import LoadingSpinner from "../../../../components/Common/LoadingSpinner"
 import ProjectCommandPalette from "../../../../components/Common/ProjectCommandPalette"
 import Sidebar from "../../../../components/Common/Sidebar"
 import CloneProject from "../../../../components/Projects/CloneProject"
@@ -509,7 +510,16 @@ function ProjectLayout() {
   return (
     <>
       {isPending ? (
-        <LoadingSpinner height="100vh" />
+        // The frame the project fills in, so the page arrives in place, with
+        // the same children ahead of the sidebar so it isn't remounted
+        <Flex>
+          <ProjectCommandPalette />
+          <Sidebar basePath={`/${accountName}/${projectName}`} />
+          <Container maxW="full" mx={6} px={0}>
+            <Skeleton mt={5} mb={4} height="36px" width="40%" />
+            <SkeletonText noOfLines={12} spacing={3} skeletonHeight="14px" />
+          </Container>
+        </Flex>
       ) : (
         <Flex>
           <ProjectCommandPalette />

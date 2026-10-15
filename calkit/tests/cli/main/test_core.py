@@ -3003,10 +3003,10 @@ def test_save_offers_hub_before_committing(
 
     import calkit.cli.main.core as core
     import calkit.cli.update
-    import calkit.dependencies
+    import calkit.core
 
     subprocess.check_call(["calkit", "init"])
-    monkeypatch.setattr(calkit.dependencies, "_is_interactive", lambda: True)
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
     bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
     subprocess.check_call(["git", "init", "-q", "--bare", bare])
     events: list[str] = []

@@ -100,6 +100,26 @@ def _get_uncached_out_paths(dvc_stage: dict | None) -> set[str]:
     return paths
 
 
+def _declared_paths(dvc_stage: dict[str, Any] | None, key: str) -> set[str]:
+    """Literal paths a dvc.yaml stage declares under ``deps`` or ``outs``.
+
+    A ``foreach`` stage keeps its definition under ``do``. Paths that are
+    still templated, e.g., ``runs/${item.date}/out.log``, are left out, since
+    they can't be compared with the lock without resolving the template.
+    """
+    paths: set[str] = set()
+    if not isinstance(dvc_stage, dict):
+        return paths
+    definition = dvc_stage.get("do", dvc_stage)
+    if not isinstance(definition, dict):
+        return paths
+    for item in definition.get(key) or []:
+        for name in list(item) if isinstance(item, dict) else [item]:
+            if isinstance(name, str) and "${" not in name:
+                paths.add(name.rstrip("/"))
+    return paths
+
+
 def _safe_yaml_load(data: bytes) -> dict | None:
     try:
         return _yaml.load(io.BytesIO(data))
@@ -697,6 +717,20 @@ def compute_stage_statuses(
                     missing_md5s.add(lock_md5)
             elif lock_md5 is not None and available_md5 != lock_md5:
                 modified_outputs.append(out_path)
+        # A dep or out declared in dvc.yaml since the last run has no locked
+        # hash, so like DVC count it as changed even when every locked hash
+        # still matches. One dropped from dvc.yaml is ignored, as DVC does.
+        for key, modified in (
+            ("deps", modified_inputs),
+            ("outs", modified_outputs),
+        ):
+            locked = {
+                item["path"].rstrip("/")
+                for item in lock_stage.get(key) or []
+                if isinstance(item, dict) and item.get("path")
+            }
+            added = _declared_paths(yaml_stage, key) - locked
+            modified.extend(sorted(p for p in added if p not in modified))
         is_stale = bool(
             modified_command
             or modified_inputs

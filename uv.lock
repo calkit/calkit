@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.10, <4.0"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
@@ -1273,6 +1273,7 @@ dependencies = [
     { name = "dulwich" },
     { name = "dvc", extra = ["all"] },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "fsspec" },
     { name = "gitpython" },
     { name = "json2latex" },
@@ -1357,6 +1358,7 @@ requires-dist = [
     { name = "dulwich", specifier = ">=1.2.5" },
     { name = "dvc", extras = ["all"], specifier = "==3.67.1" },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "fsspec", specifier = ">=2026.4.0" },
     { name = "gitpython" },
     { name = "json2latex", specifier = ">=0.0.3" },

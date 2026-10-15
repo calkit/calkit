@@ -35,6 +35,7 @@ dependencies = [
   "dulwich>=1.2.5",
   "dvc[all]==3.67.1",
   "fastapi",
+  "filelock",
   "gitpython",
   "keyring",
   "nbconvert",

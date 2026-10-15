@@ -6,7 +6,9 @@ import filecmp
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from typing_extensions import Annotated
@@ -15,21 +17,10 @@ import calkit
 from calkit.cli import AliasGroup, raise_error, warn
 from calkit.cli.sync import sync_app
 
-overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+if TYPE_CHECKING:
+    import git
 
-# Shown when a pull from Overleaf fails, most commonly due to an invalid or
-# expired token. Calkit authenticates only with the token in its config, but a
-# stale token cached by the OS credential manager from an earlier version can
-# still interfere, so we point users there as a fallback.
-PULL_FAILED_MESSAGE = (
-    "Failed to pull from Overleaf; "
-    "check that your Overleaf token is valid\n"
-    "Run 'calkit config get overleaf_token' and ensure that it matches one in "
-    "your Overleaf account settings (https://overleaf.com/user/settings).\n"
-    "If it looks correct but pulling still fails, delete any saved "
-    "'git.overleaf.com' credential from your OS credential manager (Windows "
-    "Credential Manager, macOS Keychain, or your Linux keyring) and try again."
-)
+overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 # How many times the guided commands retry a failed pull before giving up
 # when running unattended, where there's nobody to stop an endless retry
@@ -49,17 +40,15 @@ def _extract_title_from_tex(tex_file_path: str) -> str | None:
         return None
 
 
-def _get_overleaf_token() -> str:
+def _get_overleaf_token(rejected: bool = False) -> str:
     """Get the user's Overleaf token from config.
 
-    If not set, we'll try to get from the hub. If that fails, we'll prompt
-    the user to enter it.
-
-    TODO: Handle expiration?
+    If not set, we'll try to get from the hub. If that fails, or Overleaf
+    ``rejected`` the one we have, we'll prompt the user to enter one.
     """
     calkit_config = calkit.config.read()
-    overleaf_token = calkit_config.overleaf_token
-    if not overleaf_token:
+    overleaf_token = None if rejected else calkit_config.overleaf_token
+    if not overleaf_token and not rejected:
         # See if we can get it from the hub
         if calkit_config.token is not None:
             try:
@@ -71,12 +60,23 @@ def _get_overleaf_token() -> str:
             except Exception:
                 typer.echo("Failed to get Overleaf token from the hub")
     if not overleaf_token:
-        warn("Overleaf token not set in config", prefix="")
+        if rejected:
+            warn(
+                "Overleaf rejected your token; "
+                "it may have expired or been revoked",
+                prefix="",
+            )
+        else:
+            warn("Overleaf token not set in config", prefix="")
         typer.echo(
-            "One can be generated at:\n\n"
+            "A new one can be generated at:\n\n"
             "    https://www.overleaf.com/user/settings\n\n"
             "under the 'Git Integration' section.\n"
         )
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise_error(
+                "Set one with 'calkit config set overleaf_token' and try again"
+            )
         overleaf_token = typer.prompt(
             "Enter Overleaf Git authentication token", hide_input=True
         )
@@ -89,6 +89,25 @@ def _get_overleaf_token() -> str:
             "Please set it using 'calkit config set overleaf_token'"
         )
     return overleaf_token
+
+
+def _get_pulled_overleaf_repo(
+    project_id: str, token: str
+) -> tuple[git.Repo, str]:
+    """Clone or pull an Overleaf project, asking for a new token whenever
+    Overleaf rejects the current one.
+
+    Returns the repo and the token that worked, so later projects use it too.
+    """
+    while True:
+        try:
+            repo = calkit.overleaf.get_repo(project_id, token)
+            calkit.overleaf.pull(repo)
+            return repo, token
+        except calkit.overleaf.AuthError:
+            token = _get_overleaf_token(rejected=True)
+        except Exception as e:
+            raise_error(str(e))
 
 
 @overleaf_app.command(name="import")
@@ -214,7 +233,7 @@ def import_publication(
         shutil.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
-    calkit.overleaf.clone(overleaf_project_id, overleaf_token)
+    _get_pulled_overleaf_repo(overleaf_project_id, overleaf_token)
     # Detect target path if not specified
     if target_path is None:
         ol_contents = os.listdir(
@@ -579,6 +598,7 @@ def sync(
     # Keyed by synced folder, so a sync of multiple folders can be summarized
     # after the loop even if some are skipped
     results: dict[str, dict] = {}
+    first = True
     for synced_folder, sync_data in overleaf_info.items():
         if not sync_data:
             continue
@@ -590,9 +610,13 @@ def sync(
                 "No Overleaf project ID defined for this folder; "
                 "please set 'url' in the Overleaf config"
             )
+        # Separate each folder's output from the one before
+        if not first:
+            typer.echo()
+        first = False
+        folder = typer.style(synced_folder, fg="blue")
         typer.echo(
-            f"Syncing {synced_folder} with "
-            f"Overleaf project ID {overleaf_project_id}"
+            f"Syncing {folder} with Overleaf project ID {overleaf_project_id}"
         )
         wdir = synced_folder
         if resolve and wdir == resolving_info["wdir"]:
@@ -619,45 +643,41 @@ def sync(
                     "Commit or stash them before syncing with Overleaf, "
                     "or use --auto-commit/-a to automatically commit them."
                 )
-        # Ensure we've cloned the Overleaf project
-        overleaf_repo = calkit.overleaf.get_repo(
-            overleaf_project_id, str(overleaf_token)
-        )
-        # Pull the latest version in the Overleaf project
-        typer.echo("Pulling the latest version from Overleaf")
-        try:
-            overleaf_repo.git.pull()
-        except Exception:
-            raise_error(PULL_FAILED_MESSAGE)
-        if resolve:
-            last_sync_commit = resolving_info["last_overleaf_commit"]
-        else:
-            last_sync_commit = sync_data.get("last_sync_commit")
-        commits_since = calkit.overleaf.get_commits_since_last_sync(
-            overleaf_repo=overleaf_repo,
-            last_sync_commit=last_sync_commit,
-        )
-        if commits_since:
-            typer.echo(
-                f"There have been {len(commits_since)} changes on "
-                "Overleaf since last sync"
+        # Keep other processes from using the clone until we're done
+        with calkit.overleaf.lock(overleaf_project_id, typer.echo):
+            typer.echo("Pulling the latest version from Overleaf")
+            overleaf_repo, overleaf_token = _get_pulled_overleaf_repo(
+                overleaf_project_id, overleaf_token
             )
-        try:
-            results[synced_folder] = calkit.overleaf.sync(
-                main_repo=repo,
+            if resolve:
+                last_sync_commit = resolving_info["last_overleaf_commit"]
+            else:
+                last_sync_commit = sync_data.get("last_sync_commit")
+            commits_since = calkit.overleaf.get_commits_since_last_sync(
                 overleaf_repo=overleaf_repo,
-                path_in_project=synced_folder,
-                sync_info_for_path=sync_data,
                 last_sync_commit=last_sync_commit,
-                no_commit=no_commit,
-                verbose=verbose,
-                resolving_conflict=resolve,
-                print_info=typer.echo,
-                push_only=push_only,
-                force=force,
             )
-        except Exception as e:
-            raise_error(str(e))
+            if commits_since:
+                typer.echo(
+                    f"There have been {len(commits_since)} changes on "
+                    "Overleaf since last sync"
+                )
+            try:
+                results[synced_folder] = calkit.overleaf.sync(
+                    main_repo=repo,
+                    overleaf_repo=overleaf_repo,
+                    path_in_project=synced_folder,
+                    sync_info_for_path=sync_data,
+                    last_sync_commit=last_sync_commit,
+                    no_commit=no_commit,
+                    verbose=verbose,
+                    resolving_conflict=resolve,
+                    print_info=typer.echo,
+                    push_only=push_only,
+                    force=force,
+                )
+            except Exception as e:
+                raise_error(str(e))
     if results and not no_push and not no_commit:
         if not repo.remotes:
             raise_error("Project has no Git remotes defined")
@@ -729,6 +749,7 @@ def get_status(
                 raise_error(f"Path '{path}' is not synced with Overleaf")
     # First check our config for an Overleaf token
     overleaf_token = _get_overleaf_token()
+    first = True
     for path_in_project, sync_data in overleaf_info.items():
         if paths is not None and path_in_project not in paths:
             continue
@@ -738,63 +759,64 @@ def get_status(
                 "No Overleaf project ID defined for this folder; "
                 "please set it in the project's Overleaf config"
             )
+        # Separate each folder's status from the one before
+        if not first:
+            typer.echo()
+        first = False
+        folder = typer.style(path_in_project, fg="blue")
         typer.echo(
-            f"Getting status of {path_in_project} with "
+            f"Getting status of {folder} with "
             f"Overleaf project ID {overleaf_project_id}"
         )
         wdir = path_in_project
-        # Ensure we've cloned the Overleaf project
-        overleaf_project_dir = calkit.overleaf.get_project_dir(
-            overleaf_project_id
-        )
-        overleaf_repo = calkit.overleaf.get_repo(
-            overleaf_project_id, str(overleaf_token)
-        )
-        # Pull the latest version in the Overleaf project
-        typer.echo("Pulling the latest version from Overleaf")
-        try:
-            overleaf_repo.git.pull()
-        except Exception:
-            raise_error(PULL_FAILED_MESSAGE)
-        last_sync_commit = sync_data.get("last_sync_commit")
-        if last_sync_commit:
-            commits_since = calkit.overleaf.get_commits_since_last_sync(
+        # Keep other processes from using the clone until we're done
+        with calkit.overleaf.lock(overleaf_project_id, typer.echo):
+            overleaf_project_dir = calkit.overleaf.get_project_dir(
+                overleaf_project_id
+            )
+            typer.echo("Pulling the latest version from Overleaf")
+            overleaf_repo, overleaf_token = _get_pulled_overleaf_repo(
+                overleaf_project_id, overleaf_token
+            )
+            last_sync_commit = sync_data.get("last_sync_commit")
+            if last_sync_commit:
+                commits_since = calkit.overleaf.get_commits_since_last_sync(
+                    overleaf_repo=overleaf_repo,
+                    last_sync_commit=last_sync_commit,
+                )
+                typer.echo(
+                    f"There have been {len(commits_since)} changes on "
+                    "Overleaf since last sync"
+                )
+            # Determine which paths to use for computing diff
+            path_info = calkit.overleaf.OverleafSyncPaths(
+                main_repo=calkit.git.get_repo(),
                 overleaf_repo=overleaf_repo,
-                last_sync_commit=last_sync_commit,
+                path_in_project=path_in_project,
+                sync_info_for_path=sync_data,
             )
-            typer.echo(
-                f"There have been {len(commits_since)} changes on "
-                "Overleaf since last sync"
+            status = compare_folders_recursively(
+                wdir,
+                overleaf_project_dir,
+                paths=path_info.all_synced_files,
             )
-        # Determine which paths to use for computing diff
-        path_info = calkit.overleaf.OverleafSyncPaths(
-            main_repo=calkit.git.get_repo(),
-            overleaf_repo=overleaf_repo,
-            path_in_project=path_in_project,
-            sync_info_for_path=sync_data,
-        )
-        status = compare_folders_recursively(
-            wdir,
-            overleaf_project_dir,
-            paths=path_info.all_synced_files,
-        )
 
-        def print_path(p, fg_color=None):
-            txt = f"    {os.path.join(wdir, p)}"
-            typer.echo(typer.style(txt, fg=fg_color))
+            def print_path(p, fg_color=None):
+                txt = f"    {os.path.join(wdir, p)}"
+                typer.echo(typer.style(txt, fg=fg_color))
 
-        if status["left_only"]:
-            typer.echo("Files only in Calkit project:")
-            for p in status["left_only"]:
-                print_path(p, "green")
-        if status["right_only"]:
-            typer.echo("Files only in Overleaf project:")
-            for p in status["right_only"]:
-                print_path(p, "yellow")
-        if status["diff_files"]:
-            typer.echo("Changed files:")
-            for p in status["diff_files"]:
-                print_path(p, "red")
+            if status["left_only"]:
+                typer.echo("Files only in Calkit project:")
+                for p in status["left_only"]:
+                    print_path(p, "green")
+            if status["right_only"]:
+                typer.echo("Files only in Overleaf project:")
+                for p in status["right_only"]:
+                    print_path(p, "yellow")
+            if status["diff_files"]:
+                typer.echo("Changed files:")
+                for p in status["diff_files"]:
+                    print_path(p, "red")
 
 
 def _prepare_to_sync(

@@ -2067,7 +2067,7 @@ def test_complete_stage_names(tmp_dir):
             },
             f,
         )
-    names = [item.value for item in complete_stage_names(None, None, "")]
+    names = complete_stage_names(None, None, "")
     # Parent stage
     assert "parent-stage" in names
     # Subproject shorthand
@@ -2077,9 +2077,7 @@ def test_complete_stage_names(tmp_dir):
     assert "inline-sp:stage-a" in names
     assert "isolated-sp:stage-b" in names
     # Prefix filtering
-    filtered = [
-        item.value for item in complete_stage_names(None, None, "inline")
-    ]
+    filtered = complete_stage_names(None, None, "inline")
     assert "inline-sp" in filtered
     assert "inline-sp:stage-a" in filtered
     assert "parent-stage" not in filtered

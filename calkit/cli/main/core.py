@@ -2082,10 +2082,13 @@ def _tell_hub_we_pushed(targets: list[str], git_args: list[str]) -> None:
         # The remote git actually pushed to: whatever was named on the
         # command line, else the branch's own upstream, else origin.
         named = [a for a in git_args if not a.startswith("-")]
+        upstream = repo.active_branch.tracking_branch()
         if named:
             body["remote"] = named[0]
+        elif upstream is not None:
+            body["remote"] = upstream.remote_name
         else:
-            body["remote"] = repo.active_branch.tracking_branch().remote_name
+            body["remote"] = "origin"
     except Exception:
         body.setdefault("remote", "origin")
     try:

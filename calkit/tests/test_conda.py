@@ -232,9 +232,9 @@ def test_check_env_locks_every_platform(tmp_dir, conda_env_name):
     lock_fpath = os.path.join(lock_dir, here + ".yml")
 
     def spec_is_recorded() -> bool:
-        return envs.read_env_spec_hash(lock_fpath) == envs.env_spec_hash(
-            "environment.yml"
-        )
+        spec = "environment.yml"
+        recorded = envs.read_env_spec_hash(lock_fpath, spec)
+        return recorded == envs.env_spec_hash(spec)
 
     def read(fpath: str) -> str:
         with open(fpath) as f:

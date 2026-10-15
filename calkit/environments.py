@@ -1749,23 +1749,30 @@ def env_spec_hash(spec_fpath: str, python: str | None = None) -> str:
         content = "\n".join(requirement_lines(text.splitlines(), spec_dir))
     if python is not None:
         content += f"\npython={python}"
-    # Named so a reader knows what to check it with
-    return "md5:" + hashlib.md5(content.encode()).hexdigest()
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
-def _env_spec_hash_key(lock_fpath: str, wdir: str | None) -> str:
-    """The entry a lock's spec hash is kept under."""
+def _env_spec_hash_keys(
+    lock_fpath: str, spec_fpath: str, wdir: str | None
+) -> tuple[str, str]:
+    """The spec and lock paths a lock's spec hash is kept under."""
+
+    def key(fpath: str) -> str:
+        if os.path.isabs(fpath):
+            fpath = os.path.relpath(fpath, wdir or ".")
+        return Path(os.path.normpath(fpath)).as_posix()
+
     lock_dir, name = os.path.split(lock_fpath)
     # Every platform's lock in a directory is resolved from the same spec
     if lock_dir and os.path.splitext(name)[0] in CONDA_VENV_ARCHS:
         lock_fpath = lock_dir
-    if os.path.isabs(lock_fpath):
-        lock_fpath = os.path.relpath(lock_fpath, wdir or ".")
-    return Path(lock_fpath).as_posix()
+    return key(spec_fpath), key(lock_fpath)
 
 
-def read_env_spec_hash(lock_fpath: str, wdir: str | None = None) -> str | None:
-    """Read the hash of the spec a lock was resolved from, if recorded."""
+def read_env_spec_hash(
+    lock_fpath: str, spec_fpath: str, wdir: str | None = None
+) -> str | None:
+    """Read the hash of a spec when a lock was resolved from it, if recorded."""
     try:
         with open(
             os.path.join(wdir or "", ENV_SPEC_HASHES_FPATH), encoding="utf-8"
@@ -1773,9 +1780,12 @@ def read_env_spec_hash(lock_fpath: str, wdir: str | None = None) -> str | None:
             hashes = json.load(f)
     except (OSError, ValueError):
         return None
-    if not isinstance(hashes, dict):
-        return None
-    return hashes.get(_env_spec_hash_key(lock_fpath, wdir))
+    spec_key, lock_key = _env_spec_hash_keys(lock_fpath, spec_fpath, wdir)
+    entries = hashes.get(spec_key) if isinstance(hashes, dict) else None
+    for entry in entries if isinstance(entries, list) else []:
+        if isinstance(entry, dict) and entry.get("lock_path") == lock_key:
+            return entry.get("sha256")
+    return None
 
 
 def write_env_spec_hash(
@@ -1787,7 +1797,8 @@ def write_env_spec_hash(
     """Record that a lock was resolved from the spec as it is now.
 
     Kept outside the lock directory, which stages depend on, so recording
-    it for a lock that already matches its spec reruns nothing.
+    it for a lock that already matches its spec reruns nothing. Each spec
+    has a list of locks, since envs can share a spec.
     """
     fpath = os.path.join(wdir or "", ENV_SPEC_HASHES_FPATH)
     try:
@@ -1797,11 +1808,19 @@ def write_env_spec_hash(
         hashes = {}
     if not isinstance(hashes, dict):
         hashes = {}
-    key = _env_spec_hash_key(lock_fpath, wdir)
+    # Entries from before they were kept by spec are dropped
+    hashes = {k: v for k, v in hashes.items() if isinstance(v, list)}
+    spec_key, lock_key = _env_spec_hash_keys(lock_fpath, spec_fpath, wdir)
     value = env_spec_hash(os.path.join(wdir or "", spec_fpath), python=python)
-    if hashes.get(key) == value:
+    entries = [e for e in hashes.get(spec_key, []) if isinstance(e, dict)]
+    entry = next((e for e in entries if e.get("lock_path") == lock_key), None)
+    if entry is None:
+        entry = {"lock_path": lock_key}
+        entries.append(entry)
+    elif entry.get("sha256") == value:
         return
-    hashes[key] = value
+    entry["sha256"] = value
+    hashes[spec_key] = sorted(entries, key=lambda e: str(e.get("lock_path")))
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     with open(fpath, "w", encoding="utf-8", newline="\n") as f:
         json.dump(hashes, f, indent=2, sort_keys=True)

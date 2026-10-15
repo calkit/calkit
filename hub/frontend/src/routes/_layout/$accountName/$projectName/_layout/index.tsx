@@ -103,7 +103,7 @@ function ProjectView() {
   }) as any
   const ref: string | undefined = layoutSearch?.ref
   const [showClosedTodos, setShowClosedTodos] = useState(false)
-  const { projectRequest, userHasWriteAccess } = useProject(
+  const { projectRequest, userHasWriteAccess, showcaseRequest } = useProject(
     accountName,
     projectName,
     ref,
@@ -236,33 +236,36 @@ function ProjectView() {
               projectId={projectRequest.data.id}
             />
           ) : null}
-          {/* Showcase */}
-          <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-            <Flex alignItems="center">
-              <Heading size="md">Showcase</Heading>
-              {userHasWriteAccess && !ref ? (
-                <IconButton
-                  aria-label="Edit calkit.yaml"
-                  height="25px"
-                  width="28px"
-                  ml={1.5}
-                  icon={<MdEdit />}
-                  size={"xs"}
-                  onClick={() => setEditFile("calkit.yaml")}
-                />
-              ) : (
-                ""
-              )}
-            </Flex>
-            <ProjectShowcase
-              ownerName={accountName}
-              projectName={projectName}
-              gitRef={ref}
-              onEditLatex={
-                userHasWriteAccess && !ref ? openLatexEditor : undefined
-              }
-            />
-          </Box>
+          {/* Showcase, only once there's one to show, so a project without
+              one doesn't open on an empty card */}
+          {showcaseRequest.data?.elements.length ? (
+            <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+              <Flex alignItems="center">
+                <Heading size="md">Showcase</Heading>
+                {userHasWriteAccess && !ref ? (
+                  <IconButton
+                    aria-label="Edit calkit.yaml"
+                    height="25px"
+                    width="28px"
+                    ml={1.5}
+                    icon={<MdEdit />}
+                    size={"xs"}
+                    onClick={() => setEditFile("calkit.yaml")}
+                  />
+                ) : (
+                  ""
+                )}
+              </Flex>
+              <ProjectShowcase
+                ownerName={accountName}
+                projectName={projectName}
+                gitRef={ref}
+                onEditLatex={
+                  userHasWriteAccess && !ref ? openLatexEditor : undefined
+                }
+              />
+            </Box>
+          ) : null}
           {/* README */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">

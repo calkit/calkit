@@ -128,6 +128,12 @@ def run(*args: str) -> str:
     return res.stdout
 
 
+def round2(x: float) -> float:
+    # Two significant figures, so measurement jitter between runs doesn't
+    # change the file
+    return float(f"{x:.2g}")
+
+
 def sizes(image: str) -> dict:
     # The files inside the container, since what Docker reports depends
     # on the platform and storage driver, and the compressed layers a
@@ -167,10 +173,10 @@ def sizes(image: str) -> dict:
     download = sum(layer["size"] for layer in manifest["layers"])
     return {
         "image": image,
-        "unpacked_mb": unpacked / 1e6,
-        "download_mb": download / 1e6,
-        "unpacked_gb": unpacked / 1e9,
-        "download_gb": download / 1e9,
+        "unpacked_mb": round2(unpacked / 1e6),
+        "download_mb": round2(download / 1e6),
+        "unpacked_gb": round2(unpacked / 1e9),
+        "download_gb": round2(download / 1e9),
     }
 
 

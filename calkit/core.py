@@ -646,6 +646,19 @@ def update_readme_content(
     return heading + intro + ("\n" + body if body else "")
 
 
+def is_tty() -> bool:
+    """True only when both stdin and stdout are TTYs.
+
+    Stdout matters because the prompt needs to render; stdin matters because
+    we need to read the user's answer. CI environments fail at least one
+    and fall through to the abort-with-fix-command path.
+    """
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def check_dep_exists(
     name: str,
     kind: Literal["app", "env-var", "calkit-config"] = "app",
@@ -1029,9 +1042,7 @@ def check_requirements(
     # Resolve TTY interactivity once so a single per-call answer drives
     # every prompt (env-var, app installer, setup step).
     if interactive is None:
-        from calkit.dependencies import _is_interactive
-
-        interactive = _is_interactive()
+        interactive = is_tty()
     # Process in dependency order: machine properties first, since a
     # machine that is too small to run the project at all should say so
     # before we start installing things on it, then env-vars (some

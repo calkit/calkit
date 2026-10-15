@@ -194,6 +194,21 @@ def test_pull(tmp_dir):
     msg = str(e.value)
     assert "127.0.0.1" in msg
     assert "secret" not in msg
+    # Overleaf rejecting the token should be told apart from other failures
+    rejected = git.GitCommandError(
+        ["git", "fetch"],
+        128,
+        stderr="fatal: Authentication failed for 'https://git.overleaf.com/x/'",
+    )
+    err = calkit.overleaf._git_error(rejected, "pull")
+    assert isinstance(err, calkit.overleaf.AuthError)
+    assert "expired" in str(err)
+    assert not isinstance(
+        calkit.overleaf._git_error(
+            git.GitCommandError(["git", "fetch"], 128, stderr="nope"), "pull"
+        ),
+        calkit.overleaf.AuthError,
+    )
 
 
 def test_lock(tmp_dir):

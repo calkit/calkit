@@ -949,7 +949,7 @@ def split_lock_stage_name(stage_name: str) -> tuple[str | None, str]:
     return None, stage_name
 
 
-def stage_lock_md5(entry: dict) -> str:
+def stage_lock_hash(entry: dict) -> str:
     """A checksum of what a stage's ``dvc.lock`` entry says it ran and made.
 
     Built from its command, params, and each dep's and out's path and hash,
@@ -974,7 +974,7 @@ def stage_lock_md5(entry: dict) -> str:
         "outs": files("outs"),
     }
     content = json.dumps(data, sort_keys=True, default=str).encode()
-    return "md5:" + hashlib.md5(content).hexdigest()
+    return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
 def configure_autostage(wdir: str | None = None) -> int:

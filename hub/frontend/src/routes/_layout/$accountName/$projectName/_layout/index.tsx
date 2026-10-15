@@ -9,6 +9,7 @@ import {
   Icon,
   IconButton,
   Link,
+  SkeletonText,
   Spacer,
   Switch,
   Table,
@@ -37,7 +38,6 @@ import {
 } from "react-icons/go"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import { ReleasesService } from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
@@ -46,8 +46,8 @@ import FileEditorModal from "../../../../../components/Files/FileEditorModal"
 import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
-import { questionMark } from "../../../../../components/Projects/QuestionModal"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
+import { questionMark } from "../../../../../components/Projects/QuestionModal"
 import RecentChanges from "../../../../../components/Projects/RecentChanges"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewRelease from "../../../../../components/Releases/NewRelease"
@@ -100,6 +100,7 @@ function ProjectView() {
   }) as any
   const ref: string | undefined = layoutSearch?.ref
   const [showClosedTodos, setShowClosedTodos] = useState(false)
+  const [checklistSettled, setChecklistSettled] = useState(false)
   const { projectRequest, userHasWriteAccess, showcaseRequest } = useProject(
     accountName,
     projectName,
@@ -221,78 +222,91 @@ function ProjectView() {
     navigate,
   ])
 
+  const checklistProject =
+    userHasWriteAccess && !ref ? projectRequest.data : undefined
   return (
     <>
       <Flex mt={1}>
         <Box width="65%" mr={8}>
           {/* What's left to set up, until it's done or dismissed */}
-          {userHasWriteAccess && !ref && projectRequest.data ? (
+          {checklistProject ? (
             <ProjectChecklist
               accountName={accountName}
               projectName={projectName}
-              projectId={projectRequest.data.id}
+              projectId={checklistProject.id}
+              onSettledChange={setChecklistSettled}
             />
           ) : null}
-          {/* Showcase, only once there's one to show, so a project without
-              one doesn't open on an empty card */}
-          {showcaseRequest.data?.elements.length ? (
+          {/* Each of these sits above the next, so hold them all until all
+              have landed rather than shoving the README down mid-read */}
+          {(checklistProject && !checklistSettled) ||
+          showcaseRequest.isPending ||
+          readmeRequest.isPending ? (
             <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-              <Flex alignItems="center">
-                <Heading size="md">Showcase</Heading>
-                {userHasWriteAccess && !ref ? (
-                  <IconButton
-                    aria-label="Edit calkit.yaml"
-                    height="25px"
-                    width="28px"
-                    ml={1.5}
-                    icon={<MdEdit />}
-                    size={"xs"}
-                    onClick={() => setEditFile("calkit.yaml")}
+              <SkeletonText noOfLines={12} spacing={3} skeletonHeight="14px" />
+            </Box>
+          ) : (
+            <>
+              {/* Showcase, only once there's one to show, so a project
+                  without one doesn't open on an empty card */}
+              {showcaseRequest.data?.elements.length ? (
+                <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+                  <Flex alignItems="center">
+                    <Heading size="md">Showcase</Heading>
+                    {userHasWriteAccess && !ref ? (
+                      <IconButton
+                        aria-label="Edit calkit.yaml"
+                        height="25px"
+                        width="28px"
+                        ml={1.5}
+                        icon={<MdEdit />}
+                        size={"xs"}
+                        onClick={() => setEditFile("calkit.yaml")}
+                      />
+                    ) : (
+                      ""
+                    )}
+                  </Flex>
+                  <ProjectShowcase
+                    ownerName={accountName}
+                    projectName={projectName}
+                    gitRef={ref}
+                    onEditLatex={
+                      userHasWriteAccess && !ref ? openLatexEditor : undefined
+                    }
                   />
+                </Box>
+              ) : null}
+              {/* README */}
+              <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+                <Flex alignItems="center">
+                  <Heading size="md">README</Heading>
+                  {userHasWriteAccess && !ref ? (
+                    <IconButton
+                      aria-label="Edit README"
+                      height="25px"
+                      width="28px"
+                      ml={1.5}
+                      icon={<MdEdit />}
+                      size={"xs"}
+                      onClick={() => setEditFile("README.md")}
+                    />
+                  ) : (
+                    ""
+                  )}
+                </Flex>
+                {readmeRequest.data ? (
+                  <Markdown repo={{ accountName, projectName, ref }}>
+                    {removeTitle(
+                      decodeBase64Utf8(String(readmeRequest?.data?.content)),
+                    )}
+                  </Markdown>
                 ) : (
                   ""
                 )}
-              </Flex>
-              <ProjectShowcase
-                ownerName={accountName}
-                projectName={projectName}
-                gitRef={ref}
-                onEditLatex={
-                  userHasWriteAccess && !ref ? openLatexEditor : undefined
-                }
-              />
-            </Box>
-          ) : null}
-          {/* README */}
-          <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-            <Flex alignItems="center">
-              <Heading size="md">README</Heading>
-              {userHasWriteAccess && !ref ? (
-                <IconButton
-                  aria-label="Edit README"
-                  height="25px"
-                  width="28px"
-                  ml={1.5}
-                  icon={<MdEdit />}
-                  size={"xs"}
-                  onClick={() => setEditFile("README.md")}
-                />
-              ) : (
-                ""
-              )}
-            </Flex>
-            {readmeRequest.isPending ? (
-              <LoadingSpinner height="100vh" />
-            ) : readmeRequest.data ? (
-              <Markdown repo={{ accountName, projectName, ref }}>
-                {removeTitle(
-                  decodeBase64Utf8(String(readmeRequest?.data?.content)),
-                )}
-              </Markdown>
-            ) : (
-              ""
-            )}
-          </Box>
+              </Box>
+            </>
+          )}
         </Box>
         <Box width={"35%"}>
           {/* Questions  */}
@@ -329,7 +343,7 @@ function ProjectView() {
               )}
             </Flex>
             {questionsRequest.isPending ? (
-              <LoadingSpinner height="100px" />
+              <SkeletonText noOfLines={3} spacing={2} skeletonHeight="14px" />
             ) : questions.length ? (
               <Box>
                 {questions.map((question) => {
@@ -438,7 +452,7 @@ function ProjectView() {
               </Box>
             </Flex>
             {issuesRequest.isPending ? (
-              <LoadingSpinner />
+              <SkeletonText noOfLines={3} spacing={2} skeletonHeight="14px" />
             ) : (
               <>
                 {topIssues?.map((issue) => {
@@ -575,7 +589,7 @@ function ProjectView() {
               )}
             </Flex>
             {releasesRequest.isPending ? (
-              <LoadingSpinner height="100px" />
+              <SkeletonText noOfLines={3} spacing={2} skeletonHeight="14px" />
             ) : releasesRequest.isError ? (
               <Text fontSize="sm" color="red.500">
                 Failed to load releases.

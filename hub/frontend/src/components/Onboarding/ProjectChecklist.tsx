@@ -1,5 +1,14 @@
 import { ExternalLinkIcon } from "@chakra-ui/icons"
-import { Button, HStack, Link, useDisclosure } from "@chakra-ui/react"
+import {
+  Box,
+  Button,
+  HStack,
+  Heading,
+  Link,
+  SkeletonText,
+  useColorModeValue,
+  useDisclosure,
+} from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import mixpanel from "mixpanel-browser"
@@ -39,6 +48,7 @@ const ProjectChecklist = ({
   projectId,
 }: ProjectChecklistProps) => {
   const { projectFlags, setFlag, flagsLoading } = useOnboardingFlags(projectId)
+  const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   const { questionsRequest } = useProjectQuestions(accountName, projectName)
   const isDismissed = projectFlags.includes(DISMISSED)
   // A dismissed checklist renders nothing at all, and until the flags land
@@ -113,19 +123,29 @@ const ProjectChecklist = ({
   if (flagsLoading || isDismissed) {
     return null
   }
-  if (reproCheckQuery.isPending || reproCheckQuery.isError) {
+  if (reproCheckQuery.isError) {
     return null
   }
   // Every signal, not just the repo read: these three land at different
   // times, and each one arriving ticks off its own step under the reader,
   // collapsing a row and swapping its mark as it goes. Rendering once they
-  // have all settled shows the list in the state it is actually in.
+  // have all settled shows the list in the state it is actually in. Until
+  // then the card holds its place, since it sits above the README and would
+  // otherwise shove it down when it lands.
   if (
+    reproCheckQuery.isPending ||
     questionsRequest.isPending ||
     pipelineQuery.isPending ||
     referencesQuery.isPending
   ) {
-    return null
+    return (
+      <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+        <Heading size="md" mb={4}>
+          Project setup
+        </Heading>
+        <SkeletonText noOfLines={4} spacing={3} skeletonHeight="14px" />
+      </Box>
+    )
   }
   const actions: Record<string, React.ReactNode> = {
     question: (

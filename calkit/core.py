@@ -790,7 +790,9 @@ def _normalize_requirement(req) -> dict:
     required there. A ``setup`` requirement may omit it, since a single
     anonymous setup step is common and forcing users to invent a name adds
     friction; a stable one is synthesized from a short hash of
-    ``check_command``. A machine-property requirement has no name at all --
+    ``check_command``. An ``aws-credentials`` requirement may omit it too,
+    and is named after its profile and account. A machine-property
+    requirement has no name at all --
     ``kind: cpu-count`` already says everything there is to say about which
     property it constrains -- so the kind is used as the name in messages.
     """
@@ -833,6 +835,15 @@ def _normalize_requirement(req) -> dict:
                     check_command.encode("utf-8")
                 ).hexdigest()[:8]
                 out["name"] = f"setup-{short}"
+            elif kind == "aws-credentials":
+                out["name"] = "-".join(
+                    ["aws-credentials"]
+                    + [
+                        str(out[key])
+                        for key in ("profile", "account_id")
+                        if out.get(key)
+                    ]
+                )
             else:
                 raise ValueError(f"Requirement missing required 'name': {dep}")
         return out
@@ -1122,6 +1133,8 @@ def check_requirements(
     ``check_command`` and -- on an interactive TTY -- optionally runs the
     declared ``setup_command`` after asking the user. Non-interactive
     failures abort with the fix-it command printed for the user to run.
+    ``aws-credentials`` requirements are checked the same way, by
+    :func:`calkit.dependencies.check_aws_credentials_dep`.
     """
     if requirements is not None:
         # An environment's own list is checked exactly as declared: it
@@ -1145,7 +1158,8 @@ def check_requirements(
     # before we start installing things on it, then env-vars (some
     # installers and setup commands read from them), then apps (env
     # managers like pixi / uv need to exist before setup steps that run
-    # inside an env), then setup steps last. The setup-step
+    # inside an env), then setup steps, then AWS credentials, which need
+    # the AWS CLI and may be set up by a step. The setup-step
     # ``check_command`` typically wraps ``calkit xenv``, which validates
     # its own environment, so we don't need a separate env-check phase.
     property_kinds = system_property_requirement_kinds()
@@ -1154,6 +1168,7 @@ def check_requirements(
         "env-var": [],
         "app": [],
         "setup": [],
+        "aws-credentials": [],
     }
     for raw_dep in deps:
         dep = _normalize_requirement(raw_dep)
@@ -1187,15 +1202,17 @@ def check_requirements(
         # ``calkit run`` works without a separate setup step. Non-TTY
         # (CI) falls through to the legacy "not found" abort.
         if interactive:
-            from calkit.dependencies import prompt_and_store_env_var
+            from calkit.dependencies import prompt_for_env_var_dep
 
-            print(f"Missing env var '{dep_name}'")
-            value = prompt_and_store_env_var(
-                dep_name, default=dep.get("default")
-            )
-            if value is not None:
+            if prompt_for_env_var_dep(dep) is not None:
                 continue
-        raise ValueError(f"env-var '{dep_name}' not found")
+        msg = f"env-var '{dep_name}' not found"
+        if dep.get("obtain_command"):
+            msg += (
+                f"; obtain a value with '{dep['obtain_command']}' and set it "
+                f"with 'calkit set-env-var {dep_name} <value>'"
+            )
+        raise ValueError(msg)
     for dep in buckets["app"]:
         dep_name = dep["name"]
         # The ``calkit`` app is always satisfied by the running process,
@@ -1259,6 +1276,19 @@ def check_requirements(
         if not ok:
             raise ValueError(
                 f"setup requirement '{dep['name']}' is not satisfied"
+            )
+    for dep in buckets["aws-credentials"]:
+        from calkit.dependencies import check_aws_credentials_dep
+
+        ok = check_aws_credentials_dep(
+            dep,
+            interactive=interactive,
+            use_cache=use_cache,
+            wdir=wdir,
+        )
+        if not ok:
+            raise ValueError(
+                f"aws-credentials requirement '{dep['name']}' is not satisfied"
             )
 
 

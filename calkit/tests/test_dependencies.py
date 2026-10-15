@@ -313,3 +313,116 @@ def test_resolve_env_var_deps(tmp_dir, monkeypatch):
 
     monkeypatch.setattr("builtins.input", eof)
     assert resolve_env_var_deps(ck_info, interactive=True) == ["CK_A"]
+
+
+def test_prompt_for_env_var_dep(tmp_dir, monkeypatch, capsys):
+    monkeypatch.delenv("CK_TOKEN", raising=False)
+    dep = {
+        "kind": "env-var",
+        "name": "CK_TOKEN",
+        "obtain_command": "echo obtained > obtained.txt",
+        "description": "A token for the API.\n",
+    }
+    # Agreeing runs the obtain command, then asks for what it gave
+    answers = iter(["", "tok-1"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    assert deps.prompt_for_env_var_dep(dep) == "tok-1"
+    assert (tmp_dir / "obtained.txt").exists()
+    assert os.environ["CK_TOKEN"] == "tok-1"
+    assert "A token for the API." in capsys.readouterr().out
+    # Declining skips straight to asking
+    (tmp_dir / "obtained.txt").unlink()
+    answers = iter(["n", "tok-2"])
+    assert deps.prompt_for_env_var_dep(dep) == "tok-2"
+    assert not (tmp_dir / "obtained.txt").exists()
+    # A failing obtain command still lets a value be entered
+    answers = iter(["y", "tok-3"])
+    assert deps.prompt_for_env_var_dep(dict(dep, obtain_command="false")) == (
+        "tok-3"
+    )
+    assert "exited 1" in capsys.readouterr().out
+    # Without a terminal, the error says how to obtain a value
+    monkeypatch.delenv("CK_TOKEN", raising=False)
+    with pytest.raises(ValueError, match="obtain a value with 'echo"):
+        calkit.check_requirements(
+            requirements=[dep], interactive=False, described_as="here"
+        )
+
+
+def test_check_aws_credentials_dep(tmp_dir, monkeypatch):
+    import json
+    import shutil
+    import subprocess
+
+    calls: list[list[str]] = []
+    state = {"account": "012345678901", "fail": False, "sso": ""}
+
+    def fake_run(cmd, **kwargs):
+        if isinstance(cmd, str):
+            # The setup command, run through the shell
+            calls.append([cmd])
+            state["fail"] = False
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        calls.append(cmd)
+        if cmd[1] == "configure":
+            return subprocess.CompletedProcess(cmd, 0, state["sso"], "")
+        if state["fail"]:
+            return subprocess.CompletedProcess(cmd, 255, "", "expired")
+        out = json.dumps({"Account": state["account"]})
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    monkeypatch.setattr(deps.subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: "/bin/aws")
+    dep = calkit.core._normalize_requirement(
+        {"kind": "aws-credentials", "account_id": "012345678901"}
+    )
+    assert dep["name"] == "aws-credentials-012345678901"
+    # Valid credentials for the right account pass, and are cached
+    assert deps.check_aws_credentials_dep(dep, interactive=False)
+    assert calls[-1][:3] == ["aws", "sts", "get-caller-identity"]
+    calls.clear()
+    state["fail"] = True
+    assert deps.check_aws_credentials_dep(dep, interactive=False)
+    assert calls == []
+    # Without the cache, expired credentials fail, offering 'aws configure'
+    assert not deps.check_aws_credentials_dep(
+        dep, interactive=False, use_cache=False
+    )
+    assert calls[-1][:3] == ["aws", "configure", "get"]
+    # A profile set up for SSO is offered 'aws sso login', and on a
+    # terminal it's run and the credentials checked again
+    state["sso"] = "my-sso"
+    calls.clear()
+    monkeypatch.setattr("builtins.input", lambda *a: "y")
+    with_profile = dict(dep, profile="dev")
+    assert deps.check_aws_credentials_dep(
+        with_profile, interactive=True, use_cache=False
+    )
+    assert ["aws sso login --profile dev"] in calls
+    assert calls[-1][-2:] == ["--profile", "dev"]
+    # Credentials for another account don't satisfy it
+    state["account"] = "999999999999"
+    assert not deps.check_aws_credentials_dep(
+        dep, interactive=False, use_cache=False
+    )
+    # A declared setup command wins over the default
+    calls.clear()
+    assert not deps.check_aws_credentials_dep(
+        dict(dep, setup_command="./login.sh"),
+        interactive=False,
+        use_cache=False,
+    )
+    assert not any(c[:2] == ["aws", "configure"] for c in calls)
+    # Through the top-level check, a failure names the requirement
+    with pytest.raises(ValueError, match="aws-credentials-012345678901"):
+        calkit.check_requirements(
+            requirements=[
+                {"kind": "aws-credentials", "account_id": "012345678901"}
+            ],
+            interactive=False,
+            use_cache=False,
+        )
+    # Without the AWS CLI, that's what's reported
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(ValueError, match="AWS CLI"):
+        deps.check_aws_credentials_dep(dep, interactive=False)

@@ -28,6 +28,7 @@ from calkit.models.io import EnvVarInput
 from calkit.models.iteration import ParametersType
 from calkit.models.pipeline import Pipeline, RelativeChildPathString
 from calkit.models.requirements import (  # noqa: F401
+    AwsCredentialsRequirement,
     Dependency,
     DependencyAttrs,
     Requirement,

@@ -20,6 +20,73 @@ def test_list_environments(tmp_dir):
     assert json.loads(out) == envs
 
 
+def test_list_requirements(tmp_dir):
+    subprocess.check_call(["calkit", "list", "reqs"])
+    ck_info = {
+        "requirements": [
+            "git>=2.40",
+            {
+                "kind": "env-var",
+                "name": "TOKEN",
+                "obtain_command": "claude setup-token",
+            },
+            {"kind": "aws-credentials", "account_id": "012345678901"},
+            {"kind": "cpu-count", "min": 4},
+        ],
+        "environments": {
+            "cluster": {
+                "kind": "system",
+                "requirements": [{"kind": "hostname", "matches": "*.edu"}],
+            },
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "pipeline": {
+            "stages": {
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": "echo hi",
+                    "requirements": [{"kind": "env-var", "name": "DATA"}],
+                },
+                "other": {"kind": "shell-command", "command": "echo hi"},
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Each is normalized and says where it was declared
+    out = subprocess.check_output(
+        ["calkit", "list", "requirements", "--json"], text=True
+    )
+    reqs = json.loads(out)
+    assert [(r["source"], r["name"]) for r in reqs] == [
+        ("project", "git"),
+        ("project", "TOKEN"),
+        ("project", "aws-credentials-012345678901"),
+        ("project", "cpu-count"),
+        ("environment 'cluster'", "hostname"),
+        ("stage 'fetch'", "DATA"),
+    ]
+    assert reqs[0]["version_spec"] == ">=2.40"
+    assert reqs[1]["obtain_command"] == "claude setup-token"
+    out = subprocess.check_output(["calkit", "list", "reqs"], text=True)
+    assert "Project:\n  - git (app)\n      version_spec: >=2.40" in out
+    assert "obtain_command: claude setup-token" in out
+    assert "  - cpu-count\n      min: 4" in out
+    assert "Environment 'cluster':\n  - hostname" in out
+    assert "Stage 'fetch':\n  - DATA (env-var)" in out
+    # A malformed one says where it is
+    ck_info["pipeline"]["stages"]["fetch"]["requirements"] = [
+        {"kind": "env-var"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "list", "reqs"], capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "In stage 'fetch'" in res.stderr + res.stdout
+
+
 def test_list_releases(tmp_dir):
     # Internal releases are never published, so no lookup is attempted, but
     # a stray 'published' key must not override the status we determined

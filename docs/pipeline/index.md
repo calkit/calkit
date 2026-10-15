@@ -339,21 +339,21 @@ Stage definitions belong in `pipeline.stages` in `calkit.yaml`.
 
 Common stage parameters:
 
-| Parameter           | Type                                                                                                                                     | Required | Default   | Description                                                                                                                                                                                                                                                                                                           |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment`       | str                                                                                                                                      | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
-| `wdir`              | str \| None                                                                                                                              | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
-| `inputs`            | list[str \| EnvVarInput \| PathInput \| InputsFromStageOutputs]                                                                          | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.                                                                                     |
-| `outputs`           | list[str \| PathOutput]                                                                                                                  | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
-| `always_run`        | bool                                                                                                                                     | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
-| `iterate_over`      | list[StageIteration] \| None                                                                                                             | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
-| `description`       | str \| None                                                                                                                              | no       | null      | A description of what this stage does.                                                                                                                                                                                                                                                                                |
-| `frozen`            | bool                                                                                                                                     | no       | False     | Never rerun this stage, treating its outputs as up-to-date.                                                                                                                                                                                                                                                           |
-| `scheduler`         | StageSchedulerOptions \| None                                                                                                            | no       | null      | Options for running this stage on a job scheduler (SLURM or PBS).                                                                                                                                                                                                                                                     |
-| `setup`             | list[str] \| None                                                                                                                        | no       | null      | Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'. |
-| `env_default_setup` | Literal['ignore', 'replace', 'merge']                                                                                                    | no       | 'replace' | How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.                                                                   |
-| `requirements`      | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs \| None]] | no       |           | What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.                                                                                                                                               |
-| `slurm`             | StageSchedulerOptions \| None                                                                                                            | no       | null      | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                                                                                                                                                                                             |
+| Parameter           | Type                                                                                                                                                                  | Required | Default   | Description                                                                                                                                                                                                                                                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`       | str                                                                                                                                                                   | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
+| `wdir`              | str \| None                                                                                                                                                           | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
+| `inputs`            | list[str \| EnvVarInput \| PathInput \| InputsFromStageOutputs]                                                                                                       | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.                                                                                     |
+| `outputs`           | list[str \| PathOutput]                                                                                                                                               | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
+| `always_run`        | bool                                                                                                                                                                  | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
+| `iterate_over`      | list[StageIteration] \| None                                                                                                                                          | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
+| `description`       | str \| None                                                                                                                                                           | no       | null      | A description of what this stage does.                                                                                                                                                                                                                                                                                |
+| `frozen`            | bool                                                                                                                                                                  | no       | False     | Never rerun this stage, treating its outputs as up-to-date.                                                                                                                                                                                                                                                           |
+| `scheduler`         | StageSchedulerOptions \| None                                                                                                                                         | no       | null      | Options for running this stage on a job scheduler (SLURM or PBS).                                                                                                                                                                                                                                                     |
+| `setup`             | list[str] \| None                                                                                                                                                     | no       | null      | Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'. |
+| `env_default_setup` | Literal['ignore', 'replace', 'merge']                                                                                                                                 | no       | 'replace' | How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.                                                                   |
+| `requirements`      | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| AwsCredentialsRequirement \| Requirement \| dict[str, RequirementAttrs \| None]] | no       |           | What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.                                                                                                                                               |
+| `slurm`             | StageSchedulerOptions \| None                                                                                                                                         | no       | null      | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                                                                                                                                                                                             |
 
 Parameters whose type is a named object, like `PathOutput`, are described under [nested parameter types](#nested-parameter-types).
 
@@ -792,27 +792,51 @@ A `setup` requirement, whose `name` may be omitted.
 Without a `name`, Calkit derives a stable `setup-<hash>` one from
 `check_command`.
 
-| Parameter       | Type               | Required | Default | Description                                                                                                           |
-| --------------- | ------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `kind`          | Literal['setup']   | no       | 'setup' |                                                                                                                       |
-| `name`          | str \| None        | no       | null    |                                                                                                                       |
-| `check_command` | str \| None        | no       | null    |                                                                                                                       |
-| `setup_command` | str \| None        | no       | null    |                                                                                                                       |
-| `cache_ttl`     | str \| int \| None | no       | null    |                                                                                                                       |
-| `description`   | str \| None        | no       | null    |                                                                                                                       |
-| `default`       | str \| None        | no       | null    |                                                                                                                       |
-| `version_spec`  | str \| None        | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this. |
-| `notes`         | str \| None        | no       | null    |                                                                                                                       |
+| Parameter        | Type               | Required | Default | Description                                                                                                                   |
+| ---------------- | ------------------ | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `kind`           | Literal['setup']   | no       | 'setup' |                                                                                                                               |
+| `name`           | str \| None        | no       | null    |                                                                                                                               |
+| `check_command`  | str \| None        | no       | null    |                                                                                                                               |
+| `setup_command`  | str \| None        | no       | null    |                                                                                                                               |
+| `cache_ttl`      | str \| int \| None | no       | null    |                                                                                                                               |
+| `description`    | str \| None        | no       | null    |                                                                                                                               |
+| `default`        | str \| None        | no       | null    |                                                                                                                               |
+| `version_spec`   | str \| None        | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.         |
+| `obtain_command` | str \| None        | no       | null    | Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for. |
+| `account_id`     | str \| None        | no       | null    | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                  |
+| `profile`        | str \| None        | no       | null    | AWS profile 'aws-credentials' are checked with, if not the default.                                                           |
+| `notes`          | str \| None        | no       | null    |                                                                                                                               |
+
+#### `AwsCredentialsRequirement`
+
+An `aws-credentials` requirement, whose `name` may be omitted.
+
+| Parameter        | Type                       | Required | Default           | Description                                                                                                                   |
+| ---------------- | -------------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `kind`           | Literal['aws-credentials'] | no       | 'aws-credentials' |                                                                                                                               |
+| `name`           | str \| None                | no       | null              |                                                                                                                               |
+| `check_command`  | str \| None                | no       | null              |                                                                                                                               |
+| `setup_command`  | str \| None                | no       | null              |                                                                                                                               |
+| `cache_ttl`      | str \| int \| None         | no       | null              |                                                                                                                               |
+| `description`    | str \| None                | no       | null              |                                                                                                                               |
+| `default`        | str \| None                | no       | null              |                                                                                                                               |
+| `version_spec`   | str \| None                | no       | null              | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.         |
+| `obtain_command` | str \| None                | no       | null              | Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for. |
+| `account_id`     | str \| None                | no       | null              | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                  |
+| `profile`        | str \| None                | no       | null              | AWS profile 'aws-credentials' are checked with, if not the default.                                                           |
+| `notes`          | str \| None                | no       | null              |                                                                                                                               |
 
 #### `Requirement`
 
 Something that must be true of a machine before the project runs.
 
-Four kinds are supported:
+Five kinds are supported:
 
 - `app`: an executable that must be on `PATH`, optionally
   satisfying a `version_spec`.
 - `env-var`: an environmental variable that must be defined.
+  `obtain_command` says how to get a value, e.g., a command that
+  prints a token, and is offered before the value is asked for.
 - `setup`: a per-machine precondition that isn't a file---e.g.,
   the user must have authenticated a CLI like `gh auth login`.
   A `setup` requirement declares `check_command` (a shell command
@@ -821,6 +845,9 @@ Four kinds are supported:
   as a fix-it command otherwise). To run either inside a project
   environment, prefix it with `calkit xenv -n <env> --`.
   `cache_ttl` skips re-probing slow checks.
+- `aws-credentials`: valid AWS credentials, optionally for a given
+  `account_id` and `profile`, checked with
+  `aws sts get-caller-identity`.
 - `calkit-config`: a value that must be set in the user's Calkit
   configuration.
 
@@ -829,17 +856,20 @@ properties of a machine that can't be installed, e.g., how many CPUs
 it has or what OS it runs, are constrained by giving the property as
 the `kind` instead, e.g., `kind: cpu-count` with a `min`.
 
-| Parameter       | Type                                                | Required | Default | Description                                                                                                           |
-| --------------- | --------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `kind`          | Literal['app', 'env-var', 'setup', 'calkit-config'] | no       | 'app'   |                                                                                                                       |
-| `name`          | str                                                 | yes      |         |                                                                                                                       |
-| `check_command` | str \| None                                         | no       | null    |                                                                                                                       |
-| `setup_command` | str \| None                                         | no       | null    |                                                                                                                       |
-| `cache_ttl`     | str \| int \| None                                  | no       | null    |                                                                                                                       |
-| `description`   | str \| None                                         | no       | null    |                                                                                                                       |
-| `default`       | str \| None                                         | no       | null    |                                                                                                                       |
-| `version_spec`  | str \| None                                         | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this. |
-| `notes`         | str \| None                                         | no       | null    |                                                                                                                       |
+| Parameter        | Type                                                                   | Required | Default | Description                                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `kind`           | Literal['app', 'env-var', 'setup', 'aws-credentials', 'calkit-config'] | no       | 'app'   |                                                                                                                               |
+| `name`           | str                                                                    | yes      |         |                                                                                                                               |
+| `check_command`  | str \| None                                                            | no       | null    |                                                                                                                               |
+| `setup_command`  | str \| None                                                            | no       | null    |                                                                                                                               |
+| `cache_ttl`      | str \| int \| None                                                     | no       | null    |                                                                                                                               |
+| `description`    | str \| None                                                            | no       | null    |                                                                                                                               |
+| `default`        | str \| None                                                            | no       | null    |                                                                                                                               |
+| `version_spec`   | str \| None                                                            | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.         |
+| `obtain_command` | str \| None                                                            | no       | null    | Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for. |
+| `account_id`     | str \| None                                                            | no       | null    | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                  |
+| `profile`        | str \| None                                                            | no       | null    | AWS profile 'aws-credentials' are checked with, if not the default.                                                           |
+| `notes`          | str \| None                                                            | no       | null    |                                                                                                                               |
 
 #### `RequirementAttrs`
 
@@ -848,16 +878,19 @@ A requirement's properties, as written under `{name: {...}}`.
 `Requirement` is this plus the name; the mapping form supplies the
 name as its key instead.
 
-| Parameter       | Type                                                | Required | Default | Description |
-| --------------- | --------------------------------------------------- | -------- | ------- | ----------- |
-| `kind`          | Literal['app', 'env-var', 'setup', 'calkit-config'] | no       | 'app'   |             |
-| `check_command` | str \| None                                         | no       | null    |             |
-| `setup_command` | str \| None                                         | no       | null    |             |
-| `cache_ttl`     | str \| int \| None                                  | no       | null    |             |
-| `description`   | str \| None                                         | no       | null    |             |
-| `default`       | str \| None                                         | no       | null    |             |
-| `version_spec`  | str \| None                                         | no       | null    |             |
-| `notes`         | str \| None                                         | no       | null    |             |
+| Parameter        | Type                                                                   | Required | Default | Description |
+| ---------------- | ---------------------------------------------------------------------- | -------- | ------- | ----------- |
+| `kind`           | Literal['app', 'env-var', 'setup', 'aws-credentials', 'calkit-config'] | no       | 'app'   |             |
+| `check_command`  | str \| None                                                            | no       | null    |             |
+| `setup_command`  | str \| None                                                            | no       | null    |             |
+| `cache_ttl`      | str \| int \| None                                                     | no       | null    |             |
+| `description`    | str \| None                                                            | no       | null    |             |
+| `default`        | str \| None                                                            | no       | null    |             |
+| `version_spec`   | str \| None                                                            | no       | null    |             |
+| `obtain_command` | str \| None                                                            | no       | null    |             |
+| `account_id`     | str \| None                                                            | no       | null    |             |
+| `profile`        | str \| None                                                            | no       | null    |             |
+| `notes`          | str \| None                                                            | no       | null    |             |
 
 #### `PythonScriptDiffFilter`
 

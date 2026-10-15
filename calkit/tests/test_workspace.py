@@ -1484,6 +1484,31 @@ def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
     failing.add("SCRATCH")
     with pytest.raises(ValueError, match="env-var 'SCRATCH' is not set"):
         ws.check_requirements(w, [{"kind": "env-var", "name": "SCRATCH"}])
+    # How to obtain a value is passed along
+    with pytest.raises(ValueError, match="obtained with 'get-token'"):
+        ws.check_requirements(
+            w,
+            [
+                {
+                    "kind": "env-var",
+                    "name": "SCRATCH",
+                    "obtain_command": "get-token",
+                }
+            ],
+        )
+    failing.clear()
+    # AWS credentials are checked there, for the account asked for
+    ran.clear()
+    aws = {"kind": "aws-credentials", "account_id": "012", "profile": "p"}
+    ws.check_requirements(w, [aws])
+    assert "get-caller-identity" in ran[0]
+    assert "--profile p" in ran[0]
+    assert "= 012" in ran[0]
+    failing.add("get-caller-identity")
+    with pytest.raises(
+        ValueError, match="'aws-credentials-p-012' is not satisfied on host"
+    ):
+        ws.check_requirements(w, [aws])
     failing.clear()
     failing.add("gh auth")
     with pytest.raises(ValueError, match="To satisfy it there, run: gh login"):

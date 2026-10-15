@@ -473,7 +473,7 @@ def check_env(
 
     def lock_is_stale(fpath: str) -> bool:
         """Whether a lock was resolved from a spec other than this one."""
-        recorded = read_env_spec_hash(fpath, env_fpath)
+        recorded = read_env_spec_hash(fpath)
         return recorded is not None and recorded != spec_hash
 
     def versions(deps: list[str], sep: str) -> dict[str, str]:
@@ -490,9 +490,7 @@ def check_env(
         log_func = calkit.logger.info
     log_func(f"Checking conda env defined in {env_fpath}")
     spec_hash = env_spec_hash(env_fpath)
-    recorded_hash = (
-        read_env_spec_hash(lock_fpath, env_fpath) if lock_fpath else None
-    )
+    recorded_hash = read_env_spec_hash(lock_fpath) if lock_fpath else None
     # A lock resolved from the current spec is an input, not re-exported
     lock_is_current = (
         lock_fpath is not None

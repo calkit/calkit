@@ -2054,9 +2054,9 @@ def test_env_spec_hashes(tmp_dir):
     write(spec, "idna\n")
     write(lock, "idna==3.10\n")
     # Recorded beside the lock, not in it
-    assert envs.read_env_spec_hash(lock, spec) is None
+    assert envs.read_env_spec_hash(lock) is None
     envs.write_env_spec_hash(lock, spec)
-    assert envs.read_env_spec_hash(lock, spec) == envs.env_spec_hash(spec)
+    assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
     with open(lock) as f:
         assert f.read() == "idna==3.10\n"
     # Comments, blank lines, spacing and line endings aren't changes
@@ -2098,34 +2098,35 @@ def test_env_spec_hashes(tmp_dir):
         wdir="sub",
     )
     assert envs.read_env_spec_hash(
-        os.path.join(".calkit", "env-locks", "py", "win-64.txt"),
-        os.path.abspath(os.path.join("sub", spec)),
-        wdir="sub",
-    ) == (recorded := envs.env_spec_hash(os.path.join("sub", spec)))
+        os.path.join(".calkit", "env-locks", "py", "win-64.txt"), wdir="sub"
+    ) == envs.env_spec_hash(os.path.join("sub", spec))
     with open(os.path.join("sub", envs.ENV_SPEC_HASHES_FPATH)) as f:
         assert json.load(f) == {
-            spec: [{"lock_path": ".calkit/env-locks/py", "sha256": recorded}]
+            ".calkit/env-locks/py": {
+                "spec_path": spec,
+                "sha256": envs.env_spec_hash(os.path.join("sub", spec)),
+            }
         }
-    # Envs sharing a spec each record when their lock was resolved
-    write(spec, "idna\ncertifi\n")
-    envs.write_env_spec_hash("other-lock.txt", spec)
-    assert envs.read_env_spec_hash("other-lock.txt", spec) == (
-        envs.env_spec_hash(spec)
-    )
-    assert envs.read_env_spec_hash(lock, spec) != envs.env_spec_hash(spec)
-    assert envs.read_env_spec_hash(lock, "other.txt") is None
-    # Entries from before hashes were kept by spec aren't read, and are
+    # A spec moved without changing still matches
+    os.rename(os.path.join("sub", spec), os.path.join("sub", "reqs.txt"))
+    lock_dir = os.path.join(".calkit", "env-locks", "py")
+    before = envs.read_env_spec_hash(lock_dir, wdir="sub")
+    assert before == envs.env_spec_hash(os.path.join("sub", "reqs.txt"))
+    envs.write_env_spec_hash(lock_dir, "reqs.txt", wdir="sub")
+    with open(os.path.join("sub", envs.ENV_SPEC_HASHES_FPATH)) as f:
+        assert json.load(f)[".calkit/env-locks/py"]["spec_path"] == "reqs.txt"
+    # Entries from before the spec path was recorded aren't read, and are
     # dropped on the next write
-    write(envs.ENV_SPEC_HASHES_FPATH, json.dumps({lock: "md5:abc"}))
-    assert envs.read_env_spec_hash(lock, spec) is None
+    write(envs.ENV_SPEC_HASHES_FPATH, json.dumps({"old": "md5:abc"}))
+    assert envs.read_env_spec_hash("old") is None
     envs.write_env_spec_hash(lock, spec)
     with open(envs.ENV_SPEC_HASHES_FPATH) as f:
-        assert list(json.load(f)) == [spec]
+        assert list(json.load(f)) == [lock]
     # An unreadable file records nothing, and is replaced on the next write
     write(envs.ENV_SPEC_HASHES_FPATH, "not json")
-    assert envs.read_env_spec_hash(lock, spec) is None
+    assert envs.read_env_spec_hash(lock) is None
     envs.write_env_spec_hash(lock, spec)
-    assert envs.read_env_spec_hash(lock, spec) == envs.env_spec_hash(spec)
+    assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
 
 
 def test_cross_platform_venv_locks(tmp_dir, monkeypatch):

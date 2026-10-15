@@ -99,7 +99,7 @@ def test_check_venv(tmp_dir):
     with open("lock.txt") as f:
         lock_txt_4 = f.read()
     assert calkit.environments.read_env_spec_hash(
-        "lock.txt", "reqs.txt"
+        "lock.txt"
     ) == calkit.environments.env_spec_hash("reqs.txt", python="3.11")
     with open("lock.txt", "a") as f:
         f.write("# kept\n")
@@ -1638,7 +1638,7 @@ def test_check_env_locks_every_venv_platform(tmp_dir):
     assert len(locks) > 1
     # Without a declared Python, so machines with different ones agree
     recorded = calkit.environments.read_env_spec_hash(
-        os.path.join(lock_dir, locks[0]), "requirements.txt"
+        os.path.join(lock_dir, locks[0])
     )
     assert recorded == calkit.environments.env_spec_hash("requirements.txt")
     # A matching lock with no record, e.g., from before records were kept, is
@@ -1648,10 +1648,7 @@ def test_check_env_locks_every_venv_platform(tmp_dir):
     os.remove(sibling)
     os.remove(calkit.environments.ENV_SPEC_HASHES_FPATH)
     subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
-    assert (
-        calkit.environments.read_env_spec_hash(sibling, "requirements.txt")
-        == recorded
-    )
+    assert calkit.environments.read_env_spec_hash(sibling) == recorded
     assert not os.path.isfile(sibling)
     # A changed spec relocks every platform together
     with open("requirements.txt", "a") as f:

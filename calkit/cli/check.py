@@ -2001,9 +2001,7 @@ def check_venv(
             return re.match(r"^(-e|--editable)[\s=]+\w+\+", line) is None
         return re.search(r"@\s*file:", line) is not None
 
-    recorded_hash = calkit.environments.read_env_spec_hash(
-        lock_fpath, path, wdir
-    )
+    recorded_hash = calkit.environments.read_env_spec_hash(lock_fpath, wdir)
     spec_hash = calkit.environments.env_spec_hash(full(path), python=python)
     # A lock resolved from the current spec is an input, not rewritten here
     lock_is_current = (

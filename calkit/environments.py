@@ -955,6 +955,7 @@ def resolve_switch(env_name: str, envs: dict) -> str | None:
         AppExistsCondition,
         EnvVarEqualsCondition,
         EnvVarExistsCondition,
+        EnvVarSetCondition,
         HostnameMatchesCondition,
         MachineIdEqualsCondition,
         OsIsCondition,
@@ -969,6 +970,8 @@ def resolve_switch(env_name: str, envs: dict) -> str | None:
                 shutil.which(a) is not None
                 for a in any_of(condition.app_exists)
             )
+        if isinstance(condition, EnvVarSetCondition):
+            return any(n in os.environ for n in any_of(condition.env_var_set))
         if isinstance(condition, EnvVarExistsCondition):
             return any(
                 n in os.environ for n in any_of(condition.env_var_exists)

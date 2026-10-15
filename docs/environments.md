@@ -1340,7 +1340,7 @@ out `when` to be the default. Each condition is one `name: value`
 pair:
 
 - `app_exists`: an app on `PATH`.
-- `env_var_exists`: an environmental variable that is set.
+- `env_var_set`: an environmental variable that is set.
 - `env_var_equals`: `NAME=value` for an environmental variable.
 - `hostname_matches`: a glob the hostname matches, ignoring case.
 - `os_is`: `linux`, `macos` or `windows`.

@@ -1475,7 +1475,7 @@ def test_check_switch_env(tmp_dir):
     envs["two"] = {
         "kind": "switch",
         "switch": [
-            {"when": [{"env_var_exists": "CK_TEST_NO_SUCH_VAR"}], "use": "b"},
+            {"when": [{"env_var_set": "CK_TEST_NO_SUCH_VAR"}], "use": "b"},
             {"use": "a"},
         ],
     }

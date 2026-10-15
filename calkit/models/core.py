@@ -1290,10 +1290,20 @@ class AppExistsCondition(Model):
     )
 
 
+class EnvVarSetCondition(Model):
+    model_config = ConfigDict(extra="forbid")
+    env_var_set: str | list[str] = Field(
+        description="Environmental variable that must be set."
+    )
+
+
 class EnvVarExistsCondition(Model):
+    """The old name for ``env_var_set``, still honored."""
+
     model_config = ConfigDict(extra="forbid")
     env_var_exists: str | list[str] = Field(
-        description="Environmental variable that must be set."
+        description="Deprecated alias for 'env_var_set'.",
+        json_schema_extra={"deprecated": True},
     )
 
 
@@ -1330,7 +1340,7 @@ class MachineIdEqualsCondition(Model):
 
 _SWITCH_CONDITIONS: list[type[Model]] = [
     AppExistsCondition,
-    EnvVarExistsCondition,
+    EnvVarSetCondition,
     EnvVarEqualsCondition,
     HostnameMatchesCondition,
     OsIsCondition,
@@ -1349,6 +1359,7 @@ def _switch_condition_name(value: object) -> str | None:
 
 SwitchCondition = Annotated[
     Annotated[AppExistsCondition, Tag("app_exists")]
+    | Annotated[EnvVarSetCondition, Tag("env_var_set")]
     | Annotated[EnvVarExistsCondition, Tag("env_var_exists")]
     | Annotated[EnvVarEqualsCondition, Tag("env_var_equals")]
     | Annotated[HostnameMatchesCondition, Tag("hostname_matches")]
@@ -1409,7 +1420,7 @@ class SwitchEnvironment(Environment):
     pair:
 
     - ``app_exists``: an app on ``PATH``.
-    - ``env_var_exists``: an environmental variable that is set.
+    - ``env_var_set``: an environmental variable that is set.
     - ``env_var_equals``: ``NAME=value`` for an environmental variable.
     - ``hostname_matches``: a glob the hostname matches, ignoring case.
     - ``os_is``: ``linux``, ``macos`` or ``windows``.

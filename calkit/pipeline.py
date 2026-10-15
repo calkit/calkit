@@ -918,9 +918,9 @@ def get_gated_stages(
     import calkit.environments as envs_mod
 
     if interactive is None:
-        from calkit.dependencies import _is_interactive
+        from calkit.core import is_tty
 
-        interactive = _is_interactive()
+        interactive = is_tty()
     envs = ck_info.get("environments", {})
     stages = ck_info.get("pipeline", {}).get("stages", {})
     gated: dict[str, str] = {}

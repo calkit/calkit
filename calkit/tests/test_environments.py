@@ -17,7 +17,7 @@ import calkit.latex
 
 
 def test_check_all_in_pipeline(tmp_dir):
-    ck_info = {
+    ck_info: dict = {
         "environments": {
             "py1": {
                 "kind": "uv-venv",
@@ -94,6 +94,66 @@ def test_check_all_in_pipeline(tmp_dir):
         calkit.environments.check_all_in_pipeline(targets=["run-thing"]) == {}
     )
     assert not os.path.exists(env_prefix)
+    # A Docker environment needs Docker ready, which is checked up front
+    ck_info["environments"]["docker1"] = {"kind": "docker", "image": "alpine"}
+    ck_info["pipeline"]["stages"]["run-docker"] = {
+        "kind": "command",
+        "command": "echo hi",
+        "environment": "docker1",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with mock.patch(
+        "calkit.docker.ensure_ready",
+        side_effect=ValueError("Docker is required, but is not installed"),
+    ) as ensure_ready:
+        with pytest.raises(ValueError, match="not installed"):
+            calkit.environments.check_all_in_pipeline(interactive=True)
+        ensure_ready.assert_called_once_with(interactive=True)
+        # Only when a stage that will run uses it
+        assert (
+            calkit.environments.check_all_in_pipeline(targets=["run-thing"])
+            == {}
+        )
+        # Not when it isn't known yet which stages will run, in which case
+        # the environment's own check fails instead
+        ensure_ready.reset_mock()
+        with mock.patch(
+            "calkit.cli.check.check_environment", side_effect=Exception
+        ):
+            res = calkit.environments.check_all_in_pipeline(
+                docker_required=False
+            )
+        ensure_ready.assert_not_called()
+        assert not res["docker1"]["success"]
+        # Nor when it runs inside an environment on another machine or a
+        # scheduler, which needs Docker there instead
+        ck_info["environments"]["remote"] = {
+            "kind": "system",
+            "host": "some-other-machine.example.com",
+        }
+        ck_info["environments"]["cluster"] = {"kind": "slurm", "host": "hpc"}
+        for outer in ["remote", "cluster"]:
+            ck_info["pipeline"]["stages"]["run-docker"]["environment"] = (
+                f"{outer}:docker1"
+            )
+            with open("calkit.yaml", "w") as f:
+                calkit.ryaml.dump(ck_info, f)
+            with mock.patch("calkit.cli.check.check_environment"):
+                calkit.environments.check_all_in_pipeline(
+                    targets=["run-docker"]
+                )
+            ensure_ready.assert_not_called()
+        # But it does when that machine is this one
+        ck_info["environments"]["remote"]["host"] = "localhost"
+        ck_info["pipeline"]["stages"]["run-docker"]["environment"] = (
+            "remote:docker1"
+        )
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        with pytest.raises(ValueError, match="not installed"):
+            calkit.environments.check_all_in_pipeline(targets=["run-docker"])
+    del ck_info["pipeline"]["stages"]["run-docker"]
     del ck_info["pipeline"]["stages"]["run-thing"]["frozen"]
     # Editing an input's contents, not just its path, invalidates the cache
     with open("local.txt", "w") as f:

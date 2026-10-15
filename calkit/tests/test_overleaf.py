@@ -5,6 +5,7 @@ import os
 import subprocess
 
 import git
+import pytest
 
 import calkit
 
@@ -150,3 +151,78 @@ def test_write_sync_info_without_calkit_dir(tmp_dir):
     with open(fpath) as f:
         written = json.load(f)
     assert written["paper"]["project_id"] == "abc123"
+
+
+def test_pull(tmp_dir):
+    # Stand up a repo for the Overleaf project and clone it
+    overleaf_dir = tmp_dir / "overleaf"
+    overleaf_repo = git.Repo.init(overleaf_dir)
+    (overleaf_dir / "main.tex").write_text("v1")
+    _commit_all(overleaf_repo, "Initial commit")
+    clone = git.Repo.clone_from(overleaf_dir, tmp_dir / "clone")
+    clone_dir = tmp_dir / "clone"
+    # Leave the clone diverged and dirty, like after a sync whose push failed,
+    # with a conflicting edit made on Overleaf in the meantime
+    (clone_dir / "main.tex").write_text("local")
+    _commit_all(clone, "Sync with Calkit project")
+    (clone_dir / "main.tex").write_text("uncommitted")
+    (clone_dir / "leftover.tex").write_text("untracked")
+    (clone_dir / ".gitignore").write_text("*.bib\n")
+    (clone_dir / "refs.bib").write_text("ignored")
+    (overleaf_dir / "main.tex").write_text("v2")
+    _commit_all(overleaf_repo, "Edit on Overleaf")
+    calkit.overleaf.pull(clone)
+    assert clone.head.commit == overleaf_repo.head.commit
+    assert (clone_dir / "main.tex").read_text() == "v2"
+    assert not (clone_dir / "leftover.tex").exists()
+    assert not (clone_dir / "refs.bib").exists()
+    assert not clone.is_dirty(untracked_files=True)
+    # A fetch failure should show Git's error, without the token, and only
+    # give token advice for authentication failures
+    clone.git.remote("set-url", "origin", f"file://{tmp_dir}/missing")
+    with pytest.raises(RuntimeError) as e:
+        calkit.overleaf.pull(clone)
+    msg = str(e.value)
+    assert "Failed to pull from Overleaf" in msg
+    assert "missing" in msg
+    assert "overleaf_token" not in msg
+    clone.git.remote(
+        "set-url", "origin", "https://git:secret@127.0.0.1:9/project"
+    )
+    with pytest.raises(RuntimeError) as e:
+        calkit.overleaf.pull(clone)
+    msg = str(e.value)
+    assert "127.0.0.1" in msg
+    assert "secret" not in msg
+    # Overleaf rejecting the token should be told apart from other failures
+    rejected = git.GitCommandError(
+        ["git", "fetch"],
+        128,
+        stderr="fatal: Authentication failed for 'https://git.overleaf.com/x/'",
+    )
+    err = calkit.overleaf._git_error(rejected, "pull")
+    assert isinstance(err, calkit.overleaf.AuthError)
+    assert "expired" in str(err)
+    assert not isinstance(
+        calkit.overleaf._git_error(
+            git.GitCommandError(["git", "fetch"], 128, stderr="nope"), "pull"
+        ),
+        calkit.overleaf.AuthError,
+    )
+
+
+def test_lock(tmp_dir):
+    from filelock import FileLock, Timeout
+
+    lock_path = calkit.overleaf.get_project_dir("abc123") + ".lock"
+    # Another process can't take the lock while a sync holds it
+    with calkit.overleaf.lock("abc123"):
+        with pytest.raises(Timeout):
+            FileLock(lock_path).acquire(timeout=0)
+    # It's released afterwards, even if the sync fails
+    with pytest.raises(RuntimeError):
+        with calkit.overleaf.lock("abc123"):
+            raise RuntimeError("Sync failed")
+    other = FileLock(lock_path)
+    other.acquire(timeout=0)
+    other.release()

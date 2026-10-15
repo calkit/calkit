@@ -790,9 +790,9 @@ def check_environment(
             # from that machine, since those are the ones the results
             # depend on.
             import calkit.workspace as workspace
-            from calkit.dependencies import _is_interactive
+            from calkit.core import is_tty
 
-            interactive = _is_interactive()
+            interactive = is_tty()
             ck_info = calkit.load_calkit_info()
             try:
                 # Anything written as ${CK_SSH_HOST} is the first thing to
@@ -1263,12 +1263,17 @@ def check_docker_env(
 ) -> None:
     """Check that Docker environment is up-to-date."""
     from calkit import docker as ck_docker
+    from calkit.core import is_tty
     from calkit.environments import get_docker_arch
 
     if fpath is None and lock_fpath is None:
         raise_error(
             "Lock file output path must be provided if input Dockerfile is not"
         )
+    try:
+        ck_docker.ensure_ready(interactive=is_tty())
+    except ck_docker.DockerNotReadyError as e:
+        raise_error(str(e))
     outfile = open(os.devnull, "w") if quiet else None
     if fpath is not None:
         typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)

@@ -2018,9 +2018,9 @@ def update_hub(
         except Exception:
             git_repo_url = None
     if git_repo_url is None and not create_repo:
-        from calkit.dependencies import _is_interactive
+        from calkit.core import is_tty
 
-        if not _is_interactive():
+        if not is_tty():
             raise_error(
                 "This project has no Git repository, so there would be "
                 "nowhere to push its code. Add a remote, or pass "

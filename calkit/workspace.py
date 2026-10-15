@@ -1008,7 +1008,7 @@ def expand_with_prompts(
     against a host by that name. Answers are stored in ``.env`` so the
     question is only asked once.
     """
-    from calkit.dependencies import prompt_and_store_env_var
+    from calkit.requirements import prompt_and_store_env_var
 
     for name in _referenced_env_vars(value):
         if os.environ.get(name):

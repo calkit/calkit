@@ -39,6 +39,19 @@ def test_list_requirements(tmp_dir):
                 "requirements": [{"kind": "hostname", "matches": "*.edu"}],
             },
             "py": {"kind": "uv-venv", "path": "requirements.txt"},
+            "site": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"os_is": "linux"}],
+                        "use": {
+                            "kind": "system",
+                            "requirements": ["sbatch"],
+                        },
+                    },
+                    {"use": "cluster"},
+                ],
+            },
         },
         "pipeline": {
             "stages": {
@@ -64,6 +77,7 @@ def test_list_requirements(tmp_dir):
         ("project", "aws-credentials-012345678901"),
         ("project", "cpu-count"),
         ("environment 'cluster'", "hostname"),
+        ("environment 'site.1'", "sbatch"),
         ("stage 'fetch'", "DATA"),
     ]
     assert reqs[0]["version_spec"] == ">=2.40"

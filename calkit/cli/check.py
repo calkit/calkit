@@ -2199,7 +2199,7 @@ def check_project_requirements(
     typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
-        calkit.dependencies.cache_clear()
+        calkit.requirements.cache_clear()
     try:
         calkit.check_requirements(use_cache=not no_cache)
     except Exception as e:
@@ -2271,14 +2271,14 @@ def check_env_vars(
     dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
     for raw in calkit.get_requirements(ck_info):
-        dep = _normalize_requirement(raw)
-        if dep["kind"] != "env-var":
+        req = _normalize_requirement(raw)
+        if req["kind"] != "env-var":
             continue
-        name = dep["name"]
+        name = req["name"]
         if verbose:
             typer.echo(f"Checking for environmental variable '{name}'")
         if name not in os.environ:
-            value = calkit.dependencies.prompt_for_env_var_dep(dep)
+            value = calkit.requirements.prompt_for_env_var_req(req)
             if value is None:
                 raise_error(f"No value provided for '{name}'")
     message = "✅ All set!"

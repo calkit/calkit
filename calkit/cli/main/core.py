@@ -211,7 +211,7 @@ def _exec_with_version(version_spec: str) -> None:
     Strips ``--use-version`` from ``sys.argv`` before re-invoking so the
     child process doesn't loop. Requires ``uv`` to be available on PATH.
     """
-    from calkit.dependencies import _format_uvx_from
+    from calkit.requirements import _format_uvx_from
 
     if shutil.which("uvx") is None:
         raise_error(
@@ -548,7 +548,7 @@ def get_status(
     # than enforces, so anything still unset is a warning: it must not stop
     # the rest of the status from being shown.
     if ck_info:
-        missing_env_vars = calkit.dependencies.resolve_env_var_deps(ck_info)
+        missing_env_vars = calkit.requirements.resolve_env_var_deps(ck_info)
         if missing_env_vars:
             warn(
                 "Missing environmental variable(s): "

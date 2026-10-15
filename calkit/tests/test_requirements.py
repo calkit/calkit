@@ -1,4 +1,4 @@
-"""Tests for the ``dependencies`` module."""
+"""Tests for the ``requirements`` module."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest import mock
 import pytest
 
 import calkit
-from calkit import dependencies as deps
+from calkit import requirements as reqs
 
 
 @pytest.fixture
@@ -20,59 +20,59 @@ def tmp_dir(tmp_path, monkeypatch):
 
 def test_parse_ttl():
     # Unit suffixes; case-insensitive; surrounding whitespace tolerated.
-    assert deps.parse_ttl(0) == 0
-    assert deps.parse_ttl("30") == 30
-    assert deps.parse_ttl("30s") == 30
-    assert deps.parse_ttl("5m") == 300
-    assert deps.parse_ttl("2h") == 7200
-    assert deps.parse_ttl("7d") == 7 * 86400
-    assert deps.parse_ttl("1w") == 7 * 86400
-    assert deps.parse_ttl(" 12H ") == 12 * 3600
+    assert reqs.parse_ttl(0) == 0
+    assert reqs.parse_ttl("30") == 30
+    assert reqs.parse_ttl("30s") == 30
+    assert reqs.parse_ttl("5m") == 300
+    assert reqs.parse_ttl("2h") == 7200
+    assert reqs.parse_ttl("7d") == 7 * 86400
+    assert reqs.parse_ttl("1w") == 7 * 86400
+    assert reqs.parse_ttl(" 12H ") == 12 * 3600
     with pytest.raises(ValueError):
-        deps.parse_ttl("soon")
+        reqs.parse_ttl("soon")
 
 
 def test_setup_dep_caches_by_default(tmp_dir):
     # First call probes and caches; the cache file lives under the
     # gitignored .calkit/local dir.
-    dep = {
+    req = {
         "name": "alpha",
         "kind": "setup",
         "check_command": "true",
     }
-    assert deps.check_setup_dep(dep, interactive=False) is True
+    assert reqs.check_setup_dep(req, interactive=False) is True
     cache_file = tmp_dir / ".calkit" / "local" / "dep-checks.sqlite"
     assert cache_file.exists()
     # Second call hits the cache: a now-failing check is masked.
-    dep_failing = dict(dep, check_command="false")
+    req_failing = dict(req, check_command="false")
     # Same name, same hash -> would re-probe; flip the check to confirm
     # the *cached* entry (under its original hash) still satisfies when
     # we put the original command back.
-    assert deps.check_setup_dep(dep, interactive=False) is True
+    assert reqs.check_setup_dep(req, interactive=False) is True
     # Editing the check command invalidates the cache (hash mismatch).
-    assert deps.check_setup_dep(dep_failing, interactive=False) is False
+    assert reqs.check_setup_dep(req_failing, interactive=False) is False
     # use_cache=False forces re-probing even when an entry exists.
     assert (
-        deps.check_setup_dep(dep, interactive=False, use_cache=False) is True
+        reqs.check_setup_dep(req, interactive=False, use_cache=False) is True
     )
     # cache_ttl: 0 disables caching for this dep: no entry written.
-    deps.cache_clear()
-    dep_no_cache = dict(dep, name="beta", cache_ttl=0)
-    assert deps.check_setup_dep(dep_no_cache, interactive=False) is True
-    assert deps.cache_lookup("beta", "true") is None
+    reqs.cache_clear()
+    req_no_cache = dict(req, name="beta", cache_ttl=0)
+    assert reqs.check_setup_dep(req_no_cache, interactive=False) is True
+    assert reqs.cache_lookup("beta", "true") is None
     # A custom cache_ttl is honored.
-    dep_short = dict(dep, name="gamma", cache_ttl="1s")
-    assert deps.check_setup_dep(dep_short, interactive=False) is True
-    entry = deps.cache_lookup("gamma", "true")
+    req_short = dict(req, name="gamma", cache_ttl="1s")
+    assert reqs.check_setup_dep(req_short, interactive=False) is True
+    entry = reqs.cache_lookup("gamma", "true")
     assert entry is not None and entry["ttl_seconds"] == 1
     # cache_clear wipes everything.
-    deps.cache_clear()
-    assert deps.cache_lookup("alpha", "true") is None
+    reqs.cache_clear()
+    assert reqs.cache_lookup("alpha", "true") is None
 
 
 def test_check_setup_dep(tmp_dir):
     # Passing check returns True without prompting.
-    ok = deps.check_setup_dep(
+    ok = reqs.check_setup_dep(
         {"name": "alpha", "kind": "setup", "check_command": "true"},
         interactive=False,
     )
@@ -80,7 +80,7 @@ def test_check_setup_dep(tmp_dir):
     # Non-interactive failure with setup_command -> False and the setup
     # command does NOT run (we only print the fix-it).
     sentinel = tmp_dir / "should-not-exist"
-    ok = deps.check_setup_dep(
+    ok = reqs.check_setup_dep(
         {
             "name": "beta",
             "kind": "setup",
@@ -96,7 +96,7 @@ def test_check_setup_dep(tmp_dir):
     check_command = f"test -f {marker}"
     setup_command = f"touch {marker}"
     with mock.patch("builtins.input", return_value="y"):
-        ok = deps.check_setup_dep(
+        ok = reqs.check_setup_dep(
             {
                 "name": "gamma",
                 "kind": "setup",
@@ -110,7 +110,7 @@ def test_check_setup_dep(tmp_dir):
     # Interactive "n" declines and returns False; setup does not run.
     not_run = tmp_dir / "not-run"
     with mock.patch("builtins.input", return_value="n"):
-        ok = deps.check_setup_dep(
+        ok = reqs.check_setup_dep(
             {
                 "name": "delta",
                 "kind": "setup",
@@ -123,7 +123,7 @@ def test_check_setup_dep(tmp_dir):
     assert not not_run.exists()
     # Setup that claims success but doesn't satisfy the check is caught.
     with mock.patch("builtins.input", return_value="y"):
-        ok = deps.check_setup_dep(
+        ok = reqs.check_setup_dep(
             {
                 "name": "eps",
                 "kind": "setup",
@@ -135,7 +135,7 @@ def test_check_setup_dep(tmp_dir):
     assert ok is False
     # Missing check_command is a configuration error.
     with pytest.raises(ValueError, match="check_command"):
-        deps.check_setup_dep(
+        reqs.check_setup_dep(
             {"name": "zeta", "kind": "setup"}, interactive=False
         )
 
@@ -145,7 +145,7 @@ def test_prompt_and_store_env_var(tmp_dir, monkeypatch):
     # exported on os.environ so subsequent code sees it without a reload.
     monkeypatch.delenv("MY_VAR", raising=False)
     with mock.patch("builtins.input", return_value="abc123"):
-        value = deps.prompt_and_store_env_var("MY_VAR", default="zzz")
+        value = reqs.prompt_and_store_env_var("MY_VAR", default="zzz")
     assert value == "abc123"
     assert os.environ["MY_VAR"] == "abc123"
     env_text = (tmp_dir / ".env").read_text()
@@ -153,17 +153,17 @@ def test_prompt_and_store_env_var(tmp_dir, monkeypatch):
     # Empty input falls back to the default.
     monkeypatch.delenv("OTHER_VAR", raising=False)
     with mock.patch("builtins.input", return_value=""):
-        value = deps.prompt_and_store_env_var("OTHER_VAR", default="fallback")
+        value = reqs.prompt_and_store_env_var("OTHER_VAR", default="fallback")
     assert value == "fallback"
     assert os.environ["OTHER_VAR"] == "fallback"
     # No default + empty input returns None (caller decides what to do).
     monkeypatch.delenv("EMPTY_VAR", raising=False)
     with mock.patch("builtins.input", return_value=""):
-        assert deps.prompt_and_store_env_var("EMPTY_VAR") is None
+        assert reqs.prompt_and_store_env_var("EMPTY_VAR") is None
     # EOF (e.g., non-interactive stdin closed mid-prompt) returns None.
     monkeypatch.delenv("EOF_VAR", raising=False)
     with mock.patch("builtins.input", side_effect=EOFError):
-        assert deps.prompt_and_store_env_var("EOF_VAR", default="d") is None
+        assert reqs.prompt_and_store_env_var("EOF_VAR", default="d") is None
     # .env is appended to .gitignore so secrets stay out of git.
     assert ".env" in (tmp_dir / ".gitignore").read_text()
 
@@ -211,14 +211,14 @@ def test_setup_dep_name_is_optional(tmp_dir):
 def test_check_calkit_version(monkeypatch):
     # Bare version is interpreted as ``==``; a passing spec returns None.
     monkeypatch.setattr(calkit, "__version__", "0.38.0")
-    assert deps.check_calkit_version("0.38.0") is None
-    assert deps.check_calkit_version(">=0.38") is None
-    assert deps.check_calkit_version(">=0.30,<1.0") is None
+    assert reqs.check_calkit_version("0.38.0") is None
+    assert reqs.check_calkit_version(">=0.38") is None
+    assert reqs.check_calkit_version(">=0.30,<1.0") is None
     # A failing spec raises with a fix-it message naming --use-version
     # and 'calkit upgrade'.
     monkeypatch.setattr(calkit, "__version__", "0.36.0")
     with pytest.raises(ValueError) as exc:
-        deps.check_calkit_version(">=0.38")
+        reqs.check_calkit_version(">=0.38")
     msg = str(exc.value)
     assert "calkit>=0.38" in msg
     assert "0.36.0" in msg
@@ -226,7 +226,7 @@ def test_check_calkit_version(monkeypatch):
     assert "calkit upgrade" in msg
     # A garbage spec is a configuration error.
     with pytest.raises(ValueError, match="Invalid calkit version spec"):
-        deps.check_calkit_version("not-a-spec!!")
+        reqs.check_calkit_version("not-a-spec!!")
     # End-to-end through the ``- calkit>=0.38`` string form in calkit.yaml.
     monkeypatch.setattr(calkit, "__version__", "0.36.0")
     ck_info = {"dependencies": ["calkit>=0.38"]}
@@ -248,10 +248,10 @@ def test_check_calkit_version(monkeypatch):
 def test_format_uvx_from():
     # Bare versions become ``calkit-python@<v>`` (uv's exact-pin form);
     # PEP 440 specifiers are appended as-is.
-    assert deps._format_uvx_from("0.38") == "calkit-python@0.38"
-    assert deps._format_uvx_from("0.38.0") == "calkit-python@0.38.0"
-    assert deps._format_uvx_from(">=0.38") == "calkit-python>=0.38"
-    assert deps._format_uvx_from("==0.38") == "calkit-python==0.38"
+    assert reqs._format_uvx_from("0.38") == "calkit-python@0.38"
+    assert reqs._format_uvx_from("0.38.0") == "calkit-python@0.38.0"
+    assert reqs._format_uvx_from(">=0.38") == "calkit-python>=0.38"
+    assert reqs._format_uvx_from("==0.38") == "calkit-python==0.38"
 
 
 def test_check_system_deps_setup_kind(tmp_dir):
@@ -278,7 +278,7 @@ def test_check_system_deps_setup_kind(tmp_dir):
 
 
 def test_resolve_env_var_deps(tmp_dir, monkeypatch):
-    from calkit.dependencies import resolve_env_var_deps
+    from calkit.requirements import resolve_env_var_deps
 
     ck_info = {
         "dependencies": [
@@ -315,41 +315,49 @@ def test_resolve_env_var_deps(tmp_dir, monkeypatch):
     assert resolve_env_var_deps(ck_info, interactive=True) == ["CK_A"]
 
 
-def test_prompt_for_env_var_dep(tmp_dir, monkeypatch, capsys):
+def test_prompt_for_env_var_req(tmp_dir, monkeypatch, capsys):
     monkeypatch.delenv("CK_TOKEN", raising=False)
-    dep = {
+    req = {
         "kind": "env-var",
         "name": "CK_TOKEN",
         "setup_command": "echo got > got.txt",
         "description": "A token for the API.\n",
     }
     # Agreeing runs the setup command, then asks for what it gave
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
     answers = iter(["", "tok-1"])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
-    assert deps.prompt_for_env_var_dep(dep) == "tok-1"
+    assert reqs.prompt_for_env_var_req(req) == "tok-1"
     assert (tmp_dir / "got.txt").exists()
     assert os.environ["CK_TOKEN"] == "tok-1"
     assert "A token for the API." in capsys.readouterr().out
     # Declining skips straight to asking
     (tmp_dir / "got.txt").unlink()
     answers = iter(["n", "tok-2"])
-    assert deps.prompt_for_env_var_dep(dep) == "tok-2"
+    assert reqs.prompt_for_env_var_req(req) == "tok-2"
     assert not (tmp_dir / "got.txt").exists()
     # A failing setup command still lets a value be entered
     answers = iter(["y", "tok-3"])
-    assert deps.prompt_for_env_var_dep(dict(dep, setup_command="false")) == (
+    assert reqs.prompt_for_env_var_req(dict(req, setup_command="false")) == (
         "tok-3"
     )
     assert "exited 1" in capsys.readouterr().out
+    # Without a terminal, the command is only shown, so piped input is
+    # taken as the value
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    answers = iter(["y"])
+    assert reqs.prompt_for_env_var_req(req) == "y"
+    assert not (tmp_dir / "got.txt").exists()
+    assert "To get a value, run:  echo got" in capsys.readouterr().out
     # Without a terminal, the error says how to get a value
     monkeypatch.delenv("CK_TOKEN", raising=False)
     with pytest.raises(ValueError, match="get a value with 'echo"):
         calkit.check_requirements(
-            requirements=[dep], interactive=False, described_as="here"
+            requirements=[req], interactive=False, described_as="here"
         )
 
 
-def test_check_aws_credentials_dep(tmp_dir, monkeypatch):
+def test_check_aws_credentials_req(tmp_dir, monkeypatch):
     import json
     import shutil
     import subprocess
@@ -371,22 +379,26 @@ def test_check_aws_credentials_dep(tmp_dir, monkeypatch):
         out = json.dumps({"Account": state["account"]})
         return subprocess.CompletedProcess(cmd, 0, out, "")
 
-    monkeypatch.setattr(deps.subprocess, "run", fake_run)
+    monkeypatch.setattr(reqs.subprocess, "run", fake_run)
     monkeypatch.setattr(shutil, "which", lambda name: "/bin/aws")
-    dep = calkit.core._normalize_requirement(
+    req = calkit.core._normalize_requirement(
         {"kind": "aws-credentials", "account_id": "012345678901"}
     )
-    assert dep["name"] == "aws-credentials-012345678901"
+    assert req["name"] == "aws-credentials-012345678901"
     # Valid credentials for the right account pass, and are cached
-    assert deps.check_aws_credentials_dep(dep, interactive=False)
+    assert reqs.check_aws_credentials_req(req, interactive=False)
     assert calls[-1][:3] == ["aws", "sts", "get-caller-identity"]
     calls.clear()
     state["fail"] = True
-    assert deps.check_aws_credentials_dep(dep, interactive=False)
+    assert reqs.check_aws_credentials_req(req, interactive=False)
     assert calls == []
+    # Credentials selected another way aren't vouched for by the cache
+    monkeypatch.setenv("AWS_PROFILE", "other")
+    assert not reqs.check_aws_credentials_req(req, interactive=False)
+    monkeypatch.delenv("AWS_PROFILE")
     # Without the cache, expired credentials fail, offering 'aws configure'
-    assert not deps.check_aws_credentials_dep(
-        dep, interactive=False, use_cache=False
+    assert not reqs.check_aws_credentials_req(
+        req, interactive=False, use_cache=False
     )
     assert calls[-1][:3] == ["aws", "configure", "get"]
     # A profile set up for SSO is offered 'aws sso login', and on a
@@ -394,21 +406,21 @@ def test_check_aws_credentials_dep(tmp_dir, monkeypatch):
     state["sso"] = "my-sso"
     calls.clear()
     monkeypatch.setattr("builtins.input", lambda *a: "y")
-    with_profile = dict(dep, profile="dev")
-    assert deps.check_aws_credentials_dep(
+    with_profile = dict(req, profile="dev")
+    assert reqs.check_aws_credentials_req(
         with_profile, interactive=True, use_cache=False
     )
     assert ["aws sso login --profile dev"] in calls
     assert calls[-1][-2:] == ["--profile", "dev"]
     # Credentials for another account don't satisfy it
     state["account"] = "999999999999"
-    assert not deps.check_aws_credentials_dep(
-        dep, interactive=False, use_cache=False
+    assert not reqs.check_aws_credentials_req(
+        req, interactive=False, use_cache=False
     )
     # A declared setup command wins over the default
     calls.clear()
-    assert not deps.check_aws_credentials_dep(
-        dict(dep, setup_command="./login.sh"),
+    assert not reqs.check_aws_credentials_req(
+        dict(req, setup_command="./login.sh"),
         interactive=False,
         use_cache=False,
     )
@@ -425,4 +437,4 @@ def test_check_aws_credentials_dep(tmp_dir, monkeypatch):
     # Without the AWS CLI, that's what's reported
     monkeypatch.setattr(shutil, "which", lambda name: None)
     with pytest.raises(ValueError, match="AWS CLI"):
-        deps.check_aws_credentials_dep(dep, interactive=False)
+        reqs.check_aws_credentials_req(req, interactive=False)

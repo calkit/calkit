@@ -1,4 +1,4 @@
-"""Logic for checking project dependencies declared in ``calkit.yaml``.
+"""Logic for checking project requirements declared in ``calkit.yaml``.
 
 The ``app``, ``env-var``, and ``calkit-config`` kinds are handled directly
 by :func:`calkit.core.check_dep_exists`. This module adds support for the
@@ -7,7 +7,7 @@ file -- the canonical example is ``gh auth login``, which must be done
 once per clone and can be probed with ``gh auth status`` -- and the
 ``aws-credentials`` kind, a setup step Calkit knows how to check itself.
 
-A ``setup`` dep declares:
+A ``setup`` requirement declares:
 
 - ``check_command``: a shell command; exit 0 = satisfied.
 - ``setup_command``: optional. Printed as a fix-it command for non-TTY
@@ -18,7 +18,7 @@ A ``setup`` dep declares:
   don't re-probe network-bound commands. Cache entries also invalidate
   whenever the ``check_command`` itself changes, so editing
   ``calkit.yaml`` never silently relies on a stale result. Set
-  ``cache_ttl: 0`` to disable caching for a specific dep.
+  ``cache_ttl: 0`` to disable caching for a specific requirement.
 
 To run a command inside a project environment, the user prefixes it with
 ``calkit xenv -n <env> --`` explicitly -- there's no implicit wrap,
@@ -232,21 +232,21 @@ def _run_shell(
 
 
 def _resolve_cache_ttl(
-    dep: dict[str, Any], default: int = DEFAULT_SETUP_CACHE_TTL
+    req: dict[str, Any], default: int = DEFAULT_SETUP_CACHE_TTL
 ) -> int:
-    """Resolve the effective cache TTL for a setup dep.
+    """Resolve the effective cache TTL for a setup req.
 
     Defaults to ``default`` when ``cache_ttl`` is absent; ``cache_ttl: 0``
     explicitly disables caching.
     """
-    raw = dep.get("cache_ttl")
+    raw = req.get("cache_ttl")
     if raw is None:
         return default
     return parse_ttl(raw)
 
 
 def check_setup_dep(
-    dep: dict[str, Any],
+    req: dict[str, Any],
     *,
     interactive: bool | None = None,
     use_cache: bool = True,
@@ -260,20 +260,20 @@ def check_setup_dep(
     repeated runs skip re-probing. The caller can pass ``use_cache=False``
     to bypass and force re-probing, which the CLI exposes as ``--no-cache``.
     """
-    name = dep.get("name")
+    name = req.get("name")
     if not name:
-        raise ValueError(f"setup dependency missing 'name': {dep}")
-    check_command = dep.get("check_command")
-    setup_command = dep.get("setup_command")
+        raise ValueError(f"setup requirement missing 'name': {req}")
+    check_command = req.get("check_command")
+    setup_command = req.get("setup_command")
     if not check_command:
         raise ValueError(
-            f"setup dependency '{name}' must declare 'check_command'"
+            f"setup requirement '{name}' must declare 'check_command'"
         )
     if interactive is None:
         from calkit.core import is_tty
 
         interactive = is_tty()
-    ttl_seconds = _resolve_cache_ttl(dep)
+    ttl_seconds = _resolve_cache_ttl(req)
     # Cache hit short-circuits the probe entirely.
     if use_cache and ttl_seconds > 0:
         hit = cache_lookup(name, check_command, wdir=wdir)
@@ -297,8 +297,8 @@ def check_setup_dep(
     )
 
 
-def check_aws_credentials_dep(
-    dep: dict[str, Any],
+def check_aws_credentials_req(
+    req: dict[str, Any],
     *,
     interactive: bool | None = None,
     use_cache: bool = True,
@@ -319,9 +319,9 @@ def check_aws_credentials_dep(
             "The AWS CLI ('aws') is needed to check AWS credentials, but it "
             "isn't installed"
         )
-    name = dep.get("name") or "aws-credentials"
-    profile = dep.get("profile")
-    account_id = dep.get("account_id")
+    name = req.get("name") or "aws-credentials"
+    profile = req.get("profile")
+    account_id = req.get("account_id")
     if account_id is not None:
         account_id = str(account_id)
     profile_args = ["--profile", profile] if profile else []
@@ -331,9 +331,20 @@ def check_aws_credentials_dep(
         from calkit.core import is_tty
 
         interactive = is_tty()
-    ttl_seconds = _resolve_cache_ttl(dep, default=DEFAULT_AWS_CACHE_TTL)
-    # The account is part of the key so changing it invalidates the cache
-    cache_key = " ".join(cmd) + f" == {account_id}"
+    ttl_seconds = _resolve_cache_ttl(req, default=DEFAULT_AWS_CACHE_TTL)
+    # The account and what selects credentials are part of the key, so
+    # changing them invalidates the cache; only the key's hash is stored
+    aws_env = [
+        f"{var}={os.environ.get(var, '')}"
+        for var in (
+            "AWS_PROFILE",
+            "AWS_DEFAULT_PROFILE",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_CONFIG_FILE",
+            "AWS_SHARED_CREDENTIALS_FILE",
+        )
+    ]
+    cache_key = " ".join(cmd + aws_env) + f" == {account_id}"
     if use_cache and ttl_seconds > 0:
         if cache_lookup(name, cache_key, wdir=wdir) is not None:
             return True
@@ -371,7 +382,7 @@ def check_aws_credentials_dep(
         name=name,
         probe=probe,
         cache_key=cache_key,
-        setup_command=dep.get("setup_command") or default_setup_command,
+        setup_command=req.get("setup_command") or default_setup_command,
         interactive=interactive,
         ttl_seconds=ttl_seconds,
         wdir=wdir,
@@ -412,20 +423,25 @@ def prompt_and_store_env_var(
     return value
 
 
-def prompt_for_env_var_dep(dep: dict[str, Any]) -> str | None:
+def prompt_for_env_var_req(req: dict[str, Any]) -> str | None:
     """Ask for a missing ``env-var`` dependency's value and store it.
 
     A declared ``setup_command`` is offered first, attached to the
     terminal, since getting a value often means a login flow, e.g.,
     ``claude setup-token``, that ends by printing it for the user to copy.
+    Without a terminal it's only printed, so piped input is the value.
     """
-    name = dep["name"]
+    from calkit.core import is_tty
+
+    name = req["name"]
     print(f"Missing env var '{name}'")
     for key in ("description", "notes"):
-        if dep.get(key):
-            print(f"  {str(dep[key]).strip()}")
-    setup_command = dep.get("setup_command")
-    if setup_command:
+        if req.get(key):
+            print(f"  {str(req[key]).strip()}")
+    setup_command = req.get("setup_command")
+    if setup_command and not is_tty():
+        print(f"  To get a value, run:  {setup_command}")
+    elif setup_command:
         try:
             answer = (
                 input(f"Run {setup_command!r} to get a value? [Y/n] ")
@@ -438,14 +454,14 @@ def prompt_for_env_var_dep(dep: dict[str, Any]) -> str | None:
             result = _run_shell(setup_command, capture=False)
             if result.returncode != 0:
                 print(f"  {setup_command!r} exited {result.returncode}.")
-    return prompt_and_store_env_var(name, default=dep.get("default"))
+    return prompt_and_store_env_var(name, default=req.get("default"))
 
 
 def resolve_env_var_deps(
     ck_info: dict,
     interactive: bool | None = None,
 ) -> list[str]:
-    """Set any declared env-var dependencies that aren't set yet.
+    """Set any declared env-var requirements that aren't set yet.
 
     A project shares its ``calkit.yaml`` but not its ``.env``, so the
     variables it declares are the first thing missing for anyone but its
@@ -463,11 +479,11 @@ def resolve_env_var_deps(
         interactive = is_tty()
     missing = []
     for raw in get_requirements(ck_info):
-        dep = _normalize_requirement(raw)
-        if dep["kind"] != "env-var" or os.environ.get(dep["name"]):
+        req = _normalize_requirement(raw)
+        if req["kind"] != "env-var" or os.environ.get(req["name"]):
             continue
-        if not interactive or prompt_for_env_var_dep(dep) is None:
-            missing.append(dep["name"])
+        if not interactive or prompt_for_env_var_req(req) is None:
+            missing.append(req["name"])
     return missing
 
 
@@ -502,12 +518,12 @@ def _probe_or_set_up(
     ttl_seconds: int,
     wdir: str | None,
 ) -> bool:
-    """Probe a dep, then prompt-and-run setup on TTY, else print and abort.
+    """Probe a req, then prompt-and-run setup on TTY, else print and abort.
 
-    ``probe`` returns why the dep isn't satisfied, or ``None`` if it is.
+    ``probe`` returns why the req isn't satisfied, or ``None`` if it is.
     ``setup_command`` may be a function, called only if the probe fails.
     After setup runs we re-probe so a setup that *claims* success but
-    doesn't actually satisfy the dep is caught here instead of failing
+    doesn't actually satisfy the req is caught here instead of failing
     later inside the pipeline. A successful probe populates the cache so
     we don't immediately re-probe on the next ``calkit run``.
     """
@@ -516,7 +532,7 @@ def _probe_or_set_up(
         if ttl_seconds > 0:
             cache_record(name, cache_key, ttl_seconds, wdir=wdir)
         return True
-    print(f"Setup dependency '{name}' is not satisfied.")
+    print(f"Setup requirement '{name}' is not satisfied.")
     if failure_reason:
         print(f"  Reason: {failure_reason}")
     if callable(setup_command):

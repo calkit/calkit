@@ -413,8 +413,17 @@ def list_requirements(
         ("project", calkit.get_requirements(ck_info))
     ]
     for name, env in (ck_info.get("environments") or {}).items():
-        if isinstance(env, dict) and env.get("requirements"):
+        if not isinstance(env, dict):
+            continue
+        if env.get("requirements"):
             sources.append((f"environment '{name}'", env["requirements"]))
+        # An option a switch defines in place is named after its position
+        for n, option in enumerate(env.get("switch") or [], start=1):
+            use = option.get("use") if isinstance(option, dict) else None
+            if isinstance(use, dict) and use.get("requirements"):
+                sources.append(
+                    (f"environment '{name}.{n}'", use["requirements"])
+                )
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     for name, stage in stages.items():
         if isinstance(stage, dict) and stage.get("requirements"):

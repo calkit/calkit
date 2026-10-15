@@ -100,6 +100,7 @@ function ProjectView() {
   }) as any
   const ref: string | undefined = layoutSearch?.ref
   const [showClosedTodos, setShowClosedTodos] = useState(false)
+  const [checklistSettled, setChecklistSettled] = useState(false)
   const { projectRequest, userHasWriteAccess, showcaseRequest } = useProject(
     accountName,
     projectName,
@@ -221,21 +222,26 @@ function ProjectView() {
     navigate,
   ])
 
+  const checklistProject =
+    userHasWriteAccess && !ref ? projectRequest.data : undefined
   return (
     <>
       <Flex mt={1}>
         <Box width="65%" mr={8}>
           {/* What's left to set up, until it's done or dismissed */}
-          {userHasWriteAccess && !ref && projectRequest.data ? (
+          {checklistProject ? (
             <ProjectChecklist
               accountName={accountName}
               projectName={projectName}
-              projectId={projectRequest.data.id}
+              projectId={checklistProject.id}
+              onSettledChange={setChecklistSettled}
             />
           ) : null}
-          {/* The showcase sits above the README, so hold both until both
+          {/* Each of these sits above the next, so hold them all until all
               have landed rather than shoving the README down mid-read */}
-          {showcaseRequest.isPending || readmeRequest.isPending ? (
+          {(checklistProject && !checklistSettled) ||
+          showcaseRequest.isPending ||
+          readmeRequest.isPending ? (
             <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
               <SkeletonText noOfLines={12} spacing={3} skeletonHeight="14px" />
             </Box>

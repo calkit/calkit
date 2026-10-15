@@ -510,8 +510,10 @@ function ProjectLayout() {
   return (
     <>
       {isPending ? (
-        // The frame the project fills in, so the page arrives in place
+        // The frame the project fills in, so the page arrives in place, with
+        // the same children ahead of the sidebar so it isn't remounted
         <Flex>
+          <ProjectCommandPalette />
           <Sidebar basePath={`/${accountName}/${projectName}`} />
           <Container maxW="full" mx={6} px={0}>
             <Skeleton mt={5} mb={4} height="36px" width="40%" />

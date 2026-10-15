@@ -649,6 +649,10 @@ def sync(
             overleaf_repo, overleaf_token = _get_pulled_overleaf_repo(
                 overleaf_project_id, overleaf_token
             )
+            # Reread the checkpoint in case a sync we waited on just moved it
+            sync_data = calkit.overleaf.get_sync_info().get(
+                synced_folder, sync_data
+            )
             if resolve:
                 last_sync_commit = resolving_info["last_overleaf_commit"]
             else:
@@ -777,6 +781,10 @@ def get_status(
             typer.echo("Pulling the latest version from Overleaf")
             overleaf_repo, overleaf_token = _get_pulled_overleaf_repo(
                 overleaf_project_id, overleaf_token
+            )
+            # Reread the checkpoint in case a sync we waited on just moved it
+            sync_data = calkit.overleaf.get_sync_info().get(
+                path_in_project, sync_data
             )
             last_sync_commit = sync_data.get("last_sync_commit")
             if last_sync_commit:

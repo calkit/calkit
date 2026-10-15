@@ -304,7 +304,7 @@ def test_switch_env_model():
     # Mistakes are caught when the project loads, naming what's wrong
     refused = [
         ([{"os_is": "Darwin"}], "'linux', 'macos' or 'windows'"),
-        ([{"os_iz": "linux"}], "named one of: app_exists"),
+        ([{"os_iz": "linux"}], "named one of: app_exists, env_var_set,"),
         ([{"os_is": "linux", "app_exists": "x"}], "one 'name: value' pair"),
         ([{"env_var_equals": "SITE"}], "pattern"),
         ([{"app_exists": {"name": "x"}}], "app_exists"),

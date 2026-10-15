@@ -2199,7 +2199,7 @@ def check_project_requirements(
     typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
-        calkit.dependencies.cache_clear()
+        calkit.requirements.cache_clear()
     try:
         calkit.check_requirements(use_cache=not no_cache)
     except Exception as e:
@@ -2265,28 +2265,20 @@ def check_env_vars(
     ] = False,
 ) -> None:
     """Check that the project's required environmental variables exist."""
+    from calkit.core import _normalize_requirement
+
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
-    deps = calkit.get_requirements(ck_info)
-    env_var_dep_names = calkit.get_env_var_dep_names(ck_info)
-    for name in env_var_dep_names:
+    for raw in calkit.get_requirements(ck_info):
+        req = _normalize_requirement(raw)
+        if req["kind"] != "env-var":
+            continue
+        name = req["name"]
         if verbose:
             typer.echo(f"Checking for environmental variable '{name}'")
-        # Pull the dep's attrs to honor any per-var default.
-        attrs: dict = {}
-        for dep in deps:
-            if isinstance(dep, dict) and dep.get("name") == name:
-                attrs = dep
-                break
-            if isinstance(dep, dict) and list(dep.keys()) == [name]:
-                attrs = dep[name] or {}
-                break
         if name not in os.environ:
-            typer.echo(f"Missing env var '{name}'")
-            value = calkit.dependencies.prompt_and_store_env_var(
-                name, default=attrs.get("default")
-            )
+            value = calkit.requirements.prompt_for_env_var_req(req)
             if value is None:
                 raise_error(f"No value provided for '{name}'")
     message = "✅ All set!"

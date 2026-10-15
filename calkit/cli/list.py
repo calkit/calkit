@@ -394,6 +394,73 @@ def list_environments(
             typer.echo(f"    {k}: {v}")
 
 
+@list_app.command(name="requirements|reqs")
+def list_requirements(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """List what a machine needs to run the project.
+
+    That's the project's requirements, then those of each environment and
+    stage, each with where it was declared. Nothing is checked; use
+    'calkit check reqs' for that.
+    """
+    from calkit.core import _normalize_requirement
+
+    ck_info = calkit.load_calkit_info()
+    sources: list[tuple[str, list]] = [
+        ("project", calkit.get_requirements(ck_info))
+    ]
+    for name, env in (ck_info.get("environments") or {}).items():
+        if not isinstance(env, dict):
+            continue
+        if env.get("requirements"):
+            sources.append((f"environment '{name}'", env["requirements"]))
+        # An option a switch defines in place is named after its position
+        for n, option in enumerate(env.get("switch") or [], start=1):
+            use = option.get("use") if isinstance(option, dict) else None
+            if isinstance(use, dict) and use.get("requirements"):
+                sources.append(
+                    (f"environment '{name}.{n}'", use["requirements"])
+                )
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage in stages.items():
+        if isinstance(stage, dict) and stage.get("requirements"):
+            sources.append((f"stage '{name}'", stage["requirements"]))
+    result = []
+    for source, reqs in sources:
+        for raw in reqs:
+            try:
+                req = _normalize_requirement(raw)
+            except ValueError as e:
+                raise_error(f"In {source}: {e}")
+            result.append({"source": source, **req})
+    if json_output:
+        echo_json(result)
+        return
+    property_kinds = calkit.system_property_requirement_kinds()
+    last_source = None
+    for req in result:
+        req = dict(req)
+        source = req.pop("source")
+        if source != last_source:
+            if last_source is not None:
+                typer.echo()
+            typer.echo(source[0].upper() + source[1:] + ":")
+            last_source = source
+        name = req.pop("name")
+        kind = req.pop("kind")
+        # A property requirement's name is its kind
+        typer.echo(
+            f"  - {name}" if kind in property_kinds else f"  - {name} ({kind})"
+        )
+        for k, v in req.items():
+            if isinstance(v, str):
+                v = " ".join(v.split())
+            typer.echo(f"      {k}: {v}")
+
+
 @list_app.command(name="templates")
 def list_templates(
     kind: Annotated[

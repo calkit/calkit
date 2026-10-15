@@ -2222,6 +2222,10 @@ def test_switch_env(tmp_dir, monkeypatch):
     cases: list[tuple[list[dict], bool]] = [
         ([{"app_exists": "git"}], True),
         ([{"app_exists": ["calkit-test-no-such-app", "git"]}], True),
+        ([{"env_var_set": "CK_TEST_SITE"}], True),
+        ([{"env_var_set": ["CK_TEST_UNSET", "CK_TEST_SITE"]}], True),
+        ([{"env_var_set": "CK_TEST_UNSET"}], False),
+        # The old name still works
         ([{"env_var_exists": "CK_TEST_SITE"}], True),
         ([{"env_var_exists": "CK_TEST_UNSET"}], False),
         ([{"env_var_equals": "CK_TEST_UNSET="}], False),
@@ -2436,7 +2440,7 @@ def test_switch_env(tmp_dir, monkeypatch):
     assert not envs.check_cache(env_name="rt", env=envs_def["rt"])
     envs.save_cache(env_name="rt", env=envs_def["rt"], success=True)
     envs_def["rt"]["switch"] = [
-        option("py-b", {"env_var_exists": "CK_TEST_PICK_B"}),
+        option("py-b", {"env_var_set": "CK_TEST_PICK_B"}),
         option("py"),
     ]
     envs_def["py-b"] = {"kind": "uv-venv", "path": "requirements.txt"}

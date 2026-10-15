@@ -1934,6 +1934,7 @@ List Calkit objects.
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
 | [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.                                                     |
 | [`environments\|envs`](#subcommand-list-ls-environments-envs)   | List environments in the project.                                                              |
+| [`requirements\|reqs`](#subcommand-list-ls-requirements-reqs)   | List what a machine needs to run the project.                                                  |
 | [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates, grouped by kind.                                          |
 | [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer.                                                  |
 | [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
@@ -2147,6 +2148,26 @@ Usage:
 
 ```text
 calkit list|ls environments|envs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-requirements-reqs"></a>
+
+#### `calkit list|ls requirements|reqs`
+
+List what a machine needs to run the project.
+
+That's the project's requirements, then those of each environment and stage, each with where it was declared. Nothing is checked; use 'calkit check reqs' for that.
+
+Usage:
+
+```text
+calkit list|ls requirements|reqs [OPTIONS]
 ```
 
 Options:

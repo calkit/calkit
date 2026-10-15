@@ -25,6 +25,146 @@
       "title": "AppExistsCondition",
       "type": "object"
     },
+    "AwsCredentialsRequirement": {
+      "description": "An ``aws-credentials`` requirement, whose ``name`` may be omitted.",
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.",
+          "title": "Account Id"
+        },
+        "cache_ttl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Ttl"
+        },
+        "check_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Command"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "kind": {
+          "const": "aws-credentials",
+          "default": "aws-credentials",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS profile 'aws-credentials' are checked with, if not the default.",
+          "title": "Profile"
+        },
+        "setup_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
+          "title": "Setup Command"
+        },
+        "version_spec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.",
+          "title": "Version Spec"
+        }
+      },
+      "title": "AwsCredentialsRequirement",
+      "type": "object"
+    },
     "CommandStage": {
       "additionalProperties": false,
       "properties": {
@@ -177,6 +317,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -733,6 +876,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -1177,6 +1323,7 @@
     },
     "EnvVarExistsCondition": {
       "additionalProperties": false,
+      "description": "The old name for ``env_var_set``, still honored.",
       "properties": {
         "env_var_exists": {
           "anyOf": [
@@ -1190,7 +1337,8 @@
               "type": "array"
             }
           ],
-          "description": "Environmental variable that must be set.",
+          "deprecated": true,
+          "description": "Deprecated alias for 'env_var_set'.",
           "title": "Env Var Exists"
         }
       },
@@ -1221,6 +1369,31 @@
         "name"
       ],
       "title": "EnvVarInput",
+      "type": "object"
+    },
+    "EnvVarSetCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "env_var_set": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Environmental variable that must be set.",
+          "title": "Env Var Set"
+        }
+      },
+      "required": [
+        "env_var_set"
+      ],
+      "title": "EnvVarSetCondition",
       "type": "object"
     },
     "Figure": {
@@ -1759,6 +1932,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -1989,6 +2165,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -2291,6 +2470,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -2609,6 +2791,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -2974,6 +3159,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -3481,6 +3669,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -3769,6 +3960,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -4072,6 +4266,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -4303,6 +4500,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -4623,6 +4823,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -5231,6 +5434,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -5853,6 +6059,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -6397,6 +6606,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -6641,6 +6853,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -7004,6 +7219,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -7299,6 +7517,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -7646,8 +7867,21 @@
       "type": "object"
     },
     "Requirement": {
-      "description": "Something that must be true of a machine before the project runs.\n\nFour kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
+      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n  ``setup_command`` says how to get a value, e.g., a login flow that\n  prints a token, and is offered before the value is asked for.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
       "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.",
+          "title": "Account Id"
+        },
         "cache_ttl": {
           "anyOf": [
             {
@@ -7705,6 +7939,7 @@
             "app",
             "env-var",
             "setup",
+            "aws-credentials",
             "calkit-config"
           ],
           "title": "Kind",
@@ -7726,6 +7961,19 @@
           "default": null,
           "title": "Notes"
         },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS profile 'aws-credentials' are checked with, if not the default.",
+          "title": "Profile"
+        },
         "setup_command": {
           "anyOf": [
             {
@@ -7736,6 +7984,7 @@
             }
           ],
           "default": null,
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -7761,6 +8010,18 @@
     "RequirementAttrs": {
       "description": "A requirement's properties, as written under ``{name: {...}}``.\n\n``Requirement`` is this plus the name; the mapping form supplies the\nname as its key instead.",
       "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
         "cache_ttl": {
           "anyOf": [
             {
@@ -7818,6 +8079,7 @@
             "app",
             "env-var",
             "setup",
+            "aws-credentials",
             "calkit-config"
           ],
           "title": "Kind",
@@ -7834,6 +8096,18 @@
           ],
           "default": null,
           "title": "Notes"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
         },
         "setup_command": {
           "anyOf": [
@@ -8205,6 +8479,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -8304,6 +8581,19 @@
     "SetupRequirement": {
       "description": "A ``setup`` requirement, whose ``name`` may be omitted.\n\nWithout a ``name``, Calkit derives a stable ``setup-<hash>`` one from\n``check_command``.",
       "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.",
+          "title": "Account Id"
+        },
         "cache_ttl": {
           "anyOf": [
             {
@@ -8385,6 +8675,19 @@
           "default": null,
           "title": "Notes"
         },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS profile 'aws-credentials' are checked with, if not the default.",
+          "title": "Profile"
+        },
         "setup_command": {
           "anyOf": [
             {
@@ -8395,6 +8698,7 @@
             }
           ],
           "default": null,
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -8565,6 +8869,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -8816,6 +9123,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -9148,6 +9458,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -9439,7 +9752,7 @@
       "type": "object"
     },
     "SwitchEnvironment": {
-      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_exists``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.\n\nAn option's ``lock`` is part of the switch's too, so relocking the\noption, with ``relock: auto`` or ``calkit update env --lock``, reruns\nthe switch's stages. The first time a switch is checked, its options\nwith a ``host`` are locked from there. An option without one is locked\nthe first time it's checked on its own machine, which reruns nothing,\nsince only a machine taking up its option has changed.",
+      "description": "One of several environments, picked by the machine Calkit runs on.\n\n``switch`` lists the options in order, and the first whose ``when``\nconditions this machine all meets is picked. The last option can leave\nout ``when`` to be the default. Each condition is one ``name: value``\npair:\n\n- ``app_exists``: an app on ``PATH``.\n- ``env_var_set``: an environmental variable that is set.\n- ``env_var_equals``: ``NAME=value`` for an environmental variable.\n- ``hostname_matches``: a glob the hostname matches, ignoring case.\n- ``os_is``: ``linux``, ``macos`` or ``windows``.\n- ``machine_id_equals``: this machine's ID, as\n  ``calkit describe system`` shows it.\n\nA list of values means any one of them. To pick an environment when\neither of two conditions holds, list it as two options. For example:\n\n```yaml\ncluster:\n  kind: switch\n  switch:\n    - when:\n        - os_is: linux\n        - app_exists: sbatch\n      use: any-slurm\n    - when:\n        - env_var_equals: NERSC_HOST=perlmutter\n      use: perlmutter\n    - when:\n        - hostname_matches: [\"*.gps.caltech.edu\", \"*.hpc.caltech.edu\"]\n      use: clima\n    - use: clima-remote\n```\n\nThe conditions are checked on the machine Calkit runs on, which is\nwhere the pick is made, even when the option picked is another\nmachine.\n\nAn environment only the switch uses can be defined in place instead of\nnamed, e.g., ``use: {kind: slurm}``. It's named after the switch and\nits position, e.g., ``cluster.1`` for the first option, which is what\n``calkit xenv -n`` and messages call it.\n\nThe options are either all machines (``system``, ``slurm`` or\n``pbs``), so the switch can be the outer half of a composite\nenvironment like ``cluster:py``, or all runtimes, e.g., one per\noperating system. An option can't be another switch, or ``_system``;\nto pick this machine as it is, define an environment with\n``kind: system`` and use that.\n\nStages depend on the switch's definition and its options', so editing\nthem reruns those stages, but not on which option was picked, so\nmoving between machines the switch covers doesn't. A stage whose\nswitch picks nothing on this machine can't run here, and is skipped.\n\nAn option's ``lock`` is part of the switch's too, so relocking the\noption, with ``relock: auto`` or ``calkit update env --lock``, reruns\nthe switch's stages. The first time a switch is checked, its options\nwith a ``host`` are locked from there. An option without one is locked\nthe first time it's checked on its own machine, which reruns nothing,\nsince only a machine taking up its option has changed.",
       "properties": {
         "description": {
           "anyOf": [
@@ -9633,6 +9946,9 @@
                     "$ref": "#/$defs/AppExistsCondition"
                   },
                   {
+                    "$ref": "#/$defs/EnvVarSetCondition"
+                  },
+                  {
                     "$ref": "#/$defs/EnvVarExistsCondition"
                   },
                   {
@@ -9814,6 +10130,9 @@
               },
               {
                 "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
               },
               {
                 "$ref": "#/$defs/Requirement"
@@ -10568,6 +10887,9 @@
                 "$ref": "#/$defs/SetupRequirement"
               },
               {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
                 "$ref": "#/$defs/Requirement"
               },
               {
@@ -11080,6 +11402,9 @@
             "$ref": "#/$defs/SetupRequirement"
           },
           {
+            "$ref": "#/$defs/AwsCredentialsRequirement"
+          },
+          {
             "$ref": "#/$defs/Requirement"
           },
           {
@@ -11434,6 +11759,9 @@
           },
           {
             "$ref": "#/$defs/SetupRequirement"
+          },
+          {
+            "$ref": "#/$defs/AwsCredentialsRequirement"
           },
           {
             "$ref": "#/$defs/Requirement"

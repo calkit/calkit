@@ -790,7 +790,9 @@ def _normalize_requirement(req) -> dict:
     required there. A ``setup`` requirement may omit it, since a single
     anonymous setup step is common and forcing users to invent a name adds
     friction; a stable one is synthesized from a short hash of
-    ``check_command``. A machine-property requirement has no name at all --
+    ``check_command``. An ``aws-credentials`` requirement may omit it too,
+    and is named after its profile and account. A machine-property
+    requirement has no name at all --
     ``kind: cpu-count`` already says everything there is to say about which
     property it constrains -- so the kind is used as the name in messages.
     """
@@ -802,12 +804,11 @@ def _normalize_requirement(req) -> dict:
             "'kind', e.g., '- kind: env-var' with 'name: TOKEN'"
         )
 
-    dep = req
-    if isinstance(dep, str):
+    if isinstance(req, str):
         # Split on the first version operator so a string like
         # ``calkit>=0.38`` produces both a clean name and a version spec
         # the caller can validate.
-        m = re.match(r"^([A-Za-z0-9_.\-]+)(.*)$", dep.strip())
+        m = re.match(r"^([A-Za-z0-9_.\-]+)(.*)$", req.strip())
         if m is None:
             raise malformed()
         out: dict = {"name": m.group(1), "kind": "app"}
@@ -815,14 +816,14 @@ def _normalize_requirement(req) -> dict:
         if spec:
             out["version_spec"] = spec
         return out
-    if not isinstance(dep, dict):
+    if not isinstance(req, dict):
         raise malformed()
-    keys = list(dep.keys())
+    keys = list(req.keys())
     # Flat form with explicit kind: only requires ``name`` for kinds where
     # name is the identity (app, env-var). Setup requirements may omit it,
     # and property requirements have none to give.
     if "kind" in keys:
-        out = dict(dep)
+        out = dict(req)
         if "name" not in out:
             kind = out["kind"]
             if kind in system_property_requirement_kinds():
@@ -833,18 +834,27 @@ def _normalize_requirement(req) -> dict:
                     check_command.encode("utf-8")
                 ).hexdigest()[:8]
                 out["name"] = f"setup-{short}"
+            elif kind == "aws-credentials":
+                out["name"] = "-".join(
+                    ["aws-credentials"]
+                    + [
+                        str(out[key])
+                        for key in ("profile", "account_id")
+                        if out.get(key)
+                    ]
+                )
             else:
-                raise ValueError(f"Requirement missing required 'name': {dep}")
+                raise ValueError(f"Requirement missing required 'name': {req}")
         return out
     if "name" in keys:
-        out = dict(dep)
+        out = dict(req)
         out.setdefault("kind", "app")
         return out
     if len(keys) != 1:
         raise malformed()
     # Single-key form: {name: {kind: ..., ...}}
     name = keys[0]
-    attrs = dep[name] or {}
+    attrs = req[name] or {}
     if not isinstance(attrs, dict):
         raise malformed()
     out = dict(attrs)
@@ -1118,24 +1128,26 @@ def check_requirements(
     machine it names.
 
     ``setup`` requirements are verified via
-    :func:`calkit.dependencies.check_setup_dep`, which runs the
+    :func:`calkit.requirements.check_setup_dep`, which runs the
     ``check_command`` and -- on an interactive TTY -- optionally runs the
     declared ``setup_command`` after asking the user. Non-interactive
     failures abort with the fix-it command printed for the user to run.
+    ``aws-credentials`` requirements are checked the same way, by
+    :func:`calkit.requirements.check_aws_credentials_req`.
     """
     if requirements is not None:
         # An environment's own list is checked exactly as declared: it
         # describes a machine that runs stages, which is a smaller claim
         # than being where the project lives.
-        deps = list(requirements)
+        reqs = list(requirements)
     else:
         if ck_info is None:
             ck_info = load_calkit_info(wdir=wdir)
-        deps = get_requirements(ck_info)
+        reqs = get_requirements(ck_info)
         # Git is how a project exists at all, so the host needs it whether
         # or not anyone wrote it down.
-        if "git" not in deps:
-            deps.append("git")
+        if "git" not in reqs:
+            reqs.append("git")
     # Resolve TTY interactivity once so a single per-call answer drives
     # every prompt (env-var, app installer, setup step).
     if interactive is None:
@@ -1145,7 +1157,8 @@ def check_requirements(
     # before we start installing things on it, then env-vars (some
     # installers and setup commands read from them), then apps (env
     # managers like pixi / uv need to exist before setup steps that run
-    # inside an env), then setup steps last. The setup-step
+    # inside an env), then setup steps, then AWS credentials, which need
+    # the AWS CLI and may be set up by a step. The setup-step
     # ``check_command`` typically wraps ``calkit xenv``, which validates
     # its own environment, so we don't need a separate env-check phase.
     property_kinds = system_property_requirement_kinds()
@@ -1154,19 +1167,20 @@ def check_requirements(
         "env-var": [],
         "app": [],
         "setup": [],
+        "aws-credentials": [],
     }
-    for raw_dep in deps:
-        dep = _normalize_requirement(raw_dep)
-        kind = dep["kind"]
+    for raw in reqs:
+        req = _normalize_requirement(raw)
+        kind = req["kind"]
         if kind in property_kinds:
-            buckets["_property"].append(dep)
+            buckets["_property"].append(req)
         elif kind not in buckets:
             # Unknown / legacy kinds (e.g., ``calkit-config``) fall through
             # to ``check_dep_exists`` in original order so we don't change
             # behavior for them silently.
-            buckets.setdefault("_other", []).append(dep)
+            buckets.setdefault("_other", []).append(req)
         else:
-            buckets[kind].append(dep)
+            buckets[kind].append(req)
     if buckets["_property"]:
         # Read the machine only when something asks about it; describing a
         # system shells out for a version from every package manager it can
@@ -1177,43 +1191,45 @@ def check_requirements(
             if system_info is not None
             else get_machine_properties()
         )
-        for dep in buckets["_property"]:
-            check_property_requirement(dep, info, described_as=described_as)
-    for dep in buckets["env-var"]:
-        dep_name = dep["name"]
-        if dep_name in os.environ:
+        for req in buckets["_property"]:
+            check_property_requirement(req, info, described_as=described_as)
+    for req in buckets["env-var"]:
+        req_name = req["name"]
+        if req_name in os.environ:
             continue
         # On a TTY, prompt the user and persist to .env so the very next
         # ``calkit run`` works without a separate setup step. Non-TTY
         # (CI) falls through to the legacy "not found" abort.
         if interactive:
-            from calkit.dependencies import prompt_and_store_env_var
+            from calkit.requirements import prompt_for_env_var_req
 
-            print(f"Missing env var '{dep_name}'")
-            value = prompt_and_store_env_var(
-                dep_name, default=dep.get("default")
-            )
-            if value is not None:
+            if prompt_for_env_var_req(req) is not None:
                 continue
-        raise ValueError(f"env-var '{dep_name}' not found")
-    for dep in buckets["app"]:
-        dep_name = dep["name"]
+        msg = f"env-var '{req_name}' not found"
+        if req.get("setup_command"):
+            msg += (
+                f"; get a value with '{req['setup_command']}' and set it "
+                f"with 'calkit set-env-var {req_name} <value>'"
+            )
+        raise ValueError(msg)
+    for req in buckets["app"]:
+        req_name = req["name"]
         # The ``calkit`` app is always satisfied by the running process,
         # but a declared ``version_spec`` (e.g. ``calkit>=0.38``) is
         # checked against the installed version so projects can pin a
         # minimum CLI without writing a custom setup step.
-        if dep_name == "calkit":
-            spec = dep.get("version_spec")
+        if req_name == "calkit":
+            spec = req.get("version_spec")
             if spec:
-                from calkit.dependencies import check_calkit_version
+                from calkit.requirements import check_calkit_version
 
                 check_calkit_version(spec)
             continue
-        spec = dep.get("version_spec")
-        if check_dep_exists(dep_name, "app", system_info=system_info):
+        spec = req.get("version_spec")
+        if check_dep_exists(req_name, "app", system_info=system_info):
             if spec:
                 check_app_version(
-                    dep_name,
+                    req_name,
                     spec,
                     system_info=system_info,
                     described_as=described_as,
@@ -1222,14 +1238,14 @@ def check_requirements(
         # Offer the registered native installer when we have one.
         from calkit import install as _install
 
-        if _install.get_installer(dep_name) is not None:
-            print(f"App '{dep_name}' is not installed.")
+        if _install.get_installer(req_name) is not None:
+            print(f"App '{req_name}' is not installed.")
             if _install.prompt_and_install(
-                dep_name, interactive=interactive
-            ) and check_dep_exists(dep_name, "app", system_info=system_info):
+                req_name, interactive=interactive
+            ) and check_dep_exists(req_name, "app", system_info=system_info):
                 if spec:
                     check_app_version(
-                        dep_name,
+                        req_name,
                         spec,
                         system_info=system_info,
                         described_as=described_as,
@@ -1237,28 +1253,41 @@ def check_requirements(
                 continue
         # Some apps have no installer here but a known way in, e.g., a
         # system package manager on Linux
-        hint = _install.get_unsupported_message(dep_name)
+        hint = _install.get_unsupported_message(req_name)
         raise ValueError(
-            f"app '{dep_name}' not found on {described_as}"
+            f"app '{req_name}' not found on {described_as}"
             + (f"; {hint}" if hint else "")
         )
-    for dep in buckets.get("_other", []):
-        dep_name = dep["name"]
-        dep_kind = dep["kind"]
-        if not check_dep_exists(dep_name, dep_kind, system_info=system_info):
-            raise ValueError(f"{dep_kind} '{dep_name}' not found")
-    for dep in buckets["setup"]:
-        from calkit.dependencies import check_setup_dep
+    for req in buckets.get("_other", []):
+        req_name = req["name"]
+        req_kind = req["kind"]
+        if not check_dep_exists(req_name, req_kind, system_info=system_info):
+            raise ValueError(f"{req_kind} '{req_name}' not found")
+    for req in buckets["setup"]:
+        from calkit.requirements import check_setup_dep
 
         ok = check_setup_dep(
-            dep,
+            req,
             interactive=interactive,
             use_cache=use_cache,
             wdir=wdir,
         )
         if not ok:
             raise ValueError(
-                f"setup requirement '{dep['name']}' is not satisfied"
+                f"setup requirement '{req['name']}' is not satisfied"
+            )
+    for req in buckets["aws-credentials"]:
+        from calkit.requirements import check_aws_credentials_req
+
+        ok = check_aws_credentials_req(
+            req,
+            interactive=interactive,
+            use_cache=use_cache,
+            wdir=wdir,
+        )
+        if not ok:
+            raise ValueError(
+                f"aws-credentials requirement '{req['name']}' is not satisfied"
             )
 
 
@@ -1272,12 +1301,12 @@ def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
     if ck_info is None:
         ck_info = load_calkit_info()
     env_vars = []
-    for dep in get_requirements(ck_info):
+    for req in get_requirements(ck_info):
         # Delegate shape-parsing to ``_normalize_requirement`` so this stays
         # in lockstep with ``check_requirements`` -- string entries,
         # single-key dicts, flat dicts, and nameless setup steps all flow
         # through one path.
-        normalized = _normalize_requirement(dep)
+        normalized = _normalize_requirement(req)
         if normalized["kind"] == "env-var":
             env_vars.append(normalized["name"])
     return env_vars

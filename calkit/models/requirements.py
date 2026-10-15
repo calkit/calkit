@@ -16,24 +16,30 @@ class RequirementAttrs(Model):
     name as its key instead.
     """
 
-    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
+    kind: Literal[
+        "app", "env-var", "setup", "aws-credentials", "calkit-config"
+    ] = "app"
     check_command: str | None = None
     setup_command: str | None = None
     cache_ttl: str | int | None = None
     description: str | None = None
     default: str | None = None
     version_spec: str | None = None
+    account_id: str | None = None
+    profile: str | None = None
     notes: str | None = None
 
 
 class Requirement(Model):
     """Something that must be true of a machine before the project runs.
 
-    Four kinds are supported:
+    Five kinds are supported:
 
     - ``app``: an executable that must be on ``PATH``, optionally
       satisfying a ``version_spec``.
     - ``env-var``: an environmental variable that must be defined.
+      ``setup_command`` says how to get a value, e.g., a login flow that
+      prints a token, and is offered before the value is asked for.
     - ``setup``: a per-machine precondition that isn't a file---e.g.,
       the user must have authenticated a CLI like ``gh auth login``.
       A ``setup`` requirement declares ``check_command`` (a shell command
@@ -42,6 +48,9 @@ class Requirement(Model):
       as a fix-it command otherwise). To run either inside a project
       environment, prefix it with ``calkit xenv -n <env> --``.
       ``cache_ttl`` skips re-probing slow checks.
+    - ``aws-credentials``: valid AWS credentials, optionally for a given
+      ``account_id`` and ``profile``, checked with
+      ``aws sts get-caller-identity``.
     - ``calkit-config``: a value that must be set in the user's Calkit
       configuration.
 
@@ -51,11 +60,18 @@ class Requirement(Model):
     the ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.
     """
 
-    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
+    kind: Literal[
+        "app", "env-var", "setup", "aws-credentials", "calkit-config"
+    ] = "app"
     name: str
-    # ``setup``-kind fields; ignored for other kinds.
+    # ``setup``-kind field; ignored for other kinds.
     check_command: str | None = None
-    setup_command: str | None = None
+    setup_command: str | None = Field(
+        default=None,
+        description="Command that sets the requirement up, offered on a "
+        "terminal and printed as the fix otherwise. For an 'env-var', it's "
+        "run before the value is asked for, e.g., 'claude setup-token'.",
+    )
     # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
     # integer number of seconds. Setup requirements cache successful checks
     # by default for ``DEFAULT_SETUP_CACHE_TTL``; set ``cache_ttl: 0`` to
@@ -69,6 +85,16 @@ class Requirement(Model):
         description="Version specifier an 'app' must satisfy, e.g., '>=2.40'. "
         "A string requirement like 'git>=2.40' is shorthand for this.",
     )
+    account_id: str | None = Field(
+        default=None,
+        description="AWS account ID that 'aws-credentials' must be for. "
+        "Quote it so YAML keeps any leading zeros.",
+    )
+    profile: str | None = Field(
+        default=None,
+        description="AWS profile 'aws-credentials' are checked with, if not "
+        "the default.",
+    )
     notes: str | None = None
 
 
@@ -79,7 +105,14 @@ class SetupRequirement(Requirement):
     ``check_command``.
     """
 
-    kind: Literal["setup"] = "setup"
+    kind: Literal["setup"] = "setup"  # pyright: ignore[reportIncompatibleVariableOverride]
+    name: str | None = None  # type: ignore[assignment]
+
+
+class AwsCredentialsRequirement(Requirement):
+    """An ``aws-credentials`` requirement, whose ``name`` may be omitted."""
+
+    kind: Literal["aws-credentials"] = "aws-credentials"  # pyright: ignore[reportIncompatibleVariableOverride]
     name: str | None = None  # type: ignore[assignment]
 
 
@@ -206,6 +239,7 @@ RequirementType = (
     | SystemNumberRequirement
     | SystemValueRequirement
     | SetupRequirement
+    | AwsCredentialsRequirement
     | Requirement
     | dict[str, RequirementAttrs | None]
 )

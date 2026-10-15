@@ -1,6 +1,7 @@
-# Requirements, configuration, and secrets
+# Project requirements and setup
 
-One major barrier to reproducibility is dependency management.
+One major barrier to reproducibility is documenting and repeating
+the steps it took to get ready to run a project.
 If one relies too much on system-level dependencies,
 this can lead to reproducibility issues because a full system is hard to
 define with sufficient detail.
@@ -51,14 +52,14 @@ changing anything.
 ```yaml
 requirements:
   - docker
-  - name: STRAVA_CLIENT_ID
-    kind: env-var
+  - kind: env-var
+    name: STRAVA_CLIENT_ID
     notes: >
       The STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET environmental
       variables can be set in the .env file after creating a Strava
       application at https://www.strava.com/settings/api
-  - name: STRAVA_CLIENT_SECRET
-    kind: env-var
+  - kind: env-var
+    name: STRAVA_CLIENT_SECRET
 ```
 
 As we can see in the notes for `STRAVA_CLIENT_ID`,
@@ -81,7 +82,7 @@ env_vars:
 These will then be set for calls to the `run` and `xenv` commands.
 
 When `calkit run` (or `calkit check reqs`) encounters a missing
-`env-var` requirement on an interactive terminal, it prompts the user
+`env-var` requirement in an interactive shell, it prompts the user
 for a value, writes it to `.env`, and exports it for the rest of the
 run.
 `calkit status` does the same, except that a variable left unset is
@@ -96,23 +97,19 @@ the default:
 
 ```yaml
 requirements:
-  - name: DB_URL
-    kind: env-var
+  - kind: env-var
+    name: DB_URL
     default: postgres://localhost:5432/dev
 ```
 
 In non-interactive contexts (CI), the same missing variable still
 raises a clear error so failures aren't silent.
 
-## Requiring something of the machine
+## Machine requirements
 
-Not everything a project needs is something you can install.
-A simulation that needs a certain amount of memory to finish, or a stage
-that divides work across cores, is making a claim about the machine
-rather than about what's on it.
-Those are written as a `kind` naming the property, with no name, since
-`cpu-count` already says everything there is to say about which property
-is meant:
+It is possible to define requirements of the system on which the
+project is being run, e.g., how many CPU cores, how much memory, etc.
+For example:
 
 ```yaml
 requirements:
@@ -147,7 +144,7 @@ Checking these means reading the machine, which is what
 A property the machine doesn't report is an error rather than a silent
 pass---an unanswerable question isn't a satisfied one.
 
-## Requirements of a stage or an environment
+## Stage or environment specific requirements
 
 Requirements in the project's `requirements` section apply to the whole
 project, so a machine that doesn't meet them can't run anything.
@@ -318,7 +315,7 @@ That way there's always a record of what Calkit changed on the machine.
 
 ## Setup requirements
 
-Some preconditions aren't files or environment variables -- they're
+Some preconditions aren't files or environment variables---they're
 one-time per-machine actions like `gh auth login` or
 `huggingface-cli login`.
 The `setup` requirement kind captures these declaratively:
@@ -396,15 +393,15 @@ Within a single `calkit run` or `calkit check reqs`, Calkit processes
 requirements in four phases regardless of the order they appear in
 `calkit.yaml`:
 
-1. **machine properties** -- first, because a machine too small to run
+1. **machine properties**: First, because a machine too small to run
    the project at all should say so before anything is installed on it.
-2. **`env-var`** -- prompted next so installers and setup steps can
+2. **`env-var`**: Prompted next so installers and setup steps can
    read newly-set variables.
-3. **`app`** -- env managers like `pixi` and `uv` must exist before
+3. **`app`**: Environment managers like `pixi` and `uv` must exist before
    any setup step that runs inside one of those environments. Missing
    apps with a registered installer trigger the auto-install prompt
    here.
-4. **`setup`** -- last, since `check_command` typically wraps
+4. **`setup`**: Last, since `check_command` typically wraps
    `calkit xenv` and depends on both apps and env vars.
 
 This ordering means a single fresh-clone `calkit run` can prompt for

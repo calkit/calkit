@@ -906,11 +906,14 @@ def check_requirements(
             # under a profile that runs with 'set -u'.
             cmd = f'test -n "${{{name}:-}}"'
             if _remote_rc(workspace, cmd, verbose=verbose) != 0:
-                raise ValueError(
+                msg = (
                     f"env-var '{name}' is not set on {described_as}. Set it "
                     "in that machine's shell profile, since a stage running "
                     "there reads its environment, not this one's."
                 )
+                if req.get("setup_command"):
+                    msg += f" Get a value with '{req['setup_command']}'."
+                raise ValueError(msg)
         elif kind == "app":
             cmd = f"command -v {shlex.quote(name)}"
             if _remote_rc(workspace, cmd, verbose=verbose) != 0:
@@ -940,6 +943,23 @@ def check_requirements(
                 )
                 if setup_command:
                     msg += f". To satisfy it there, run: {setup_command}"
+                raise ValueError(msg)
+        elif kind == "aws-credentials":
+            cmd = "aws sts get-caller-identity --query Account --output text"
+            if req.get("profile"):
+                cmd += f" --profile {shlex.quote(req['profile'])}"
+            if req.get("account_id"):
+                account_id = shlex.quote(str(req["account_id"]))
+                cmd = f'test "$({cmd} 2>/dev/null)" = {account_id}'
+            if _remote_rc(workspace, cmd, verbose=verbose) != 0:
+                msg = (
+                    f"aws-credentials requirement '{name}' is not satisfied "
+                    f"on {described_as}"
+                )
+                if req.get("setup_command"):
+                    msg += (
+                        f". To satisfy it there, run: {req['setup_command']}"
+                    )
                 raise ValueError(msg)
         else:
             raise ValueError(
@@ -988,7 +1008,7 @@ def expand_with_prompts(
     against a host by that name. Answers are stored in ``.env`` so the
     question is only asked once.
     """
-    from calkit.dependencies import prompt_and_store_env_var
+    from calkit.requirements import prompt_and_store_env_var
 
     for name in _referenced_env_vars(value):
         if os.environ.get(name):

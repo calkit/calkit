@@ -48,18 +48,26 @@ def rst_to_markdown(text: str) -> str:
     the RST spellings are what belongs in them; normalizing here keeps
     authors from having to write markdown by hand in a docstring.
     """
-    # ``double backticks`` are RST inline code; markdown uses one
-    text = text.replace("``", "`")
-    # *emphasis* is RST (and the natural thing to type); prettier
-    # normalizes single-asterisk emphasis to underscores, but leaves
-    # **strong** alone. Bounded to one line, and the delimiters exclude
-    # '*' and whitespace on both sides so '**strong**' isn't mangled into
-    # '_*strong*_' and a '* ' bullet isn't read as an opening delimiter.
-    return re.sub(
-        r"(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])",
-        r"_\1_",
-        text,
+    # Fenced code is left exactly as written; the split puts each fence
+    # at an odd index
+    parts = re.split(
+        r"(^[ \t]*```.*?^[ \t]*```[ \t]*$)", text, flags=re.M | re.S
     )
+    for i in range(0, len(parts), 2):
+        # ``double backticks`` are RST inline code; markdown uses one
+        part = re.sub(r"(?<!`)``(?!`)", "`", parts[i])
+        # *emphasis* is RST (and the natural thing to type); prettier
+        # normalizes single-asterisk emphasis to underscores, but leaves
+        # **strong** alone. Bounded to one line, and the delimiters
+        # exclude '*' and whitespace on both sides so '**strong**' isn't
+        # mangled into '_*strong*_' and a '* ' bullet isn't read as an
+        # opening delimiter.
+        parts[i] = re.sub(
+            r"(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])",
+            r"_\1_",
+            part,
+        )
+    return "".join(parts)
 
 
 def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
@@ -990,7 +998,20 @@ def generate_system_lock_properties_markdown() -> str:
     return (
         "The properties that can be locked are:\n\n"
         + make_table(rows, ["Property", "Description"]).rstrip()
-        + "\n\nRun `calkit describe system` to see what these are on the "
+        + "\n\nAny app's version can be locked too, as `<app>-version`, "
+        "e.g., `gcc-version`.\n"
+        "A version is recorded as its number up to the patch part,\n"
+        "e.g., `27.3.1` from `Docker version 27.3.1, build ce12230`,\n"
+        "or `6.8.0` from a Linux kernel release `6.8.0-45-generic`.\n"
+        "Any version can end in `-major` or `-minor` to lock only those "
+        "parts,\n"
+        "e.g., `python-version-minor` records `3.12` for Python 3.12.8,\n"
+        "so only a move to another minor version counts as a change.\n"
+        "`-patch` is the same as no ending, and `-full` keeps a suffix "
+        "attached to\n"
+        "the number, e.g., `11.4.0-1ubuntu1~22.04` for Ubuntu's GCC "
+        "11.4.0.\n"
+        "\nRun `calkit describe system` to see what these are on the "
         "machine you're on.\n"
     )
 

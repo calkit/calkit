@@ -209,7 +209,7 @@ def test_check_property_requirement():
         "cpu_count": 8,
         "memory_gb": 32.0,
         "os": "Linux",
-        "python_version": "3.12.4",
+        "calkit_python_version": "3.12.4",
     }
     # Numeric properties are bounded from either side
     check({"kind": "cpu-count", "min": 8}, info)
@@ -229,10 +229,17 @@ def test_check_property_requirement():
     check({"kind": "os", "equals": ["Darwin", "Linux"]}, info)
     with pytest.raises(ValueError, match="'Darwin' is required"):
         check({"kind": "os", "equals": "Darwin"}, info)
+    # Globs match case-insensitively too, and a list means any of them
+    check({"kind": "os", "matches": "lin*"}, info)
+    check({"kind": "os", "matches": ["darwin", "L?nux"]}, info)
+    with pytest.raises(ValueError, match="doesn't match 'win\\*'"):
+        check({"kind": "os", "matches": "win*"}, info)
     # Versions compare as versions rather than as strings
-    check({"kind": "python-version", "version_spec": ">=3.11"}, info)
+    check({"kind": "calkit-python-version", "version_spec": ">=3.11"}, info)
     with pytest.raises(ValueError, match=">=3.13"):
-        check({"kind": "python-version", "version_spec": ">=3.13"}, info)
+        check(
+            {"kind": "calkit-python-version", "version_spec": ">=3.13"}, info
+        )
     with pytest.raises(ValueError, match="can't be read as a version"):
         check({"kind": "os", "version_spec": ">=1"}, info)
     # A property the machine doesn't report is unanswered, not satisfied
@@ -272,6 +279,31 @@ def test_check_app_version():
     assert extract_version("git version 2.39.5") == "2.39.5"
     assert extract_version("uv 0.4.18 (a1b2c3d 2024-09-20)") == "0.4.18"
     assert extract_version("") is None
+    # Not a year or part of a name, and in full with what's attached to it
+    nvcc = (
+        "Copyright (c) 2005-2024 NVIDIA\nCuda compilation tools, release 12.4"
+    )
+    assert extract_version(nvcc) == "12.4"
+    assert (
+        extract_version("gcc.exe (x86_64-posix, MinGW-W64) 8.1.0") == "8.1.0"
+    )
+    assert extract_version("perl 5, version 34 (v5.34.1)") == "5.34.1"
+    assert extract_version("Python 3.12.10rc1") == "3.12.10"
+    assert extract_version("Python 3.12.10rc1", full=True) == "3.12.10rc1"
+    assert extract_version("10") == "10"
+    # A dotted number can follow letters, and the first one is the tool's
+    assert extract_version("go version go1.22.0 linux/amd64") == "1.22.0"
+    assert extract_version("OpenSSH_9.6p1, LibreSSL 3.3.6") == "9.6"
+    assert extract_version("ffmpeg version n6.1.1") == "6.1.1"
+    # A bare number may have letters after it, as Windows Server's release
+    assert extract_version("2025Server") == "2025"
+    assert extract_version("2025Server", full=True) == "2025Server"
+    assert extract_version("x86_64") is None
+    # Requirements compare the number, so nvcc's isn't its copyright year
+    with pytest.raises(ValueError, match="but '>=13' is required"):
+        check_app_version("nvcc", ">=13", system_info={"nvcc_version": nvcc})
+    # Keys are lowercase, whatever the app's name
+    check_app_version("Rscript", ">=4", system_info={"rscript_version": "4.3"})
     info = {"git_version": "git version 2.39.5"}
     check_app_version("git", ">=2.30", system_info=info)
     check_app_version("git", "2.39.5", system_info=info)
@@ -283,6 +315,31 @@ def test_check_app_version():
     # A version a system description doesn't carry is still read from the
     # machine, unless the machine in question isn't this one
     check_app_version("git", ">=1", system_info={})
+    # Probes get no stdin and a timeout, and MATLAB is asked its own way
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if cmd[0] == "hangs":
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        if cmd[0] == "java":
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="", stderr='java version "1.8.0_402"\n'
+            )
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="25.1.0.2943329 (R2025a)\n"
+        )
+
+    with mock.patch("calkit.core.subprocess.run", fake_run):
+        assert calkit.get_dep_version("matlab") == "25.1.0.2943329 (R2025a)"
+        assert calkit.get_dep_version("hangs") is None
+        # Some tools print their version to stderr
+        assert calkit.get_dep_version("java") == 'java version "1.8.0_402"'
+        check_app_version("matlab", ">=25", system_info={})
+    assert calls[0][0] == ["matlab", "-batch", "disp(version)"]
+    assert calls[1][0] == ["hangs", "--version"]
+    assert all(kw["stdin"] is subprocess.DEVNULL for _, kw in calls)
+    assert all(kw["timeout"] for _, kw in calls)
 
 
 def test_check_dep_exists_conda_off_path(monkeypatch):
@@ -439,3 +496,68 @@ def test_update_readme_content():
     )
     assert calkit.update_readme_content("", "T", "D.") == "# T\n\nD.\n"
     assert calkit.update_readme_content("", "T", None) == "# T\n"
+
+
+def test_get_version_checked_app_names():
+    ck_info = {
+        "requirements": ["git", "calkit>=0.1", {"jq": {"version_spec": ">1"}}],
+        "environments": {
+            "ml": {"kind": "system", "requirements": ["matlab>=24"]},
+            "far": {
+                "kind": "system",
+                "host": "calkit-test.invalid",
+                "requirements": ["julia>=1.10"],
+            },
+            "py": {"kind": "uv-venv", "path": "r.txt"},
+            "pick": {
+                "kind": "switch",
+                "switch": [
+                    {"when": [{"os_is": "linux"}], "use": "far"},
+                    {"use": "ml"},
+                ],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "requirements": [
+                        "ffmpeg>=6",
+                        {"kind": "env-var", "name": "TOKEN"},
+                    ],
+                },
+                "m": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "ml:py",
+                },
+                "remote": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "far:py",
+                    "requirements": ["pandoc>=3"],
+                },
+                "switched": {
+                    "kind": "shell-command",
+                    "command": "x",
+                    "environment": "pick",
+                },
+            }
+        },
+    }
+    # Apps only required to exist aren't asked their version, and nor are
+    # those checked on another machine, including a switch's remote option
+    assert calkit.get_version_checked_app_names(ck_info) == [
+        "jq",
+        "ffmpeg",
+        "matlab",
+    ]
+    # Nor those of stages the run doesn't reach
+    assert calkit.get_version_checked_app_names(
+        ck_info, stage_names={"s"}
+    ) == ["jq", "ffmpeg"]
+    # A malformed requirement says how to write one
+    ck_info["environments"]["ml"]["requirements"] = [{"app": "sbatch"}]
+    with pytest.raises(ValueError, match="list an app by name"):
+        calkit.get_version_checked_app_names(ck_info)

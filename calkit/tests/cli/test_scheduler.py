@@ -1,5 +1,6 @@
 """Tests for ``calkit.cli.scheduler``."""
 
+import json
 import os
 import subprocess
 import sys
@@ -9,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import typer
 
+import calkit
 import calkit.cli.scheduler as sched
 from calkit.cli.scheduler import (
     _active_job_ids,
@@ -609,3 +611,147 @@ def test_queue_lock_is_exclusive(tmp_dir):
     # Whoever went first finished before the other started.
     assert order[0].startswith("enter")
     assert order[1] == order[0].replace("enter", "exit")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="The setup is a POSIX shell command"
+)
+def test_batch_on_a_switch_pick_reads_a_setup_file(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "here": {"kind": "system"},
+                    "mach": {"kind": "switch", "switch": [{"use": "here"}]},
+                }
+            },
+            f,
+        )
+    with open("setup.json", "w") as f:
+        json.dump(["export CK_TEST_SETUP=from-file"], f)
+    cmd = [
+        "calkit",
+        "scheduler",
+        "batch",
+        "--name",
+        "job",
+        "--environment",
+        "mach",
+        "--setup-file",
+        "setup.json",
+        "--log-path",
+        "job.log",
+        "--command",
+        "--",
+        "printenv",
+        "CK_TEST_SETUP",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    with open("job.log") as f:
+        assert "from-file" in f.read()
+    # One or the other, so a stage's setup can't be given twice
+    res = subprocess.run(
+        cmd[:9] + ["--setup", "true"] + cmd[9:],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "not both" in res.stderr + res.stdout
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: mock scheduler is not yet Windows-compatible",
+)
+def test_batch_sent_to_a_remote_cluster(tmp_dir, monkeypatch):
+    import calkit.cli.check
+    import calkit.workspace
+
+    subprocess.check_call(["calkit", "init"])
+    envs = {
+        "cluster": {
+            "kind": "switch",
+            "switch": [
+                {"use": {"kind": "slurm", "host": "calkit-test.invalid"}}
+            ],
+        },
+        "py": {"kind": "uv-venv", "path": "requirements.txt"},
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": envs}, f)
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    # As if built, since its check is faked
+    py_lock = calkit.environments.get_env_lock_fpath(envs["py"], "py")
+    os.makedirs(os.path.dirname(py_lock))
+    with open(py_lock, "w") as f:
+        f.write("idna==3.10\n")
+    job = ["calkit", "xenv", "-n", "py", "--no-check", "--", "true"]
+    argv = [
+        "calkit",
+        "scheduler",
+        "batch",
+        "--name",
+        "job",
+        "--environment",
+        "cluster",
+        "--log-path",
+        "job.log",
+        "--command",
+        "--",
+        *job,
+    ]
+    sent: list[str] = []
+    monkeypatch.setattr(
+        calkit.workspace.Workspace, "from_env", lambda **kw: object()
+    )
+    monkeypatch.setattr(calkit.workspace, "resolve_wdir", lambda ws: ws)
+    monkeypatch.setattr(
+        calkit.workspace,
+        "run_in_workspace",
+        lambda workspace, command, **kw: sent.append(command),
+    )
+
+    def batch(argv: list[str]) -> None:
+        monkeypatch.setattr(sys, "argv", argv)
+        environment = argv[argv.index("--environment") + 1]
+        try:
+            # The job itself is left out, since its env isn't built
+            sched.run_batch(
+                name="job",
+                target="true",
+                environment=environment,
+                args=[],
+                log_path="job.log",
+                is_command=True,
+                check_inner_env="--check-inner-env" in argv,
+            )
+        except typer.Exit as e:
+            # A job already finished is reused
+            assert e.exit_code == 0
+
+    # The cluster is sent the pick, and checks the inner env once before
+    # submitting rather than in every job
+    batch(argv)
+    forwarded = sent[-1].split()
+    assert forwarded[forwarded.index("--environment") + 1] == "cluster.1"
+    assert "--check-inner-env" in forwarded
+    assert "--no-check" in forwarded
+    # There, the option defined in place is found, and the inner env is
+    # checked once for all jobs
+    checked: list[str] = []
+    monkeypatch.setattr(
+        calkit.cli.check,
+        "check_environment",
+        lambda env_name, **kw: checked.append(env_name),
+    )
+    monkeypatch.setattr(
+        calkit.environments, "host_is_local", lambda host: True
+    )
+    monkeypatch.setenv(sched.MOCK_ENV_VAR, "1")
+    for _ in range(2):
+        batch(["calkit", *forwarded])
+    assert checked == ["py"]
+    assert os.path.isfile("job.log")

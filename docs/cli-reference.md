@@ -354,34 +354,35 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                  |
-| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------- |
-| `-q`, `--quiet`          | boolean | no       | False   | Be quiet.                                                                                    |
-| `-v`, `--verbose`        | boolean | no       | False   | Print verbose output.                                                                        |
-| `-f`, `--force`          | boolean | no       | False   | Run even if stages or inputs have not changed.                                               |
-| `-i`, `--interactive`    | boolean | no       | False   | Ask for confirmation before running each stage.                                              |
-| `-s`, `--single-item`    | boolean | no       | False   | Run only a single stage without any dependents.                                              |
-| `-p`, `--pipeline`       | str     | no       |         |                                                                                              |
-| `-P`, `--all-pipelines`  | boolean | no       | False   | Run all pipelines in the repo.                                                               |
-| `-R`, `--recursive`      | boolean | no       | False   | Run pipelines in subdirectories.                                                             |
-| `--downstream`           | str     | no       |         | Start from the specified stage and run all downstream.                                       |
-| `--force-downstream`     | boolean | no       | False   | Force downstream stages to run even if they are still up-to-date.                            |
-| `--pull`                 | boolean | no       | False   | Try automatically pulling missing data.                                                      |
-| `--allow-missing`        | boolean | no       | False   | Skip stages with missing data.                                                               |
-| `--dry`, `--dry-run`     | boolean | no       | False   | Only print commands that would execute.                                                      |
-| `--keep-going`, `-k`     | boolean | no       | False   | Continue executing, skipping stages with failed inputs from other stages.                    |
-| `--ignore-errors`        | boolean | no       | False   | Ignore errors from stages.                                                                   |
-| `--glob`                 | boolean | no       | False   | Match stages with glob-style patterns.                                                       |
-| `--no-commit`            | boolean | no       | False   | Do not save to the run cache.                                                                |
-| `--no-run-cache`         | boolean | no       | False   | Ignore the run cache.                                                                        |
-| `--log`, `-l`            | boolean | no       | False   | Log the run and system information.                                                          |
-| `--save`, `-S`           | boolean | no       | False   | Save the project after running.                                                              |
-| `--save-message`, `-m`   | str     | no       |         | Commit message for saving.                                                                   |
-| `--input`, `--dep`       | str     | no       |         | Run stages that depend on given input dependency path.                                       |
-| `--output`, `--out`      | str     | no       |         | Run stages that produce the given output path.                                               |
-| `--overleaf`, `-O`       | boolean | no       | False   | Sync with Overleaf before and after running.                                                 |
-| `--no-push`              | boolean | no       | False   | Do not push to Git and DVC after saving.                                                     |
-| `--mock-scheduler`, `-K` | boolean | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                  |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-q`, `--quiet`          | boolean | no       | False   | Be quiet.                                                                                                                                    |
+| `-v`, `--verbose`        | boolean | no       | False   | Print verbose output.                                                                                                                        |
+| `-f`, `--force`          | boolean | no       | False   | Run even if stages or inputs have not changed.                                                                                               |
+| `-i`, `--interactive`    | boolean | no       | False   | Ask for confirmation before running each stage.                                                                                              |
+| `-s`, `--single-item`    | boolean | no       | False   | Run only a single stage without any dependents.                                                                                              |
+| `-p`, `--pipeline`       | str     | no       |         |                                                                                                                                              |
+| `-P`, `--all-pipelines`  | boolean | no       | False   | Run all pipelines in the repo.                                                                                                               |
+| `-R`, `--recursive`      | boolean | no       | False   | Run pipelines in subdirectories.                                                                                                             |
+| `--downstream`           | str     | no       |         | Start from the specified stage and run all downstream.                                                                                       |
+| `--force-downstream`     | boolean | no       | False   | Force downstream stages to run even if they are still up-to-date.                                                                            |
+| `--pull`                 | boolean | no       | False   | Try automatically pulling missing data.                                                                                                      |
+| `--allow-missing`        | boolean | no       | False   | Skip stages with missing data.                                                                                                               |
+| `--dry`, `--dry-run`     | boolean | no       | False   | Only print commands that would execute.                                                                                                      |
+| `--keep-going`, `-k`     | boolean | no       | False   | Continue executing, skipping stages with failed inputs from other stages.                                                                    |
+| `--ignore-errors`        | boolean | no       | False   | Ignore errors from stages.                                                                                                                   |
+| `--glob`                 | boolean | no       | False   | Match stages with glob-style patterns.                                                                                                       |
+| `--no-commit`            | boolean | no       | False   | Do not save to the run cache.                                                                                                                |
+| `--no-run-cache`         | boolean | no       | False   | Ignore the run cache.                                                                                                                        |
+| `--log`, `-l`            | boolean | no       | False   | Log the run and system information.                                                                                                          |
+| `--save`, `-S`           | boolean | no       | False   | Save the project after running.                                                                                                              |
+| `--save-message`, `-m`   | str     | no       |         | Commit message for saving.                                                                                                                   |
+| `--input`, `--dep`       | str     | no       |         | Run stages that depend on given input dependency path.                                                                                       |
+| `--output`, `--out`      | str     | no       |         | Run stages that produce the given output path.                                                                                               |
+| `--overleaf`, `-O`       | boolean | no       | False   | Sync with Overleaf before and after running.                                                                                                 |
+| `--no-push`              | boolean | no       | False   | Do not push to Git and DVC after saving.                                                                                                     |
+| `--mock-scheduler`, `-K` | boolean | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler.                                                 |
+| `--strict`               | boolean | no       | False   | Fail if an out-of-date stage can't run on this machine rather than skipping it, e.g., in CI for a project whose stages should all run there. |
 
 <a id="top-command-manual-step"></a>
 
@@ -2372,9 +2373,10 @@ calkit describe|desc system [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description            |
-| -------- | ------- | -------- | ------- | ---------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON. |
+| Option   | Type    | Required | Default | Description                                                                        |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON.                                                             |
+| `--app`  | str     | no       |         | An app whose version to include, beyond the ones always reported. Repeat for more. |
 
 <a id="subcommand-describe-desc-environment-env"></a>
 
@@ -2945,7 +2947,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs.
+Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
 
 Usage:
 
@@ -2955,10 +2957,11 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option                   | Type | Required | Default | Description                                                               |
-| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `--name`, `-n`           | str  | yes      |         | Name of the environment to update                                         |
-| `--add`, `--add-package` | str  | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                              |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
+| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -2966,7 +2969,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs.
+Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
 
 Usage:
 
@@ -2976,10 +2979,11 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option                   | Type | Required | Default | Description                                                               |
-| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `--name`, `-n`           | str  | yes      |         | Name of the environment to update                                         |
-| `--add`, `--add-package` | str  | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                              |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
+| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
 
 <a id="subcommand-update-stage"></a>
 
@@ -3174,6 +3178,7 @@ Check things.
 | [`venv`](#subcommand-check-venv)                            | Check a Python virtual environment (uv or virtualenv).                                                       |
 | [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
 | [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that a project's system-level requirements are met.                                                    |
+| [`stage-runs`](#subcommand-check-stage-runs)                | Check each stage in dvc.lock matches the recorded run that made it.                                          |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
@@ -3210,6 +3215,8 @@ Options:
 
 Check that an environment is up-to-date.
 
+An environment is also rebuilt when one of its 'inputs' changes.
+
 Usage:
 
 ```text
@@ -3218,10 +3225,11 @@ calkit check environment [OPTIONS]
 
 Options:
 
-| Option         | Type    | Required | Default | Description                       |
-| -------------- | ------- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | str     | yes      |         | Name of the environment to check. |
-| `--verbose`    | boolean | no       | False   | Print verbose output.             |
+| Option          | Type    | Required | Default | Description                                                                                                |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`  | str     | yes      |         | Name of the environment to check.                                                                          |
+| `--verbose`     | boolean | no       | False   | Print verbose output.                                                                                      |
+| `--force`, `-f` | boolean | no       | False   | Rebuild the environment from scratch, e.g., after something it was built from changed outside the project. |
 
 <a id="subcommand-check-julia-env"></a>
 
@@ -3344,6 +3352,7 @@ Options:
 | `--registry`       | str     | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                           |
 | `--lock-arch`      | str     | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                       |
 | `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                         |
+| `--rebuild`        | boolean | no       | False   | Build the image from scratch, pulling its base image, rather than reusing a cached or locked one.                                                                 |
 
 <a id="subcommand-check-conda-env"></a>
 
@@ -3414,10 +3423,11 @@ calkit check matlab-env [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default | Description                      |
-| ---------------- | ---- | -------- | ------- | -------------------------------- |
-| `--name`, `-n`   | str  | yes      |         | Environment name in calkit.yaml. |
-| `--output`, `-o` | str  | yes      |         |                                  |
+| Option           | Type    | Required | Default | Description                      |
+| ---------------- | ------- | -------- | ------- | -------------------------------- |
+| `--name`, `-n`   | str     | yes      |         | Environment name in calkit.yaml. |
+| `--output`, `-o` | str     | yes      |         |                                  |
+| `--rebuild`      | boolean | no       | False   | Rebuild the image from scratch.  |
 
 <a id="subcommand-check-reqs-requirements"></a>
 
@@ -3437,6 +3447,20 @@ Options:
 | ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
 | `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                    |
 | `--no-cache`      | boolean | no       | False   | Re-probe every setup requirement, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
+
+<a id="subcommand-check-stage-runs"></a>
+
+#### `calkit check stage-runs`
+
+Check each stage in dvc.lock matches the recorded run that made it.
+
+A stage's entry in .calkit/stage-runs.json records a checksum of its dvc.lock entry after it ran, so one that disagrees got its dvc.lock entry some other way, e.g., 'dvc commit' after an output was edited, an edit or merge of dvc.lock, or running it outside Calkit. This catches mistakes and shortcuts, not forgery, since a matching entry can be written by anyone.
+
+Usage:
+
+```text
+calkit check stage-runs
+```
 
 <a id="subcommand-check-env-vars"></a>
 
@@ -4070,6 +4094,7 @@ Options:
 | `--out`, `-o`           | str                            | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
 | `--option`, `-s`        | str                            | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
 | `--setup`               | str                            | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
+| `--setup-file`          | str                            | no       |         | Path to a JSON list of setup commands, used instead of --setup, since a path survives cmd.exe and a POSIX shell alike, and quoted commands don't.                                                                                                                                       |
 | `--log-path`            | str                            | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
 | `--command`             | boolean                        | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
 | `--env-default-options` | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |

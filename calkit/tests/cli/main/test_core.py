@@ -2,6 +2,7 @@
 
 import json
 import os
+import platform
 import shutil
 import socket
 import stat
@@ -27,6 +28,7 @@ from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
     STAGE_OUTPUT_START,
+    STAGE_RUNS_FPATH,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
     _prune_run_logs,
@@ -587,8 +589,48 @@ def test_run_in_env_system(tmp_dir):
         text=True,
     )
     assert "hi" in out
-    with open(os.path.join(".calkit", "env-locks", "sys", "info.json")) as f:
+    sys_lock = os.path.join(".calkit", "env-locks", "sys", "info.json")
+    with open(sys_lock) as f:
         assert set(json.load(f)) == {"os"}
+    # A lock from another machine stops a run, even with --no-check
+    with open(sys_lock, "w") as f:
+        json.dump({"os": "SomeOtherOS"}, f)
+    for extra in ([], ["--no-check"]):
+        res = subprocess.run(
+            ["calkit", "xenv", "-n", "sys", *extra, "--", "echo", "hi"],
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode != 0
+        assert "locked to a different machine" in res.stdout + res.stderr
+        assert "calkit update env -n sys --lock" in res.stdout + res.stderr
+        with open(sys_lock) as f:
+            assert json.load(f) == {"os": "SomeOtherOS"}
+    # The up-front check only warns, so up-to-date stages can be skipped
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "sys"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "locked to a different machine" in res.stdout + res.stderr
+    subprocess.check_call(["calkit", "update", "env", "-n", "sys", "--lock"])
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "sys", "--", "python", "-c", "print('hi')"],
+        text=True,
+    )
+    assert "hi" in out
+    # With 'relock: auto' a run there rewrites the lock instead of failing
+    with open(sys_lock, "w") as f:
+        json.dump({"os": "SomeOtherOS"}, f)
+    _write_envs_to_ck_info(
+        {"sys": {"kind": "system", "lock": ["os"], "relock": "auto"}}
+    )
+    subprocess.check_call(
+        ["calkit", "xenv", "-n", "sys", "--no-check", "--", "echo", "hi"]
+    )
+    with open(sys_lock) as f:
+        assert json.load(f) != {"os": "SomeOtherOS"}
     # '--setup' runs its commands in the same shell as the command, so
     # what they set is visible there, and it runs in bash by default so
     # 'source' works---the reason most of these exist. What to run is
@@ -1849,15 +1891,41 @@ def test_run_writes_private_logs(tmp_dir):
     assert not os.path.isdir(tracked_dir) or not [
         f for f in os.listdir(tracked_dir) if f.endswith(".log")
     ]
-    # Run info and system info are saved privately without --log too
-    assert os.path.isdir(os.path.join(".calkit", "local", "runs"))
-    assert os.path.isdir(os.path.join(".calkit", "local", "systems"))
+    # Run info is saved privately without --log too, with the system inline
+    local_runs = os.path.join(".calkit", "local", "runs")
+    with open(os.path.join(local_runs, os.listdir(local_runs)[0])) as f:
+        assert json.load(f)["system"]["os"] == platform.system()
+    assert not os.path.exists(os.path.join(".calkit", "local", "systems"))
+    # How each stage's outputs were made is kept with the project, staged
+    with open(STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    entry = stage_runs["s1"]
+    assert list(stage_runs) == ["s1"]
+    assert "environment" not in entry
+    assert entry["calkit_version"] == calkit.__version__
+    assert entry["dvc_lock"] == calkit.dvc.stage_lock_md5(
+        calkit.dvc.read_lock_stages()["s1"]
+    )
+    assert entry["system"]["os"] == platform.system()
+    assert entry["system"]["machine_id"] == calkit.get_machine_id()
+    assert entry["start_time"] <= entry["end_time"]
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    )
+    assert ".calkit/stage-runs.json" in staged.splitlines()
+    # A stage that's skipped as up to date keeps its entry, as does --dry
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["calkit", "run", "--dry", "--force"])
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f) == stage_runs
     # With --log, the log is also saved to the tracked directory plus run info
     subprocess.check_call(["calkit", "run", "--log", "--force"])
     tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
     assert len(tracked) == 1
     assert os.path.isdir(os.path.join(".calkit", "runs"))
-    assert os.path.isdir(os.path.join(".calkit", "systems"))
+    assert not os.path.exists(os.path.join(".calkit", "systems"))
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f)["s1"]["start_time"] > entry["start_time"]
 
 
 def test_prune_run_logs(tmp_dir):
@@ -3257,6 +3325,310 @@ def test_push_carries_annotated_tags(tmp_dir):
     )
     assert "v0.1.0" in tags
     assert "scratch" not in tags
+
+
+@skipif_windows_mock_scheduler
+def test_run_switch_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "cluster": {
+                "kind": "switch",
+                "switch": [
+                    # Defined in place, since only the switch uses it
+                    {
+                        "when": [{"env_var_equals": "CK_TEST_SITE=cluster"}],
+                        "use": {
+                            "kind": "slurm",
+                            "default_setup": ["export WHERE=slurm"],
+                        },
+                    },
+                    {"use": "here"},
+                ],
+            },
+            "here": {"kind": "system", "default_setup": ["export WHERE=here"]},
+        },
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "echo $WHERE > out.txt",
+                    "environment": "cluster",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = {k: v for k, v in os.environ.items() if k != "CK_TEST_SITE"}
+    # Off the cluster, the switch picks the system env and runs it here,
+    # writing the log a scheduler stage declares
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "here"
+    assert os.path.isfile(".calkit/scheduler/logs/s.out")
+    runs = sorted(os.listdir(os.path.join(".calkit", "local", "runs")))
+    with open(os.path.join(".calkit", "local", "runs", runs[-1])) as f:
+        run_info = json.load(f)
+    assert run_info["switches"] == {"cluster": "here"}
+    assert run_info["stages"]["s"]["switches"] == {"cluster": "here"}
+    with open(STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    assert stage_runs["s"]["environment"] == {
+        "name": "cluster",
+        "switch": "here",
+    }
+    # The command file it runs from is committed, so it's staged
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).splitlines()
+    assert ".calkit/stage-commands/s.sh" in staged
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Environment 'cluster' picks 'here' here" in out
+    # Moving to the cluster doesn't make the stage stale, since it doesn't
+    # depend on which option was picked
+    env["CK_TEST_SITE"] = "cluster"
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "here"
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f) == stage_runs
+    # Rerunning it there goes through the scheduler
+    subprocess.check_call(["calkit", "run", "-K", "-f"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "slurm"
+    with open(STAGE_RUNS_FPATH) as f:
+        assert json.load(f)["s"]["environment"]["switch"] == "cluster.1"
+    # xenv resolves a switch passed by name
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "cluster", "--", "echo", "picked"],
+        env={k: v for k, v in env.items() if k != "CK_TEST_SITE"},
+        text=True,
+    )
+    assert "picked" in out
+
+
+def test_run_skips_stages_that_cant_run_here(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "lab": {
+                "kind": "system",
+                "requirements": [{"kind": "env-var", "name": "CK_TEST_TOKEN"}],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": "printenv CK_TEST_TOKEN > data.txt",
+                    "environment": "lab",
+                    "outputs": [{"path": "data.txt", "storage": "git"}],
+                },
+                "use": {
+                    "kind": "shell-command",
+                    "command": "cat data.txt > result.txt",
+                    "environment": "_system",
+                    "inputs": ["data.txt"],
+                    "outputs": [{"path": "result.txt", "storage": "git"}],
+                },
+                "settled": {
+                    "kind": "shell-command",
+                    "command": "echo done > settled.txt",
+                    "environment": "lab",
+                    "outputs": [{"path": "settled.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ)
+    # Where the requirement is met, everything runs
+    env["CK_TEST_TOKEN"] = "first"
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("result.txt") as f:
+        assert f.read().strip() == "first"
+    # Somewhere it isn't, the stage is skipped and its output kept, and
+    # what depends on that output still runs from it
+    del env["CK_TEST_TOKEN"]
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    ck_info["pipeline"]["stages"]["fetch"]["command"] = (
+        "printenv CK_TEST_TOKEN > data.txt && echo changed"
+    )
+    ck_info["pipeline"]["stages"]["use"]["command"] = (
+        "cat data.txt data.txt > result.txt"
+    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "run"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "can't run on this machine" in res.stdout + res.stderr
+    assert "skipping 1 out-of-date stage" in res.stdout
+    assert "successfully" not in res.stdout
+    # One that is up to date isn't worth mentioning
+    assert "'settled' can't run" not in res.stdout + res.stderr
+    assert "'settled' is out of date" not in res.stdout + res.stderr
+    with open("data.txt") as f:
+        assert f.read().strip() == "first"
+    with open("result.txt") as f:
+        assert f.read().split() == ["first", "first"]
+    runs = sorted(os.listdir(os.path.join(".calkit", "local", "runs")))
+    with open(os.path.join(".calkit", "local", "runs", runs[-1])) as f:
+        run_info = json.load(f)
+    assert "CK_TEST_TOKEN" in run_info["gated"]["fetch"]
+    assert run_info["stages"]["fetch"]["status"] == "gated"
+    # It stays stale, since running it where it can is what updates it
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "fetch" in out
+    assert "can't run on this machine" in out
+    # A variable calkit.yaml sets counts for status, as it does for run
+    with open("calkit.yaml") as f:
+        ck_yaml = f.read()
+    with open("calkit.yaml", "a") as f:
+        f.write("env_vars:\n  CK_TEST_TOKEN: from-yaml\n")
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "can't run on this machine" not in out
+    with open("calkit.yaml", "w") as f:
+        f.write(ck_yaml)
+    # Asking for it by name and not getting it is a failure
+    res = subprocess.run(
+        ["calkit", "run", "fetch"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "out of date and couldn't run" in res.stderr
+    # As is any with --strict, e.g., in CI where every stage should run
+    res = subprocess.run(
+        ["calkit", "run", "--strict"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "'fetch' is out of date and couldn't run" in res.stderr
+    # A skipped stage is still caught out of date when a stage it depends
+    # on runs after DVC has visited it
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    ck_info["pipeline"]["stages"]["g"] = {
+        "kind": "shell-command",
+        "command": "cat u.txt > g.txt",
+        "environment": "lab",
+        "inputs": ["u.txt"],
+        "outputs": [{"path": "g.txt", "storage": "git"}],
+    }
+    ck_info["pipeline"]["stages"]["u"] = {
+        "kind": "shell-command",
+        "command": "cat in.txt > u.txt",
+        "environment": "_system",
+        "inputs": ["in.txt"],
+        "outputs": [{"path": "u.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("in.txt", "w") as f:
+        f.write("1\n")
+    subprocess.check_call(
+        ["calkit", "run", "g"], env=env | {"CK_TEST_TOKEN": "first"}
+    )
+    with open("in.txt", "w") as f:
+        f.write("2\n")
+    res = subprocess.run(
+        ["calkit", "run"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "'g' is out of date but can't run" in res.stdout
+    with open("u.txt") as f:
+        assert f.read().strip() == "2"
+    with open("g.txt") as f:
+        assert f.read().strip() == "1"
+    runs = sorted(os.listdir(os.path.join(".calkit", "local", "runs")))
+    with open(os.path.join(".calkit", "local", "runs", runs[-1])) as f:
+        run_info = json.load(f)
+    assert run_info["stages"]["g"]["status"] == "gated"
+    # So is a stage that can't run because something is wrong, though the
+    # rest still runs
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    ck_info["environments"]["broken"] = {
+        "kind": "system",
+        "host": "calkit-test.invalid",
+        "requirements": ["git"],
+    }
+    ck_info["pipeline"]["stages"]["odd"] = {
+        "kind": "shell-command",
+        "command": "echo odd > odd.txt",
+        "environment": "broken",
+        "outputs": [{"path": "odd.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env["CK_TEST_TOKEN"] = "second"
+    res = subprocess.run(
+        ["calkit", "run"], env=env, capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "'odd' is out of date and couldn't run" in res.stderr
+    assert not os.path.isfile("odd.txt")
+    with open("result.txt") as f:
+        assert f.read().split() == ["second", "second"]
+
+
+def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "here": {
+                "kind": "system",
+                "inputs": [{"kind": "env-var", "name": "CK_TEST_SITE"}],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "shell-command",
+                    "command": "printenv CK_TEST_MODE > out.txt",
+                    "environment": "here",
+                    "inputs": [{"kind": "env-var", "name": "CK_TEST_MODE"}],
+                    "outputs": [{"path": "out.txt", "storage": "git"}],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ) | {"CK_TEST_MODE": "a", "CK_TEST_SITE": "x"}
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "a"
+    # The values are hashed rather than written down
+    with open(os.path.join(".calkit", "env-vars", "s.json")) as f:
+        hashes = json.load(f)
+    assert set(hashes) == {"CK_TEST_MODE", "CK_TEST_SITE"}
+    assert "a" not in hashes.values()
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Pipeline is up to date" in out
+    # Changing the stage's value, or its environment's, reruns it
+    env["CK_TEST_MODE"] = "b"
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Stale stages" in out
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().strip() == "b"
+    # A process without the value, e.g., an editor's, doesn't make it stale,
+    # but a run without it does
+    unset = {k: v for k, v in env.items() if k != "CK_TEST_MODE"}
+    out = subprocess.check_output(["calkit", "status"], env=unset, text=True)
+    assert "Pipeline is up to date" in out
+    # The stage itself fails without it
+    subprocess.run(["calkit", "run"], env=unset, capture_output=True)
+    with open(os.path.join(".calkit", "env-vars", "s.json")) as f:
+        assert json.load(f)["CK_TEST_MODE"] is None
+    subprocess.check_call(["calkit", "run"], env=env)
+    env["CK_TEST_SITE"] = "y"
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Stale stages" in out
 
 
 def test_stash(tmp_dir):

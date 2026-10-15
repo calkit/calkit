@@ -1,8 +1,8 @@
 """Models for inputs and outputs."""
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from calkit.models.base import Model
 
@@ -11,6 +11,22 @@ class InputsFromStageOutputs(Model):
     from_stage_outputs: str = Field(
         description="Name of a stage whose outputs are inputs to this one."
     )
+
+
+class EnvVarInput(Model):
+    """An environment variable whose value a stage's results depend on.
+
+    The value is hashed, not stored, into a file the stage depends on, so
+    changing it reruns the stage. A short or guessable value could be
+    recovered from its hash, so this isn't a way to keep one secret.
+    It is read where ``calkit run`` runs, from the project's ``env_vars``,
+    the environment or ``.env``, even for a stage that runs on another
+    machine.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["env-var"] = Field(description="Always 'env-var'.")
+    name: str = Field(description="Name of the environment variable.")
 
 
 class PathInput(Model):
@@ -31,6 +47,14 @@ class PathInput(Model):
 
     model_config = ConfigDict(extra="allow")
     path: str = Field(description="Path to the input file or directory.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _not_env_var(cls, data: Any) -> Any:
+        # A malformed env-var input would otherwise be read as a path
+        if isinstance(data, dict) and data.get("kind") == "env-var":
+            raise ValueError("an 'env-var' input is not a path")
+        return data
 
 
 class Input(Model):

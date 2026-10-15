@@ -12,8 +12,43 @@ import typer
 
 import calkit
 from calkit.cli import raise_error
-from calkit.cli.main.core import app, init, project_is_initialized, run
+from calkit.cli.main.core import (
+    STAGE_RUNS_FPATH,
+    app,
+    init,
+    project_is_initialized,
+    run,
+)
 from calkit.core import DVC_EXTENSIONS, DVC_SIZE_THRESH_BYTES
+
+
+def _unstage_record(paths: list[str]) -> None:
+    """Unstage what recorded a run, with what the run staged itself."""
+    import git
+
+    paths = [
+        os.path.abspath(p)
+        for p in [*paths, *calkit.environments.STAGED_CALKIT_PATHS]
+    ]
+    try:
+        repo = git.Repo(search_parent_directories=True)
+    except Exception:
+        return
+    if repo.head.is_valid():
+        # Path by path, since restore errors out on a pathspec that matches
+        # nothing---normal here, where some of these were never created
+        for unstage_path in paths:
+            try:
+                repo.git.restore("--staged", "--", unstage_path)
+            except Exception:
+                pass
+    else:
+        # A just-created repo has no HEAD to restore the index from, and
+        # also nothing tracked, so dropping the entries is right
+        try:
+            repo.git.rm("--cached", "-r", "--ignore-unmatch", "--", *paths)
+        except Exception:
+            pass
 
 
 def _xr_markdown(
@@ -118,7 +153,14 @@ def _xr_markdown(
     # the pipeline and builds environments too, so everything that writes
     # is covered, not just the files written here.
     snapshot = _snapshot(
-        ["calkit.yaml", "dvc.yaml", "dvc.lock", ".gitignore", ".dvcignore"]
+        [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            ".gitignore",
+            ".dvcignore",
+            STAGE_RUNS_FPATH,
+        ]
     )
     if not dry_run and not project_is_initialized():
         typer.echo(f"Initializing project in {os.getcwd()}")
@@ -165,8 +207,6 @@ def _xr_markdown(
         Derived files under .calkit are left alone: they are what there
         is to inspect, and nothing tracks them.
         """
-        import git
-
         for path, content in snapshot.items():
             if content is None:
                 if os.path.isfile(path):
@@ -176,30 +216,9 @@ def _xr_markdown(
                     fb.write(content)
         if not dvc_existed:
             shutil.rmtree(".dvc", ignore_errors=True)
-        # The bootstrap stages what it creates, so the index has to be
-        # put back too, or a deleted calkit.yaml lingers as a staged
-        # addition
-        paths = [os.path.abspath(p) for p in [*snapshot, ".dvc"]]
-        try:
-            repo = git.Repo(search_parent_directories=True)
-        except Exception:
-            return
-        if repo.head.is_valid():
-            # Path by path, since restore errors out on a pathspec that
-            # matches nothing---normal here, where some of these were
-            # never created
-            for unstage_path in paths:
-                try:
-                    repo.git.restore("--staged", "--", unstage_path)
-                except Exception:
-                    pass
-        else:
-            # A just-created repo has no HEAD to restore the index from,
-            # and also nothing tracked, so dropping the entries is right
-            try:
-                repo.git.rm("--cached", "-r", "--ignore-unmatch", "--", *paths)
-            except Exception:
-                pass
+        # The bootstrap stages what it creates, so the index has to be put
+        # back too, or a deleted calkit.yaml lingers as a staged addition
+        _unstage_record([*snapshot, ".dvc"])
 
     def _cleanup_derived() -> None:
         """Remove the derived files this run created.
@@ -440,7 +459,12 @@ def execute_and_record(
     # inspection)
     record_snapshot: dict[str, bytes | None] = {}
     if no_record:
-        for record_path in ["calkit.yaml", "dvc.yaml", "dvc.lock"]:
+        for record_path in [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            STAGE_RUNS_FPATH,
+        ]:
             if os.path.isfile(record_path):
                 with open(record_path, "rb") as fb:
                     record_snapshot[record_path] = fb.read()
@@ -939,6 +963,8 @@ def execute_and_record(
                 else:
                     with open(record_path, "wb") as fw:
                         fw.write(content)
+            # The run stages what it writes when autostaging
+            _unstage_record(list(record_snapshot))
             typer.echo(
                 "Executed without recording; the stage was not added to "
                 "the pipeline"

@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 import zipfile
 from copy import deepcopy
@@ -6879,6 +6880,7 @@ async def post_project_overleaf_publication(
     # Determine mode: link vs zip
     import_zip_mode = file is not None
     overleaf_repo = None
+    overleaf_commit: str | None = None
     zf: zipfile.ZipFile | None = None
     # Files the Overleaf project carries, relative to its root, so what's
     # being replaced can be compared against what's coming in
@@ -6913,8 +6915,6 @@ async def post_project_overleaf_publication(
             users.get_overleaf_token(session=session, user=current_user)
         except HTTPException:
             raise HTTPException(400, "No Overleaf token found")
-        # Only reads follow the listing, which a concurrent pull to the same
-        # commit leaves intact, so the lock needn't be held past it
         try:
             with get_overleaf_repo(
                 project=project,
@@ -6922,7 +6922,21 @@ async def post_project_overleaf_publication(
                 session=session,
                 overleaf_project_id=overleaf_project_id,
             ) as overleaf_repo:
-                overleaf_abs_path = str(overleaf_repo.working_dir)
+                # Snapshot the files and commit while the clone is locked, so
+                # a concurrent pull or sync can't change them mid-import; the
+                # directory is removed when the snapshot is garbage collected
+                overleaf_snapshot = tempfile.TemporaryDirectory(
+                    prefix="overleaf-import-"
+                )
+                overleaf_abs_path = os.path.join(
+                    overleaf_snapshot.name, "repo"
+                )
+                shutil.copytree(
+                    overleaf_repo.working_dir,
+                    overleaf_abs_path,
+                    ignore=shutil.ignore_patterns(".git"),
+                )
+                overleaf_commit = overleaf_repo.head.commit.hexsha
                 for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
                     dirnames[:] = [d for d in dirnames if d != ".git"]
                     for fname in filenames:
@@ -7068,12 +7082,11 @@ async def post_project_overleaf_publication(
         overleaf_sync_in_ck_info = ck_info.get("overleaf_sync", {})
         overleaf_sync_in_ck_info[path] = {"url": overleaf_project_url}
         ck_info["overleaf_sync"] = overleaf_sync_in_ck_info
-        last_overleaf_sync_commit = overleaf_repo.head.commit.hexsha
         calkit.overleaf.write_sync_info(
             synced_path=path,
             info={
                 "project_id": overleaf_project_id,
-                "last_sync_commit": last_overleaf_sync_commit,
+                "last_sync_commit": overleaf_commit,
             },
             wdir=repo.working_dir,
         )

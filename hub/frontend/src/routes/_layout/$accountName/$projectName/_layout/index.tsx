@@ -302,6 +302,8 @@ function ProjectView() {
                 <Link
                   as={RouterLink}
                   to={`/${accountName}/${projectName}/questions`}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  search={{ ref } as any}
                 >
                   Questions
                 </Link>

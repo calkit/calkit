@@ -238,8 +238,10 @@ function ProjectView() {
             />
           ) : null}
           {/* Each of these sits above the next, so hold them all until all
-              have landed rather than shoving the README down mid-read */}
-          {(checklistProject && !checklistSettled) ||
+              have landed rather than shoving the README down mid-read; the
+              project says whether there's a checklist to wait for */}
+          {projectRequest.isPending ||
+          (checklistProject && !checklistSettled) ||
           showcaseRequest.isPending ||
           readmeRequest.isPending ? (
             <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>

@@ -725,6 +725,10 @@ def get_creds_store() -> str | None:
     return store if isinstance(store, str) else None
 
 
+class DockerNotReadyError(ValueError):
+    """Docker isn't installed, isn't running, or can't be used."""
+
+
 # How long to wait for Docker to answer after starting Docker Desktop, which
 # can take a minute or more on a cold start
 DAEMON_START_TIMEOUT = 180.0
@@ -779,7 +783,7 @@ def ensure_ready(interactive: bool = False) -> None:
             print("Docker is required, but is not installed.")
             installed = install.prompt_and_install("docker", interactive=True)
         if not installed:
-            raise ValueError(
+            raise DockerNotReadyError(
                 "Docker is required, but is not installed. Install it with "
                 "'calkit install docker', or see "
                 "https://docs.docker.com/get-started/get-docker/"
@@ -789,7 +793,7 @@ def ensure_ready(interactive: bool = False) -> None:
     if error is None:
         return
     if "permission denied" in error.lower():
-        raise ValueError(
+        raise DockerNotReadyError(
             "Docker is installed, but this user isn't allowed to use it. "
             "Add yourself to the 'docker' group with "
             "'sudo usermod -aG docker $USER', then log out and back in.\n"
@@ -820,7 +824,7 @@ def ensure_ready(interactive: bool = False) -> None:
                 time.sleep(2)
                 if get_daemon_error() is None:
                     return
-            raise ValueError(
+            raise DockerNotReadyError(
                 "Started Docker Desktop, but Docker didn't answer within "
                 f"{DAEMON_START_TIMEOUT:.0f} seconds; once it's up, try again"
             )
@@ -828,7 +832,7 @@ def ensure_ready(interactive: bool = False) -> None:
         how = "start Docker Desktop"
     else:
         how = "start it, e.g., with 'sudo systemctl start docker'"
-    raise ValueError(
+    raise DockerNotReadyError(
         f"Docker is installed, but not running; {how} and try again.\n" + error
     )
 

@@ -1976,13 +1976,13 @@ def _offer_to_connect() -> bool:
     rather than reporting the symptom. True if it can be pushed now.
     """
     from calkit.cli.update import update_hub
-    from calkit.dependencies import _is_interactive
+    from calkit.core import is_tty
 
     typer.echo(
         "This project isn't connected to a hub, so there's nowhere to "
         "push its code and data."
     )
-    if not _is_interactive():
+    if not is_tty():
         warn("Skipping push; run 'calkit update hub' to connect")
         return False
     answer = typer.prompt(
@@ -2940,16 +2940,20 @@ def run(
     # Check all environments in the pipeline (with caching)
     # If any failed, warn the user that we might have problems running
     calkit.echo("📦 Checking environments")
-    from calkit.dependencies import _is_interactive
+    import calkit.docker
+    from calkit.core import is_tty
 
     try:
         env_check_results = calkit.environments.check_all_in_pipeline(
             ck_info=ck_info,
             targets=targets,
             force=force,
-            interactive=_is_interactive(),
+            interactive=is_tty(),
+            # Stages picked by --input or --output aren't known until the
+            # pipeline is compiled, so they may not need Docker at all
+            docker_required=not (target_inputs or target_outputs),
         )
-    except ValueError as e:
+    except calkit.docker.DockerNotReadyError as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
     for env_name, result in env_check_results.items():
@@ -2994,7 +2998,11 @@ def run(
                         f"📦 Checking environments for subproject: {sp}"
                     )
                 sp_env_results = calkit.environments.check_all_in_pipeline(
-                    ck_info=sp_ck_info, targets=sp_targets, force=force
+                    ck_info=sp_ck_info,
+                    targets=sp_targets,
+                    force=force,
+                    interactive=is_tty(),
+                    docker_required=not (target_inputs or target_outputs),
                 )
                 for env_name, sp_result in sp_env_results.items():
                     if verbose:
@@ -3007,6 +3015,10 @@ def run(
                 if not quiet:
                     calkit.echo(f"📓 Cleaning notebooks for subproject: {sp}")
                 calkit.notebooks.clean_all_in_pipeline(ck_info=sp_ck_info)
+            except calkit.docker.DockerNotReadyError as e:
+                os.chdir(prev_cwd)
+                os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+                raise_error(str(e))
             except Exception as e:
                 warn(
                     f"Failed to prepare subproject '{sp}': "
@@ -3859,7 +3871,7 @@ def run_in_env(
             if isinstance(e, FileNotFoundError) or e.returncode == 125:
                 try:
                     calkit.docker.ensure_ready()
-                except ValueError as ready_error:
+                except calkit.docker.DockerNotReadyError as ready_error:
                     raise_error(str(ready_error))
             returncode = getattr(e, "returncode", None)
             raise_error(
@@ -4278,9 +4290,9 @@ def install_app(
     if yes:
         ok = _install.install(name)
     else:
-        from calkit.dependencies import _is_interactive
+        from calkit.core import is_tty
 
-        ok = _install.prompt_and_install(name, interactive=_is_interactive())
+        ok = _install.prompt_and_install(name, interactive=is_tty())
     if not ok:
         raise_error(f"Failed to install '{name}'")
     typer.echo(f"✅ Installed '{name}'")

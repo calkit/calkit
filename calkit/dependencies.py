@@ -30,7 +30,6 @@ import hashlib
 import os
 import re
 import subprocess
-import sys
 import time
 from typing import Any
 
@@ -228,19 +227,6 @@ def _run_shell(
     return subprocess.run(cmd, shell=True, capture_output=capture, text=True)
 
 
-def _is_interactive() -> bool:
-    """True only when both stdin and stdout are TTYs.
-
-    Stdout matters because the prompt needs to render; stdin matters because
-    we need to read the user's answer. CI environments fail at least one
-    and fall through to the abort-with-fix-command path.
-    """
-    try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError):
-        return False
-
-
 def _resolve_cache_ttl(dep: dict[str, Any]) -> int:
     """Resolve the effective cache TTL for a setup dep.
 
@@ -278,7 +264,9 @@ def check_setup_dep(
             f"setup dependency '{name}' must declare 'check_command'"
         )
     if interactive is None:
-        interactive = _is_interactive()
+        from calkit.core import is_tty
+
+        interactive = is_tty()
     ttl_seconds = _resolve_cache_ttl(dep)
     # Cache hit short-circuits the probe entirely.
     if use_cache and ttl_seconds > 0:
@@ -364,7 +352,9 @@ def resolve_env_var_deps(
     import calkit
 
     if interactive is None:
-        interactive = _is_interactive()
+        from calkit.core import is_tty
+
+        interactive = is_tty()
     deps = calkit.get_requirements(ck_info)
     missing = []
     for name in calkit.get_env_var_dep_names(ck_info):

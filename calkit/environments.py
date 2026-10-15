@@ -1110,6 +1110,7 @@ def check_all_in_pipeline(
     quiet: bool = False,
     progress: Callable[[str], None] | None = None,
     interactive: bool = False,
+    docker_required: bool = True,
 ) -> dict:
     """Check all environments in the pipeline, caching for efficiency.
 
@@ -1119,6 +1120,12 @@ def check_all_in_pipeline(
 
     With ``quiet``, what the checks' tools print, e.g., uv or Julia, is
     discarded, and ``progress`` is told which environment is being checked.
+
+    Raises ``calkit.docker.DockerNotReadyError`` if a Docker environment
+    runs on this machine but Docker isn't installed or running, after
+    offering to fix that if ``interactive``. Without ``docker_required``,
+    e.g., when which stages will run isn't known yet, that only fails the
+    checks of the environments that use Docker.
     """
     import sys
     from collections.abc import Iterator
@@ -1126,6 +1133,18 @@ def check_all_in_pipeline(
 
     import calkit
     from calkit.cli.check import check_environment
+
+    def runs_docker_here(env_name: str) -> bool:
+        # A Docker environment inside one that dispatches to another machine
+        # or a scheduler runs there, so needs no Docker here
+        outer_name, _, inner_name = env_name.partition(COMPOSITE_ENV_SEP)
+        docker_name = inner_name or outer_name
+        if (envs.get(docker_name) or {}).get("kind") != "docker":
+            return False
+        if not inner_name:
+            return True
+        outer = envs.get(outer_name) or {}
+        return outer.get("kind") == "system" and env_is_local(outer)
 
     @contextmanager
     def silenced() -> Iterator[None]:
@@ -1202,14 +1221,12 @@ def check_all_in_pipeline(
                 for name in calkit.latex.get_diff_stage_names(k, v)
             )
         }
-    envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
-    envs_in_pipeline = [
-        e for e in envs_in_pipeline if e and not (str(e)).startswith("_")
-    ]
+    stage_envs = [stage.get("environment") for stage in stages.values()]
+    stage_envs = [e for e in stage_envs if e and not (str(e)).startswith("_")]
     # If any environments are composite environments, we need to split them
     # up into their individual names in the list
     split_envs = []
-    for env_name in envs_in_pipeline:
+    for env_name in stage_envs:
         if env_name.count(COMPOSITE_ENV_SEP) == 1:
             outer_env_name, sub_env_name = env_name.split(COMPOSITE_ENV_SEP)
             split_envs += [outer_env_name, sub_env_name]
@@ -1219,10 +1236,7 @@ def check_all_in_pipeline(
     envs = ck_info.get("environments", {})
     # Checked regardless of the cache, since Docker can be stopped or
     # removed without anything in the project changing
-    if any(
-        (envs.get(env_name) or {}).get("kind") == "docker"
-        for env_name in envs_in_pipeline
-    ):
+    if docker_required and any(runs_docker_here(e) for e in stage_envs):
         import calkit.docker
 
         calkit.docker.ensure_ready(interactive=interactive)

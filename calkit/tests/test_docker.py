@@ -591,11 +591,15 @@ def test_ensure_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     # Not installed, which offers the installer only on a TTY
     monkeypatch.setattr("shutil.which", lambda _: None)
     with mock.patch("calkit.install.prompt_and_install") as install:
-        with pytest.raises(ValueError, match="calkit install docker"):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="calkit install docker"
+        ):
             calkit.docker.ensure_ready()
         install.assert_not_called()
         install.return_value = False
-        with pytest.raises(ValueError, match="not installed"):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="not installed"
+        ):
             calkit.docker.ensure_ready(interactive=True)
         install.assert_called_once_with("docker", interactive=True)
     # Installed and running
@@ -605,17 +609,23 @@ def test_ensure_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     # Installed but not running
     not_running = docker_info(1, "Cannot connect to the Docker daemon")
     with mock.patch("subprocess.run", not_running):
-        with pytest.raises(ValueError, match="not running"):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="not running"
+        ):
             calkit.docker.ensure_ready()
     # Installed but not usable by this user
     with mock.patch("subprocess.run", docker_info(1, "permission denied")):
-        with pytest.raises(ValueError, match="'docker' group"):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="'docker' group"
+        ):
             calkit.docker.ensure_ready()
     # A daemon that doesn't answer at all
     with mock.patch(
         "subprocess.run", side_effect=subprocess.TimeoutExpired("docker", 30)
     ):
-        with pytest.raises(ValueError, match="did not answer"):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="did not answer"
+        ):
             calkit.docker.ensure_ready()
     # Docker Desktop is offered to be started on a TTY, and waited for
     monkeypatch.setattr("calkit.docker.DAEMON_START_TIMEOUT", 10.0)
@@ -642,6 +652,8 @@ def test_ensure_ready(monkeypatch: pytest.MonkeyPatch) -> None:
         mock.patch("subprocess.Popen") as popen,
         mock.patch("builtins.input", return_value="n"),
     ):
-        with pytest.raises(ValueError, match="start Docker Desktop"):
+        with pytest.raises(
+            calkit.docker.DockerNotReadyError, match="start Docker Desktop"
+        ):
             calkit.docker.ensure_ready(interactive=True)
     popen.assert_not_called()

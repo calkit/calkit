@@ -115,6 +115,44 @@ def test_check_all_in_pipeline(tmp_dir):
             calkit.environments.check_all_in_pipeline(targets=["run-thing"])
             == {}
         )
+        # Not when it isn't known yet which stages will run, in which case
+        # the environment's own check fails instead
+        ensure_ready.reset_mock()
+        with mock.patch(
+            "calkit.cli.check.check_environment", side_effect=Exception
+        ):
+            res = calkit.environments.check_all_in_pipeline(
+                docker_required=False
+            )
+        ensure_ready.assert_not_called()
+        assert not res["docker1"]["success"]
+        # Nor when it runs inside an environment on another machine or a
+        # scheduler, which needs Docker there instead
+        ck_info["environments"]["remote"] = {
+            "kind": "system",
+            "host": "some-other-machine.example.com",
+        }
+        ck_info["environments"]["cluster"] = {"kind": "slurm", "host": "hpc"}
+        for outer in ["remote", "cluster"]:
+            ck_info["pipeline"]["stages"]["run-docker"]["environment"] = (
+                f"{outer}:docker1"
+            )
+            with open("calkit.yaml", "w") as f:
+                calkit.ryaml.dump(ck_info, f)
+            with mock.patch("calkit.cli.check.check_environment"):
+                calkit.environments.check_all_in_pipeline(
+                    targets=["run-docker"]
+                )
+            ensure_ready.assert_not_called()
+        # But it does when that machine is this one
+        ck_info["environments"]["remote"]["host"] = "localhost"
+        ck_info["pipeline"]["stages"]["run-docker"]["environment"] = (
+            "remote:docker1"
+        )
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        with pytest.raises(ValueError, match="not installed"):
+            calkit.environments.check_all_in_pipeline(targets=["run-docker"])
 
 
 def test_cache_uses_dir_signature_for_conda_prefix(tmp_dir, monkeypatch):

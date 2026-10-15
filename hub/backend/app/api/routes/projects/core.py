@@ -7204,7 +7204,7 @@ def post_project_overleaf_sync(
     repo = get_repo(project=project, user=current_user, session=session)
     ck_info = get_ck_info_from_repo(repo)
     overleaf_sync_info = calkit.overleaf.get_sync_info(
-        wdir=repo.working_dir, ck_info=ck_info, fix_legacy=True
+        wdir=repo.working_dir, ck_info=ck_info
     )
     app.projects.record_overleaf_links(
         session=session, project=project, repo=repo
@@ -7227,7 +7227,9 @@ def post_project_overleaf_sync(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,
                 path_in_project=path_in_project,
-                sync_info_for_path=overleaf_sync_info[path_in_project],
+                # Reloaded under the lock, in case a sync we waited on just
+                # moved the checkpoint, which also fixes any legacy schema
+                sync_info_for_path=None,
                 print_info=logger.info,
                 no_commit=False,
             )
@@ -7400,7 +7402,9 @@ def get_project_overleaf_sync_status(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,
                 path_in_project=path_in_project,
-                sync_info_for_path=sync_info_for_path,
+                # Reloaded under the lock, in case a sync we waited on just
+                # moved the checkpoint
+                sync_info_for_path=None,
                 ck_info=ck_info,
             )
         resp.append(

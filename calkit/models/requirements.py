@@ -25,7 +25,6 @@ class RequirementAttrs(Model):
     description: str | None = None
     default: str | None = None
     version_spec: str | None = None
-    obtain_command: str | None = None
     account_id: str | None = None
     profile: str | None = None
     notes: str | None = None
@@ -39,7 +38,7 @@ class Requirement(Model):
     - ``app``: an executable that must be on ``PATH``, optionally
       satisfying a ``version_spec``.
     - ``env-var``: an environmental variable that must be defined.
-      ``obtain_command`` says how to get a value, e.g., a command that
+      ``setup_command`` says how to get a value, e.g., a login flow that
       prints a token, and is offered before the value is asked for.
     - ``setup``: a per-machine precondition that isn't a file---e.g.,
       the user must have authenticated a CLI like ``gh auth login``.
@@ -65,9 +64,14 @@ class Requirement(Model):
         "app", "env-var", "setup", "aws-credentials", "calkit-config"
     ] = "app"
     name: str
-    # ``setup``-kind fields; ignored for other kinds.
+    # ``setup``-kind field; ignored for other kinds.
     check_command: str | None = None
-    setup_command: str | None = None
+    setup_command: str | None = Field(
+        default=None,
+        description="Command that sets the requirement up, offered on a "
+        "terminal and printed as the fix otherwise. For an 'env-var', it's "
+        "run before the value is asked for, e.g., 'claude setup-token'.",
+    )
     # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
     # integer number of seconds. Setup requirements cache successful checks
     # by default for ``DEFAULT_SETUP_CACHE_TTL``; set ``cache_ttl: 0`` to
@@ -80,12 +84,6 @@ class Requirement(Model):
         default=None,
         description="Version specifier an 'app' must satisfy, e.g., '>=2.40'. "
         "A string requirement like 'git>=2.40' is shorthand for this.",
-    )
-    obtain_command: str | None = Field(
-        default=None,
-        description="Command an 'env-var' value can be obtained with, e.g., "
-        "'claude setup-token'. Offered to be run before the value is "
-        "asked for.",
     )
     account_id: str | None = Field(
         default=None,

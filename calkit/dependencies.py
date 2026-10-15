@@ -415,7 +415,7 @@ def prompt_and_store_env_var(
 def prompt_for_env_var_dep(dep: dict[str, Any]) -> str | None:
     """Ask for a missing ``env-var`` dependency's value and store it.
 
-    A declared ``obtain_command`` is offered first, attached to the
+    A declared ``setup_command`` is offered first, attached to the
     terminal, since getting a value often means a login flow, e.g.,
     ``claude setup-token``, that ends by printing it for the user to copy.
     """
@@ -424,20 +424,20 @@ def prompt_for_env_var_dep(dep: dict[str, Any]) -> str | None:
     for key in ("description", "notes"):
         if dep.get(key):
             print(f"  {str(dep[key]).strip()}")
-    obtain_command = dep.get("obtain_command")
-    if obtain_command:
+    setup_command = dep.get("setup_command")
+    if setup_command:
         try:
             answer = (
-                input(f"Run {obtain_command!r} to obtain a value? [Y/n] ")
+                input(f"Run {setup_command!r} to get a value? [Y/n] ")
                 .strip()
                 .lower()
             )
         except EOFError:
             answer = "n"
         if answer in ("", "y", "yes"):
-            result = _run_shell(obtain_command, capture=False)
+            result = _run_shell(setup_command, capture=False)
             if result.returncode != 0:
-                print(f"  {obtain_command!r} exited {result.returncode}.")
+                print(f"  {setup_command!r} exited {result.returncode}.")
     return prompt_and_store_env_var(name, default=dep.get("default"))
 
 

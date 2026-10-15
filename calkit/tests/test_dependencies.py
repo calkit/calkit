@@ -320,30 +320,30 @@ def test_prompt_for_env_var_dep(tmp_dir, monkeypatch, capsys):
     dep = {
         "kind": "env-var",
         "name": "CK_TOKEN",
-        "obtain_command": "echo obtained > obtained.txt",
+        "setup_command": "echo got > got.txt",
         "description": "A token for the API.\n",
     }
-    # Agreeing runs the obtain command, then asks for what it gave
+    # Agreeing runs the setup command, then asks for what it gave
     answers = iter(["", "tok-1"])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
     assert deps.prompt_for_env_var_dep(dep) == "tok-1"
-    assert (tmp_dir / "obtained.txt").exists()
+    assert (tmp_dir / "got.txt").exists()
     assert os.environ["CK_TOKEN"] == "tok-1"
     assert "A token for the API." in capsys.readouterr().out
     # Declining skips straight to asking
-    (tmp_dir / "obtained.txt").unlink()
+    (tmp_dir / "got.txt").unlink()
     answers = iter(["n", "tok-2"])
     assert deps.prompt_for_env_var_dep(dep) == "tok-2"
-    assert not (tmp_dir / "obtained.txt").exists()
-    # A failing obtain command still lets a value be entered
+    assert not (tmp_dir / "got.txt").exists()
+    # A failing setup command still lets a value be entered
     answers = iter(["y", "tok-3"])
-    assert deps.prompt_for_env_var_dep(dict(dep, obtain_command="false")) == (
+    assert deps.prompt_for_env_var_dep(dict(dep, setup_command="false")) == (
         "tok-3"
     )
     assert "exited 1" in capsys.readouterr().out
-    # Without a terminal, the error says how to obtain a value
+    # Without a terminal, the error says how to get a value
     monkeypatch.delenv("CK_TOKEN", raising=False)
-    with pytest.raises(ValueError, match="obtain a value with 'echo"):
+    with pytest.raises(ValueError, match="get a value with 'echo"):
         calkit.check_requirements(
             requirements=[dep], interactive=False, described_as="here"
         )

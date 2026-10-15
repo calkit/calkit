@@ -911,11 +911,8 @@ def check_requirements(
                     "in that machine's shell profile, since a stage running "
                     "there reads its environment, not this one's."
                 )
-                if req.get("obtain_command"):
-                    msg += (
-                        " A value can be obtained with "
-                        f"'{req['obtain_command']}'."
-                    )
+                if req.get("setup_command"):
+                    msg += f" Get a value with '{req['setup_command']}'."
                 raise ValueError(msg)
         elif kind == "app":
             cmd = f"command -v {shlex.quote(name)}"

@@ -122,19 +122,6 @@
           "default": null,
           "title": "Notes"
         },
-        "obtain_command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for.",
-          "title": "Obtain Command"
-        },
         "profile": {
           "anyOf": [
             {
@@ -158,6 +145,7 @@
             }
           ],
           "default": null,
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -7852,7 +7840,7 @@
       "type": "object"
     },
     "Requirement": {
-      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n  ``obtain_command`` says how to get a value, e.g., a command that\n  prints a token, and is offered before the value is asked for.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
+      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n  ``setup_command`` says how to get a value, e.g., a login flow that\n  prints a token, and is offered before the value is asked for.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
       "properties": {
         "account_id": {
           "anyOf": [
@@ -7946,19 +7934,6 @@
           "default": null,
           "title": "Notes"
         },
-        "obtain_command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for.",
-          "title": "Obtain Command"
-        },
         "profile": {
           "anyOf": [
             {
@@ -7982,6 +7957,7 @@
             }
           ],
           "default": null,
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -8093,18 +8069,6 @@
           ],
           "default": null,
           "title": "Notes"
-        },
-        "obtain_command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Obtain Command"
         },
         "profile": {
           "anyOf": [
@@ -8684,19 +8648,6 @@
           "default": null,
           "title": "Notes"
         },
-        "obtain_command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for.",
-          "title": "Obtain Command"
-        },
         "profile": {
           "anyOf": [
             {
@@ -8720,6 +8671,7 @@
             }
           ],
           "default": null,
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {

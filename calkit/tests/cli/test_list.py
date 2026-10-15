@@ -28,7 +28,7 @@ def test_list_requirements(tmp_dir):
             {
                 "kind": "env-var",
                 "name": "TOKEN",
-                "obtain_command": "claude setup-token",
+                "setup_command": "claude setup-token",
             },
             {"kind": "aws-credentials", "account_id": "012345678901"},
             {"kind": "cpu-count", "min": 4},
@@ -67,10 +67,10 @@ def test_list_requirements(tmp_dir):
         ("stage 'fetch'", "DATA"),
     ]
     assert reqs[0]["version_spec"] == ">=2.40"
-    assert reqs[1]["obtain_command"] == "claude setup-token"
+    assert reqs[1]["setup_command"] == "claude setup-token"
     out = subprocess.check_output(["calkit", "list", "reqs"], text=True)
     assert "Project:\n  - git (app)\n      version_spec: >=2.40" in out
-    assert "obtain_command: claude setup-token" in out
+    assert "setup_command: claude setup-token" in out
     assert "  - cpu-count\n      min: 4" in out
     assert "Environment 'cluster':\n  - hostname" in out
     assert "Stage 'fetch':\n  - DATA (env-var)" in out

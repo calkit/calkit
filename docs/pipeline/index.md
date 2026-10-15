@@ -792,39 +792,37 @@ A `setup` requirement, whose `name` may be omitted.
 Without a `name`, Calkit derives a stable `setup-<hash>` one from
 `check_command`.
 
-| Parameter        | Type               | Required | Default | Description                                                                                                                   |
-| ---------------- | ------------------ | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `kind`           | Literal['setup']   | no       | 'setup' |                                                                                                                               |
-| `name`           | str \| None        | no       | null    |                                                                                                                               |
-| `check_command`  | str \| None        | no       | null    |                                                                                                                               |
-| `setup_command`  | str \| None        | no       | null    |                                                                                                                               |
-| `cache_ttl`      | str \| int \| None | no       | null    |                                                                                                                               |
-| `description`    | str \| None        | no       | null    |                                                                                                                               |
-| `default`        | str \| None        | no       | null    |                                                                                                                               |
-| `version_spec`   | str \| None        | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.         |
-| `obtain_command` | str \| None        | no       | null    | Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for. |
-| `account_id`     | str \| None        | no       | null    | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                  |
-| `profile`        | str \| None        | no       | null    | AWS profile 'aws-credentials' are checked with, if not the default.                                                           |
-| `notes`          | str \| None        | no       | null    |                                                                                                                               |
+| Parameter       | Type               | Required | Default | Description                                                                                                                                                                         |
+| --------------- | ------------------ | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['setup']   | no       | 'setup' |                                                                                                                                                                                     |
+| `name`          | str \| None        | no       | null    |                                                                                                                                                                                     |
+| `check_command` | str \| None        | no       | null    |                                                                                                                                                                                     |
+| `setup_command` | str \| None        | no       | null    | Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'. |
+| `cache_ttl`     | str \| int \| None | no       | null    |                                                                                                                                                                                     |
+| `description`   | str \| None        | no       | null    |                                                                                                                                                                                     |
+| `default`       | str \| None        | no       | null    |                                                                                                                                                                                     |
+| `version_spec`  | str \| None        | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.                                                               |
+| `account_id`    | str \| None        | no       | null    | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                                                                        |
+| `profile`       | str \| None        | no       | null    | AWS profile 'aws-credentials' are checked with, if not the default.                                                                                                                 |
+| `notes`         | str \| None        | no       | null    |                                                                                                                                                                                     |
 
 #### `AwsCredentialsRequirement`
 
 An `aws-credentials` requirement, whose `name` may be omitted.
 
-| Parameter        | Type                       | Required | Default           | Description                                                                                                                   |
-| ---------------- | -------------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `kind`           | Literal['aws-credentials'] | no       | 'aws-credentials' |                                                                                                                               |
-| `name`           | str \| None                | no       | null              |                                                                                                                               |
-| `check_command`  | str \| None                | no       | null              |                                                                                                                               |
-| `setup_command`  | str \| None                | no       | null              |                                                                                                                               |
-| `cache_ttl`      | str \| int \| None         | no       | null              |                                                                                                                               |
-| `description`    | str \| None                | no       | null              |                                                                                                                               |
-| `default`        | str \| None                | no       | null              |                                                                                                                               |
-| `version_spec`   | str \| None                | no       | null              | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.         |
-| `obtain_command` | str \| None                | no       | null              | Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for. |
-| `account_id`     | str \| None                | no       | null              | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                  |
-| `profile`        | str \| None                | no       | null              | AWS profile 'aws-credentials' are checked with, if not the default.                                                           |
-| `notes`          | str \| None                | no       | null              |                                                                                                                               |
+| Parameter       | Type                       | Required | Default           | Description                                                                                                                                                                         |
+| --------------- | -------------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['aws-credentials'] | no       | 'aws-credentials' |                                                                                                                                                                                     |
+| `name`          | str \| None                | no       | null              |                                                                                                                                                                                     |
+| `check_command` | str \| None                | no       | null              |                                                                                                                                                                                     |
+| `setup_command` | str \| None                | no       | null              | Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'. |
+| `cache_ttl`     | str \| int \| None         | no       | null              |                                                                                                                                                                                     |
+| `description`   | str \| None                | no       | null              |                                                                                                                                                                                     |
+| `default`       | str \| None                | no       | null              |                                                                                                                                                                                     |
+| `version_spec`  | str \| None                | no       | null              | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.                                                               |
+| `account_id`    | str \| None                | no       | null              | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                                                                        |
+| `profile`       | str \| None                | no       | null              | AWS profile 'aws-credentials' are checked with, if not the default.                                                                                                                 |
+| `notes`         | str \| None                | no       | null              |                                                                                                                                                                                     |
 
 #### `Requirement`
 
@@ -835,7 +833,7 @@ Five kinds are supported:
 - `app`: an executable that must be on `PATH`, optionally
   satisfying a `version_spec`.
 - `env-var`: an environmental variable that must be defined.
-  `obtain_command` says how to get a value, e.g., a command that
+  `setup_command` says how to get a value, e.g., a login flow that
   prints a token, and is offered before the value is asked for.
 - `setup`: a per-machine precondition that isn't a file---e.g.,
   the user must have authenticated a CLI like `gh auth login`.
@@ -856,20 +854,19 @@ properties of a machine that can't be installed, e.g., how many CPUs
 it has or what OS it runs, are constrained by giving the property as
 the `kind` instead, e.g., `kind: cpu-count` with a `min`.
 
-| Parameter        | Type                                                                   | Required | Default | Description                                                                                                                   |
-| ---------------- | ---------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `kind`           | Literal['app', 'env-var', 'setup', 'aws-credentials', 'calkit-config'] | no       | 'app'   |                                                                                                                               |
-| `name`           | str                                                                    | yes      |         |                                                                                                                               |
-| `check_command`  | str \| None                                                            | no       | null    |                                                                                                                               |
-| `setup_command`  | str \| None                                                            | no       | null    |                                                                                                                               |
-| `cache_ttl`      | str \| int \| None                                                     | no       | null    |                                                                                                                               |
-| `description`    | str \| None                                                            | no       | null    |                                                                                                                               |
-| `default`        | str \| None                                                            | no       | null    |                                                                                                                               |
-| `version_spec`   | str \| None                                                            | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.         |
-| `obtain_command` | str \| None                                                            | no       | null    | Command an 'env-var' value can be obtained with, e.g., 'claude setup-token'. Offered to be run before the value is asked for. |
-| `account_id`     | str \| None                                                            | no       | null    | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                  |
-| `profile`        | str \| None                                                            | no       | null    | AWS profile 'aws-credentials' are checked with, if not the default.                                                           |
-| `notes`          | str \| None                                                            | no       | null    |                                                                                                                               |
+| Parameter       | Type                                                                   | Required | Default | Description                                                                                                                                                                         |
+| --------------- | ---------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['app', 'env-var', 'setup', 'aws-credentials', 'calkit-config'] | no       | 'app'   |                                                                                                                                                                                     |
+| `name`          | str                                                                    | yes      |         |                                                                                                                                                                                     |
+| `check_command` | str \| None                                                            | no       | null    |                                                                                                                                                                                     |
+| `setup_command` | str \| None                                                            | no       | null    | Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'. |
+| `cache_ttl`     | str \| int \| None                                                     | no       | null    |                                                                                                                                                                                     |
+| `description`   | str \| None                                                            | no       | null    |                                                                                                                                                                                     |
+| `default`       | str \| None                                                            | no       | null    |                                                                                                                                                                                     |
+| `version_spec`  | str \| None                                                            | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.                                                               |
+| `account_id`    | str \| None                                                            | no       | null    | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                                                                        |
+| `profile`       | str \| None                                                            | no       | null    | AWS profile 'aws-credentials' are checked with, if not the default.                                                                                                                 |
+| `notes`         | str \| None                                                            | no       | null    |                                                                                                                                                                                     |
 
 #### `RequirementAttrs`
 
@@ -878,19 +875,18 @@ A requirement's properties, as written under `{name: {...}}`.
 `Requirement` is this plus the name; the mapping form supplies the
 name as its key instead.
 
-| Parameter        | Type                                                                   | Required | Default | Description |
-| ---------------- | ---------------------------------------------------------------------- | -------- | ------- | ----------- |
-| `kind`           | Literal['app', 'env-var', 'setup', 'aws-credentials', 'calkit-config'] | no       | 'app'   |             |
-| `check_command`  | str \| None                                                            | no       | null    |             |
-| `setup_command`  | str \| None                                                            | no       | null    |             |
-| `cache_ttl`      | str \| int \| None                                                     | no       | null    |             |
-| `description`    | str \| None                                                            | no       | null    |             |
-| `default`        | str \| None                                                            | no       | null    |             |
-| `version_spec`   | str \| None                                                            | no       | null    |             |
-| `obtain_command` | str \| None                                                            | no       | null    |             |
-| `account_id`     | str \| None                                                            | no       | null    |             |
-| `profile`        | str \| None                                                            | no       | null    |             |
-| `notes`          | str \| None                                                            | no       | null    |             |
+| Parameter       | Type                                                                   | Required | Default | Description |
+| --------------- | ---------------------------------------------------------------------- | -------- | ------- | ----------- |
+| `kind`          | Literal['app', 'env-var', 'setup', 'aws-credentials', 'calkit-config'] | no       | 'app'   |             |
+| `check_command` | str \| None                                                            | no       | null    |             |
+| `setup_command` | str \| None                                                            | no       | null    |             |
+| `cache_ttl`     | str \| int \| None                                                     | no       | null    |             |
+| `description`   | str \| None                                                            | no       | null    |             |
+| `default`       | str \| None                                                            | no       | null    |             |
+| `version_spec`  | str \| None                                                            | no       | null    |             |
+| `account_id`    | str \| None                                                            | no       | null    |             |
+| `profile`       | str \| None                                                            | no       | null    |             |
+| `notes`         | str \| None                                                            | no       | null    |             |
 
 #### `PythonScriptDiffFilter`
 

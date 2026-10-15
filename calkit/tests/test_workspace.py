@@ -1484,15 +1484,15 @@ def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
     failing.add("SCRATCH")
     with pytest.raises(ValueError, match="env-var 'SCRATCH' is not set"):
         ws.check_requirements(w, [{"kind": "env-var", "name": "SCRATCH"}])
-    # How to obtain a value is passed along
-    with pytest.raises(ValueError, match="obtained with 'get-token'"):
+    # How to get a value is passed along
+    with pytest.raises(ValueError, match="Get a value with 'get-token'"):
         ws.check_requirements(
             w,
             [
                 {
                     "kind": "env-var",
                     "name": "SCRATCH",
-                    "obtain_command": "get-token",
+                    "setup_command": "get-token",
                 }
             ],
         )

@@ -1207,9 +1207,9 @@ def check_requirements(
             if prompt_for_env_var_dep(dep) is not None:
                 continue
         msg = f"env-var '{dep_name}' not found"
-        if dep.get("obtain_command"):
+        if dep.get("setup_command"):
             msg += (
-                f"; obtain a value with '{dep['obtain_command']}' and set it "
+                f"; get a value with '{dep['setup_command']}' and set it "
                 f"with 'calkit set-env-var {dep_name} <value>'"
             )
         raise ValueError(msg)

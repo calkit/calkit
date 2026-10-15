@@ -41,7 +41,7 @@ import CommentsPanel, {
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import Tooltip from "../Common/Tooltip"
-import FigureView from "../Figures/FigureView"
+import FigureView, { PlotlyThumbnail } from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
 import SandboxedHtml from "../Common/SandboxedHtml"
 import PublicationView from "../Publications/PublicationView"
@@ -243,8 +243,12 @@ function EvidenceCard({
           objectFit="contain"
         />
       )
+    } else if (fig?.content && ext === "json") {
+      // Same stripped-down drawing as the gallery, since a live plot this
+      // small squishes its labels into the traces.
+      thumb = <PlotlyThumbnail figure={fig} height={150} />
     } else if (fig && (fig.content || fig.url)) {
-      // Plotly JSON, PDFs, etc. go through the shared figure renderer.
+      // PDFs, etc. go through the shared figure renderer.
       thumb = <FigureView figure={fig} fillHeight />
     } else {
       thumb = (

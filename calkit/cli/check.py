@@ -1119,12 +1119,17 @@ def check_docker_env(
 ) -> None:
     """Check that Docker environment is up-to-date."""
     from calkit import docker as ck_docker
+    from calkit.dependencies import _is_interactive
     from calkit.environments import get_docker_arch
 
     if fpath is None and lock_fpath is None:
         raise_error(
             "Lock file output path must be provided if input Dockerfile is not"
         )
+    try:
+        ck_docker.ensure_ready(interactive=_is_interactive())
+    except ValueError as e:
+        raise_error(str(e))
     outfile = open(os.devnull, "w") if quiet else None
     if fpath is not None:
         typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)

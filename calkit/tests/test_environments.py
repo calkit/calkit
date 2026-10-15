@@ -17,7 +17,7 @@ import calkit.latex
 
 
 def test_check_all_in_pipeline(tmp_dir):
-    ck_info = {
+    ck_info: dict = {
         "environments": {
             "py1": {
                 "kind": "uv-venv",
@@ -94,6 +94,27 @@ def test_check_all_in_pipeline(tmp_dir):
         calkit.environments.check_all_in_pipeline(targets=["run-thing"]) == {}
     )
     assert not os.path.exists(env_prefix)
+    # A Docker environment needs Docker ready, which is checked up front
+    ck_info["environments"]["docker1"] = {"kind": "docker", "image": "alpine"}
+    ck_info["pipeline"]["stages"]["run-docker"] = {
+        "kind": "command",
+        "command": "echo hi",
+        "environment": "docker1",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with mock.patch(
+        "calkit.docker.ensure_ready",
+        side_effect=ValueError("Docker is required, but is not installed"),
+    ) as ensure_ready:
+        with pytest.raises(ValueError, match="not installed"):
+            calkit.environments.check_all_in_pipeline(interactive=True)
+        ensure_ready.assert_called_once_with(interactive=True)
+        # Only when a stage that will run uses it
+        assert (
+            calkit.environments.check_all_in_pipeline(targets=["run-thing"])
+            == {}
+        )
 
 
 def test_cache_uses_dir_signature_for_conda_prefix(tmp_dir, monkeypatch):

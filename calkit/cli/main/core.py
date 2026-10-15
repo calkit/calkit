@@ -2940,9 +2940,18 @@ def run(
     # Check all environments in the pipeline (with caching)
     # If any failed, warn the user that we might have problems running
     calkit.echo("📦 Checking environments")
-    env_check_results = calkit.environments.check_all_in_pipeline(
-        ck_info=ck_info, targets=targets, force=force
-    )
+    from calkit.dependencies import _is_interactive
+
+    try:
+        env_check_results = calkit.environments.check_all_in_pipeline(
+            ck_info=ck_info,
+            targets=targets,
+            force=force,
+            interactive=_is_interactive(),
+        )
+    except ValueError as e:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(str(e))
     for env_name, result in env_check_results.items():
         if verbose:
             typer.echo(f"{env_name}: {result}")
@@ -3844,10 +3853,18 @@ def run_in_env(
             typer.echo(f"Running command: {docker_cmd}")
         try:
             subprocess.check_call(docker_cmd, cwd=wdir)
-        except subprocess.CalledProcessError as e:
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            # Docker exits 125 when it couldn't run the container at all,
+            # which is most often because Docker itself isn't running
+            if isinstance(e, FileNotFoundError) or e.returncode == 125:
+                try:
+                    calkit.docker.ensure_ready()
+                except ValueError as ready_error:
+                    raise_error(str(ready_error))
+            returncode = getattr(e, "returncode", None)
             raise_error(
                 "Failed to run in Docker environment: command exited with "
-                f"status {e.returncode}"
+                f"status {returncode}"
             )
     elif env["kind"] == "conda":
         with open(env["path"]) as f:

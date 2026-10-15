@@ -725,6 +725,114 @@ def get_creds_store() -> str | None:
     return store if isinstance(store, str) else None
 
 
+# How long to wait for Docker to answer after starting Docker Desktop, which
+# can take a minute or more on a cold start
+DAEMON_START_TIMEOUT = 180.0
+
+
+def ensure_ready(interactive: bool = False) -> None:
+    """Make sure Docker is installed and running, or say what to do.
+
+    Without both, every Docker command fails, and the failure otherwise
+    surfaces much later as a pull or run that went wrong for no stated
+    reason. On a TTY, installing or starting Docker is offered.
+    """
+    import shutil
+    import time
+
+    from calkit import install
+
+    def get_desktop_start_cmd() -> list[str] | None:
+        # How to start Docker Desktop, if it's installed
+        if sys.platform == "darwin":
+            for apps_dir in ("/Applications", "~/Applications"):
+                if os.path.isdir(
+                    os.path.join(os.path.expanduser(apps_dir), "Docker.app")
+                ):
+                    return ["open", "-a", "Docker"]
+        elif sys.platform.startswith("win"):
+            exe = os.path.expandvars(
+                "%ProgramFiles%\\Docker\\Docker\\Docker Desktop.exe"
+            )
+            if os.path.isfile(exe):
+                return [exe]
+        return None
+
+    def get_daemon_error() -> str | None:
+        # What Docker says when its daemon can't be reached, if it can't
+        try:
+            res = subprocess.run(
+                ["docker", "info"], capture_output=True, text=True, timeout=30
+            )
+        except subprocess.TimeoutExpired:
+            return "Docker did not answer within 30 seconds"
+        except OSError as e:
+            return str(e)
+        if res.returncode == 0:
+            return None
+        return (res.stderr or res.stdout).strip() or "'docker info' failed"
+
+    # Check it's installed
+    if shutil.which("docker") is None:
+        installed = False
+        if interactive:
+            print("Docker is required, but is not installed.")
+            installed = install.prompt_and_install("docker", interactive=True)
+        if not installed:
+            raise ValueError(
+                "Docker is required, but is not installed. Install it with "
+                "'calkit install docker', or see "
+                "https://docs.docker.com/get-started/get-docker/"
+            )
+    # Check it's running
+    error = get_daemon_error()
+    if error is None:
+        return
+    if "permission denied" in error.lower():
+        raise ValueError(
+            "Docker is installed, but this user isn't allowed to use it. "
+            "Add yourself to the 'docker' group with "
+            "'sudo usermod -aG docker $USER', then log out and back in.\n"
+            + error
+        )
+    start_cmd = get_desktop_start_cmd()
+    if start_cmd is not None and interactive:
+        try:
+            answer = (
+                input(
+                    "Docker is installed, but not running. "
+                    "Start Docker Desktop? [Y/n] "
+                )
+                .strip()
+                .lower()
+            )
+        except EOFError:
+            answer = "n"
+        if answer in ("", "y", "yes"):
+            subprocess.Popen(
+                start_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("Waiting for Docker to start...")
+            deadline = time.monotonic() + DAEMON_START_TIMEOUT
+            while time.monotonic() < deadline:
+                time.sleep(2)
+                if get_daemon_error() is None:
+                    return
+            raise ValueError(
+                "Started Docker Desktop, but Docker didn't answer within "
+                f"{DAEMON_START_TIMEOUT:.0f} seconds; once it's up, try again"
+            )
+    if start_cmd is not None or not sys.platform.startswith("linux"):
+        how = "start Docker Desktop"
+    else:
+        how = "start it, e.g., with 'sudo systemctl start docker'"
+    raise ValueError(
+        f"Docker is installed, but not running; {how} and try again.\n" + error
+    )
+
+
 def pull_image(ref: str, platform: str | None = None) -> tuple[bool, str]:
     """Pull an image, returning success and its output."""
     cmd = ["docker", "pull"]

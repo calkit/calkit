@@ -1109,6 +1109,7 @@ def check_all_in_pipeline(
     force: bool = False,
     quiet: bool = False,
     progress: Callable[[str], None] | None = None,
+    interactive: bool = False,
 ) -> dict:
     """Check all environments in the pipeline, caching for efficiency.
 
@@ -1216,6 +1217,15 @@ def check_all_in_pipeline(
             split_envs.append(env_name)
     envs_in_pipeline = list(set(split_envs))
     envs = ck_info.get("environments", {})
+    # Checked regardless of the cache, since Docker can be stopped or
+    # removed without anything in the project changing
+    if any(
+        (envs.get(env_name) or {}).get("kind") == "docker"
+        for env_name in envs_in_pipeline
+    ):
+        import calkit.docker
+
+        calkit.docker.ensure_ready(interactive=interactive)
     for env_name in envs_in_pipeline:
         env = envs.get(env_name)
         if env.get("kind") in KINDS_NO_CHECK:

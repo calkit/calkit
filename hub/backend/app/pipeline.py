@@ -23,7 +23,7 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Literal
+from typing import Any, Literal
 
 import ruamel.yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -744,7 +744,11 @@ def compute_stage_statuses(
     return result
 
 
-def find_frozen_tainted_stages(dvc_yaml: dict, dvc_lock: dict) -> set[str]:
+def find_frozen_tainted_stages(
+    dvc_yaml: dict[str, Any],
+    dvc_lock: dict[str, Any],
+    stage_statuses: dict[str, StageStatus] | None = None,
+) -> set[str]:
     """Stages that are frozen, plus everything downstream of one.
 
     A frozen stage (``dvc freeze``) is never stale, because DVC won't re-run
@@ -752,6 +756,10 @@ def find_frozen_tainted_stages(dvc_yaml: dict, dvc_lock: dict) -> set[str]:
     can't be taken at face value, and why neither can anything computed from
     them. Staleness detection has nothing to say about either, so name them
     here and let callers decide what to do about it.
+
+    Given ``stage_statuses``, a frozen stage whose command, deps, and outs
+    still match ``dvc.lock`` is left out, since it's as current as if it
+    weren't frozen, matching the CLI's ``frozen_tainted_stage_names``.
 
     Returns stage names as they appear in ``dvc.lock``, matching the keys of
     ``compute_stage_statuses``.
@@ -792,12 +800,26 @@ def find_frozen_tainted_stages(dvc_yaml: dict, dvc_lock: dict) -> set[str]:
                             consumers.setdefault(producer, set()).add(
                                 stage_name
                             )
+
+    def _changed(stage_name: str) -> bool:
+        if stage_statuses is None:
+            return True
+        status = stage_statuses.get(stage_name)
+        # Outputs missing from storage aren't counted: that says they weren't
+        # pushed, not that the stage's inputs moved.
+        return status is None or bool(
+            status.modified_command
+            or status.modified_inputs
+            or status.modified_outputs
+        )
+
     tainted = {
         stage_name
         for stage_name in live
         if (yaml_stages.get(_get_base_stage_name(stage_name)) or {}).get(
             "frozen"
         )
+        and _changed(stage_name)
     }
     queue = list(tainted)
     while queue:

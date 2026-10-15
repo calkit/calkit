@@ -6,6 +6,7 @@ import git
 
 from app.git import get_repo_tree_for_ref
 from app.pipeline import (
+    StageStatus,
     _precompute_storage_presence,
     calc_overall_pipeline_status,
     compute_stage_statuses,
@@ -1097,6 +1098,28 @@ def test_find_frozen_tainted_stages() -> None:
         "clean",
         "plot",
     }
+    # A frozen stage that still matches dvc.lock taints nothing, even with
+    # its outputs missing from storage; one whose inputs moved does.
+    assert (
+        find_frozen_tainted_stages(
+            dvc_yaml,
+            dvc_lock,
+            {
+                "collect": StageStatus(
+                    status="frozen", missing_outputs=["data/raw.csv"]
+                )
+            },
+        )
+        == set()
+    )
+    for changed in (
+        StageStatus(status="frozen", modified_command=True),
+        StageStatus(status="frozen", modified_inputs=["collect.py"]),
+        StageStatus(status="frozen", modified_outputs=["data/raw.csv"]),
+    ):
+        assert find_frozen_tainted_stages(
+            dvc_yaml, dvc_lock, {"collect": changed}
+        ) == {"collect", "clean", "plot"}
     # Nothing frozen, nothing tainted -- including a cycle's worth of stages,
     # which the walk must not loop on.
     assert (

@@ -1,72 +1,197 @@
 # Making an Overleaf paper reproducible
 
 <!--
-Outline only. Each section's comment says what it covers and which feature
-it waits on; the comments come out as the prose goes in.
+First pass, written ahead of the features it describes; see the PR for
+what's built. Screenshot placeholders name the file to drop into
+img/overleaf-paper/.
 -->
+
+Most papers on Overleaf are put together by hand. Somebody runs a script,
+saves a figure, and drags it into the Overleaf project. A number gets
+copied out of a notebook and typed into the text. It works until the data
+or the analysis changes, and then nobody is quite sure which figures are
+current, which numbers came from which run, or how to make any of them
+again.
+
+In this tutorial you'll keep writing on Overleaf exactly as you do now, and
+work through the paper one item at a time, pointing at each figure, table,
+and number and saying where it came from. By the end, everything the paper
+shows can be traced back to the code and data that made it, and Overleaf
+tells you when something is out of date.
+
+You don't need to have used Calkit before, and you don't need to change how
+your analysis is organized to get started.
 
 ## What you need
 
-<!-- An Overleaf paper, the browser extension, a calkit.io account. -->
+- A paper on [Overleaf](https://overleaf.com).
+- The [Calkit browser extension](../browser-ext/index.md), signed in.
+- An account on [calkit.io](https://calkit.io).
+- An Overleaf Git token, which lets Calkit read and update your Overleaf
+  project. The extension asks for one the first time it needs it. See
+  [Overleaf integration](../overleaf.md#generating-and-storing-an-overleaf-token)
+  for how to make one.
+
+Your analysis can be anywhere: in a repository on GitHub, in a folder on
+your computer, or nowhere yet. You'll say which when you get to it.
 
 ## Connect the paper to a project
 
-<!--
-"Make this paper reproducible" from the extension: creates a project on
-the hub and links it to the Overleaf project.
-Needs: project creation and Overleaf linking from the extension.
--->
+Open your paper on Overleaf and click the Calkit button in the bottom right
+corner of the page. Since the paper isn't part of a project yet, the panel
+offers to make it reproducible.
+
+<!-- Screenshot: img/overleaf-paper/make-reproducible.png
+The extension panel on an unconnected Overleaf paper, with the "Make this
+paper reproducible" button. -->
+
+Click **Make this paper reproducible** and give the project a name.
+Calkit creates a project on calkit.io and brings in a copy of your paper,
+which stays connected to Overleaf. You keep writing on Overleaf, and
+changes go both ways when you sync.
 
 ## See what isn't accounted for
 
-<!--
-The extension lists every figure, table, and typed-in number the paper
-shows with nothing recorded behind it, e.g., "7 of 12 figures accounted
-for".
-Needs: the provenance gap check, and the checklist on Overleaf.
--->
+Once the paper is connected, the panel lists everything the paper shows
+that nothing records the origin of yet:
+
+- figures, from `\includegraphics`
+- tables, from `\input`
+- numbers typed into the text that look like results, e.g., an error, a
+  speedup, or a p-value
+
+<!-- Screenshot: img/overleaf-paper/checklist.png
+The checklist in the extension panel, e.g., "3 of 12 accounted for", with
+figures, tables, and numbers listed. -->
+
+At this point it's normal for nothing to be accounted for. Overleaf only
+ever saw the finished files, so as far as anyone can tell, they could have
+come from anywhere. The rest of the tutorial works down this list.
+
+Clicking an item jumps to it in the paper, and putting the cursor on an
+item in the paper selects it in the list.
 
 ## Say where something came from
 
-<!--
-Point at one item and pick an answer. The fork in the road lives here.
--->
+Pick an item, e.g., the first figure, and click **Where did this come
+from?** There are four answers.
 
-### Made by code in a GitHub repo
+<!-- Screenshot: img/overleaf-paper/where-from.png
+The four choices for one figure. -->
 
-<!--
-Connect the repo, pick the script and its environment, and get a stage.
-Needs: connecting a repo from the extension, and building a stage and
-environment from the answer.
--->
+### Made by code in a GitHub repository
+
+If the code that made the figure is in a repository on GitHub, choose the
+repository, then the script or notebook that makes the figure. Calkit looks
+in the repository for what the code needs to run, e.g., a
+`requirements.txt`, `environment.yml`, or `pyproject.toml`, and asks you to
+confirm it, or to pick one if there are several.
+
+<!-- Screenshot: img/overleaf-paper/pick-script.png
+Choosing the script and its environment from a connected repository. -->
+
+From that, Calkit adds a step to the project's pipeline that runs the
+script in that environment and produces the figure. The next time you need
+the figure, you run the pipeline rather than remembering which script to
+run, with which packages, in what order.
+
+If the script reads data files, Calkit lists them, and each one goes on the
+checklist too. A figure is only as traceable as the data it was made from.
 
 ### Made by code on your computer
 
-<!--
-calkit new project in that folder (or the operator, once it lands), then
-point to existing-project.md rather than repeating it.
--->
+If the code is in a folder on your computer and not in a repository, it
+needs to go somewhere Calkit can see it. The panel shows a command to copy
+into a terminal, which downloads the project you just made, paper and all:
+
+```sh
+calkit clone {your project URL}
+```
+
+Move your scripts, notebooks, and data into the new folder, then follow
+[converting an existing project](existing-project.md#put-everything-in-version-control)
+from where the files go into version control. When you come back to Overleaf,
+the project's scripts show up to pick from, the same as a GitHub
+repository's.
 
 ### Downloaded from somewhere
 
-<!-- Records imported_from. -->
+If the figure, table, or data came from somewhere else, e.g., another
+paper, a data repository, or a colleague's project, give its URL or DOI.
+Calkit records it, and can check it again later to see whether the source
+has changed.
 
 ### Drawn or measured by you
 
-<!-- Records created_by, with with_ai if an AI tool helped. -->
+Some things don't come from code: a schematic you drew, a photo of the
+experimental setup, or measurements you took by hand. Say who made it.
+If an AI tool helped, say which one. That's recorded against the person,
+so someone always answers for it.
+
+Numbers can't be accounted for this way. A number in the paper should come
+from something that computed it, so a measurement belongs in a dataset you
+record as yours, and the number comes from a script that reads it.
 
 ## Run the pipeline and sync
 
-<!--
-The \includegraphics becomes a \ckfigure and the item is checked off.
-Needs: deciding who runs the pipeline for a GitHub repo (locally or
-GitHub Actions), and converting \includegraphics to \ckfigure.
--->
+Once a figure's origin is recorded, the project can make it. If the code
+is on GitHub, Calkit can run the pipeline there; otherwise run it on your
+computer with:
+
+```sh
+calkit run
+```
+
+<!-- Screenshot: img/overleaf-paper/sync.png
+The "Sync now" prompt after a figure's origin is recorded. -->
+
+Then click **Sync now** in the panel. Calkit replaces the
+`\includegraphics` with a `\ckfigure` that points at the figure in the
+project, and sends the figure to Overleaf. The item is checked off.
+
+```latex
+% Before
+\includegraphics[width=\linewidth]{figures/fit.png}
+% After
+\ckfigure[width=\linewidth]{figures/fit.png}
+```
+
+The `\ckfigure` command comes from `calkit.sty`, which Calkit adds to your
+Overleaf project along with a `\usepackage{calkit}` line in the preamble.
+Numbers work the same way, with `\ckvalue`, which reads the value straight
+from the results file the script wrote, so it can't be mistyped or left
+behind when the results change.
+
+From now on, putting the cursor on the figure shows what made it, whether
+it's out of date, and a link to see it on calkit.io. When the code or data
+changes, the figure shows as stale until you run the pipeline and sync
+again.
+
+<!-- Screenshot: img/overleaf-paper/provenance-card.png
+The card shown with the cursor on a \ckfigure: stage, script, inputs, and
+status. -->
 
 ## Repeat until nothing is left
 
+Work down the checklist the same way. It gets faster as you go: once a
+repository and its environment are connected, the next figure from the
+same code is two clicks, and data files that several figures read only
+need accounting for once.
+
+You don't have to finish in one sitting. The checklist is saved with the
+project, so you and your coauthors can pick it up where you left off.
+
 ## Release the paper for review
 
-<!--
-Where the strict provenance check runs. Needs #1819.
--->
+When the checklist is empty, you can release the paper for review. Calkit
+checks that everything the paper shows can be traced all the way back,
+builds the PDF, and gives you a link to share with reviewers. Figures and
+numbers in the PDF link to where they came from, so a reviewer can see the
+script and data behind any of them.
+
+If anything is still unaccounted for, the release stops and says what, and
+where it leads back to, e.g., a figure made from a data file nothing
+records the source of.
+
+<!-- Screenshot: img/overleaf-paper/release.png
+Releasing the paper, and the shareable link. -->

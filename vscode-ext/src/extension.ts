@@ -208,6 +208,9 @@ const pipelineNotebookUris = new Set<string>();
 // sidebar and decorations show. Anything that writes reads the one project
 // it writes to instead.
 let currentCalkitConfig: CalkitInfo | undefined;
+// Bumped by each refresh of the pipeline context, so one that a newer refresh
+// has overtaken doesn't overwrite its state
+let pipelineContextGeneration = 0;
 // Subproject directories, relative to the workspace root
 let currentSubprojectDirs: string[] = [];
 let currentQuestionOrigins: QuestionOrigin[] = [];
@@ -2384,6 +2387,7 @@ async function listDetectedArtifacts(
 async function scanDetectedFiles(
   workspaceRoot: string,
   calkitYamlExists: boolean,
+  generation: number,
 ): Promise<void> {
   // Outside a Calkit project the sidebar shows the welcome view, so detected
   // files are never displayed. Skip the scan (including the `calkit list`
@@ -2418,6 +2422,10 @@ async function scanDetectedFiles(
       currentSubprojectDirs,
     ),
   ]);
+  // Left to the refresh that overtook this one
+  if (generation !== pipelineContextGeneration) {
+    return;
+  }
   const toRel = (u: vscode.Uri): string =>
     path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
   currentDetectedNotebooks = notebookUris
@@ -2473,6 +2481,17 @@ async function refreshPipelineOutputContext(
   if (!workspaceRoot) {
     return;
   }
+  const generation = ++pipelineContextGeneration;
+  const superseded = (): boolean => {
+    if (generation === pipelineContextGeneration) {
+      return false;
+    }
+    // The newer refresh may not check status, so a forced check still runs
+    if (force) {
+      ensureRunStatusPolling(context);
+    }
+    return true;
+  };
   const {
     config: calkitConfig,
     dvcYaml,
@@ -2485,6 +2504,9 @@ async function refreshPipelineOutputContext(
     workspaceRoot,
     subprojectDirs,
   );
+  if (superseded()) {
+    return;
+  }
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
   currentSubprojectDirs = subprojectDirs;
@@ -2500,6 +2522,9 @@ async function refreshPipelineOutputContext(
   const calkitYamlExists = await fileExists(
     path.join(workspaceRoot, "calkit.yaml"),
   );
+  if (superseded()) {
+    return;
+  }
   const calkitStatusChanged = calkitYamlExists !== currentCalkitYamlExists;
   currentCalkitYamlExists = calkitYamlExists;
   void vscode.commands.executeCommand(
@@ -2553,7 +2578,10 @@ async function refreshPipelineOutputContext(
   // "not produced by the pipeline" badges appear or clear across the tree; the
   // affected figure/notebook files aren't in changedUris otherwise.
   decorationProvider.refresh(calkitStatusChanged ? undefined : changedUris);
-  await scanDetectedFiles(workspaceRoot, calkitYamlExists);
+  await scanDetectedFiles(workspaceRoot, calkitYamlExists, generation);
+  if (superseded()) {
+    return;
+  }
   renderSidebarFromState();
   // Run the staleness check after the fast decoration pass: "not produced
   // by the pipeline" badges are applied immediately, and stale-output

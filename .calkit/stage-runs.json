@@ -1,12 +1,12 @@
 {
   "latex-image-readme/sizes": {
-    "start_time": "2026-10-16T16:45:04.558000",
-    "end_time": "2026-10-16T16:46:34.899000",
-    "git_rev": "905e7d203dbdacad062e06629a106e4f2426d5f9",
+    "start_time": "2026-10-16T21:09:50.607000",
+    "end_time": "2026-10-16T21:11:12.541000",
+    "git_rev": "4095a9c83d33ef9f2ce1839ad2fb8acef3b5dbd9",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:657a2c0ad99ebbad5208805f50241a586a97fcad54f8d708eb7717f147329166",
-    "calkit_version": "0.49.3.dev14+g905e7d20",
-    "calkit_git_rev": "905e7d203dbdacad062e06629a106e4f2426d5f9",
+    "dvc_lock_hash": "sha256:77a820c5ce061510a9ea10cfdbe85642130360b58c0657193617f22ac2ff10df",
+    "calkit_version": "0.49.3.dev23+g4095a9c8",
+    "calkit_git_rev": "4095a9c83d33ef9f2ce1839ad2fb8acef3b5dbd9",
     "system": {
       "machine_id": "2d791d5cce6240faa3c626058b1ffc7d",
       "os": "Linux",
@@ -18,14 +18,14 @@
     }
   },
   "latex-word-round-trip": {
-    "start_time": "2026-10-16T20:50:43.971000",
-    "end_time": "2026-10-16T20:51:10.804000",
+    "start_time": "2026-10-16T21:09:19.604000",
+    "end_time": "2026-10-16T21:09:50.576000",
     "environment": "dev",
-    "git_rev": "ca288085b3700ba7ecceef4d2d597a85de10d74f",
+    "git_rev": "4095a9c83d33ef9f2ce1839ad2fb8acef3b5dbd9",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:6042c0898ba842162435f3e292545bb5196d5e8a1439663183eefadb20412585",
-    "calkit_version": "0.49.3.dev20+gca288085",
-    "calkit_git_rev": "ca288085b3700ba7ecceef4d2d597a85de10d74f",
+    "dvc_lock_hash": "sha256:2decc5ee8c22c0100ae771c9ece538e700c7ce815c13250d5281ac1e07288a48",
+    "calkit_version": "0.49.3.dev23+g4095a9c8",
+    "calkit_git_rev": "4095a9c83d33ef9f2ce1839ad2fb8acef3b5dbd9",
     "system": {
       "machine_id": "2d791d5cce6240faa3c626058b1ffc7d",
       "os": "Linux",

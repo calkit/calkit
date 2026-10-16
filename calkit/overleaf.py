@@ -320,6 +320,12 @@ class OverleafSyncPaths:
         self.sync_info_for_path = deepcopy(sync_info_for_path)
         self.push_paths_from_config = sync_info_for_path.get("push_paths", [])
         self.last_sync_commit = last_sync_commit
+        # What the folder's documents cite has to be there to push
+        import calkit.latex
+
+        self.cited_problems = calkit.latex.write_cited(
+            os.path.join(str(main_repo.working_dir), path_in_project)
+        )
 
     @property
     def push_paths(self) -> list[str]:
@@ -514,14 +520,17 @@ class OverleafSyncPaths:
 
     @cached_property
     def mapped_files(self) -> set[str]:
-        """Files on disk under a map-paths destination.
+        """Files on disk under a map-paths destination, or copied into the
+        folder because its documents cite them.
 
         Relative to ``path_in_project``. A destination may be a single file
         or a whole directory, so directories are walked.
         """
+        import calkit.latex
+
         root = os.path.join(self.main_repo.working_dir, self.path_in_project)
         res: set[str] = set()
-        for dest in self.map_paths_outputs:
+        for dest in sorted(self.map_paths_outputs | {calkit.latex.CITED_DIR}):
             abs_dest = os.path.join(root, dest)
             if os.path.isfile(abs_dest):
                 res.add(dest)
@@ -794,8 +803,17 @@ class OverleafSyncPaths:
         ``storage: null`` pipeline output). Only files that were genuinely
         removed from the project are deleted from Overleaf.
         """
+        import calkit.latex
+
         keep = set()
         for f in self.files_in_overleaf_last_sync:
+            # No longer cited, so no longer copied, and nothing else writes
+            # there
+            if (
+                f.startswith(calkit.latex.CITED_DIR + "/")
+                and f not in self.mapped_files
+            ):
+                continue
             if (
                 f in self.stored_files
                 or f in self.newly_added_on_overleaf

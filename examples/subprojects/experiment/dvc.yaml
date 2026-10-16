@@ -4,7 +4,7 @@ stages:
     deps:
       - scripts/collect.py
       - calibration/results/calibration.json
-      - .calkit/env-locks/py
+      - uv.lock
     outs:
       - data/measurements.csv:
           cache: false

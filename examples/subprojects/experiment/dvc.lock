@@ -3,11 +3,6 @@ stages:
   collect:
     cmd: calkit xenv -n py --no-check -- python scripts/collect.py
     deps:
-    - path: .calkit/env-locks/py
-      hash: md5
-      md5: 89a19710e7cfff9039430d6ee63cf11b.dir
-      size: 65
-      nfiles: 5
     - path: calibration/results/calibration.json
       hash: md5
       md5: 9140d119090326fcfadb06966600772a
@@ -16,6 +11,10 @@ stages:
       hash: md5
       md5: e039d521f7de582ce843dd2092445935
       size: 487
+    - path: uv.lock
+      hash: md5
+      md5: 77c49601b7164cec934f82031d17a75c
+      size: 17617
     outs:
     - path: data/measurements.csv
       hash: md5

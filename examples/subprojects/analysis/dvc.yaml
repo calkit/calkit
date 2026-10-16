@@ -4,7 +4,7 @@ stages:
     deps:
       - scripts/fit.py
       - ../experiment/data/measurements.csv
-      - .calkit/env-locks/py
+      - uv.lock
     outs:
       - results/fit.json:
           cache: false

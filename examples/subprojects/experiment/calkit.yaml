@@ -11,10 +11,8 @@ subprojects:
 
 environments:
   py:
-    kind: uv-venv
-    path: requirements.txt
-    python: "3.13"
-    prefix: .venv
+    kind: uv
+    path: pyproject.toml
 
 pipeline:
   stages:

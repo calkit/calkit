@@ -45,11 +45,31 @@ def _stubs(installed: bool) -> dict:
     }
 
 
+def _check_setup(window, refresh: bool = True) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    # The checks run on threads and report back through queued signals
+    if refresh:
+        window.refresh_setup_status()
+    window.setup_check_thread.wait()
+    window.projects_widget.load_thread.wait()
+    QApplication.processEvents()
+
+
 def test_main_window_builds_and_refreshes_offscreen(app):
     # A bare machine: every install step shows its install button
     with mock.patch.multiple("main", **_stubs(installed=False)):
         window = main.MainWindow()
         steps = window.setup_step_widgets
+        # The window is built before anything is checked, which happens
+        # in the background behind a progress bar
+        assert "⏳" in steps["git"].label.text()
+        assert not window.setup_progress.isHidden()
+        assert not window.refresh_setup_button.isEnabled()
+        _check_setup(window, refresh=False)
+        assert window.setup_progress.isHidden()
+        assert window.refresh_setup_button.isEnabled()
+        assert window.setup_progress.value() == len(steps)
         install_steps = [
             s for s in steps.values() if isinstance(s, main.DependencyInstall)
         ]
@@ -65,7 +85,7 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         assert not steps["vscode-extensions"].isEnabled()
     # A set-up machine: refreshing clears the buttons and enables the rest
     with mock.patch.multiple("main", **_stubs(installed=True)):
-        window.refresh_setup_status()
+        _check_setup(window)
         assert all(s.install_button is None for s in install_steps)
         assert steps["calkit"].isEnabled()
         assert steps["vscode-extensions"].isEnabled()
@@ -74,7 +94,7 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         "main",
         **{**_stubs(installed=True), "get_calkit_version": lambda: (0, 0, 1)},
     ):
-        window.refresh_setup_status()
+        _check_setup(window)
         assert steps["calkit"].install_button is not None
         assert "Update Calkit" in steps["calkit"].label.text()
         assert steps["calkit"].install_command == ["calkit", "upgrade"]
@@ -84,14 +104,14 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         "main",
         **{**_stubs(installed=True), "get_calkit_version": lambda: (98, 0)},
     ):
-        window.refresh_setup_status()
+        _check_setup(window)
         assert steps["calkit"].install_button is not None
         assert steps["calkit"].install_button.toolTip() == "Update"
         assert "✅ (v99.0.0 available)" in steps["calkit"].label.text()
         assert steps["hub-login"].isEnabled()
         assert steps["calkit"].install_command == ["calkit", "upgrade"]
     with mock.patch.multiple("main", **_stubs(installed=True)):
-        window.refresh_setup_status()
+        _check_setup(window)
         assert steps["calkit"].install_button is None
     with mock.patch.multiple("main", **_stubs(installed=False)):
         assert steps["calkit"].install_command[:3] == ["uv", "tool", "install"]

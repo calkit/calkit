@@ -2429,14 +2429,41 @@ def _reserved_artifact_paths(
     return [p.replace("\\", "/") for p in paths]
 
 
+def _pipeline_output_paths(
+    wdir: str | None = None, ck_info: dict | None = None
+) -> list[str]:
+    """Pipeline outputs on disk, which are the project's even when neither
+    Git nor DVC holds them, e.g., a ``map-paths`` copy.
+    """
+    from calkit.pipeline import map_paths_outputs
+
+    stages = (ck_info or {}).get("pipeline", {}).get("stages", {})
+    if not isinstance(stages, dict):
+        return []
+    root = Path(wdir or os.getcwd())
+    found: list[str] = []
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        outs = [
+            out.get("path") if isinstance(out, dict) else out
+            for out in stage.get("outputs", []) or []
+        ]
+        outs += map_paths_outputs(stage)
+        for out in outs:
+            if isinstance(out, str) and out and (root / out).is_file():
+                found.append(Path(out).as_posix())
+    return found
+
+
 def detect_project_artifacts(
     wdir: str | None = None, ck_info: dict | None = None
 ) -> dict[str, list[str]]:
     """Auto-detect figure and dataset paths in the project at ``wdir``.
 
-    Candidates are the files Git does not ignore plus any files tracked by DVC
-    (which are Git-ignored); declared artifacts are reserved so they aren't
-    detected again.
+    Candidates are the files Git does not ignore, any files tracked by DVC
+    (which are Git-ignored), and the pipeline's own outputs on disk. Declared
+    artifacts are reserved so they aren't detected again.
     """
     import calkit
 
@@ -2446,7 +2473,11 @@ def detect_project_artifacts(
     reserved = _reserved_artifact_paths(wdir=wdir, ck_info=ck_info)
     candidates = list(
         dict.fromkeys(
-            [*list_repo_files(wdir=wdir), *list_dvc_tracked_files(wdir=wdir)]
+            [
+                *list_repo_files(wdir=wdir),
+                *list_dvc_tracked_files(wdir=wdir),
+                *_pipeline_output_paths(wdir=wdir, ck_info=ck_info),
+            ]
         )
     )
     figures = detect_figures(

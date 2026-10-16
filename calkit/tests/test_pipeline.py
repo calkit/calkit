@@ -3694,6 +3694,52 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
         assert f.read().count("/.calkit/** text eol=lf") == 1
 
 
+def test_get_stage_for_output_reads_map_paths_destinations():
+    from calkit.pipeline import get_stage_for_output
+
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/a.png",
+                            "dest": "paper/figures/a.png",
+                        },
+                        {
+                            "kind": "file-to-dir",
+                            "src": "figures/b.png",
+                            "dest": "paper/figures",
+                        },
+                        {
+                            "kind": "dir-to-dir-merge",
+                            "src": "shared",
+                            "dest": "paper/shared",
+                        },
+                    ],
+                },
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "py",
+                    "outputs": ["figures/a.png"],
+                },
+            }
+        }
+    }
+    assert get_stage_for_output("paper/figures/a.png", ck_info) == "copy"
+    # file-to-dir writes dest/<name>, not dest
+    assert get_stage_for_output("paper/figures/b.png", ck_info) == "copy"
+    # A directory mapping produces everything it writes into
+    assert get_stage_for_output("paper/shared/x/y.tex", ck_info) == "copy"
+    assert get_stage_for_output("paper/shared", ck_info) == "copy"
+    # The original is still the plotting stage's
+    assert get_stage_for_output("figures/a.png", ck_info) == "plot"
+    assert get_stage_for_output("paper/figures/nope.png", ck_info) is None
+
+
 def test_table_iteration_names(tmp_dir):
     subprocess.check_call(["git", "init", "-q"])
     subprocess.check_call(["dvc", "init", "-q"])

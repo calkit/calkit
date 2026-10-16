@@ -1757,6 +1757,21 @@ def get_status(
             os.chdir(prev_cwd)
 
 
+def map_paths_outputs(stage: dict) -> list[str]:
+    """Where a ``map-paths`` stage writes, which it declares under ``paths``
+    rather than ``outputs``.
+    """
+    from calkit.models.pipeline import MapPathsStage
+
+    if stage.get("kind") != "map-paths":
+        return []
+    try:
+        parsed = MapPathsStage.model_validate(stage)
+    except Exception:
+        return []
+    return [Path(mapping.out_path).as_posix() for mapping in parsed.paths]
+
+
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any."""
     target = Path(path).as_posix()
@@ -1770,6 +1785,10 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
             out_path = out.get("path") if isinstance(out, dict) else out
             if out_path and Path(out_path).as_posix() == target:
                 return name
+        for out in map_paths_outputs(stage):
+            # A directory mapping produces everything it writes into
+            if target == out or target.startswith(out + "/"):
+                return str(name)
     return None
 
 

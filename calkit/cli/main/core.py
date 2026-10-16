@@ -548,7 +548,12 @@ def get_status(
     # than enforces, so anything still unset is a warning: it must not stop
     # the rest of the status from being shown.
     if ck_info:
-        missing_env_vars = calkit.requirements.resolve_env_var_deps(ck_info)
+        missing_env_vars = []
+        for sp_wdir, sp_info in calkit.iter_projects(ck_info=ck_info):
+            missing_env_vars += [
+                calkit.qualify_with_project(sp_wdir, name)
+                for name in calkit.requirements.resolve_env_var_deps(sp_info)
+            ]
         if missing_env_vars:
             warn(
                 "Missing environmental variable(s): "
@@ -3023,11 +3028,17 @@ def run(
     # First check the host meets the project's requirements
     if not quiet:
         calkit.echo("🔗 Checking system-level requirements")
-    try:
-        calkit.check_requirements(ck_info=ck_info, system_info=system_info)
-    except Exception as e:
-        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        raise_error(str(e))
+    # Subprojects' requirements are the host's too, and checking them here
+    # rather than in the loop below keeps the whole answer to "can this
+    # machine run this?" ahead of the first environment being built
+    for req_wdir, req_info in calkit.iter_projects(ck_info=ck_info):
+        try:
+            calkit.check_requirements(
+                ck_info=req_info, wdir=req_wdir, system_info=system_info
+            )
+        except Exception as e:
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            raise_error(f"{calkit.describe_project(req_wdir)}{e}")
     # Extract anything the project's Markdown files declare before the
     # environments are checked, since an environment declared there must be
     # in calkit.yaml before it can be created or entered.

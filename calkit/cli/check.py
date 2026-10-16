@@ -919,35 +919,53 @@ def check_environments(
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
 ) -> None:
+    """Check that the project's environments are up to date.
+
+    Subprojects' environments are checked too, as 'calkit run' does.
+    """
     ck_info = calkit.load_calkit_info()
-    envs = ck_info.get("environments", {})
-    if not envs:
+    projects = [
+        (wdir, info)
+        for wdir, info in calkit.iter_projects(ck_info=ck_info)
+        if info.get("environments")
+    ]
+    if not projects:
         typer.echo("No environments defined in calkit.yaml")
         return
     # Set any project-level environmental variables before checking
     # environments
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    calkit.set_env_vars(ck_info=ck_info, cli=True)
     failures = []
-    for env_name, env in envs.items():
-        if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
-            if verbose:
-                typer.echo(
-                    f"Skipping check for {env['kind']} env '{env_name}'"
-                )
-            continue
-        typer.echo(f"Checking environment: '{env_name}'")
+    prev_wdir = os.getcwd()
+    for wdir, info in projects:
+        calkit.set_env_vars(ck_info=info, cli=True)
+        # check_environment reads the project it's in, so go there
+        os.chdir(wdir)
         try:
-            check_environment(env_name=env_name, verbose=verbose)
-        except typer.Exit:
-            # The check reported its own reason through raise_error, which
-            # has already printed it. Repeating it here would replace a
-            # real message ("Unknown system property to lock: ...") with
-            # the exit code, since that is all this exception carries.
-            failures.append(env_name)
-        except Exception as e:
-            warn(f"Error checking environment '{env_name}': {e}")
-            failures.append(env_name)
+            for env_name, env in info["environments"].items():
+                if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
+                    if verbose:
+                        typer.echo(
+                            f"Skipping check for {env['kind']} env "
+                            f"'{env_name}'"
+                        )
+                    continue
+                qualified = calkit.qualify_with_project(wdir, env_name)
+                typer.echo(f"Checking environment: '{qualified}'")
+                try:
+                    check_environment(env_name=env_name, verbose=verbose)
+                except typer.Exit:
+                    # The check reported its own reason through raise_error,
+                    # which has already printed it. Repeating it here would
+                    # replace a real message ("Unknown system property to
+                    # lock: ...") with the exit code, since that is all this
+                    # exception carries.
+                    failures.append(qualified)
+                except Exception as e:
+                    warn(f"Error checking environment '{qualified}': {e}")
+                    failures.append(qualified)
+        finally:
+            os.chdir(prev_wdir)
     if failures:
         raise_error(
             f"Failed to check the following environments: {', '.join(failures)}"
@@ -2195,15 +2213,22 @@ def check_project_requirements(
         ),
     ] = False,
 ) -> None:
-    """Check that a project's system-level requirements are met."""
+    """Check that a project's system-level requirements are met.
+
+    Subprojects' requirements are checked too, since the host has to meet
+    them for the project's pipeline to run.
+    """
     typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
         calkit.requirements.cache_clear()
-    try:
-        calkit.check_requirements(use_cache=not no_cache)
-    except Exception as e:
-        raise_error(str(e))
+    for wdir, info in calkit.iter_projects():
+        try:
+            calkit.check_requirements(
+                ck_info=info, wdir=wdir, use_cache=not no_cache
+            )
+        except Exception as e:
+            raise_error(f"{calkit.describe_project(wdir)}{e}")
     message = "✅ All set!"
     calkit.echo(message)
 
@@ -2264,23 +2289,30 @@ def check_env_vars(
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
     ] = False,
 ) -> None:
-    """Check that the project's required environmental variables exist."""
+    """Check that the project's required environmental variables exist.
+
+    Subprojects' are included, since they are read from the same
+    environment.
+    """
     from calkit.core import _normalize_requirement
 
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
-    ck_info = calkit.load_calkit_info()
-    for raw in calkit.get_requirements(ck_info):
-        req = _normalize_requirement(raw)
-        if req["kind"] != "env-var":
-            continue
-        name = req["name"]
-        if verbose:
-            typer.echo(f"Checking for environmental variable '{name}'")
-        if name not in os.environ:
-            value = calkit.requirements.prompt_for_env_var_req(req)
-            if value is None:
-                raise_error(f"No value provided for '{name}'")
+    for wdir, info in calkit.iter_projects():
+        for raw in calkit.get_requirements(info):
+            req = _normalize_requirement(raw)
+            if req["kind"] != "env-var":
+                continue
+            name = req["name"]
+            if verbose:
+                typer.echo(f"Checking for environmental variable '{name}'")
+            if name not in os.environ:
+                value = calkit.requirements.prompt_for_env_var_req(req)
+                if value is None:
+                    raise_error(
+                        f"{calkit.describe_project(wdir)}no value provided "
+                        f"for '{name}'"
+                    )
     message = "✅ All set!"
     calkit.echo(message)
 
@@ -2296,21 +2328,34 @@ def check_pipeline(
         ),
     ] = False,
 ) -> None:
-    """Check that the project pipeline is defined correctly."""
+    """Check that the project pipeline is defined correctly.
+
+    Subprojects' pipelines are checked too, since those are stages the
+    project runs.
+    """
     from calkit.models.pipeline import Pipeline
 
     ck_info = calkit.load_calkit_info()
-    if "pipeline" not in ck_info:
+    projects = [
+        (wdir, info)
+        for wdir, info in calkit.iter_projects(ck_info=ck_info)
+        if "pipeline" in info
+    ]
+    if not projects:
         raise_error("No pipeline is defined in calkit.yaml")
-    try:
-        pipeline = Pipeline.model_validate(ck_info["pipeline"], strict=True)
-    except Exception as e:
-        raise_error(f"Pipeline is not defined correctly: {e}")
-    # Check that we have no leading underscores in stage names, since those
-    # are reserved for auto-generated stages
-    for stage_name in pipeline.stages.keys():
-        if stage_name.startswith("_"):
-            raise_error("Stage names cannot start with an underscore")
+    for wdir, info in projects:
+        where = calkit.describe_project(wdir)
+        try:
+            pipeline = Pipeline.model_validate(info["pipeline"], strict=True)
+        except Exception as e:
+            raise_error(f"{where}pipeline is not defined correctly: {e}")
+        # Check that we have no leading underscores in stage names, since
+        # those are reserved for auto-generated stages
+        for stage_name in pipeline.stages.keys():
+            if stage_name.startswith("_"):
+                raise_error(
+                    f"{where}stage names cannot start with an underscore"
+                )
     message = "✅ This project's pipeline is defined correctly!"
     calkit.echo(message)
     if compile_to_dvc:

@@ -31,7 +31,7 @@ except ImportError:
     UTC = _timezone.utc
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Iterator, Literal
 
 if TYPE_CHECKING:
     from calkit.models import ProjectInfo, ProjectStatus
@@ -436,6 +436,53 @@ def load_calkit_info(
         if comment and not read_only:
             info.yaml_set_start_comment(comment)
     return info
+
+
+def iter_projects(
+    wdir: str | None = None,
+    ck_info: dict | None = None,
+    read_only: bool = True,
+    _seen: set[str] | None = None,
+) -> Iterator[tuple[str, dict]]:
+    """Yield ``(wdir, ck_info)`` for a project and each of its subprojects.
+
+    Parent first, depth first, with paths relative to ``wdir``. A check
+    that loops over this covers everything ``calkit run`` would run, which
+    is what makes a subproject's requirements and environments part of the
+    parent's rather than something only found by going in there.
+    """
+    base = os.path.normpath(wdir) if wdir else "."
+    if ck_info is None:
+        ck_info = load_calkit_info(wdir=base, read_only=read_only)
+    yield base, ck_info
+    # A subproject declaring its parent, or itself, would otherwise recurse
+    # until the stack runs out
+    seen = _seen if _seen is not None else {os.path.realpath(base)}
+    for subproject in ck_info.get("subprojects") or []:
+        path = subproject.get("path") if isinstance(subproject, dict) else None
+        if not isinstance(path, str):
+            continue
+        sp_wdir = os.path.normpath(os.path.join(base, path))
+        real = os.path.realpath(sp_wdir)
+        if real in seen or not os.path.isfile(
+            os.path.join(sp_wdir, "calkit.yaml")
+        ):
+            continue
+        seen.add(real)
+        yield from iter_projects(wdir=sp_wdir, read_only=read_only, _seen=seen)
+
+
+def describe_project(wdir: str) -> str:
+    """How to name a subproject in a message, and nothing for the project
+    itself."""
+    return "" if wdir in (".", "") else f"subproject '{wdir}': "
+
+
+def qualify_with_project(wdir: str, name: str) -> str:
+    """Name something in a subproject the way its stages are named."""
+    if wdir in (".", ""):
+        return name
+    return f"{os.path.basename(os.path.normpath(wdir))}:{name}"
 
 
 def save_calkit_info(

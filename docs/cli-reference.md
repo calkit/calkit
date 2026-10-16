@@ -3191,7 +3191,7 @@ Check things.
 | [`repro`](#subcommand-check-repro)                          | Check the reproducibility of a project.                                                                      |
 | [`environment`](#subcommand-check-environment)              | Check that an environment is up-to-date.                                                                     |
 | [`julia-env`](#subcommand-check-julia-env)                  | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
-| [`environments`](#subcommand-check-environments)            |                                                                                                              |
+| [`environments`](#subcommand-check-environments)            | Check that the project's environments are up to date.                                                        |
 | [`envs`](#subcommand-check-envs)                            | Check that all environments are up-to-date.                                                                  |
 | [`renv`](#subcommand-check-renv)                            | Check an renv R environment, initializing if needed.                                                         |
 | [`docker-env`](#subcommand-check-docker-env)                | Check that Docker environment is up-to-date.                                                                 |
@@ -3280,6 +3280,10 @@ Options:
 <a id="subcommand-check-environments"></a>
 
 #### `calkit check environments`
+
+Check that the project's environments are up to date.
+
+Subprojects' environments are checked too, as 'calkit run' does.
 
 Usage:
 
@@ -3456,6 +3460,8 @@ Options:
 
 Check that a project's system-level requirements are met.
 
+Subprojects' requirements are checked too, since the host has to meet them for the project's pipeline to run.
+
 Usage:
 
 ```text
@@ -3489,6 +3495,8 @@ calkit check stage-runs
 
 Check that the project's required environmental variables exist.
 
+Subprojects' are included, since they are read from the same environment.
+
 Usage:
 
 ```text
@@ -3506,6 +3514,8 @@ Options:
 #### `calkit check pipeline`
 
 Check that the project pipeline is defined correctly.
+
+Subprojects' pipelines are checked too, since those are stages the project runs.
 
 Usage:
 

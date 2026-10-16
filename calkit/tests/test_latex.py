@@ -101,6 +101,19 @@ def test_cited_content(tmp_dir):
     assert "\\cksetvalue{results/metrics.json}{rmse}{.2f}{0.12}" in values
     assert "\\cksetvalue{results/metrics.json}{fit.slope}{}{1.2345}" in values
     assert "\\cksetvalue{results/metrics.json}{n_runs}{}{42}" in values
+    # No link base without knowing whose project it is
+    assert "cklinkbase" not in values
+    with open("calkit.yaml", "w") as f:
+        f.write("name: test\nowner: someone\n")
+    calkit.latex.write_cited("paper")
+    with open("paper/_calkit/values.tex") as f:
+        assert "\\cklinkbase{https://calkit.io/someone/test}" in f.read()
+    with open("calkit.yaml", "a") as f:
+        f.write("hub: calkit.example.edu\n")
+    calkit.latex.write_cited("paper")
+    with open("paper/_calkit/values.tex") as f:
+        values = f.read()
+    assert "\\cklinkbase{https://calkit.example.edu/someone/test}" in values
     # Kept out of Git without touching the project's own .gitignore
     with open("paper/_calkit/.gitignore") as f:
         assert f.read().strip().endswith("*")

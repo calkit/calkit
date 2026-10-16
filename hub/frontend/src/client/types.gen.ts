@@ -3964,6 +3964,67 @@ export type ProjectsPublic = {
 }
 
 /**
+ * Provenance
+ *
+ * Where an artifact, or one value inside a results file, came from.
+ */
+export type Provenance = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Exists
+   */
+  exists?: boolean
+  /**
+   * Value
+   */
+  value?: unknown
+  /**
+   * Value Error
+   */
+  value_error?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Stage Kind
+   */
+  stage_kind?: string | null
+  /**
+   * Source
+   */
+  source?: string | null
+  /**
+   * Command
+   */
+  command?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  stage_status?: StageStatus | null
+  /**
+   * Stale Reason
+   */
+  stale_reason?: "pipeline" | "frozen" | null
+  /**
+   * Copied From
+   */
+  copied_from?: string | null
+  /**
+   * Copy Stage
+   */
+  copy_stage?: string | null
+}
+
+/**
  * Publication
  *
  * A publication declared in calkit.yaml.
@@ -5399,6 +5460,7 @@ export type Result = {
    * Key
    */
   key?: string | null
+  stage_status?: StageStatus | null
 }
 
 /**
@@ -13221,6 +13283,55 @@ export type PostProjectMapPathsResponses = {
 
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
+
+export type GetProjectProvenanceData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Key
+     */
+    key?: string | null
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/provenance"
+}
+
+export type GetProjectProvenanceErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectProvenanceError =
+  GetProjectProvenanceErrors[keyof GetProjectProvenanceErrors]
+
+export type GetProjectProvenanceResponses = {
+  /**
+   * Successful Response
+   */
+  200: Provenance
+}
+
+export type GetProjectProvenanceResponse =
+  GetProjectProvenanceResponses[keyof GetProjectProvenanceResponses]
 
 export type PostProjectFigureScriptData = {
   body: FigureScriptPost

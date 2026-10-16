@@ -629,9 +629,12 @@ def test_subproject_checks(tmp_dir, monkeypatch):
     res = run("check", "env-vars")
     assert res.returncode != 0
     assert "SUBPROJECT_ONLY_VAR" in res.stderr
-    # Status reports rather than enforces, and names it as stages are named
+    # Status reports rather than enforces, naming it as it's set, from here
     res = run("status")
-    assert "sub:SUBPROJECT_ONLY_VAR" in res.stdout + res.stderr
+    assert (
+        "Missing environmental variable(s): SUBPROJECT_ONLY_VAR."
+        in res.stdout + res.stderr
+    )
     # A run stops on an unmet requirement instead of starting work it
     # can't finish
     res = run("run")

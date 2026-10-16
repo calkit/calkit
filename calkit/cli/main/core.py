@@ -548,15 +548,14 @@ def get_status(
     # than enforces, so anything still unset is a warning: it must not stop
     # the rest of the status from being shown.
     if ck_info:
-        missing_env_vars = []
+        # Named bare, since a subproject reads the same variables, and
+        # setting one here sets it for all of them
+        missing_env_vars: list[str] = []
         for sp_wdir, sp_info in calkit.iter_projects(ck_info=ck_info):
             with calkit.in_project(sp_wdir):
-                missing_env_vars += [
-                    calkit.qualify_with_project(sp_wdir, name)
-                    for name in calkit.requirements.resolve_env_var_deps(
-                        sp_info
-                    )
-                ]
+                for name in calkit.requirements.resolve_env_var_deps(sp_info):
+                    if name not in missing_env_vars:
+                        missing_env_vars.append(name)
         if missing_env_vars:
             warn(
                 "Missing environmental variable(s): "

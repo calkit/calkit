@@ -37,6 +37,7 @@ def _stubs(installed: bool) -> dict:
         ),
         "find_conda_prefix": lambda: "/opt/conda" if installed else "",
         "get_calkit_version": lambda: (99, 0, 0) if installed else None,
+        "get_latest_calkit_version": lambda: (99, 0, 0),
         "get_calkit_token": lambda: "token" if installed else "",
         "get_projects": list,
         "run_in_git_bash": missing,
@@ -77,6 +78,21 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         assert steps["calkit"].install_button is not None
         assert "Update Calkit" in steps["calkit"].label.text()
         assert steps["calkit"].install_command == ["calkit", "upgrade"]
+    # A usable Calkit behind the latest release suggests updating, without
+    # blocking the steps that depend on it
+    with mock.patch.multiple(
+        "main",
+        **{**_stubs(installed=True), "get_calkit_version": lambda: (98, 0)},
+    ):
+        window.refresh_setup_status()
+        assert steps["calkit"].install_button is not None
+        assert steps["calkit"].install_button.toolTip() == "Update"
+        assert "✅ (v99.0.0 available)" in steps["calkit"].label.text()
+        assert steps["hub-login"].isEnabled()
+        assert steps["calkit"].install_command == ["calkit", "upgrade"]
+    with mock.patch.multiple("main", **_stubs(installed=True)):
+        window.refresh_setup_status()
+        assert steps["calkit"].install_button is None
     with mock.patch.multiple("main", **_stubs(installed=False)):
         assert steps["calkit"].install_command[:3] == ["uv", "tool", "install"]
     # Platform-specific steps only appear where they apply

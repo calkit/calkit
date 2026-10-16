@@ -6,11 +6,13 @@ in their editor of choice.
 
 from __future__ import annotations
 
-__version__ = "0.0.5"
+# Set from the release tag when the executable is built
+__version__ = "dev"
 # The oldest Calkit this assistant knows how to drive. Bump it when the
 # assistant starts relying on newer CLI output.
 MIN_CALKIT_VERSION = "0.47.4"
 
+import functools
 import glob
 import itertools
 import os
@@ -162,6 +164,19 @@ def get_calkit_version() -> tuple[int, ...] | None:
     except (FileNotFoundError, subprocess.CalledProcessError):
         return None
     return _parse_version(out)
+
+
+@functools.cache
+def get_latest_calkit_version() -> tuple[int, ...] | None:
+    """The newest Calkit on PyPI, or None if PyPI can't be reached."""
+    try:
+        resp = requests.get(
+            "https://pypi.org/pypi/calkit-python/json", timeout=5
+        )
+        resp.raise_for_status()
+        return _parse_version(resp.json()["info"]["version"])
+    except (requests.RequestException, KeyError, ValueError):
+        return None
 
 
 def get_calkit_token() -> str:
@@ -422,6 +437,9 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
         self.layout = make_setup_step_layout(self)
         self.txt_installed = f"Install {self.dependency_name}: ✅"
         self.txt_not_installed = f"Install {self.dependency_name}: ❌"
+        self.txt_update_available = (
+            f"Install {self.dependency_name}: ✅ (update available)"
+        )
         self.label = QLabel()
         self.layout.addWidget(self.label)
         self.install_button = None
@@ -448,19 +466,27 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
         installed = self.installed
         for step in self.child_steps:
             step.setEnabled(installed)
-        if not installed:
-            self.label.setText(self.txt_not_installed)
+        # An outdated install still works, so updating is only suggested
+        update_available = installed and self.update_available
+        if not installed or update_available:
+            if update_available:
+                self.label.setText(self.txt_update_available)
+            else:
+                self.label.setText(self.txt_not_installed)
             if self.install_button is None:
-                self.install_button = QPushButton("⬇️")
+                self.install_button = QPushButton()
                 self.install_button.setCursor(Qt.PointingHandCursor)
-                self.install_button.setToolTip("Install")
                 self.install_button.setFixedSize(18, 18)
                 self.install_button.setStyleSheet(
                     "font-size: 12px; padding: 0px; margin: 0px; border: none;"
                 )
                 self.install_button.clicked.connect(self.install)
                 self.layout.addWidget(self.install_button)
-        elif installed:
+            self.install_button.setText("⬆️" if update_available else "⬇️")
+            self.install_button.setToolTip(
+                "Update" if update_available else "Install"
+            )
+        else:
             if self.install_button is not None:
                 self.layout.removeWidget(self.install_button)
                 self.install_button.deleteLater()
@@ -479,6 +505,13 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
     def installed(self) -> bool:
         """Return a bool indicating if the dependency is installed."""
         raise NotImplementedError
+
+    @property
+    def update_available(self) -> bool:
+        """Whether a newer version than the installed one is available,
+        which installing again would get.
+        """
+        return False
 
     @property
     def install_command(self) -> list[str] | None:
@@ -1055,6 +1088,15 @@ class CalkitInstall(DependencyInstall):
             MIN_CALKIT_VERSION
         )
 
+    @property
+    def update_available(self) -> bool:
+        # Calkit upgrades itself by default, but not every install can,
+        # e.g., one in a conda env, and old ones can misconfigure projects,
+        # e.g., pointing their DVC remote at the legacy HTTP URL
+        version = get_calkit_version()
+        latest = get_latest_calkit_version()
+        return version is not None and latest is not None and version < latest
+
     def refresh(self) -> bool:
         # An old install is a different ask than a missing one
         if get_calkit_version() is None:
@@ -1062,6 +1104,10 @@ class CalkitInstall(DependencyInstall):
         else:
             self.txt_not_installed = (
                 f"Update Calkit to v{MIN_CALKIT_VERSION} or newer: ❌"
+            )
+        if latest := get_latest_calkit_version():
+            self.txt_update_available = (
+                f"Install Calkit: ✅ (v{'.'.join(map(str, latest))} available)"
             )
         return super().refresh()
 

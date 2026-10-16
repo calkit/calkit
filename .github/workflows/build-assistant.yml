@@ -27,26 +27,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # Tags and history, so the version can be described from them
+          # Tags and history, so hatch-vcs can derive the version
           fetch-depth: 0
       - name: Setup uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
-      # A release gets its tag's version, and a manual build the latest tag
-      # plus commits since, e.g., 0.0.6-3-gabc1234
-      # Bash, since Windows PowerShell's Set-Content mangles the emoji
-      - name: Set the version from the tag
-        shell: bash
-        run: |
-          version=$(git describe --tags --match 'assistant/v*')
-          version=${version#assistant/v}
-          sed -i "s/^__version__ = .*/__version__ = \"$version\"/" main.py
-          grep -q "^__version__ = \"$version\"$" main.py
-          echo "VERSION=$version" >> "$GITHUB_ENV"
+      # The metadata carries the version hatch-vcs derived
       - name: Build with PyInstaller
         run: >-
           uv run pyinstaller --onefile --icon resources/icon.ico
+          --copy-metadata calkit-assistant
           --name calkit-assistant main.py
       - name: Upload the executable
         uses: actions/upload-artifact@v7
@@ -59,5 +50,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
-          Copy-Item dist/calkit-assistant.exe "dist/calkit-assistant-$env:VERSION-windows.exe"
-          gh release upload "$env:TAG_NAME" "dist/calkit-assistant-$env:VERSION-windows.exe" --clobber
+          $version = $env:TAG_NAME -replace '^assistant/v', ''
+          Copy-Item dist/calkit-assistant.exe "dist/calkit-assistant-$version-windows.exe"
+          gh release upload "$env:TAG_NAME" "dist/calkit-assistant-$version-windows.exe" --clobber

@@ -6,8 +6,6 @@ in their editor of choice.
 
 from __future__ import annotations
 
-# Set from the release tag when the executable is built
-__version__ = "dev"
 # The oldest Calkit this assistant knows how to drive. Bump it when the
 # assistant starts relying on newer CLI output.
 MIN_CALKIT_VERSION = "0.47.4"
@@ -23,9 +21,17 @@ import subprocess
 import sys
 import webbrowser
 from abc import ABCMeta, abstractmethod
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as installed_version
 from pathlib import Path
 from typing import ClassVar, Literal
 from urllib.request import urlopen
+
+# hatch-vcs derives this from the assistant/vX.Y.Z tags at install time
+try:
+    __version__ = installed_version("calkit-assistant")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 # Set env var for gitpython so it doesn't fail if not installed
 os.environ["GIT_PYTHON_REFRESH"] = "quiet"

@@ -54,6 +54,7 @@ jobs:
       - name: Build with PyInstaller
         run: >-
           uv run pyinstaller --onefile --icon resources/icon.ico
+          --copy-metadata calkit-assistant
           --name calkit-assistant main.py
       - name: Check the executable starts
         run: |

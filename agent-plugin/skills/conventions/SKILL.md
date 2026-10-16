@@ -37,9 +37,8 @@ A minimal example:
 ```yaml
 environments:
   main:
-    kind: uv-venv
-    path: requirements.txt
-    python: "3.13"
+    kind: uv
+    path: pyproject.toml
 
 pipeline:
   stages:
@@ -61,7 +60,8 @@ kinds:
 
 | Kind      | Spec file                               |
 | --------- | --------------------------------------- |
-| `uv-venv` | `requirements.txt` or `pyproject.toml`  |
+| `uv`      | `pyproject.toml` (with `uv.lock`)       |
+| `uv-venv` | `requirements.txt`                      |
 | `venv`    | `requirements.txt`                      |
 | `conda`   | `environment.yml`                       |
 | `pixi`    | `pixi.toml`                             |
@@ -72,6 +72,12 @@ kinds:
 | `ssh`     | (remote host config)                    |
 | `slurm`   | (HPC cluster config)                    |
 
+For Python, default to a `uv` project environment, created with
+`calkit new uv-env -n <name> <packages>`, which writes `pyproject.toml` and
+`uv.lock`; set the Python version with `--python`, which becomes
+`requires-python`. Use `uv-venv` only for a project that already has a
+`requirements.txt` it should keep.
+
 Example environment definitions:
 
 ```yaml
@@ -79,12 +85,6 @@ environments:
   py:
     kind: uv
     path: pyproject.toml
-    python: "3.13"
-
-  py2:
-    kind: uv-venv
-    path: requirements.txt
-    python: "3.13"
 
   texlive:
     kind: docker

@@ -2366,9 +2366,15 @@ def test_translate_run_targets(tmp_dir):
     subprocess.check_call(["git", "init"])
     os.makedirs("inline-sp/calkit", exist_ok=True)
     os.makedirs("isolated-sp/.dvc", exist_ok=True)
+    # Each has an inline subproject of its own
+    for sp in ["inline-sp", "isolated-sp"]:
+        os.makedirs(f"{sp}/nested")
+        with open(f"{sp}/nested/calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"name": "nested"}, f)
     with open("inline-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
+                "subprojects": [{"path": "nested"}],
                 "pipeline": {
                     "stages": {
                         "stage-a": {
@@ -2382,14 +2388,21 @@ def test_translate_run_targets(tmp_dir):
                             "target_path": "main.tex",
                             "diffs": ["v1"],
                         },
+                        "report": {
+                            "kind": "markdown",
+                            "target_path": "report.md",
+                        },
                     }
-                }
+                },
             },
             f,
         )
+    with open("inline-sp/report.md", "w") as f:
+        f.write("```python calkit stage name=plot environment=env\n1\n```\n")
     with open("isolated-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
+                "subprojects": [{"path": "nested"}],
                 "pipeline": {
                     "stages": {
                         "stage-b": {
@@ -2404,7 +2417,7 @@ def test_translate_run_targets(tmp_dir):
                             "diffs": ["v1"],
                         },
                     }
-                }
+                },
             },
             f,
         )
@@ -2444,6 +2457,11 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:paper-diff-v1"]
     assert isolated == [("isolated-sp", "paper-diff-v1")]
+    # As can a subproject's markdown stage, read from its own directory
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:report"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml:report/plot"]
     # Unrecognized targets pass through unchanged
     parent, isolated = calkit.pipeline.translate_run_targets(
         ["my-parent-stage"], ck_info=ck_info
@@ -2457,6 +2475,37 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:stage-a", "my-parent-stage"]
     assert isolated == [("isolated-sp", "stage-b")]
+    # A nested subproject is named by its path, and run by the nearest
+    # project with its own DVC repo
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp/nested:s", "inline-sp/nested", "isolated-sp/nested:s"],
+        ck_info=ck_info,
+    )
+    assert parent == [
+        "inline-sp/nested/dvc.yaml:s",
+        "inline-sp/nested/dvc.yaml",
+    ]
+    assert isolated == [("isolated-sp", "nested/dvc.yaml:s")]
+    # A nested one's directory name works too, unless it's ambiguous, as
+    # here, where both subprojects have one called 'nested'
+    with pytest.raises(
+        ValueError, match="inline-sp/nested, isolated-sp/nested"
+    ):
+        calkit.pipeline.translate_run_targets(["nested:s"], ck_info=ck_info)
+    os.rename("isolated-sp/nested", "isolated-sp/other")
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["nested:s", "nested"], ck_info=ck_info
+    )
+    assert parent == [
+        "inline-sp/nested/dvc.yaml:s",
+        "inline-sp/nested/dvc.yaml",
+    ]
+    # But a bare name is this project's stage first
+    ck_info["pipeline"] = {"stages": {"nested": {}}}
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["nested"], ck_info=ck_info
+    )
+    assert parent == ["nested"]
 
 
 def test_get_concurrent_scheduler_stages():

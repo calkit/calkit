@@ -142,6 +142,73 @@ def test_load_calkit_info(tmp_dir, monkeypatch):
     assert calkit.load_calkit_info() == {}
 
 
+def test_iter_projects(tmp_dir):
+    def write(wdir, info):
+        os.makedirs(wdir, exist_ok=True)
+        with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+            calkit.ryaml.dump(info, f)
+
+    write(
+        ".",
+        {
+            "name": "root",
+            "subprojects": [
+                {"path": "sub1"},
+                {"path": "sub2"},
+                # Declared but never created, so there's nothing to read
+                {"path": "missing"},
+                # Not a mapping, and a mapping with no path
+                "sub1",
+                {"description": "no path"},
+            ],
+        },
+    )
+    write("sub1", {"name": "sub1", "subprojects": [{"path": "nested"}]})
+    write("sub1/nested", {"name": "nested"})
+    write("sub2", {"name": "sub2"})
+    # A directory with no calkit.yaml isn't a project
+    os.makedirs("missing", exist_ok=True)
+    found = [(wdir, info["name"]) for wdir, info in calkit.iter_projects()]
+    assert found == [
+        (".", "root"),
+        ("sub1", "sub1"),
+        (os.path.join("sub1", "nested"), "nested"),
+        ("sub2", "sub2"),
+    ]
+    # Starting from a subproject yields paths relative to it
+    assert [wdir for wdir, _ in calkit.iter_projects(wdir="sub1")] == [
+        "sub1",
+        os.path.join("sub1", "nested"),
+    ]
+    # A subproject naming itself, or its parent, terminates
+    write(
+        "sub2",
+        {"name": "sub2", "subprojects": [{"path": "."}, {"path": ".."}]},
+    )
+    assert [wdir for wdir, _ in calkit.iter_projects()] == [
+        ".",
+        "sub1",
+        os.path.join("sub1", "nested"),
+        "sub2",
+    ]
+    assert calkit.describe_project(".") == ""
+    assert calkit.describe_project("sub1/nested") == (
+        "subproject 'sub1/nested': "
+    )
+    assert calkit.qualify_with_project(".", "env") == "env"
+    assert calkit.qualify_with_project(
+        os.path.join("sub1", "nested"), "env"
+    ) == ("sub1/nested:env")
+    # A project is checked from its own directory, with its own .env
+    with open(os.path.join("sub1", ".env"), "w") as f:
+        f.write("CALKIT_TEST_SUB1_VAR=from-sub1\n")
+    cwd = os.getcwd()
+    with calkit.in_project("sub1"):
+        assert os.getcwd() == os.path.join(cwd, "sub1")
+        assert os.environ.pop("CALKIT_TEST_SUB1_VAR") == "from-sub1"
+    assert os.getcwd() == cwd
+
+
 def test_get_env_var_dep_names():
     ck_info = {
         "dependencies": [

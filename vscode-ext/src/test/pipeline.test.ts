@@ -117,6 +117,15 @@ test("classifyStaleStage maps a notebook edit via its cleaned copy", () => {
   assert.equal(cls.notebookStale, true);
   // The internal cleaned path isn't surfaced as a stray "extra" input.
   assert.deepEqual(cls.extraModifiedInputs, []);
+  // A subproject's cleaned copy is under its own .calkit
+  const sub = classifyStaleStage(
+    {
+      modified_inputs: ["sub/.calkit/notebooks/cleaned/nb/explore.ipynb"],
+    },
+    { notebookPath: "sub/nb/explore.ipynb", projectDir: "sub" },
+  );
+  assert.equal(sub.notebookStale, true);
+  assert.deepEqual(sub.extraModifiedInputs, []);
 });
 
 test("classifyStaleStage surfaces modified declared inputs and extra deps", () => {

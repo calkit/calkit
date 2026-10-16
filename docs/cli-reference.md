@@ -1939,7 +1939,8 @@ List Calkit objects.
 | [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer.                                                  |
 | [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
-| [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                                                                          |
+| [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages, including subprojects'.                                                  |
+| [`subprojects`](#subcommand-list-ls-subprojects)                | List subprojects, including nested ones, by path.                                              |
 | [`latex-diffs`](#subcommand-list-ls-latex-diffs)                | List the LaTeX diffs the pipeline keeps and whether each is current.                           |
 | [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                                                                      |
 | [`imports`](#subcommand-list-ls-imports)                        | List everything in the project that was imported from elsewhere.                               |
@@ -2257,7 +2258,7 @@ Options:
 
 #### `calkit list|ls stages`
 
-List pipeline stages.
+List pipeline stages, including subprojects'.
 
 Usage:
 
@@ -2272,6 +2273,24 @@ Options:
 | `--kind`, `-k` | str     | no       |         | Filter stages by kind.  |
 | `--stale`      | boolean | no       | False   | Show only stale stages. |
 | `--json`       | boolean | no       | False   | Output result as JSON.  |
+
+<a id="subcommand-list-ls-subprojects"></a>
+
+#### `calkit list|ls subprojects`
+
+List subprojects, including nested ones, by path.
+
+Usage:
+
+```text
+calkit list|ls subprojects [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-latex-diffs"></a>
 
@@ -2378,6 +2397,7 @@ Describe things.
 | [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
 | [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
+| [`subprojects`](#subcommand-describe-desc-subprojects)              | Describe subprojects, including nested ones.                       |
 | [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
@@ -2428,6 +2448,26 @@ Usage:
 
 ```text
 calkit describe|desc environments|envs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-subprojects"></a>
+
+#### `calkit describe|desc subprojects`
+
+Describe subprojects, including nested ones.
+
+Stages and environments are named as in the subproject itself; from here, they're addressed as '<path>:<name>'.
+
+Usage:
+
+```text
+calkit describe|desc subprojects [OPTIONS]
 ```
 
 Options:
@@ -3191,7 +3231,7 @@ Check things.
 | [`repro`](#subcommand-check-repro)                          | Check the reproducibility of a project.                                                                      |
 | [`environment`](#subcommand-check-environment)              | Check that an environment is up-to-date.                                                                     |
 | [`julia-env`](#subcommand-check-julia-env)                  | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
-| [`environments`](#subcommand-check-environments)            |                                                                                                              |
+| [`environments`](#subcommand-check-environments)            | Check that the project's environments are up to date.                                                        |
 | [`envs`](#subcommand-check-envs)                            | Check that all environments are up-to-date.                                                                  |
 | [`renv`](#subcommand-check-renv)                            | Check an renv R environment, initializing if needed.                                                         |
 | [`docker-env`](#subcommand-check-docker-env)                | Check that Docker environment is up-to-date.                                                                 |
@@ -3280,6 +3320,10 @@ Options:
 <a id="subcommand-check-environments"></a>
 
 #### `calkit check environments`
+
+Check that the project's environments are up to date.
+
+Subprojects' environments are checked too, as 'calkit run' does.
 
 Usage:
 
@@ -3456,6 +3500,8 @@ Options:
 
 Check that a project's system-level requirements are met.
 
+Subprojects' requirements are checked too, since the host has to meet them for the project's pipeline to run.
+
 Usage:
 
 ```text
@@ -3489,6 +3535,8 @@ calkit check stage-runs
 
 Check that the project's required environmental variables exist.
 
+Subprojects' are included, since they are read from the same environment.
+
 Usage:
 
 ```text
@@ -3506,6 +3554,8 @@ Options:
 #### `calkit check pipeline`
 
 Check that the project pipeline is defined correctly.
+
+Subprojects' pipelines are checked too, since those are stages the project runs.
 
 Usage:
 

@@ -380,12 +380,14 @@ export function qualifyEnvDescriptions(
  * stale ones already carry the "sub:stage" name.
  */
 export function stageNameFromDvcAddress(address: string): string {
+  // DVC may report a Windows path's native separators
+  const normalized = address.replace(/\\/g, "/");
   const marker = "dvc.yaml:";
-  const at = address.indexOf(marker);
+  const at = normalized.indexOf(marker);
   if (at < 0) {
     return address;
   }
-  const dir = address.slice(0, at).replace(/\/+$/, "");
+  const dir = normalized.slice(0, at).replace(/\/+$/, "");
   return qualifyName(dir || ".", address.slice(at + marker.length));
 }
 

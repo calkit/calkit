@@ -275,6 +275,11 @@ test("subproject names and paths split back to where they're declared", () => {
     "analyses:download",
   );
   assert.equal(stageNameFromDvcAddress("dvc.yaml:build"), "build");
+  // DVC on Windows may use native separators
+  assert.equal(
+    stageNameFromDvcAddress("analyses\\nested\\dvc.yaml:download"),
+    "analyses/nested:download",
+  );
   assert.equal(stageNameFromDvcAddress("build@1"), "build@1");
   const envs = new Set(["slurm", "main", "analyses:main", "analyses:cluster"]);
   assert.deepEqual(envRefParts("slurm:main", envs), ["slurm", "main"]);

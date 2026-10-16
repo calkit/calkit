@@ -3036,6 +3036,9 @@ def translate_run_targets(
       directly inside the subproject directory)
     - ``stage.diffs`` → every diff stage a latex stage generates
 
+    A subproject is named by its path; a declared one, and a nested one
+    whose directory name is unambiguous, by its directory name too.
+
     Any target that does not match a known subproject is passed through
     unchanged into the first return value.
 
@@ -3083,10 +3086,15 @@ def translate_run_targets(
         sp_map[sp] = sp
         sp_map[Path(sp).name] = sp
     declared = set(sp_map.values())
+    root_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # A nested one by its directory name too, when that's unambiguous
+    nested_by_name: dict[str, list[str]] = {}
     for sp_wdir, _ in calkit.iter_projects(ck_info=ck_info):
         sp = Path(sp_wdir).as_posix()
         if sp != ".":
             sp_map.setdefault(sp, sp)
+            if sp not in declared:
+                nested_by_name.setdefault(Path(sp).name, []).append(sp)
     # Targets have to become the stages DVC actually knows about. Done
     # before subproject handling because a Markdown path contains no ':'
     # and so can't be a subproject shorthand.
@@ -3099,6 +3107,20 @@ def translate_run_targets(
         else:
             sp_part = target
             stage_part = None
+        nested = nested_by_name.get(sp_part, [])
+        # A bare name is a stage of this project's before a nested
+        # subproject's
+        if (
+            sp_part not in sp_map
+            and nested
+            and (stage_part or sp_part not in root_stages)
+        ):
+            if len(nested) > 1:
+                raise ValueError(
+                    f"'{sp_part}' could be any of the subprojects "
+                    f"{', '.join(nested)}; name one by its path"
+                )
+            sp_map[sp_part] = nested[0]
         if sp_part not in sp_map:
             parent_targets.append(target)
             continue

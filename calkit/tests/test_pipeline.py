@@ -2486,6 +2486,26 @@ def test_translate_run_targets(tmp_dir):
         "inline-sp/nested/dvc.yaml",
     ]
     assert isolated == [("isolated-sp", "nested/dvc.yaml:s")]
+    # A nested one's directory name works too, unless it's ambiguous, as
+    # here, where both subprojects have one called 'nested'
+    with pytest.raises(
+        ValueError, match="inline-sp/nested, isolated-sp/nested"
+    ):
+        calkit.pipeline.translate_run_targets(["nested:s"], ck_info=ck_info)
+    os.rename("isolated-sp/nested", "isolated-sp/other")
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["nested:s", "nested"], ck_info=ck_info
+    )
+    assert parent == [
+        "inline-sp/nested/dvc.yaml:s",
+        "inline-sp/nested/dvc.yaml",
+    ]
+    # But a bare name is this project's stage first
+    ck_info["pipeline"] = {"stages": {"nested": {}}}
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["nested"], ck_info=ck_info
+    )
+    assert parent == ["nested"]
 
 
 def test_get_concurrent_scheduler_stages():

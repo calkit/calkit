@@ -190,25 +190,57 @@ def test_check_reproducibility(tmp_dir):
         good | {"provenance_gaps": []}
     ).recommendation
     assert "datasets with no provenance" in rec  # type: ignore
-    # What a LaTeX document cites is followed too
+    # What a LaTeX document shows is followed too, whether cited with
+    # \\ckfigure or included plainly, and a plain include is fine wherever
+    # the pipeline made the file, e.g., copied in by a map-paths stage or
+    # written by a json-to-latex one
     ck_info["pipeline"]["stages"]["paper"] = {
         "kind": "latex",
         "target_path": "paper/main.tex",
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    os.makedirs("paper")
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "plot": {
+                        "cmd": "calkit xenv -n py -- python scripts/plot.py",
+                        "deps": ["scripts/plot.py"],
+                        "outs": ["figures/fit.png", "results/fit.json"],
+                    },
+                    "copy-figs": {
+                        "cmd": "calkit map-paths",
+                        "deps": ["figures/fit.png"],
+                        "outs": ["paper/figs/fit.png"],
+                    },
+                    "table": {
+                        "cmd": "calkit latex from-json results/fit.json",
+                        "deps": ["results/fit.json"],
+                        "outs": ["paper/table.tex"],
+                    },
+                }
+            },
+            f,
+        )
+    os.makedirs("paper/figs")
+    for path in ["paper/figs/fit.png", "paper/table.tex", "paper/drawn.png"]:
+        with open(path, "w") as f:
+            f.write("")
     with open("paper/main.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n\\usepackage{calkit}\n"
-            "\\begin{document}\\ckfigure{figures/pasted.png}"
+            "\\begin{document}\n"
+            "\\includegraphics{figs/fit}\n\\input{table}\n"
+            "\\includegraphics[width=1cm]{drawn.png}\n"
+            "\\ckfigure{figures/pasted.png}\n"
             "\\end{document}\n"
         )
     res = check_reproducibility()
-    assert (
-        "nothing records where figures/pasted.png came from"
-        in res.provenance_gaps
-    )
+    assert [g for g in res.provenance_gaps if "mystery" not in g] == [
+        "nothing records where figures/pasted.png came from",
+        "nothing records where paper/drawn.png came from",
+    ]
 
 
 def test_check_call():

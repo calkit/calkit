@@ -884,7 +884,7 @@ def check_reproducibility(
         and posixpath.splitext(a["path"])[1].lower()
         in MISC_EXTENSIONS_NEEDING_PROVENANCE
     ]
-    # Followed back from what a reader sees, declared or cited by a LaTeX
+    # Followed back from what a reader sees, declared or shown by a LaTeX
     # document the pipeline builds
     shown = [
         a["path"]
@@ -895,16 +895,11 @@ def check_reproducibility(
     for stage in (
         (ck_info.get("pipeline", {}) or {}).get("stages", {}).values()
     ):
-        if isinstance(stage, dict) and stage.get("kind") == "latex":
-            folder = os.path.join(
-                wdir, os.path.dirname(stage.get("target_path") or "")
-            )
-            if os.path.isdir(folder):
-                shown += [
-                    c.path
-                    for doc in calkit.latex.root_documents(folder)
-                    for c in calkit.latex.find_citations(doc)
-                ]
+        if not isinstance(stage, dict) or stage.get("kind") != "latex":
+            continue
+        target = stage.get("target_path")
+        if target and os.path.isfile(os.path.join(wdir, target)):
+            shown += calkit.latex.find_shown(target, wdir=wdir)
     res["provenance_gaps"] = [
         str(gap)
         for gap in find_project_provenance_gaps(

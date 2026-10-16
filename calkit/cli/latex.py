@@ -659,15 +659,13 @@ def build(
     # to be beside it before TeX can read it
     for problem in calkit.latex.write_cited(tex_dir):
         warn(f"{problem}; it will print as ??")
-    cited = {
-        c.path
-        for doc in calkit.latex.root_documents(tex_dir)
-        for c in calkit.latex.find_citations(doc)
-    }
-    if cited:
+    # Plain \includegraphics counts as much as \ckfigure, and is fine
+    # wherever the pipeline made the file
+    shown = calkit.latex.find_shown(tex_file)
+    if shown:
         from calkit.provenance import find_project_provenance_gaps
 
-        for gap in find_project_provenance_gaps(sorted(cited)):
+        for gap in find_project_provenance_gaps(shown):
             warn(
                 f"The document can't be traced back to its sources: {gap}; "
                 "record it in calkit.yaml with imported_from or created_by, "

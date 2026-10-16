@@ -188,3 +188,29 @@ def test_main_window_builds_and_refreshes_offscreen(app):
                 "--install-extension",
                 recommended[1],
             ]
+
+
+def test_get_projects(tmp_path, monkeypatch):
+    import git
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    # Projects are found in ~/calkit and ~/dev, and a project cloned in both
+    # opens from ~/calkit
+    for folder, url in [
+        ("calkit/a", "https://github.com/someone/a.git"),
+        ("dev/a", "git@github.com:someone/a.git"),
+        ("dev/b", "https://github.com/someone/b.git"),
+        ("dev/not-calkit", "https://github.com/someone/c.git"),
+    ]:
+        wdir = tmp_path / folder
+        repo = git.Repo.init(wdir)
+        repo.create_remote("origin", url)
+        if folder != "dev/not-calkit":
+            (wdir / "calkit.yaml").write_text("owner: someone\n")
+    with mock.patch("main.get_calkit_token", return_value=""):
+        projects = main.get_projects()
+    assert [(p.project_name, p.wdir) for p in projects] == [
+        ("a", str(tmp_path / "calkit" / "a")),
+        ("b", str(tmp_path / "dev" / "b")),
+    ]

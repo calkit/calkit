@@ -1263,13 +1263,15 @@ def get_projects() -> list[Project]:
         cloud_projects_by_git_url[project_full_name["git_repo_url"]] = (
             project_full_name
         )
-    # Get the local projects
-    start = os.path.join(os.path.expanduser("~"), "calkit")
+    # Get the local projects, from where the assistant clones them and where
+    # developers tend to keep repos
     max_depth = 1
     res = []
-    for i in range(max_depth):
-        pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
-        res += glob.glob(pattern)
+    for start_name in ["calkit", "dev"]:
+        start = os.path.join(os.path.expanduser("~"), start_name)
+        for i in range(max_depth):
+            pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
+            res += sorted(glob.glob(pattern))
     final_res_by_git_url = {}
     for ck_fpath in res:
         project_dir = os.path.dirname(ck_fpath)
@@ -1301,7 +1303,8 @@ def get_projects() -> list[Project]:
             wdir=project_dir,
             git_repo_url=remote_url,
         )
-        final_res_by_git_url[remote_url] = project
+        # A project cloned in both places opens from ~/calkit
+        final_res_by_git_url.setdefault(remote_url, project)
     for git_repo_url, project_dict in cloud_projects_by_git_url.items():
         # If the project is not in the local directory, add it
         if git_repo_url not in final_res_by_git_url:

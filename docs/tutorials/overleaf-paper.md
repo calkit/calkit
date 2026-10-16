@@ -145,22 +145,30 @@ calkit run
 <!-- Screenshot: img/overleaf-paper/sync.png
 The "Sync now" prompt after a figure's origin is recorded. -->
 
-Then click **Sync now** in the panel. Calkit replaces the
-`\includegraphics` with a `\ckfigure` that points at the figure in the
-project, and sends the figure to Overleaf. The item is checked off.
+Then click **Sync now** in the panel. Calkit sends the figure from the
+project to the same place in your Overleaf project, replacing the copy that
+was uploaded by hand, and the item is checked off. Your
+`\includegraphics` line stays exactly as it was. If the figure is made
+somewhere other than where the paper expects it, Calkit adds a step that
+copies it into place, so you don't have to rename anything.
+
+Numbers are different, since a number typed into the text has nothing to
+point at. For those, Calkit swaps the typed value for a `\ckvalue`, which
+reads it straight from the results file the script wrote, so it can't be
+mistyped or left behind when the results change:
 
 ```latex
 % Before
-\includegraphics[width=\linewidth]{figures/fit.png}
+The fit has an RMSE of 0.12.
 % After
-\ckfigure[width=\linewidth]{figures/fit.png}
+The fit has an RMSE of \ckvalue[.2f]{results/fit.json}{rmse}.
 ```
 
-The `\ckfigure` command comes from `calkit.sty`, which Calkit adds to your
-Overleaf project along with a `\usepackage{calkit}` line in the preamble.
-Numbers work the same way, with `\ckvalue`, which reads the value straight
-from the results file the script wrote, so it can't be mistyped or left
-behind when the results change.
+`\ckvalue` comes from `calkit.sty`, which Calkit adds to your Overleaf
+project along with a `\usepackage{calkit}` line in the preamble. The same
+package has `\ckfigure` and `\cktable`, which the panel uses when you
+insert a new figure or table from the project, but nothing you've already
+written needs to change to use them.
 
 From now on, putting the cursor on the figure shows what made it, whether
 it's out of date, and a link to see it on calkit.io. When the code or data
@@ -168,8 +176,8 @@ changes, the figure shows as stale until you run the pipeline and sync
 again.
 
 <!-- Screenshot: img/overleaf-paper/provenance-card.png
-The card shown with the cursor on a \ckfigure: stage, script, inputs, and
-status. -->
+The card shown with the cursor on an \includegraphics: stage, script,
+inputs, and status. -->
 
 ## Repeat until nothing is left
 

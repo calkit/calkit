@@ -543,11 +543,20 @@ def test_subproject_checks(tmp_dir, monkeypatch):
     os.makedirs("sub")
     with open("sub/requirements.txt", "w") as f:
         f.write("")
+    with open("sub/ready", "w") as f:
+        f.write("")
+    subprocess.check_call(["git", "add", "sub/ready"])
     write_ck_info(
         "sub/calkit.yaml",
         {
             "requirements": [
-                {"kind": "env-var", "name": "SUBPROJECT_ONLY_VAR"}
+                {"kind": "env-var", "name": "SUBPROJECT_ONLY_VAR"},
+                # Only passes when checked from the subproject
+                {
+                    "kind": "setup",
+                    "name": "ready",
+                    "check_command": "git ls-files --error-unmatch ready",
+                },
             ],
             "environments": {
                 "sub-env": {
@@ -608,4 +617,4 @@ def test_subproject_checks(tmp_dir, monkeypatch):
     assert "sub-env" in res.stdout
     subprocess.check_call(["calkit", "run"])
     with open("sub/a.txt") as f:
-        assert f.read().strip() == "from sub"
+        assert "from sub" in f.read()

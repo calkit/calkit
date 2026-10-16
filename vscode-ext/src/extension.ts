@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import * as fs from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import * as http from "node:http";
@@ -210,6 +211,7 @@ let currentCalkitConfig: CalkitInfo | undefined;
 // Subproject directories, relative to the workspace root
 let currentSubprojectDirs: string[] = [];
 let currentQuestionOrigins: QuestionOrigin[] = [];
+let currentArtifactOrigins = new Map<string, string>();
 // For telling open PDF viewers when the config has been read
 let pdfReviewProvider: PdfReviewProvider | undefined;
 // Whether a calkit.yaml exists in the workspace. The sidebar is gated on this:
@@ -1355,7 +1357,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const artifactKind =
           item?.nodeKind === "dataset" ? "dataset" : "figure";
-        const project = projectForPath(workspaceRoot, artifactPath);
+        const project = projectForArtifact(workspaceRoot, artifactPath);
         await showStageEditor(
           context,
           project.projectDir,
@@ -1390,7 +1392,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!url) {
           return;
         }
-        const project = projectForPath(workspaceRoot, artifactPath);
+        const project = projectForArtifact(workspaceRoot, artifactPath);
         try {
           await execFileAsync(
             "calkit",
@@ -2457,6 +2459,7 @@ async function refreshPipelineOutputContext(
     dvcYaml,
     subprojects,
     questionOrigins,
+    artifactOrigins,
   } = await readMergedProject(workspaceRoot);
   const subprojectDirs = subprojects.map((sp) => sp.dir);
   const envDescriptions = await fetchEnvDescriptions(
@@ -2467,6 +2470,7 @@ async function refreshPipelineOutputContext(
   currentCalkitConfig = calkitConfig;
   currentSubprojectDirs = subprojectDirs;
   currentQuestionOrigins = questionOrigins;
+  currentArtifactOrigins = artifactOrigins;
   currentEnvDescriptions = envDescriptions;
   pdfReviewProvider?.stagesChanged();
   void refreshActiveFileBuildsPdfContext(
@@ -3077,13 +3081,12 @@ async function showStageEditor(
     .map(toProjectRelative)
     .filter((rel) => !rel.startsWith("../"))
     .sort();
-  // The calkit run terminal is shared, so a subproject's commands say where
-  // to run
-  const rootDir = getWorkspaceRoot();
-  const calkitCmd =
-    rootDir && path.relative(rootDir, workspaceRoot)
-      ? `calkit -C ${shQuote(workspaceRoot)}`
-      : "calkit";
+  // The calkit run terminal is shared, so it opens at the root and a
+  // subproject's commands say where to run
+  const terminalCwd = getWorkspaceRoot() ?? workspaceRoot;
+  const calkitCmd = path.relative(terminalCwd, workspaceRoot)
+    ? `calkit -C ${shQuote(workspaceRoot)}`
+    : "calkit";
   const envs = projectConfig?.environments ?? {};
   const envEntries = Object.entries(envs).map(([name, env]) => ({
     name,
@@ -3166,7 +3169,7 @@ async function showStageEditor(
             );
           });
         }
-        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        const terminal = getOrCreateTerminal("calkit: run", terminalCwd);
         terminal.show();
         let cmd = `${calkitCmd} xr ${args.map(shQuote).join(" ")}`;
         if (gitOuts.length > 0) {
@@ -3210,10 +3213,7 @@ async function showStageEditor(
         void execFileAsync("calkit", updateArgs, { cwd: workspaceRoot })
           .then(() => {
             if (msg.andRun) {
-              const terminal = getOrCreateTerminal(
-                "calkit: run",
-                workspaceRoot,
-              );
+              const terminal = getOrCreateTerminal("calkit: run", terminalCwd);
               terminal.show();
               terminal.sendText(`${calkitCmd} run ${shQuote(editStageName)}`);
             }
@@ -4700,20 +4700,34 @@ async function readMergedProject(workspaceRoot: string): Promise<{
   dvcYaml: DvcYaml | undefined;
   subprojects: Subproject[];
   questionOrigins: QuestionOrigin[];
+  artifactOrigins: Map<string, string>;
 }> {
   const [config, dvcYaml] = await Promise.all([
     readCalkitConfig(workspaceRoot),
     readDvcYaml(workspaceRoot),
   ]);
   if (!config) {
-    return { config, dvcYaml, subprojects: [], questionOrigins: [] };
+    return {
+      config,
+      dvcYaml,
+      subprojects: [],
+      questionOrigins: [],
+      artifactOrigins: new Map(),
+    };
   }
-  const found = await collectSubprojects(config, async (dir) => {
-    const projectDir = path.join(workspaceRoot, dir);
-    return (await fileExists(path.join(projectDir, "calkit.yaml")))
-      ? readCalkitConfig(projectDir)
-      : undefined;
-  });
+  const found = await collectSubprojects(
+    config,
+    async (dir) => {
+      const projectDir = path.join(workspaceRoot, dir);
+      return (await fileExists(path.join(projectDir, "calkit.yaml")))
+        ? readCalkitConfig(projectDir)
+        : undefined;
+    },
+    (dir) =>
+      fs.promises
+        .realpath(path.join(workspaceRoot, dir))
+        .catch(() => path.join(workspaceRoot, dir)),
+  );
   const subprojects: Subproject[] = await Promise.all(
     found.map(async (sp) => ({
       ...sp,
@@ -4726,6 +4740,7 @@ async function readMergedProject(workspaceRoot: string): Promise<{
     dvcYaml: dvcYaml && mergeSubprojectDvcYaml(dvcYaml, subprojects),
     subprojects,
     questionOrigins: merged.questionOrigins,
+    artifactOrigins: merged.artifactOrigins,
   };
 }
 
@@ -4745,6 +4760,22 @@ function projectForPath(
 ): { projectDir: string; path: string } {
   const split = splitSubprojectPath(relPath, currentSubprojectDirs);
   return { projectDir: path.join(workspaceRoot, split.dir), path: split.path };
+}
+
+// An artifact is edited where it's declared, falling back to the project its
+// file is in
+function projectForArtifact(
+  workspaceRoot: string,
+  relPath: string,
+): { projectDir: string; path: string } {
+  const dir = currentArtifactOrigins.get(relPath);
+  if (dir === undefined) {
+    return projectForPath(workspaceRoot, relPath);
+  }
+  return {
+    projectDir: path.join(workspaceRoot, dir),
+    path: dir === "." ? relPath : path.posix.relative(dir, relPath),
+  };
 }
 
 async function readCalkitConfig(

@@ -924,24 +924,22 @@ def check_environments(
     Subprojects' environments are checked too, as 'calkit run' does.
     """
     ck_info = calkit.load_calkit_info()
-    projects = [
-        (wdir, info)
-        for wdir, info in calkit.iter_projects(ck_info=ck_info)
-        if info.get("environments")
-    ]
-    if not projects:
+    projects = list(calkit.iter_projects(ck_info=ck_info))
+    if not any(info.get("environments") for _, info in projects):
         typer.echo("No environments defined in calkit.yaml")
         return
     # Set any project-level environmental variables before checking
     # environments
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     failures = []
-    prev_wdir = os.getcwd()
     for wdir, info in projects:
+        # A parent's variables apply to its subprojects even if it has no
+        # environments of its own, as in 'calkit run'
         calkit.set_env_vars(ck_info=info, cli=True)
+        if not info.get("environments"):
+            continue
         # check_environment reads the project it's in, so go there
-        os.chdir(wdir)
-        try:
+        with calkit.in_project(wdir):
             for env_name, env in info["environments"].items():
                 if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
                     if verbose:
@@ -964,8 +962,6 @@ def check_environments(
                 except Exception as e:
                     warn(f"Error checking environment '{qualified}': {e}")
                     failures.append(qualified)
-        finally:
-            os.chdir(prev_wdir)
     if failures:
         raise_error(
             f"Failed to check the following environments: {', '.join(failures)}"
@@ -2224,9 +2220,8 @@ def check_project_requirements(
         calkit.requirements.cache_clear()
     for wdir, info in calkit.iter_projects():
         try:
-            calkit.check_requirements(
-                ck_info=info, wdir=wdir, use_cache=not no_cache
-            )
+            with calkit.in_project(wdir):
+                calkit.check_requirements(ck_info=info, use_cache=not no_cache)
         except Exception as e:
             raise_error(f"{calkit.describe_project(wdir)}{e}")
     message = "✅ All set!"
@@ -2299,20 +2294,21 @@ def check_env_vars(
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
     for wdir, info in calkit.iter_projects():
-        for raw in calkit.get_requirements(info):
-            req = _normalize_requirement(raw)
-            if req["kind"] != "env-var":
-                continue
-            name = req["name"]
-            if verbose:
-                typer.echo(f"Checking for environmental variable '{name}'")
-            if name not in os.environ:
-                value = calkit.requirements.prompt_for_env_var_req(req)
-                if value is None:
-                    raise_error(
-                        f"{calkit.describe_project(wdir)}no value provided "
-                        f"for '{name}'"
-                    )
+        with calkit.in_project(wdir):
+            for raw in calkit.get_requirements(info):
+                req = _normalize_requirement(raw)
+                if req["kind"] != "env-var":
+                    continue
+                name = req["name"]
+                if verbose:
+                    typer.echo(f"Checking for environmental variable '{name}'")
+                if name not in os.environ:
+                    value = calkit.requirements.prompt_for_env_var_req(req)
+                    if value is None:
+                        raise_error(
+                            f"{calkit.describe_project(wdir)}no value "
+                            f"provided for '{name}'"
+                        )
     message = "✅ All set!"
     calkit.echo(message)
 

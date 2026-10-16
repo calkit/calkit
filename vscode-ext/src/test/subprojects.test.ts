@@ -41,14 +41,26 @@ test("collectSubprojects walks nested subprojects and skips bad entries", async 
     ["analyses", "analyses/nested", "other"],
   );
   assert.deepEqual(await collectSubprojects({}, read), []);
+  // One reached again through a symlink is the same project
+  configs.self = { subprojects: [{ path: "self" }] };
+  const realDir = async (dir: string) => dir.replace(/^(self\/)*self$/, ".");
+  assert.deepEqual(
+    await collectSubprojects(
+      { subprojects: [{ path: "self" }, { path: "other" }] },
+      read,
+      realDir,
+    ),
+    [{ dir: "other", config: {} }],
+  );
 });
 
 test("mergeSubprojectConfigs qualifies names and rebases paths", () => {
-  const { config, questionOrigins } = mergeSubprojectConfigs(
+  const { config, questionOrigins, artifactOrigins } = mergeSubprojectConfigs(
     {
       questions: ["Root question?"],
       environments: { main: { kind: "uv", path: "pyproject.toml" } },
       pipeline: { stages: { build: { kind: "python-script" } } },
+      figures: [{ path: "root.png" }],
     },
     [
       {
@@ -73,7 +85,8 @@ test("mergeSubprojectConfigs qualifies names and rebases paths", () => {
               plot: {
                 kind: "python-script",
                 script_path: "scripts/plot.py",
-                environment: "main",
+                environment: "cluster:main",
+                scheduler: { log_path: "logs/plot.out" },
                 // Calkit also takes an input as a mapping, which the type
                 // doesn't say
                 inputs: [
@@ -87,11 +100,20 @@ test("mergeSubprojectConfigs qualifies names and rebases paths", () => {
                 kind: "latex",
                 wdir: "paper",
                 target_path: "paper.tex",
-                environment: "cluster:main",
+                environment: "main",
+              },
+              notes: {
+                kind: "markdown",
+                target_path: "notes.md",
+                pdf: { output_path: "out/notes.pdf" },
               },
             },
           },
-          figures: [{ path: "figures/a.png", stage: "plot" }],
+          figures: [
+            { path: "figures/a.png", stage: "plot" },
+            // Declared at the root too, which is where it's edited
+            { path: "../root.png" },
+          ],
           results: [{ path: "/abs/results.json" }],
           notebooks: [{ path: "nb.ipynb", environment: "main", stage: "plot" }],
           apps: { dash: { path: "app.html", stage: "plot" } },
@@ -111,7 +133,9 @@ test("mergeSubprojectConfigs qualifies names and rebases paths", () => {
   assert.deepEqual(config.pipeline?.stages?.["analyses:plot"], {
     kind: "python-script",
     script_path: "analyses/scripts/plot.py",
-    environment: "analyses:main",
+    environment: "analyses:cluster:analyses:main",
+    scheduler: { log_path: "analyses/logs/plot.out" },
+    subproject_wdir: "analyses",
     inputs: [
       "analyses/data/raw",
       { path: "analyses/params.yaml" },
@@ -124,11 +148,28 @@ test("mergeSubprojectConfigs qualifies names and rebases paths", () => {
   assert.deepEqual(config.pipeline?.stages?.["analyses:paper"], {
     kind: "latex",
     target_path: "analyses/paper/paper.tex",
-    environment: "analyses:cluster:analyses:main",
+    environment: "analyses:main",
+    subproject_wdir: "analyses/paper",
+  });
+  assert.deepEqual(config.pipeline?.stages?.["analyses:notes"], {
+    kind: "markdown",
+    target_path: "analyses/notes.md",
+    pdf: { output_path: "analyses/out/notes.pdf" },
+    subproject_wdir: "analyses",
   });
   assert.deepEqual(config.figures, [
+    { path: "root.png" },
     { path: "analyses/figures/a.png", stage: "analyses:plot" },
+    { path: "root.png" },
   ]);
+  assert.deepEqual(
+    [...artifactOrigins],
+    [
+      ["root.png", "."],
+      ["analyses/figures/a.png", "analyses"],
+      ["/abs/results.json", "analyses"],
+    ],
+  );
   assert.deepEqual(config.results, [{ path: "/abs/results.json" }]);
   assert.deepEqual(config.notebooks, [
     {

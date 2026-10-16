@@ -37,9 +37,13 @@ export interface QuestionOrigin {
 export async function collectSubprojects(
   config: CalkitInfo,
   readConfig: (dir: string) => Promise<CalkitInfo | undefined>,
+  // Where a directory really is, so one reached again through a symlink
+  // counts as seen
+  realDir: (dir: string) => Promise<string> = async (dir) => dir,
   base = ".",
-  seen: Set<string> = new Set(["."]),
+  seen?: Set<string>,
 ): Promise<{ dir: string; config: CalkitInfo }[]> {
+  seen ??= new Set([await realDir(".")]);
   const found: { dir: string; config: CalkitInfo }[] = [];
   for (const entry of config.subprojects ?? []) {
     const rawPath =
@@ -52,16 +56,19 @@ export async function collectSubprojects(
     const dir = path.posix
       .normalize(path.posix.join(base, rawPath.replace(/\\/g, "/")))
       .replace(/\/+$/, "");
-    if (seen.has(dir)) {
+    const real = await realDir(dir);
+    if (seen.has(real)) {
       continue;
     }
     const subConfig = await readConfig(dir);
     if (subConfig === undefined) {
       continue;
     }
-    seen.add(dir);
+    seen.add(real);
     found.push({ dir, config: subConfig });
-    found.push(...(await collectSubprojects(subConfig, readConfig, dir, seen)));
+    found.push(
+      ...(await collectSubprojects(subConfig, readConfig, realDir, dir, seen)),
+    );
   }
   return found;
 }
@@ -112,7 +119,7 @@ export function envRefParts(ref: string, envNames: Set<string>): string[] {
 function rebaseStage(dir: string, stage: PipelineStage): PipelineStage {
   const base =
     typeof stage.wdir === "string" ? path.posix.join(dir, stage.wdir) : dir;
-  const rebased: PipelineStage = { ...stage };
+  const rebased: PipelineStage = { ...stage, subproject_wdir: base };
   delete rebased.wdir;
   for (const [key, value] of Object.entries(stage)) {
     if (
@@ -146,6 +153,16 @@ function rebaseStage(dir: string, stage: PipelineStage): PipelineStage {
         : { ...output, path: rebasePath(base, output.path) },
     );
   }
+  if (typeof stage.scheduler?.log_path === "string") {
+    rebased.scheduler = {
+      ...stage.scheduler,
+      log_path: rebasePath(base, stage.scheduler.log_path),
+    };
+  }
+  const pdf = stage.pdf as { output_path?: unknown } | null | undefined;
+  if (typeof pdf?.output_path === "string") {
+    rebased.pdf = { ...pdf, output_path: rebasePath(base, pdf.output_path) };
+  }
   return rebased;
 }
 
@@ -167,7 +184,13 @@ function rebaseArtifact<T extends ArtifactEntry>(dir: string, entry: T): T {
 export function mergeSubprojectConfigs(
   root: CalkitInfo,
   subprojects: Subproject[],
-): { config: CalkitInfo; questionOrigins: QuestionOrigin[] } {
+): {
+  config: CalkitInfo;
+  questionOrigins: QuestionOrigin[];
+  // The project declaring each artifact path, which needn't be the one its
+  // file is in
+  artifactOrigins: Map<string, string>;
+} {
   const merged: CalkitInfo = {
     ...root,
     environments: { ...(root.environments ?? {}) },
@@ -187,6 +210,19 @@ export function mergeSubprojectConfigs(
   const questionOrigins: QuestionOrigin[] = (root.questions ?? []).map(
     (_, i) => ({ dir: ".", index: i + 1 }),
   );
+  const artifactOrigins = new Map<string, string>();
+  const artifactKinds = [
+    "figures",
+    "datasets",
+    "results",
+    "publications",
+    "presentations",
+  ] as const;
+  for (const kind of artifactKinds) {
+    for (const entry of root[kind] ?? []) {
+      artifactOrigins.set(entry.path, ".");
+    }
+  }
   for (const { dir, config } of subprojects) {
     for (const [name, env] of Object.entries(config.environments ?? {})) {
       merged.environments![qualifyName(dir, name)] =
@@ -223,15 +259,13 @@ export function mergeSubprojectConfigs(
           : {}),
       });
     }
-    for (const kind of [
-      "figures",
-      "datasets",
-      "results",
-      "publications",
-      "presentations",
-    ] as const) {
+    for (const kind of artifactKinds) {
       for (const entry of config[kind] ?? []) {
-        (merged[kind] as ArtifactEntry[]).push(rebaseArtifact(dir, entry));
+        const rebased = rebaseArtifact(dir, entry);
+        (merged[kind] as ArtifactEntry[]).push(rebased);
+        if (!artifactOrigins.has(rebased.path)) {
+          artifactOrigins.set(rebased.path, dir);
+        }
       }
     }
     (config.questions ?? []).forEach((question, i) => {
@@ -250,7 +284,7 @@ export function mergeSubprojectConfigs(
       questionOrigins.push({ dir, index: i + 1 });
     });
   }
-  return { config: merged, questionOrigins };
+  return { config: merged, questionOrigins, artifactOrigins };
 }
 
 function rebaseDvcPaths(

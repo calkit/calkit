@@ -196,7 +196,17 @@ def test_iter_projects(tmp_dir):
         "subproject 'sub1/nested': "
     )
     assert calkit.qualify_with_project(".", "env") == "env"
-    assert calkit.qualify_with_project("sub1/nested", "env") == "nested:env"
+    assert calkit.qualify_with_project(
+        os.path.join("sub1", "nested"), "env"
+    ) == ("sub1/nested:env")
+    # A project is checked from its own directory, with its own .env
+    with open(os.path.join("sub1", ".env"), "w") as f:
+        f.write("CALKIT_TEST_SUB1_VAR=from-sub1\n")
+    cwd = os.getcwd()
+    with calkit.in_project("sub1"):
+        assert os.getcwd() == os.path.join(cwd, "sub1")
+        assert os.environ.pop("CALKIT_TEST_SUB1_VAR") == "from-sub1"
+    assert os.getcwd() == cwd
 
 
 def test_get_env_var_dep_names():

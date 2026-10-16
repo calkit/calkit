@@ -550,10 +550,13 @@ def get_status(
     if ck_info:
         missing_env_vars = []
         for sp_wdir, sp_info in calkit.iter_projects(ck_info=ck_info):
-            missing_env_vars += [
-                calkit.qualify_with_project(sp_wdir, name)
-                for name in calkit.requirements.resolve_env_var_deps(sp_info)
-            ]
+            with calkit.in_project(sp_wdir):
+                missing_env_vars += [
+                    calkit.qualify_with_project(sp_wdir, name)
+                    for name in calkit.requirements.resolve_env_var_deps(
+                        sp_info
+                    )
+                ]
         if missing_env_vars:
             warn(
                 "Missing environmental variable(s): "
@@ -3033,9 +3036,10 @@ def run(
     # machine run this?" ahead of the first environment being built
     for req_wdir, req_info in calkit.iter_projects(ck_info=ck_info):
         try:
-            calkit.check_requirements(
-                ck_info=req_info, wdir=req_wdir, system_info=system_info
-            )
+            with calkit.in_project(req_wdir):
+                calkit.check_requirements(
+                    ck_info=req_info, system_info=system_info
+                )
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"{calkit.describe_project(req_wdir)}{e}")

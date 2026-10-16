@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import csv
 import functools
 import glob
@@ -482,7 +483,24 @@ def qualify_with_project(wdir: str, name: str) -> str:
     """Name something in a subproject the way its stages are named."""
     if wdir in (".", ""):
         return name
-    return f"{os.path.basename(os.path.normpath(wdir))}:{name}"
+    from pathlib import Path
+
+    return f"{Path(os.path.normpath(wdir)).as_posix()}:{name}"
+
+
+@contextlib.contextmanager
+def in_project(wdir: str) -> Iterator[None]:
+    """Work from a project's directory, with its ``.env`` loaded, as if
+    running from there."""
+    import dotenv
+
+    prev_wdir = os.getcwd()
+    os.chdir(wdir)
+    try:
+        dotenv.load_dotenv(dotenv_path=".env")
+        yield
+    finally:
+        os.chdir(prev_wdir)
 
 
 def save_calkit_info(

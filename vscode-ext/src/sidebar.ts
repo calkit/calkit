@@ -57,6 +57,9 @@ function answerText(question: string | QuestionEntry): string | undefined {
     .join("; ");
 }
 
+// Where scheduler logs go, under a subproject's directory for its stages
+const SCHEDULER_LOG_DIR = /(^|\/)\.calkit\/scheduler\/logs\//;
+
 // Base codicon for each artifact kind (used when the artifact has provenance and
 // isn't stale; imported artifacts use a cloud icon instead).
 const ARTIFACT_ICONS: Record<ArtifactKind, string> = {
@@ -1376,7 +1379,7 @@ export class CalkitSidebarProvider
       // "Output" row opens a real file. Scheduler logs get their own row below.
       const explicitOutputs = calkitStage.iterate_over
         ? dvcStageOutputPaths(this.dvcYaml?.stages?.[stageName] ?? {}).filter(
-            (p) => !p.startsWith(".calkit/scheduler/logs/"),
+            (p) => !SCHEDULER_LOG_DIR.test(p),
           )
         : Array.isArray(calkitStage.outputs)
         ? (calkitStage.outputs as (string | { path: string })[]).map(
@@ -1488,7 +1491,7 @@ export class CalkitSidebarProvider
     for (const out of outs) {
       const p =
         typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
-      if (p.startsWith(".calkit/scheduler/logs/")) {
+      if (SCHEDULER_LOG_DIR.test(p)) {
         return p;
       }
     }
@@ -1497,7 +1500,11 @@ export class CalkitSidebarProvider
       const override = stage.scheduler?.log_path;
       return typeof override === "string" && override
         ? override
-        : `.calkit/scheduler/logs/${stageName}.out`;
+        : path.posix.join(
+            stage.subproject_wdir ?? "",
+            ".calkit/scheduler/logs",
+            `${stageName.slice(stageName.lastIndexOf(":") + 1)}.out`,
+          );
     }
     return undefined;
   }

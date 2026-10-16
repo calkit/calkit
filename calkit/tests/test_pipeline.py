@@ -2366,9 +2366,15 @@ def test_translate_run_targets(tmp_dir):
     subprocess.check_call(["git", "init"])
     os.makedirs("inline-sp/calkit", exist_ok=True)
     os.makedirs("isolated-sp/.dvc", exist_ok=True)
+    # Each has an inline subproject of its own
+    for sp in ["inline-sp", "isolated-sp"]:
+        os.makedirs(f"{sp}/nested")
+        with open(f"{sp}/nested/calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"name": "nested"}, f)
     with open("inline-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
+                "subprojects": [{"path": "nested"}],
                 "pipeline": {
                     "stages": {
                         "stage-a": {
@@ -2383,13 +2389,14 @@ def test_translate_run_targets(tmp_dir):
                             "diffs": ["v1"],
                         },
                     }
-                }
+                },
             },
             f,
         )
     with open("isolated-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
+                "subprojects": [{"path": "nested"}],
                 "pipeline": {
                     "stages": {
                         "stage-b": {
@@ -2404,7 +2411,7 @@ def test_translate_run_targets(tmp_dir):
                             "diffs": ["v1"],
                         },
                     }
-                }
+                },
             },
             f,
         )
@@ -2457,6 +2464,17 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:stage-a", "my-parent-stage"]
     assert isolated == [("isolated-sp", "stage-b")]
+    # A nested subproject is named by its path, and run by the nearest
+    # project with its own DVC repo
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp/nested:s", "inline-sp/nested", "isolated-sp/nested:s"],
+        ck_info=ck_info,
+    )
+    assert parent == [
+        "inline-sp/nested/dvc.yaml:s",
+        "inline-sp/nested/dvc.yaml",
+    ]
+    assert isolated == [("isolated-sp", "nested/dvc.yaml:s")]
 
 
 def test_get_concurrent_scheduler_stages():

@@ -84,6 +84,14 @@ def test_check_reproducibility(tmp_dir):
     assert res.n_presentations_with_import_or_stage == 1
     assert "Misc with provenance recorded" in res.to_pretty()
     assert "Tables with provenance recorded" in res.to_pretty()
+    # What's shown is followed back to its sources: a figure or table with
+    # nothing behind it is a gap, while one whose stage isn't compiled yet
+    # is taken at its word
+    assert res.provenance_gaps == [
+        "nothing records where mystery.png came from",
+        "nothing records where mystery.csv came from",
+    ]
+    assert "traced back to their sources: 2" in res.to_pretty()
     # Nothing tracked yet, so no scripts to flag, and the mystery misc
     # artifact isn't of a kind that's hard to make by hand
     assert res.scripts_not_in_pipeline == []
@@ -175,10 +183,32 @@ def test_check_reproducibility(tmp_dir):
         good | {"scripts_not_in_pipeline": []}
     ).recommendation
     assert "2 misc artifacts (plot.png, slides.PPTX)" in rec  # type: ignore
+    good |= {"scripts_not_in_pipeline": [], "misc_needing_provenance": []}
+    rec = ReproCheck.model_validate(good).recommendation
+    assert "e.g., nothing records where mystery.png came from" in rec  # type: ignore
     rec = ReproCheck.model_validate(
-        good | {"scripts_not_in_pipeline": [], "misc_needing_provenance": []}
+        good | {"provenance_gaps": []}
     ).recommendation
     assert "datasets with no provenance" in rec  # type: ignore
+    # What a LaTeX document cites is followed too
+    ck_info["pipeline"]["stages"]["paper"] = {
+        "kind": "latex",
+        "target_path": "paper/main.tex",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\\ckfigure{figures/pasted.png}"
+            "\\end{document}\n"
+        )
+    res = check_reproducibility()
+    assert (
+        "nothing records where figures/pasted.png came from"
+        in res.provenance_gaps
+    )
 
 
 def test_check_call():

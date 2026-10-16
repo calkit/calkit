@@ -659,6 +659,20 @@ def build(
     # to be beside it before TeX can read it
     for problem in calkit.latex.write_cited(tex_dir):
         warn(f"{problem}; it will print as ??")
+    cited = {
+        c.path
+        for doc in calkit.latex.root_documents(tex_dir)
+        for c in calkit.latex.find_citations(doc)
+    }
+    if cited:
+        from calkit.provenance import find_project_provenance_gaps
+
+        for gap in find_project_provenance_gaps(sorted(cited)):
+            warn(
+                f"The document can't be traced back to its sources: {gap}; "
+                "record it in calkit.yaml with imported_from or created_by, "
+                "or add the stage that makes it"
+            )
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir
         fdb_fpath = os.path.join(fdb_dir, stem + ".fdb_latexmk")

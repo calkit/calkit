@@ -1757,9 +1757,9 @@ def get_status(
             os.chdir(prev_cwd)
 
 
-def map_paths_outputs(stage: dict) -> list[str]:
-    """Where a ``map-paths`` stage writes, which it declares under ``paths``
-    rather than ``outputs``.
+def get_map_paths_outputs(stage: dict) -> list[str]:
+    """Where a ``map-paths`` stage writes, relative to the project, which it
+    declares under ``paths`` rather than ``outputs``.
     """
     from calkit.models.pipeline import MapPathsStage
 
@@ -1769,25 +1769,32 @@ def map_paths_outputs(stage: dict) -> list[str]:
         parsed = MapPathsStage.model_validate(stage)
     except Exception:
         return []
-    return [Path(mapping.out_path).as_posix() for mapping in parsed.paths]
+    return [
+        posixpath.normpath(posixpath.join(parsed.wdir or "", mapping.out_path))
+        for mapping in parsed.paths
+    ]
 
 
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any."""
-    target = Path(path).as_posix()
-    stages = ck_info.get("pipeline", {}).get("stages", {})
+    target = posixpath.normpath(Path(path).as_posix())
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
         return None
     for name, stage in stages.items():
         if not isinstance(stage, dict):
             continue
-        for out in stage.get("outputs", []):
+        wdir = stage.get("wdir") or ""
+        for out in stage.get("outputs") or []:
             out_path = out.get("path") if isinstance(out, dict) else out
-            if out_path and Path(out_path).as_posix() == target:
-                return name
-        for out in map_paths_outputs(stage):
-            # A directory mapping produces everything it writes into
-            if target == out or target.startswith(out + "/"):
+            if out_path and target == posixpath.normpath(
+                posixpath.join(wdir, Path(out_path).as_posix())
+            ):
+                return str(name)
+        for out in get_map_paths_outputs(stage):
+            # A directory mapping produces everything it writes into, except
+            # into the project root, which would claim every path
+            if target == out or (out != "." and target.startswith(out + "/")):
                 return str(name)
     return None
 

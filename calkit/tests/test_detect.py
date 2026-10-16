@@ -1531,3 +1531,28 @@ def test_detect_project_artifacts_considers_ignored_pipeline_outputs(tmp_dir):
         "figures"
     ]
     assert "figures/none.png" not in figures
+    # Paths are relative to a stage's wdir, and a directory mapping's files
+    # are found under its destination
+    os.makedirs("analysis/figures")
+    os.makedirs("shared/figures")
+    for path in ("analysis/figures/fit.png", "shared/figures/logo.png"):
+        with open(path, "w") as f:
+            f.write("png")
+    with open(".gitignore", "a") as f:
+        f.write("analysis/figures/\npaper/shared/\n")
+    stages = ck_info["pipeline"]["stages"]
+    stages["plot"]["wdir"] = "analysis"
+    stages["plot"]["outputs"] = ["figures/fit.png"]
+    stages["copy"]["paths"].append(
+        {"kind": "dir-to-dir-merge", "src": "shared", "dest": "paper/shared"}
+    )
+    os.makedirs("paper/shared/figures")
+    with open("paper/shared/figures/logo.png", "w") as f:
+        f.write("png")
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "analysis/figures/fit.png" in figures
+    assert "paper/shared/figures/logo.png" in figures
+    # A pipeline can be null
+    calkit.detect.detect_project_artifacts(ck_info={"pipeline": None})

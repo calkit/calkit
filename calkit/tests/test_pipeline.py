@@ -3738,6 +3738,19 @@ def test_get_stage_for_output_reads_map_paths_destinations():
     # The original is still the plotting stage's
     assert get_stage_for_output("figures/a.png", ck_info) == "plot"
     assert get_stage_for_output("paper/figures/nope.png", ck_info) is None
+    # Paths in a stage are relative to its wdir
+    stages = ck_info["pipeline"]["stages"]
+    stages["copy"]["wdir"] = "sub"
+    stages["plot"]["wdir"] = "analysis"
+    assert get_stage_for_output("sub/paper/figures/a.png", ck_info) == "copy"
+    assert get_stage_for_output("paper/figures/a.png", ck_info) is None
+    assert get_stage_for_output("analysis/figures/a.png", ck_info) == "plot"
+    # A merge into the project root doesn't claim every path
+    stages["copy"]["wdir"] = None
+    stages["copy"]["paths"][2]["dest"] = "."
+    assert get_stage_for_output("data/raw.csv", ck_info) is None
+    # A pipeline can be null
+    assert get_stage_for_output("figures/a.png", {"pipeline": None}) is None
 
 
 def test_table_iteration_names(tmp_dir):

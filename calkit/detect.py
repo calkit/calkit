@@ -2435,9 +2435,11 @@ def _pipeline_output_paths(
     """Pipeline outputs on disk, which are the project's even when neither
     Git nor DVC holds them, e.g., a ``map-paths`` copy.
     """
-    from calkit.pipeline import map_paths_outputs
+    import posixpath
 
-    stages = (ck_info or {}).get("pipeline", {}).get("stages", {})
+    from calkit.pipeline import get_map_paths_outputs
+
+    stages = ((ck_info or {}).get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
         return []
     root = Path(wdir or os.getcwd())
@@ -2445,14 +2447,27 @@ def _pipeline_output_paths(
     for stage in stages.values():
         if not isinstance(stage, dict):
             continue
+        stage_wdir = stage.get("wdir") or ""
         outs = [
-            out.get("path") if isinstance(out, dict) else out
-            for out in stage.get("outputs", []) or []
+            posixpath.normpath(posixpath.join(stage_wdir, out))
+            for out in (
+                out.get("path") if isinstance(out, dict) else out
+                for out in stage.get("outputs") or []
+            )
+            if isinstance(out, str) and out
         ]
-        outs += map_paths_outputs(stage)
+        outs += get_map_paths_outputs(stage)
         for out in outs:
-            if isinstance(out, str) and out and (root / out).is_file():
-                found.append(Path(out).as_posix())
+            full = root / out
+            if full.is_file():
+                found.append(out)
+            elif full.is_dir():
+                # E.g., a directory mapping's destination
+                for dirpath, _, filenames in os.walk(full):
+                    found += [
+                        Path(dirpath, f).relative_to(root).as_posix()
+                        for f in filenames
+                    ]
     return found
 
 

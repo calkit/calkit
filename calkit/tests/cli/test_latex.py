@@ -246,6 +246,8 @@ def test_build_cited_content(tmp_dir):
     assert os.path.isfile("paper/main.pdf")
     # Not brought in yet, so it prints as ?? rather than failing the build
     assert "figures/not-yet.png is not in the project yet" in out.stdout
+    # Nothing says where the figure came from, which a build points out
+    assert "nothing records where figures/plot.png came from" in out.stdout
     with open("paper/main.log", errors="replace") as f:
         log = f.read()
     assert "figures/not-yet.png hasn't been brought in yet" in log

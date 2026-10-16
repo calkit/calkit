@@ -19,6 +19,7 @@ import {
   type StaleClassification,
   outputEntryPath,
 } from "./pipeline/core";
+import { envRefParts } from "./subprojects";
 
 // Singular node kinds and the matching calkit.yaml collection keys for the
 // artifact-style sections (figures, datasets, results, publications,
@@ -1203,7 +1204,7 @@ export class CalkitSidebarProvider
   // files for each part.
   private envFilePaths(envName: string): string[] {
     const paths: string[] = [];
-    for (const part of envName.split(":")) {
+    for (const part of this.envRefParts(envName)) {
       const desc = this.envDescriptions?.[part];
       if (desc?.spec_path) {
         paths.push(desc.spec_path);
@@ -1501,6 +1502,13 @@ export class CalkitSidebarProvider
     return undefined;
   }
 
+  private envRefParts(envRef: string): string[] {
+    return envRefParts(
+      envRef,
+      new Set(Object.keys(this.calkitConfig?.environments ?? {})),
+    );
+  }
+
   // Whether a stage runs under a SLURM/PBS scheduler. Environments combine as
   // "outer:inner", with the scheduler being the outer (or only) environment, so
   // the kind of the part before any colon is what matters.
@@ -1509,7 +1517,7 @@ export class CalkitSidebarProvider
     if (typeof envRef !== "string") {
       return false;
     }
-    const outerName = envRef.split(":")[0];
+    const outerName = this.envRefParts(envRef)[0];
     const kind = this.calkitConfig?.environments?.[outerName]?.kind;
     return kind === "slurm" || kind === "pbs";
   }

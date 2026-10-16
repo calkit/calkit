@@ -88,6 +88,7 @@ export interface CalkitInfo {
   publications?: ArtifactEntry[];
   presentations?: ArtifactEntry[];
   apps?: Record<string, AppEntry>;
+  subprojects?: { path?: string; [key: string]: unknown }[];
   pipeline?: {
     stages?: Record<string, PipelineStage>;
   };

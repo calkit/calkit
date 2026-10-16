@@ -190,19 +190,14 @@ def get_platform() -> Literal["linux", "mac", "windows"]:
 
 
 def wsl_installed() -> bool:
+    # 'wsl --status' text is localized and varies across WSL releases, so
+    # check for an installed distribution instead, which fails without one
     try:
-        output = (
-            subprocess.check_output(["wsl", "--status"])
-            .decode()
-            .replace("\x00", "")
-        )
-        return (
-            "Default Version: 2" in output
-            and "Default Distribution: Ubuntu" in output
-            and "not supported" not in output
-        )
+        output = subprocess.check_output(["wsl", "--list", "--quiet"])
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
+    # wsl.exe writes UTF-16 when piped
+    return bool(output.decode(errors="ignore").replace("\x00", "").strip())
 
 
 def vs_code_installed() -> bool:
@@ -628,8 +623,12 @@ class WSLInstall(DependencyInstall):
 
     @property
     def install_command(self) -> list[str]:
-        # Run command as administrator in PowerShell
+        # Everything runs elevated, since this app usually isn't, e.g., when
+        # the browser opens it straight from the download, and the WSL
+        # package fails to install without admin rights
         cmd = (
+            "winget install --accept-source-agreements "
+            "--accept-package-agreements Microsoft.WSL --force & "
             "dism.exe /online /enable-feature "
             "/featurename:Microsoft-Windows-Subsystem-Linux /all /norestart "
             "&& dism.exe /online /enable-feature "
@@ -638,13 +637,6 @@ class WSLInstall(DependencyInstall):
             "wsl --install -d Ubuntu"
         )
         return [
-            "winget",
-            "install",
-            "--accept-source-agreements",
-            "--accept-package-agreements",
-            "Microsoft.WSL",
-            "--force",
-            "&&",
             "powershell",
             "-ExecutionPolicy",
             "Bypass",

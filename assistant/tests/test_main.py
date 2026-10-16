@@ -98,3 +98,20 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         "main.subprocess.check_output", side_effect=FileNotFoundError
     ):
         assert main.wsl_installed() is False
+    # WSL without a distribution fails to list, but any distribution counts,
+    # whatever its name, read from wsl.exe's UTF-16 output
+    with mock.patch(
+        "main.subprocess.check_output",
+        side_effect=main.subprocess.CalledProcessError(1, "wsl"),
+    ):
+        assert main.wsl_installed() is False
+    with mock.patch(
+        "main.subprocess.check_output",
+        return_value="Ubuntu-24.04\r\n".encode("utf-16"),
+    ):
+        assert main.wsl_installed() is True
+    # The WSL install elevates as a whole, including the winget install
+    with mock.patch.multiple("main", **_stubs(installed=False)):
+        cmd = main.WSLInstall().install_command
+    assert cmd[0] == "powershell" and "runAs" in cmd
+    assert cmd[-1].startswith('"/k winget install')

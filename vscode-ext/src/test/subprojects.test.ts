@@ -107,6 +107,12 @@ test("mergeSubprojectConfigs qualifies names and rebases paths", () => {
                 target_path: "notes.md",
                 pdf: { output_path: "out/notes.pdf" },
               },
+              // The built-in environment is the same one everywhere
+              sys: { kind: "command", environment: "_system" },
+              "sys-outer": {
+                kind: "command",
+                environment: "_system:main",
+              },
             },
           },
           figures: [
@@ -157,6 +163,14 @@ test("mergeSubprojectConfigs qualifies names and rebases paths", () => {
     pdf: { output_path: "analyses/out/notes.pdf" },
     subproject_wdir: "analyses",
   });
+  assert.equal(
+    config.pipeline?.stages?.["analyses:sys"]?.environment,
+    "_system",
+  );
+  assert.equal(
+    config.pipeline?.stages?.["analyses:sys-outer"]?.environment,
+    "_system:analyses:main",
+  );
   assert.deepEqual(config.figures, [
     { path: "root.png" },
     { path: "analyses/figures/a.png", stage: "analyses:plot" },

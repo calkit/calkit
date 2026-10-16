@@ -99,11 +99,12 @@ function rebasePath(dir: string, p: string): string {
 }
 
 // An environment reference may combine an outer and inner environment as
-// "outer:inner", so each part is qualified on its own.
+// "outer:inner", so each part is qualified on its own. The built-in system
+// environment is the same one everywhere.
 function qualifyEnvRef(dir: string, ref: string): string {
   return ref
     .split(":")
-    .map((part) => qualifyName(dir, part))
+    .map((part) => (part === "_system" ? part : qualifyName(dir, part)))
     .join(":");
 }
 

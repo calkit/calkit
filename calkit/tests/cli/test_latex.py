@@ -202,6 +202,57 @@ def test_build(tmp_dir):
 
 
 @skipif_windows_docker
+def test_build_cited_content(tmp_dir):
+    import struct
+    import zlib
+
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("results")
+    with open("results/metrics.json", "w") as f:
+        json.dump({"rmse": 0.123456}, f)
+    # The smallest PNG TeX will read: one white pixel
+    raw = zlib.compress(b"\x00\xff\xff\xff")
+    png = b"\x89PNG\r\n\x1a\n" + b"".join(
+        struct.pack(">I", len(data))
+        + tag
+        + data
+        + struct.pack(">I", zlib.crc32(tag + data))
+        for tag, data in [
+            (b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)),
+            (b"IDAT", raw),
+            (b"IEND", b""),
+        ]
+    )
+    os.makedirs("figures")
+    with open("figures/plot.png", "wb") as f:
+        f.write(png)
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "Error: \\ckvalue[.2f]{results/metrics.json}{rmse}.\n"
+            "\\ckfigure[width=1cm]{figures/plot.png}\n"
+            "\\ckfigure{figures/not-yet.png}\n"
+            "\\end{document}\n"
+        )
+    out = subprocess.run(
+        ["calkit", "latex", "build", "paper/main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert os.path.isfile("paper/main.pdf")
+    # Not brought in yet, so it prints as ?? rather than failing the build
+    assert "figures/not-yet.png is not in the project yet" in out.stdout
+    with open("paper/main.log", errors="replace") as f:
+        log = f.read()
+    assert "figures/not-yet.png hasn't been brought in yet" in log
+    assert "_calkit/figures/plot.png" in log
+
+
+@skipif_windows_docker
 def test_build_output_and_aux_dirs(tmp_dir):
     # --output-dir / --aux-dir are given relative to the current directory but
     # latexmk runs with -cd, so the build command must translate them to the

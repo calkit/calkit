@@ -91,6 +91,12 @@ jobs:
           fetch-depth: 0
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d --remove-orphans
+      # Builds run on this host, so drop the images each build supersedes
+      # and cap the build cache, keeping the most recently used layers
+      - name: Prune superseded images and old build cache
+        run: |
+          docker image prune -f
+          docker builder prune -f --max-used-space 20GB
       # `up -d` doesn't recreate a container when only its bind-mounted
       # config changed, so Prometheus and Alloy are reloaded (SIGHUP, which
       # avoids a scrape gap) and Loki and Grafana restarted (they don't

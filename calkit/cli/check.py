@@ -2071,7 +2071,7 @@ def check_venv(
             )
         # Last, so an interrupted relock isn't taken as current
         calkit.environments.write_env_spec_hash(
-            lock_fpath, path, python=python, wdir=wdir
+            lock_fpath, spec_hash, wdir=wdir
         )
         # Delete legacy lock file after use
         if used_legacy_lock:

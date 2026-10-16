@@ -2055,7 +2055,7 @@ def test_env_spec_hashes(tmp_dir):
     write(lock, "idna==3.10\n")
     # Recorded beside the lock, not in it
     assert envs.read_env_spec_hash(lock) is None
-    envs.write_env_spec_hash(lock, spec)
+    envs.write_env_spec_hash(lock, envs.env_spec_hash(spec))
     assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
     with open(lock) as f:
         assert f.read() == "idna==3.10\n"
@@ -2094,18 +2094,29 @@ def test_env_spec_hashes(tmp_dir):
     write(os.path.join("sub", spec), "idna\n")
     envs.write_env_spec_hash(
         os.path.join(".calkit", "env-locks", "py", "linux-64.txt"),
-        spec,
+        envs.env_spec_hash(os.path.join("sub", spec)),
         wdir="sub",
     )
     assert envs.read_env_spec_hash(
         os.path.join(".calkit", "env-locks", "py", "win-64.txt"), wdir="sub"
     ) == envs.env_spec_hash(os.path.join("sub", spec))
     with open(os.path.join("sub", envs.ENV_SPEC_HASHES_FPATH)) as f:
-        assert list(json.load(f)) == [".calkit/env-locks/py"]
+        assert json.load(f) == {
+            ".calkit/env-locks/py": envs.env_spec_hash(
+                os.path.join("sub", spec)
+            )
+        }
+    assert envs.env_spec_hash(spec).startswith("sha256:")
+    # Older md5 hashes aren't read, and are dropped on the next write
+    write(envs.ENV_SPEC_HASHES_FPATH, json.dumps({"old": "md5:abc"}))
+    assert envs.read_env_spec_hash("old") is None
+    envs.write_env_spec_hash(lock, envs.env_spec_hash(spec))
+    with open(envs.ENV_SPEC_HASHES_FPATH) as f:
+        assert list(json.load(f)) == [lock]
     # An unreadable file records nothing, and is replaced on the next write
     write(envs.ENV_SPEC_HASHES_FPATH, "not json")
     assert envs.read_env_spec_hash(lock) is None
-    envs.write_env_spec_hash(lock, spec)
+    envs.write_env_spec_hash(lock, envs.env_spec_hash(spec))
     assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
 
 

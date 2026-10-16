@@ -995,7 +995,7 @@ def check_env(
             relock=spec_changed and recorded_hash is not None,
         )
     # Last, so an interrupted relock isn't taken as current
-    write_env_spec_hash(lock_fpath, env_fpath)
+    write_env_spec_hash(lock_fpath, spec_hash)
     return res
 
 

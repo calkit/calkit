@@ -1750,7 +1750,7 @@ def env_spec_hash(spec_fpath: str, python: str | None = None) -> str:
     if python is not None:
         content += f"\npython={python}"
     # Named so a reader knows what to check it with
-    return "md5:" + hashlib.md5(content.encode()).hexdigest()
+    return "sha256:" + hashlib.sha256(content.encode()).hexdigest()
 
 
 def _env_spec_hash_key(lock_fpath: str, wdir: str | None) -> str:
@@ -1760,8 +1760,11 @@ def _env_spec_hash_key(lock_fpath: str, wdir: str | None) -> str:
     if lock_dir and os.path.splitext(name)[0] in CONDA_VENV_ARCHS:
         lock_fpath = lock_dir
     if os.path.isabs(lock_fpath):
-        lock_fpath = os.path.relpath(lock_fpath, wdir or ".")
-    return Path(lock_fpath).as_posix()
+        try:
+            lock_fpath = os.path.relpath(lock_fpath, wdir or ".")
+        except ValueError:  # On another Windows drive
+            pass
+    return Path(os.path.normpath(lock_fpath)).as_posix()
 
 
 def read_env_spec_hash(lock_fpath: str, wdir: str | None = None) -> str | None:
@@ -1775,16 +1778,17 @@ def read_env_spec_hash(lock_fpath: str, wdir: str | None = None) -> str | None:
         return None
     if not isinstance(hashes, dict):
         return None
-    return hashes.get(_env_spec_hash_key(lock_fpath, wdir))
+    value = hashes.get(_env_spec_hash_key(lock_fpath, wdir))
+    # Older md5 hashes would make every lock look stale, so they're ignored
+    if isinstance(value, str) and value.startswith("sha256:"):
+        return value
+    return None
 
 
 def write_env_spec_hash(
-    lock_fpath: str,
-    spec_fpath: str,
-    python: str | None = None,
-    wdir: str | None = None,
+    lock_fpath: str, spec_hash: str, wdir: str | None = None
 ) -> None:
-    """Record that a lock was resolved from the spec as it is now.
+    """Record that a lock was resolved from a spec with the given hash.
 
     Kept outside the lock directory, which stages depend on, so recording
     it for a lock that already matches its spec reruns nothing.
@@ -1797,11 +1801,15 @@ def write_env_spec_hash(
         hashes = {}
     if not isinstance(hashes, dict):
         hashes = {}
+    hashes = {
+        k: v
+        for k, v in hashes.items()
+        if isinstance(v, str) and v.startswith("sha256:")
+    }
     key = _env_spec_hash_key(lock_fpath, wdir)
-    value = env_spec_hash(os.path.join(wdir or "", spec_fpath), python=python)
-    if hashes.get(key) == value:
+    if hashes.get(key) == spec_hash:
         return
-    hashes[key] = value
+    hashes[key] = spec_hash
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     with open(fpath, "w", encoding="utf-8", newline="\n") as f:
         json.dump(hashes, f, indent=2, sort_keys=True)

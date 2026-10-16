@@ -1637,34 +1637,33 @@ def write_comment(lines: list[str], tc: TexComment) -> None:
     tc.nlines = len(rendered)
 
 
-def localize_synctex(pdf_path: str, wdir: str = ".") -> bool:
-    """Point the SyncTeX file beside a PDF at the sources as they sit here.
+def localize_synctex(
+    synctex_path: str, source_dir: str, wdir: str = "."
+) -> bool:
+    """Point a SyncTeX file at the sources as they sit here.
 
     A build in a container records the container's paths, e.g.,
     ``/work/paper/main.tex``, so reverse search in a viewer lands on a file
-    that doesn't exist. Each recorded input is matched to a project file by
-    its longest trailing part that exists, so nothing needs to know where
-    the container mounted the project. Anything else, e.g., a class file
+    that doesn't exist. Each such input is matched to a project file by its
+    longest trailing part that exists, so nothing needs to know where the
+    container mounted the project. A relative input is relative to
+    ``source_dir``, where latexmk ran. Anything else, e.g., a class file
     from the TeX distribution, is left alone.
 
     Returns whether the file was changed.
     """
     import gzip
 
-    stem = os.path.splitext(pdf_path)[0]
-    path = next(
-        (
-            p
-            for p in (stem + ".synctex.gz", stem + ".synctex")
-            if os.path.isfile(p)
-        ),
-        None,
-    )
-    if path is None:
+    if not os.path.isfile(synctex_path):
         return False
     root = Path(wdir).resolve()
 
     def local(raw: str) -> str | None:
+        if not os.path.isabs(raw):
+            candidate = Path(source_dir, raw).resolve()
+            return candidate.as_posix() if candidate.is_file() else None
+        if os.path.isfile(raw):
+            return None
         parts = Path(os.path.normpath(raw)).as_posix().split("/")
         for i in range(len(parts)):
             rel = "/".join(parts[i:])
@@ -1672,9 +1671,9 @@ def localize_synctex(pdf_path: str, wdir: str = ".") -> bool:
                 return (root / rel).as_posix()
         return None
 
-    opener: Any = gzip.open if path.endswith(".gz") else open
+    opener: Any = gzip.open if synctex_path.endswith(".gz") else open
     try:
-        with opener(path, "rt", errors="replace") as f:
+        with opener(synctex_path, "rt", errors="replace") as f:
             lines = f.read().split("\n")
     except OSError:
         return False
@@ -1689,6 +1688,6 @@ def localize_synctex(pdf_path: str, wdir: str = ".") -> bool:
             changed = True
     if not changed:
         return False
-    with opener(path, "wt") as f:
+    with opener(synctex_path, "wt") as f:
         f.write("\n".join(lines))
     return True

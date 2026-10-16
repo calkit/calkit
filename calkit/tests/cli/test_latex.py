@@ -233,6 +233,33 @@ def test_build_output_and_aux_dirs(tmp_dir):
     assert os.path.isfile("paper/aux/main.aux")
 
 
+def test_build_localizes_synctex(tmp_dir, monkeypatch):
+    import gzip
+
+    from calkit.cli import latex as cli_latex
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    with open("paper/latexmkrc", "w") as f:
+        f.write("$out_dir = 'build';\n")
+
+    # Stands in for a container build whose rc sends output to paper/build
+    def run_latexmk(*args, **kwargs):
+        os.makedirs("paper/build", exist_ok=True)
+        with gzip.open("paper/build/main.synctex.gz", "wt") as f:
+            f.write("SyncTeX Version:1\nInput:1:/work/paper/main.tex\n")
+        return 0
+
+    monkeypatch.setattr(cli_latex, "_tex_cmd", lambda cmd, **kwargs: cmd)
+    monkeypatch.setattr(cli_latex, "_run_latexmk", run_latexmk)
+    cli_latex.build("paper/main.tex", latexmk_rc_path="paper/latexmkrc")
+    with gzip.open("paper/build/main.synctex.gz", "rt") as f:
+        text = f.read()
+    here = os.path.realpath("paper/main.tex").replace(os.sep, "/")
+    assert f"Input:1:{here}" in text
+
+
 def _commit(message: str) -> None:
     subprocess.check_call(["git", "add", "-A"])
     subprocess.check_call(

@@ -43,7 +43,9 @@
     {
       "matches": [
         "https://www.overleaf.com/project/*",
-        "https://overleaf.com/project/*"
+        "https://overleaf.com/project/*",
+        "https://www.overleaf.com/user/settings*",
+        "https://overleaf.com/user/settings*"
       ],
       "js": ["content/overleaf.js"],
       "run_at": "document_idle"

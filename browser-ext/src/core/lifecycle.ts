@@ -1,4 +1,4 @@
-import { isExtensionAlive, onUrlChange } from "./messages";
+import { isExtensionAlive, onAuthChange, onUrlChange } from "./messages";
 
 /**
  * Wire a content script's lifecycle: react to navigation, and shut down
@@ -17,6 +17,8 @@ export function runContentScript(options: {
   sync: () => void;
   /** Remove everything this script added to the page. */
   teardown: () => void;
+  /** Called when someone signs in or out, from this page or any other. */
+  authChanged: () => void;
 }): void {
   // A page can end up with the same content script injected more than once,
   // e.g. after the extension is reloaded while the tab is open. Only the
@@ -36,12 +38,21 @@ export function runContentScript(options: {
     }
     options.teardown();
   };
-  stopListening = onUrlChange(() => {
+  const stopUrl = onUrlChange(() => {
     if (!checkAlive()) {
       return;
     }
     options.sync();
   });
+  const stopAuth = onAuthChange(() => {
+    if (checkAlive()) {
+      options.authChanged();
+    }
+  });
+  stopListening = () => {
+    stopUrl();
+    stopAuth();
+  };
 
   function checkAlive(): boolean {
     if (isExtensionAlive()) {

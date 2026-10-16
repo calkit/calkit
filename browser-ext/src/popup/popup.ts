@@ -1,6 +1,6 @@
 import { getGithubRepo, getOverleafProjectId } from "../core/detect";
 import { projectUrl } from "../core/hub-url";
-import { RequestFailed, send } from "../core/messages";
+import { onAuthChange, RequestFailed, send } from "../core/messages";
 import { clear, el, errorMessage, loading } from "../core/ui";
 
 const app = document.getElementById("app") as HTMLElement;
@@ -272,6 +272,7 @@ async function render(): Promise<void> {
 }
 
 void render();
+onAuthChange(() => void render());
 
 // The popup closes while the sign-in tab is open, so pick up the result the
 // next time it opens rather than trying to hold state across that

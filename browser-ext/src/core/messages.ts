@@ -6,17 +6,20 @@ import type {
   ContentsItem,
   DvcOutput,
   TextDiff,
-  Figure,
+  FiguresPage,
   GithubRepo,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
+  Provenance,
   PullRequestRefs,
   ProjectsPublic,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
+  Result,
+  Table,
 } from "./types";
 
 /**
@@ -100,6 +103,16 @@ export type Request =
       head: string;
     } & HubScoped)
   | { type: "project.figures"; owner: string; project: string }
+  | { type: "project.tables"; owner: string; project: string }
+  | { type: "project.results"; owner: string; project: string }
+  | {
+      type: "project.provenance";
+      owner: string;
+      project: string;
+      path: string;
+      /** A value in a results file; without one, the file comes back whole. */
+      key?: string;
+    }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
   | {
@@ -176,7 +189,10 @@ export interface ResponseMap {
   "project.contents": ContentsItem;
   "project.dvcOutputs": DvcOutput[];
   "project.textDiff": TextDiff;
-  "project.figures": Figure[];
+  "project.figures": FiguresPage;
+  "project.tables": Table[];
+  "project.results": Result[];
+  "project.provenance": Provenance;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import os
@@ -703,6 +704,28 @@ def build(
         verbose=verbose,
     ):
         raise_error("latexmk failed")
+    if not no_synctex:
+        # A container build records its own paths, which reverse search in
+        # a viewer can't open
+        synctex_paths = [
+            os.path.join(pdf_dir, stem + ext)
+            for ext in (".synctex.gz", ".synctex")
+        ]
+        if latexmk_rc_path is not None and output_dir is None:
+            # The rc can set $out_dir, which Calkit doesn't read
+            synctex_paths += sorted(
+                glob.glob(
+                    os.path.join(tex_dir, "**", stem + ".synctex*"),
+                    recursive=True,
+                ),
+                key=os.path.getmtime,
+                reverse=True,
+            )
+        synctex_path = next(
+            (p for p in synctex_paths if os.path.isfile(p)), None
+        )
+        if synctex_path is not None:
+            calkit.latex.localize_synctex(synctex_path, tex_dir)
 
 
 DIFF_TMP_DIR = calkit.latex.DIFF_TMP_DIR

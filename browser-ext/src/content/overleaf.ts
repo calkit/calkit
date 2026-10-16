@@ -1018,4 +1018,23 @@ function watchForSaves(): void {
 }
 
 watchForSaves();
-runContentScript({ id: "overleaf", sync, teardown });
+runContentScript({
+  id: "overleaf",
+  sync,
+  teardown,
+  authChanged: () => {
+    if (!currentProjectId) {
+      return;
+    }
+    const overleafProjectId = currentProjectId;
+    // What the last session found says nothing about this one
+    lastSyncNeeded = false;
+    lastTokenProblem = false;
+    if (panel) {
+      void load(overleafProjectId);
+    } else {
+      mountLauncher(() => openPanel(overleafProjectId));
+      void checkSyncStatus(overleafProjectId);
+    }
+  },
+});

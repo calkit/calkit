@@ -1154,6 +1154,11 @@ async function refresh(repo: string): Promise<void> {
     return;
   }
   mountLauncher(state, () => void openPanel(state));
+  // A panel still on screen was showing the old state, e.g., a sign-in
+  // prompt whose spinner would otherwise run until the page is reloaded
+  if (panel?.host.isConnected) {
+    void openPanel(state);
+  }
   if (!state.project) {
     return;
   }
@@ -1224,4 +1229,22 @@ function sync(): void {
   void refresh(repo);
 }
 
-runContentScript({ id: "github", sync, teardown });
+runContentScript({
+  id: "github",
+  sync,
+  teardown,
+  authChanged: () => {
+    if (!currentRepo) {
+      return;
+    }
+    // Read under the old session, including a lookup that failed for want
+    // of signing in, which would otherwise be served from the cache
+    pullChanges = null;
+    document.getElementById(PR_CARD_ID)?.remove();
+    document.getElementById(OVERLAY_ID)?.remove();
+    for (const row of document.querySelectorAll(`[${ARTIFACT_ROW_ATTR}]`)) {
+      row.remove();
+    }
+    void refresh(currentRepo);
+  },
+});

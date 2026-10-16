@@ -180,6 +180,9 @@ export interface Provenance {
   inputs: string[];
   stage_status?: StageStatus | null;
   stale_reason?: "pipeline" | "frozen" | null;
+  /** Where a copy, e.g., one put beside a document, came from. */
+  copied_from?: string | null;
+  copy_stage?: string | null;
 }
 
 export interface ReferenceEntry {

@@ -5,7 +5,12 @@ import {
   renderProjectPicker,
 } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
-import { type Citation, citationAt, citationText } from "../core/latex";
+import {
+  type Citation,
+  citationAt,
+  citationText,
+  includeCandidates,
+} from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import { isUnsupportedByHub, RequestFailed, send } from "../core/messages";
 import type {
@@ -68,6 +73,30 @@ function provenanceFor(
 }
 
 /**
+ * Where a file the document shows came from, finding it in the project
+ * first if it's included plainly, since TeX names it relative to the
+ * document and may leave off the extension.
+ */
+async function citationProvenance(
+  link: OverleafLinkPublic,
+  citation: Citation,
+): Promise<Provenance> {
+  if (!citation.included) {
+    return provenanceFor(link, citation.path, citation.key);
+  }
+  const candidates = includeCandidates(link.path, citation);
+  let first: Provenance | null = null;
+  for (const candidate of candidates) {
+    const provenance = await provenanceFor(link, candidate);
+    if (provenance.exists) {
+      return provenance;
+    }
+    first ??= provenance;
+  }
+  return first ?? provenanceFor(link, candidates[0]);
+}
+
+/**
  * Type into Overleaf's editor at the cursor, as if the user had.
  *
  * CodeMirror keeps its selection while the panel has focus and puts it
@@ -94,7 +123,8 @@ function valueText(value: unknown): string {
 }
 
 /**
- * What produced a cited figure, table, or value, and whether it's current.
+ * What produced a figure, table, or value the document shows, and whether
+ * it's current.
  *
  * Overleaf can't run the pipeline, so the actions are ways into the
  * project: the script to edit, and the page in the hub with the rest.
@@ -112,10 +142,25 @@ function renderProvenance(
   );
   const fileUrl = (path: string) =>
     `${base}/files?path=${encodeURIComponent(path)}`;
-  const label = citation.key
-    ? `${citation.path}: ${citation.key}`
-    : citation.path;
+  // An included file is named as the project has it, not as written
+  const path = citation.included ? provenance.path : citation.path;
+  const label = citation.key ? `${path}: ${citation.key}` : path;
   container.append(el("div", { class: "name", text: label }));
+  if (provenance.copied_from) {
+    container.append(
+      el("div", { class: "dim small" }, [
+        document.createTextNode("Copied from "),
+        el("a", {
+          text: provenance.copied_from,
+          href: fileUrl(provenance.copied_from),
+          attrs: { target: "_blank" },
+        }),
+        provenance.copy_stage
+          ? document.createTextNode(` by ${provenance.copy_stage}`)
+          : null,
+      ]),
+    );
+  }
   if (citation.kind === "value") {
     container.append(
       el("div", {
@@ -213,11 +258,13 @@ function renderProvenance(
         text: "Open in Calkit",
         href:
           citation.kind === "value"
-            ? `${base}/results?path=${encodeURIComponent(citation.path)}` +
+            ? `${base}/results?path=${encodeURIComponent(path)}` +
               `&key=${encodeURIComponent(citation.key ?? "")}`
             : citation.kind === "figure"
-            ? `${base}/figures?path=${encodeURIComponent(citation.path)}`
-            : fileUrl(citation.path),
+            ? `${base}/figures?path=${encodeURIComponent(
+                provenance.copied_from ?? path,
+              )}`
+            : fileUrl(path),
         attrs: { target: "_blank" },
       }),
     ]),
@@ -225,8 +272,9 @@ function renderProvenance(
 }
 
 /**
- * Follow the cursor in the editor, and when it's on a calkit.sty command,
- * say where what it cites came from.
+ * Follow the cursor in the editor, and when it's on something the document
+ * shows from the project, whether with a calkit.sty command or a plain
+ * `\\includegraphics` or `\\input`, say where it came from.
  *
  * A card rather than the panel, since the panel is about syncing and
  * mostly closed, while this is about the line being written.
@@ -262,7 +310,11 @@ function watchCursor(): void {
       line.textContent ?? "",
       range.toString().length,
     );
-    const id = citation ? citationText(citation) : null;
+    const id = citation
+      ? citation.included
+        ? `${citation.kind}:${citation.path}`
+        : citationText(citation)
+      : null;
     if (!citation || !id) {
       hide();
       dismissed = null;
@@ -283,7 +335,7 @@ function watchCursor(): void {
     });
     card.body.append(loading());
     try {
-      const provenance = await provenanceFor(link, citation.path, citation.key);
+      const provenance = await citationProvenance(link, citation);
       if (shown !== id) {
         return;
       }

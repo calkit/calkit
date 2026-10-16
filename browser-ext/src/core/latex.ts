@@ -26,37 +26,61 @@ export function isDiffableDocument(path: string): boolean {
   return /\.pdf$/i.test(path);
 }
 
-/** Project content a document cites with one of calkit.sty's commands. */
+/**
+ * Project content a document shows, cited with one of calkit.sty's
+ * commands or included plainly, e.g., with `\\includegraphics`.
+ */
 export interface Citation {
-  kind: "value" | "figure" | "table";
-  /** Relative to the project root, wherever the document is. */
+  kind: "value" | "figure" | "table" | "file";
+  /**
+   * Relative to the project root, wherever the document is, except for an
+   * included file, which TeX finds relative to the document.
+   */
   path: string;
   key?: string;
   /** A value's format spec, or a figure's graphics options. */
   options: string;
+  /** Included plainly, so its path may also leave off the extension. */
+  included?: boolean;
 }
 
 // Mirrors _CITE_RE in calkit/latex.py
 const CITE_RE =
   /\\ck(value|figure|table)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}(?:\s*\{([^}]*)\})?/g;
+// The plain commands among _INPUT_COMMANDS in calkit/latex.py that show
+// something from the project
+const INCLUDE_RE =
+  /\\(includegraphics|input|include)\s*((?:\[[^\]]*\])*)\s*\{([^}]*)\}/g;
+// What TeX tries after the name as written, as in _INPUT_COMMANDS
+const GRAPHICS_EXTS = [".pdf", ".png", ".jpg", ".jpeg", ".eps", ".ps", ".gif"];
 
 /**
- * The calkit.sty command a position in one line of source falls in.
+ * The command showing project content that a position in one line of
+ * source falls in.
  *
  * A command in a comment doesn't count, the same as when Calkit reads the
  * document to bring in what it cites.
  */
 export function citationAt(line: string, offset: number): Citation | null {
   const comment = line.search(/(?<!\\)%/);
-  for (const match of line.matchAll(CITE_RE)) {
+  const matches = [...line.matchAll(CITE_RE), ...line.matchAll(INCLUDE_RE)];
+  for (const match of matches) {
     const start = match.index ?? 0;
     if (comment >= 0 && start >= comment) {
-      break;
+      continue;
     }
     if (offset < start || offset > start + match[0].length) {
       continue;
     }
-    const [, kind, options, first, second] = match;
+    const [command, kind, options, first, second] = match;
+    if (!command.startsWith("\\ck")) {
+      return {
+        kind: kind === "includegraphics" ? "figure" : "file",
+        path: first.trim(),
+        options: (options ?? "").replace(/^\[|\]$/g, "").trim(),
+        included: true,
+      };
+    }
     return {
       kind: kind as Citation["kind"],
       path: first.trim(),
@@ -65,6 +89,32 @@ export function citationAt(line: string, offset: number): Citation | null {
     };
   }
   return null;
+}
+
+/**
+ * Where in the project an included file could be, in the order TeX tries
+ * them, given the folder the Overleaf project syncs with.
+ *
+ * Mirrors the lookup in ``detect_inputs`` in calkit/latex.py.
+ */
+export function includeCandidates(
+  folder: string,
+  citation: Citation,
+): string[] {
+  const parts: string[] = [];
+  for (const part of `${folder}/${citation.path}`.split("/")) {
+    if (part === "..") {
+      parts.pop();
+    } else if (part && part !== ".") {
+      parts.push(part);
+    }
+  }
+  const path = parts.join("/");
+  const exts = citation.kind === "figure" ? GRAPHICS_EXTS : [".tex"];
+  if (exts.some((ext) => path.toLowerCase().endsWith(ext))) {
+    return [path];
+  }
+  return [path, ...exts.map((ext) => path + ext)];
 }
 
 /** The command that cites something, to insert into a document. */

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   citationAt,
   citationText,
+  includeCandidates,
   isDiffableDocument,
   latexDiffPath,
   refDirName,
@@ -63,6 +64,28 @@ describe("citationAt", () => {
     expect(citationAt(line, line.indexOf("tables/t.tex"))).toBeNull();
   });
 
+  test("finds plain includes too, by the path as written", () => {
+    const plain =
+      "\\includegraphics[width=\\linewidth]{figs/fit} \\input{tables/t} % \\input{no}";
+    expect(citationAt(plain, plain.indexOf("figs"))).toEqual({
+      kind: "figure",
+      path: "figs/fit",
+      options: "width=\\linewidth",
+      included: true,
+    });
+    expect(citationAt(plain, plain.indexOf("tables"))).toEqual({
+      kind: "file",
+      path: "tables/t",
+      options: "",
+      included: true,
+    });
+    expect(citationAt(plain, plain.indexOf("no}"))).toBeNull();
+    // Not to be mistaken for an include
+    const other = "\\inputencoding{utf8} \\includesvg{x}";
+    expect(citationAt(other, other.indexOf("utf8"))).toBeNull();
+    expect(citationAt(other, other.indexOf("x}"))).toBeNull();
+  });
+
   test("builds what it parses", () => {
     for (const offset of [line.indexOf("fit"), line.indexOf("figures")]) {
       const citation = citationAt(line, offset);
@@ -74,5 +97,34 @@ describe("citationAt", () => {
     expect(
       citationText({ kind: "table", path: "tables/t.tex", options: "" }),
     ).toBe("\\cktable{tables/t.tex}");
+  });
+});
+
+describe("includeCandidates", () => {
+  test("tries the name as written, then what TeX would add", () => {
+    const figure = { kind: "figure", options: "", included: true } as const;
+    expect(includeCandidates("paper", { ...figure, path: "figs/fit" })).toEqual(
+      [
+        "paper/figs/fit",
+        "paper/figs/fit.pdf",
+        "paper/figs/fit.png",
+        "paper/figs/fit.jpg",
+        "paper/figs/fit.jpeg",
+        "paper/figs/fit.eps",
+        "paper/figs/fit.ps",
+        "paper/figs/fit.gif",
+      ],
+    );
+    // An extension already written is the only place to look, and a path
+    // can climb out of the paper's folder
+    expect(
+      includeCandidates("pubs/paper", {
+        ...figure,
+        path: "../../figures/a.PNG",
+      }),
+    ).toEqual(["figures/a.PNG"]);
+    expect(
+      includeCandidates(".", { kind: "file", path: "./t", options: "" }),
+    ).toEqual(["t", "t.tex"]);
   });
 });

@@ -1,5 +1,6 @@
 import { NotSignedInError, request } from "./api";
 import type { Hub } from "./hubs";
+import type { AuthChanged } from "./messages";
 import {
   getCredentials,
   getCurrentHub,
@@ -89,6 +90,10 @@ async function pollForToken(
   let pollsSinceClose = 0;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    // Timers and fetches don't count as activity, so without an extension
+    // API call the worker is shut down after 30 seconds, which is less time
+    // than signing in to the hub first takes
+    await chrome.runtime.getPlatformInfo();
     // Always ask before concluding anything. Closing the tab right after
     // approving is the ordinary way to finish, so a closed tab on its own
     // says nothing; only a closed tab plus a hub that still reports the
@@ -121,6 +126,7 @@ async function pollForToken(
       refreshToken: token.refresh_token ?? null,
       expiresAt: Date.now() + (token.expires_in ?? 1800) * 1000,
     });
+    void announceAuthChange();
     return getAuthState();
   }
   throw new Error("Timed out waiting for authorization; try signing in again");
@@ -130,7 +136,26 @@ export async function signOut(): Promise<AuthState> {
   const hub = await getCurrentHub();
   await setCredentials(hub.apiUrl, null);
   await setKnownEmail(hub.apiUrl, null);
+  void announceAuthChange();
   return getAuthState();
+}
+
+/**
+ * Tell every surface that the signed-in state changed.
+ *
+ * The surface that asked hears back anyway, but the popup closes as soon as
+ * the sign-in tab opens, and a panel in another tab has no idea it happened.
+ */
+async function announceAuthChange(): Promise<void> {
+  const message: AuthChanged = { type: "auth.changed" };
+  // The popup and options page; rejects when neither is open
+  chrome.runtime.sendMessage(message).catch(() => undefined);
+  for (const tab of await chrome.tabs.query({})) {
+    if (tab.id !== undefined) {
+      // Most tabs have no content script of ours listening
+      chrome.tabs.sendMessage(tab.id, message).catch(() => undefined);
+    }
+  }
 }
 
 export async function getAuthState(requested?: Hub): Promise<AuthState> {

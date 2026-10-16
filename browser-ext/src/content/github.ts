@@ -1154,6 +1154,11 @@ async function refresh(repo: string): Promise<void> {
     return;
   }
   mountLauncher(state, () => void openPanel(state));
+  // A panel still on screen was showing the old state, e.g., a sign-in
+  // prompt whose spinner would otherwise run until the page is reloaded
+  if (panel?.host.isConnected) {
+    void openPanel(state);
+  }
   if (!state.project) {
     return;
   }
@@ -1224,4 +1229,13 @@ function sync(): void {
   void refresh(repo);
 }
 
-runContentScript({ id: "github", sync, teardown });
+runContentScript({
+  id: "github",
+  sync,
+  teardown,
+  authChanged: () => {
+    if (currentRepo) {
+      void refresh(currentRepo);
+    }
+  },
+});

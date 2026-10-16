@@ -851,4 +851,18 @@ function watchForSaves(): void {
 }
 
 watchForSaves();
-runContentScript({ id: "overleaf", sync, teardown });
+runContentScript({
+  id: "overleaf",
+  sync,
+  teardown,
+  authChanged: () => {
+    if (!currentProjectId) {
+      return;
+    }
+    if (panel) {
+      void load(currentProjectId);
+    } else {
+      void checkSyncStatus(currentProjectId);
+    }
+  },
+});

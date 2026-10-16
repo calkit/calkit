@@ -17,7 +17,7 @@
         "ms-python.python",
         "ms-python.vscode-pylance",
         "ms-python.debugpy",
-        "ms-python.autopep8",
+        "charliermarsh.ruff",
         "ms-toolsai.jupyter",
         "ms-toolsai.jupyter-keymap",
         "ms-toolsai.jupyter-renderers",
@@ -39,6 +39,9 @@
           "*.pdf": "latex-workshop-pdf-hook"
         },
         "git.autofetch": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        },
         "cSpell.userWords": [
           "calkit",
           "Calkit"

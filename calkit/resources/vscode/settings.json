@@ -8,6 +8,9 @@
     "*.pdf": "latex-workshop-pdf-hook"
   },
   "git.autofetch": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
   "cSpell.userWords": [
     "calkit",
     "Calkit"

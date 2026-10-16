@@ -19,17 +19,20 @@ import type {
   ContentsItem,
   DvcOutput,
   TextDiff,
-  Figure,
+  FiguresPage,
   GithubRepo,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
   ProjectsPublic,
+  Provenance,
   PullRequestRefs,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
+  Result,
+  Table,
 } from "../core/types";
 
 function projectPath(owner: string, project: string): string {
@@ -212,8 +215,22 @@ async function handle(message: Request): Promise<unknown> {
         },
       );
     case "project.figures":
-      return request<Figure[]>(
+      return request<FiguresPage>(
         `${projectPath(message.owner, message.project)}/figures`,
+        { query: { limit: 200 } },
+      );
+    case "project.tables":
+      return request<Table[]>(
+        `${projectPath(message.owner, message.project)}/tables`,
+      );
+    case "project.results":
+      return request<Result[]>(
+        `${projectPath(message.owner, message.project)}/results`,
+      );
+    case "project.provenance":
+      return request<Provenance>(
+        `${projectPath(message.owner, message.project)}/provenance`,
+        { query: { path: message.path, key: message.key } },
       );
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });

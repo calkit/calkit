@@ -145,6 +145,43 @@ export interface Figure {
   storage?: "git" | "dvc" | "dvc-zip" | null;
 }
 
+export interface FiguresPage {
+  items: Figure[];
+  total: number;
+}
+
+export interface Table {
+  path: string;
+  title: string;
+  stage?: string | null;
+  stage_status?: StageStatus | null;
+}
+
+export interface Result {
+  path: string;
+  title: string;
+  key?: string | null;
+  stage?: string | null;
+  stage_status?: StageStatus | null;
+}
+
+/** Where a path, or one value in a results file, came from. */
+export interface Provenance {
+  path: string;
+  key?: string | null;
+  exists: boolean;
+  value?: unknown;
+  value_error?: string | null;
+  stage?: string | null;
+  stage_kind?: string | null;
+  /** What to edit to change it: the stage's script, notebook, or document. */
+  source?: string | null;
+  command?: string | null;
+  inputs: string[];
+  stage_status?: StageStatus | null;
+  stale_reason?: "pipeline" | "frozen" | null;
+}
+
 export interface ReferenceEntry {
   type: string;
   key: string;

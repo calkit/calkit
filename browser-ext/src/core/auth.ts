@@ -69,14 +69,14 @@ async function runSignIn(requested?: Hub): Promise<AuthState> {
   };
   chrome.tabs.onRemoved.addListener(onTabClosed);
   try {
-    return await pollForToken(hub.apiUrl, auth, () => abandoned);
+    return await pollForToken(hub, auth, () => abandoned);
   } finally {
     chrome.tabs.onRemoved.removeListener(onTabClosed);
   }
 }
 
 async function pollForToken(
-  apiUrl: string,
+  hub: Hub,
   auth: DeviceAuthResponse,
   isAbandoned: () => boolean,
 ): Promise<AuthState> {
@@ -98,7 +98,7 @@ async function pollForToken(
     // approving is the ordinary way to finish, so a closed tab on its own
     // says nothing; only a closed tab plus a hub that still reports the
     // request as pending means the user walked away.
-    const resp = await fetch(`${apiUrl}/login/device/token`, {
+    const resp = await fetch(`${hub.apiUrl}/login/device/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device_code: auth.device_code }),
@@ -121,13 +121,16 @@ async function pollForToken(
     if (!token.access_token) {
       continue;
     }
-    await setCredentials(apiUrl, {
+    await setCredentials(hub.apiUrl, {
       accessToken: token.access_token,
       refreshToken: token.refresh_token ?? null,
       expiresAt: Date.now() + (token.expires_in ?? 1800) * 1000,
     });
+    // After the state is read, which caches the email surfaces use to
+    // decide what to offer
+    const state = await getAuthState(hub);
     void announceAuthChange();
-    return getAuthState();
+    return state;
   }
   throw new Error("Timed out waiting for authorization; try signing in again");
 }
@@ -136,8 +139,9 @@ export async function signOut(): Promise<AuthState> {
   const hub = await getCurrentHub();
   await setCredentials(hub.apiUrl, null);
   await setKnownEmail(hub.apiUrl, null);
+  const state = await getAuthState();
   void announceAuthChange();
-  return getAuthState();
+  return state;
 }
 
 /**

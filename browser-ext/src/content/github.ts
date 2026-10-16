@@ -1234,8 +1234,17 @@ runContentScript({
   sync,
   teardown,
   authChanged: () => {
-    if (currentRepo) {
-      void refresh(currentRepo);
+    if (!currentRepo) {
+      return;
     }
+    // Read under the old session, including a lookup that failed for want
+    // of signing in, which would otherwise be served from the cache
+    pullChanges = null;
+    document.getElementById(PR_CARD_ID)?.remove();
+    document.getElementById(OVERLAY_ID)?.remove();
+    for (const row of document.querySelectorAll(`[${ARTIFACT_ROW_ATTR}]`)) {
+      row.remove();
+    }
+    void refresh(currentRepo);
   },
 });

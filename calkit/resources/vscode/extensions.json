@@ -3,6 +3,7 @@
     "Calkit.calkit-vscode",
     "james-yu.latex-workshop",
     "lakefs.lakefs-dvc",
+    "ms-vscode-remote.remote-containers",
     "esbenp.prettier-vscode",
     "ms-python.python",
     "ms-python.vscode-pylance",

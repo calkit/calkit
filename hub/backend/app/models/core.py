@@ -1130,7 +1130,7 @@ class Figure(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     dataset: str | None = None
     content: str | None = None  # Base64 encoded
     url: str | None = None
@@ -1152,6 +1152,26 @@ class Result(SQLModel):
     # Which value inside the file this result is; null means the whole file.
     # Several results can share a path with different keys.
     key: str | None = None
+    stage_status: StageStatus | None = None
+
+
+class Provenance(SQLModel):
+    """Where an artifact, or one value inside a results file, came from."""
+
+    path: str
+    key: str | None = None
+    exists: bool = False
+    # JSON-able, so a key can name a subtree as well as a number
+    value: Any = None
+    value_error: str | None = None
+    stage: str | None = None
+    stage_kind: str | None = None
+    # What to open to change it: the stage's script, notebook, or document
+    source: str | None = None
+    command: str | None = None
+    inputs: list[str] = Field(default_factory=list)
+    stage_status: StageStatus | None = None
+    stale_reason: Literal["pipeline", "frozen"] | None = None
 
 
 class Table(SQLModel):
@@ -1167,7 +1187,7 @@ class Table(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     content: str | None = None  # Base64 encoded
     url: str | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
@@ -1527,7 +1547,7 @@ class Publication(_DeclaredArtifact):
     description: str | None = None
     kind: PublicationKind | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     content: str | None = None
     stage_info: DvcPipelineStage | None = None
     # The full Calkit pipeline stage definition from calkit.yaml, unlike
@@ -1634,7 +1654,7 @@ class QuestionEvidence(SQLModel):
     # citing an artifact the pipeline would rebuild differently, which is
     # worth knowing before trusting it as an answer.
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     # Why this citation shouldn't be taken at face value, if it shouldn't.
     # 'missing': it resolves to nothing -- never pushed, deleted, or at a ref
     # that isn't there. 'pipeline': the stage that made it is out of date.

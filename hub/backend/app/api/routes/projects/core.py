@@ -196,6 +196,7 @@ from app.pipeline import (
     compute_stage_statuses,
     find_frozen_tainted_stages,
     find_stage_for_path,
+    pipeline_at_ref,
 )
 from app.security import generate_refresh_token, hash_refresh_token
 from app.storage import (
@@ -3981,7 +3982,21 @@ def get_project_results(
         ref=ref,
         read_only=True,
     )
-    return _build_results(project=project, repo=repo, ref=ref)
+    results = _build_results(project=project, repo=repo, ref=ref)
+    # Whether each is out of date, like a figure or table
+    pipeline = pipeline_at_ref(
+        repo, ref, project.owner_account_name, project.name
+    )
+    for result in results:
+        result.stage = result.stage or find_stage_for_path(
+            result.path, pipeline.dvc_lock, valid_stages=set(pipeline.statuses)
+        )
+        status = pipeline.statuses.get(result.stage) if result.stage else None
+        if status is not None:
+            result.stage_status = StageStatus.model_validate(
+                status.model_dump()
+            )
+    return results
 
 
 # ``figure_path`` takes the path convertor because figures live in nested

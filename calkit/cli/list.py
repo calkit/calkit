@@ -639,9 +639,16 @@ def list_stages(
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ):
-    """List pipeline stages."""
+    """List pipeline stages, including subprojects'."""
     ck_info = calkit.load_calkit_info()
-    stages = ck_info.get("pipeline", {}).get("stages", {})
+    # Named as 'calkit status' names them and 'calkit run' accepts them
+    stages = {
+        calkit.qualify_with_project(wdir, name): stage
+        for wdir, info in calkit.iter_projects(ck_info=ck_info)
+        for name, stage in (
+            (info.get("pipeline") or {}).get("stages") or {}
+        ).items()
+    }
     # If we only want stale stages, we need to get the status first.
     # This compiles the pipeline, cleans notebooks, and checks environments,
     # all of which can affect whether a stage is stale, so we don't skip them.
@@ -664,6 +671,29 @@ def list_stages(
         return
     for name in result:
         typer.echo(name)
+
+
+@list_app.command(name="subprojects")
+def list_subprojects(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """List subprojects, including nested ones, by path."""
+    subprojects = calkit.get_subprojects()
+    if json_output:
+        echo_json(
+            {
+                path: {
+                    "parent": sp["parent"],
+                    "description": sp["entry"].get("description"),
+                }
+                for path, sp in subprojects.items()
+            }
+        )
+        return
+    for path in subprojects:
+        typer.echo(path)
 
 
 @list_app.command(name="latex-diffs")

@@ -1939,7 +1939,8 @@ List Calkit objects.
 | [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer.                                                  |
 | [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
-| [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                                                                          |
+| [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages, including subprojects'.                                                  |
+| [`subprojects`](#subcommand-list-ls-subprojects)                | List subprojects, including nested ones, by path.                                              |
 | [`latex-diffs`](#subcommand-list-ls-latex-diffs)                | List the LaTeX diffs the pipeline keeps and whether each is current.                           |
 | [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                                                                      |
 | [`imports`](#subcommand-list-ls-imports)                        | List everything in the project that was imported from elsewhere.                               |
@@ -2257,7 +2258,7 @@ Options:
 
 #### `calkit list|ls stages`
 
-List pipeline stages.
+List pipeline stages, including subprojects'.
 
 Usage:
 
@@ -2272,6 +2273,24 @@ Options:
 | `--kind`, `-k` | str     | no       |         | Filter stages by kind.  |
 | `--stale`      | boolean | no       | False   | Show only stale stages. |
 | `--json`       | boolean | no       | False   | Output result as JSON.  |
+
+<a id="subcommand-list-ls-subprojects"></a>
+
+#### `calkit list|ls subprojects`
+
+List subprojects, including nested ones, by path.
+
+Usage:
+
+```text
+calkit list|ls subprojects [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-latex-diffs"></a>
 
@@ -2378,6 +2397,7 @@ Describe things.
 | [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
 | [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
+| [`subprojects`](#subcommand-describe-desc-subprojects)              | Describe subprojects, including nested ones.                       |
 | [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
@@ -2428,6 +2448,26 @@ Usage:
 
 ```text
 calkit describe|desc environments|envs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-subprojects"></a>
+
+#### `calkit describe|desc subprojects`
+
+Describe subprojects, including nested ones.
+
+Stages and environments are named as in the subproject itself; from here, they're addressed as '<path>:<name>'.
+
+Usage:
+
+```text
+calkit describe|desc subprojects [OPTIONS]
 ```
 
 Options:

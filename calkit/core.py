@@ -473,6 +473,40 @@ def iter_projects(
         yield from iter_projects(wdir=sp_wdir, read_only=read_only, _seen=seen)
 
 
+def get_subprojects(ck_info: dict | None = None) -> dict[str, dict]:
+    """Map each subproject's path, relative to the project, to the project
+    declaring it (``parent``), its entry there, and its own ``ck_info``.
+
+    Nested subprojects are included, in the order ``iter_projects`` visits
+    them.
+    """
+    from pathlib import Path
+
+    projects = {
+        Path(wdir).as_posix(): info
+        for wdir, info in iter_projects(ck_info=ck_info)
+    }
+    found: dict[str, dict] = {}
+    for wdir, info in projects.items():
+        for entry in info.get("subprojects") or []:
+            if not isinstance(entry, dict) or not isinstance(
+                entry.get("path"), str
+            ):
+                continue
+            sp = Path(os.path.normpath(os.path.join(wdir, entry["path"])))
+            sp_posix = sp.as_posix()
+            if sp_posix in projects and sp_posix != ".":
+                found.setdefault(
+                    sp_posix,
+                    {
+                        "parent": wdir,
+                        "entry": entry,
+                        "ck_info": projects[sp_posix],
+                    },
+                )
+    return {p: found[p] for p in projects if p in found}
+
+
 def describe_project(wdir: str) -> str:
     """How to name a subproject in a message, and nothing for the project
     itself."""

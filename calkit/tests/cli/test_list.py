@@ -206,6 +206,61 @@ def test_list_stages(tmp_dir):
         text=True,
     )
     assert set(json.loads(out)) == {"stage1"}
+    # Subprojects' stages are listed as 'calkit run' addresses them
+    os.makedirs("sub/nested")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "subprojects": [{"path": "nested"}],
+                "pipeline": {
+                    "stages": {"s": ck_info["pipeline"]["stages"]["stage2"]}
+                },
+            },
+            f,
+        )
+    with open("sub/nested/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": {"n": {}}}}, f)
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "stages"], text=True)
+    assert out.split() == ["stage1", "stage2", "sub:s", "sub/nested:n"]
+
+
+def test_list_subprojects(tmp_dir):
+    out = subprocess.check_output(["calkit", "list", "subprojects"], text=True)
+    assert out == ""
+    os.makedirs("a/b")
+    os.makedirs("c")
+    os.makedirs("missing-config")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "subprojects": [
+                    {"path": "a", "description": "The A one."},
+                    {"path": "c"},
+                    # Skipped, as 'calkit run' skips it
+                    {"path": "missing-config"},
+                ]
+            },
+            f,
+        )
+    # A nested one, and one naming its parent, which isn't repeated
+    with open("a/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"subprojects": [{"path": "b"}, {"path": ".."}]}, f)
+    for path in ["a/b", "c"]:
+        with open(f"{path}/calkit.yaml", "w") as f:
+            calkit.ryaml.dump({}, f)
+    out = subprocess.check_output(["calkit", "list", "subprojects"], text=True)
+    assert out.split() == ["a", "a/b", "c"]
+    out = subprocess.check_output(
+        ["calkit", "list", "subprojects", "--json"], text=True
+    )
+    assert json.loads(out) == {
+        "a": {"parent": ".", "description": "The A one."},
+        "a/b": {"parent": "a", "description": None},
+        "c": {"parent": ".", "description": None},
+    }
 
 
 def test_list_latex_diffs(tmp_dir):

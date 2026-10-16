@@ -5,6 +5,10 @@
 %% document.
 \NeedsTeXFormat{LaTeX2e}
 \ProvidesPackage{calkit}[2026/10/16 v0.1 Calkit project content]
+\newif\ifck@links \ck@linkstrue
+% Without links, e.g., for a journal that shouldn't see the project
+\DeclareOption{nolinks}{\ck@linksfalse}
+\ProcessOptions\relax
 \RequirePackage{graphicx}
 \def\ck@dir{_calkit}
 \let\ck@linkbase\@empty
@@ -17,19 +21,22 @@
 \newcommand\ck@missing[1]{%
   \PackageWarning{calkit}{#1 hasn't been brought in yet; sync with Calkit}%
   \textbf{??}}
+% Links to the project on its hub, if hyperref is loaded and Calkit wrote
+% where that is
 \newcommand\ck@link[2]{%
-  \ifx\ck@linkbase\@empty #2%
-  \else\ifdefined\href \href{\ck@linkbase/#1}{#2}\else #2\fi\fi}
+  \ifck@links\ifx\ck@linkbase\@empty #2%
+  \else\ifdefined\href \href{\ck@linkbase/#1}{#2}\else #2\fi\fi
+  \else #2\fi}
 % \ckvalue[format]{path}{key}: a value from a results file. Calkit applies
 % the format, e.g., .2f, when it writes the value.
 \newcommand\ckvalue[3][]{%
   \ifcsname ck@v@#2@#3@#1\endcsname
-    \ck@link{#2?key=#3}{\csname ck@v@#2@#3@#1\endcsname}%
+    \ck@link{results?path=#2\string&key=#3}{\csname ck@v@#2@#3@#1\endcsname}%
   \else\ck@missing{#3 from #2}\fi}
 % \ckfigure[graphics options]{path}
 \newcommand\ckfigure[2][]{%
   \IfFileExists{\ck@dir/#2}%
-    {\ck@link{#2}{\includegraphics[#1]{\ck@dir/#2}}}%
+    {\ck@link{figures?path=#2}{\includegraphics[#1]{\ck@dir/#2}}}%
     {\ck@missing{#2}}}
 % \cktable{path}: a table or other TeX a stage generated
 \newcommand\cktable[1]{%

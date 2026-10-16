@@ -6,13 +6,14 @@ in their editor of choice.
 
 from __future__ import annotations
 
-__version__ = "0.0.5"
 # The oldest Calkit this assistant knows how to drive. Bump it when the
 # assistant starts relying on newer CLI output.
 MIN_CALKIT_VERSION = "0.47.4"
 
+import functools
 import glob
 import itertools
+import json
 import os
 import platform
 import re
@@ -21,9 +22,17 @@ import subprocess
 import sys
 import webbrowser
 from abc import ABCMeta, abstractmethod
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as installed_version
 from pathlib import Path
 from typing import ClassVar, Literal
 from urllib.request import urlopen
+
+# hatch-vcs derives this from the assistant/vX.Y.Z tags at install time
+try:
+    __version__ = installed_version("calkit-assistant")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 # Set env var for gitpython so it doesn't fail if not installed
 os.environ["GIT_PYTHON_REFRESH"] = "quiet"
@@ -48,8 +57,10 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QProgressDialog,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -164,6 +175,19 @@ def get_calkit_version() -> tuple[int, ...] | None:
     return _parse_version(out)
 
 
+@functools.cache
+def get_latest_calkit_version() -> tuple[int, ...] | None:
+    """The newest Calkit on PyPI, or None if PyPI can't be reached."""
+    try:
+        resp = requests.get(
+            "https://pypi.org/pypi/calkit-python/json", timeout=5
+        )
+        resp.raise_for_status()
+        return _parse_version(resp.json()["info"]["version"])
+    except (requests.RequestException, KeyError, ValueError):
+        return None
+
+
 def get_calkit_token() -> str:
     # The token is a per-hub credential, so it lives under 'hub config',
     # not the shared 'config' group
@@ -190,19 +214,14 @@ def get_platform() -> Literal["linux", "mac", "windows"]:
 
 
 def wsl_installed() -> bool:
+    # 'wsl --status' text is localized and varies across WSL releases, so
+    # check for an installed distribution instead, which fails without one
     try:
-        output = (
-            subprocess.check_output(["wsl", "--status"])
-            .decode()
-            .replace("\x00", "")
-        )
-        return (
-            "Default Version: 2" in output
-            and "Default Distribution: Ubuntu" in output
-            and "not supported" not in output
-        )
+        output = subprocess.check_output(["wsl", "--list", "--quiet"])
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
+    # wsl.exe writes UTF-16 when piped
+    return bool(output.decode(errors="ignore").replace("\x00", "").strip())
 
 
 def vs_code_installed() -> bool:
@@ -342,11 +361,9 @@ class HubLogin(QWidget):
 
     def __init__(self):
         super().__init__()
-        print("Checking Calkit hub login status")
-        is_set = self.is_set
         self.txt_not_set = "Log in to the Calkit hub: ❌"
         self.txt_set = "Log in to the Calkit hub: ✅"
-        self.label = QLabel(self.txt_set if is_set else self.txt_not_set)
+        self.label = QLabel("Log in to the Calkit hub: ⏳")
         self.login_button = QPushButton(self)
         self.login_button.setText("🔑")
         self.login_button.setCursor(Qt.PointingHandCursor)
@@ -369,16 +386,15 @@ class HubLogin(QWidget):
         # Show the menu at the cursor position
         menu.exec(self.mapToGlobal(position))
 
-    def refresh(self) -> None:
-        print("Refreshing Calkit hub login status")
-        if self.is_set:
-            self.label.setText(self.txt_set)
-        else:
-            self.label.setText(self.txt_not_set)
-
-    @property
-    def is_set(self) -> bool:
+    def check(self) -> bool:
+        print("Checking Calkit hub login status")
         return bool(get_calkit_token())
+
+    def show_status(self, is_set: bool) -> None:
+        self.label.setText(self.txt_set if is_set else self.txt_not_set)
+
+    def refresh(self) -> None:
+        self.show_status(self.check())
 
     @property
     def login_command(self) -> list[str]:
@@ -427,10 +443,14 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
         self.layout = make_setup_step_layout(self)
         self.txt_installed = f"Install {self.dependency_name}: ✅"
         self.txt_not_installed = f"Install {self.dependency_name}: ❌"
-        self.label = QLabel()
+        self.txt_update_available = (
+            f"Install {self.dependency_name}: ✅ (update available)"
+        )
+        self.label = QLabel(f"Install {self.dependency_name}: ⏳")
         self.layout.addWidget(self.label)
         self.install_button = None
-        self.refresh()
+        for step in self.child_steps:
+            step.setEnabled(False)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
 
@@ -445,27 +465,40 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
         # Show the menu at the cursor position
         menu.exec(self.mapToGlobal(position))
 
-    def refresh(self) -> bool:
-        """Refresh the widget, e.g., if it's been installed and we want to
-        update the check mark display.
+    def check(self) -> dict:
+        """Probe the system for this step's status.
+
+        This runs off the GUI thread, so it must not touch any widgets.
         """
-        print(f"Refreshing {self.dependency_name} install status")
-        installed = self.installed
+        print(f"Checking {self.dependency_name} install status")
+        return {"installed": self.installed, "update_available": False}
+
+    def show_status(self, status: dict) -> bool:
+        """Display the status returned by ``check``."""
+        installed = status["installed"]
         for step in self.child_steps:
             step.setEnabled(installed)
-        if not installed:
-            self.label.setText(self.txt_not_installed)
+        # An outdated install still works, so updating is only suggested
+        update_available = installed and status["update_available"]
+        if not installed or update_available:
+            if update_available:
+                self.label.setText(self.txt_update_available)
+            else:
+                self.label.setText(self.txt_not_installed)
             if self.install_button is None:
-                self.install_button = QPushButton("⬇️")
+                self.install_button = QPushButton()
                 self.install_button.setCursor(Qt.PointingHandCursor)
-                self.install_button.setToolTip("Install")
                 self.install_button.setFixedSize(18, 18)
                 self.install_button.setStyleSheet(
                     "font-size: 12px; padding: 0px; margin: 0px; border: none;"
                 )
                 self.install_button.clicked.connect(self.install)
                 self.layout.addWidget(self.install_button)
-        elif installed:
+            self.install_button.setText("⬆️" if update_available else "⬇️")
+            self.install_button.setToolTip(
+                "Update" if update_available else "Install"
+            )
+        else:
             if self.install_button is not None:
                 self.layout.removeWidget(self.install_button)
                 self.install_button.deleteLater()
@@ -473,6 +506,10 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
             # Update label to show installed
             self.label.setText(self.txt_installed)
         return installed
+
+    def refresh(self) -> bool:
+        """Check and display the status, e.g., after installing."""
+        return self.show_status(self.check())
 
     @property
     @abstractmethod
@@ -628,8 +665,12 @@ class WSLInstall(DependencyInstall):
 
     @property
     def install_command(self) -> list[str]:
-        # Run command as administrator in PowerShell
+        # Everything runs elevated, since this app usually isn't, e.g., when
+        # the browser opens it straight from the download, and the WSL
+        # package fails to install without admin rights
         cmd = (
+            "winget install --accept-source-agreements "
+            "--accept-package-agreements Microsoft.WSL --force & "
             "dism.exe /online /enable-feature "
             "/featurename:Microsoft-Windows-Subsystem-Linux /all /norestart "
             "&& dism.exe /online /enable-feature "
@@ -638,13 +679,6 @@ class WSLInstall(DependencyInstall):
             "wsl --install -d Ubuntu"
         )
         return [
-            "winget",
-            "install",
-            "--accept-source-agreements",
-            "--accept-package-agreements",
-            "Microsoft.WSL",
-            "--force",
-            "&&",
             "powershell",
             "-ExecutionPolicy",
             "Bypass",
@@ -778,42 +812,58 @@ class VSCodeInstall(DependencyInstall):
 
 
 class VSCodeExtensionsInstall(DependencyInstall):
-    recommended: ClassVar[list[str]] = [
-        "james-yu.latex-workshop",
-        "iterative.dvc",
-        "mechatroner.rainbow-csv",
-        "charliermarsh.ruff",
-        "ms-python.python",
-        "ms-toolsai.jupyter",
-        "redhat.vscode-yaml",
-        "eamodio.gitlens",
-        "bierner.markdown-mermaid",
-        "mathworks.language-matlab",
-        "grapecity.gc-excelviewer",
-        "ms-vscode-remote.remote-containers",
-    ]
+    # Copied from Calkit's project recommendations by
+    # scripts/sync-resources.py, and bundled into the executable
+    recommended: ClassVar[list[str]] = json.loads(
+        Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+        .joinpath("resources", "vscode-extensions.json")
+        .read_text(encoding="utf-8")
+    )["recommendations"]
 
     @property
     def dependency_name(self) -> str:
         return "VS Code extensions"
 
     @property
+    def missing(self) -> list[str]:
+        # IDs are case-insensitive, and VS Code lists them lowercased
+        installed = {ext.lower() for ext in get_installed_vs_code_extensions()}
+        return [
+            ext for ext in self.recommended if ext.lower() not in installed
+        ]
+
+    @property
     def installed(self) -> bool:
-        return not (
-            set(self.recommended) - set(get_installed_vs_code_extensions())
+        return not self.missing
+
+    def check(self) -> dict:
+        print("Checking VS Code extensions install status")
+        missing = self.missing
+        return {
+            "installed": not missing,
+            "update_available": False,
+            "missing": missing,
+        }
+
+    def show_status(self, status: dict) -> bool:
+        missing = status["missing"]
+        self.txt_not_installed = (
+            f"Install VS Code extensions: ❌ ({len(missing)} missing)"
         )
+        self.label.setToolTip(
+            "Missing:\n" + "\n".join(missing) if missing else ""
+        )
+        return super().show_status(status)
 
     @property
     def install_command(self) -> list[str]:
         cmd = []
-        installed = get_installed_vs_code_extensions()
         code_path = shutil.which("code")
-        for ext in self.recommended:
-            if ext not in installed:
-                print("VS Code extension", ext, "not found")
-                if cmd:
-                    cmd.append("&&")
-                cmd += [code_path, "--install-extension", ext]
+        for ext in self.missing:
+            print("VS Code extension", ext, "not found")
+            if cmd:
+                cmd.append("&&")
+            cmd += [code_path, "--install-extension", ext]
         return cmd
 
 
@@ -872,7 +922,6 @@ class WSLGitInstall(DependencyInstall):
 class GitConfigStep(QWidget):
     def __init__(self, key: str, pretty_name: str, wsl: bool = False) -> None:
         super().__init__()
-        print(f"Checking Git {key} config status")
         self.key = key
         self.pretty_name = pretty_name
         self.wsl = wsl
@@ -883,8 +932,7 @@ class GitConfigStep(QWidget):
         else:
             self.txt_not_set = f"Set Git {self.key}: ❌"
             self.txt_set = f"Set Git {self.key}: ✅"
-        value = self.value
-        self.label = QLabel(self.txt_set if value else self.txt_not_set)
+        self.label = QLabel(self.txt_not_set.replace("❌", "⏳"))
         # Create a button for updating
         self.update_button = QPushButton(self)
         self.update_button.setText("✏️")
@@ -907,12 +955,15 @@ class GitConfigStep(QWidget):
         # Show the menu at the cursor position
         menu.exec(self.mapToGlobal(position))
 
+    def check(self) -> bool:
+        print(f"Checking Git {self.key} config status")
+        return bool(self.value)
+
+    def show_status(self, is_set: bool) -> None:
+        self.label.setText(self.txt_set if is_set else self.txt_not_set)
+
     def refresh(self) -> None:
-        print(f"Refreshing Git {self.key} config status")
-        if self.value:
-            self.label.setText(self.txt_set)
-        else:
-            self.label.setText(self.txt_not_set)
+        self.show_status(self.check())
 
     @property
     def cmd(self) -> list[str]:
@@ -1058,20 +1109,41 @@ class CalkitInstall(DependencyInstall):
     @property
     def installed(self) -> bool:
         """Installed and new enough for this assistant to drive it."""
+        return self.check()["installed"]
+
+    def check(self) -> dict:
+        print("Checking Calkit install status")
         version = get_calkit_version()
-        return version is not None and version >= _parse_version(
+        latest = get_latest_calkit_version()
+        installed = version is not None and version >= _parse_version(
             MIN_CALKIT_VERSION
         )
+        # Calkit upgrades itself by default, but not every install can,
+        # e.g., one in a conda env, and old ones can misconfigure projects,
+        # e.g., pointing their DVC remote at the legacy HTTP URL
+        update_available = (
+            version is not None and latest is not None and version < latest
+        )
+        return {
+            "installed": installed,
+            "update_available": update_available,
+            "version": version,
+            "latest": latest,
+        }
 
-    def refresh(self) -> bool:
+    def show_status(self, status: dict) -> bool:
         # An old install is a different ask than a missing one
-        if get_calkit_version() is None:
+        if status["version"] is None:
             self.txt_not_installed = "Install Calkit: ❌"
         else:
             self.txt_not_installed = (
                 f"Update Calkit to v{MIN_CALKIT_VERSION} or newer: ❌"
             )
-        return super().refresh()
+        if latest := status["latest"]:
+            self.txt_update_available = (
+                f"Install Calkit: ✅ (v{'.'.join(map(str, latest))} available)"
+            )
+        return super().show_status(status)
 
     @property
     def install_command(self) -> list[str]:
@@ -1179,6 +1251,7 @@ def get_projects() -> list[Project]:
         resp = requests.get(
             "https://api.calkit.io/user/projects",
             headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
         )
         cloud_projects = resp.json()["data"]
     except (requests.RequestException, ValueError, KeyError) as e:
@@ -1190,13 +1263,15 @@ def get_projects() -> list[Project]:
         cloud_projects_by_git_url[project_full_name["git_repo_url"]] = (
             project_full_name
         )
-    # Get the local projects
-    start = os.path.join(os.path.expanduser("~"), "calkit")
+    # Get the local projects, from where the assistant clones them and where
+    # developers tend to keep repos
     max_depth = 1
     res = []
-    for i in range(max_depth):
-        pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
-        res += glob.glob(pattern)
+    for start_name in ["calkit", "dev"]:
+        start = os.path.join(os.path.expanduser("~"), start_name)
+        for i in range(max_depth):
+            pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
+            res += sorted(glob.glob(pattern))
     final_res_by_git_url = {}
     for ck_fpath in res:
         project_dir = os.path.dirname(ck_fpath)
@@ -1228,7 +1303,8 @@ def get_projects() -> list[Project]:
             wdir=project_dir,
             git_repo_url=remote_url,
         )
-        final_res_by_git_url[remote_url] = project
+        # A project cloned in both places opens from ~/calkit
+        final_res_by_git_url.setdefault(remote_url, project)
     for git_repo_url, project_dict in cloud_projects_by_git_url.items():
         # If the project is not in the local directory, add it
         if git_repo_url not in final_res_by_git_url:
@@ -1514,6 +1590,33 @@ class NewProjectThread(QThread):
         self.success = self.process.returncode == 0
 
 
+class ProjectsThread(QThread):
+    """A thread to load the project list."""
+
+    loaded = Signal(list)
+
+    def run(self) -> None:
+        self.loaded.emit(get_projects())
+
+
+class SetupCheckThread(QThread):
+    """A thread to check each setup step's status in turn.
+
+    Every check shells out, and some go to the network, so on the GUI
+    thread they'd freeze the window until all were done.
+    """
+
+    checked = Signal(str, object)
+
+    def __init__(self, steps: dict[str, QWidget], parent=None):
+        super().__init__(parent)
+        self.steps = steps
+
+    def run(self) -> None:
+        for key, step in self.steps.items():
+            self.checked.emit(key, step.check())
+
+
 class ProjectListWidget(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -1562,6 +1665,10 @@ class ProjectListWidget(QWidget):
         self.layout.addWidget(self.title_bar)
         # Add a list of folders with "open" icons
         self.list_widget = QListWidget()
+        self.load_thread = ProjectsThread(parent=self)
+        self.load_thread.loaded.connect(self.show_projects)
+        self.load_thread.finished.connect(self.finish_loading)
+        self.refresh_pending = False
         self.refresh()
         self.list_widget.itemDoubleClicked.connect(self.open_project_vs_code)
         # Add right-click context menu to the project list
@@ -1572,10 +1679,30 @@ class ProjectListWidget(QWidget):
         self.layout.addWidget(self.list_widget)
 
     def refresh(self) -> None:
-        """Refresh the project list by clearing and re-adding items."""
+        """Load the projects off the GUI thread, since that asks the hub."""
+        if self.load_thread.isRunning():
+            # What's loading may predate whatever prompted this, e.g., a login
+            self.refresh_pending = True
+            return
         print("Refreshing project list")
+        self.refresh_pending = False
+        self.refresh_projects_button.setEnabled(False)
+        # Disabled so the placeholder can't be opened like a project
+        self.list_widget.setEnabled(False)
+        if not self.list_widget.count():
+            self.list_widget.addItem("Loading projects...")
+        self.load_thread.start()
+
+    def finish_loading(self) -> None:
+        self.refresh_projects_button.setEnabled(True)
+        self.list_widget.setEnabled(True)
+        if self.refresh_pending:
+            self.refresh()
+
+    def show_projects(self, projects: list[Project]) -> None:
+        """Clear the list and add the loaded projects."""
         self.list_widget.clear()
-        self.projects = get_projects()
+        self.projects = projects
         self.projects_by_name = {}
         for project in self.projects:
             name = f"{project.owner_name}/{project.project_name}"
@@ -1789,10 +1916,23 @@ class MainWindow(QWidget):
         # Add setup steps to the left section
         print("Creating setup steps")
         self.setup_step_widgets = make_setup_step_widgets()
+        self.setup_progress = QProgressBar(self.setup_widget)
+        self.setup_progress.setMaximum(len(self.setup_step_widgets))
+        self.setup_progress.setFormat("Checking %v of %m")
+        # Fill the column without widening it, so nothing shifts on hiding
+        self.setup_progress.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Fixed
+        )
+        self.setup_layout.addWidget(self.setup_progress)
         for setup_step_widget in self.setup_step_widgets.values():
             setup_step_widget.setMinimumHeight(20)
             self.setup_layout.addWidget(setup_step_widget, stretch=0)
         self.layout.addWidget(self.setup_widget)
+        self.setup_check_thread = SetupCheckThread(
+            self.setup_step_widgets, parent=self
+        )
+        self.setup_check_thread.checked.connect(self.show_setup_step_status)
+        self.setup_check_thread.finished.connect(self.finish_setup_check)
         # Right half: Projects
         self.projects_widget = ProjectListWidget(self)
         # Refresh projects widget on Calkit install or token set
@@ -1804,11 +1944,31 @@ class MainWindow(QWidget):
         )
         # Add the projects widget to the layout
         self.layout.addWidget(self.projects_widget)
+        self.refresh_setup_status()
 
     def refresh_setup_status(self) -> None:
-        """Refresh the status of all setup steps."""
-        for step in self.setup_step_widgets.values():
-            step.refresh()
+        """Check all setup steps in the background, showing progress."""
+        if self.setup_check_thread.isRunning():
+            return
+        self.refresh_setup_button.setEnabled(False)
+        self.setup_progress.setValue(0)
+        self.setup_progress.show()
+        self.setup_check_thread.start()
+
+    def show_setup_step_status(self, key: str, status: object) -> None:
+        self.setup_step_widgets[key].show_status(status)
+        self.setup_progress.setValue(self.setup_progress.value() + 1)
+
+    def finish_setup_check(self) -> None:
+        self.setup_progress.hide()
+        self.refresh_setup_button.setEnabled(True)
+
+    def closeEvent(self, event) -> None:
+        # Qt aborts if a running thread is destroyed with the window
+        self.hide()
+        self.setup_check_thread.wait()
+        self.projects_widget.load_thread.wait()
+        super().closeEvent(event)
 
 
 def restart():

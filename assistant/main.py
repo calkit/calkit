@@ -13,6 +13,7 @@ MIN_CALKIT_VERSION = "0.47.4"
 import functools
 import glob
 import itertools
+import json
 import os
 import platform
 import re
@@ -811,42 +812,58 @@ class VSCodeInstall(DependencyInstall):
 
 
 class VSCodeExtensionsInstall(DependencyInstall):
-    recommended: ClassVar[list[str]] = [
-        "james-yu.latex-workshop",
-        "iterative.dvc",
-        "mechatroner.rainbow-csv",
-        "charliermarsh.ruff",
-        "ms-python.python",
-        "ms-toolsai.jupyter",
-        "redhat.vscode-yaml",
-        "eamodio.gitlens",
-        "bierner.markdown-mermaid",
-        "mathworks.language-matlab",
-        "grapecity.gc-excelviewer",
-        "ms-vscode-remote.remote-containers",
-    ]
+    # Copied from Calkit's project recommendations by
+    # scripts/sync-resources.py, and bundled into the executable
+    recommended: ClassVar[list[str]] = json.loads(
+        Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+        .joinpath("resources", "vscode-extensions.json")
+        .read_text(encoding="utf-8")
+    )["recommendations"]
 
     @property
     def dependency_name(self) -> str:
         return "VS Code extensions"
 
     @property
+    def missing(self) -> list[str]:
+        # IDs are case-insensitive, and VS Code lists them lowercased
+        installed = {ext.lower() for ext in get_installed_vs_code_extensions()}
+        return [
+            ext for ext in self.recommended if ext.lower() not in installed
+        ]
+
+    @property
     def installed(self) -> bool:
-        return not (
-            set(self.recommended) - set(get_installed_vs_code_extensions())
+        return not self.missing
+
+    def check(self) -> dict:
+        print("Checking VS Code extensions install status")
+        missing = self.missing
+        return {
+            "installed": not missing,
+            "update_available": False,
+            "missing": missing,
+        }
+
+    def show_status(self, status: dict) -> bool:
+        missing = status["missing"]
+        self.txt_not_installed = (
+            f"Install VS Code extensions: ❌ ({len(missing)} missing)"
         )
+        self.label.setToolTip(
+            "Missing:\n" + "\n".join(missing) if missing else ""
+        )
+        return super().show_status(status)
 
     @property
     def install_command(self) -> list[str]:
         cmd = []
-        installed = get_installed_vs_code_extensions()
         code_path = shutil.which("code")
-        for ext in self.recommended:
-            if ext not in installed:
-                print("VS Code extension", ext, "not found")
-                if cmd:
-                    cmd.append("&&")
-                cmd += [code_path, "--install-extension", ext]
+        for ext in self.missing:
+            print("VS Code extension", ext, "not found")
+            if cmd:
+                cmd.append("&&")
+            cmd += [code_path, "--install-extension", ext]
         return cmd
 
 

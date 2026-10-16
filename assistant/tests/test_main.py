@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from unittest import mock
@@ -151,3 +152,39 @@ def test_main_window_builds_and_refreshes_offscreen(app):
         cmd = main.WSLInstall().install_command
     assert cmd[0] == "powershell" and "runAs" in cmd
     assert cmd[-1].startswith('"/k winget install')
+    # The extensions are the ones Calkit recommends for projects, from a
+    # copy kept in sync by scripts/sync-resources.py
+    recommended = main.VSCodeExtensionsInstall.recommended
+    with open(
+        os.path.join(
+            os.path.dirname(__file__),
+            *["..", "..", "calkit", "resources", "vscode", "extensions.json"],
+        )
+    ) as f:
+        assert recommended == json.load(f)["recommendations"]
+    assert "Calkit.calkit-vscode" in recommended
+    # VS Code lists IDs lowercased, which still count as installed
+    with mock.patch(
+        "main.get_installed_vs_code_extensions",
+        return_value=[ext.lower() for ext in recommended],
+    ):
+        assert main.VSCodeExtensionsInstall().refresh() is True
+    # Otherwise the step says how many are missing and which
+    with mock.patch(
+        "main.get_installed_vs_code_extensions",
+        return_value=recommended[2:],
+    ):
+        step = main.VSCodeExtensionsInstall()
+        assert step.refresh() is False
+        assert "(2 missing)" in step.label.text()
+        assert step.label.toolTip().splitlines()[1:] == recommended[:2]
+        with mock.patch("main.shutil.which", return_value="code"):
+            assert step.install_command == [
+                "code",
+                "--install-extension",
+                recommended[0],
+                "&&",
+                "code",
+                "--install-extension",
+                recommended[1],
+            ]

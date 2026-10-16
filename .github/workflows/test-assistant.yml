@@ -55,6 +55,7 @@ jobs:
         run: >-
           uv run pyinstaller --onefile --icon resources/icon.ico
           --copy-metadata calkit-assistant
+          --add-data resources/vscode-extensions.json:resources
           --name calkit-assistant main.py
       - name: Check the executable starts
         run: |

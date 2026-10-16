@@ -1333,8 +1333,9 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        // Recorded in the calkit.yaml of the subproject the file is in
-        const { projectDir } = projectForPath(
+        // Recorded where the file is declared, or else in the calkit.yaml
+        // of the subproject it's in
+        const { projectDir } = projectForArtifact(
           workspaceRoot,
           path.relative(workspaceRoot, fileUri.fsPath).replace(/\\/g, "/"),
         );
@@ -1508,7 +1509,17 @@ export function activate(context: vscode.ExtensionContext): void {
         path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
       );
       const profile = getLaunchProfileForActiveNotebook(context);
-      const envName = profile?.environmentName;
+      // The stage goes in the notebook's project, so its environment is
+      // only one that project declares, named as it is there
+      const env = profile?.environmentName
+        ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
+        : undefined;
+      const envName =
+        env &&
+        path.resolve(workspaceRoot, env.dir) ===
+          path.resolve(project.projectDir)
+          ? env.name
+          : undefined;
       const prefillStage = envName
         ? { kind: "jupyter-notebook", environment: envName }
         : { kind: "jupyter-notebook" };
@@ -1543,7 +1554,15 @@ export function activate(context: vscode.ExtensionContext): void {
             .relative(workspaceRoot, notebookUri.fsPath)
             .replace(/\\/g, "/");
         }
-        const htmlRelPath = getExecutedNotebookHtmlPath(relPath);
+        // Under the .calkit of the project its stage runs in
+        const nbStage = Object.values(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+        ).find((s) => s.notebook_path === relPath);
+        const htmlRelPath = getExecutedNotebookHtmlPath(
+          relPath,
+          nbStage?.subproject_wdir ??
+            splitSubprojectPath(relPath, currentSubprojectDirs).dir,
+        );
         if (!(await fileExists(path.join(workspaceRoot, htmlRelPath)))) {
           void vscode.window.showInformationMessage(
             `No executed HTML found for ${relPath}. Run the notebook to generate it.`,

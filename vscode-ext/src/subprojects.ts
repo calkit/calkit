@@ -45,7 +45,9 @@ export async function collectSubprojects(
 ): Promise<{ dir: string; config: CalkitInfo }[]> {
   seen ??= new Set([await realDir(".")]);
   const found: { dir: string; config: CalkitInfo }[] = [];
-  for (const entry of config.subprojects ?? []) {
+  // As in Python, a malformed list is skipped rather than failing the view
+  const entries = Array.isArray(config.subprojects) ? config.subprojects : [];
+  for (const entry of entries) {
     const rawPath =
       entry && typeof entry === "object" && typeof entry.path === "string"
         ? entry.path
@@ -76,6 +78,20 @@ export async function collectSubprojects(
 /** Name something in a subproject the way `calkit status` names its stages. */
 export function qualifyName(dir: string, name: string): string {
   return dir === "." ? name : `${dir}:${name}`;
+}
+
+// An entry a hand-edited calkit.yaml may have left null or half-written,
+// which the merge skips rather than letting one subproject blank the view
+function isObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasPath(value: unknown): value is { path: string } {
+  return isObject(value) && typeof value.path === "string";
+}
+
+function asList<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function rebasePath(dir: string, p: string): string {
@@ -225,18 +241,27 @@ export function mergeSubprojectConfigs(
   }
   for (const { dir, config } of subprojects) {
     for (const [name, env] of Object.entries(config.environments ?? {})) {
+      if (!isObject(env)) {
+        continue;
+      }
       merged.environments![qualifyName(dir, name)] =
         typeof env.path === "string"
           ? { ...env, path: rebasePath(dir, env.path) }
           : env;
     }
     for (const [name, stage] of Object.entries(config.pipeline?.stages ?? {})) {
+      if (!isObject(stage)) {
+        continue;
+      }
       merged.pipeline!.stages![qualifyName(dir, name)] = rebaseStage(
         dir,
         stage,
       );
     }
     for (const [name, app] of Object.entries(config.apps ?? {})) {
+      if (!isObject(app)) {
+        continue;
+      }
       merged.apps![qualifyName(dir, name)] = {
         ...app,
         ...(typeof app.path === "string"
@@ -247,7 +272,10 @@ export function mergeSubprojectConfigs(
           : {}),
       };
     }
-    for (const notebook of config.notebooks ?? []) {
+    for (const notebook of asList(config.notebooks)) {
+      if (!hasPath(notebook)) {
+        continue;
+      }
       merged.notebooks!.push({
         ...notebook,
         path: rebasePath(dir, notebook.path),
@@ -260,7 +288,10 @@ export function mergeSubprojectConfigs(
       });
     }
     for (const kind of artifactKinds) {
-      for (const entry of config[kind] ?? []) {
+      for (const entry of asList(config[kind])) {
+        if (!hasPath(entry)) {
+          continue;
+        }
         const rebased = rebaseArtifact(dir, entry);
         (merged[kind] as ArtifactEntry[]).push(rebased);
         if (!artifactOrigins.has(rebased.path)) {
@@ -268,14 +299,14 @@ export function mergeSubprojectConfigs(
         }
       }
     }
-    (config.questions ?? []).forEach((question, i) => {
+    asList(config.questions).forEach((question, i) => {
       merged.questions!.push(
         typeof question === "string"
           ? question
           : ({
               ...question,
-              evidence: question.evidence?.map((ev) =>
-                typeof ev.path === "string"
+              evidence: question?.evidence?.map((ev) =>
+                typeof ev?.path === "string"
                   ? { ...ev, path: rebasePath(dir, ev.path) }
                   : ev,
               ),
@@ -308,6 +339,9 @@ export function mergeSubprojectDvcYaml(
   const stages: Record<string, DvcStage> = { ...(root.stages ?? {}) };
   for (const { dir, dvcYaml } of subprojects) {
     for (const [name, stage] of Object.entries(dvcYaml?.stages ?? {})) {
+      if (!isObject(stage)) {
+        continue;
+      }
       const base =
         typeof stage.wdir === "string" ? path.posix.join(dir, stage.wdir) : dir;
       const rebased: DvcStage = {

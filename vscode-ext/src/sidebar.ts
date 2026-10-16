@@ -869,7 +869,10 @@ export class CalkitSidebarProvider
       // The notebook itself opens when clicked in the tree, so no separate
       // "Open" child is needed. Offer the executed HTML when it has been
       // generated.
-      const htmlRel = getExecutedNotebookHtmlPath(nbPath);
+      const htmlRel = getExecutedNotebookHtmlPath(
+        nbPath,
+        stage?.subproject_wdir,
+      );
       if (fs.existsSync(path.join(this.workspaceRoot, htmlRel))) {
         const htmlItem = new SidebarItem(
           "Open executed HTML",
@@ -1254,6 +1257,7 @@ export class CalkitSidebarProvider
               typeof calkitStage.environment === "string"
                 ? this.envFilePaths(calkitStage.environment)
                 : [],
+            projectDir: calkitStage.subproject_wdir,
           })
         : undefined;
     // An output is "modified" when its file changed on disk, or "stale" when an

@@ -3049,8 +3049,18 @@ def translate_run_targets(
     import calkit.latex
     import calkit.markdown
 
-    def expand_diffs(target: str, stages: dict) -> list[str]:
-        """Turn a target naming all of a latex stage's diffs into theirs."""
+    def expand(target: str, info: dict, wdir: str | None = None) -> list[str]:
+        """Turn a target standing for other stages into theirs."""
+        stages = info.get("pipeline", {}).get("stages", {})
+        # A markdown stage stands in for the stages its blocks declare
+        md_path = calkit.markdown.get_markdown_stages(info).get(target)
+        if md_path is not None:
+            return calkit.markdown.get_stage_names(
+                os.path.join(wdir, md_path) if wdir else md_path,
+                target,
+                pdf=bool(stages[target].get("pdf")),
+            )
+        # A latex stage's diffs are separate DVC stages
         stage_name = target.removesuffix(calkit.latex.DIFFS_TARGET_SUFFIX)
         if stage_name == target or stage_name not in stages:
             return [target]
@@ -3077,27 +3087,10 @@ def translate_run_targets(
         sp = Path(sp_wdir).as_posix()
         if sp != ".":
             sp_map.setdefault(sp, sp)
-    # A markdown stage stands in for the stages its blocks declare, so a
-    # target naming it has to become the stages DVC actually knows about.
-    # Done before subproject handling because a Markdown path contains no
-    # ':' and so can't be a subproject shorthand.
-    md_stages = calkit.markdown.get_markdown_stages(ck_info)
-    if md_stages:
-        expanded: list[str] = []
-        for target in targets:
-            md_path = md_stages.get(target)
-            if md_path is None:
-                expanded.append(target)
-                continue
-            cfg = ck_info.get("pipeline", {}).get("stages", {}).get(target)
-            expanded += calkit.markdown.get_stage_names(
-                md_path, target, pdf=bool(cfg.get("pdf"))
-            )
-        targets = expanded
-    # A latex stage's diffs are separate DVC stages, so a target addressing
-    # them all has to become their names
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    targets = [name for t in targets for name in expand_diffs(t, stages)]
+    # Targets have to become the stages DVC actually knows about. Done
+    # before subproject handling because a Markdown path contains no ':'
+    # and so can't be a subproject shorthand.
+    targets = [name for t in targets for name in expand(t, ck_info)]
     parent_targets: list[str] = []
     isolated_sp_targets: list[tuple[str, str | None]] = []
     for target in targets:
@@ -3135,12 +3128,9 @@ def translate_run_targets(
             else:
                 isolated_sp_targets.append((sp, None))
             continue
-        # A subproject's diffs are named after its own stages
-        sp_stages: dict = {}
-        if stage_part.endswith(calkit.latex.DIFFS_TARGET_SUFFIX):
-            sp_info = calkit.load_calkit_info(wdir=sp)
-            sp_stages = sp_info.get("pipeline", {}).get("stages", {})
-        for stage_name in expand_diffs(stage_part, sp_stages):
+        # A subproject's stages expand to its own
+        sp_info = calkit.load_calkit_info(wdir=sp)
+        for stage_name in expand(stage_part, sp_info, wdir=sp):
             if dvc_root is None:
                 parent_targets.append(f"{sp}/dvc.yaml:{stage_name}")
             elif dvc_root == sp:

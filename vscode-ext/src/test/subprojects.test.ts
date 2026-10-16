@@ -289,3 +289,35 @@ test("subproject names and paths split back to where they're declared", () => {
     main: { kind: "uv" },
   });
 });
+
+test("a malformed subproject calkit.yaml doesn't break the merge", async () => {
+  const sub = {
+    subprojects: { path: "nested" },
+    environments: { ok: { kind: "uv", path: "pyproject.toml" }, bad: null },
+    pipeline: { stages: { ok: { kind: "python-script" }, bad: null } },
+    apps: { bad: null },
+    notebooks: [{ environment: "ok" }],
+    figures: [{ title: "No path" }, { path: "fig.png" }],
+    datasets: { path: "not-a-list.csv" },
+    questions: [null],
+  } as unknown as CalkitInfo;
+  const found = await collectSubprojects(
+    { subprojects: [{ path: "sub" }] },
+    async (dir) => (dir === "sub" ? sub : undefined),
+  );
+  assert.deepEqual(
+    found.map((s) => s.dir),
+    ["sub"],
+  );
+  const { config } = mergeSubprojectConfigs({}, [{ dir: "sub", config: sub }]);
+  assert.deepEqual(Object.keys(config.environments ?? {}), ["sub:ok"]);
+  assert.deepEqual(Object.keys(config.pipeline?.stages ?? {}), ["sub:ok"]);
+  assert.deepEqual(config.apps, {});
+  assert.deepEqual(config.notebooks, []);
+  assert.deepEqual(config.figures?.map((f) => f.path), ["sub/fig.png"]);
+  assert.deepEqual(config.datasets, []);
+  const dvc = mergeSubprojectDvcYaml({}, [
+    { dir: "sub", config: sub, dvcYaml: { stages: { bad: null } } as never },
+  ]);
+  assert.deepEqual(dvc.stages, {});
+});

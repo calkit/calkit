@@ -2388,11 +2388,17 @@ def test_translate_run_targets(tmp_dir):
                             "target_path": "main.tex",
                             "diffs": ["v1"],
                         },
+                        "report": {
+                            "kind": "markdown",
+                            "target_path": "report.md",
+                        },
                     }
                 },
             },
             f,
         )
+    with open("inline-sp/report.md", "w") as f:
+        f.write("```python calkit stage name=plot environment=env\n1\n```\n")
     with open("isolated-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
@@ -2451,6 +2457,11 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:paper-diff-v1"]
     assert isolated == [("isolated-sp", "paper-diff-v1")]
+    # As can a subproject's markdown stage, read from its own directory
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:report"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml:report/plot"]
     # Unrecognized targets pass through unchanged
     parent, isolated = calkit.pipeline.translate_run_targets(
         ["my-parent-stage"], ck_info=ck_info

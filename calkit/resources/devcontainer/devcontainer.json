@@ -12,11 +12,12 @@
         "Calkit.calkit-vscode",
         "james-yu.latex-workshop",
         "lakefs.lakefs-dvc",
+        "ms-vscode-remote.remote-containers",
         "esbenp.prettier-vscode",
         "ms-python.python",
         "ms-python.vscode-pylance",
         "ms-python.debugpy",
-        "ms-python.autopep8",
+        "charliermarsh.ruff",
         "ms-toolsai.jupyter",
         "ms-toolsai.jupyter-keymap",
         "ms-toolsai.jupyter-renderers",
@@ -38,6 +39,9 @@
           "*.pdf": "latex-workshop-pdf-hook"
         },
         "git.autofetch": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        },
         "cSpell.userWords": [
           "calkit",
           "Calkit"

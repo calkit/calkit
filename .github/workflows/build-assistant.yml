@@ -26,13 +26,19 @@ jobs:
         working-directory: assistant
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Tags and history, so hatch-vcs can derive the version
+          fetch-depth: 0
       - name: Setup uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
+      # The metadata carries the version hatch-vcs derived
       - name: Build with PyInstaller
         run: >-
           uv run pyinstaller --onefile --icon resources/icon.ico
+          --copy-metadata calkit-assistant
+          --add-data resources/vscode-extensions.json:resources
           --name calkit-assistant main.py
       - name: Upload the executable
         uses: actions/upload-artifact@v7

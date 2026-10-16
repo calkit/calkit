@@ -3694,6 +3694,65 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
         assert f.read().count("/.calkit/** text eol=lf") == 1
 
 
+def test_get_stage_for_output_reads_map_paths_destinations():
+    from calkit.pipeline import get_stage_for_output
+
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/a.png",
+                            "dest": "paper/figures/a.png",
+                        },
+                        {
+                            "kind": "file-to-dir",
+                            "src": "figures/b.png",
+                            "dest": "paper/figures",
+                        },
+                        {
+                            "kind": "dir-to-dir-merge",
+                            "src": "shared",
+                            "dest": "paper/shared",
+                        },
+                    ],
+                },
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "py",
+                    "outputs": ["figures/a.png"],
+                },
+            }
+        }
+    }
+    assert get_stage_for_output("paper/figures/a.png", ck_info) == "copy"
+    # file-to-dir writes dest/<name>, not dest
+    assert get_stage_for_output("paper/figures/b.png", ck_info) == "copy"
+    # A directory mapping produces everything it writes into
+    assert get_stage_for_output("paper/shared/x/y.tex", ck_info) == "copy"
+    assert get_stage_for_output("paper/shared", ck_info) == "copy"
+    # The original is still the plotting stage's
+    assert get_stage_for_output("figures/a.png", ck_info) == "plot"
+    assert get_stage_for_output("paper/figures/nope.png", ck_info) is None
+    # Paths in a stage are relative to its wdir
+    stages = ck_info["pipeline"]["stages"]
+    stages["copy"]["wdir"] = "sub"
+    stages["plot"]["wdir"] = "analysis"
+    assert get_stage_for_output("sub/paper/figures/a.png", ck_info) == "copy"
+    assert get_stage_for_output("paper/figures/a.png", ck_info) is None
+    assert get_stage_for_output("analysis/figures/a.png", ck_info) == "plot"
+    # A merge into the project root doesn't claim every path
+    stages["copy"]["wdir"] = None
+    stages["copy"]["paths"][2]["dest"] = "."
+    assert get_stage_for_output("data/raw.csv", ck_info) is None
+    # A pipeline can be null
+    assert get_stage_for_output("figures/a.png", {"pipeline": None}) is None
+
+
 def test_table_iteration_names(tmp_dir):
     subprocess.check_call(["git", "init", "-q"])
     subprocess.check_call(["dvc", "init", "-q"])

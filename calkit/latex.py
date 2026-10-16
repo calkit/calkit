@@ -1635,3 +1635,59 @@ def write_comment(lines: list[str], tc: TexComment) -> None:
     rendered = tc.render()
     lines[tc.lineno - 1 : tc.lineno - 1 + tc.nlines] = rendered
     tc.nlines = len(rendered)
+
+
+def localize_synctex(
+    synctex_path: str, source_dir: str, wdir: str = "."
+) -> bool:
+    """Point a SyncTeX file at the sources as they sit here.
+
+    A build in a container records the container's paths, e.g.,
+    ``/work/paper/main.tex``, so reverse search in a viewer lands on a file
+    that doesn't exist. Each such input is matched to a project file by its
+    longest trailing part that exists, so nothing needs to know where the
+    container mounted the project. A relative input is relative to
+    ``source_dir``, where latexmk ran. Anything else, e.g., a class file
+    from the TeX distribution, is left alone.
+
+    Returns whether the file was changed.
+    """
+    import gzip
+
+    if not os.path.isfile(synctex_path):
+        return False
+    root = Path(wdir).resolve()
+
+    def local(raw: str) -> str | None:
+        if not os.path.isabs(raw):
+            candidate = Path(source_dir, raw).resolve()
+            return candidate.as_posix() if candidate.is_file() else None
+        if os.path.isfile(raw):
+            return None
+        parts = Path(os.path.normpath(raw)).as_posix().split("/")
+        for i in range(len(parts)):
+            rel = "/".join(parts[i:])
+            if rel and not rel.startswith("..") and (root / rel).is_file():
+                return (root / rel).as_posix()
+        return None
+
+    opener: Any = gzip.open if synctex_path.endswith(".gz") else open
+    try:
+        with opener(synctex_path, "rt", errors="replace") as f:
+            lines = f.read().split("\n")
+    except OSError:
+        return False
+    changed = False
+    for i, line in enumerate(lines):
+        named = re.match(r"^(Input:\d+:)(.*)$", line)
+        if named is None:
+            continue
+        found = local(named.group(2))
+        if found is not None and found != named.group(2):
+            lines[i] = named.group(1) + found
+            changed = True
+    if not changed:
+        return False
+    with opener(synctex_path, "wt") as f:
+        f.write("\n".join(lines))
+    return True

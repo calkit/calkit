@@ -703,6 +703,10 @@ def build(
         verbose=verbose,
     ):
         raise_error("latexmk failed")
+    if not no_synctex:
+        # A container build records its own paths, which reverse search in
+        # a viewer can't open
+        calkit.latex.localize_synctex(os.path.join(pdf_dir, stem + ".pdf"))
 
 
 DIFF_TMP_DIR = calkit.latex.DIFF_TMP_DIR

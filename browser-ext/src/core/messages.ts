@@ -202,6 +202,37 @@ export interface UrlChanged {
 }
 
 /**
+ * Sent from the service worker to every surface when a sign-in or sign-out
+ * completes, so whichever surface started it, the others stop showing the
+ * old state.
+ */
+export interface AuthChanged {
+  type: "auth.changed";
+}
+
+/** Run a callback whenever someone signs in or out, from any surface. */
+export function onAuthChange(callback: () => void): () => void {
+  const listener = (message: AuthChanged) => {
+    if (message?.type === "auth.changed") {
+      callback();
+    }
+    return false;
+  };
+  try {
+    chrome.runtime.onMessage.addListener(listener);
+  } catch {
+    return () => undefined;
+  }
+  return () => {
+    try {
+      chrome.runtime.onMessage.removeListener(listener);
+    } catch {
+      // Already gone with the context
+    }
+  };
+}
+
+/**
  * Whether this script can still reach the extension it was injected by.
  *
  * Reloading or updating an extension does not remove the content scripts it

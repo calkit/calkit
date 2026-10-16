@@ -806,9 +806,10 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     if (panel || currentProjectId !== overleafProjectId) {
       return;
     }
-    if (lastSyncNeeded) {
-      mountLauncher(() => openPanel(overleafProjectId), "attention");
-    }
+    mountLauncher(
+      () => openPanel(overleafProjectId),
+      lastSyncNeeded ? "attention" : "idle",
+    );
   } catch {
     // Whatever went wrong, the panel says so properly when opened
   }
@@ -851,4 +852,22 @@ function watchForSaves(): void {
 }
 
 watchForSaves();
-runContentScript({ id: "overleaf", sync, teardown });
+runContentScript({
+  id: "overleaf",
+  sync,
+  teardown,
+  authChanged: () => {
+    if (!currentProjectId) {
+      return;
+    }
+    const overleafProjectId = currentProjectId;
+    // What the last session found says nothing about this one
+    lastSyncNeeded = false;
+    if (panel) {
+      void load(overleafProjectId);
+    } else {
+      mountLauncher(() => openPanel(overleafProjectId));
+      void checkSyncStatus(overleafProjectId);
+    }
+  },
+});

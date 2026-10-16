@@ -121,26 +121,36 @@ function watchForNewToken(): void {
   if (tokenWatcher) {
     return;
   }
-  let offered: string | null = null;
-  const find = (): string | null => {
-    for (const input of document.querySelectorAll("input")) {
-      const match = input.value.match(OVERLEAF_TOKEN_RE);
-      if (match) {
-        return match[0];
-      }
-    }
-    return document.body.innerText.match(OVERLEAF_TOKEN_RE)?.[0] ?? null;
-  };
+  const texts = (): string[] => [
+    ...Array.from(document.querySelectorAll("input"), (input) => input.value),
+    document.body.innerText,
+  ];
+  // Only whether one is showing until the user asks to save it, so the
+  // token itself is never held before then
+  let showing = false;
   tokenWatcher = new MutationObserver(() => {
-    const token = find();
-    if (!token || token === offered) {
+    const visible = texts().some((text) => OVERLEAF_TOKEN_RE.test(text));
+    if (visible === showing) {
       return;
     }
-    offered = token;
+    showing = visible;
+    if (!visible) {
+      document.getElementById(TOKEN_PANEL_ID)?.remove();
+      return;
+    }
     const tokenPanel = mountPanel({ id: TOKEN_PANEL_ID, title: "Calkit" });
     const message = el("div", { class: "small" });
     const save = el("button", { class: "action", text: "Save to Calkit" });
     save.addEventListener("click", async () => {
+      const token = texts()
+        .map((text) => text.match(OVERLEAF_TOKEN_RE)?.[0])
+        .find(Boolean);
+      if (!token) {
+        clear(message).append(
+          errorMessage("The token is no longer on the page"),
+        );
+        return;
+      }
       save.disabled = true;
       clear(message).append(loading("Saving"));
       try {
@@ -769,6 +779,7 @@ async function load(overleafProjectId: string): Promise<void> {
       );
       return;
     }
+    lastTokenProblem = false;
     lastSyncNeeded = !statuses[0].in_sync;
     renderStatus(content, link, statuses[0], reload);
     if (links.length > 1) {
@@ -956,9 +967,10 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     if (panel || currentProjectId !== overleafProjectId) {
       return;
     }
-    if (lastSyncNeeded) {
-      mountLauncher(() => openPanel(overleafProjectId), "attention");
-    }
+    mountLauncher(
+      () => openPanel(overleafProjectId),
+      lastSyncNeeded ? "attention" : "idle",
+    );
   } catch (e) {
     // A token problem is worth a nudge, since nothing works until it's
     // fixed; anything else the panel explains when opened

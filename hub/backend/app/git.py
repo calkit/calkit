@@ -1161,6 +1161,15 @@ def get_dvc_pipeline_from_repo(
 OVERLEAF_LOCK_TIMEOUT = 60
 
 
+# Distinct from the hub's own credential errors, so a client asks for a new
+# Overleaf token rather than for the user to sign in again
+OVERLEAF_TOKEN_REJECTED = (
+    "Overleaf rejected your Git token, so it may have expired or been "
+    "revoked. Generate a new one under 'Git Integration' in your Overleaf "
+    "account settings."
+)
+
+
 @contextmanager
 def get_overleaf_repo(
     project: Project, user: User, session: Session, overleaf_project_id: str
@@ -1194,20 +1203,32 @@ def get_overleaf_repo(
             409, "Another Overleaf sync of this project is running"
         )
     try:
-        if os.path.isdir(repo_dir):
-            repo = git.Repo(repo_dir)
-            repo.git.update_environment(**overleaf_auth)
-            # Resets rather than merges, so a sync that failed after
-            # committing to the clone can't block every later pull
-            calkit.overleaf.pull(repo)
-        else:
-            subprocess.check_call(
-                ["git", "clone", git_plain_url, repo_dir],
-                env={**os.environ, **overleaf_auth},
-                timeout=300,
-            )
-            repo = git.Repo(repo_dir)
-            repo.git.update_environment(**overleaf_auth)
+        try:
+            if os.path.isdir(repo_dir):
+                repo = git.Repo(repo_dir)
+                repo.git.update_environment(**overleaf_auth)
+                # Resets rather than merges, so a sync that failed after
+                # committing to the clone can't block every later pull
+                calkit.overleaf.pull(repo)
+            else:
+                cloned = subprocess.run(
+                    ["git", "clone", git_plain_url, repo_dir],
+                    env={**os.environ, **overleaf_auth},
+                    timeout=300,
+                    capture_output=True,
+                    text=True,
+                )
+                if cloned.returncode != 0:
+                    raise calkit.overleaf._git_error(
+                        GitCommandError(
+                            ["git", "clone"], cloned.returncode, cloned.stderr
+                        ),
+                        "clone",
+                    )
+                repo = git.Repo(repo_dir)
+                repo.git.update_environment(**overleaf_auth)
+        except calkit.overleaf.AuthError:
+            raise HTTPException(401, OVERLEAF_TOKEN_REJECTED)
         # Run git config so we make commits as this user (with safe fallbacks)
         _configure_committer(repo, user, session=session)
         yield repo

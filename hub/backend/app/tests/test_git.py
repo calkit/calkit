@@ -731,6 +731,7 @@ def _fake_overleaf_clone(files: dict[str, str]):
 
 
 def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
+    import shutil
     from types import SimpleNamespace
 
     from app.config import settings
@@ -784,6 +785,31 @@ def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
             raise RuntimeError("Sync failed")
     with get():
         pass
+
+    # Overleaf rejecting the token asks for a new one, both when pulling into
+    # the clone and when cloning afresh, rather than failing with a 500
+    def reject(*args, **kwargs):
+        raise app.git.calkit.overleaf.AuthError("Authentication failed")
+
+    monkeypatch.setattr(app.git.calkit.overleaf, "pull", reject)
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.status_code == 401
+    assert e.value.detail == app.git.OVERLEAF_TOKEN_REJECTED
+    shutil.rmtree(repo_dir)
+    monkeypatch.setattr(
+        app.git.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=128,
+            stderr="fatal: Authentication failed for 'https://x@git.overleaf.com/abc/'",
+        ),
+    )
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.status_code == 401
 
 
 def _read_title(files: dict[str, str]):

@@ -85,6 +85,35 @@ def get_project_provenance(
     key: str | None = None,
     ref: str | None = None,
 ) -> Provenance:
+    def stage_for(path: str) -> str | None:
+        # A declaration knows better than a path match, which knows better
+        # than the pipeline's outputs as written, which cover stages never
+        # run
+        declared = next(
+            (
+                artifact["stage"]
+                for kind in ("results", "figures", "tables", "datasets")
+                for artifact in ck_info.get(kind) or []
+                if isinstance(artifact, dict)
+                and artifact.get("path") == path
+                and artifact.get("stage")
+            ),
+            None,
+        )
+        return (
+            declared
+            or find_stage_for_path(
+                path, pipeline.dvc_lock, valid_stages=set(pipeline.statuses)
+            )
+            or calkit.pipeline.get_stage_for_output(path, ck_info)
+        )
+
+    def ck_stage_for(stage: str) -> dict | None:
+        # A matrix stage's expansions share one definition
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        ck_stage = stages.get(stage.split("@")[0])
+        return ck_stage if isinstance(ck_stage, dict) else None
+
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -125,26 +154,29 @@ def get_project_provenance(
     )
     if out.exists and (key is not None or path.lower().endswith(RESULTS_EXTS)):
         out.value, out.value_error = _read_value(project, repo, ref, path, key)
-    # A declaration knows better than a path match, which knows better than
-    # the pipeline's outputs as written, which cover stages never run
-    declared = next(
-        (
-            artifact["stage"]
-            for kind in ("results", "figures", "tables", "datasets")
-            for artifact in ck_info.get(kind) or []
-            if isinstance(artifact, dict)
-            and artifact.get("path") == path
-            and artifact.get("stage")
-        ),
-        None,
-    )
-    stage = (
-        declared
-        or find_stage_for_path(
-            path, pipeline.dvc_lock, valid_stages=set(pipeline.statuses)
+    stage = stage_for(path)
+    # A copy, e.g., a figure a map-paths stage put in the paper's folder, is
+    # described by what made the original, and is stale if the copy is
+    traced = path
+    copy_stale = False
+    for _ in range(10):
+        ck_stage = ck_stage_for(stage) if stage else None
+        src = (
+            calkit.pipeline.get_map_paths_source(ck_stage, traced)
+            if ck_stage is not None
+            else None
         )
-        or calkit.pipeline.get_stage_for_output(path, ck_info)
-    )
+        if stage is None or src is None:
+            break
+        copy_status = pipeline.statuses.get(stage)
+        copy_stale |= copy_status is not None and copy_status.status == "stale"
+        out.copy_stage = out.copy_stage or stage
+        traced = src
+        stage = stage_for(src)
+    if traced != path:
+        out.copied_from = traced
+    if copy_stale:
+        out.stale_reason = "pipeline"
     if stage is None:
         return out
     out.stage = stage
@@ -153,13 +185,12 @@ def get_project_provenance(
         out.stage_status = StageStatus.model_validate(status.model_dump())
         if status.status == "stale":
             out.stale_reason = "pipeline"
-        elif stage in pipeline.frozen:
+        elif stage in pipeline.frozen and out.stale_reason is None:
             out.stale_reason = "frozen"
-    # A matrix stage's expansions share one definition
     base = stage.split("@")[0]
-    ck_stage = ((ck_info.get("pipeline") or {}).get("stages") or {}).get(base)
+    ck_stage = ck_stage_for(stage)
     source = None
-    if isinstance(ck_stage, dict):
+    if ck_stage is not None:
         out.stage_kind = ck_stage.get("kind")
         wdir = ck_stage.get("wdir") or ""
         field = next((f for f in SOURCE_FIELDS if ck_stage.get(f)), None)

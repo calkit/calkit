@@ -1172,6 +1172,10 @@ class Provenance(SQLModel):
     inputs: list[str] = Field(default_factory=list)
     stage_status: StageStatus | None = None
     stale_reason: Literal["pipeline", "frozen"] | None = None
+    # Where a copy, e.g., one a map-paths stage put beside a document, came
+    # from, and the stage that copied it; the rest describes the original
+    copied_from: str | None = None
+    copy_stage: str | None = None
 
 
 class Table(SQLModel):

@@ -39,6 +39,17 @@ def test_get_project_provenance(client: TestClient) -> None:
                     "wdir": "figs",
                     "outputs": ["out.png"],
                 },
+                # Puts the plot beside the paper, which includes it there
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figs/out.png",
+                            "dest": "paper/out.png",
+                        }
+                    ],
+                },
             }
         }
     }
@@ -56,7 +67,10 @@ def test_get_project_provenance(client: TestClient) -> None:
                 }
             }
         },
-        statuses={"analyze": PipelineStageStatus(status="stale")},
+        statuses={
+            "analyze": PipelineStageStatus(status="stale"),
+            "copy": PipelineStageStatus(status="stale"),
+        },
         frozen=set(),
     )
 
@@ -112,6 +126,15 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["stage"] == "plot"
     assert body["source"] == "figs/plot.py"
     assert body["stage_status"] is None
+    # A copy is described by the stage that made the original, and is out
+    # of date while the copy is
+    body = get("path=paper/out.png")
+    assert body["copied_from"] == "figs/out.png"
+    assert body["copy_stage"] == "copy"
+    assert body["stage"] == "plot"
+    assert body["source"] == "figs/plot.py"
+    assert body["stale_reason"] == "pipeline"
+    assert get("path=figs/out.png")["copied_from"] is None
     # Nothing produces an authored file
     body = get("path=scripts/analyze.py")
     assert body["exists"]

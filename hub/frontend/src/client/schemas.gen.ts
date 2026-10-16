@@ -7007,6 +7007,28 @@ export const ProvenanceSchema = {
       ],
       title: "Stale Reason",
     },
+    copied_from: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copied From",
+    },
+    copy_stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copy Stage",
+    },
   },
   type: "object",
   required: ["path"],

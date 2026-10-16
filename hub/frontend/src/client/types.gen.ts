@@ -4014,6 +4014,14 @@ export type Provenance = {
    * Stale Reason
    */
   stale_reason?: "pipeline" | "frozen" | null
+  /**
+   * Copied From
+   */
+  copied_from?: string | null
+  /**
+   * Copy Stage
+   */
+  copy_stage?: string | null
 }
 
 /**

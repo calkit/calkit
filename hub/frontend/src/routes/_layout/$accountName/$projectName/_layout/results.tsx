@@ -154,15 +154,26 @@ function ProvenanceCard({
       <Code fontSize="xs">{path}</Code>
     </Link>
   )
+  // A copy, e.g., a figure put beside a paper, is described by the original
+  const copied = provenance.copied_from ? (
+    <Text fontSize="sm" color={subtle}>
+      Copied from {fileLink(provenance.copied_from)}
+      {provenance.copy_stage ? ` by ${provenance.copy_stage}` : ""}
+    </Text>
+  ) : null
   if (!provenance.stage) {
     return (
-      <Text fontSize="sm" color={subtle}>
-        No pipeline stage produces this file.
-      </Text>
+      <Box>
+        {copied}
+        <Text fontSize="sm" color={subtle}>
+          No pipeline stage produces this file.
+        </Text>
+      </Box>
     )
   }
   return (
     <Box fontSize="sm">
+      {copied}
       <Flex align="center" gap={2} wrap="wrap">
         <Icon as={TiFlowMerge} />
         <Link

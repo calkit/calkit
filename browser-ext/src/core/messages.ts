@@ -117,6 +117,7 @@ export type Request =
       path?: string;
     }
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
+  | { type: "overleaf.setToken"; token: string }
   | {
       type: "overleaf.import";
       owner: string;
@@ -181,6 +182,7 @@ export interface ResponseMap {
   "overleaf.lookup": OverleafLookup;
   "overleaf.status": OverleafSyncStatus[];
   "overleaf.sync": OverleafSyncResponse;
+  "overleaf.setToken": { message: string };
   "overleaf.import": { path: string; title: string };
   "references.list": References[];
   "references.search": ReferenceSearchMatch[];

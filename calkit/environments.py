@@ -1752,14 +1752,19 @@ def env_spec_hash(spec_fpath: str, python: str | None = None) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
 
-def _env_spec_hash_key(fpath: str, wdir: str | None) -> str:
+def _env_spec_hash_key(
+    fpath: str, wdir: str | None, is_lock: bool = True
+) -> str:
     """The path a lock or spec is recorded under."""
     lock_dir, name = os.path.split(fpath)
     # Every platform's lock in a directory is resolved from the same spec
-    if lock_dir and os.path.splitext(name)[0] in CONDA_VENV_ARCHS:
+    if is_lock and lock_dir and os.path.splitext(name)[0] in CONDA_VENV_ARCHS:
         fpath = lock_dir
     if os.path.isabs(fpath):
-        fpath = os.path.relpath(fpath, wdir or ".")
+        try:
+            fpath = os.path.relpath(fpath, wdir or ".")
+        except ValueError:  # On another Windows drive
+            pass
     return Path(os.path.normpath(fpath)).as_posix()
 
 
@@ -1781,10 +1786,10 @@ def read_env_spec_hash(lock_fpath: str, wdir: str | None = None) -> str | None:
 def write_env_spec_hash(
     lock_fpath: str,
     spec_fpath: str,
-    python: str | None = None,
+    spec_hash: str,
     wdir: str | None = None,
 ) -> None:
-    """Record that a lock was resolved from the spec as it is now.
+    """Record that a lock was resolved from a spec with the given hash.
 
     Kept outside the lock directory, which stages depend on, so recording
     it for a lock that already matches its spec reruns nothing.
@@ -1801,10 +1806,8 @@ def write_env_spec_hash(
     hashes = {k: v for k, v in hashes.items() if isinstance(v, dict)}
     key = _env_spec_hash_key(lock_fpath, wdir)
     entry = {
-        "spec_path": _env_spec_hash_key(spec_fpath, wdir),
-        "sha256": env_spec_hash(
-            os.path.join(wdir or "", spec_fpath), python=python
-        ),
+        "spec_path": _env_spec_hash_key(spec_fpath, wdir, is_lock=False),
+        "sha256": spec_hash,
     }
     if hashes.get(key) == entry:
         return

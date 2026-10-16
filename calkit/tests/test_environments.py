@@ -2055,7 +2055,7 @@ def test_env_spec_hashes(tmp_dir):
     write(lock, "idna==3.10\n")
     # Recorded beside the lock, not in it
     assert envs.read_env_spec_hash(lock) is None
-    envs.write_env_spec_hash(lock, spec)
+    envs.write_env_spec_hash(lock, spec, envs.env_spec_hash(spec))
     assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
     with open(lock) as f:
         assert f.read() == "idna==3.10\n"
@@ -2095,6 +2095,7 @@ def test_env_spec_hashes(tmp_dir):
     envs.write_env_spec_hash(
         os.path.join(".calkit", "env-locks", "py", "linux-64.txt"),
         spec,
+        envs.env_spec_hash(os.path.join("sub", spec)),
         wdir="sub",
     )
     assert envs.read_env_spec_hash(
@@ -2112,20 +2113,27 @@ def test_env_spec_hashes(tmp_dir):
     lock_dir = os.path.join(".calkit", "env-locks", "py")
     before = envs.read_env_spec_hash(lock_dir, wdir="sub")
     assert before == envs.env_spec_hash(os.path.join("sub", "reqs.txt"))
-    envs.write_env_spec_hash(lock_dir, "reqs.txt", wdir="sub")
+    envs.write_env_spec_hash(lock_dir, "reqs.txt", before, wdir="sub")
     with open(os.path.join("sub", envs.ENV_SPEC_HASHES_FPATH)) as f:
         assert json.load(f)[".calkit/env-locks/py"]["spec_path"] == "reqs.txt"
+    # A spec named after a platform is recorded as itself, not its directory
+    envs.write_env_spec_hash(
+        lock_dir, os.path.abspath(os.path.join("reqs", "linux-64.txt")), before
+    )
+    with open(envs.ENV_SPEC_HASHES_FPATH) as f:
+        entry = json.load(f)[".calkit/env-locks/py"]
+        assert entry["spec_path"] == "reqs/linux-64.txt"
     # Entries from before the spec path was recorded aren't read, and are
     # dropped on the next write
     write(envs.ENV_SPEC_HASHES_FPATH, json.dumps({"old": "md5:abc"}))
     assert envs.read_env_spec_hash("old") is None
-    envs.write_env_spec_hash(lock, spec)
+    envs.write_env_spec_hash(lock, spec, envs.env_spec_hash(spec))
     with open(envs.ENV_SPEC_HASHES_FPATH) as f:
         assert list(json.load(f)) == [lock]
     # An unreadable file records nothing, and is replaced on the next write
     write(envs.ENV_SPEC_HASHES_FPATH, "not json")
     assert envs.read_env_spec_hash(lock) is None
-    envs.write_env_spec_hash(lock, spec)
+    envs.write_env_spec_hash(lock, spec, envs.env_spec_hash(spec))
     assert envs.read_env_spec_hash(lock) == envs.env_spec_hash(spec)
 
 

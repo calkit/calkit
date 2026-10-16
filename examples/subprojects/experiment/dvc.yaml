@@ -1,0 +1,13 @@
+stages:
+  collect:
+    cmd: calkit xenv -n py --no-check -- python scripts/collect.py
+    deps:
+      - scripts/collect.py
+      - calibration/results/calibration.json
+      - .calkit/env-locks/py
+    outs:
+      - data/measurements.csv:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'collect' stage in calkit.yaml.
+      Changes made here will be overwritten.

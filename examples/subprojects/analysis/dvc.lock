@@ -1,0 +1,27 @@
+schema: '2.0'
+stages:
+  fit:
+    cmd: calkit xenv -n py --no-check -- python scripts/fit.py
+    deps:
+    - path: ../experiment/data/measurements.csv
+      hash: md5
+      md5: dbd52cae8d18d77a79547258a7a46b0f
+      size: 952
+    - path: .calkit/env-locks/py
+      hash: md5
+      md5: 6dc01af86441b48f1e48c8612b8c80ee.dir
+      size: 945
+      nfiles: 5
+    - path: scripts/fit.py
+      hash: md5
+      md5: c6b5dbd9e7020a29aa4b89f6473dd61e
+      size: 754
+    outs:
+    - path: figures/fit.png
+      hash: md5
+      md5: 114817c0f5ed5264e1f80fc52a72e52e
+      size: 31717
+    - path: results/fit.json
+      hash: md5
+      md5: b7e4165c1c21b08a0aa08e05359efdc2
+      size: 63

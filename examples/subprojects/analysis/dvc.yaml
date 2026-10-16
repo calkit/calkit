@@ -1,0 +1,16 @@
+stages:
+  fit:
+    cmd: calkit xenv -n py --no-check -- python scripts/fit.py
+    deps:
+      - scripts/fit.py
+      - ../experiment/data/measurements.csv
+      - .calkit/env-locks/py
+    outs:
+      - results/fit.json:
+          cache: false
+          persist: false
+      - figures/fit.png:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'fit' stage in calkit.yaml. Changes
+      made here will be overwritten.

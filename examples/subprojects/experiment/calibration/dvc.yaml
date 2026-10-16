@@ -1,0 +1,12 @@
+stages:
+  calibrate:
+    cmd: calkit xenv -n py --no-check -- python scripts/calibrate.py
+    deps:
+      - scripts/calibrate.py
+      - .calkit/env-locks/py
+    outs:
+      - results/calibration.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'calibrate' stage in calkit.yaml.
+      Changes made here will be overwritten.

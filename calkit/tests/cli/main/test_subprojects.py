@@ -575,6 +575,36 @@ def test_subproject_checks(tmp_dir, monkeypatch):
             },
         },
     )
+    # A nested subproject, whose environment only exists once a run from
+    # the root builds it
+    os.makedirs("sub/nested")
+    with open("sub/nested/requirements.txt", "w") as f:
+        f.write("")
+    write_ck_info(
+        "sub/nested/calkit.yaml",
+        {
+            "environments": {
+                "nested-env": {
+                    "kind": "uv-venv",
+                    "path": "requirements.txt",
+                    "python": "3.12",
+                }
+            },
+            "pipeline": {
+                "stages": {
+                    "nested-produce": {
+                        "kind": "command",
+                        "environment": "nested-env",
+                        "command": "python -c \"open('b.txt', 'w')\"",
+                        "outputs": [{"path": "b.txt", "storage": "git"}],
+                    }
+                }
+            },
+        },
+    )
+    sub_ck = calkit.load_calkit_info(wdir="sub")
+    sub_ck["subprojects"] = [{"path": "nested"}]
+    write_ck_info("sub/calkit.yaml", sub_ck)
     # The parent has nothing of its own: everything it runs is the
     # subproject's
     write_ck_info("calkit.yaml", {"subprojects": [{"path": "sub"}]})
@@ -612,9 +642,12 @@ def test_subproject_checks(tmp_dir, monkeypatch):
     monkeypatch.setenv("SUBPROJECT_ONLY_VAR", "set")
     res = run("check", "reqs")
     assert res.returncode == 0, res.stderr
-    res = run("check", "environments")
-    assert res.returncode == 0, res.stderr
-    assert "sub-env" in res.stdout
+    # The run builds the nested subproject's environment itself
     subprocess.check_call(["calkit", "run"])
     with open("sub/a.txt") as f:
         assert "from sub" in f.read()
+    assert os.path.isfile("sub/nested/b.txt")
+    res = run("check", "environments")
+    assert res.returncode == 0, res.stderr
+    assert "sub-env" in res.stdout
+    assert "sub/nested:nested-env" in res.stdout

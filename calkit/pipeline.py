@@ -2356,14 +2356,16 @@ def to_dvc(
         if not isinstance(subproject, dict) or not subproject.get("path"):
             raise ValueError("Subprojects must have a 'path' defined")
         sp = Path(subproject["path"]).as_posix()
-        if not os.path.isdir(sp):
+        # The path is relative to this project, which may itself be nested
+        sp_dir = os.path.join(wdir, sp) if wdir else sp
+        if not os.path.isdir(sp_dir):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
-        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        sp_is_isolated = os.path.isdir(os.path.join(sp_dir, ".dvc"))
         # Always compile the subproject's dvc.yaml recursively.
         # Inline subprojects need their dvc.yaml written so DVC discovers them
         # via --all-pipelines; isolated subprojects get a wrapper stage instead.
         sp_dvc_stages = to_dvc(
-            wdir=sp,
+            wdir=sp_dir,
             write=write,
             verbose=verbose,
             manage_gitignore=manage_gitignore,

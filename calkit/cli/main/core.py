@@ -3090,16 +3090,15 @@ def run(
         calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
     except Exception as e:
         raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
-    # Check environments and clean notebooks for each subproject
+    # Check environments and clean notebooks for each subproject, nested
+    # ones included
     subprojects = ck_info.get("subprojects", [])
     if subprojects:
         prev_cwd = os.getcwd()
-        for subproject in subprojects:
-            if not isinstance(subproject, dict) or not subproject.get("path"):
+        for sp_wdir, _ in calkit.iter_projects(ck_info=ck_info):
+            if sp_wdir == ".":
                 continue
-            sp = Path(subproject["path"]).as_posix()
-            if not os.path.isdir(sp):
-                continue
+            sp = Path(sp_wdir).as_posix()
             if single_item:
                 sp_selected, sp_targets = _get_subproject_targets_for_run(
                     subproject_path=sp,

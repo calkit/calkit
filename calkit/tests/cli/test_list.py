@@ -436,6 +436,50 @@ def test_list_questions(tmp_dir):
     )
     # Fields that aren't set aren't listed
     assert "None" not in out
+    # Subprojects' are listed too, numbered within each, with evidence
+    # read from where they're declared
+    os.makedirs("sub/nested/results")
+    with open("sub/nested/results/m.json", "w") as f:
+        json.dump({"accuracy": 0.9}, f)
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {"questions": ["Sub?"], "subprojects": [{"path": "nested"}]}, f
+        )
+    with open("sub/nested/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "questions": [
+                    {
+                        "question": "How accurate?",
+                        "answer": "{acc}",
+                        "evidence": [
+                            {
+                                "kind": "result",
+                                "path": "results/m.json",
+                                "values": {"acc": "accuracy"},
+                            }
+                        ],
+                    }
+                ]
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "1. Does it work?" in out
+    assert "sub: 1. Sub?" in out
+    assert "sub/nested: 1. question: How accurate?" in out
+    assert "answer: 0.9" in out
+    out = subprocess.check_output(
+        ["calkit", "list", "questions", "--json"], text=True
+    )
+    questions = json.loads(out)
+    assert questions[0] == "Does it work?"
+    assert questions[2] == {"project": "sub", "question": "Sub?"}
+    assert questions[3]["project"] == "sub/nested"
+    assert questions[3]["answer"] == "0.9"
 
 
 def test_list_comments(tmp_dir):

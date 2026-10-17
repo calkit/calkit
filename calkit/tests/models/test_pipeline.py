@@ -51,6 +51,60 @@ def test_pythonscriptstage():
     }
 
 
+def test_params_input():
+    s = PythonScriptStage.model_validate(
+        dict(
+            name="figures",
+            kind="python-script",
+            script_path="scripts/make_figures.py",
+            environment="py1",
+            inputs=[
+                "data/processed.csv",
+                dict(kind="params", keys=["step_day", "sample.turbine_id"]),
+                dict(
+                    kind="params", path="analysis.yaml", keys=["calc_params"]
+                ),
+            ],
+            outputs=["figures/a.png"],
+        )
+    )
+    sd = s.to_dvc()
+    # Named keys, since the file as a dep would invalidate the stage anyway
+    assert sd["params"] == [
+        "step_day",
+        "sample.turbine_id",
+        {"analysis.yaml": ["calc_params"]},
+    ]
+    assert "params.yaml" not in sd["deps"]
+    assert "analysis.yaml" not in sd["deps"]
+    assert "data/processed.csv" in sd["deps"]
+    # A stage naming no params keeps the section out of the DVC stage
+    s2 = PythonScriptStage.model_validate(
+        dict(
+            name="download",
+            kind="python-script",
+            script_path="scripts/download.py",
+            environment="py1",
+            inputs=["params.yaml"],
+            outputs=["data/raw.csv"],
+        )
+    )
+    assert "params" not in s2.to_dvc()
+    assert "params.yaml" in s2.to_dvc()["deps"]
+    # A params entry missing its keys is not read as a plain path input
+    with pytest.raises(ValidationError):
+        PythonScriptStage.model_validate(
+            dict(
+                name="bad",
+                kind="python-script",
+                script_path="scripts/x.py",
+                environment="py1",
+                inputs=[dict(kind="params", path="params.yaml")],
+                outputs=[],
+            )
+        )
+
+
 def test_wordtopdfstage():
     s = WordToPdfStage(
         name="none",

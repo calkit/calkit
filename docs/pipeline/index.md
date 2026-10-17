@@ -343,7 +343,7 @@ Common stage parameters:
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `environment`       | str                                                                                                                                                                   | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
 | `wdir`              | str \| None                                                                                                                                                           | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
-| `inputs`            | list[str \| EnvVarInput \| PathInput \| InputsFromStageOutputs]                                                                                                       | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.                                                                                     |
+| `inputs`            | list[str \| EnvVarInput \| ParamsInput \| PathInput \| InputsFromStageOutputs]                                                                                        | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.     |
 | `outputs`           | list[str \| PathOutput]                                                                                                                                               | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
 | `always_run`        | bool                                                                                                                                                                  | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
 | `iterate_over`      | list[StageIteration] \| None                                                                                                                                          | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
@@ -673,6 +673,21 @@ machine.
 | --------- | ------------------ | -------- | ------- | --------------------------------- |
 | `kind`    | Literal['env-var'] | yes      |         | Always 'env-var'.                 |
 | `name`    | str                | yes      |         | Name of the environment variable. |
+
+#### `ParamsInput`
+
+Keys of a parameters file whose values a stage's results depend on.
+
+DVC records the keys' values rather than the file's hash, so changing a
+key this stage doesn't read leaves it alone. The file itself is kept out
+of the stage's dependencies for that reason: named there too, its hash
+would invalidate the stage whichever key moved.
+
+| Parameter | Type              | Required | Default       | Description                                                                           |
+| --------- | ----------------- | -------- | ------------- | ------------------------------------------------------------------------------------- |
+| `kind`    | Literal['params'] | yes      |               | Always 'params'.                                                                      |
+| `path`    | str               | no       | 'params.yaml' | File the keys are read from. DVC parses it, so it must be YAML, JSON, TOML or Python. |
+| `keys`    | list[str]         | yes      |               | Keys this stage depends on, a nested one written like 'sample.turbine_id'.            |
 
 #### `PathInput`
 

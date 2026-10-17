@@ -32,6 +32,7 @@ from calkit.models.base import Model
 from calkit.models.io import (
     EnvVarInput,
     InputsFromStageOutputs,
+    ParamsInput,
     PathInput,
     PathOutput,
 )
@@ -43,8 +44,11 @@ from calkit.models.iteration import (
 )
 from calkit.models.requirements import RequirementType
 
-# What a stage's 'inputs' can list
-StageInput = str | EnvVarInput | PathInput | InputsFromStageOutputs
+# What a stage's 'inputs' can list. ParamsInput precedes PathInput because
+# it also carries a 'path' and would otherwise be read as one.
+StageInput = (
+    str | EnvVarInput | ParamsInput | PathInput | InputsFromStageOutputs
+)
 
 
 def check_path_relative_and_child_of_cwd(s: str) -> str:
@@ -304,8 +308,9 @@ class Stage(Model):
         default=[],
         description="Paths this stage depends on, which trigger a rerun when "
         "they change. Normally plain path strings; an object carrying a "
-        "'path' is also accepted, and an 'env-var' entry makes the stage "
-        "depend on an environment variable's value.",
+        "'path' is also accepted, an 'env-var' entry makes the stage "
+        "depend on an environment variable's value, and a 'params' entry on "
+        "named keys of a parameters file rather than the whole file.",
         json_schema_extra=_allow_null,
     )
     # TODO: Support database outputs
@@ -617,12 +622,39 @@ class Stage(Model):
         if env_var_file is not None:
             deps.append(self.path_from_wdir(env_var_file))
         for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
+            if isinstance(
+                i, (InputsFromStageOutputs, EnvVarInput, ParamsInput)
+            ):
                 continue
             path = i if isinstance(i, str) else i.path
             if path not in deps:
                 deps.append(path)
         return deps
+
+    @property
+    def dvc_params(self) -> list[str | dict[str, list[str]]]:
+        """Parameter keys for the DVC stage's ``params`` section.
+
+        Keys of the default file are named on their own, which is how DVC
+        writes them; keys of any other file are grouped under its path.
+        """
+        from_default: list[str] = []
+        from_others: dict[str, list[str]] = {}
+        for i in self.inputs:
+            if not isinstance(i, ParamsInput):
+                continue
+            target = (
+                from_default
+                if i.path == ParamsInput.model_fields["path"].default
+                else from_others.setdefault(i.path, [])
+            )
+            for key in i.keys:
+                if key not in target:
+                    target.append(key)
+        params: list[str | dict[str, list[str]]] = list(from_default)
+        for path, keys in from_others.items():
+            params.append({path: keys})
+        return params
 
     @property
     def dvc_outs(self) -> list[str | dict]:
@@ -824,7 +856,9 @@ class Stage(Model):
         cmd = self.dvc_cmd
         deps = self.dvc_deps
         for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
+            if isinstance(
+                i, (InputsFromStageOutputs, EnvVarInput, ParamsInput)
+            ):
                 continue
             path = i if isinstance(i, str) else i.path
             if path not in deps:
@@ -862,6 +896,9 @@ class Stage(Model):
                     persisted_outs.append({out_path: out_opts})
             outs = persisted_outs
         stage = {"cmd": cmd, "deps": deps, "outs": outs}
+        params = self.dvc_params
+        if params:
+            stage["params"] = params
         if self.wdir is not None:
             stage["wdir"] = self.wdir
         if self.always_run:

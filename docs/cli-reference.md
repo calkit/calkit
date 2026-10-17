@@ -2045,7 +2045,7 @@ Options:
 
 List the project's questions (1-indexed).
 
-Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`.
+Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. Subprojects' questions are listed too, numbered within each, and in the JSON output each has a `project` key with the subproject's path.
 
 Usage:
 

@@ -183,20 +183,23 @@ def list_presentations(
     _list_artifacts("presentations", json_output, declared_only)
 
 
-def _echo_question(n: int, question: str | dict) -> None:
+def _echo_question(n: int, question: str | dict, project: str = "") -> None:
     """Print a single question in the human-readable YAML-ish listing format.
 
     String questions are shown as a numbered line. Rich (dict) questions are
     shown with their text on the first line followed by hypothesis, answer,
-    evidence, and any other fields in YAML-like indented form.
+    evidence, and any other fields in YAML-like indented form. A
+    subproject's are numbered within it and prefixed with its path, as
+    ``calkit check questions`` names them.
     """
+    where = f"{project}: " if project else ""
     if isinstance(question, str):
-        typer.echo(f"{n}. {question}")
+        typer.echo(f"{where}{n}. {question}")
         return
     # Copy so popping 'question' doesn't mutate the caller's dict.
     question = dict(question)
     text = question.pop("question", "")
-    typer.echo(f"{n}. question: {text}")
+    typer.echo(f"{where}{n}. question: {text}")
     # Rendering fills every field, so leave out the ones that aren't set
     for k, v in question.items():
         if v is None:
@@ -244,8 +247,12 @@ def list_questions(
 
     Placeholders in the text, such as ``{improvement:.1f}``, are filled from
     the question's value evidence, so numbers shown are read from the
-    results files rather than retyped into ``calkit.yaml``.
+    results files rather than retyped into ``calkit.yaml``. Subprojects'
+    questions are listed too, numbered within each, and in the JSON output
+    each has a ``project`` key with the subproject's path.
     """
+    from pathlib import Path
+
     from calkit.questions import (
         TEMPLATED_FIELDS,
         placeholders,
@@ -260,10 +267,17 @@ def list_questions(
             if isinstance(ev, dict)
         ]
 
-    ck_info = calkit.load_calkit_info()
-    questions = ck_info.get("questions", []) or []
+    # Each with its 1-based index in its own project and that project's
+    # path, empty for this one
+    listed: list[tuple[int, str | dict, str]] = []
+    for wdir, info in calkit.iter_projects():
+        project = "" if wdir == "." else Path(wdir).as_posix()
+        for n, q in enumerate(info.get("questions", []) or [], start=1):
+            if not raw:
+                q = render_question(q, info, wdir=wdir)
+            listed.append((n, q, project))
+    questions = [q for _, q, _ in listed]
     if not raw:
-        rendered = [render_question(q, ck_info) for q in questions]
         # A placeholder left as written looks exactly like text somebody
         # meant literally, so say when one could not be filled rather than
         # let a fresh clone read as a project that types its braces. Any
@@ -273,7 +287,7 @@ def list_questions(
         # answer still in clauses is one whose conditions could not be read.
         unfilled = any(
             isinstance(text, dict) or placeholders(text)
-            for q in rendered
+            for q in questions
             if isinstance(q, dict)
             for text in _texts(q)
         )
@@ -285,12 +299,20 @@ def list_questions(
                 "the results files are not here yet.",
                 err=json_output,
             )
-        questions = rendered
     if json_output:
-        echo_json(questions)
+        echo_json(
+            [
+                q
+                if not project
+                else {"project": project, "question": q}
+                if isinstance(q, str)
+                else {"project": project, **q}
+                for _, q, project in listed
+            ]
+        )
         return
-    for n, question in enumerate(questions, start=1):
-        _echo_question(n, question)
+    for n, question, project in listed:
+        _echo_question(n, question, project)
 
 
 @list_app.command(name="comments")

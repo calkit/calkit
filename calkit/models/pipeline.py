@@ -1406,9 +1406,18 @@ class LatexStage(Stage):
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
+    #: Project paths the document cites with calkit.sty's commands, which
+    #: only something that can read the document knows, so the pipeline
+    #: sets them when compiling
+    _cited_paths: list[str] = PrivateAttr(default_factory=list)
+
     @property
     def dvc_deps(self) -> list[str]:
-        deps = [self.target_path] + super().dvc_deps
+        deps = (
+            [self.target_path]
+            + super().dvc_deps
+            + [self.path_from_wdir(p) for p in self._cited_paths]
+        )
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
         return _unique_paths(deps)

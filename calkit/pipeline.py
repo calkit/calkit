@@ -2561,6 +2561,19 @@ def to_dvc(
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
+    # A document's cited project content is as much an input as its source
+    import calkit.latex
+
+    for stage in pipeline.stages.values():
+        if isinstance(stage, LatexStage):
+            document = os.path.join(
+                wdir or "", stage.wdir or "", stage.target_path
+            )
+            stage._cited_paths = list(
+                dict.fromkeys(
+                    c.path for c in calkit.latex.find_citations(document)
+                )
+            )
     if write:
         # The resolved setup commands each stage runs, written beside the
         # pipeline so the compiled command can name a path instead of

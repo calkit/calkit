@@ -226,6 +226,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -240,7 +243,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -784,6 +787,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -798,7 +804,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -1830,6 +1836,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -1844,7 +1853,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2074,6 +2083,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2088,7 +2100,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2379,6 +2391,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2393,7 +2408,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2670,6 +2685,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2684,7 +2702,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3001,6 +3019,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3015,7 +3036,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3546,6 +3567,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3560,7 +3584,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3819,6 +3843,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3833,7 +3860,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -4188,6 +4215,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4409,6 +4439,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4423,7 +4456,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -4720,6 +4753,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4734,7 +4770,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -5477,6 +5513,39 @@
       "title": "ParameterIteration",
       "type": "object"
     },
+    "ParamsInput": {
+      "additionalProperties": false,
+      "description": "Keys of a parameters file whose values a stage's results depend on.\n\nDVC records the keys' values rather than the file's hash, so changing a\nkey this stage doesn't read leaves it alone. The file itself is kept out\nof the stage's dependencies for that reason: named there too, its hash\nwould invalidate the stage whichever key moved.",
+      "properties": {
+        "keys": {
+          "description": "Keys this stage depends on, a nested one written like 'sample.turbine_id'.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Keys",
+          "type": "array"
+        },
+        "kind": {
+          "const": "params",
+          "description": "Always 'params'.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "default": "params.yaml",
+          "description": "File the keys are read from. DVC parses it, so it must be YAML, JSON, TOML or Python.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "keys"
+      ],
+      "title": "ParamsInput",
+      "type": "object"
+    },
     "PathInput": {
       "additionalProperties": true,
       "description": "An input written as an object carrying a path.\n\nPrefer a plain path string. This exists so a stage keeps working when an\noutput is copied verbatim into another stage's ``inputs``, which is how\nentries like ``{path: ..., storage: ...}`` show up in the wild. Only\n``path`` is used: an input is a dependency wherever it happens to be\nstored, so the other keys are carried along and ignored.\n\nExtra keys are allowed deliberately, both to tolerate whatever came along\nwith a copied output and to leave room for object inputs that aren't\npaths at all, e.g., a database table. They are kept rather than dropped,\nsince a stage rewritten back to calkit.yaml (see\n``Pipeline.convert_sbatch_stages``) would otherwise silently lose them.",
@@ -5955,6 +6024,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -5969,7 +6041,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6513,6 +6585,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -6527,7 +6602,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6762,6 +6837,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -6776,7 +6854,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -7126,6 +7204,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -7140,7 +7221,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -7427,6 +7508,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -7441,7 +7525,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8356,6 +8440,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -8370,7 +8457,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8779,6 +8866,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -8793,7 +8883,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -9033,6 +9123,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -9047,7 +9140,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -10794,6 +10887,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ParamsInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -10808,7 +10904,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'params' entry on named keys of a parameters file rather than the whole file.",
           "title": "Inputs"
         },
         "iterate_over": {

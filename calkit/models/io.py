@@ -29,6 +29,29 @@ class EnvVarInput(Model):
     name: str = Field(description="Name of the environment variable.")
 
 
+class ParamsInput(Model):
+    """Keys of a parameters file whose values a stage's results depend on.
+
+    DVC records the keys' values rather than the file's hash, so changing a
+    key this stage doesn't read leaves it alone. The file itself is kept out
+    of the stage's dependencies for that reason: named there too, its hash
+    would invalidate the stage whichever key moved.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["params"] = Field(description="Always 'params'.")
+    path: str = Field(
+        default="params.yaml",
+        description="File the keys are read from. DVC parses it, so it must "
+        "be YAML, JSON, TOML or Python.",
+    )
+    keys: list[str] = Field(
+        description="Keys this stage depends on, a nested one written like "
+        "'sample.turbine_id'.",
+        min_length=1,
+    )
+
+
 class PathInput(Model):
     """An input written as an object carrying a path.
 
@@ -51,9 +74,12 @@ class PathInput(Model):
     @model_validator(mode="before")
     @classmethod
     def _not_env_var(cls, data: Any) -> Any:
-        # A malformed env-var input would otherwise be read as a path
-        if isinstance(data, dict) and data.get("kind") == "env-var":
-            raise ValueError("an 'env-var' input is not a path")
+        # A malformed env-var or params input would otherwise read as a path
+        if isinstance(data, dict) and data.get("kind") in (
+            "env-var",
+            "params",
+        ):
+            raise ValueError(f"a '{data['kind']}' input is not a path")
         return data
 
 

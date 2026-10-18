@@ -1546,6 +1546,58 @@ def test_check_stage_runs(tmp_dir):
     # Rerunning them records them again
     subprocess.check_call(["calkit", "run", "--force"])
     subprocess.check_call(check)
+    # A subproject's runs are kept beside its dvc.lock under their names
+    # there, so it is the same record whichever directory ran them
+    os.makedirs("sub")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "c": {
+                            "kind": "shell-command",
+                            "command": "echo c > c.txt",
+                            "environment": "_system",
+                            "outputs": [{"path": "c.txt", "storage": "git"}],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    sub_runs = calkit.read_stage_runs("sub")
+    assert list(sub_runs) == ["c"]
+    assert "sub/dvc.yaml:c" not in calkit.read_stage_runs()
+    subprocess.check_call(check)
+    subprocess.check_call(check, cwd="sub")
+    # Edited in the subproject, it's caught from the parent too
+    with open(os.path.join("sub", "c.txt"), "w") as f:
+        f.write("edited\n")
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "sub/dvc.yaml:c"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'sub/dvc.yaml:c' has changed in dvc.lock" in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "sub/dvc.yaml:c"])
+    subprocess.check_call(check)
+    # A record the parent kept under the subproject stage's name there, as
+    # it used to, still counts, and moves to the subproject when rerun
+    stage_runs = calkit.read_stage_runs()
+    stage_runs["sub/dvc.yaml:c"] = calkit.read_stage_runs("sub")["c"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    os.remove(os.path.join("sub", calkit.STAGE_RUNS_FPATH))
+    subprocess.check_call(check)
+    subprocess.check_call(["calkit", "run", "--force", "sub/dvc.yaml:c"])
+    assert "sub/dvc.yaml:c" not in calkit.read_stage_runs()
+    assert list(calkit.read_stage_runs("sub")) == ["c"]
+    subprocess.check_call(check)
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    )
+    assert "sub/.calkit/stage-runs.json" in staged.splitlines()
 
 
 def test_check_env_rebuilds(tmp_dir):

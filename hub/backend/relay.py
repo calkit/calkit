@@ -128,7 +128,7 @@ def health() -> dict:
 async def _receive(ws: WebSocket) -> dict | None:
     """Receive one JSON message, closing the socket if it's too big."""
     text = await ws.receive_text()
-    if len(text) > MAX_MESSAGE_BYTES:
+    if len(text.encode()) > MAX_MESSAGE_BYTES:
         await ws.close(CLOSE_TOO_BIG)
         return None
     try:

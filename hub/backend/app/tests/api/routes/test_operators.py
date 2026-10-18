@@ -499,8 +499,9 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
                 # ...and unwrapped on the way back
                 op_ws.send_json({"ch": ch, "msg": {"type": "result", "id": 1}})
                 assert browser_ws.receive_json() == {"type": "result", "id": 1}
-                # Messages over the limit close the connection
-                browser_ws.send_text("x" * (relay.MAX_MESSAGE_BYTES + 1))
+                # Messages over the limit close the connection, counted in
+                # bytes rather than characters
+                browser_ws.send_text("é" * (relay.MAX_MESSAGE_BYTES // 2 + 1))
                 with pytest.raises(WebSocketDisconnect) as e:
                     browser_ws.receive_text()
                 assert e.value.code == relay.CLOSE_TOO_BIG

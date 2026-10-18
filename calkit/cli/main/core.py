@@ -4720,7 +4720,7 @@ def install_app(
         typer.Option(
             "--cron",
             help=(
-                "For the operator, have cron start it when the hub asks "
+                "For the Operator, have cron start it when the hub asks "
                 "rather than running it as a service, e.g., on a cluster's "
                 "login node."
             ),
@@ -4731,7 +4731,7 @@ def install_app(
         typer.Option(
             "--ssh",
             help=(
-                "For the operator, install it on another machine over SSH, "
+                "For the Operator, install it on another machine over SSH, "
                 "e.g., 'user@cluster.example.edu' or a host from "
                 "~/.ssh/config, installing Calkit there if needed."
             ),
@@ -4742,7 +4742,7 @@ def install_app(
         typer.Option(
             "--no-service",
             help=(
-                "For the operator, only register it, e.g., to run it with "
+                "For the Operator, only register it, e.g., to run it with "
                 "'calkit operator start' inside tmux on a cluster."
             ),
         ),
@@ -4752,7 +4752,7 @@ def install_app(
         typer.Option(
             "--hub",
             help=(
-                "For the operator, the URL of the hub it's for, e.g., "
+                "For the Operator, the URL of the hub it's for, e.g., "
                 "https://calkit.io; a machine can have one per hub."
             ),
         ),

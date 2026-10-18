@@ -449,10 +449,10 @@ Options:
 | -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--yes`, `-y`  | boolean | no       | False   | Skip the confirmation prompt and install immediately.                                                                                                       |
 | `--login`      | boolean | no       | False   | For the Operator, start it when you log in rather than at boot, which needs sudo on macOS and Linux.                                                        |
-| `--cron`       | boolean | no       | False   | For the operator, have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
-| `--ssh`        | str     | no       |         | For the operator, install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
-| `--no-service` | boolean | no       | False   | For the operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
-| `--hub`        | str     | no       |         | For the operator, the URL of the hub it's for, e.g., https://calkit.io; a machine can have one per hub.                                                     |
+| `--cron`       | boolean | no       | False   | For the Operator, have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
+| `--ssh`        | str     | no       |         | For the Operator, install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
+| `--no-service` | boolean | no       | False   | For the Operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
+| `--hub`        | str     | no       |         | For the Operator, the URL of the hub it's for, e.g., https://calkit.io; a machine can have one per hub.                                                     |
 
 <a id="top-command-xproc-runproc"></a>
 

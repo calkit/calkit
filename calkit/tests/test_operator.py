@@ -1389,6 +1389,13 @@ def test_machine_setup(tmp_path, monkeypatch):
     monkeypatch.setattr(config.Settings, "write", locked)
     with pytest.raises(RuntimeError, match="calkit config set token"):
         operator.configure_machine(token=token)
+    # A machine with no SSH key gets one to add to the Git host, and one that
+    # has a key keeps it
+    if shutil.which("ssh-keygen"):
+        made = operator.get_ssh_public_key()
+        assert made["created"] and made["public_key"].startswith("ssh-ed25519")
+        assert os.path.isfile(os.path.join(home, ".ssh", "id_ed25519"))
+        assert operator.get_ssh_public_key() == dict(made, created=False)
     # A clone outside the folders workspaces are found in is added to them,
     # so the hub lists it
     sent: list[dict] = []

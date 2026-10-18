@@ -1698,10 +1698,14 @@ def check_machine_setup(git_repo_url: str) -> dict:
         return out or None
 
     env = dict(child_env(), GIT_TERMINAL_PROMPT="0")
-    # So SSH fails rather than asking for a passphrase or host key nobody
-    # can answer, unless the user chose how Git runs it
+    # So SSH fails rather than asking for a passphrase nobody can answer,
+    # unless the user chose how Git runs it. A new host's key is accepted, as
+    # someone answering yes would, so the clone after this knows it.
     if "GIT_SSH_COMMAND" not in env and not get_git_config("core.sshCommand"):
-        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=15"
+        env["GIT_SSH_COMMAND"] = (
+            "ssh -o BatchMode=yes -o ConnectTimeout=15 "
+            "-o StrictHostKeyChecking=accept-new"
+        )
     error = None
     try:
         result = subprocess.run(
@@ -1736,6 +1740,53 @@ def check_machine_setup(git_repo_url: str) -> dict:
         # This Operator's hub's, which the project is on
         "token": bool(config.read().token),
     }
+
+
+def get_ssh_public_key() -> dict:
+    """This machine's SSH public key, made first if it has none, for the
+    owner to add to their Git host, as 'calkit config github-ssh' does.
+
+    A new key has no passphrase, since the Operator runs Git with nobody
+    there to type one.
+    """
+    ssh_dir = os.path.join(config.get_user_home(), ".ssh")
+    # The ones SSH tries by default, in its order
+    for name in ("id_ed25519", "id_ecdsa", "id_rsa"):
+        key = os.path.join(ssh_dir, name)
+        if os.path.isfile(key) and os.path.isfile(key + ".pub"):
+            with open(key + ".pub") as f:
+                return {"public_key": f.read().strip(), "created": False}
+    os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+    key = os.path.join(ssh_dir, "id_ed25519")
+    try:
+        email = subprocess.run(
+            ["git", "config", "--get", "user.email"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, OSError):
+        email = ""
+    subprocess.run(
+        [
+            "ssh-keygen",
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            email or f"calkit-operator@{socket.gethostname()}",
+            "-f",
+            key,
+        ],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    with open(key + ".pub") as f:
+        return {"public_key": f.read().strip(), "created": True}
 
 
 def configure_machine(
@@ -1837,7 +1888,12 @@ WORKSPACE_ACTIONS: dict[str, Any] = {
 }
 # Browser requests about the machine rather than a workspace, also run off
 # the event loop
-MACHINE_ACTIONS = {"workspaces.clone", "machine.check", "machine.configure"}
+MACHINE_ACTIONS = {
+    "workspaces.clone",
+    "machine.check",
+    "machine.configure",
+    "machine.ssh_key",
+}
 # Actions that change nothing, so needn't take the workspace from other
 # hubs' Operators, and may act on managed workspaces too
 READ_ONLY_ACTIONS = {
@@ -2326,6 +2382,8 @@ class Operator:
                 result = await asyncio.to_thread(
                     check_machine_setup, msg["git_repo_url"]
                 )
+            elif kind == "machine.ssh_key":
+                result = await asyncio.to_thread(get_ssh_public_key)
             elif kind == "machine.configure":
                 result = await asyncio.to_thread(
                     configure_machine,

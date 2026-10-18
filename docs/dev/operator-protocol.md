@@ -286,8 +286,12 @@ Operator's hub, which pulling and pushing data use.
 config, as `calkit config set token` would.
 The browser makes that token with the hub's personal access token API,
 so it reaches the Operator only over a channel the owner opened.
-SSH keys aren't set up this way: the hub shows how to make one in a
-session instead.
+`machine.ssh_key`, with `id`, returns the machine's SSH `public_key`,
+making an ed25519 key with no passphrase first if it has none, and
+whether it was `created`, for the owner to add to their Git host, as
+`calkit config github-ssh` does.
+The check accepts a host's key the first time it connects, as someone
+answering yes would.
 
 ## Editor builds
 

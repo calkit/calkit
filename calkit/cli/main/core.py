@@ -3843,7 +3843,12 @@ def run(
             # Replacing a record made from here, from before a subproject's
             # were kept with it
             if lock_dir is not None:
-                stage_runs[None].pop(stage_name, None)
+                for key in list(stage_runs[None]):
+                    if calkit.dvc.split_lock_stage_name(key) == (
+                        lock_dir,
+                        lock_name,
+                    ):
+                        del stage_runs[None][key]
         for lock_dir, runs in stage_runs.items():
             fpath = os.path.join(lock_dir or "", STAGE_RUNS_FPATH)
             if not runs and not os.path.exists(fpath):

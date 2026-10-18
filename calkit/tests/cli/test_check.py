@@ -1583,15 +1583,16 @@ def test_check_stage_runs(tmp_dir):
     subprocess.check_call(["calkit", "run", "--force", "sub/dvc.yaml:c"])
     subprocess.check_call(check)
     # A record the parent kept under the subproject stage's name there, as
-    # it used to, still counts, and moves to the subproject when rerun
+    # it used to, still counts, and moves to the subproject when rerun. It's
+    # named as on Windows, which a run elsewhere must recognize too.
     stage_runs = calkit.read_stage_runs()
-    stage_runs["sub/dvc.yaml:c"] = calkit.read_stage_runs("sub")["c"]
+    stage_runs["sub\\dvc.yaml:c"] = calkit.read_stage_runs("sub")["c"]
     with open(calkit.STAGE_RUNS_FPATH, "w") as f:
         json.dump(stage_runs, f)
     os.remove(os.path.join("sub", calkit.STAGE_RUNS_FPATH))
     subprocess.check_call(check)
     subprocess.check_call(["calkit", "run", "--force", "sub/dvc.yaml:c"])
-    assert "sub/dvc.yaml:c" not in calkit.read_stage_runs()
+    assert not any("dvc.yaml" in k for k in calkit.read_stage_runs())
     assert list(calkit.read_stage_runs("sub")) == ["c"]
     subprocess.check_call(check)
     staged = subprocess.check_output(

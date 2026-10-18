@@ -2239,14 +2239,34 @@ def check_stage_runs() -> None:
     mistakes and shortcuts, not forgery, since a matching entry can be
     written by anyone.
     """
-    # A subproject sharing this project's DVC repo is run with it, so its
-    # stages are checked too, against the record kept beside its dvc.lock.
-    # One with a repo of its own is run by its wrapper stage.
-    lock_dirs: list[str | None] = [None] + [
-        sp
-        for sp in calkit.get_subprojects()
-        if not os.path.isdir(os.path.join(sp, ".dvc"))
-    ]
+    # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
+    # subproject's, against the record kept beside its dvc.lock: any other
+    # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
+    # a wrapper stage, which doesn't record its stages.
+    try:
+        listed = subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*/dvc.yaml",
+            ],
+            text=True,
+        ).splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        listed = []
+    lock_dirs: list[str | None] = [None]
+    for path in sorted(listed):
+        parts = path.split("/")[:-1]
+        if not os.path.isfile(path) or any(
+            os.path.isdir(os.path.join(*parts[:i], ".dvc"))
+            for i in range(1, len(parts) + 1)
+        ):
+            continue
+        lock_dirs.append("/".join(parts))
     stage_runs: dict[str | None, dict] = {}
     for lock_dir in lock_dirs:
         try:
@@ -2254,6 +2274,11 @@ def check_stage_runs() -> None:
         except json.JSONDecodeError as e:
             fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
             raise_error(f"Can't read {fpath}: {e}")
+    # This project's records of other pipelines' stages, under the names
+    # they have here, from before they were kept beside their own dvc.lock
+    parent_runs = {
+        k.replace("\\", "/"): v for k, v in stage_runs[None].items()
+    }
     problems = []
     for lock_dir in lock_dirs:
         lock_stages = calkit.dvc.read_lock_stages(lock_dir)
@@ -2265,16 +2290,16 @@ def check_stage_runs() -> None:
                 if lock_dir is None
                 else f"{lock_dir}/dvc.yaml:{lock_name}"
             )
-            recorded = stage_runs[lock_dir].get(lock_name)
-            # This project's record of a subproject's stage, under the name
-            # it has here, from before they were kept with the subproject
-            if not isinstance(recorded, dict):
-                recorded = stage_runs[None].get(name)
-            if not isinstance(recorded, dict):
+            # Either record matching will do, since a stage may have been
+            # run from both directories before they were kept together
+            candidates = [stage_runs[lock_dir].get(lock_name)]
+            if lock_dir is not None:
+                candidates.append(parent_runs.get(name))
+            records = [r for r in candidates if isinstance(r, dict)]
+            lock_hash = calkit.dvc.stage_lock_hash(locked)
+            if not records:
                 problems.append(f"Stage '{name}' has no recorded run")
-            elif recorded.get("dvc_lock_hash") != calkit.dvc.stage_lock_hash(
-                locked
-            ):
+            elif all(r.get("dvc_lock_hash") != lock_hash for r in records):
                 problems.append(
                     f"Stage '{name}' has changed in dvc.lock since its last "
                     "recorded run"

@@ -20,6 +20,7 @@ from calkit.models.pipeline import (
     ShellScriptStage,
     StageIteration,
     WordToPdfStage,
+    quote_arg,
 )
 
 
@@ -49,6 +50,38 @@ def test_pythonscriptstage():
     assert sd["outs"][1] == {
         "data/something.csv": dict(cache=False, persist=False)
     }
+
+
+def test_quote_arg():
+    # One argument with a space is quoted for both cmd.exe and POSIX shells
+    assert quote_arg("2026-06-09 12:00:00") == '"2026-06-09 12:00:00"'
+    assert quote_arg(r"C:\My Data\\") == r'"C:\My Data\\\\"'
+    # Args that compiled to these before keep doing so
+    assert quote_arg("--model={var}") == "--model={var}"
+    assert quote_arg("$HOME") == "$HOME"
+    assert quote_arg("") == ""
+    assert quote_arg('--date="{date}"') == '--date="{date}"'
+    assert quote_arg("'a b'") == "'a b'"
+    assert quote_arg("--theta {theta}") == "--theta {theta}"
+    # Each stage kind with script args passes them through it
+    s = PythonScriptStage(
+        name="sample",
+        environment="py1",
+        script_path="scripts/x.py",
+        args=["--before", "2026-06-09 12:00:00", "--theta 5"],
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n py1 --no-check -- python scripts/x.py "
+        '--before "2026-06-09 12:00:00" --theta 5'
+    )
+    s = ShellScriptStage(
+        name="sample",
+        kind="shell-script",
+        environment="_system",
+        script_path="scripts/x.sh",
+        args=["a b"],
+    )
+    assert s.to_dvc()["cmd"].endswith('scripts/x.sh "a b"')
 
 
 def test_wordtopdfstage():

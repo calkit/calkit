@@ -4506,7 +4506,10 @@ def new_workspace(
         repo.git.worktree("add", *args)
     except Exception as e:
         raise_error(f"Could not create the worktree: {e}")
-    if os.path.isdir(os.path.join(root, ".dvc")):
+    # A branch can predate DVC being set up here, so it needs none
+    if os.path.isdir(os.path.join(root, ".dvc")) and os.path.isdir(
+        os.path.join(path, ".dvc")
+    ):
         # The remotes' settings, e.g., their auth, live in the local config,
         # which Git doesn't carry over
         cache_root = root

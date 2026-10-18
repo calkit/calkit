@@ -2300,6 +2300,15 @@ def test_release_detached_head(tmp_dir):
 
 
 def test_new_workspace(tmp_dir):
+    def git_out(*args: str, input: str | None = None) -> str:
+        return subprocess.run(
+            ["git", *args],
+            input=input,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
     def cache_dir(path: str) -> str:
         # Normalized, since Git gives paths on Windows with forward slashes
         with open(os.path.join(path, ".dvc", "config.local")) as f:
@@ -2360,6 +2369,16 @@ def test_new_workspace(tmp_dir):
         text=True,
     )
     assert result.returncode != 0 and "already exists" in result.stderr
+
+    # A branch from before DVC was set up gets no DVC config
+    blob = git_out("hash-object", "-w", "--stdin", input="hi\n")
+    tree = git_out("mktree", input=f"100644 blob {blob}\tREADME.md\n")
+    git_out("branch", "before-dvc", git_out("commit-tree", tree, "-m", "Old"))
+    old = os.path.join(os.path.dirname(root), "old")
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "before-dvc", "--path", old]
+    )
+    assert not os.path.exists(os.path.join(old, ".dvc"))
 
 
 def test_new_comment(tmp_dir):

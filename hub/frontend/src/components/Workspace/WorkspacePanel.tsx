@@ -546,9 +546,9 @@ export default function WorkspacePanel({
               {diverged && (
                 <Alert status="warning" borderRadius="md" mb={2} gap={2}>
                   <AlertIcon />
-                  {/* TODO: copy for a human to write */}
                   <Text flex={1} fontSize="sm">
-                    This branch and its remote have diverged.
+                    This branch and its remote both have new commits, so pulling
+                    needs a merge.
                   </Text>
                   <Button
                     size="xs"
@@ -703,7 +703,7 @@ export default function WorkspacePanel({
                 )}
               {stageFilter === "running" && ready && !running && (
                 <Text fontSize="sm" color="ui.dim">
-                  Not running
+                  No stages are running
                 </Text>
               )}
               {shownStages && shownStages.length > 0 && (

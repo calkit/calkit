@@ -480,9 +480,10 @@ can broker them the way it brokers storage: the user adds and names
 compute there and enables projects to use it, and a hub environment
 names it, optionally locking its properties so a change on the hub
 shows up in the project (#1749).
-The hub names its pages for workspaces rather than compute, leaving
-"Compute" for brokered compute, and pipeline runs from anywhere, e.g.,
-GitHub Actions, belong on the pipeline page rather than with workspaces.
+The hub calls these pages Workspaces.
+"Compute" is saved for brokered compute,
+and pipeline runs from elsewhere, e.g., GitHub Actions,
+go on the pipeline page, since they aren't interactive like workspaces.
 
 ### Editor builds
 

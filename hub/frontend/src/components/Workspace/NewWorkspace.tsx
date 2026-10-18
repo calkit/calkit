@@ -84,8 +84,8 @@ const NewWorkspace = ({
               data-lpignore="true"
             />
             <FormHelperText>
-              Created from the current commit unless it exists. The workspace
-              shares this one's data cache.
+              A new branch starts from this workspace's current commit. Both
+              workspaces share one data cache, so data isn't pulled again.
             </FormHelperText>
             {errors.branch && (
               <FormErrorMessage>{errors.branch.message}</FormErrorMessage>

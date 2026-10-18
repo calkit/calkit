@@ -163,9 +163,8 @@ function AgentLog({
           {logQuery.error.message}
         </Text>
       ) : entries === null ? (
-        // TODO: copy for a human to write
         <Text color="ui.dim" fontSize="sm">
-          This agent's conversation can't be read here.
+          Couldn't find this agent's conversation log on the Operator.
         </Text>
       ) : (
         <Box ref={logRef} maxH="70vh" overflowY="auto">

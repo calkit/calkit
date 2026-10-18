@@ -110,8 +110,8 @@ Creating the project on calkit.io.
 
 Next, we'll do the only command line thing in this whole process
 and install the Calkit Operator.
-This will allow us connect to the web app and enable us to modify the project
-on our local machine.
+This will allow us to connect to the web app
+and enable us to modify the project on our local machine.
 To install Calkit along with the Operator,
 open up a command prompt and run:
 
@@ -127,16 +127,16 @@ curl -LsSf install.calkit.org | sh -s -- --operator
 
 If Calkit is already installed, run `calkit operator install` instead.
 
-The Operator starts whenever we log in,
+The Operator starts on its own from now on,
 so we won't need to do this again.
 If we navigate to our project page on [calkit.io](https://calkit.io),
-then go to the compute page, we see that the repo has never been
-cloned to our computer, so let's click the button with our computer's name
-to clone it there.
+then go to the Workspaces page, we see that the repo has never been
+cloned to our computer, so let's click "Create workspace" next to our
+computer's name, then "Create", to clone it there.
 
-![The project's compute page showing we haven't cloned the repo yet.](img/office/needs-clone.png)
+![The project's Workspaces page showing we haven't cloned the repo yet.](img/office/needs-clone.png)
 /// caption
-The project's compute page showing we haven't cloned the repo yet.
+The project's Workspaces page showing we haven't cloned the repo yet.
 ///
 
 It will be cloned somewhere
@@ -158,7 +158,7 @@ and saving it in our project repo as `data.xlsx`.
 Creating our dataset in Excel.
 ///
 
-Back on the Calkit compute page,
+Back on the Calkit Workspaces page,
 if we refresh the status
 we see that the `data.xlsx` spreadsheet is showing up as an untracked
 file in the project repo.
@@ -176,7 +176,7 @@ and again we'll see that our repo is clean and in sync.
 
 Now let's use Excel to create a figure.
 If we go in and create a chart inside and save the spreadsheet,
-we see up on the compute page that we have a changed file.
+we see up on the Workspaces page that we have a changed file.
 Let's commit that change by clicking the "Commit" button
 and let's use a commit message like
 "Add chart to spreadsheet".

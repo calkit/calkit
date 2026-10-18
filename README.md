@@ -202,7 +202,7 @@ powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 
 Both install shell completion for `calkit` and `ck`.
 To also install the [Calkit Operator](https://docs.calkit.org/compute),
-which lets the Calkit Hub use your machine,
+which connects this machine's workspaces to the hub,
 pass `--operator`:
 
 ```sh

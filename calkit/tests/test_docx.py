@@ -331,6 +331,7 @@ def test_docx_round_trip(
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(calkit.docx, "find_soffice", lambda: "soffice")
+        mp.setattr(calkit.docx, "libreoffice_has_math", lambda soffice: True)
         mp.setattr(calkit, "check_dep_exists", lambda dep: True)
         mp.setattr(calkit.cli.latex.subprocess, "Popen", Make4ht)
         with pytest.raises(typer.Exit):
@@ -353,6 +354,7 @@ def test_docx_round_trip(
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(calkit.docx, "find_soffice", lambda: "soffice")
+        mp.setattr(calkit.docx, "libreoffice_has_math", lambda soffice: True)
         mp.setattr(calkit.cli.latex.subprocess, "run", run_recorded)
         with pytest.raises(typer.Exit):
             calkit.cli.latex.to_docx(

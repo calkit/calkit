@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 import zipfile
 from copy import deepcopy
@@ -2530,10 +2531,10 @@ def _set_evidence_stage(
 
     A frozen stage is the case staleness can't speak to: DVC won't re-run it
     whatever its inputs do, so it reports up to date forever, and so does
-    everything built from its outputs. Naming a Git ref settles it -- the
-    citation then refers to one version of the artifact rather than to
-    whatever the frozen stage last happened to leave behind -- so only an
-    unpinned one is flagged.
+    everything built from its outputs. One that has moved from dvc.lock is
+    flagged, unless a Git ref settles it -- the citation then refers to one
+    version of the artifact rather than to whatever the frozen stage last
+    happened to leave behind.
     """
     stage = (
         (item.figure.stage if item.figure else None)
@@ -2776,7 +2777,9 @@ def _build_questions_public(
                 fs=get_object_fs(),
                 cache_token=resolve_commit_sha(repo, ev_ref),
             )
-            frozen_stages = find_frozen_tainted_stages(dvc_yaml, dvc_lock)
+            frozen_stages = find_frozen_tainted_stages(
+                dvc_yaml, dvc_lock, stage_statuses
+            )
         except Exception as e:
             logger.warning(
                 f"Failed to compute pipeline status for questions at "
@@ -6908,6 +6911,7 @@ async def post_project_overleaf_publication(
     # Determine mode: link vs zip
     import_zip_mode = file is not None
     overleaf_repo = None
+    overleaf_commit: str | None = None
     zf: zipfile.ZipFile | None = None
     # Files the Overleaf project carries, relative to its root, so what's
     # being replaced can be compared against what's coming in
@@ -6943,13 +6947,43 @@ async def post_project_overleaf_publication(
         except HTTPException:
             raise HTTPException(400, "No Overleaf token found")
         try:
-            overleaf_repo = get_overleaf_repo(
+            with get_overleaf_repo(
                 project=project,
                 user=current_user,
                 session=session,
                 overleaf_project_id=overleaf_project_id,
-            )
-        except GitCommandError as e:
+            ) as overleaf_repo:
+                # Snapshot the files and commit while the clone is locked, so
+                # a concurrent pull or sync can't change them mid-import; the
+                # directory is removed when the snapshot is garbage collected
+                overleaf_snapshot = tempfile.TemporaryDirectory(
+                    prefix="overleaf-import-"
+                )
+                overleaf_abs_path = os.path.join(
+                    overleaf_snapshot.name, "repo"
+                )
+                shutil.copytree(
+                    overleaf_repo.working_dir,
+                    overleaf_abs_path,
+                    ignore=shutil.ignore_patterns(".git"),
+                )
+                overleaf_commit = overleaf_repo.head.commit.hexsha
+                for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
+                    dirnames[:] = [d for d in dirnames if d != ".git"]
+                    for fname in filenames:
+                        incoming_files.append(
+                            Path(
+                                os.path.relpath(
+                                    os.path.join(dirpath, fname),
+                                    overleaf_abs_path,
+                                )
+                            ).as_posix()
+                        )
+        except (
+            GitCommandError,
+            RuntimeError,
+            subprocess.CalledProcessError,
+        ) as e:
             logger.error(f"Failed to clone Overleaf repo: {e}")
             raise HTTPException(
                 400,
@@ -6958,17 +6992,6 @@ async def post_project_overleaf_publication(
                     "and that Git integration is enabled on Overleaf"
                 ),
             )
-        overleaf_abs_path = str(overleaf_repo.working_dir)
-        for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
-            dirnames[:] = [d for d in dirnames if d != ".git"]
-            for fname in filenames:
-                incoming_files.append(
-                    Path(
-                        os.path.relpath(
-                            os.path.join(dirpath, fname), overleaf_abs_path
-                        )
-                    ).as_posix()
-                )
     if replacing:
         # A reference file the Overleaf project also carries stays
         # declared; the rest go with the folder
@@ -7090,12 +7113,11 @@ async def post_project_overleaf_publication(
         overleaf_sync_in_ck_info = ck_info.get("overleaf_sync", {})
         overleaf_sync_in_ck_info[path] = {"url": overleaf_project_url}
         ck_info["overleaf_sync"] = overleaf_sync_in_ck_info
-        last_overleaf_sync_commit = overleaf_repo.head.commit.hexsha
         calkit.overleaf.write_sync_info(
             synced_path=path,
             info={
                 "project_id": overleaf_project_id,
-                "last_sync_commit": last_overleaf_sync_commit,
+                "last_sync_commit": overleaf_commit,
             },
             wdir=repo.working_dir,
         )
@@ -7226,7 +7248,7 @@ def post_project_overleaf_sync(
     repo = get_repo(project=project, user=current_user, session=session)
     ck_info = get_ck_info_from_repo(repo)
     overleaf_sync_info = calkit.overleaf.get_sync_info(
-        wdir=repo.working_dir, ck_info=ck_info, fix_legacy=True
+        wdir=repo.working_dir, ck_info=ck_info
     )
     app.projects.record_overleaf_links(
         session=session, project=project, repo=repo
@@ -7238,21 +7260,25 @@ def post_project_overleaf_sync(
     if path_in_project not in overleaf_sync_info:
         raise HTTPException(404, "Overleaf sync info not found for path")
     overleaf_project_id = overleaf_sync_info[path_in_project]["project_id"]
-    overleaf_repo = get_overleaf_repo(
-        project=project,
-        user=current_user,
-        session=session,
-        overleaf_project_id=overleaf_project_id,
-    )
     try:
-        res = calkit.overleaf.sync(
-            main_repo=repo,
-            overleaf_repo=overleaf_repo,
-            path_in_project=path_in_project,
-            sync_info_for_path=overleaf_sync_info[path_in_project],
-            print_info=logger.info,
-            no_commit=False,
-        )
+        with get_overleaf_repo(
+            project=project,
+            user=current_user,
+            session=session,
+            overleaf_project_id=overleaf_project_id,
+        ) as overleaf_repo:
+            res = calkit.overleaf.sync(
+                main_repo=repo,
+                overleaf_repo=overleaf_repo,
+                path_in_project=path_in_project,
+                # Reloaded under the lock, in case a sync we waited on just
+                # moved the checkpoint, which also fixes any legacy schema
+                sync_info_for_path=None,
+                print_info=logger.info,
+                no_commit=False,
+            )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.info(f"Failed to sync: {e}")
         if "in the middle of an am session" in repo.git.status():
@@ -7410,19 +7436,21 @@ def get_project_overleaf_sync_status(
         if not this_overleaf_project_id:
             logger.info(f"No Overleaf project ID for '{path_in_project}'")
             continue
-        overleaf_repo = get_overleaf_repo(
+        with get_overleaf_repo(
             project=project,
             user=current_user,
             session=session,
             overleaf_project_id=this_overleaf_project_id,
-        )
-        status = calkit.overleaf.get_sync_status(
-            main_repo=repo,
-            overleaf_repo=overleaf_repo,
-            path_in_project=path_in_project,
-            sync_info_for_path=sync_info_for_path,
-            ck_info=ck_info,
-        )
+        ) as overleaf_repo:
+            status = calkit.overleaf.get_sync_status(
+                main_repo=repo,
+                overleaf_repo=overleaf_repo,
+                path_in_project=path_in_project,
+                # Reloaded under the lock, in case a sync we waited on just
+                # moved the checkpoint
+                sync_info_for_path=None,
+                ck_info=ck_info,
+            )
         resp.append(
             OverleafSyncStatus(
                 path=status["path_in_project"],

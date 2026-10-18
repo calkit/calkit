@@ -19,7 +19,7 @@ InstallMethod = Literal["uv-tool", "pipx", "pip", "frozen"]
 
 
 def get_state_fpath() -> str:
-    from calkit.config import get_env_suffix, get_user_home
+    from calkit.core import get_env_suffix, get_user_home
 
     return os.path.join(
         get_user_home(), ".calkit", f"upgrade{get_env_suffix()}.json"

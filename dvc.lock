@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 80144a733e1c1b8012c4b1824285294e
-      size: 129483
+      md5: e4ee0a41f3edd5b13e24459298d94737
+      size: 128660
     - path: calkit/docx.py
       hash: md5
-      md5: 611355cdf404240e9991499fc0fa3665
-      size: 55987
+      md5: 3f34445a3e65cf2c10f908b84de55fd2
+      size: 55475
     - path: calkit/latex.py
       hash: md5
-      md5: abedc72b9d65b5cc05a887a48b922041
-      size: 54256
+      md5: 4804078b664b11c447912359f7fbd168
+      size: 62525
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -46,8 +46,8 @@ stages:
       size: 4747
     - path: uv.lock
       hash: md5
-      md5: 8c547ca649fc9cc7228324f42297d3f7
-      size: 1727820
+      md5: 78cff1621fa9cb37be1d99412ed26e0f
+      size: 1727624
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5
@@ -75,8 +75,8 @@ stages:
       size: 5
     - path: calkit/docx.py
       hash: md5
-      md5: 611355cdf404240e9991499fc0fa3665
-      size: 55987
+      md5: 3f34445a3e65cf2c10f908b84de55fd2
+      size: 55475
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: adf9a8da2e08dee394a2de3a2d4e831a
@@ -95,8 +95,8 @@ stages:
       size: 2652
     - path: uv.lock
       hash: md5
-      md5: 8c547ca649fc9cc7228324f42297d3f7
-      size: 1727820
+      md5: 78cff1621fa9cb37be1d99412ed26e0f
+      size: 1727624
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
@@ -108,25 +108,25 @@ stages:
     deps:
     - path: .calkit/markdown/images/latex/README.md/sizes.py
       hash: md5
-      md5: 8957703e760b2a61772fd845dbcaee5e
-      size: 1765
+      md5: 7ee40f897ceb2046753dc7aee67b09f7
+      size: 1955
     - path: .python-version
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: abedc72b9d65b5cc05a887a48b922041
-      size: 54256
+      md5: 4804078b664b11c447912359f7fbd168
+      size: 62525
     - path: uv.lock
       hash: md5
-      md5: 8c547ca649fc9cc7228324f42297d3f7
-      size: 1727820
+      md5: 78cff1621fa9cb37be1d99412ed26e0f
+      size: 1727624
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: 2cc4fe9b65d5ff209633086405600e88
-      size: 386
+      md5: 6e54c19cc380b0e12a97d4d0866f266e
+      size: 335
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
     deps:
@@ -144,8 +144,8 @@ stages:
       size: 14225
     - path: uv.lock
       hash: md5
-      md5: 8c547ca649fc9cc7228324f42297d3f7
-      size: 1727820
+      md5: 78cff1621fa9cb37be1d99412ed26e0f
+      size: 1727624
     outs:
     - path: results/research-flow.json
       hash: md5
@@ -168,8 +168,8 @@ stages:
       size: 12155
     - path: uv.lock
       hash: md5
-      md5: 8c547ca649fc9cc7228324f42297d3f7
-      size: 1727820
+      md5: 78cff1621fa9cb37be1d99412ed26e0f
+      size: 1727624
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
@@ -270,8 +270,8 @@ stages:
       size: 1861
     - path: uv.lock
       hash: md5
-      md5: 8c547ca649fc9cc7228324f42297d3f7
-      size: 1727820
+      md5: 78cff1621fa9cb37be1d99412ed26e0f
+      size: 1727624
     outs:
     - path: results/2027-budget.json
       hash: md5
@@ -298,26 +298,22 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: d5c6e92edb7d06a50adba193b0804d55
-      size: 5019
+      md5: 314b2aeb70af1c75c3af9b994934d95d
+      size: 5418
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 161bbc0cccd2e991cdc03924cedaef55
       size: 2101
     - path: docs/one-pager/template.tex
       hash: md5
-      md5: f0ed0796442f5382792c552c6a59d116
-      size: 3170
+      md5: f9de5dfe6f91b65428b6af9c77ba2b96
+      size: 3649
     - path: results/2027-budget.json
       hash: md5
       md5: d223d73c9ad60723f06e3c13496fd205
       size: 1649
-    - path: results/research-flow.json
-      hash: md5
-      md5: ad60cc07e5c53f0803252e215ff43141
-      size: 75297
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 62d4174727fbddf9dce2d54cb549ee47
-      size: 137554
+      md5: 873f00284cc088a5ecdace22bc9412b9
+      size: 139595

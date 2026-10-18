@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 
+import git
 import pytest
 
 import calkit
@@ -70,6 +71,15 @@ def test_check_venv(tmp_dir):
     with open("lock.txt") as f:
         lock_txt_3 = f.read()
     assert "polars==1.0.0" in lock_txt_3
+    # Removing one removes it from the lock, rather than the old lock or env
+    # bringing it back
+    with open("reqs.txt", "w") as f:
+        f.write("requests")
+    subprocess.check_call(
+        ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    )
+    with open("lock.txt") as f:
+        assert "polars" not in f.read()
     # Test that if we specify a different Python or otherwise fail with an
     # existing prefix, we can still build the environment since it will be
     # deleted and recreated
@@ -85,6 +95,34 @@ def test_check_venv(tmp_dir):
             "3.11",
         ]
     )
+    # A lock resolved from the current spec is read, not rewritten
+    with open("lock.txt") as f:
+        lock_txt_4 = f.read()
+    assert calkit.environments.read_env_spec_hash(
+        "lock.txt"
+    ) == calkit.environments.env_spec_hash("reqs.txt", python="3.11")
+    with open("lock.txt", "a") as f:
+        f.write("# kept\n")
+    check_311 = [
+        "calkit",
+        "check",
+        "venv",
+        "reqs.txt",
+        "-o",
+        "lock.txt",
+        "--python",
+        "3.11",
+    ]
+    subprocess.check_call(check_311)
+    with open("lock.txt") as f:
+        assert f.read() == lock_txt_4 + "# kept\n"
+    # One that can't be installed fails rather than diverging from the env
+    with open("lock.txt", "w") as f:
+        f.write("polars==0.0.0\n")
+    result = subprocess.run(check_311, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "out of sync with its lock" in result.stderr + result.stdout
+    assert not [f for f in os.listdir() if f.startswith(("osx-", "linux-"))]
 
 
 def test_check_venv_moved(tmp_dir):
@@ -117,6 +155,29 @@ def test_check_venv_moved(tmp_dir):
     else:
         cmd = f". \"{activate_fpath}\" && python -c 'import requests'"
     subprocess.check_call(cmd, shell=True)
+    # A local package is installed from the spec rather than locked, so the
+    # lock still installs once the project has moved
+    os.makedirs(os.path.join("a", "pkg"))
+    with open(os.path.join("a", "pkg", "pyproject.toml"), "w") as f:
+        f.write(
+            '[project]\nname = "calkit-test-pkg"\nversion = "0.1.0"\n'
+            '[build-system]\nrequires = ["setuptools"]\n'
+            'build-backend = "setuptools.build_meta"\n'
+        )
+    with open(os.path.join("a", "pkg", "calkit_test_pkg.py"), "w") as f:
+        f.write("")
+    with open(os.path.join("a", "reqs.txt"), "w") as f:
+        f.write("idna\n-e ./pkg\n")
+    check = ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    subprocess.check_call(check, cwd="a")
+    with open(os.path.join("a", "lock.txt")) as f:
+        lock = f.read()
+    assert "idna==" in lock
+    assert "file:" not in lock and "calkit-test-pkg" not in lock
+    os.rename("a", "b")
+    subprocess.check_call(check, cwd="b")
+    with open(os.path.join("b", "lock.txt")) as f:
+        assert f.read() == lock
 
 
 def test_check_env_vars(tmp_dir):
@@ -904,6 +965,39 @@ def test_check_env_rejects_an_invalid_lock_property(tmp_dir):
     assert not os.path.exists(os.path.join(".calkit", "env-locks", "laptop"))
 
 
+def test_check_env_stages_the_lock_it_writes(tmp_dir, monkeypatch):
+    import calkit.dvc.core
+
+    # DVC stages dvc.lock, which records the lock's hash, so the lock is
+    # staged with it rather than left out of the commit
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"laptop": {"kind": "system", "lock": ["os"]}}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    lock_fpath = ".calkit/env-locks/laptop/info.json"
+    subprocess.check_call(["calkit", "check", "env", "-n", "laptop"])
+    repo = calkit.git.get_repo()
+    assert lock_fpath in repo.git.diff("--cached", "--name-only").split()
+    repo.git.commit("-m", "Lock")
+    # Not when the project doesn't autostage, or Calkit doesn't
+    assert calkit.dvc.autostage_enabled()
+    with monkeypatch.context() as m:
+        m.setattr(calkit.dvc.core, "AUTOSTAGE", False)
+        assert not calkit.dvc.autostage_enabled()
+        assert calkit.dvc.configure_autostage() == 0
+    subprocess.check_call(
+        ["calkit", "dvc", "config", "core.autostage", "false"]
+    )
+    assert not calkit.dvc.autostage_enabled()
+    ck_info["environments"]["laptop"]["lock"] = ["os", "machine"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "check", "envs"])
+    assert lock_fpath in repo.git.diff("--name-only").split()
+    assert lock_fpath not in repo.git.diff("--cached", "--name-only").split()
+
+
 def test_check_env_checks_system_requirements(tmp_dir):
     # A system env's requirements gate the machine it names, and are
     # checked before its lock is written, so a machine that doesn't meet
@@ -1329,6 +1423,241 @@ def test_check_questions(tmp_dir):
         calkit.ryaml.dump({}, f)
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "No questions defined." in out
+
+
+def test_check_switch_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "pick": {
+                "kind": "switch",
+                "switch": [{"use": "here"}],
+                "lock": ["os"],
+            },
+            "never": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"app_exists": "calkit-test-no-such-app"}],
+                        "use": "here",
+                    }
+                ],
+            },
+            "here": {"kind": "system"},
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Checking a switch writes its lock and checks what it picks here
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "pick", "--verbose"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "picks 'here' here" in res.stdout
+    assert os.path.isfile(".calkit/env-locks/pick/switch.json")
+    with open(".calkit/env-locks/pick/info.json") as f:
+        assert json.load(f) == {"os": calkit.get_system_info()["os"]}
+    # One that picks nothing warns rather than failing
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "never"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    assert "picks no environment" in res.stdout + res.stderr
+    # Until a stage has run with a switch, every option's machine lock is
+    # part of its lock, even one written after compiling wrote the lock
+    envs = ck_info["environments"]
+    envs["a"] = {"kind": "system", "lock": ["os"]}
+    envs["b"] = {"kind": "system", "lock": ["machine"]}
+    envs["two"] = {
+        "kind": "switch",
+        "switch": [
+            {"when": [{"env_var_set": "CK_TEST_NO_SUCH_VAR"}], "use": "b"},
+            {"use": "a"},
+        ],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    switch_lock = calkit.environments.write_switch_env_lock("two", envs)
+    calkit.environments.write_system_env_lock(env_name="a", env=envs["a"])
+    subprocess.check_call(["calkit", "check", "env", "-n", "two"])
+    with open(switch_lock) as f:
+        assert set(json.load(f)["machine_locks"]) == {"a"}
+    # After that, one first written is a machine taking up its option
+    with open("dvc.lock", "w") as f:
+        f.write(f"deps:\n- path: {switch_lock}\n")
+    calkit.environments.write_system_env_lock(env_name="b", env=envs["b"])
+    subprocess.check_call(["calkit", "check", "env", "-n", "two"])
+    with open(switch_lock) as f:
+        assert set(json.load(f)["machine_locks"]) == {"a"}
+
+
+def test_check_stage_runs(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                name: {
+                    "kind": "shell-command",
+                    "command": f"echo {name} > {name}.txt",
+                    "environment": "_system",
+                    "outputs": [{"path": f"{name}.txt", "storage": "git"}],
+                }
+                for name in ["a", "b"]
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check = ["calkit", "check", "stage-runs"]
+    subprocess.check_call(["calkit", "run"])
+    # Each run records what dvc.lock then said about the stage, with the
+    # commit it started from
+    with open(calkit.STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    lock = calkit.dvc.read_lock_stages()
+    assert stage_runs["a"]["dvc_lock_hash"] == calkit.dvc.stage_lock_hash(
+        lock["a"]
+    )
+    assert stage_runs["a"]["dvc_lock_hash"].startswith("sha256:")
+    assert stage_runs["a"]["git_rev"] == git.Repo().head.commit.hexsha
+    assert stage_runs["a"]["git_dirty"]
+    subprocess.check_call(check)
+    # An output edited and committed to dvc.lock without running the stage
+    # doesn't match
+    with open("a.txt", "w") as f:
+        f.write("edited\n")
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "a"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Stage 'a' has changed in dvc.lock" in res.stdout
+    assert "'b'" not in res.stdout
+    # Nor does a stage with no recorded run, e.g., run outside Calkit
+    with open(calkit.STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    del stage_runs["b"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'b' has no recorded run" in res.stdout
+    # Rerunning them records them again
+    subprocess.check_call(["calkit", "run", "--force"])
+    subprocess.check_call(check)
+
+
+def test_check_env_rebuilds(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    with open("local.txt", "w") as f:
+        f.write("one\n")
+    ck_info: dict = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+                "inputs": ["local.txt"],
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check = ["calkit", "check", "env", "-n", "py"]
+    subprocess.check_call(check)
+    marker = os.path.join(".venv", "marker")
+    # Checking again reuses what was built
+    open(marker, "w").close()
+    subprocess.check_call(check)
+    assert os.path.isfile(marker)
+    # --force rebuilds it from scratch
+    subprocess.check_call(check + ["--force"])
+    assert not os.path.isfile(marker)
+    assert os.path.isdir(".venv")
+    # So does an input changing
+    open(marker, "w").close()
+    with open("local.txt", "w") as f:
+        f.write("two\n")
+    subprocess.check_call(check)
+    assert not os.path.isfile(marker)
+    # An input outside the project is refused
+    ck_info["environments"]["py"]["inputs"] = ["../outside.txt"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode != 0
+    # A switch's own inputs rebuild what it picks
+    ck_info["environments"]["py"]["inputs"] = []
+    ck_info["environments"]["sw"] = {
+        "kind": "switch",
+        "switch": [{"use": "py"}],
+        "inputs": ["local.txt"],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check_switch = ["calkit", "check", "env", "-n", "sw"]
+    subprocess.check_call(check_switch)
+    open(marker, "w").close()
+    subprocess.check_call(check_switch)
+    assert os.path.isfile(marker)
+    with open("local.txt", "w") as f:
+        f.write("three\n")
+    subprocess.check_call(check_switch)
+    assert not os.path.isfile(marker)
+    # An renv env's library is what a rebuild removes
+    library = os.path.join("r", "renv", "library")
+    os.makedirs(library)
+    envs = {"r": {"kind": "renv", "path": "r/DESCRIPTION"}}
+    assert calkit.environments.remove_built_env("r", envs) == library
+    assert not os.path.exists(library)
+
+
+def test_check_env_locks_every_venv_platform(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    ck_info = {
+        "environments": {
+            "plain": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            },
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    lock_dir = os.path.join(".calkit", "env-locks", "plain")
+    # With uv available, a plain venv is locked for other platforms too, so
+    # another machine reads its lock as current rather than relocking
+    locks = os.listdir(lock_dir)
+    assert len(locks) > 1
+    # Without a declared Python, so machines with different ones agree
+    recorded = calkit.environments.read_env_spec_hash(
+        os.path.join(lock_dir, locks[0])
+    )
+    assert recorded == calkit.environments.env_spec_hash("requirements.txt")
+    # A matching lock with no record, e.g., from before records were kept, is
+    # adopted without relocking other platforms
+    here = calkit.environments._conda_venv_platform() + ".txt"
+    sibling = os.path.join(lock_dir, next(f for f in locks if f != here))
+    os.remove(sibling)
+    os.remove(calkit.environments.ENV_SPEC_HASHES_FPATH)
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    assert calkit.environments.read_env_spec_hash(sibling) == recorded
+    assert not os.path.isfile(sibling)
+    # A changed spec relocks every platform together
+    with open("requirements.txt", "a") as f:
+        f.write("certifi\n")
+    subprocess.check_call(["calkit", "check", "env", "-n", "plain"])
+    assert sorted(os.listdir(lock_dir)) == sorted(locks)
+    for fname in locks:
+        with open(os.path.join(lock_dir, fname)) as f:
+            assert "certifi==" in f.read()
 
 
 def test_check_storage(tmp_dir):

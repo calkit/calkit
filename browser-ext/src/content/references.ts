@@ -536,4 +536,11 @@ runContentScript({
     panel?.remove();
     panel = null;
   },
+  authChanged: () => {
+    void start();
+    const reference = detectReference();
+    if (reference && panel?.host.isConnected) {
+      void openPanel(reference);
+    }
+  },
 });

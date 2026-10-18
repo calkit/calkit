@@ -52,6 +52,7 @@ import { Route as LayoutAccountNameProjectNameLayoutDatasetsRouteImport } from '
 import { Route as LayoutAccountNameProjectNameLayoutCollaboratorsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/collaborators'
 import { Route as LayoutAccountNameProjectNameLayoutAppsRouteImport } from './routes/_layout/$accountName/$projectName/_layout/apps'
 import { Route as LayoutAccountNameProjectNameLayoutAppRouteImport } from './routes/_layout/$accountName/$projectName/_layout/app'
+import { Route as LayoutAccountNameProjectNameLayoutQuestionsIndexRouteImport } from './routes/_layout/$accountName/$projectName/_layout/questions.index'
 import { Route as LayoutAccountNameProjectNameLayoutAppsIndexRouteImport } from './routes/_layout/$accountName/$projectName/_layout/apps/index'
 import { Route as LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRouteImport } from './routes/_layout/$accountName/$projectName/_layout/questions.$questionNumber'
 import { Route as LayoutAccountNameProjectNameLayoutAppsAppNameRouteImport } from './routes/_layout/$accountName/$projectName/_layout/apps/$appName'
@@ -289,6 +290,12 @@ const LayoutAccountNameProjectNameLayoutAppRoute =
     path: '/app',
     getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
   } as any)
+const LayoutAccountNameProjectNameLayoutQuestionsIndexRoute =
+  LayoutAccountNameProjectNameLayoutQuestionsIndexRouteImport.update({
+    id: '/questions/',
+    path: '/questions/',
+    getParentRoute: () => LayoutAccountNameProjectNameLayoutRoute,
+  } as any)
 const LayoutAccountNameProjectNameLayoutAppsIndexRoute =
   LayoutAccountNameProjectNameLayoutAppsIndexRouteImport.update({
     id: '/',
@@ -352,6 +359,7 @@ export interface FileRoutesByFullPath {
   '/$accountName/$projectName/apps/$appName': typeof LayoutAccountNameProjectNameLayoutAppsAppNameRoute
   '/$accountName/$projectName/questions/$questionNumber': typeof LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute
   '/$accountName/$projectName/apps/': typeof LayoutAccountNameProjectNameLayoutAppsIndexRoute
+  '/$accountName/$projectName/questions': typeof LayoutAccountNameProjectNameLayoutQuestionsIndexRoute
 }
 export interface FileRoutesByTo {
   '/checkout': typeof CheckoutRoute
@@ -395,6 +403,7 @@ export interface FileRoutesByTo {
   '/$accountName/$projectName/apps/$appName': typeof LayoutAccountNameProjectNameLayoutAppsAppNameRoute
   '/$accountName/$projectName/questions/$questionNumber': typeof LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute
   '/$accountName/$projectName/apps': typeof LayoutAccountNameProjectNameLayoutAppsIndexRoute
+  '/$accountName/$projectName/questions': typeof LayoutAccountNameProjectNameLayoutQuestionsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -443,6 +452,7 @@ export interface FileRoutesById {
   '/_layout/$accountName/$projectName/_layout/apps/$appName': typeof LayoutAccountNameProjectNameLayoutAppsAppNameRoute
   '/_layout/$accountName/$projectName/_layout/questions/$questionNumber': typeof LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute
   '/_layout/$accountName/$projectName/_layout/apps/': typeof LayoutAccountNameProjectNameLayoutAppsIndexRoute
+  '/_layout/$accountName/$projectName/_layout/questions/': typeof LayoutAccountNameProjectNameLayoutQuestionsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -490,6 +500,7 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/apps/$appName'
     | '/$accountName/$projectName/questions/$questionNumber'
     | '/$accountName/$projectName/apps/'
+    | '/$accountName/$projectName/questions'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/checkout'
@@ -533,6 +544,7 @@ export interface FileRouteTypes {
     | '/$accountName/$projectName/apps/$appName'
     | '/$accountName/$projectName/questions/$questionNumber'
     | '/$accountName/$projectName/apps'
+    | '/$accountName/$projectName/questions'
   id:
     | '__root__'
     | '/_layout'
@@ -580,6 +592,7 @@ export interface FileRouteTypes {
     | '/_layout/$accountName/$projectName/_layout/apps/$appName'
     | '/_layout/$accountName/$projectName/_layout/questions/$questionNumber'
     | '/_layout/$accountName/$projectName/_layout/apps/'
+    | '/_layout/$accountName/$projectName/_layout/questions/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -893,6 +906,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutAppRouteImport
       parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
     }
+    '/_layout/$accountName/$projectName/_layout/questions/': {
+      id: '/_layout/$accountName/$projectName/_layout/questions/'
+      path: '/questions'
+      fullPath: '/$accountName/$projectName/questions'
+      preLoaderRoute: typeof LayoutAccountNameProjectNameLayoutQuestionsIndexRouteImport
+      parentRoute: typeof LayoutAccountNameProjectNameLayoutRoute
+    }
     '/_layout/$accountName/$projectName/_layout/apps/': {
       id: '/_layout/$accountName/$projectName/_layout/apps/'
       path: '/'
@@ -955,6 +975,7 @@ interface LayoutAccountNameProjectNameLayoutRouteChildren {
   LayoutAccountNameProjectNameLayoutWorkspacesRoute: typeof LayoutAccountNameProjectNameLayoutWorkspacesRoute
   LayoutAccountNameProjectNameLayoutIndexRoute: typeof LayoutAccountNameProjectNameLayoutIndexRoute
   LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute: typeof LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute
+  LayoutAccountNameProjectNameLayoutQuestionsIndexRoute: typeof LayoutAccountNameProjectNameLayoutQuestionsIndexRoute
 }
 
 const LayoutAccountNameProjectNameLayoutRouteChildren: LayoutAccountNameProjectNameLayoutRouteChildren =
@@ -997,6 +1018,8 @@ const LayoutAccountNameProjectNameLayoutRouteChildren: LayoutAccountNameProjectN
       LayoutAccountNameProjectNameLayoutIndexRoute,
     LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute:
       LayoutAccountNameProjectNameLayoutQuestionsQuestionNumberRoute,
+    LayoutAccountNameProjectNameLayoutQuestionsIndexRoute:
+      LayoutAccountNameProjectNameLayoutQuestionsIndexRoute,
   }
 
 const LayoutAccountNameProjectNameLayoutRouteWithChildren =

@@ -88,7 +88,6 @@ stages:
     deps:
       - docs/one-pager/main.md
       - docs/one-pager/one-pager.lua
-      - results/research-flow.json
       - results/2027-budget.json
       - docs/img/pipeline.png
       - calkit.yaml

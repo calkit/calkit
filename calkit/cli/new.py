@@ -945,6 +945,73 @@ def new_question(
         repo.git.commit(["-m", "Add question"])
 
 
+@new_app.command(name="comment")
+def new_comment(
+    path: Annotated[str, typer.Argument(help="File to comment in.")],
+    line: Annotated[
+        int,
+        typer.Option(
+            "--line",
+            "-l",
+            help="A line in, or just above, the paragraph to comment on.",
+        ),
+    ],
+    text: Annotated[str, typer.Option("--text", "-m", help="The comment.")],
+    highlight: Annotated[
+        str | None,
+        typer.Option(
+            "--highlight", help="Rendered text in the paragraph it's about."
+        ),
+    ] = None,
+    occ: Annotated[
+        int,
+        typer.Option(
+            "--occ", help="Which occurrence of the highlight text, from 0."
+        ),
+    ] = 0,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", help="Defaults to Git's user.name."),
+    ] = None,
+    email: Annotated[
+        str | None,
+        typer.Option("--email", help="Defaults to Git's user.email."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output the thread as JSON.")
+    ] = False,
+) -> None:
+    """Start a review comment thread above a paragraph of a LaTeX or
+    Markdown document, printing its ID."""
+    import json
+
+    import calkit.latex
+    from calkit.cli.latex import comment_entry
+
+    if not os.path.isfile(path):
+        raise_error(f"{path} does not exist")
+    lines = pathlib.Path(path).read_text(encoding="utf-8").split("\n")
+    tc = calkit.latex.TexComment(
+        [comment_entry(text, author, email)],
+        highlight=highlight or None,
+        highlight_occ=occ,
+        id=calkit.latex.new_comment_id(),
+        markdown=calkit.latex.is_markdown(path),
+    )
+    try:
+        calkit.latex.add_comment(lines, line, tc)
+    except ValueError as e:
+        raise_error(str(e))
+    pathlib.Path(path).write_text("\n".join(lines), encoding="utf-8")
+    if as_json:
+        blks = calkit.latex.file_blocks(path, lines)
+        typer.echo(
+            json.dumps(calkit.latex.comment_to_dict(path, tc, blks), indent=2)
+        )
+    else:
+        typer.echo(tc.id)
+
+
 @new_app.command("notebook|nb")
 def new_notebook(
     path: Annotated[str, typer.Argument(help="Notebook path (relative)")],

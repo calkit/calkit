@@ -92,10 +92,6 @@ calkit run
 ```
 
 ```
-💻 Getting system information
-🔗 Checking system-level requirements
-📦 Checking environments
-🔀 Compiling DVC pipeline
 Running stage 'collect-data':
 Running stage 'analyze':
 Running stage 'figs-to-paper':
@@ -136,7 +132,7 @@ calkit status
 ```
 --------------------------- Questions ----------------------------
 1 question, 1 with stale evidence
-Run 'calkit check questions' for detail.
+Run 'calkit check questions' for details.
 
 ---------------------------- Pipeline ----------------------------
 Stale stages:

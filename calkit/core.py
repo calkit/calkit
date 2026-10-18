@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import csv
+import functools
 import glob
 import hashlib
 import json
@@ -30,7 +32,7 @@ except ImportError:
     UTC = _timezone.utc
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Iterator, Literal
 
 if TYPE_CHECKING:
     from calkit.models import ProjectInfo, ProjectStatus
@@ -327,6 +329,8 @@ DVC_EXTENSIONS = [
     ".zarr",
 ]
 DVC_SIZE_THRESH_BYTES = 5_000_000
+# How each stage's current outputs were made, kept with the project
+STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
 
 
 def check_or_x(val: bool | int) -> str:
@@ -435,6 +439,104 @@ def load_calkit_info(
     return info
 
 
+def iter_projects(
+    wdir: str | None = None,
+    ck_info: dict | None = None,
+    read_only: bool = True,
+    _seen: set[str] | None = None,
+) -> Iterator[tuple[str, dict]]:
+    """Yield ``(wdir, ck_info)`` for a project and each of its subprojects.
+
+    Parent first, depth first, with paths relative to ``wdir``. A check
+    that loops over this covers everything ``calkit run`` would run, which
+    is what makes a subproject's requirements and environments part of the
+    parent's rather than something only found by going in there.
+    """
+    base = os.path.normpath(wdir) if wdir else "."
+    if ck_info is None:
+        ck_info = load_calkit_info(wdir=base, read_only=read_only)
+    yield base, ck_info
+    # A subproject declaring its parent, or itself, would otherwise recurse
+    # until the stack runs out
+    seen = _seen if _seen is not None else {os.path.realpath(base)}
+    for subproject in ck_info.get("subprojects") or []:
+        path = subproject.get("path") if isinstance(subproject, dict) else None
+        if not isinstance(path, str):
+            continue
+        sp_wdir = os.path.normpath(os.path.join(base, path))
+        real = os.path.realpath(sp_wdir)
+        if real in seen or not os.path.isfile(
+            os.path.join(sp_wdir, "calkit.yaml")
+        ):
+            continue
+        seen.add(real)
+        yield from iter_projects(wdir=sp_wdir, read_only=read_only, _seen=seen)
+
+
+def get_subprojects(ck_info: dict | None = None) -> dict[str, dict]:
+    """Map each subproject's path, relative to the project, to the project
+    declaring it (``parent``), its entry there, and its own ``ck_info``.
+
+    Nested subprojects are included, in the order ``iter_projects`` visits
+    them.
+    """
+    from pathlib import Path
+
+    projects = {
+        Path(wdir).as_posix(): info
+        for wdir, info in iter_projects(ck_info=ck_info)
+    }
+    found: dict[str, dict] = {}
+    for wdir, info in projects.items():
+        for entry in info.get("subprojects") or []:
+            if not isinstance(entry, dict) or not isinstance(
+                entry.get("path"), str
+            ):
+                continue
+            sp = Path(os.path.normpath(os.path.join(wdir, entry["path"])))
+            sp_posix = sp.as_posix()
+            if sp_posix in projects and sp_posix != ".":
+                found.setdefault(
+                    sp_posix,
+                    {
+                        "parent": wdir,
+                        "entry": entry,
+                        "ck_info": projects[sp_posix],
+                    },
+                )
+    return {p: found[p] for p in projects if p in found}
+
+
+def describe_project(wdir: str) -> str:
+    """How to name a subproject in a message, and nothing for the project
+    itself."""
+    return "" if wdir in (".", "") else f"subproject '{wdir}': "
+
+
+def qualify_with_project(wdir: str, name: str) -> str:
+    """Name something in a subproject the way its stages are named."""
+    if wdir in (".", ""):
+        return name
+    from pathlib import Path
+
+    return f"{Path(os.path.normpath(wdir)).as_posix()}:{name}"
+
+
+@contextlib.contextmanager
+def in_project(wdir: str) -> Iterator[None]:
+    """Work from a project's directory, with its ``.env`` loaded, as if
+    running from there."""
+    import dotenv
+
+    prev_wdir = os.getcwd()
+    os.chdir(wdir)
+    try:
+        dotenv.load_dotenv(dotenv_path=".env")
+        yield
+    finally:
+        os.chdir(prev_wdir)
+
+
 def save_calkit_info(
     info: dict,
     wdir: str | PathLike | None = None,
@@ -462,6 +564,34 @@ def utcnow(remove_tz=True) -> datetime:
     if remove_tz:
         dt = dt.replace(tzinfo=None)
     return dt
+
+
+# Where set_env_vars keeps the user's own home directory when a project's
+# env_vars change it, e.g., to /tmp for a tool a stage runs, so Calkit still
+# finds its config, credentials, and caches
+USER_HOME_ENV_VAR = "CALKIT_USER_HOME"
+
+
+# These are here rather than in calkit.config, which every command's update
+# check would otherwise import, with keyring and pydantic-settings, only to
+# find where its state is kept
+def get_user_home() -> str:
+    """The home directory Calkit keeps its own files in."""
+    return os.environ.get(USER_HOME_ENV_VAR) or os.path.expanduser("~")
+
+
+def get_env_suffix(sep: str = "-") -> str:
+    """Suffix for the config file name, keyring service, and env var
+    prefix.
+
+    All real hubs share a single config file and keyring service, with
+    hub credentials scoped inside them (see ``calkit.config``); only the
+    test environment gets its own isolated config, so tests never touch
+    real credentials.
+    """
+    if os.getenv("CALKIT_ENV") == "test":
+        return sep + "test"
+    return ""
 
 
 LOCAL_DIR = ".calkit/local"
@@ -618,6 +748,19 @@ def update_readme_content(
     return heading + intro + ("\n" + body if body else "")
 
 
+def is_tty() -> bool:
+    """True only when both stdin and stdout are TTYs.
+
+    Stdout matters because the prompt needs to render; stdin matters because
+    we need to read the user's answer. CI environments fail at least one
+    and fall through to the abort-with-fix-command path.
+    """
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def check_dep_exists(
     name: str,
     kind: Literal["app", "env-var", "calkit-config"] = "app",
@@ -636,7 +779,7 @@ def check_dep_exists(
         return getattr(cfg, name, None) is not None
     if name == "calkit":
         return True
-    if system_info is not None and system_info.get(f"{name}_version"):
+    if system_info is not None and system_info.get(f"{name.lower()}_version"):
         return True
     # Conda and mamba are frequently installed but not on the PATH (most
     # commonly on Windows), so search their typical install locations
@@ -746,31 +889,40 @@ def _normalize_requirement(req) -> dict:
     required there. A ``setup`` requirement may omit it, since a single
     anonymous setup step is common and forcing users to invent a name adds
     friction; a stable one is synthesized from a short hash of
-    ``check_command``. A machine-property requirement has no name at all --
+    ``check_command``. An ``aws-credentials`` requirement may omit it too,
+    and is named after its profile and account. A machine-property
+    requirement has no name at all --
     ``kind: cpu-count`` already says everything there is to say about which
     property it constrains -- so the kind is used as the name in messages.
     """
-    dep = req
-    if isinstance(dep, str):
+
+    def malformed() -> ValueError:
+        return ValueError(
+            f"Malformed requirement {req!r}; list an app by name, e.g., "
+            "'- sbatch' or '- python>=3.11', or give the requirement's "
+            "'kind', e.g., '- kind: env-var' with 'name: TOKEN'"
+        )
+
+    if isinstance(req, str):
         # Split on the first version operator so a string like
         # ``calkit>=0.38`` produces both a clean name and a version spec
         # the caller can validate.
-        m = re.match(r"^([A-Za-z0-9_.\-]+)(.*)$", dep.strip())
+        m = re.match(r"^([A-Za-z0-9_.\-]+)(.*)$", req.strip())
         if m is None:
-            raise ValueError(f"Malformed requirement: {dep}")
+            raise malformed()
         out: dict = {"name": m.group(1), "kind": "app"}
         spec = m.group(2).strip()
         if spec:
             out["version_spec"] = spec
         return out
-    if not isinstance(dep, dict):
-        raise ValueError(f"Malformed requirement: {dep}")
-    keys = list(dep.keys())
+    if not isinstance(req, dict):
+        raise malformed()
+    keys = list(req.keys())
     # Flat form with explicit kind: only requires ``name`` for kinds where
     # name is the identity (app, env-var). Setup requirements may omit it,
     # and property requirements have none to give.
     if "kind" in keys:
-        out = dict(dep)
+        out = dict(req)
         if "name" not in out:
             kind = out["kind"]
             if kind in system_property_requirement_kinds():
@@ -781,20 +933,29 @@ def _normalize_requirement(req) -> dict:
                     check_command.encode("utf-8")
                 ).hexdigest()[:8]
                 out["name"] = f"setup-{short}"
+            elif kind == "aws-credentials":
+                out["name"] = "-".join(
+                    ["aws-credentials"]
+                    + [
+                        str(out[key])
+                        for key in ("profile", "account_id")
+                        if out.get(key)
+                    ]
+                )
             else:
-                raise ValueError(f"Requirement missing required 'name': {dep}")
+                raise ValueError(f"Requirement missing required 'name': {req}")
         return out
     if "name" in keys:
-        out = dict(dep)
+        out = dict(req)
         out.setdefault("kind", "app")
         return out
     if len(keys) != 1:
-        raise ValueError(f"Malformed requirement: {dep}")
+        raise malformed()
     # Single-key form: {name: {kind: ..., ...}}
     name = keys[0]
-    attrs = dep[name] or {}
+    attrs = req[name] or {}
     if not isinstance(attrs, dict):
-        raise ValueError(f"Malformed requirement: {dep}")
+        raise malformed()
     out = dict(attrs)
     out["name"] = name
     out.setdefault("kind", "app")
@@ -851,12 +1012,26 @@ def check_property_requirement(
         return
     equals = req.get("equals")
     spec = req.get("version_spec")
-    if equals is None and spec is None:
+    patterns = req.get("matches")
+    if equals is None and spec is None and patterns is None:
         raise ValueError(
-            f"Requirement on '{prop}' needs an 'equals' or a 'version_spec'; "
-            "to depend on its value rather than constrain it, add it to the "
-            "environment's 'lock'"
+            f"Requirement on '{prop}' needs an 'equals', 'matches' or a "
+            "'version_spec'; to depend on its value rather than constrain "
+            "it, add it to the environment's 'lock'"
         )
+    if patterns is not None:
+        import fnmatch
+
+        globs = [patterns] if isinstance(patterns, str) else list(patterns)
+        if not any(
+            fnmatch.fnmatchcase(str(value).lower(), str(g).lower())
+            for g in globs
+        ):
+            wanted = " or ".join(f"'{g}'" for g in globs)
+            raise ValueError(
+                f"{described_as} has {prop} '{value}', which doesn't match "
+                f"{wanted}"
+            )
     if equals is not None:
         allowed = [equals] if isinstance(equals, str) else list(equals)
         # Matched case-insensitively because the same machine is 'Darwin'
@@ -898,16 +1073,31 @@ def _fmt_prop(value: float) -> str:
     return str(value)
 
 
-def extract_version(text: str) -> str | None:
+def extract_version(text: str, full: bool = False) -> str | None:
     """Pull a comparable version out of what a tool prints for ``--version``.
 
     Tools answer that question in their own way -- 'git version 2.39.5',
     'uv 0.4.18 (a1b2c3d)' -- so the number has to be found rather than
-    read off. The first dotted number is it in every case we've seen; a
-    build hash that follows is not part of what a specifier compares.
+    read off. It's the first dotted number not inside another number,
+    which may follow letters, e.g., 'go1.22.0' or 'OpenSSH_9.6p1'. Failing
+    that, it's a bare number that doesn't follow a word, so a name like
+    'x86_64' isn't mistaken for it, though letters may follow, as in
+    Windows Server's release, '2025Server'. A year like nvcc's
+    'Copyright (c) 2005' is only taken if there's no dotted number. A build
+    hash that follows is not part of what a specifier compares.
+
+    With ``full``, a suffix attached to the number is kept, e.g.,
+    '3.12.10rc1' or '11.4.0-1ubuntu1~22.04'.
     """
-    m = re.search(r"\d+(?:\.\d+)+|\d+", text or "")
-    return m.group(0) if m else None
+    m = re.search(
+        r"(?<![\d.])v?(\d+(?:\.\d+)+)((?:[-+~.]?[0-9A-Za-z]+)*)", text or ""
+    ) or re.search(
+        r"(?<![\w.])v?(\d+)((?:[-+~]?[A-Za-z][0-9A-Za-z]*)*)(?![\d.])",
+        text or "",
+    )
+    if m is None:
+        return None
+    return m.group(1) + m.group(2) if full else m.group(1)
 
 
 def check_app_version(
@@ -933,7 +1123,7 @@ def check_app_version(
     from packaging.specifiers import SpecifierSet
     from packaging.version import InvalidVersion, Version
 
-    raw = (system_info or {}).get(f"{name}_version")
+    raw = (system_info or {}).get(f"{name.lower()}_version")
     if raw is None and probe_locally:
         raw = get_dep_version(name)
     found = extract_version(raw) if raw else None
@@ -963,6 +1153,63 @@ def check_app_version(
         )
 
 
+def get_version_checked_app_names(
+    ck_info: dict, stage_names: list[str] | set[str] | None = None
+) -> list[str]:
+    """The apps a requirement checked here gives a version spec for.
+
+    Only these are worth asking for a version up front, since some apps,
+    e.g., MATLAB, take seconds to say. That's the project's requirements
+    and those of the stages in ``stage_names``, or all stages, and their
+    environments, except for stages run on another machine, whose
+    requirements are checked there.
+    """
+    from calkit.environments import (
+        COMPOSITE_ENV_SEP,
+        SWITCH_KIND,
+        runs_elsewhere,
+    )
+
+    envs = ck_info.get("environments") or {}
+    reqs = list(get_requirements(ck_info))
+    stages = (ck_info.get("pipeline") or {}).get("stages", {})
+    for name, stage in stages.items():
+        if stage_names is not None and name not in stage_names:
+            continue
+        env_names = str(stage.get("environment") or "_system").split(
+            COMPOSITE_ENV_SEP
+        )
+        stage_envs = [envs.get(n) or {} for n in env_names]
+        if any(runs_elsewhere(env) for env in stage_envs):
+            continue
+        # A switch may pick any of its options here that are local
+        for env in list(stage_envs):
+            if env.get("kind") == SWITCH_KIND:
+                # An option is named or, when only the switch uses it,
+                # defined in place
+                options = [
+                    o["use"]
+                    if isinstance(o.get("use"), dict)
+                    else envs.get(o.get("use")) or {}
+                    for o in env.get("switch") or []
+                    if isinstance(o, dict)
+                ]
+                stage_envs += [o for o in options if not runs_elsewhere(o)]
+        reqs += stage.get("requirements") or []
+        for env in stage_envs:
+            reqs += env.get("requirements") or []
+    names = []
+    for raw in reqs:
+        req = _normalize_requirement(raw)
+        if (
+            req["kind"] == "app"
+            and req["name"] != "calkit"
+            and req.get("version_spec")
+        ):
+            names.append(req["name"])
+    return list(dict.fromkeys(names))
+
+
 def check_requirements(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -980,36 +1227,37 @@ def check_requirements(
     machine it names.
 
     ``setup`` requirements are verified via
-    :func:`calkit.dependencies.check_setup_dep`, which runs the
+    :func:`calkit.requirements.check_setup_dep`, which runs the
     ``check_command`` and -- on an interactive TTY -- optionally runs the
     declared ``setup_command`` after asking the user. Non-interactive
     failures abort with the fix-it command printed for the user to run.
+    ``aws-credentials`` requirements are checked the same way, by
+    :func:`calkit.requirements.check_aws_credentials_req`.
     """
     if requirements is not None:
         # An environment's own list is checked exactly as declared: it
         # describes a machine that runs stages, which is a smaller claim
         # than being where the project lives.
-        deps = list(requirements)
+        reqs = list(requirements)
     else:
         if ck_info is None:
             ck_info = load_calkit_info(wdir=wdir)
-        deps = get_requirements(ck_info)
+        reqs = get_requirements(ck_info)
         # Git is how a project exists at all, so the host needs it whether
         # or not anyone wrote it down.
-        if "git" not in deps:
-            deps.append("git")
+        if "git" not in reqs:
+            reqs.append("git")
     # Resolve TTY interactivity once so a single per-call answer drives
     # every prompt (env-var, app installer, setup step).
     if interactive is None:
-        from calkit.dependencies import _is_interactive
-
-        interactive = _is_interactive()
+        interactive = is_tty()
     # Process in dependency order: machine properties first, since a
     # machine that is too small to run the project at all should say so
     # before we start installing things on it, then env-vars (some
     # installers and setup commands read from them), then apps (env
     # managers like pixi / uv need to exist before setup steps that run
-    # inside an env), then setup steps last. The setup-step
+    # inside an env), then setup steps, then AWS credentials, which need
+    # the AWS CLI and may be set up by a step. The setup-step
     # ``check_command`` typically wraps ``calkit xenv``, which validates
     # its own environment, so we don't need a separate env-check phase.
     property_kinds = system_property_requirement_kinds()
@@ -1018,62 +1266,69 @@ def check_requirements(
         "env-var": [],
         "app": [],
         "setup": [],
+        "aws-credentials": [],
     }
-    for raw_dep in deps:
-        dep = _normalize_requirement(raw_dep)
-        kind = dep["kind"]
+    for raw in reqs:
+        req = _normalize_requirement(raw)
+        kind = req["kind"]
         if kind in property_kinds:
-            buckets["_property"].append(dep)
+            buckets["_property"].append(req)
         elif kind not in buckets:
             # Unknown / legacy kinds (e.g., ``calkit-config``) fall through
             # to ``check_dep_exists`` in original order so we don't change
             # behavior for them silently.
-            buckets.setdefault("_other", []).append(dep)
+            buckets.setdefault("_other", []).append(req)
         else:
-            buckets[kind].append(dep)
+            buckets[kind].append(req)
     if buckets["_property"]:
         # Read the machine only when something asks about it; describing a
         # system shells out for a version from every package manager it can
         # find, which is not a cost to pay for a project that has no
         # property requirements at all.
-        info = system_info if system_info is not None else get_system_info()
-        for dep in buckets["_property"]:
-            check_property_requirement(dep, info, described_as=described_as)
-    for dep in buckets["env-var"]:
-        dep_name = dep["name"]
-        if dep_name in os.environ:
+        info = (
+            system_info
+            if system_info is not None
+            else get_machine_properties()
+        )
+        for req in buckets["_property"]:
+            check_property_requirement(req, info, described_as=described_as)
+    for req in buckets["env-var"]:
+        req_name = req["name"]
+        if req_name in os.environ:
             continue
         # On a TTY, prompt the user and persist to .env so the very next
         # ``calkit run`` works without a separate setup step. Non-TTY
         # (CI) falls through to the legacy "not found" abort.
         if interactive:
-            from calkit.dependencies import prompt_and_store_env_var
+            from calkit.requirements import prompt_for_env_var_req
 
-            print(f"Missing env var '{dep_name}'")
-            value = prompt_and_store_env_var(
-                dep_name, default=dep.get("default")
-            )
-            if value is not None:
+            if prompt_for_env_var_req(req) is not None:
                 continue
-        raise ValueError(f"env-var '{dep_name}' not found")
-    for dep in buckets["app"]:
-        dep_name = dep["name"]
+        msg = f"env-var '{req_name}' not found"
+        if req.get("setup_command"):
+            msg += (
+                f"; get a value with '{req['setup_command']}' and set it "
+                f"with 'calkit set-env-var {req_name} <value>'"
+            )
+        raise ValueError(msg)
+    for req in buckets["app"]:
+        req_name = req["name"]
         # The ``calkit`` app is always satisfied by the running process,
         # but a declared ``version_spec`` (e.g. ``calkit>=0.38``) is
         # checked against the installed version so projects can pin a
         # minimum CLI without writing a custom setup step.
-        if dep_name == "calkit":
-            spec = dep.get("version_spec")
+        if req_name == "calkit":
+            spec = req.get("version_spec")
             if spec:
-                from calkit.dependencies import check_calkit_version
+                from calkit.requirements import check_calkit_version
 
                 check_calkit_version(spec)
             continue
-        spec = dep.get("version_spec")
-        if check_dep_exists(dep_name, "app", system_info=system_info):
+        spec = req.get("version_spec")
+        if check_dep_exists(req_name, "app", system_info=system_info):
             if spec:
                 check_app_version(
-                    dep_name,
+                    req_name,
                     spec,
                     system_info=system_info,
                     described_as=described_as,
@@ -1082,14 +1337,14 @@ def check_requirements(
         # Offer the registered native installer when we have one.
         from calkit import install as _install
 
-        if _install.get_installer(dep_name) is not None:
-            print(f"App '{dep_name}' is not installed.")
+        if _install.get_installer(req_name) is not None:
+            print(f"App '{req_name}' is not installed.")
             if _install.prompt_and_install(
-                dep_name, interactive=interactive
-            ) and check_dep_exists(dep_name, "app", system_info=system_info):
+                req_name, interactive=interactive
+            ) and check_dep_exists(req_name, "app", system_info=system_info):
                 if spec:
                     check_app_version(
-                        dep_name,
+                        req_name,
                         spec,
                         system_info=system_info,
                         described_as=described_as,
@@ -1097,28 +1352,41 @@ def check_requirements(
                 continue
         # Some apps have no installer here but a known way in, e.g., a
         # system package manager on Linux
-        hint = _install.get_unsupported_message(dep_name)
+        hint = _install.get_unsupported_message(req_name)
         raise ValueError(
-            f"app '{dep_name}' not found on {described_as}"
+            f"app '{req_name}' not found on {described_as}"
             + (f"; {hint}" if hint else "")
         )
-    for dep in buckets.get("_other", []):
-        dep_name = dep["name"]
-        dep_kind = dep["kind"]
-        if not check_dep_exists(dep_name, dep_kind, system_info=system_info):
-            raise ValueError(f"{dep_kind} '{dep_name}' not found")
-    for dep in buckets["setup"]:
-        from calkit.dependencies import check_setup_dep
+    for req in buckets.get("_other", []):
+        req_name = req["name"]
+        req_kind = req["kind"]
+        if not check_dep_exists(req_name, req_kind, system_info=system_info):
+            raise ValueError(f"{req_kind} '{req_name}' not found")
+    for req in buckets["setup"]:
+        from calkit.requirements import check_setup_dep
 
         ok = check_setup_dep(
-            dep,
+            req,
             interactive=interactive,
             use_cache=use_cache,
             wdir=wdir,
         )
         if not ok:
             raise ValueError(
-                f"setup requirement '{dep['name']}' is not satisfied"
+                f"setup requirement '{req['name']}' is not satisfied"
+            )
+    for req in buckets["aws-credentials"]:
+        from calkit.requirements import check_aws_credentials_req
+
+        ok = check_aws_credentials_req(
+            req,
+            interactive=interactive,
+            use_cache=use_cache,
+            wdir=wdir,
+        )
+        if not ok:
+            raise ValueError(
+                f"aws-credentials requirement '{req['name']}' is not satisfied"
             )
 
 
@@ -1132,12 +1400,12 @@ def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
     if ck_info is None:
         ck_info = load_calkit_info()
     env_vars = []
-    for dep in get_requirements(ck_info):
+    for req in get_requirements(ck_info):
         # Delegate shape-parsing to ``_normalize_requirement`` so this stays
         # in lockstep with ``check_requirements`` -- string entries,
         # single-key dicts, flat dicts, and nameless setup steps all flow
         # through one path.
-        normalized = _normalize_requirement(dep)
+        normalized = _normalize_requirement(req)
         if normalized["kind"] == "env-var":
             env_vars.append(normalized["name"])
     return env_vars
@@ -1371,12 +1639,23 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
 
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
-    try:
+    # MATLAB has no '--version', and starts in full if passed one
+    if dep_name == "matlab":
+        cmd = [dep_name, "-batch", "disp(version)"]
+    else:
         cmd = [dep_name, "--version"]
+    try:
+        # Without stdin, a tool that ignores the flag can't wait on a prompt
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            stdin=subprocess.DEVNULL,
+            timeout=120,
         )
-        return result.stdout.strip()
+        # Some tools, e.g., older Java, print their version to stderr
+        return result.stdout.strip() or result.stderr.strip()
     except Exception:
         return None
 
@@ -1441,7 +1720,9 @@ def _read_windows_machine_id() -> str | None:
     return str(value).strip() or None
 
 
+@functools.cache
 def _read_platform_machine_id() -> str | None:
+    # Cached, since it can take a subprocess and is read for every stage
     readers = {
         "Darwin": _read_darwin_machine_id,
         "Linux": _read_linux_machine_id,
@@ -1508,15 +1789,18 @@ def get_machine_id() -> str | None:
     return _read_platform_machine_id()
 
 
-def get_system_info() -> dict:
-    """Get information about the system on which we're currently running."""
+def get_machine_properties() -> dict:
+    """The properties of this machine that are cheap to read.
+
+    Everything in ``get_system_info`` except what it has to run a program
+    for, e.g., tool versions.
+    """
     import psutil
 
-    os_name = platform.system()
-    system_info = {
-        "os": os_name,
+    return {
+        "os": platform.system(),
         "os_version": platform.release(),
-        "python_version": platform.python_version(),
+        "calkit_python_version": platform.python_version(),
         "calkit_version": calkit.__version__,
         "calkit_git_rev": None,
         "hostname": socket.gethostname(),
@@ -1529,6 +1813,34 @@ def get_system_info() -> dict:
         "memory_gb": psutil.virtual_memory().total / (1024**3),
         "cpu_count": os.cpu_count(),
     }
+
+
+# Apps whose versions 'calkit describe system' reports on every OS
+ALWAYS_REPORTED_APPS = (
+    "python",
+    "git",
+    "docker",
+    "conda",
+    "mamba",
+    "uv",
+    "pixi",
+    "Rscript",
+    "juliaup",
+    "julia",
+)
+
+
+def get_system_info(
+    apps: list[str] | None = None, all_apps: bool = True
+) -> dict:
+    """Get information about the system on which we're currently running.
+
+    ``apps`` are reported with a version each, beyond the ones always
+    reported, e.g., the apps a project's requirements name. Without
+    ``all_apps``, only ``apps`` are, since each costs a subprocess.
+    """
+    system_info = get_machine_properties()
+    os_name = system_info["os"]
     node_id = uuid.getnode()
     # The multicast bit is the 40th bit from the right (0-indexed)
     # This corresponds to the least significant bit of the first octet
@@ -1544,29 +1856,19 @@ def get_system_info() -> dict:
         system_info["calkit_git_rev"] = repo.head.commit.hexsha
     except Exception:
         pass
-    # Get versions of important foundational dependencies
-    for dep in [
-        "git",
-        "docker",
-        "conda",
-        "mamba",
-        "uv",
-        "pixi",
-        "Rscript",
-        "juliaup",
-        "julia",
-    ]:
-        system_info[f"{dep}_version"] = get_dep_version(dep)
-    # OS-specific app versions
-    if os_name == "Darwin":
-        for dep in ["brew", "port"]:
-            system_info[f"{dep}_version"] = get_dep_version(dep)
-    elif os_name == "Linux":
-        for dep in ["apt", "yum"]:
-            system_info[f"{dep}_version"] = get_dep_version(dep)
-    elif os_name == "Windows":
-        for dep in ["choco", "winget"]:
-            system_info[f"{dep}_version"] = get_dep_version(dep)
+    # Get versions of important foundational dependencies, and OS-specific
+    # package managers
+    os_apps = {
+        "Darwin": ["brew", "port"],
+        "Linux": ["apt", "yum"],
+        "Windows": ["choco", "winget"],
+    }.get(os_name, [])
+    for dep in [*ALWAYS_REPORTED_APPS, *os_apps]:
+        if all_apps or dep.lower() in [a.lower() for a in apps or []]:
+            system_info[f"{dep.lower()}_version"] = get_dep_version(dep)
+    for app in apps or []:
+        if f"{app.lower()}_version" not in system_info:
+            system_info[f"{app.lower()}_version"] = get_dep_version(app)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info
@@ -1608,10 +1910,8 @@ def set_env_vars(ck_info: dict, cli: bool = True) -> None:
     # A project that points the home directory elsewhere, e.g., at /tmp for
     # a tool a stage runs, would otherwise hide the user's Calkit config,
     # and with it their credentials, from every Calkit command it runs
-    import calkit.config
-
     home = os.path.expanduser("~")
     for k, v in env_vars.items():
         os.environ[str(k)] = str(v)
     if os.path.expanduser("~") != home:
-        os.environ.setdefault(calkit.config.USER_HOME_ENV_VAR, home)
+        os.environ.setdefault(USER_HOME_ENV_VAR, home)

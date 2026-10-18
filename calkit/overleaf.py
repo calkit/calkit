@@ -6,11 +6,12 @@ import shutil
 import subprocess
 import tempfile
 import warnings
+from contextlib import contextmanager
 from copy import deepcopy
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 import git
 
@@ -61,16 +62,77 @@ def get_project_dir(project_id: str) -> str:
     return os.path.join(".calkit", "overleaf", project_id)
 
 
+class AuthError(RuntimeError):
+    """Overleaf rejected the token, e.g., because it expired or was revoked."""
+
+
+# Added to the error when Overleaf rejects the token
+AUTH_FAILED_ADVICE = (
+    "Your Overleaf token may have expired or been revoked. Generate a new one "
+    "under 'Git Integration' at https://www.overleaf.com/user/settings and "
+    "set it with 'calkit config set overleaf_token'."
+)
+
+
+def _git_error(e: git.GitCommandError, action: str) -> RuntimeError:
+    """Turn a failed clone or fetch from Overleaf into an error that shows
+    Git's message, without the token, and advice for authentication failures.
+    """
+    import re
+
+    # Never show the token embedded in the remote URL
+    details = re.sub(r"://[^/@\s]+@", "://", str(e.stderr)).strip()
+    msg = f"Failed to {action} from Overleaf:\n{details}"
+    auth_errors = [
+        "authentication failed",
+        "could not read username",
+        "returned error: 401",
+        "returned error: 403",
+    ]
+    if any(err in details.lower() for err in auth_errors):
+        return AuthError(msg + "\n" + AUTH_FAILED_ADVICE)
+    return RuntimeError(msg)
+
+
 def clone(project_id: str, token: str) -> git.Repo:
     """Clone an Overleaf project, authenticating only with ``token``."""
-    repo = git.Repo.clone_from(
-        get_git_remote_url(project_id=project_id, token=token),
-        get_project_dir(project_id),
-        multi_options=_CREDENTIAL_CLONE_OPTIONS,
-        allow_unsafe_options=True,
-    )
+    try:
+        repo = git.Repo.clone_from(
+            get_git_remote_url(project_id=project_id, token=token),
+            get_project_dir(project_id),
+            multi_options=_CREDENTIAL_CLONE_OPTIONS,
+            allow_unsafe_options=True,
+        )
+    except git.GitCommandError as e:
+        raise _git_error(e, "clone")
     _disable_credential_store(repo)
     return repo
+
+
+@contextmanager
+def lock(
+    project_id: str, print_info: Callable[[str], None] = print
+) -> Iterator[None]:
+    """Hold an exclusive lock on the local clone of an Overleaf project.
+
+    Syncs reset the clone and copy files into it, so two at once could wipe
+    each other's files or record Overleaf edits as synced without pulling
+    them. The OS releases the lock if its process dies, so it can't go stale.
+    """
+    from filelock import FileLock, Timeout
+
+    lock_path = get_project_dir(project_id) + ".lock"
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    file_lock = FileLock(lock_path)
+    try:
+        file_lock.acquire(timeout=0)
+    except Timeout:
+        print_info("Waiting for another Overleaf sync of this project")
+        file_lock.acquire()
+    try:
+        yield
+    finally:
+        file_lock.release()
 
 
 def get_repo(project_id: str, token: str) -> git.Repo:
@@ -82,9 +144,13 @@ def get_repo(project_id: str, token: str) -> git.Repo:
     the OS credential store is never used.
     """
     dest = get_project_dir(project_id)
+    # Re-clone a cache missing its own .git, since opening it would find the
+    # main project repo in a parent directory instead
+    if os.path.isdir(dest) and not os.path.exists(os.path.join(dest, ".git")):
+        shutil.rmtree(dest)
     if not os.path.isdir(dest):
         return clone(project_id, token)
-    repo = calkit.git.get_repo(dest)
+    repo = git.Repo(dest)
     repo.git.remote(
         "set-url",
         "origin",
@@ -92,6 +158,21 @@ def get_repo(project_id: str, token: str) -> git.Repo:
     )
     _disable_credential_store(repo)
     return repo
+
+
+def pull(repo: git.Repo) -> None:
+    """Update the local clone of an Overleaf project to match Overleaf.
+
+    The clone is only a cache, so anything left in it by an interrupted or
+    failed sync, e.g., a commit whose push was rejected, is discarded rather
+    than merged, since merging can fail and block every later pull.
+    """
+    try:
+        repo.git.fetch("origin")
+    except git.GitCommandError as e:
+        raise _git_error(e, "pull")
+    repo.git.reset("--hard", "@{upstream}")
+    repo.git.clean("-fdx")
 
 
 def project_id_to_url(project_id: str) -> str:

@@ -6,7 +6,7 @@ import os
 import re
 import subprocess
 from enum import Enum
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import Any, NoReturn
 
 import typer
 from typer.core import TyperCommand, TyperGroup
@@ -26,10 +26,6 @@ class EnvDefaultsModeChoice(str, Enum):
     ignore = "ignore"
     replace = "replace"
     merge = "merge"
-
-
-if TYPE_CHECKING:
-    import click
 
 
 class AliasGroup(TyperGroup):
@@ -87,21 +83,19 @@ class OptionalValueCommand(TyperCommand):
 
 
 def complete_stage_names(
-    ctx: "click.Context | None",
-    param: "click.Parameter | None",
-    incomplete: str,
-) -> list:
+    ctx: object, param: object, incomplete: str
+) -> list[str]:
     """Return pipeline stage names for shell tab-completion.
 
     ``ctx`` and ``param`` are part of the Click completion-callback signature
-    but are unused here, so they accept ``None`` (e.g. when called directly in
-    tests).
+    but are unused here, so they accept anything, e.g., ``None`` when called
+    directly in tests. Typer bundles its own Click, so its types would only
+    tie this to that copy.
     """
     if not os.path.isfile("calkit.yaml"):
         return []
     try:
         import ruamel.yaml
-        from click.shell_completion import CompletionItem
 
         ryaml = ruamel.yaml.YAML()
         with open("calkit.yaml") as f:
@@ -122,11 +116,7 @@ def complete_stage_names(
                 sp_stages = sp_info.get("pipeline", {}).get("stages", {})
                 for stage in sp_stages:
                     candidates.append(f"{sp_name}:{stage}")
-        return [
-            CompletionItem(name)
-            for name in candidates
-            if name.startswith(incomplete)
-        ]
+        return [name for name in candidates if name.startswith(incomplete)]
     except Exception:
         return []
 

@@ -9,6 +9,7 @@ import {
   Icon,
   IconButton,
   Link,
+  SkeletonText,
   Spacer,
   Switch,
   Table,
@@ -28,7 +29,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
-import { FaCheck, FaPlus, FaRegSquare } from "react-icons/fa"
+import { FaPlus } from "react-icons/fa"
 import {
   GoGitPullRequest,
   GoGitPullRequestClosed,
@@ -37,7 +38,6 @@ import {
 } from "react-icons/go"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import { ReleasesService } from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
@@ -46,11 +46,8 @@ import FileEditorModal from "../../../../../components/Files/FileEditorModal"
 import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
-import {
-  isEvidenceMissing,
-  isEvidenceStale,
-} from "../../../../../components/Projects/QuestionModal"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
+import { questionMark } from "../../../../../components/Projects/QuestionModal"
 import RecentChanges from "../../../../../components/Projects/RecentChanges"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewRelease from "../../../../../components/Releases/NewRelease"
@@ -104,7 +101,8 @@ function ProjectView() {
   }) as any
   const ref: string | undefined = layoutSearch?.ref
   const [showClosedTodos, setShowClosedTodos] = useState(false)
-  const { projectRequest, userHasWriteAccess } = useProject(
+  const [checklistSettled, setChecklistSettled] = useState(false)
+  const { projectRequest, userHasWriteAccess, showcaseRequest } = useProject(
     accountName,
     projectName,
     ref,
@@ -225,82 +223,107 @@ function ProjectView() {
     navigate,
   ])
 
+  const checklistProject =
+    userHasWriteAccess && !ref ? projectRequest.data : undefined
   return (
     <>
       <Flex mt={1}>
         <Box width="65%" mr={8}>
           {/* What's left to set up, until it's done or dismissed */}
-          {userHasWriteAccess && !ref && projectRequest.data ? (
+          {checklistProject ? (
             <ProjectChecklist
               accountName={accountName}
               projectName={projectName}
-              projectId={projectRequest.data.id}
+              projectId={checklistProject.id}
+              onSettledChange={setChecklistSettled}
             />
           ) : null}
-          {/* Showcase */}
-          <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-            <Flex alignItems="center">
-              <Heading size="md">Showcase</Heading>
-              {userHasWriteAccess && !ref ? (
-                <IconButton
-                  aria-label="Edit calkit.yaml"
-                  height="25px"
-                  width="28px"
-                  ml={1.5}
-                  icon={<MdEdit />}
-                  size={"xs"}
-                  onClick={() => setEditFile("calkit.yaml")}
-                />
-              ) : (
-                ""
-              )}
-            </Flex>
-            <ProjectShowcase
-              ownerName={accountName}
-              projectName={projectName}
-              gitRef={ref}
-              onEditLatex={
-                userHasWriteAccess && !ref ? openLatexEditor : undefined
-              }
-            />
-          </Box>
-          {/* README */}
-          <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-            <Flex alignItems="center">
-              <Heading size="md">README</Heading>
-              {userHasWriteAccess && !ref ? (
-                <IconButton
-                  aria-label="Edit README"
-                  height="25px"
-                  width="28px"
-                  ml={1.5}
-                  icon={<MdEdit />}
-                  size={"xs"}
-                  onClick={() => setEditFile("README.md")}
-                />
-              ) : (
-                ""
-              )}
-            </Flex>
-            {readmeRequest.isPending ? (
-              <LoadingSpinner height="100vh" />
-            ) : readmeRequest.data ? (
-              <Markdown repo={{ accountName, projectName, ref }}>
-                {removeTitle(
-                  decodeBase64Utf8(String(readmeRequest?.data?.content)),
+          {/* Each of these sits above the next, so hold them all until all
+              have landed rather than shoving the README down mid-read; the
+              project says whether there's a checklist to wait for */}
+          {projectRequest.isPending ||
+          (checklistProject && !checklistSettled) ||
+          showcaseRequest.isPending ||
+          readmeRequest.isPending ? (
+            <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+              <SkeletonText noOfLines={12} spacing={3} skeletonHeight="14px" />
+            </Box>
+          ) : (
+            <>
+              {/* Showcase, only once there's one to show, so a project
+                  without one doesn't open on an empty card */}
+              {showcaseRequest.data?.elements.length ? (
+                <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+                  <Flex alignItems="center">
+                    <Heading size="md">Showcase</Heading>
+                    {userHasWriteAccess && !ref ? (
+                      <IconButton
+                        aria-label="Edit calkit.yaml"
+                        height="25px"
+                        width="28px"
+                        ml={1.5}
+                        icon={<MdEdit />}
+                        size={"xs"}
+                        onClick={() => setEditFile("calkit.yaml")}
+                      />
+                    ) : (
+                      ""
+                    )}
+                  </Flex>
+                  <ProjectShowcase
+                    ownerName={accountName}
+                    projectName={projectName}
+                    gitRef={ref}
+                    onEditLatex={
+                      userHasWriteAccess && !ref ? openLatexEditor : undefined
+                    }
+                  />
+                </Box>
+              ) : null}
+              {/* README */}
+              <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+                <Flex alignItems="center">
+                  <Heading size="md">README</Heading>
+                  {userHasWriteAccess && !ref ? (
+                    <IconButton
+                      aria-label="Edit README"
+                      height="25px"
+                      width="28px"
+                      ml={1.5}
+                      icon={<MdEdit />}
+                      size={"xs"}
+                      onClick={() => setEditFile("README.md")}
+                    />
+                  ) : (
+                    ""
+                  )}
+                </Flex>
+                {readmeRequest.data ? (
+                  <Markdown repo={{ accountName, projectName, ref }}>
+                    {removeTitle(
+                      decodeBase64Utf8(String(readmeRequest?.data?.content)),
+                    )}
+                  </Markdown>
+                ) : (
+                  ""
                 )}
-              </Markdown>
-            ) : (
-              ""
-            )}
-          </Box>
+              </Box>
+            </>
+          )}
         </Box>
         <Box width={"35%"}>
           {/* Questions  */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex>
               <Heading size="md" mb={2}>
-                Questions
+                <Link
+                  as={RouterLink}
+                  to={`/${accountName}/${projectName}/questions`}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  search={{ ref } as any}
+                >
+                  Questions
+                </Link>
               </Heading>
               {userHasWriteAccess ? (
                 <>
@@ -323,49 +346,11 @@ function ProjectView() {
               )}
             </Flex>
             {questionsRequest.isPending ? (
-              <LoadingSpinner height="100px" />
+              <SkeletonText noOfLines={3} spacing={2} skeletonHeight="14px" />
             ) : questions.length ? (
               <Box>
                 {questions.map((question) => {
-                  // One mark per row, worst first: no answer, then an answer
-                  // with nothing behind it, then evidence that can't be found
-                  // at all, then evidence that has merely drifted --
-                  // staleness that only shows once a question is open is
-                  // staleness nobody sees. All four are icons of the same
-                  // size, so they land on one line down the list.
-                  const mark = !question.answer
-                    ? {
-                        icon: FaRegSquare,
-                        color: "red.400",
-                        label: "Not yet answered",
-                      }
-                    : !question.evidence?.length
-                      ? {
-                          icon: FaRegSquare,
-                          color: "orange.300",
-                          label:
-                            "Answered, but nothing is linked to back it up",
-                        }
-                      : question.evidence.some(isEvidenceMissing)
-                        ? {
-                            icon: FaCheck,
-                            color: "red.400",
-                            label:
-                              "Answered, but some of its evidence can't be found -- it may never have been pushed, or it cites a Git ref that doesn't exist.",
-                          }
-                        : question.evidence.some(isEvidenceStale)
-                          ? {
-                              icon: FaCheck,
-                              color: "orange.300",
-                              label:
-                                "Answered, but some of its evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.",
-                            }
-                          : {
-                              icon: FaCheck,
-                              color: "green.400",
-                              label:
-                                "Answered, and every piece of its evidence is up to date",
-                            }
+                  const mark = questionMark(question)
                   return (
                     // The whole row opens the question, mark included, since
                     // the answer and its evidence are the point of listing it
@@ -470,7 +455,7 @@ function ProjectView() {
               </Box>
             </Flex>
             {issuesRequest.isPending ? (
-              <LoadingSpinner />
+              <SkeletonText noOfLines={3} spacing={2} skeletonHeight="14px" />
             ) : (
               <>
                 {topIssues?.map((issue) => {
@@ -607,7 +592,7 @@ function ProjectView() {
               )}
             </Flex>
             {releasesRequest.isPending ? (
-              <LoadingSpinner height="100px" />
+              <SkeletonText noOfLines={3} spacing={2} skeletonHeight="14px" />
             ) : releasesRequest.isError ? (
               <Text fontSize="sm" color="red.500">
                 Failed to load releases.

@@ -1481,3 +1481,78 @@ def test_detect_latex_io_finds_class_and_style_files(tmp_dir):
     assert "refs.bib" in inputs
     # graphicx comes from TeX Live, not the project
     assert "graphicx.sty" not in inputs
+
+
+def test_detect_project_artifacts_considers_ignored_pipeline_outputs(tmp_dir):
+    import subprocess
+
+    import calkit.detect
+
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("figures")
+    os.makedirs("paper/figures")
+    for path in ("figures/plot.png", "paper/figures/plot.png"):
+        with open(path, "w") as f:
+            f.write("png")
+    # Neither Git nor DVC holds these
+    with open(".gitignore", "w") as f:
+        f.write("figures/plot.png\npaper/figures/plot.png\n")
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "py",
+                    "outputs": ["figures/plot.png"],
+                },
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/plot.png",
+                            "dest": "paper/figures/plot.png",
+                        }
+                    ],
+                },
+            }
+        }
+    }
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "figures/plot.png" in figures
+    # A map-paths destination, declared under 'paths'
+    assert "paper/figures/plot.png" in figures
+    # An output not produced yet isn't on disk
+    ck_info["pipeline"]["stages"]["plot"]["outputs"].append("figures/none.png")
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "figures/none.png" not in figures
+    # Paths are relative to a stage's wdir, and a directory mapping's files
+    # are found under its destination
+    os.makedirs("analysis/figures")
+    os.makedirs("shared/figures")
+    for path in ("analysis/figures/fit.png", "shared/figures/logo.png"):
+        with open(path, "w") as f:
+            f.write("png")
+    with open(".gitignore", "a") as f:
+        f.write("analysis/figures/\npaper/shared/\n")
+    stages = ck_info["pipeline"]["stages"]
+    stages["plot"]["wdir"] = "analysis"
+    stages["plot"]["outputs"] = ["figures/fit.png"]
+    stages["copy"]["paths"].append(
+        {"kind": "dir-to-dir-merge", "src": "shared", "dest": "paper/shared"}
+    )
+    os.makedirs("paper/shared/figures")
+    with open("paper/shared/figures/logo.png", "w") as f:
+        f.write("png")
+    figures = calkit.detect.detect_project_artifacts(ck_info=ck_info)[
+        "figures"
+    ]
+    assert "analysis/figures/fit.png" in figures
+    assert "paper/shared/figures/logo.png" in figures
+    # A pipeline can be null
+    calkit.detect.detect_project_artifacts(ck_info={"pipeline": None})

@@ -1061,22 +1061,123 @@ def update_environment(
             ),
         ),
     ] = None,
+    lock: Annotated[
+        bool,
+        typer.Option(
+            "--lock",
+            "--relock",
+            help=(
+                "Record this machine's properties in a system "
+                "environment's lock file, replacing the machine it is "
+                "locked to. Invalidates every stage that depends on it."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Update an environment.
 
-    Currently supports adding packages to Julia and Nix (flake) envs.
+    Currently supports adding packages to Julia and Nix (flake) envs, and
+    re-locking a system environment to this machine.
     """
     from calkit.cli.main import run_in_env
 
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
-    if env_name not in envs:
+    found = calkit.environments.get_env(env_name, envs)
+    if found is None:
         raise_error(f"Environment '{env_name}' does not exist")
+    if lock:
+        if add_packages:
+            raise_error(
+                "Use --lock or --add, not both: re-locking records this "
+                "machine for a system environment, and --add changes the "
+                "spec of an environment that has packages, which no system "
+                "environment does"
+            )
+        env = found
+        kind = env.get("kind")
+        if kind not in ("system", calkit.environments.SWITCH_KIND):
+            raise_error(
+                f"Environment '{env_name}' is not a system or switch "
+                "environment, so it has no machine to lock; its lock file is "
+                "derived from its spec"
+            )
+        # A switch's lock describes the machine its pick runs on
+        machine_name, machine_env = env_name, env
+        if kind == calkit.environments.SWITCH_KIND:
+            try:
+                picked = calkit.environments.resolve_switch(env_name, envs)
+            except ValueError as e:
+                raise_error(str(e))
+            if picked is None:
+                raise_error(
+                    calkit.environments.describe_switch_no_match(env_name, env)
+                )
+            machine_name, machine_env = (
+                picked,
+                (calkit.environments.get_env(picked, envs) or {}),
+            )
+            env = calkit.environments.switch_machine_lock_env(env)
+        if not calkit.environments.system_env_locks_anything(env):
+            raise_error(
+                f"Environment '{env_name}' locks no machine properties, so "
+                "there is nothing to re-lock; add them under 'lock' in "
+                "calkit.yaml"
+            )
+        # An unreadable lock is a reason to relock, so it must not stop it
+        try:
+            before = calkit.environments.read_system_env_lock(
+                env_name=env_name, env=env
+            )
+        except ValueError:
+            before = None
+        # A remote env is locked to the far end, which is what the gate
+        # in 'calkit xenv' compares against
+        try:
+            system_info = calkit.environments.picked_machine_info(
+                machine_name, machine_env, ck_info, lock=env.get("lock")
+            )
+        except ValueError as e:
+            raise_error(str(e))
+        machine = "this machine"
+        if system_info is not None:
+            machine = f"'{machine_env.get('host')}'"
+        try:
+            lock_fpath = calkit.environments.write_system_env_lock(
+                env_name=env_name,
+                env=env,
+                system_info=system_info,
+                relock=True,
+            )
+        except ValueError as e:
+            raise_error(f"Environment '{env_name}': {e}")
+        calkit.environments.stage_calkit_files()
+        after = calkit.environments.read_system_env_lock(
+            env_name=env_name, env=env
+        )
+        if before == after:
+            typer.echo(
+                f"Environment '{env_name}' was already locked to {machine}; "
+                "nothing changed"
+            )
+            return
+        typer.echo(f"Locked environment '{env_name}' to {machine}")
+        for prop in sorted(after or {}):
+            was = (before or {}).get(prop)
+            now = (after or {})[prop]
+            if was != now:
+                typer.echo(f"  {prop}: {was!r} -> {now!r}")
+        typer.echo(
+            f"\nStages depending on {lock_fpath} will rerun. Commit it so "
+            "the project records which machine its results came from."
+        )
+        return
     if add_packages is None:
         raise_error(
-            "No updates specified. Use --add to specify packages to add."
+            "No updates specified. Use --add to specify packages to add, or "
+            "--lock to re-lock a system environment to this machine."
         )
-    env = envs[env_name]
+    env = found
     assert isinstance(add_packages, list)
     kind = env.get("kind")
     if kind == "julia":
@@ -1917,9 +2018,9 @@ def update_hub(
         except Exception:
             git_repo_url = None
     if git_repo_url is None and not create_repo:
-        from calkit.dependencies import _is_interactive
+        from calkit.core import is_tty
 
-        if not _is_interactive():
+        if not is_tty():
             raise_error(
                 "This project has no Git repository, so there would be "
                 "nowhere to push its code. Add a remote, or pass "
@@ -2055,3 +2156,57 @@ def update_hub(
             repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
         _adopt_hub_history(repo)
     typer.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
+
+
+@update_app.command(name="comment")
+def update_comment(
+    path: Annotated[
+        str | None,
+        typer.Argument(help="File the thread is in, if not found by --id."),
+    ] = None,
+    id: Annotated[
+        str | None,
+        typer.Option(
+            "--id",
+            help="ID of the thread, which finds it in any of the project's documents.",
+        ),
+    ] = None,
+    line: Annotated[
+        int | None,
+        typer.Option("--line", "-l", help="Number of any line in the thread."),
+    ] = None,
+    reply: Annotated[
+        str | None, typer.Option("--reply", "-r", help="Reply to the thread.")
+    ] = None,
+    resolve: Annotated[
+        bool, typer.Option("--resolve", help="Mark the thread resolved.")
+    ] = False,
+    reopen: Annotated[
+        bool, typer.Option("--reopen", help="Mark the thread open again.")
+    ] = False,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", help="Defaults to Git's user.name."),
+    ] = None,
+    email: Annotated[
+        str | None,
+        typer.Option("--email", help="Defaults to Git's user.email."),
+    ] = None,
+) -> None:
+    """Reply to, resolve, or reopen a review comment thread, printing its
+    ID."""
+    from calkit.cli.latex import comment_entry, edit_comment
+
+    if resolve and reopen:
+        raise_error("Specify only one of --resolve or --reopen")
+    if reply is None and not resolve and not reopen:
+        raise_error("Specify --reply, --resolve, or --reopen")
+    entry = None if reply is None else comment_entry(reply, author, email)
+
+    def edit(tc: calkit.latex.TexComment) -> None:
+        if entry is not None:
+            tc.entries.append(entry)
+        if resolve or reopen:
+            tc.resolved = resolve
+
+    typer.echo(edit_comment(path, id, line, edit).id)

@@ -21,6 +21,8 @@ export const Route = createFileRoute(
         evidence: z.number().optional(),
         // Whether the editor is open over the question.
         edit: z.boolean().optional(),
+        // Opened from the list of all questions, so closing returns there.
+        list: z.boolean().optional(),
       })
       .parse(search),
 })
@@ -35,7 +37,7 @@ export const Route = createFileRoute(
 function QuestionDetail() {
   const { accountName, projectName, questionNumber } = Route.useParams()
   const navigate = Route.useNavigate()
-  const { evidence: evidenceIndex, edit } = Route.useSearch()
+  const { evidence: evidenceIndex, edit, list } = Route.useSearch()
   const layoutSearch = useSearch({
     from: "/_layout/$accountName/$projectName/_layout" as any,
     strict: false,
@@ -55,13 +57,16 @@ function QuestionDetail() {
   // browsed, above all -- and drop only what belongs to this page.
   const goToProject = () =>
     navigate({
-      to: "/$accountName/$projectName",
+      to: list
+        ? "/$accountName/$projectName/questions"
+        : "/$accountName/$projectName",
       params: { accountName, projectName },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       search: (prev: any) => ({
         ...prev,
         evidence: undefined,
         edit: undefined,
+        list: undefined,
       }),
     })
   // Stepping works off list order rather than number, so a project whose

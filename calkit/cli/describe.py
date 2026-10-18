@@ -49,9 +49,17 @@ def describe_system(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
+    apps: Annotated[
+        list[str],
+        typer.Option(
+            "--app",
+            help="An app whose version to include, beyond the ones always "
+            "reported. Repeat for more.",
+        ),
+    ] = [],
 ):
     """Describe the system."""
-    system_info = calkit.get_system_info()
+    system_info = calkit.get_system_info(apps=apps)
     if json_output:
         echo_json(system_info)
         return
@@ -98,6 +106,44 @@ def describe_envs(
         return
     for env_name, desc in result.items():
         typer.echo(env_name + ":")
+        _echo_description(desc, indent="    ")
+
+
+@describe_app.command(name="subprojects")
+def describe_subprojects(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """Describe subprojects, including nested ones.
+
+    Stages and environments are named as in the subproject itself; from
+    here, they're addressed as '<path>:<name>'.
+    """
+    subprojects = calkit.get_subprojects()
+    result = {}
+    for path, sp in subprojects.items():
+        info = sp["ck_info"]
+        result[path] = {
+            "parent": sp["parent"],
+            "description": sp["entry"].get("description"),
+            "name": info.get("name"),
+            "title": info.get("title"),
+            # With its own DVC repo, a subproject runs as one parent stage
+            "isolated": os.path.isdir(os.path.join(path, ".dvc")),
+            "environments": list(info.get("environments") or {}),
+            "stages": list((info.get("pipeline") or {}).get("stages") or {}),
+            "subprojects": [
+                p
+                for p, child in subprojects.items()
+                if child["parent"] == path
+            ],
+        }
+    if json_output:
+        echo_json(result)
+        return
+    for path, desc in result.items():
+        typer.echo(path + ":")
         _echo_description(desc, indent="    ")
 
 

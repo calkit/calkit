@@ -183,20 +183,23 @@ def list_presentations(
     _list_artifacts("presentations", json_output, declared_only)
 
 
-def _echo_question(n: int, question: str | dict) -> None:
+def _echo_question(n: int, question: str | dict, project: str = "") -> None:
     """Print a single question in the human-readable YAML-ish listing format.
 
     String questions are shown as a numbered line. Rich (dict) questions are
     shown with their text on the first line followed by hypothesis, answer,
-    evidence, and any other fields in YAML-like indented form.
+    evidence, and any other fields in YAML-like indented form. A
+    subproject's are numbered within it and prefixed with its path, as
+    ``calkit check questions`` names them.
     """
+    where = f"{project}: " if project else ""
     if isinstance(question, str):
-        typer.echo(f"{n}. {question}")
+        typer.echo(f"{where}{n}. {question}")
         return
     # Copy so popping 'question' doesn't mutate the caller's dict.
     question = dict(question)
     text = question.pop("question", "")
-    typer.echo(f"{n}. question: {text}")
+    typer.echo(f"{where}{n}. question: {text}")
     # Rendering fills every field, so leave out the ones that aren't set
     for k, v in question.items():
         if v is None:
@@ -244,8 +247,12 @@ def list_questions(
 
     Placeholders in the text, such as ``{improvement:.1f}``, are filled from
     the question's value evidence, so numbers shown are read from the
-    results files rather than retyped into ``calkit.yaml``.
+    results files rather than retyped into ``calkit.yaml``. Subprojects'
+    questions are listed too, numbered within each, and in the JSON output
+    each has a ``project`` key with the subproject's path.
     """
+    from pathlib import Path
+
     from calkit.questions import (
         TEMPLATED_FIELDS,
         placeholders,
@@ -260,10 +267,17 @@ def list_questions(
             if isinstance(ev, dict)
         ]
 
-    ck_info = calkit.load_calkit_info()
-    questions = ck_info.get("questions", []) or []
+    # Each with its 1-based index in its own project and that project's
+    # path, empty for this one
+    listed: list[tuple[int, str | dict, str]] = []
+    for wdir, info in calkit.iter_projects():
+        project = "" if wdir == "." else Path(wdir).as_posix()
+        for n, q in enumerate(info.get("questions", []) or [], start=1):
+            if not raw:
+                q = render_question(q, info, wdir=wdir)
+            listed.append((n, q, project))
+    questions = [q for _, q, _ in listed]
     if not raw:
-        rendered = [render_question(q, ck_info) for q in questions]
         # A placeholder left as written looks exactly like text somebody
         # meant literally, so say when one could not be filled rather than
         # let a fresh clone read as a project that types its braces. Any
@@ -273,7 +287,7 @@ def list_questions(
         # answer still in clauses is one whose conditions could not be read.
         unfilled = any(
             isinstance(text, dict) or placeholders(text)
-            for q in rendered
+            for q in questions
             if isinstance(q, dict)
             for text in _texts(q)
         )
@@ -285,12 +299,72 @@ def list_questions(
                 "the results files are not here yet.",
                 err=json_output,
             )
-        questions = rendered
     if json_output:
-        echo_json(questions)
+        echo_json(
+            [
+                q
+                if not project
+                else {"project": project, "question": q}
+                if isinstance(q, str)
+                else {"project": project, **q}
+                for _, q, project in listed
+            ]
+        )
         return
-    for n, question in enumerate(questions, start=1):
-        _echo_question(n, question)
+    for n, question, project in listed:
+        _echo_question(n, question, project)
+
+
+@list_app.command(name="comments")
+def list_comments(
+    path: Annotated[
+        str | None,
+        typer.Argument(
+            help="Document to list threads from, including files it inputs. "
+            "Defaults to every document the pipeline builds into a PDF."
+        ),
+    ] = None,
+    unresolved: Annotated[
+        bool,
+        typer.Option("--unresolved", "-u", help="Only list open threads."),
+    ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """List review comment threads in LaTeX and Markdown documents."""
+    import os
+
+    import calkit.latex
+
+    if path is not None and not os.path.isfile(path):
+        raise_error(f"{path} does not exist")
+    docs = (
+        [path]
+        if path is not None
+        else calkit.latex.comment_documents(calkit.load_calkit_info())
+    )
+    # Documents can input the same files
+    out = []
+    seen = set()
+    for doc in docs:
+        if not os.path.isfile(doc):
+            continue
+        for c in calkit.latex.list_comments(doc):
+            key = (c["path"], c["line"])
+            if key not in seen and not (unresolved and c["resolved"]):
+                seen.add(key)
+                out.append(c)
+    if as_json:
+        echo_json(out)
+        return
+    for c in out:
+        status = " (resolved)" if c["resolved"] else ""
+        typer.echo(f"{c['path']}:{c['line']} [{c['id'] or '-'}]{status}")
+        if c["highlight"]:
+            typer.echo(f'  On "{c["highlight"]["text"]}"')
+        for m in c["messages"]:
+            typer.echo(f"  {m['author']}: {m['text']}")
 
 
 @list_app.command(name="publications|pubs")
@@ -340,6 +414,73 @@ def list_environments(
         typer.echo(name + ":")
         for k, v in env.items():
             typer.echo(f"    {k}: {v}")
+
+
+@list_app.command(name="requirements|reqs")
+def list_requirements(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """List what a machine needs to run the project.
+
+    That's the project's requirements, then those of each environment and
+    stage, each with where it was declared. Nothing is checked; use
+    'calkit check reqs' for that.
+    """
+    from calkit.core import _normalize_requirement
+
+    ck_info = calkit.load_calkit_info()
+    sources: list[tuple[str, list]] = [
+        ("project", calkit.get_requirements(ck_info))
+    ]
+    for name, env in (ck_info.get("environments") or {}).items():
+        if not isinstance(env, dict):
+            continue
+        if env.get("requirements"):
+            sources.append((f"environment '{name}'", env["requirements"]))
+        # An option a switch defines in place is named after its position
+        for n, option in enumerate(env.get("switch") or [], start=1):
+            use = option.get("use") if isinstance(option, dict) else None
+            if isinstance(use, dict) and use.get("requirements"):
+                sources.append(
+                    (f"environment '{name}.{n}'", use["requirements"])
+                )
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage in stages.items():
+        if isinstance(stage, dict) and stage.get("requirements"):
+            sources.append((f"stage '{name}'", stage["requirements"]))
+    result = []
+    for source, reqs in sources:
+        for raw in reqs:
+            try:
+                req = _normalize_requirement(raw)
+            except ValueError as e:
+                raise_error(f"In {source}: {e}")
+            result.append({"source": source, **req})
+    if json_output:
+        echo_json(result)
+        return
+    property_kinds = calkit.system_property_requirement_kinds()
+    last_source = None
+    for req in result:
+        req = dict(req)
+        source = req.pop("source")
+        if source != last_source:
+            if last_source is not None:
+                typer.echo()
+            typer.echo(source[0].upper() + source[1:] + ":")
+            last_source = source
+        name = req.pop("name")
+        kind = req.pop("kind")
+        # A property requirement's name is its kind
+        typer.echo(
+            f"  - {name}" if kind in property_kinds else f"  - {name} ({kind})"
+        )
+        for k, v in req.items():
+            if isinstance(v, str):
+                v = " ".join(v.split())
+            typer.echo(f"      {k}: {v}")
 
 
 @list_app.command(name="templates")
@@ -520,9 +661,16 @@ def list_stages(
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ):
-    """List pipeline stages."""
+    """List pipeline stages, including subprojects'."""
     ck_info = calkit.load_calkit_info()
-    stages = ck_info.get("pipeline", {}).get("stages", {})
+    # Named as 'calkit status' names them and 'calkit run' accepts them
+    stages = {
+        calkit.qualify_with_project(wdir, name): stage
+        for wdir, info in calkit.iter_projects(ck_info=ck_info)
+        for name, stage in (
+            (info.get("pipeline") or {}).get("stages") or {}
+        ).items()
+    }
     # If we only want stale stages, we need to get the status first.
     # This compiles the pipeline, cleans notebooks, and checks environments,
     # all of which can affect whether a stage is stale, so we don't skip them.
@@ -545,6 +693,29 @@ def list_stages(
         return
     for name in result:
         typer.echo(name)
+
+
+@list_app.command(name="subprojects")
+def list_subprojects(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """List subprojects, including nested ones, by path."""
+    subprojects = calkit.get_subprojects()
+    if json_output:
+        echo_json(
+            {
+                path: {
+                    "parent": sp["parent"],
+                    "description": sp["entry"].get("description"),
+                }
+                for path, sp in subprojects.items()
+            }
+        )
+        return
+    for path in subprojects:
+        typer.echo(path)
 
 
 @list_app.command(name="latex-diffs")

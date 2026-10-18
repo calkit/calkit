@@ -674,6 +674,92 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert calkit.load_calkit_info()["owner"] == "acme-lab"
 
 
+def test_update_env_lock(tmp_dir, monkeypatch):
+    import calkit.environments as envs
+    import calkit.workspace
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "bench": {"kind": "system", "lock": ["os", "cpu-count"]},
+        "far": {
+            "kind": "system",
+            "host": "bigbox.invalid",
+            "wdir": "/work",
+            "lock": ["os", "cpu-count"],
+        },
+        "plain": {"kind": "system"},
+        "pick": {
+            "kind": "switch",
+            "switch": [{"use": "plain"}],
+            "lock": ["os"],
+        },
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = ck_info["environments"]["bench"]
+    lock_fpath = os.path.join(".calkit", "env-locks", "bench", "info.json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    locked = envs.read_system_env_lock(env_name="bench", env=env)
+    assert locked == envs.get_system_lock_data(["os", "cpu-count"])
+    # Running it again changes nothing, and says so
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "already locked" in result.output
+    # A lock from another machine is replaced, and the change reported
+    with open(lock_fpath, "w") as f:
+        json.dump({"os": "SomeOtherOS", "cpu-count": 1}, f)
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "SomeOtherOS" in result.output
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])
+    # A remote env is locked to the far end, not this machine
+    monkeypatch.setattr(
+        calkit.workspace,
+        "remote_system_info",
+        lambda ws, apps=None: {"os": "FarOS", "cpu_count": 128},
+    )
+    result = runner.invoke(update_app, ["env", "-n", "far", "--lock"])
+    assert result.exit_code == 0, result.output
+    assert "bigbox.invalid" in result.output
+    assert envs.read_system_env_lock(
+        env_name="far", env=ck_info["environments"]["far"]
+    ) == {"os": "FarOS", "cpu-count": 128}
+    # A switch is locked to the machine its pick runs on
+    result = runner.invoke(update_app, ["env", "-n", "pick", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(os.path.join(".calkit", "env-locks", "pick", "info.json")) as f:
+        assert json.load(f) == envs.get_system_lock_data(["os"])
+    # Nothing to relock without machine properties or a machine
+    result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(
+        update_app, ["env", "-n", "bench", "--lock", "--add", "numpy"]
+    )
+    assert result.exit_code != 0
+    assert "not both" in result.output
+    # An unreadable lock doesn't stop a relock
+    with open(lock_fpath, "w") as f:
+        f.write("{not json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])
+
+
 def test_update_path_storage(tmp_dir, tmp_path_factory):
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], text=True)
@@ -842,3 +928,79 @@ def test_update_path_storage(tmp_dir, tmp_path_factory):
         "notes.txt",
         "out.txt",
     ]
+
+
+def test_update_comment(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\input{intro}\n\nA paragraph.\n")
+    with open("paper/intro.tex", "w") as f:
+        f.write("% COMMENT id=aaaa0001\n%   A:\n%     Why?\nIntro text.\n")
+    with open("note.md", "w") as f:
+        f.write("<!-- COMMENT id=bbbb0002\n  B:\n    Hm.\n-->\nSome text.\n")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "paper": {
+                            "kind": "latex",
+                            "target_path": "main.tex",
+                            "wdir": "paper",
+                            "environment": "_system",
+                        },
+                        "note": {
+                            "kind": "markdown",
+                            "target_path": "note.md",
+                            "pdf": {"environment": "_system"},
+                        },
+                    }
+                }
+            },
+            f,
+        )
+
+    def thread(id_: str) -> dict:
+        listed = json.loads(ck("list", "comments", "--json"))
+        return next(c for c in listed if c["id"] == id_)
+
+    # An ID finds its thread in any of the project's documents, including
+    # what they input, to reply and resolve at once
+    assert (
+        ck(
+            "update",
+            "comment",
+            "--id",
+            "aaaa0001",
+            "-r",
+            "Because.",
+            "--resolve",
+            "--author",
+            "C",
+        )
+        == "aaaa0001"
+    )
+    t = thread("aaaa0001")
+    assert t["resolved"]
+    assert [m["text"] for m in t["messages"]] == ["Why?", "Because."]
+    # A line needs its file, and a thread without an ID gets one
+    ck("update", "comment", "paper/intro.tex", "-l", "1", "--reopen")
+    assert not thread("aaaa0001")["resolved"]
+    with open("note.md", "w") as f:
+        f.write("<!-- COMMENT\n  B:\n    Hm.\n-->\nSome text.\n")
+    new_id = ck("update", "comment", "note.md", "-l", "2", "--resolve")
+    with open("note.md") as f:
+        assert f.read().startswith(f"<!-- COMMENT id={new_id} resolved=true\n")
+    for args in [
+        ["update", "comment", "--id", "nope", "--resolve"],
+        ["update", "comment", "-l", "1", "--resolve"],
+        ["update", "comment", "--id", "aaaa0001"],
+        ["update", "comment", "--id", "aaaa0001", "--resolve", "--reopen"],
+    ]:
+        res = subprocess.run(["calkit", *args], capture_output=True)
+        assert res.returncode != 0, args

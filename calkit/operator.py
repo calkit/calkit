@@ -50,6 +50,11 @@ CRON_IDLE_EXIT_SECONDS = 900
 WORKSPACE_ROOTS = ["calkit", "dev"]
 # How often to check whether Calkit was upgraded or a restart was asked for
 RESTART_CHECK_SECONDS = 30
+# The log is cut down to its last LOG_KEEP_BYTES past LOG_MAX_BYTES
+LOG_MAX_BYTES = 5_000_000
+LOG_KEEP_BYTES = 1_000_000
+# How long the same warning isn't logged again
+REPEAT_LOG_SECONDS = 3600
 # Coding agents found running in workspaces, by command
 AGENT_TOOLS = ("claude", "codex", "opencode")
 
@@ -2159,6 +2164,7 @@ class Operator:
     async def keep_checking_in(self) -> None:
         while True:
             await asyncio.sleep(self.check_in_interval)
+            trim_log()
             try:
                 await self.check_in()
             except OperatorRevoked:
@@ -2374,6 +2380,9 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
     lock = acquire_lock()
     if lock is None:
         return False
+    trim_log()
+    if not any(isinstance(f, RepeatFilter) for f in logger.filters):
+        logger.addFilter(RepeatFilter())
 
     # Service managers stop it with SIGTERM, which should shut down as
     # cleanly as Ctrl+C
@@ -2432,6 +2441,57 @@ def cron_marker(key: str | None = None) -> str:
 
 def get_log_path() -> str:
     return os.path.join(operator_dir(), "operator.log")
+
+
+def trim_log(fpath: str | None = None) -> None:
+    """Drop the log's oldest lines once it's over LOG_MAX_BYTES.
+
+    Service managers write to it directly, so it's cut down in place rather
+    than rotated, which would leave them writing to the old file. They open
+    it to append, so their next write goes at the new end, except on
+    Windows, where it's left alone.
+    """
+    if sys.platform == "win32":
+        return
+    fpath = fpath or get_log_path()
+    try:
+        if os.path.getsize(fpath) <= LOG_MAX_BYTES:
+            return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        with open(fpath, "r+b") as f:
+            f.seek(-LOG_KEEP_BYTES, os.SEEK_END)
+            tail = f.read()
+            # From the start of a line
+            tail = tail[tail.find(b"\n") + 1 :]
+            f.seek(0)
+            f.write(tail)
+            f.truncate()
+    except OSError:
+        pass
+
+
+class RepeatFilter(logging.Filter):
+    """Log a warning that keeps recurring, e.g., while the hub is down, only
+    once per REPEAT_LOG_SECONDS, rather than every check-in.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.last_logged: dict[str, float] = {}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        import time
+
+        if record.levelno < logging.WARNING:
+            return True
+        message = record.getMessage()
+        now = time.monotonic()
+        last = self.last_logged.get(message)
+        if last is not None and now - last < REPEAT_LOG_SECONDS:
+            return False
+        self.last_logged[message] = now
+        return True
 
 
 def _service_command(mode: str = "service") -> list[str]:

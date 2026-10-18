@@ -553,6 +553,49 @@ async def test_sessions(tmp_path, monkeypatch):
     await asyncio.wait_for(op.wait_until_idle(), 5)
 
 
+def test_log(tmp_path, monkeypatch):
+    import logging
+
+    # A log past its limit keeps its newest whole lines, in the same file
+    # the service manager has open
+    fpath = str(tmp_path / "operator.log")
+    monkeypatch.setattr(operator, "LOG_MAX_BYTES", 100)
+    monkeypatch.setattr(operator, "LOG_KEEP_BYTES", 50)
+    monkeypatch.setattr(operator.sys, "platform", "linux")
+    with open(fpath, "a") as service:
+        service.write("".join(f"line {i:03d}\n" for i in range(20)))
+        service.flush()
+        operator.trim_log(fpath)
+        service.write("after\n")
+    with open(fpath) as f:
+        lines = f.read().splitlines()
+    assert lines[-1] == "after"
+    assert lines[0].startswith("line ") and len(lines) < 10
+    assert lines[-2] == "line 019"
+    # Under the limit, or missing, it's left alone
+    operator.trim_log(fpath)
+    with open(fpath) as f:
+        assert f.read().splitlines() == lines
+    operator.trim_log(str(tmp_path / "missing.log"))
+    # The same warning is only logged again after a while
+    records = []
+    log = logging.getLogger("test_operator_log")
+    log.propagate = False
+    log.setLevel(logging.INFO)
+    log.addHandler(logging.Handler())
+    log.handlers[0].emit = records.append  # type: ignore[method-assign]
+    log.addFilter(operator.RepeatFilter())
+    for _ in range(3):
+        log.warning("Check-in failed: 404")
+        log.warning("Connection failed: 404")
+        log.info("Connected to relay")
+    assert [r.getMessage() for r in records].count("Check-in failed: 404") == 1
+    assert len([r for r in records if r.levelno == logging.INFO]) == 3
+    monkeypatch.setattr(operator, "REPEAT_LOG_SECONDS", 0)
+    log.warning("Check-in failed: 404")
+    assert [r.getMessage() for r in records].count("Check-in failed: 404") == 2
+
+
 def test_service_files(tmp_path, monkeypatch):
     import plistlib
 

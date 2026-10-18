@@ -230,13 +230,19 @@ def test_to_dvc():
     assert "something" in matrix["param_a"]
     outs = dvc_stages["process-data"]["outs"]
     assert outs[0] == "out-${item.param_a}.txt"
-    # A flag and its value in one item still splits, with a warning, and an
-    # iterated value with a space in it stays one argument
+    # A flag and its value in one item still splits, with a warning even
+    # when it ends in a backslash, and an iterated value with a space in it
+    # stays one argument
     ck_info["pipeline"]["stages"] = {
         "plot": {
             "kind": "python-script",
             "script_path": "plot.py",
-            "args": ["--theta {theta}", "--title", "{title}"],
+            "args": [
+                "--theta {theta}",
+                "--output C:\\tmp\\",
+                "--title",
+                "{title}",
+            ],
             "environment": "py",
             "iterate_over": [
                 {"arg_name": "theta", "values": [1]},
@@ -244,10 +250,13 @@ def test_to_dvc():
             ],
         }
     }
-    with pytest.warns(UserWarning, match=r"\['--theta', '\{theta\}'\]"):
+    with pytest.warns(UserWarning) as record:
         dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    messages = [str(w.message) for w in record]
+    assert any("['--theta', '{theta}']" in m for m in messages)
+    assert any(r"['--output', 'C:\\tmp\\']" in m for m in messages)
     assert dvc_stages["plot"]["cmd"].endswith(
-        "plot.py --theta ${item.theta} --title ${item.title}"
+        "plot.py --theta ${item.theta} --output C:\\tmp\\ --title ${item.title}"
     )
 
 

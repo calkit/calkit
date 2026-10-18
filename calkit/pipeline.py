@@ -4,7 +4,6 @@ import itertools
 import os
 import posixpath
 import re
-import shlex
 import warnings
 from collections.abc import Callable
 from pathlib import Path
@@ -2657,7 +2656,7 @@ def to_dvc(
                 warnings.warn(
                     f"Stage '{stage_name}' has the arg {arg!r}, which the "
                     "shell splits into separate arguments. Write each as "
-                    f"its own item instead: {shlex.split(arg)}.",
+                    f"its own item instead: {arg.split()}.",
                     stacklevel=2,
                 )
         dvc_stage = stage.to_dvc()

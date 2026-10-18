@@ -4710,8 +4710,8 @@ def install_app(
         typer.Option(
             "--login",
             help=(
-                "For the Operator, start it when you log in rather than at "
-                "boot, which needs sudo on macOS and Linux."
+                "For the Operator, start at login instead of at boot "
+                "(requires sudo on macOS and Linux)."
             ),
         ),
     ] = False,

@@ -3016,7 +3016,11 @@ def install_service(login: bool = False) -> list[str]:
             return True
         if not _has_terminal():
             return False
-        print("Starting the Operator at boot needs sudo", file=sys.stderr)
+        print(
+            "Starting the Operator at boot needs sudo. Press Ctrl+C to start "
+            "it at login instead.",
+            file=sys.stderr,
+        )
         try:
             return subprocess.run(["sudo", "-v"]).returncode == 0
         except KeyboardInterrupt:

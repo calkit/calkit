@@ -7029,12 +7029,97 @@ export const ProvenanceSchema = {
       ],
       title: "Copy Stage",
     },
+    origin: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin",
+    },
+    origin_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Url",
+    },
+    origin_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Path",
+    },
+    gaps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceGap",
+      },
+      type: "array",
+      title: "Gaps",
+    },
   },
   type: "object",
   required: ["path"],
   title: "Provenance",
   description:
     "Where an artifact, or one value inside a results file, came from.",
+} as const
+
+export const ProvenanceGapSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    steps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceStep",
+      },
+      type: "array",
+      title: "Steps",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceGap",
+  description: "Something nothing records the origin of, and the chain to it.",
+} as const
+
+export const ProvenanceStepSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceStep",
+  description:
+    "A path on the way back from an artifact, and the stage producing it.",
 } as const
 
 export const PublicationSchema = {
@@ -9494,6 +9579,14 @@ export const ReproCheckSchema = {
       },
       type: "array",
       title: "Misc Needing Provenance",
+      default: [],
+    },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
       default: [],
     },
     scripts_not_in_pipeline: {
@@ -12053,6 +12146,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Misc Needing Provenance",
+      default: [],
+    },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
       default: [],
     },
     scripts_not_in_pipeline: {

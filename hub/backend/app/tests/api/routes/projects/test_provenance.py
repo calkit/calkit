@@ -17,12 +17,25 @@ def test_get_project_provenance(client: TestClient) -> None:
             {"rmse": 0.12, "fit": {"slope": 1.23}}
         ),
         "scripts/analyze.py": "print()",
+        "data/downloaded/a.csv": "x\n1\n",
+        "paper/drawn.png": "",
+        "paper/pasted.png": "",
     }
     tree = SimpleNamespace(
         is_file=lambda path: path in files,
-        is_dir=lambda path: False,
+        is_dir=lambda path: path == "data/downloaded",
+        listdir=lambda path: ["a.csv"] if path == "data/downloaded" else [],
     )
     ck_info = {
+        "datasets": [
+            {"path": "data/downloaded", "imported_from": "https://x.org/d.zip"}
+        ],
+        "figures": [
+            {
+                "path": "paper/drawn.png",
+                "created_by": {"name": "Ada", "with_ai": "Claude"},
+            }
+        ],
         "pipeline": {
             "stages": {
                 "analyze": {
@@ -51,7 +64,7 @@ def test_get_project_provenance(client: TestClient) -> None:
                     ],
                 },
             }
-        }
+        },
     }
     pipeline = PipelineAtRef(
         dvc_yaml={},
@@ -108,6 +121,18 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["inputs"] == ["data/raw.csv"]
     assert body["stage_status"]["status"] == "stale"
     assert body["stale_reason"] == "pipeline"
+    # What it reads has no recorded origin, which is reported with the
+    # chain leading to it
+    assert body["gaps"] == [
+        {
+            "path": "data/raw.csv",
+            "steps": [
+                {"path": "results/metrics.json", "stage": "analyze"},
+                {"path": "data/raw.csv", "stage": None},
+            ],
+        }
+    ]
+    assert body["origin"] is None
     # A subtree is a value too
     assert get("path=results/metrics.json&key=fit")["value"] == {"slope": 1.23}
     # Without a key, a results file is read whole, e.g., to browse it
@@ -134,7 +159,31 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["stage"] == "plot"
     assert body["source"] == "figs/plot.py"
     assert body["stale_reason"] == "pipeline"
+    # A stage dvc.yaml doesn't have yet is trusted
+    assert body["gaps"] == []
     assert get("path=figs/out.png")["copied_from"] is None
+    # What calkit.yaml records for something no stage makes, including for
+    # a folder it's in
+    body = get("path=data/downloaded/a.csv")
+    assert body["stage"] is None
+    assert body["origin"] == "Imported from https://x.org/d.zip"
+    assert body["origin_url"] == "https://x.org/d.zip"
+    assert body["origin_path"] == "data/downloaded"
+    assert body["gaps"] == []
+    body = get("path=paper/drawn.png")
+    assert body["origin"] == "Created by Ada with Claude"
+    assert body["origin_url"] is None
+    assert body["origin_path"] is None
+    assert body["gaps"] == []
+    # A figure nothing accounts for is a gap itself
+    body = get("path=paper/pasted.png")
+    assert body["origin"] is None
+    assert body["gaps"] == [
+        {
+            "path": "paper/pasted.png",
+            "steps": [{"path": "paper/pasted.png", "stage": None}],
+        }
+    ]
     # Nothing produces an authored file
     body = get("path=scripts/analyze.py")
     assert body["exists"]
@@ -142,3 +191,5 @@ def test_get_project_provenance(client: TestClient) -> None:
     # and it isn't a results file, so there's no value to read
     assert body["value"] is None
     assert body["value_error"] is None
+    # and code needs no recorded origin
+    assert body["gaps"] == []

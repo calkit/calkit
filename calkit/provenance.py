@@ -980,35 +980,47 @@ def find_provenance_gaps(
     return list(gaps.values())
 
 
-def find_project_provenance_gaps(
-    paths: list[str], wdir: str = ".", ck_info: dict | None = None
-) -> list[ProvenanceGap]:
-    """:func:`find_provenance_gaps` for a project on disk.
+def is_data_path(
+    path: str,
+    is_file: Callable[[str], bool],
+    is_dir: Callable[[str], bool],
+    listdir: Callable[[str], list[str]],
+) -> bool:
+    """Whether a path is data, which needs a recorded origin, rather than
+    code or config the authors wrote.
 
     Data is anything DVC tracks, and otherwise files of a kind that isn't
-    code or config, including inside a directory.
+    code or config, including inside a directory. Takes the filesystem as
+    functions, so a project on disk and one read out of Git agree.
     """
-    import calkit
     from calkit.detect import DATASET_EXTENSIONS
     from calkit.reproducibility import MISC_EXTENSIONS_NEEDING_PROVENANCE
 
     exts = MISC_EXTENSIONS_NEEDING_PROVENANCE | DATASET_EXTENSIONS | {".tsv"}
+    parts = path.split("/")
+    if any(
+        is_file("/".join(parts[:i]) + ".dvc") for i in range(1, len(parts) + 1)
+    ):
+        return True
+    if is_dir(path):
+        pending = [path]
+        while pending:
+            parent = pending.pop()
+            for name in listdir(parent):
+                child = f"{parent}/{name}"
+                if is_dir(child):
+                    pending.append(child)
+                elif posixpath.splitext(name)[1].lower() in exts:
+                    return True
+        return False
+    return posixpath.splitext(path)[1].lower() in exts
 
-    def is_data(path: str) -> bool:
-        parts = path.split("/")
-        if any(
-            os.path.isfile(os.path.join(wdir, *parts[:i]) + ".dvc")
-            for i in range(1, len(parts) + 1)
-        ):
-            return True
-        full = os.path.join(wdir, path)
-        if os.path.isdir(full):
-            return any(
-                os.path.splitext(name)[1].lower() in exts
-                for _, _, names in os.walk(full)
-                for name in names
-            )
-        return os.path.splitext(path)[1].lower() in exts
+
+def find_project_provenance_gaps(
+    paths: list[str], wdir: str = ".", ck_info: dict | None = None
+) -> list[ProvenanceGap]:
+    """:func:`find_provenance_gaps` for a project on disk."""
+    import calkit
 
     def read_yaml(name: str) -> dict:
         fpath = os.path.join(wdir, name)
@@ -1024,5 +1036,10 @@ def find_project_provenance_gaps(
         ck_info=ck_info,
         dvc_yaml=read_yaml("dvc.yaml"),
         dvc_lock=read_yaml("dvc.lock"),
-        is_data=is_data,
+        is_data=lambda path: is_data_path(
+            path,
+            is_file=lambda p: os.path.isfile(os.path.join(wdir, p)),
+            is_dir=lambda p: os.path.isdir(os.path.join(wdir, p)),
+            listdir=lambda p: os.listdir(os.path.join(wdir, p)),
+        ),
     )

@@ -678,3 +678,34 @@ def test_find_provenance_gaps():
     assert gaps(["figures/sweep-1.png"]) == [
         "nothing records where figures/sweep-1.png came from"
     ]
+
+
+def test_is_data_path(tmp_path):
+    from calkit.provenance import is_data_path
+
+    def is_data(path: str) -> bool:
+        return is_data_path(
+            path,
+            is_file=lambda p: (tmp_path / p).is_file(),
+            is_dir=lambda p: (tmp_path / p).is_dir(),
+            listdir=lambda p: [c.name for c in (tmp_path / p).iterdir()],
+        )
+
+    (tmp_path / "data" / "raw" / "deep").mkdir(parents=True)
+    (tmp_path / "data" / "raw" / "deep" / "x.csv").write_text("a\n")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "plot.py").write_text("")
+    (tmp_path / "big").mkdir()
+    (tmp_path / "big.dvc").write_text("outs: []\n")
+    # A data file, or a folder with one anywhere inside, is data
+    assert is_data("data/raw/deep/x.csv")
+    assert is_data("data")
+    assert is_data("figures/drawn.PNG")
+    # Code and config aren't, nor is a folder of code
+    assert not is_data("scripts/plot.py")
+    assert not is_data("scripts")
+    assert not is_data("params.yaml")
+    # Anything DVC tracks is, including inside a tracked folder, whatever
+    # its kind
+    assert is_data("big")
+    assert is_data("big/notes.txt")

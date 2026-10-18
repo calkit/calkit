@@ -183,6 +183,20 @@ export interface Provenance {
   /** Where a copy, e.g., one put beside a document, came from. */
   copied_from?: string | null;
   copy_stage?: string | null;
+  /**
+   * Where calkit.yaml says something no stage makes came from, e.g., an
+   * import or who created it, maybe recorded for a folder it's in.
+   */
+  origin?: string | null;
+  origin_url?: string | null;
+  origin_path?: string | null;
+  /** Data behind it, however far back, nothing records the origin of. */
+  gaps?: ProvenanceGap[];
+}
+
+export interface ProvenanceGap {
+  path: string;
+  steps: { path: string; stage?: string | null }[];
 }
 
 export interface ReferenceEntry {

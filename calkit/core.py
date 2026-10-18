@@ -333,6 +333,21 @@ DVC_SIZE_THRESH_BYTES = 5_000_000
 STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
 
 
+def read_stage_runs(wdir: str | None = None) -> dict:
+    """The recorded runs of the stages a project's ``dvc.lock`` records, by
+    their names there.
+
+    Kept beside that ``dvc.lock``, so a subproject's are in its own
+    directory whether its stages ran from it or from its parent.
+    """
+    try:
+        with open(os.path.join(wdir or "", STAGE_RUNS_FPATH)) as f:
+            stage_runs = json.load(f)
+    except OSError:
+        return {}
+    return stage_runs if isinstance(stage_runs, dict) else {}
+
+
 def check_or_x(val: bool | int) -> str:
     """A check mark for something that holds, an X for something that does
     not.

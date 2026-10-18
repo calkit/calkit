@@ -800,6 +800,67 @@ def test_service_files(tmp_path, monkeypatch):
     assert calls == [
         ["systemctl", "--user", "restart", operator.systemd_unit()]
     ]
+    # Installing starts it at boot unless told to start at login, falling
+    # back to login when sudo can't be had without a terminal to ask in
+    sudo_cached = [True]
+
+    def run_install(cmd, **kwargs):
+        calls.append(cmd)
+        code = 0
+        if cmd == ["sudo", "-n", "true"]:
+            code = 0 if sudo_cached[0] else 1
+        elif cmd[:2] == ["loginctl", "enable-linger"]:
+            # Not allowed for this user without sudo
+            code = 1
+        elif "launchctl" in cmd and "print" in cmd:
+            code = 113
+        stdout = "no" if "show-user" in cmd else ""
+        return subprocess.CompletedProcess(cmd, code, stdout=stdout)
+
+    monkeypatch.setattr(operator.subprocess, "run", run_install)
+    monkeypatch.setattr(operator.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(operator, "_has_terminal", lambda: False)
+    monkeypatch.setattr(operator.platform, "system", lambda: "Darwin")
+    daemon_bootstrap = [
+        "sudo",
+        "-n",
+        "launchctl",
+        "bootstrap",
+        "system",
+        operator._launchd_plist_path(at_boot=True),
+    ]
+    agent_bootstrap = ["launchctl", "bootstrap", "gui/501", agent_path]
+    for cached, login, bootstrap, noted in [
+        (True, False, daemon_bootstrap, False),
+        (False, False, agent_bootstrap, True),
+        (True, True, agent_bootstrap, False),
+    ]:
+        sudo_cached[0] = cached
+        calls.clear()
+        notes = operator.install_service(login=login)
+        assert bootstrap in calls
+        assert any("needs sudo" in n for n in notes) == noted
+        # Starting at login never asks for sudo
+        if login:
+            assert not any(c[:1] == ["sudo"] for c in calls)
+    # On Linux, lingering is enabled with sudo if it can't be without, and
+    # left alone when starting at login
+    monkeypatch.setattr(operator.platform, "system", lambda: "Linux")
+    user = os.environ.get("USER") or ""
+    for cached, login, sudo_linger, noted in [
+        (True, False, True, False),
+        (False, False, False, True),
+        (True, True, False, False),
+    ]:
+        sudo_cached[0] = cached
+        calls.clear()
+        notes = operator.install_service(login=login)
+        assert (
+            ["sudo", "-n", "loginctl", "enable-linger", user] in calls
+        ) == sudo_linger
+        assert any("enable-linger" in n for n in notes) == noted
+        if login:
+            assert not any("enable-linger" in c for c in calls)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Cron and flock are POSIX")
@@ -1506,6 +1567,10 @@ def test_install_remote(monkeypatch):
     assert operator.install_remote("cluster") == cfg
     assert posted == {}
     assert len(runs) == 2
+    # Starting at login is passed along
+    runs.clear()
+    operator.install_remote("cluster", login=True)
+    assert runs[-1][0][-1].endswith("--login'")
     # One that was revoked is registered again rather than kept, since it
     # would exit at its first check-in
     active.clear()

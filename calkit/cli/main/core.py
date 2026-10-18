@@ -4705,13 +4705,13 @@ def install_app(
             help="Skip the confirmation prompt and install immediately.",
         ),
     ] = False,
-    at_boot: Annotated[
+    login: Annotated[
         bool,
         typer.Option(
-            "--boot",
+            "--login",
             help=(
-                "For the operator on macOS, start at boot rather than at "
-                "login, which needs sudo."
+                "For the Operator, start it when you log in rather than at "
+                "boot, which needs sudo on macOS and Linux."
             ),
         ),
     ] = False,
@@ -4764,7 +4764,7 @@ def install_app(
         from calkit.cli.operator import install as install_operator
 
         install_operator(
-            hub=hub, at_boot=at_boot, cron=cron, ssh=ssh, no_service=no_service
+            hub=hub, login=login, cron=cron, ssh=ssh, no_service=no_service
         )
         return
     # Surface a platform-specific "use X instead" message before the

@@ -288,6 +288,7 @@ def install_remote(
     host: str,
     cron: bool = False,
     no_service: bool = False,
+    login: bool = False,
     interactive: bool = True,
 ) -> dict:
     """Install an Operator on another machine over SSH, returning its
@@ -367,6 +368,10 @@ def install_remote(
             args.append("--cron")
         if no_service:
             args.append("--no-service")
+        # Over SSH there's no terminal for sudo to ask in, so it starts at
+        # boot only if sudo can without asking, and says so if not
+        if login:
+            args.append("--login")
         subprocess.run(target.login_argv(shlex.join(args)), check=True)
     except Exception:
         # A registration nothing can use would linger on the hub
@@ -2980,13 +2985,43 @@ def _systemd_unit() -> str:
     )
 
 
-def install_service(at_boot: bool = False) -> list[str]:
+def _has_terminal() -> bool:
+    """Whether there's a terminal to ask for a password in, even with stdin
+    piped, e.g., from 'curl ... | sh'.
+    """
+    try:
+        with open("/dev/tty"):
+            return True
+    except OSError:
+        return False
+
+
+def install_service(login: bool = False) -> list[str]:
     """Install the Operator as a service that runs as this user, returning
     notes for the user.
 
-    On Linux it starts at boot if the user's services are allowed to linger.
-    On macOS it starts at login unless ``at_boot``, which needs sudo.
+    It starts at boot unless ``login``, which needs sudo on macOS, and on
+    Linux, letting the user's services linger. Without sudo, it starts at
+    login instead. On Windows it always starts at login.
     """
+
+    def can_sudo() -> bool:
+        # Without asking, e.g., while sudo remembers the password, then by
+        # asking, if there's a terminal to ask in, which there isn't when
+        # 'calkit operator install --ssh' runs this over SSH
+        if not shutil.which("sudo"):
+            return False
+        cached = subprocess.run(["sudo", "-n", "true"], capture_output=True)
+        if cached.returncode == 0:
+            return True
+        if not _has_terminal():
+            return False
+        print("Starting the Operator at boot needs sudo", file=sys.stderr)
+        try:
+            return subprocess.run(["sudo", "-v"]).returncode == 0
+        except KeyboardInterrupt:
+            return False
+
     notes = []
     system = platform.system()
     os.makedirs(os.path.dirname(get_log_path()), exist_ok=True)
@@ -3025,10 +3060,14 @@ def install_service(at_boot: bool = False) -> list[str]:
             capture_output=True,
             text=True,
         ).stdout.strip()
-        if linger != "yes":
-            enabled = subprocess.run(
-                ["loginctl", "enable-linger", user], capture_output=True
-            )
+        if linger != "yes" and not login:
+            enable = ["loginctl", "enable-linger", user]
+            # Often allowed for one's own user without sudo
+            enabled = subprocess.run(enable, capture_output=True)
+            if enabled.returncode != 0 and can_sudo():
+                enabled = subprocess.run(
+                    ["sudo", "-n", *enable], capture_output=True
+                )
             if enabled.returncode != 0:
                 notes.append(
                     "The Operator will only run while you're logged in. "
@@ -3036,9 +3075,11 @@ def install_service(at_boot: bool = False) -> list[str]:
                     f"sudo loginctl enable-linger {user}"
                 )
     elif system == "Darwin":
+        at_boot = not login and can_sudo()
         fpath = _launchd_plist_path(at_boot)
         domain = "system" if at_boot else f"gui/{os.getuid()}"
-        sudo = ["sudo"] if at_boot else []
+        # Checked above, so it never stops to ask
+        sudo = ["sudo", "-n"] if at_boot else []
         target = f"{domain}/{service_label()}"
         subprocess.run(
             [*sudo, "launchctl", "bootout", target], capture_output=True
@@ -3059,7 +3100,7 @@ def install_service(at_boot: bool = False) -> list[str]:
 
             with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
                 tmp.write(_launchd_plist(at_boot))
-            subprocess.run(["sudo", "cp", tmp.name, fpath], check=True)
+            subprocess.run(["sudo", "-n", "cp", tmp.name, fpath], check=True)
             os.remove(tmp.name)
         else:
             os.makedirs(os.path.dirname(fpath), exist_ok=True)
@@ -3068,10 +3109,11 @@ def install_service(at_boot: bool = False) -> list[str]:
         subprocess.run(
             [*sudo, "launchctl", "bootstrap", domain, fpath], check=True
         )
-        if not at_boot:
+        if not at_boot and not login:
             notes.append(
-                "The Operator will start when you log in. To start it at "
-                "boot instead, reinstall with --boot, which needs sudo."
+                "Starting at boot needs sudo, so the Operator will start "
+                "when you log in. To start it at boot, run 'calkit operator "
+                "install' again in a terminal."
             )
     elif system == "Windows":
         fpath = _windows_startup_path()

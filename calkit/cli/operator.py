@@ -71,11 +71,14 @@ def _require_config() -> dict:
 @operator_app.command(name="install")
 def install(
     hub: HubOption = None,
-    at_boot: Annotated[
+    login: Annotated[
         bool,
         typer.Option(
-            "--boot",
-            help="On macOS, start at boot rather than at login (needs sudo).",
+            "--login",
+            help=(
+                "Start it when you log in rather than at boot, which needs "
+                "sudo on macOS and Linux."
+            ),
         ),
     ] = False,
     cron: Annotated[
@@ -145,6 +148,7 @@ def install(
                 ssh,
                 cron=cron,
                 no_service=no_service,
+                login=login,
                 interactive=is_tty(),
             )
         except Exception as e:
@@ -187,7 +191,7 @@ def install(
         )
         return
     try:
-        notes = operator.install_service(at_boot=at_boot)
+        notes = operator.install_service(login=login)
     except NotImplementedError as e:
         raise_error(str(e))
     from calkit.hub import get_hub_url

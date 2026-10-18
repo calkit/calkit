@@ -245,9 +245,28 @@ the project on `branch`, a Git worktree sharing the main checkout's DVC
 cache, named after it and beside it if it's in `~/calkit` or `~/dev`,
 where the Operator finds it, else in `~/calkit`, and returns its `path`.
 
-`workspaces.clone`, with `id` and `git_repo_url`, clones a project into
-`~/calkit` with the machine's own Git credentials, where it becomes a
-workspace, and returns its `path`.
+`workspaces.clone`, with `id`, `git_repo_url`, and optionally `path`,
+clones a project with the machine's own Git credentials and returns its
+`path`.
+It goes in `~/calkit/<repo name>` unless `path` says otherwise, which can
+start with `~/` and must be in the user's home folder, outside hidden
+folders, and not exist yet.
+A clone outside `~/calkit` and `~/dev` is added to the config's
+workspaces, as `calkit operator add-workspace` would.
+
+Before cloning, the hub asks what the machine still needs.
+`machine.check`, with `id` and `git_repo_url`, returns `git_name` and
+`git_email`, Git's identity there or null, `repo`, with the URL's `host`,
+whether it's `ssh`, and an `error` if `git ls-remote` couldn't reach it
+without prompting, and `token`, whether Calkit has a token for this
+Operator's hub, which pulling and pushing data use.
+`machine.configure`, with `id` and any of `git_name`, `git_email`, and
+`token`, sets Git's global identity and stores the token in Calkit's
+config, as `calkit config set token` would.
+The browser makes that token with the hub's personal access token API,
+so it reaches the Operator only over a channel the owner opened.
+SSH keys aren't set up this way: the hub shows how to make one in a
+session instead.
 
 ## Editor builds
 

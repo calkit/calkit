@@ -1537,28 +1537,164 @@ def get_run_log(wdir: str) -> dict:
     return {"name": os.path.basename(fpath), "log": log[-50_000:]}
 
 
-def clone_project(git_repo_url: str) -> str:
-    """Clone a project into ``~/calkit``, where it becomes a workspace,
-    returning its path.
-
-    The clone uses this machine's own Git credentials.
-    """
+def _check_repo_url(git_repo_url: str) -> None:
     # Only the kinds of URL projects have, so nothing else Git can fetch
     # from, e.g., local paths or other transports, can be named
     if not re.match(r"(https://|git@)[A-Za-z0-9]", git_repo_url):
         raise ValueError(f"Can't clone {git_repo_url}")
-    parent = os.path.join(config.get_user_home(), "calkit")
-    os.makedirs(parent, exist_ok=True)
+
+
+def clone_project(git_repo_url: str, path: str | None = None) -> str:
+    """Clone a project into a new workspace, by default ``~/calkit/<name>``,
+    returning its path.
+
+    The clone uses this machine's own Git credentials. Another path must be
+    in the user's home folder, outside hidden folders, e.g., ``~/.ssh``.
+    """
+    _check_repo_url(git_repo_url)
+    home = os.path.realpath(config.get_user_home())
     name = git_repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
     if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or name.startswith("."):
         raise ValueError(f"Can't clone {git_repo_url}")
-    dest = os.path.join(parent, name)
+    path = (path or "").strip()
+    if not path:
+        dest = os.path.join(home, "calkit", name)
+    else:
+        if path == "~" or path.startswith("~/"):
+            path = home + path[1:]
+        if not os.path.isabs(path):
+            raise ValueError(
+                f"{path} isn't a full path, e.g., ~/calkit/{name}"
+            )
+        dest = os.path.normpath(path)
+    # Through any links, so the checks below are on where it really goes
+    dest = os.path.join(
+        os.path.realpath(os.path.dirname(dest)), os.path.basename(dest)
+    )
+    if dest == home or os.path.commonpath([home, dest]) != home:
+        raise ValueError(f"{dest} isn't in your home folder")
+    parts = os.path.relpath(dest, home).split(os.sep)
+    if any(part.startswith(".") for part in parts) or not re.fullmatch(
+        r"[A-Za-z0-9._-]+", parts[-1]
+    ):
+        raise ValueError(f"Can't clone into {dest}")
     if os.path.exists(dest):
         raise ValueError(f"{dest} already exists")
+    parent = os.path.dirname(dest)
+    os.makedirs(parent, exist_ok=True)
     # Pulling data can be slow or need credentials, so it's left to an
     # explicit pull
     _calkit(["clone", git_repo_url, dest, "--no-dvc-pull"], parent)
     return dest
+
+
+def check_machine_setup(git_repo_url: str) -> dict:
+    """What this machine needs before a project is cloned onto it: Git's name
+    and email for commits, access to the project's repository, and a Calkit
+    token for the hub, which pulling and pushing data use.
+    """
+    _check_repo_url(git_repo_url)
+    home = config.get_user_home()
+
+    def get_git_config(key: str) -> str | None:
+        try:
+            out = subprocess.run(
+                ["git", "config", "--get", key],
+                cwd=home,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ).stdout.strip()
+        except (subprocess.SubprocessError, OSError):
+            return None
+        return out or None
+
+    env = dict(child_env(), GIT_TERMINAL_PROMPT="0")
+    # So SSH fails rather than asking for a passphrase or host key nobody
+    # can answer, unless the user chose how Git runs it
+    if "GIT_SSH_COMMAND" not in env and not get_git_config("core.sshCommand"):
+        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=15"
+    error = None
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--exit-code", git_repo_url, "HEAD"],
+            cwd=home,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+        # 2 means it was reached but has no commits yet
+        if result.returncode not in (0, 2):
+            lines = result.stderr.strip().splitlines()
+            error = lines[-1] if lines else "Git couldn't reach it"
+    except subprocess.TimeoutExpired:
+        error = "Timed out"
+    except OSError as e:
+        error = str(e)
+    if git_repo_url.startswith("git@"):
+        host = git_repo_url[4:].split(":")[0]
+    else:
+        host = git_repo_url.split("/")[2]
+    return {
+        "git_name": get_git_config("user.name"),
+        "git_email": get_git_config("user.email"),
+        "repo": {
+            "host": host,
+            "ssh": git_repo_url.startswith("git@"),
+            "error": error,
+        },
+        # This Operator's hub's, which the project is on
+        "token": bool(config.read().token),
+    }
+
+
+def configure_machine(
+    git_name: str | None = None,
+    git_email: str | None = None,
+    token: str | None = None,
+) -> dict:
+    """Set up what ``check_machine_setup`` found missing, as the owner asked
+    from the hub.
+    """
+    import keyring.errors
+
+    home = config.get_user_home()
+    for key, value in [("user.name", git_name), ("user.email", git_email)]:
+        if value is None:
+            continue
+        value = value.strip()
+        if (
+            not value
+            or len(value) > 256
+            or any(c in value for c in "\n\r\0")
+            or (key == "user.email" and "@" not in value)
+        ):
+            raise ValueError(f"Invalid {key.removeprefix('user.')}")
+        subprocess.run(
+            ["git", "config", "--global", key, value],
+            cwd=home,
+            capture_output=True,
+            timeout=10,
+            check=True,
+        )
+    if token is not None:
+        if not re.fullmatch(r"ckp_[0-9a-f]{16,128}", token):
+            raise ValueError("Invalid token")
+        try:
+            settings = config.read()
+            settings = config.Settings.model_validate(
+                settings.model_dump() | {"token": token}
+            )
+            settings.write()
+        except keyring.errors.KeyringError:
+            # E.g., a service started at boot, before the user unlocked it
+            raise RuntimeError(
+                "Couldn't store the token in this machine's keyring; run "
+                "'calkit config set token' there instead"
+            )
+    return {}
 
 
 def new_workspace(wdir: str, branch: str) -> dict:
@@ -1611,6 +1747,9 @@ WORKSPACE_ACTIONS: dict[str, Any] = {
     "workspace.run_log": get_run_log,
     "workspace.new": new_workspace,
 }
+# Browser requests about the machine rather than a workspace, also run off
+# the event loop
+MACHINE_ACTIONS = {"workspaces.clone", "machine.check", "machine.configure"}
 # Actions that change nothing, so needn't take the workspace from other
 # hubs' Operators, and may act on managed workspaces too
 READ_ONLY_ACTIONS = {
@@ -2016,8 +2155,8 @@ class Operator:
         msg = frame.get("msg")
         if not isinstance(msg, dict):
             return
-        if msg.get("type") in WORKSPACE_ACTIONS or msg.get("type") == (
-            "workspaces.clone"
+        if msg.get("type") in WORKSPACE_ACTIONS or msg.get("type") in (
+            MACHINE_ACTIONS
         ):
             asyncio.get_running_loop().create_task(self.run_action(ch, msg))
             return
@@ -2046,8 +2185,21 @@ class Operator:
         try:
             if kind == "workspaces.clone":
                 path = await asyncio.to_thread(
-                    clone_project, msg["git_repo_url"]
+                    clone_project, msg["git_repo_url"], msg.get("path")
                 )
+                # One outside the folders workspaces are found in has to be
+                # added, as with 'calkit operator add-workspace'
+                home = config.get_user_home()
+                roots = [
+                    os.path.realpath(os.path.join(home, r))
+                    for r in WORKSPACE_ROOTS
+                ]
+                workspaces = self.cfg.setdefault("workspaces", [])
+                if os.path.dirname(path) not in roots and path not in (
+                    workspaces
+                ):
+                    workspaces.append(path)
+                    save_config(self.cfg)
                 # So the hub lists it right away, though the clone stands
                 # either way
                 try:
@@ -2055,6 +2207,17 @@ class Operator:
                 except Exception as e:
                     logger.warning(f"Check-in after cloning failed: {e}")
                 result: Any = {"path": path}
+            elif kind == "machine.check":
+                result = await asyncio.to_thread(
+                    check_machine_setup, msg["git_repo_url"]
+                )
+            elif kind == "machine.configure":
+                result = await asyncio.to_thread(
+                    configure_machine,
+                    git_name=msg.get("git_name"),
+                    git_email=msg.get("git_email"),
+                    token=msg.get("token"),
+                )
             else:
                 wdir = self.get_workspace(
                     msg.get("workspace", ""),

@@ -1038,6 +1038,23 @@ def test_workspace_actions(tmp_path, monkeypatch):
     path = operator.clone_project(url)
     assert path == os.path.join(tmp_path, "calkit", "other")
     assert calls == [["clone", url, path, "--no-dvc-pull"]]
+    # Or into a folder chosen for it in the home folder, which is created
+    calls.clear()
+    path = operator.clone_project(url, "~/work/other-copy")
+    assert path == os.path.join(tmp_path, "work", "other-copy")
+    assert calls == [["clone", url, path, "--no-dvc-pull"]]
+    assert os.path.isdir(os.path.join(tmp_path, "work"))
+    for bad_path in [
+        "relative/path",
+        "~",
+        "/etc/other",
+        "~/../other",
+        "~/.ssh/other",
+        "~/work/.hidden",
+        "~/calkit/demo",
+    ]:
+        with pytest.raises(ValueError):
+            operator.clone_project(url, bad_path)
 
     # Stages are listed in order with their state and the questions resting
     # on them, as evidence or upstream of it, matched through their paths,
@@ -1170,6 +1187,122 @@ def test_workspace_actions(tmp_path, monkeypatch):
     ]:
         with pytest.raises(ValueError):
             operator.clone_project(bad)
+
+
+def test_machine_setup(tmp_path, monkeypatch):
+    import keyring.errors
+
+    from calkit import config
+
+    home = os.path.realpath(tmp_path)
+    monkeypatch.setenv("CALKIT_USER_HOME", home)
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("XDG_CONFIG_HOME", os.path.join(home, ".config"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in ["GIT_CONFIG_GLOBAL", "GIT_SSH_COMMAND"]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(config, "supports_keyring", lambda: False)
+    # A repository the project's URL leads to, without the network
+    remote = os.path.join(home, "remote.git")
+    subprocess.run(["git", "init", "-q", "--bare", remote], check=True)
+    url = "https://example.com/someone/demo"
+    subprocess.run(
+        ["git", "config", "--global", f"url.file://{remote}.insteadOf", url],
+        check=True,
+    )
+    # A fresh machine has no Git identity or token, but can reach an empty
+    # repository
+    setup = operator.check_machine_setup(url)
+    assert setup == {
+        "git_name": None,
+        "git_email": None,
+        "repo": {"host": "example.com", "ssh": False, "error": None},
+        "token": False,
+    }
+    # One it can't reach says why
+    missing = "https://example.com/someone/missing"
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "--global",
+            f"url.file://{home}/nowhere.git.insteadOf",
+            missing,
+        ],
+        check=True,
+    )
+    assert operator.check_machine_setup(missing)["repo"]["error"]
+    ssh = operator.check_machine_setup("git@example.com:someone/demo.git")
+    assert ssh["repo"]["host"] == "example.com" and ssh["repo"]["ssh"]
+    # What's missing can be set from the hub
+    token = "ckp_" + "ab" * 32
+    operator.configure_machine(
+        git_name=" Ada Lovelace ", git_email="ada@example.com", token=token
+    )
+    setup = operator.check_machine_setup(url)
+    assert setup["git_name"] == "Ada Lovelace"
+    assert setup["git_email"] == "ada@example.com"
+    assert setup["token"]
+    assert config.read().token == token
+    # But nothing that isn't what it says it is
+    for kwargs in [
+        {"git_name": ""},
+        {"git_name": "a\n[core]\n\tsshCommand = evil"},
+        {"git_email": "not-an-email"},
+        {"token": "abc"},
+        {"token": token + "\n"},
+    ]:
+        with pytest.raises(ValueError):
+            operator.configure_machine(**kwargs)
+    assert operator.check_machine_setup(url)["git_name"] == "Ada Lovelace"
+    for bad in ["", "/etc", "--upload-pack=touch /tmp/x"]:
+        with pytest.raises(ValueError):
+            operator.check_machine_setup(bad)
+
+    # A keyring that can't be reached, e.g., from a service started at
+    # boot, says what to do instead
+    def locked(self):
+        raise keyring.errors.KeyringError("locked")
+
+    monkeypatch.setattr(config.Settings, "write", locked)
+    with pytest.raises(RuntimeError, match="calkit config set token"):
+        operator.configure_machine(token=token)
+    # A clone outside the folders workspaces are found in is added to them,
+    # so the hub lists it
+    sent: list[dict] = []
+    saved: list[dict] = []
+    op = operator.Operator({"workspaces": []})
+
+    async def send(ch, msg):
+        sent.append(msg)
+
+    async def check_in():
+        return {}
+
+    monkeypatch.setattr(op, "send", send)
+    monkeypatch.setattr(op, "check_in", check_in)
+    monkeypatch.setattr(operator, "save_config", saved.append)
+    monkeypatch.setattr(
+        operator,
+        "clone_project",
+        lambda u, p: os.path.join(
+            home, *(p[2:].split("/") if p else ["calkit", "demo"])
+        ),
+    )
+    for path in [None, "~/work/demo"]:
+        asyncio.run(
+            op.run_action(
+                "ch",
+                {"type": "workspaces.clone", "id": 1, "git_repo_url": url}
+                | ({"path": path} if path else {}),
+            )
+        )
+    assert [m["result"]["path"] for m in sent] == [
+        os.path.join(home, "calkit", "demo"),
+        os.path.join(home, "work", "demo"),
+    ]
+    assert op.cfg["workspaces"] == [os.path.join(home, "work", "demo")]
+    assert len(saved) == 1
 
 
 def test_install_remote(monkeypatch):

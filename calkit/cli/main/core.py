@@ -115,10 +115,26 @@ def _to_shell_cmd(cmd: list[str]) -> str:
         return cmd[0]
     quoted_cmd = []
     for part in cmd:
-        # Find quotes within quotes and escape them
-        if " " in part or '"' in part[1:-1] or "'" in part[1:-1]:
-            part = part.replace('"', r"\"")
-            quoted_cmd.append(f'"{part}"')
+        if (
+            any(c.isspace() for c in part)
+            or '"' in part[1:-1]
+            or "'" in part[1:-1]
+        ):
+            # Quotes are escaped, and backslashes before one, including the
+            # closing quote, are doubled so they stay literal
+            escaped = ""
+            backslashes = 0
+            for c in part:
+                if c == "\\":
+                    backslashes += 1
+                    continue
+                if c == '"':
+                    escaped += "\\" * (2 * backslashes + 1) + c
+                else:
+                    escaped += "\\" * backslashes + c
+                backslashes = 0
+            escaped += "\\" * 2 * backslashes
+            quoted_cmd.append(f'"{escaped}"')
         else:
             quoted_cmd.append(part)
     return " ".join(quoted_cmd)

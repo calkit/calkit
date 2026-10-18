@@ -809,6 +809,26 @@ def test_to_shell_cmd():
     ]
     good_shell_cmd = 'sh -c "cd dir1 && ls"'
     assert _to_shell_cmd(cmd) == good_shell_cmd
+    # Arguments survive the shell as they were, backslashes and tabs too
+    args = [
+        "2026-06-09 12:00:00",
+        "a b\\",
+        "a b\\\\",
+        "a\tb",
+        'say "hi"',
+        'say \\"hi\\"',
+        "C:\\My Data\\x",
+    ]
+    shell_cmd = _to_shell_cmd(
+        [
+            sys.executable,
+            "-c",
+            "import json, sys; print(json.dumps(sys.argv[1:]))",
+        ]
+        + args
+    )
+    out = subprocess.check_output(shell_cmd, shell=True, text=True)
+    assert json.loads(out) == args
 
 
 def test_add(tmp_dir):

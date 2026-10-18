@@ -491,6 +491,7 @@ import type {
   RefreshTokenRequest,
   RegisterUserErrors,
   RegisterUserResponses,
+  RelayTokenReq,
   ReleaseCommentPost,
   ReleaseCommentResolvePost,
   ReleasePost,
@@ -9773,6 +9774,7 @@ export class OperatorsService {
     parameters: {
       "x-second-factor"?: string | null
       operator_id: string
+      relayTokenReq: RelayTokenReq
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -9787,6 +9789,7 @@ export class OperatorsService {
           args: [
             { in: "headers", key: "x-second-factor" },
             { in: "path", key: "operator_id" },
+            { key: "relayTokenReq", map: "body" },
           ],
         },
       ],
@@ -9801,6 +9804,11 @@ export class OperatorsService {
       url: "/operators/{operator_id}/relay-token",
       ...options,
       ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

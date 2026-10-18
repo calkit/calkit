@@ -321,6 +321,34 @@ export type BodyProjectsPutProjectContents = {
 }
 
 /**
+ * BrowserKey
+ *
+ * A browser's public key for one connection, as a JSON Web Key.
+ *
+ * The browser signs every message it sends the Operator with the private
+ * half, which it can't export, so a grant naming this key is no use to
+ * the relay that carries it.
+ */
+export type BrowserKey = {
+  /**
+   * Kty
+   */
+  kty: "EC"
+  /**
+   * Crv
+   */
+  crv: "P-256"
+  /**
+   * X
+   */
+  x: string
+  /**
+   * Y
+   */
+  y: string
+}
+
+/**
  * CheckIn
  *
  * What an Operator reports each time it checks in.
@@ -346,6 +374,10 @@ export type CheckIn = {
    * Workspaces
    */
   workspaces?: Array<WorkspaceInfo>
+  /**
+   * Channel Sessions
+   */
+  channel_sessions?: Array<string>
 }
 
 /**
@@ -390,6 +422,10 @@ export type CheckInResp = {
    * Restart
    */
   restart?: boolean
+  /**
+   * Ended Sessions
+   */
+  ended_sessions?: Array<string>
 }
 
 /**
@@ -5000,6 +5036,15 @@ export type RefreshTokenRequest = {
    * Refresh Token
    */
   refresh_token: string
+}
+
+/**
+ * RelayTokenReq
+ *
+ * What a browser asking to connect to an Operator sends.
+ */
+export type RelayTokenReq = {
+  public_key: BrowserKey
 }
 
 /**
@@ -15800,7 +15845,7 @@ export type PostOperatorRestartResponse =
   PostOperatorRestartResponses[keyof PostOperatorRestartResponses]
 
 export type PostOperatorRelayTokenData = {
-  body?: never
+  body: RelayTokenReq
   headers?: {
     /**
      * X-Second-Factor

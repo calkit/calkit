@@ -31,6 +31,7 @@ from app.models import (
     OperatorPublic,
     OperatorWorkspace,
     Project,
+    RefreshToken,
     User,
 )
 from app.security import (
@@ -302,6 +303,8 @@ class CheckIn(BaseModel):
     # Whether it will restart once idle, e.g., after Calkit was upgraded
     restart_pending: bool = False
     workspaces: list[WorkspaceInfo] = Field(default=[], max_length=1000)
+    # The sign-ins its open channels came from, to hear which have ended
+    channel_sessions: list[uuid.UUID] = Field(default=[], max_length=100)
 
 
 class CheckInResp(BaseModel):
@@ -319,6 +322,26 @@ class CheckInResp(BaseModel):
     connect: bool = False
     # Whether to restart once idle, as its owner asked
     restart: bool = False
+    # Which of its channels' sign-ins have ended, e.g., with a password
+    # change, so it closes those channels
+    ended_sessions: list[uuid.UUID] = []
+
+
+def _ended_sessions(
+    session: SessionDep, operator: Operator, session_ids: list[uuid.UUID]
+) -> list[uuid.UUID]:
+    """Which of these sign-ins of the Operator's owner are no longer live."""
+    if not session_ids:
+        return []
+    live = session.exec(
+        select(RefreshToken.session_id)
+        .where(col(RefreshToken.session_id).in_(session_ids))
+        .where(RefreshToken.user_id == operator.user_id)
+        .where(RefreshToken.interactive)
+        .where(RefreshToken.is_active)
+        .where(RefreshToken.expires > utcnow())
+    ).all()
+    return sorted(set(session_ids) - set(live), key=str)
 
 
 def _update_workspaces(
@@ -398,6 +421,9 @@ def post_operator_check_in(
         connect=connect_requested(operator),
         restart=restart,
         grant_public_key=get_operator_grant_public_key(),
+        ended_sessions=_ended_sessions(
+            session, operator, req.channel_sessions
+        ),
     )
 
 
@@ -430,6 +456,46 @@ def post_operator_restart(
     return _out(operator)
 
 
+class BrowserKey(BaseModel):
+    """A browser's public key for one connection, as a JSON Web Key.
+
+    The browser signs every message it sends the Operator with the private
+    half, which it can't export, so a grant naming this key is no use to
+    the relay that carries it.
+    """
+
+    kty: Literal["EC"]
+    crv: Literal["P-256"]
+    # Base64url coordinates of the point, 32 bytes each
+    x: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+    y: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+
+
+class RelayTokenReq(BaseModel):
+    """What a browser asking to connect to an Operator sends."""
+
+    public_key: BrowserKey
+
+
+def _check_browser_key(key: BrowserKey) -> None:
+    """Refuse a key that isn't a point on P-256, which the Operator would
+    reject anyway, so the browser hears why now.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    def coordinate(value: str) -> int:
+        return int.from_bytes(base64.urlsafe_b64decode(value + "="), "big")
+
+    try:
+        ec.EllipticCurvePublicNumbers(
+            coordinate(key.x), coordinate(key.y), ec.SECP256R1()
+        ).public_key()
+    except ValueError:
+        raise HTTPException(422, "Invalid public key")
+
+
 class RelayTokenResp(BaseModel):
     """Where and how a browser connects to an Operator through the relay."""
 
@@ -442,6 +508,7 @@ def post_operator_relay_token(
     session: SessionDep,
     signed_in: CurrentSession,
     operator_id: uuid.UUID,
+    req: RelayTokenReq,
     x_second_factor: Annotated[str | None, Header()] = None,
 ) -> RelayTokenResp:
     """Let the user's browser connect to one of their online Operators.
@@ -449,6 +516,7 @@ def post_operator_relay_token(
     This opens a shell on their machine, so it takes a signed-in session,
     not a token, that entered a second factor recently.
     """
+    _check_browser_key(req.public_key)
     current_user = signed_in.user
     operator = _get_owned_operator(session, current_user, operator_id)
     users.require_second_factor(
@@ -467,6 +535,8 @@ def post_operator_relay_token(
                 operator.id,
                 current_user.id,
                 timedelta(seconds=BROWSER_RELAY_TOKEN_SECONDS),
+                browser_key=req.public_key.model_dump(),
+                session_id=signed_in.session_id,
             ),
         ),
     )

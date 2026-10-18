@@ -98,18 +98,28 @@ def get_operator_grant_public_key() -> str:
 
 
 def create_operator_grant(
-    operator_id: uuid.UUID, user_id: uuid.UUID, expires_delta: timedelta
+    operator_id: uuid.UUID,
+    user_id: uuid.UUID,
+    expires_delta: timedelta,
+    browser_key: dict[str, str],
+    session_id: uuid.UUID,
 ) -> str:
     """Create a grant for a user to open one channel to an Operator.
 
     It's signed with a key only the API holds, and the Operator checks it,
-    so the relay, which carries it, can't open channels of its own.
+    so the relay, which carries it, can't open channels of its own. It
+    names the browser's public key, which the Operator checks every message
+    on the channel is signed with, so the relay can't act inside a channel
+    either, and the sign-in it came from, so the Operator can close the
+    channel once that sign-in ends.
     """
     payload = {
         "exp": datetime.now(timezone.utc) + expires_delta,
         "aud": str(operator_id),
         "sub": str(user_id),
         "jti": secrets.token_hex(16),
+        "cnf": {"jwk": browser_key},
+        "sid": str(session_id),
     }
     return jwt.encode(payload, _operator_grant_key(), algorithm="EdDSA")
 

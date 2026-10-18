@@ -50,9 +50,13 @@ rejects its token and the Operator shuts down.
   `tool`, `pid`, when it `started`, `where` it runs (`session`, one of the
   Operator's, `tmux`, or another `terminal`), the `app` it was started
   from, e.g., `Code`, and the `name` and `status` it gives itself, if any.
+  It also lists the sign-ins its open channels came from
+  (`channel_sessions`, the grants' `sid`s).
   It returns the relay URL, an Operator relay token, `connect`, which
-  tells an Operator in cron mode whether to connect, and `restart`, which
-  passes on a restart its owner asked for.
+  tells an Operator in cron mode whether to connect, `restart`, which
+  passes on a restart its owner asked for, and `ended_sessions`, which of
+  those sign-ins are no longer live, e.g., after a password change, whose
+  channels the Operator then closes, leaving their sessions running.
   Operators check in every 60 seconds while connected.
 - `POST /operators/{operator_id}/wake`, with the user's token, asks an
   Operator in cron mode to connect at its next check-in.
@@ -62,6 +66,9 @@ rejects its token and the Operator shuts down.
   Operator to restart, which it hears at its next check-in.
 - `POST /operators/{operator_id}/relay-token`, with the user's token,
   returns the relay URL and a browser relay token for that Operator.
+  The browser sends the public half of a P-256 key it made for this
+  connection, whose private half can't be exported, as a JSON Web Key:
+  `{"public_key": {"kty": "EC", "crv": "P-256", "x": ..., "y": ...}}`.
   It requires an access token from a person signing in to the web app,
   whose sign-in session is still live, not a personal access token or a
   CLI, CI, or GitHub token login, and proof that the session entered a
@@ -135,7 +142,8 @@ When a browser connects, the relay assigns it a channel ID and sends the
 Operator `{"type": "channel.open", "ch": ..., "user_id": ..., "grant": ...}`.
 The grant, which comes from the browser's relay token, is an EdDSA JWT
 the API signed, with the Operator's ID as `aud`, its owner as `sub`, a
-`jti`, and a 60 second `exp`.
+`jti`, a 60 second `exp`, the browser's public key as `cnf.jwk`, and
+the sign-in it came from as `sid`.
 The Operator checks it against the key it pinned from `grant_public_key`
 when it registered (or at its first check-in, if registered before), and
 refuses channels without a valid, unused one.
@@ -143,8 +151,21 @@ Browser messages are forwarded to the Operator as
 `{"type": "channel.message", "ch": ..., "msg": ...}`,
 and the Operator sends `{"ch": ..., "msg": ...}` to reach a browser, which
 receives `msg` unwrapped.
+Each browser message is sent signed, as
+`{"seq": ..., "body": ..., "sig": ...}`, where `body` is the message's
+JSON text, `seq` counts up from 1 on each connection, and `sig` is an
+ECDSA P-256 SHA-256 signature, as r and s side by side in base64url, of
+`calkit-operator-message\n{seq}\n{body}` with the key the grant names.
+The Operator drops a message whose signature doesn't check out or whose
+`seq` isn't past the last one, so the relay, which carries the grant,
+can neither use it nor forge or replay messages in a channel a user
+opened.
+What the Operator sends back isn't signed, and the relay can read both
+directions.
 When a browser disconnects, the Operator gets
 `{"type": "channel.close", "ch": ...}`.
+The Operator sends the same to close a channel itself, e.g., when its
+sign-in ends, and the relay closes the browser with code 4401.
 When the Operator disconnects, its browsers are closed with code 4410.
 
 All messages are JSON text frames.

@@ -191,6 +191,12 @@ further:
   So the relay alone can't open channels, for shells or anything else,
   and what's left to trust is the API itself, as with any web terminal
   its pages serve.
+- The grant also names a key the browser made for that connection and
+  can't export, which signs every message, numbered, so the relay can't
+  use a grant it carries or act inside a channel, though it can read
+  both directions.
+  The grant names its sign-in too, and the Operator closes the channel
+  within a check-in once that sign-in ends, e.g., with a password change.
 - The Operator registers with the user's own hub, never one named by a
   project in the working directory, and refuses to connect without TLS
   except locally or to run as root.

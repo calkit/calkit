@@ -10,6 +10,43 @@ export interface SessionInfo {
 
 type Listener = (msg: any) => void
 
+// Signed along with each message, so a signature means nothing elsewhere.
+// The Operator checks the same text (calkit/operator.py).
+export const MESSAGE_SIGNATURE_CONTEXT = "calkit-operator-message"
+
+export function signedText(seq: number, body: string): string {
+  return `${MESSAGE_SIGNATURE_CONTEXT}\n${seq}\n${body}`
+}
+
+function toBase64Url(bytes: ArrayBuffer): string {
+  let binary = ""
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
+
+// A message as the Operator takes it: its JSON text, signed as sent with
+// this connection's key, after the last one, so the relay can neither
+// forge nor replay one
+export async function signMessage(
+  key: CryptoKey,
+  seq: number,
+  body: string,
+): Promise<{ seq: number; body: string; sig: string }> {
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    new TextEncoder().encode(signedText(seq, body)),
+  )
+  return { seq, body, sig: toBase64Url(sig) }
+}
+
+// What one connection signs its messages with, in the order they're sent
+interface Signer {
+  key: CryptoKey
+  seq: number
+  queue: Promise<void>
+}
+
 // Why the hub refused a relay token, from app/users.py
 export const SECOND_FACTOR_SETUP_REQUIRED =
   "Two-factor authentication setup required"
@@ -20,6 +57,7 @@ export const SECOND_FACTOR_REQUIRED = "Two-factor authentication code required"
 export class OperatorConnection {
   operatorId: string
   ws: WebSocket | null = null
+  signer: Signer | null = null
   nextId = 1
   pending = new Map<
     number,
@@ -40,10 +78,29 @@ export class OperatorConnection {
 
   async connect() {
     let ws: WebSocket
+    let signer: Signer
     try {
+      // A key for this connection only, which can't leave the browser. Its
+      // public half goes in the grant the Operator checks, so the relay
+      // carrying the grant can't use it.
+      const keys = await crypto.subtle.generateKey(
+        { name: "ECDSA", namedCurve: "P-256" },
+        false,
+        ["sign", "verify"],
+      )
+      const jwk = await crypto.subtle.exportKey("jwk", keys.publicKey)
+      signer = { key: keys.privateKey, seq: 0, queue: Promise.resolve() }
       const resp = await OperatorsService.postOperatorRelayToken({
         operator_id: this.operatorId,
         "x-second-factor": getSecondFactorToken(),
+        relayTokenReq: {
+          public_key: {
+            kty: "EC",
+            crv: "P-256",
+            x: jwk.x ?? "",
+            y: jwk.y ?? "",
+          },
+        },
       })
       // Closed while the token was on its way, e.g., by leaving the page,
       // so it mustn't open a channel that would keep the Operator awake
@@ -70,6 +127,7 @@ export class OperatorConnection {
     }
     this.error = null
     this.ws = ws
+    this.signer = signer
     ws.onopen = () => {
       this.connected = true
       this.retryDelay = 1000
@@ -93,6 +151,7 @@ export class OperatorConnection {
     ws.onclose = () => {
       this.connected = false
       this.ws = null
+      this.signer = null
       for (const p of this.pending.values()) {
         p.reject(new Error("Disconnected from Operator"))
       }
@@ -113,9 +172,18 @@ export class OperatorConnection {
   }
 
   send(msg: object) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg))
-    }
+    const ws = this.ws
+    const signer = this.signer
+    if (ws?.readyState !== WebSocket.OPEN || !signer) return
+    const body = JSON.stringify(msg)
+    // Signing is asynchronous, so messages queue to keep their order
+    signer.queue = signer.queue
+      .then(async () => {
+        signer.seq += 1
+        const signed = await signMessage(signer.key, signer.seq, body)
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(signed))
+      })
+      .catch(() => {})
   }
 
   request(type: string, fields: object = {}): Promise<any> {

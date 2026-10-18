@@ -1424,10 +1424,12 @@ def test_restarts(tmp_path, monkeypatch):
     # Restarting replaces the process with one running the same way
     execs = []
     monkeypatch.setattr(operator.os, "execv", lambda *a: execs.append(a))
+    platform = operator.sys.platform
     monkeypatch.setattr(operator.sys, "platform", "linux")
     operator.restart_process("service")
     cmd = operator._service_command("service")
     assert execs == [(cmd[0], cmd)]
+    monkeypatch.setattr(operator.sys, "platform", platform)
     # Run restarts once its Operator stops for one, and drops requests left
     # from before it started
     restarts: list[str] = []

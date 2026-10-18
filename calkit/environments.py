@@ -480,7 +480,13 @@ def stage_calkit_files(wdir: str | None = None) -> None:
     if not paths:
         return
     try:
-        calkit.git.get_repo(wdir).git.add("-A", "--", *paths)
+        repo = calkit.git.get_repo(wdir)
+        # A project that ignores one of these has chosen not to commit it,
+        # and naming it to 'git add' would fail the whole call
+        ignored = {os.path.abspath(p) for p in repo.ignored(*paths)}
+        paths = [p for p in paths if p not in ignored]
+        if paths:
+            repo.git.add("-A", "--", *paths)
     except Exception as e:
         warn(f"Couldn't stage the files Calkit wrote: {e}")
 

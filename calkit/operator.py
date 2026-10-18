@@ -606,6 +606,7 @@ def check_in(
     mode: str,
     connected: bool = True,
     restart_pending: bool = False,
+    channel_sessions: list[str] | None = None,
 ) -> dict:
     from requests.exceptions import HTTPError
 
@@ -621,6 +622,7 @@ def check_in(
                 mode=mode,
                 connected=connected,
                 restart_pending=restart_pending,
+                channel_sessions=channel_sessions or [],
             ),
             headers={"Authorization": f"Bearer {cfg['token']}"},
             auth=False,
@@ -646,45 +648,131 @@ def check_in(
     return resp
 
 
-def check_grant(cfg: dict, grant: Any, used: dict[str, float]) -> bool:
-    """Whether a channel's grant is one the hub signed for this Operator's
-    owner, and hasn't been used or expired.
+@dataclass
+class ChannelAuth:
+    """What a channel's grant lets through: messages signed with the
+    browser's key, in order, while the sign-in it came from lasts.
+    """
+
+    key: Any
+    session_id: str
+    # The last message's sequence number, which each next one must pass
+    seq: int = 0
+
+
+# Signed with each browser message, so a signature means nothing elsewhere
+MESSAGE_SIGNATURE_CONTEXT = "calkit-operator-message"
+# How many of its channels' sign-ins a check-in can ask about
+MAX_CHANNEL_SESSIONS = 100
+
+
+def _b64url_decode(value: str) -> bytes:
+    import base64
+
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def check_grant(
+    cfg: dict, grant: Any, used: dict[str, float]
+) -> ChannelAuth | None:
+    """What a channel may do, if its grant is one the hub signed for this
+    Operator's owner, and hasn't been used or expired.
 
     This, rather than the relay's word, is what decides who opened a
-    channel, so the relay alone can't run anything here.
+    channel, so the relay alone can't run anything here. The grant names
+    the browser's public key, which every message must be signed with, so
+    the relay, which carries the grant, can't use it either.
     """
     import base64
     import time
 
     import jwt
+    from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PublicKey,
     )
 
     key = cfg.get("grant_public_key")
     if not isinstance(grant, str) or not key:
-        return False
+        return None
     try:
         payload = jwt.decode(
             grant,
             Ed25519PublicKey.from_public_bytes(base64.b64decode(key)),
             algorithms=["EdDSA"],
             audience=str(cfg["id"]),
-            options={"require": ["exp", "aud", "sub", "jti"]},
+            options={"require": ["exp", "aud", "sub", "jti", "cnf", "sid"]},
             # For clocks that disagree with the hub's
             leeway=60,
         )
-    except (jwt.InvalidTokenError, ValueError):
-        return False
+        jwk = payload["cnf"]["jwk"]
+        if jwk["kty"] != "EC" or jwk["crv"] != "P-256":
+            return None
+        browser_key = ec.EllipticCurvePublicNumbers(
+            int.from_bytes(_b64url_decode(jwk["x"]), "big"),
+            int.from_bytes(_b64url_decode(jwk["y"]), "big"),
+            ec.SECP256R1(),
+        ).public_key()
+    except (jwt.InvalidTokenError, ValueError, KeyError, TypeError):
+        return None
     now = time.time()
     for jti, exp in list(used.items()):
         if exp + 60 < now:
             del used[jti]
     jti = payload["jti"]
     if payload["sub"] != str(cfg["user_id"]) or jti in used:
-        return False
+        return None
     used[jti] = float(payload["exp"])
-    return True
+    return ChannelAuth(key=browser_key, session_id=str(payload["sid"]))
+
+
+def open_signed_message(auth: ChannelAuth, msg: Any) -> dict | None:
+    """The message a browser sent, if it's signed with its channel's key
+    and comes after the last one, so the relay can neither forge one nor
+    replay one.
+
+    Browsers send ``{"seq": ..., "body": ..., "sig": ...}``, where ``body``
+    is the message as JSON text, signed as sent, so neither end has to
+    encode it the same way.
+    """
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import (
+        encode_dss_signature,
+    )
+
+    if not isinstance(msg, dict):
+        return None
+    seq, body, sig = msg.get("seq"), msg.get("body"), msg.get("sig")
+    if (
+        not isinstance(seq, int)
+        or isinstance(seq, bool)
+        or seq <= auth.seq
+        or not isinstance(body, str)
+        or not isinstance(sig, str)
+    ):
+        return None
+    try:
+        # WebCrypto signs as r and s side by side, not DER
+        raw = _b64url_decode(sig)
+        if len(raw) != 64:
+            return None
+        auth.key.verify(
+            encode_dss_signature(
+                int.from_bytes(raw[:32], "big"),
+                int.from_bytes(raw[32:], "big"),
+            ),
+            f"{MESSAGE_SIGNATURE_CONTEXT}\n{seq}\n{body}".encode(),
+            ec.ECDSA(hashes.SHA256()),
+        )
+        inner = json.loads(body)
+    except (InvalidSignature, ValueError):
+        return None
+    if not isinstance(inner, dict):
+        return None
+    auth.seq = seq
+    return inner
 
 
 def get_shell() -> str:
@@ -1687,8 +1775,8 @@ class Operator:
         self.mode = mode
         self.idle_exit_seconds = idle_exit_seconds
         self.sessions: dict[str, Session] = {}
-        # Browser channels, which are all the owner's
-        self.channels: set[str] = set()
+        # Browser channels, which are all the owner's, and what each may do
+        self.channels: dict[str, ChannelAuth] = {}
         # IDs of grants channels were opened with, and when they expire
         self.used_grants: dict[str, float] = {}
         self.workspaces: list[dict] = []
@@ -2001,20 +2089,20 @@ class Operator:
         if kind == "channel.open":
             # Only the owner may use this Operator, as the hub vouches with
             # a grant it signed, whatever the relay says
-            if check_grant(self.cfg, frame.get("grant"), self.used_grants):
-                self.channels.add(ch)
+            auth = check_grant(self.cfg, frame.get("grant"), self.used_grants)
+            if auth is not None:
+                self.channels[ch] = auth
             else:
                 logger.warning(f"Refused channel {ch} without a valid grant")
             return
         if kind == "channel.close":
-            self.channels.discard(ch)
-            for session in self.sessions.values():
-                session.channels.discard(ch)
+            self.drop_channel(ch)
             return
         if kind != "channel.message" or ch not in self.channels:
             return
-        msg = frame.get("msg")
-        if not isinstance(msg, dict):
+        msg = open_signed_message(self.channels[ch], frame.get("msg"))
+        if msg is None:
+            logger.warning(f"Dropped an unsigned message on channel {ch}")
             return
         if msg.get("type") in WORKSPACE_ACTIONS or msg.get("type") == (
             "workspaces.clone"
@@ -2036,6 +2124,33 @@ class Operator:
             self.send_soon(
                 ch, {"type": "result", "id": req_id, "result": result}
             )
+
+    def drop_channel(self, ch: str) -> None:
+        """Forget a channel, leaving any sessions it was attached to
+        running.
+        """
+        self.channels.pop(ch, None)
+        for session in self.sessions.values():
+            session.channels.discard(ch)
+
+    async def close_ended_channels(self, ended: list[str]) -> None:
+        """Close the channels opened from sign-ins that have since ended,
+        e.g., with a password change, leaving their sessions running.
+        """
+        for ch, auth in list(self.channels.items()):
+            if auth.session_id not in ended:
+                continue
+            self.drop_channel(ch)
+            logger.info(f"Closed channel {ch}, since its sign-in ended")
+            # Messages on it are refused here regardless, so this only tells
+            # the browser sooner
+            if self.ws is not None:
+                try:
+                    await self.ws.send(
+                        json.dumps({"type": "channel.close", "ch": ch})
+                    )
+                except Exception:
+                    pass
 
     async def run_action(self, ch: str, msg: dict) -> None:
         """Run a request that waits on Git, DVC, or the network in a thread,
@@ -2117,8 +2232,16 @@ class Operator:
             self.mode,
             self.ws is not None,
             self.restart_pending(),
+            # As many as the hub takes, which is far more than one person
+            # signs in from
+            sorted({auth.session_id for auth in self.channels.values()})[
+                :MAX_CHANNEL_SESSIONS
+            ],
         )
         self.check_in_interval = resp.get("check_in_interval", 60)
+        await self.close_ended_channels(
+            [str(s) for s in resp.get("ended_sessions") or []]
+        )
         if resp.get("restart"):
             self.restart_requested = True
         return resp

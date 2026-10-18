@@ -166,10 +166,20 @@ async def operator_ws(ws: WebSocket) -> None:
             if msg is None:
                 break
             ch = msg.get("ch")
-            browser = (
-                operator.channels.get(ch) if isinstance(ch, str) else None
-            )
-            if browser is None or "msg" not in msg:
+            if not isinstance(ch, str):
+                continue
+            browser = operator.channels.get(ch)
+            if browser is None:
+                continue
+            # The Operator closed it, e.g., because its sign-in ended
+            if msg.get("type") == "channel.close":
+                operator.channels.pop(ch, None)
+                try:
+                    await browser.close(CLOSE_UNAUTHORIZED)
+                except Exception:
+                    pass
+                continue
+            if "msg" not in msg:
                 continue
             meter[operator_id][1] += await _send(browser, msg["msg"])
     except WebSocketDisconnect:

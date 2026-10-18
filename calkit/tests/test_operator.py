@@ -395,8 +395,13 @@ async def test_sessions(tmp_path, monkeypatch):
     import time
 
     import jwt
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PrivateKey,
+    )
+    from cryptography.hazmat.primitives.asymmetric.utils import (
+        decode_dss_signature,
     )
     from cryptography.hazmat.primitives.serialization import (
         Encoding,
@@ -417,17 +422,60 @@ async def test_sessions(tmp_path, monkeypatch):
     )
     op.workspaces = operator.discover_workspaces(op.cfg)
 
-    def grant(sub="owner", aud="op1", expires_in=60, key=hub_key, jti=None):
-        return jwt.encode(
-            {
-                "exp": time.time() + expires_in,
-                "aud": aud,
-                "sub": sub,
-                "jti": jti or os.urandom(8).hex(),
-            },
-            key,
-            algorithm="EdDSA",
+    def b64url(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+    # Each browser connection makes a key, which its grant names
+    def browser_key():
+        key = ec.generate_private_key(ec.SECP256R1())
+        numbers = key.public_key().public_numbers()
+        jwk = {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": b64url(numbers.x.to_bytes(32, "big")),
+            "y": b64url(numbers.y.to_bytes(32, "big")),
+        }
+        return key, jwk
+
+    browser, browser_jwk = browser_key()
+
+    def grant(
+        sub="owner",
+        aud="op1",
+        expires_in=60,
+        key=hub_key,
+        jti=None,
+        jwk=None,
+        sid="sign-in-1",
+        drop=(),
+    ):
+        payload = {
+            "exp": time.time() + expires_in,
+            "aud": aud,
+            "sub": sub,
+            "jti": jti or os.urandom(8).hex(),
+            "cnf": {"jwk": jwk or browser_jwk},
+            "sid": sid,
+        }
+        for k in drop:
+            del payload[k]
+        return jwt.encode(payload, key, algorithm="EdDSA")
+
+    # As a browser signs with WebCrypto: r and s side by side
+    seqs: dict[str, int] = {}
+
+    def sign(ch, msg, key=None, seq=None):
+        if seq is None:
+            seq = seqs[ch] = seqs.get(ch, 0) + 1
+        body = json.dumps(msg)
+        r, s = decode_dss_signature(
+            (key or browser).sign(
+                f"{operator.MESSAGE_SIGNATURE_CONTEXT}\n{seq}\n{body}".encode(),
+                ec.ECDSA(hashes.SHA256()),
+            )
         )
+        sig = b64url(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
+        return {"seq": seq, "body": body, "sig": sig}
 
     workspace = op.workspaces[0]["path"]
 
@@ -469,7 +517,9 @@ async def test_sessions(tmp_path, monkeypatch):
         return replies[0] if replies else None
 
     def message(ch, msg):
-        op.on_relay_message({"type": "channel.message", "ch": ch, "msg": msg})
+        op.on_relay_message(
+            {"type": "channel.message", "ch": ch, "msg": sign(ch, msg)}
+        )
 
     # Channels are refused unless the hub signed a grant for the owner to use
     # this Operator, whatever the relay says, and each grant works once
@@ -483,6 +533,10 @@ async def test_sessions(tmp_path, monkeypatch):
         grant(aud="op2"),
         grant(expires_in=-120),
         grant(key=Ed25519PrivateKey.generate()),
+        # Grants name the browser's key and sign-in
+        grant(drop=["cnf"]),
+        grant(drop=["sid"]),
+        grant(jwk=browser_jwk | {"y": browser_jwk["x"]}),
         used,
     ]:
         op.on_relay_message(
@@ -497,6 +551,50 @@ async def test_sessions(tmp_path, monkeypatch):
     await asyncio.sleep(0.1)
     assert sent == []
     op.on_relay_message({"type": "channel.open", "ch": "a", "grant": grant()})
+    # On an open channel, only messages the browser signed count, each once
+    # and in order, so the relay that carried the grant can't act with it
+    listing = {"type": "sessions.list", "id": 20}
+    other_key, _ = browser_key()
+    signed = sign("a", listing)
+    for bad in [
+        listing,
+        signed | {"body": json.dumps(listing | {"id": 21})},
+        signed | {"sig": signed["sig"][:-4] + "AAAA"},
+        sign("a", listing, key=other_key),
+        signed | {"seq": True},
+    ]:
+        op.on_relay_message({"type": "channel.message", "ch": "a", "msg": bad})
+    await asyncio.sleep(0.1)
+    assert sent == []
+    op.on_relay_message({"type": "channel.message", "ch": "a", "msg": signed})
+    await wait_for(lambda: reply(20))
+    sent.clear()
+    op.on_relay_message({"type": "channel.message", "ch": "a", "msg": signed})
+    earlier = sign("a", listing | {"id": 22}, seq=signed["seq"] - 1)
+    op.on_relay_message({"type": "channel.message", "ch": "a", "msg": earlier})
+    await asyncio.sleep(0.1)
+    assert sent == []
+    # Signed as sent, as the hub's tests check with the same vector, from
+    # hub/frontend/src/components/Operators/connection.test.ts
+    vector = {
+        "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "QF8jZqZXlCI2kwXe6F3IGC3DlMRjap4e8f1DV0uWNiQ",
+            "y": "GAhXTzjif_yPldGN07yo6alEe_o-IyFSC83KEKILGdE",
+        },
+        "seq": 7,
+        "body": '{"type":"sessions.input","session":"s1","data":"ls ─\\n"}',
+        "sig": (
+            "Cml8CVzkHw2lLu6pU4A4BLtI17I6xUkJ_onoD76cKc10ZP4CjQ6_-XvcP3DmUqpn"
+            "i_b8crjTTi1SDU8jBZpumw"
+        ),
+    }
+    auth = operator.check_grant(op.cfg, grant(jwk=vector["jwk"]), {})
+    assert auth is not None
+    assert operator.open_signed_message(
+        auth, {k: vector[k] for k in ["seq", "body", "sig"]}
+    ) == {"type": "sessions.input", "session": "s1", "data": "ls ─\n"}
     # Only allowed workspaces can have sessions
     message("a", {"type": "sessions.open", "id": 2, "workspace": "/"})
     await wait_for(lambda: reply(2))
@@ -547,6 +645,30 @@ async def test_sessions(tmp_path, monkeypatch):
     exits = [m for _, m in sent if m["type"] == "sessions.exit"]
     assert exits == [{"type": "sessions.exit", "session": sid, "code": 3}]
     assert op.sessions == {}
+    # Channels close once the sign-in they came from ends, e.g., with a
+    # password change, which check-ins hear about
+    op.on_relay_message(
+        {"type": "channel.open", "ch": "d", "grant": grant(sid="sign-in-2")}
+    )
+    checked_in: list[list[str]] = []
+
+    def fake_check_in(cfg, workspaces, mode, connected, restart, sessions):
+        checked_in.append(sessions)
+        return {"ended_sessions": ["sign-in-2"]}
+
+    monkeypatch.setattr(operator, "check_in", fake_check_in)
+    monkeypatch.setattr(operator, "discover_workspaces", lambda cfg: [])
+    op.ws = FakeSocket()
+    await op.check_in()
+    assert checked_in == [["sign-in-1", "sign-in-2"]]
+    assert set(op.channels) == {"c"}
+    # The relay is asked to close it, though it's refused here regardless
+    assert op.ws.sent == ['{"type": "channel.close", "ch": "d"}']
+    op.ws = None
+    sent.clear()
+    message("d", {"type": "sessions.list", "id": 30})
+    await asyncio.sleep(0.1)
+    assert sent == []
     # With nothing using it, an Operator with an idle limit stops
     op.on_relay_message({"type": "channel.close", "ch": "c"})
     op.idle_exit_seconds = 0.1
@@ -1449,7 +1571,7 @@ def test_restarts(tmp_path, monkeypatch):
     assert not op.restart_pending()
     reported: list[bool] = []
 
-    def check_in(cfg, workspaces, mode, connected, pending) -> dict:
+    def check_in(cfg, workspaces, mode, connected, pending, sessions) -> dict:
         reported.append(pending)
         return {"restart": True}
 

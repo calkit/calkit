@@ -605,6 +605,36 @@ export const Body_projects_put_project_contentsSchema = {
   title: "Body_projects-put_project_contents",
 } as const
 
+export const BrowserKeySchema = {
+  properties: {
+    kty: {
+      type: "string",
+      const: "EC",
+      title: "Kty",
+    },
+    crv: {
+      type: "string",
+      const: "P-256",
+      title: "Crv",
+    },
+    x: {
+      type: "string",
+      pattern: "^[A-Za-z0-9_-]{43}$",
+      title: "X",
+    },
+    y: {
+      type: "string",
+      pattern: "^[A-Za-z0-9_-]{43}$",
+      title: "Y",
+    },
+  },
+  type: "object",
+  required: ["kty", "crv", "x", "y"],
+  title: "BrowserKey",
+  description:
+    "A browser's public key for one connection, as a JSON Web Key.\n\nThe browser signs every message it sends the Operator with the private\nhalf, which it can't export, so a grant naming this key is no use to\nthe relay that carries it.",
+} as const
+
 export const CheckInSchema = {
   properties: {
     calkit_version: {
@@ -648,6 +678,16 @@ export const CheckInSchema = {
       type: "array",
       maxItems: 1000,
       title: "Workspaces",
+      default: [],
+    },
+    channel_sessions: {
+      items: {
+        type: "string",
+        format: "uuid",
+      },
+      type: "array",
+      maxItems: 100,
+      title: "Channel Sessions",
       default: [],
     },
   },
@@ -698,6 +738,15 @@ export const CheckInRespSchema = {
       type: "boolean",
       title: "Restart",
       default: false,
+    },
+    ended_sessions: {
+      items: {
+        type: "string",
+        format: "uuid",
+      },
+      type: "array",
+      title: "Ended Sessions",
+      default: [],
     },
   },
   type: "object",
@@ -8840,6 +8889,18 @@ export const RefreshTokenRequestSchema = {
   type: "object",
   required: ["refresh_token"],
   title: "RefreshTokenRequest",
+} as const
+
+export const RelayTokenReqSchema = {
+  properties: {
+    public_key: {
+      $ref: "#/components/schemas/BrowserKey",
+    },
+  },
+  type: "object",
+  required: ["public_key"],
+  title: "RelayTokenReq",
+  description: "What a browser asking to connect to an Operator sends.",
 } as const
 
 export const RelayTokenRespSchema = {

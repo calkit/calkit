@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi.testclient import TestClient
 from sqlmodel import Session
@@ -30,7 +31,21 @@ def test_operators(
     normal_user_token_headers: dict[str, str],
     superuser_token_headers: dict[str, str],
 ) -> None:
+    def b64url(n: int) -> str:
+        return base64.urlsafe_b64encode(n.to_bytes(32, "big")).decode()[:-1]
+
     hostname = f"Lab-Box-{uuid.uuid4().hex[:6]}"
+    # What a browser sends to connect: the public half of a key it made
+    numbers = (
+        ec.generate_private_key(ec.SECP256R1()).public_key().public_numbers()
+    )
+    jwk = {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": b64url(numbers.x),
+        "y": b64url(numbers.y),
+    }
+    browser_key = {"public_key": jwk}
     # Registering takes a verified email, since that's what setting up the
     # second factor for opening sessions proves itself with
     me = client.get("/user", headers=normal_user_token_headers).json()
@@ -218,7 +233,9 @@ def test_operators(
     r = client.get("/workspaces", headers=superuser_token_headers)
     assert op["id"] not in [w["operator_id"] for w in r.json()]
     r = client.post(
-        f"/operators/{op['id']}/relay-token", headers=superuser_token_headers
+        f"/operators/{op['id']}/relay-token",
+        json=browser_key,
+        headers=superuser_token_headers,
     )
     assert r.status_code == 404
     # Opening sessions takes two-factor authentication, set up and recent
@@ -228,7 +245,9 @@ def test_operators(
         db.delete(existing)
         db.commit()
     r = client.post(
-        f"/operators/{op['id']}/relay-token", headers=normal_user_token_headers
+        f"/operators/{op['id']}/relay-token",
+        json=browser_key,
+        headers=normal_user_token_headers,
     )
     assert r.status_code == 403
     assert r.json()["detail"] == SECOND_FACTOR_SETUP_REQUIRED
@@ -243,7 +262,9 @@ def test_operators(
     db.add(totp)
     db.commit()
     r = client.post(
-        f"/operators/{op['id']}/relay-token", headers=normal_user_token_headers
+        f"/operators/{op['id']}/relay-token",
+        json=browser_key,
+        headers=normal_user_token_headers,
     )
     assert r.status_code == 403
     assert r.json()["detail"] == SECOND_FACTOR_REQUIRED
@@ -267,6 +288,7 @@ def test_operators(
     ]:
         r = client.post(
             f"/operators/{op['id']}/relay-token",
+            json=browser_key,
             headers=normal_user_token_headers | {"X-Second-Factor": other},
         )
         assert r.status_code == 403
@@ -293,6 +315,7 @@ def test_operators(
     ]:
         r = client.post(
             f"/operators/{op['id']}/relay-token",
+            json=browser_key,
             headers={
                 "Authorization": f"Bearer {token}",
                 "X-Second-Factor": create_second_factor_token(
@@ -311,11 +334,17 @@ def test_operators(
         "Authorization": f"Bearer {r.json()['access_token']}",
         "X-Second-Factor": second_factor,
     }
-    r = client.post(f"/operators/{op['id']}/relay-token", headers=pat_headers)
+    r = client.post(
+        f"/operators/{op['id']}/relay-token",
+        json=browser_key,
+        headers=pat_headers,
+    )
     assert r.status_code == 403
     # Browsers get a short-lived relay token for an online Operator
     r = client.post(
-        f"/operators/{op['id']}/relay-token", headers=with_second_factor
+        f"/operators/{op['id']}/relay-token",
+        json=browser_key,
+        headers=with_second_factor,
     )
     assert r.status_code == 200, r.text
     payload = jwt.decode(
@@ -333,6 +362,22 @@ def test_operators(
     )
     assert grant["sub"] == str(user.id)
     assert check_in["grant_public_key"] == op["grant_public_key"]
+    # The grant names the browser's key, so only messages it signs count,
+    # and the sign-in, so the channel closes once that ends
+    assert grant["cnf"] == {"jwk": jwk}
+    assert grant["sid"] == str(session_id)
+    # A key that isn't on the curve, or isn't a key, is refused
+    for bad in [
+        jwk | {"y": jwk["x"]},
+        jwk | {"crv": "P-384"},
+        {"kty": "EC", "crv": "P-256", "x": "short", "y": jwk["y"]},
+    ]:
+        r = client.post(
+            f"/operators/{op['id']}/relay-token",
+            json={"public_key": bad},
+            headers=with_second_factor,
+        )
+        assert r.status_code == 422, bad
     # An Operator that stopped checking in is offline
     operator = db.get(Operator, uuid.UUID(op["id"]))
     assert operator is not None
@@ -340,7 +385,9 @@ def test_operators(
     db.add(operator)
     db.commit()
     r = client.post(
-        f"/operators/{op['id']}/relay-token", headers=with_second_factor
+        f"/operators/{op['id']}/relay-token",
+        json=browser_key,
+        headers=with_second_factor,
     )
     assert r.status_code == 409
     # An Operator in cron mode that's between check-ins is asleep, and waking
@@ -413,6 +460,35 @@ def test_operators(
         r = client.get("/operators", headers=normal_user_token_headers)
         listed = {o["id"]: o for o in r.json()}
         assert listed[op["id"]]["restart_pending"] == reported
+    # Check-ins hear which of their channels' sign-ins have ended, e.g.,
+    # with a password change, and only of the owner's
+    other_session_id = uuid.uuid4()
+    other_sign_in = RefreshToken(
+        user_id=user.id,
+        token_hash=uuid.uuid4().hex,
+        expires=utcnow() + timedelta(days=1),
+        session_id=other_session_id,
+        interactive=True,
+    )
+    db.add(other_sign_in)
+    db.commit()
+    unknown = uuid.uuid4()
+
+    def ended(*session_ids: uuid.UUID) -> set[str]:
+        r = client.post(
+            "/operators/check-in",
+            headers=op_headers,
+            json={"channel_sessions": [str(s) for s in session_ids]},
+        )
+        assert r.status_code == 200, r.text
+        return set(r.json()["ended_sessions"])
+
+    assert ended() == set()
+    assert ended(session_id, other_session_id, unknown) == {str(unknown)}
+    other_sign_in.is_active = False
+    db.add(other_sign_in)
+    db.commit()
+    assert ended(session_id, other_session_id) == {str(other_session_id)}
     # Revoking stops its token working
     r = client.delete(
         f"/operators/{op['id']}", headers=normal_user_token_headers
@@ -506,3 +582,12 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
                     browser_ws.receive_text()
                 assert e.value.code == relay.CLOSE_TOO_BIG
             assert op_ws.receive_json() == {"type": "channel.close", "ch": ch}
+            # The Operator can close a channel, e.g., once its sign-in ends
+            with connect(
+                client, "/browser", token("browser", grant="signed")
+            ) as browser_ws:
+                ch = op_ws.receive_json()["ch"]
+                op_ws.send_json({"type": "channel.close", "ch": ch})
+                with pytest.raises(WebSocketDisconnect) as e:
+                    browser_ws.receive_text()
+                assert e.value.code == relay.CLOSE_UNAUTHORIZED

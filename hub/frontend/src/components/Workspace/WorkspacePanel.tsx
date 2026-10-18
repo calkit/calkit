@@ -300,8 +300,16 @@ export default function WorkspacePanel({
       request("workspace.run", stages ? { stages } : {}),
     onSuccess: (result) =>
       result.ok
-        ? showToast("Success!", "The pipeline ran.", "success")
-        : showToast("Error", "The pipeline failed.", "error"),
+        ? showToast(
+            "Success!",
+            `Pipeline finished on ${ws.operator_name}.`,
+            "success",
+          )
+        : showToast(
+            "Error",
+            `Pipeline failed on ${ws.operator_name}. See the run log for details.`,
+            "error",
+          ),
     onError: (err: Error) => showToast("Error", err.message, "error"),
     onSettled: () => {
       refresh()
@@ -442,7 +450,7 @@ export default function WorkspacePanel({
           )}
         </Flex>
         {editable && (
-          <Tooltip label="Another workspace for this project, on a branch">
+          <Tooltip label="Create another workspace on a new branch">
             <Button
               size="xs"
               variant="ghost"
@@ -547,8 +555,7 @@ export default function WorkspacePanel({
                 <Alert status="warning" borderRadius="md" mb={2} gap={2}>
                   <AlertIcon />
                   <Text flex={1} fontSize="sm">
-                    This branch and its remote both have new commits, so pulling
-                    needs a merge.
+                    This branch and its remote have both changed. Merge them?
                   </Text>
                   <Button
                     size="xs"

@@ -174,7 +174,7 @@ function TwoFactor() {
             Or enter this key: <Code>{setup.secret}</Code>
           </Text>
           <Text fontSize="sm" mb={2}>
-            We also emailed you a code, to make sure it's you.
+            Also enter the code we just emailed you.
           </Text>
           <Flex gap={2}>
             {codeInput}
@@ -244,7 +244,7 @@ function TwoFactor() {
         </>
       ) : (
         <Flex align="center" gap={2}>
-          <Text>Required to open sessions on your Operators.</Text>
+          <Text>Required to connect to workspaces.</Text>
           <Button
             size="sm"
             variant="primary"
@@ -293,7 +293,8 @@ function Operators() {
       </Heading>
       <TwoFactor />
       <Text mb={4}>
-        Install one with <Code>calkit operator install</Code>.
+        To connect a machine, install the Calkit CLI on it and run{" "}
+        <Code>calkit operator install</Code>.
       </Text>
       <TableContainer>
         <Table size={{ base: "sm", md: "md" }}>
@@ -346,7 +347,7 @@ function Operators() {
                       {/* Dev versions carry a long local suffix */}
                       {op.calkit_version?.split("+")[0]}
                       {op.restart_pending && (
-                        <Tooltip label="It restarts, e.g., to run a newer Calkit, once no session or run is using it">
+                        <Tooltip label="Restarts when idle">
                           <Badge fontSize="2xs">restart pending</Badge>
                         </Tooltip>
                       )}

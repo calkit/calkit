@@ -110,7 +110,7 @@ export default function TerminalPane({
           <Badge colorScheme="gray">Exited ({exited ?? "?"})</Badge>
         )}
         <Box flex={1} />
-        <Tooltip label="Hide (keeps running)">
+        <Tooltip label="Hide (stays running)">
           <IconButton
             aria-label="Hide session"
             icon={<FiMinus />}

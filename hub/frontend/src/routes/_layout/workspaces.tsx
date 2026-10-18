@@ -520,8 +520,9 @@ function Workspaces() {
         </Flex>
         {operators.length === 0 && (
           <Text color="ui.dim" fontSize="sm">
-            You have no Operators. Install one with{" "}
-            <Code>calkit operator install</Code>.
+            No Operators yet. Install the Calkit CLI and run{" "}
+            <Code>calkit operator install</Code> to install the Operator and
+            connect to a workspace.
           </Text>
         )}
         {sortedOperators.map((op) => {

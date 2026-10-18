@@ -63,10 +63,9 @@ const DiscardChanges = ({
             </AlertDialogHeader>
             <AlertDialogCloseButton />
             <AlertDialogBody>
-              This puts the workspace back to its last commit. Changes are
-              stashed, including data tracked with DVC, so{" "}
-              <Code>calkit stash pop</Code> brings them back. New files are left
-              alone.
+              This resets the workspace to its last commit. Your changes,
+              including data, are stashed, so <Code>calkit stash pop</Code>{" "}
+              brings them back. New files are kept.
             </AlertDialogBody>
             <AlertDialogFooter gap={3}>
               <Button

@@ -42,8 +42,7 @@ export default function SecondFactorPrompt({
         <Alert status="warning" borderRadius="md" mb={4}>
           <AlertIcon />
           <Text>
-            Opening sessions and running things on your machines takes
-            two-factor authentication.{" "}
+            Connecting to a workspace requires two-factor authentication.{" "}
             <RouterLink to="/settings" search={{ tab: "operators" }}>
               <Text as="span" color="ui.main" textDecoration="underline">
                 Set it up
@@ -63,8 +62,8 @@ export default function SecondFactorPrompt({
         >
           <AlertIcon />
           <Text>
-            Opening sessions and running things on your machines takes a code
-            from your authenticator app.
+            Connecting to a workspace requires a code from your authenticator
+            app.
           </Text>
           <Input
             size="sm"

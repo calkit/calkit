@@ -1159,6 +1159,8 @@ def set_remote_auth(
     # the hub's anywhere, so it only goes to the hub it came from
     base_url = calkit.hub.get_base_url().rstrip("/")
     if remote_url != base_url and not remote_url.startswith(base_url + "/"):
+        # Including any set while it pointed at the hub
+        clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         logger.warning(
             f"Not setting up authentication for DVC remote {remote_name}, "
             f"since its URL ({remote_url}) isn't on the hub ({base_url})"

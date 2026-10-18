@@ -614,10 +614,20 @@ def test_set_remote_auth_only_for_hub_remotes(monkeypatch, tmp_path):
             "get_remotes",
             lambda wdir=None, url=url: {remote_name: url},
         )
+        # Set while it pointed at the hub, which a pull can change
+        (tmp_path / ".dvc").mkdir(exist_ok=True)
+        fpath = tmp_path / ".dvc" / "config.local"
+        fpath.write_text(
+            f'[remote "{remote_name}"]\n'
+            "    custom_auth_header = Authorization\n"
+            "    password = Bearer ckp_token\n"
+        )
         calkit.dvc.set_remote_auth(wdir=str(tmp_path))
         assert bool(calls) == sent, url
         if sent:
             assert calls[-1][-1] == "Bearer ckp_token"
+        else:
+            assert "ckp_token" not in fpath.read_text(), url
 
 
 def test_ck_fs_reads_content_only_for_dirs() -> None:

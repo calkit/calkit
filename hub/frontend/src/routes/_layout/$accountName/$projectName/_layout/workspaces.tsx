@@ -13,6 +13,7 @@ import {
   Grid,
   Heading,
   Input,
+  Link,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -28,6 +29,7 @@ import {
   Th,
   Thead,
   Tr,
+  useClipboard,
 } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute, redirect } from "@tanstack/react-router"
@@ -277,9 +279,9 @@ function Workspaces() {
         </Text>
       ) : workspaces.length === 0 ? (
         <Text mb={4}>
-          None of your Operators has this project yet. If it's already on one of
-          your machines, add it there with{" "}
-          <Code>calkit operator add-workspace</Code>.
+          No workspaces for this project yet. Create one on a machine below, or
+          if it's already on one, run <Code>calkit operator add-workspace</Code>{" "}
+          there.
         </Text>
       ) : (
         <Table size="sm" mb={6}>
@@ -571,6 +573,16 @@ function CreateWorkspace({
     retry: false,
   })
   const setup = setupQuery.data
+  // The machine's SSH key, for the owner to add to their Git host, as with
+  // 'calkit config github-ssh'
+  const sshKeyMutation = useMutation({
+    mutationFn: (): Promise<{ public_key: string; created: boolean }> =>
+      conn.request("machine.ssh_key"),
+    onError: (err: Error) =>
+      showToast("Could not set up SSH", err.message, "error"),
+  })
+  const sshKey = sshKeyMutation.data?.public_key ?? ""
+  const { onCopy, hasCopied } = useClipboard(sshKey)
   const needsGit = !!setup && (!setup.git_name || !setup.git_email)
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -647,12 +659,52 @@ function CreateWorkspace({
                   <AlertIcon />
                   <Box flex={1} fontSize="sm">
                     {setup.repo.ssh ? (
-                      <Text>
-                        {operator.name} can't reach {setup.repo.host} over SSH.
-                        On that machine, run <Code>ssh-keygen -t ed25519</Code>,
-                        add the public key to your {setup.repo.host} account,
-                        then run <Code>ssh -T git@{setup.repo.host}</Code> once.
-                      </Text>
+                      <>
+                        <Text>
+                          {operator.name} can't reach {setup.repo.host} over
+                          SSH.
+                        </Text>
+                        {sshKey ? (
+                          <>
+                            <Text mt={2}>
+                              Add this key to your {setup.repo.host} account,
+                              then check again.
+                            </Text>
+                            <Code
+                              display="block"
+                              p={2}
+                              my={2}
+                              fontSize="xs"
+                              wordBreak="break-all"
+                            >
+                              {sshKey}
+                            </Code>
+                            <Flex gap={2} align="center">
+                              <Button size="xs" onClick={onCopy}>
+                                {hasCopied ? "Copied" : "Copy"}
+                              </Button>
+                              {setup.repo.host === "github.com" && (
+                                <Link
+                                  href="https://github.com/settings/ssh/new"
+                                  isExternal
+                                  color="ui.main"
+                                >
+                                  Open GitHub's SSH settings
+                                </Link>
+                              )}
+                            </Flex>
+                          </>
+                        ) : (
+                          <Button
+                            size="xs"
+                            mt={2}
+                            isLoading={sshKeyMutation.isPending}
+                            onClick={() => sshKeyMutation.mutate()}
+                          >
+                            Set up SSH
+                          </Button>
+                        )}
+                      </>
                     ) : (
                       <Text>
                         {operator.name} can't reach the repository on{" "}
@@ -708,7 +760,7 @@ function CreateWorkspace({
                     isChecked={makeToken}
                     onChange={(e) => setMakeToken(e.target.checked)}
                   >
-                    Create a Calkit token for {operator.name}
+                    Authenticate this Operator with the Calkit CLI.
                   </Checkbox>
                   <FormHelperText>
                     So it can pull and push data with the hub.

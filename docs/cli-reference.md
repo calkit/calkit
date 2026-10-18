@@ -448,11 +448,11 @@ Options:
 | Option         | Type    | Required | Default | Description                                                                                                                                                 |
 | -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--yes`, `-y`  | boolean | no       | False   | Skip the confirmation prompt and install immediately.                                                                                                       |
-| `--boot`       | boolean | no       | False   | For the operator on macOS, start at boot rather than at login, which needs sudo.                                                                            |
-| `--cron`       | boolean | no       | False   | For the operator, have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
-| `--ssh`        | str     | no       |         | For the operator, install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
-| `--no-service` | boolean | no       | False   | For the operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
-| `--hub`        | str     | no       |         | For the operator, the URL of the hub it's for, e.g., https://calkit.io; a machine can have one per hub.                                                     |
+| `--login`      | boolean | no       | False   | For the Operator, start it when you log in rather than at boot, which needs sudo on macOS and Linux.                                                        |
+| `--cron`       | boolean | no       | False   | For the Operator, have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
+| `--ssh`        | str     | no       |         | For the Operator, install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
+| `--no-service` | boolean | no       | False   | For the Operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
+| `--hub`        | str     | no       |         | For the Operator, the URL of the hub it's for, e.g., https://calkit.io; a machine can have one per hub.                                                     |
 
 <a id="top-command-xproc-runproc"></a>
 
@@ -4474,7 +4474,7 @@ Options:
 | Option         | Type    | Required | Default | Description                                                                                                                                                      |
 | -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--hub`        | str     | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
-| `--boot`       | boolean | no       | False   | On macOS, start at boot rather than at login (needs sudo).                                                                                                       |
+| `--login`      | boolean | no       | False   | Start it when you log in rather than at boot, which needs sudo on macOS and Linux.                                                                               |
 | `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                                       |
 | `--ssh`        | str     | no       |         | Install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed.                        |
 | `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                                         |

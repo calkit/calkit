@@ -4705,13 +4705,13 @@ def install_app(
             help="Skip the confirmation prompt and install immediately.",
         ),
     ] = False,
-    at_boot: Annotated[
+    login: Annotated[
         bool,
         typer.Option(
-            "--boot",
+            "--login",
             help=(
-                "For the operator on macOS, start at boot rather than at "
-                "login, which needs sudo."
+                "For the Operator, start it when you log in rather than at "
+                "boot, which needs sudo on macOS and Linux."
             ),
         ),
     ] = False,
@@ -4720,7 +4720,7 @@ def install_app(
         typer.Option(
             "--cron",
             help=(
-                "For the operator, have cron start it when the hub asks "
+                "For the Operator, have cron start it when the hub asks "
                 "rather than running it as a service, e.g., on a cluster's "
                 "login node."
             ),
@@ -4731,7 +4731,7 @@ def install_app(
         typer.Option(
             "--ssh",
             help=(
-                "For the operator, install it on another machine over SSH, "
+                "For the Operator, install it on another machine over SSH, "
                 "e.g., 'user@cluster.example.edu' or a host from "
                 "~/.ssh/config, installing Calkit there if needed."
             ),
@@ -4742,7 +4742,7 @@ def install_app(
         typer.Option(
             "--no-service",
             help=(
-                "For the operator, only register it, e.g., to run it with "
+                "For the Operator, only register it, e.g., to run it with "
                 "'calkit operator start' inside tmux on a cluster."
             ),
         ),
@@ -4752,7 +4752,7 @@ def install_app(
         typer.Option(
             "--hub",
             help=(
-                "For the operator, the URL of the hub it's for, e.g., "
+                "For the Operator, the URL of the hub it's for, e.g., "
                 "https://calkit.io; a machine can have one per hub."
             ),
         ),
@@ -4764,7 +4764,7 @@ def install_app(
         from calkit.cli.operator import install as install_operator
 
         install_operator(
-            hub=hub, at_boot=at_boot, cron=cron, ssh=ssh, no_service=no_service
+            hub=hub, login=login, cron=cron, ssh=ssh, no_service=no_service
         )
         return
     # Surface a platform-specific "use X instead" message before the

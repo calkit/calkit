@@ -400,11 +400,14 @@ was last seen.
 
 - Linux: a `systemd --user` service with lingering enabled, so the user's
   services start at boot and survive logout.
-  Installing enables lingering when permitted; otherwise it warns and
-  prints the `sudo loginctl enable-linger` command.
+  Installing enables lingering when permitted, or with sudo if it can
+  ask; otherwise it warns and prints the `sudo loginctl enable-linger`
+  command.
 - macOS: a LaunchDaemon with `UserName` set to the user when they have
   admin rights, otherwise a LaunchAgent that starts at login, with a
   warning.
+- With `--login`, it starts at login on Linux and macOS too, without
+  asking for sudo.
 - Windows: a script in the user's Startup folder that starts it hidden at
   login, which needs no admin rights.
   Starting at boot, e.g., with a scheduled task, is deferred.

@@ -444,6 +444,69 @@ def test_login_with_google_creates_github_less_user(
     assert user.email_verified is True
 
 
+def test_login_with_google_recovers_unverified_account(
+    client: TestClient, db: Session
+) -> None:
+    # Someone registers another person's address, which isn't checked, and
+    # links their own GitHub account to get back in later
+    email = f"squat-{uuid.uuid4().hex[:8]}@example.com"
+    github_name = f"squatter-{uuid.uuid4().hex[:8]}"
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password="squatter-password"),
+    )
+    users.link_github_account(
+        session=db, user=user, github_username=github_name
+    )
+    users.save_github_token(
+        session=db,
+        user=user,
+        github_resp={
+            "access_token": "gho_squatter",
+            "refresh_token": "ghr_squatter",
+            "expires_in": 3600,
+            "refresh_token_expires_in": 3600,
+        },
+    )
+    assert user.email_verified is False
+    # Its owner signing in with Google takes it back, GitHub link included
+    with (
+        patch(
+            "app.api.routes.login.requests.post",
+            return_value=_FakeGoogleResp(
+                200, {"access_token": "ya29.fake", "refresh_token": "r"}
+            ),
+        ),
+        patch(
+            "app.api.routes.login.requests.get",
+            return_value=_FakeGoogleResp(
+                200, {"email": email, "email_verified": True, "name": "Owner"}
+            ),
+        ),
+        patch("app.api.routes.login.users.save_google_token"),
+    ):
+        r = client.post(
+            "/login/google",
+            json={
+                "code": "auth-code",
+                "redirect_uri": "http://localhost:5173/auth/google",
+            },
+        )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.account.github_name is None
+    assert not [c for c in user.external_credentials if c.provider == "github"]
+    assert (
+        users.get_user_by_github_username(
+            session=db, github_username=github_name
+        )
+        is None
+    )
+    assert not verify_password("squatter-password", user.hashed_password)
+
+
 def test_login_with_google_requires_verified_email(client: TestClient) -> None:
     with (
         patch(

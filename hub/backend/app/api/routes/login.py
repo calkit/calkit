@@ -550,6 +550,15 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
             users.end_sign_in_sessions(session=session, user=user)
             if user.totp is not None:
                 session.delete(user.totp)
+            # As is a GitHub account they linked, which signs in by itself
+            if user.account.github_name is not None:
+                user.account.github_name = None
+                session.add(user.account)
+            for external in user.external_credentials:
+                if external.provider == "github":
+                    session.delete(external)
+            if user.github_token is not None:
+                session.delete(user.github_token)
             tokens = session.exec(
                 select(UserToken).where(UserToken.user_id == user.id)
             ).all()

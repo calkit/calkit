@@ -113,6 +113,7 @@ class OperatorOut(OperatorPublic):
 
 
 def _out(operator: Operator) -> OperatorOut:
+    """Add an Operator's current state to its record."""
     return OperatorOut.model_validate(
         operator,
         update=dict(
@@ -212,6 +213,7 @@ def get_operators(
 def _get_owned_operator(
     session: SessionDep, user: User, operator_id: uuid.UUID
 ) -> Operator:
+    """Get one of the user's active Operators, or raise a 404 or 410."""
     operator = session.get(Operator, operator_id)
     if operator is None or operator.user_id != user.id:
         raise HTTPException(404, "Operator not found")
@@ -491,6 +493,7 @@ def _list_workspaces(
     owner_name: str | None = None,
     project_name: str | None = None,
 ) -> list[Workspace]:
+    """The workspaces on the user's Operators, optionally for one project."""
     # Only the user's own Operators, so this reveals nothing about a
     # project beyond what the user's machines reported
     query = (

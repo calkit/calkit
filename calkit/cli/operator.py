@@ -138,14 +138,14 @@ def install(
     except ValueError as e:
         raise_error(str(e))
     if ssh is not None:
-        from calkit.dependencies import _is_interactive
+        from calkit.core import is_tty
 
         try:
             remote = operator.install_remote(
                 ssh,
                 cron=cron,
                 no_service=no_service,
-                interactive=_is_interactive(),
+                interactive=is_tty(),
             )
         except Exception as e:
             raise_error(

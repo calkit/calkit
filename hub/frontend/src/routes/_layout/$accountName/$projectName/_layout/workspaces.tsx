@@ -1,11 +1,25 @@
 import {
+  Alert,
+  AlertIcon,
   Badge,
   Box,
   Button,
+  Checkbox,
   Code,
   Flex,
+  FormControl,
+  FormHelperText,
+  FormLabel,
   Grid,
   Heading,
+  Input,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   Spinner,
   Table,
   Tbody,
@@ -21,17 +35,26 @@ import { useEffect, useState } from "react"
 import { FiPlus } from "react-icons/fi"
 import { z } from "zod"
 
-import { OperatorsService, type Workspace } from "../../../../../client"
+import {
+  type OperatorOut,
+  OperatorsService,
+  UsersService,
+  type Workspace,
+} from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
 import SecondFactorPrompt from "../../../../../components/Operators/SecondFactorPrompt"
 import TerminalPane from "../../../../../components/Operators/TerminalPane"
-import type { Pane } from "../../../../../components/Operators/connection"
+import type {
+  OperatorConnection,
+  Pane,
+} from "../../../../../components/Operators/connection"
 import useOperatorConnections from "../../../../../components/Operators/useOperatorConnections"
 import WorkspaceBadges from "../../../../../components/Workspace/WorkspaceBadges"
 import WorkspacePanel, {
-  type Modal,
+  type Modal as WorkspaceModal,
 } from "../../../../../components/Workspace/WorkspacePanel"
+import useAuth from "../../../../../hooks/useAuth"
 import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
 
@@ -48,6 +71,8 @@ const workspacesSearchSchema = z.object({
   // A run asked for from another page, e.g., the pipeline's, which waits
   // for a click here: a stage's name, or "*" for the whole pipeline
   confirm_run: z.string().optional(),
+  // The Operator a workspace is being created on, by ID
+  create: z.string().optional(),
 })
 
 // The open panes and workspace, kept for the browser tab so leaving for
@@ -204,33 +229,26 @@ function Workspaces() {
         modal: undefined,
       }),
     })
-  const setModal = (modal: Modal | undefined) =>
+  const setModal = (modal: WorkspaceModal | undefined) =>
     navigate({ search: (prev) => ({ ...prev, modal }) })
-  // Online Operators without this project, which it could be cloned onto
+  // Operators without this project, which a workspace can be created on
   const operatorsQuery = useQuery({
     queryKey: ["user", "operators"],
     queryFn: () => OperatorsService.getOperators().then((r) => r.data),
   })
-  const cloneTargets = (operatorsQuery.data ?? []).filter(
+  const operators = operatorsQuery.data ?? []
+  const createTargets = operators.filter(
     (op) =>
-      op.is_online &&
+      (op.is_online || op.is_asleep) &&
       !workspaces.some(
         (ws) => ws.operator_id === op.id && ws.kind === "personal",
       ),
   )
-  const cloneMutation = useMutation({
-    mutationFn: async (operatorId: string) => {
-      const conn = getConnection(operatorId)
-      await conn.waitUntilConnected()
-      return conn.request("workspaces.clone", {
-        git_repo_url: project?.git_repo_url,
-      })
-    },
-    onSuccess: (result) =>
-      showToast("Cloned", `The project is now in ${result.path}.`, "success"),
-    onError: (err: Error) => showToast("Could not clone", err.message, "error"),
-    onSettled: () => workspacesQuery.refetch(),
-  })
+  const creatingOn = createTargets.find(
+    (op) => op.is_online && String(op.id) === search.create,
+  )
+  const setCreate = (operatorId: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, create: operatorId }) })
   const closePane = (pane: Pane, end: boolean) => {
     const conn = connections.get(pane.operatorId)
     if (conn) {
@@ -242,18 +260,25 @@ function Workspaces() {
     setPanes(panes.filter((p) => p.session !== pane.session))
     refreshSessions()
   }
-  if (workspacesQuery.isPending) return <LoadingSpinner />
+  if (workspacesQuery.isPending || operatorsQuery.isPending) {
+    return <LoadingSpinner />
+  }
   return (
     <Box p={4} maxH="100%" overflowY="auto" w="100%">
       <Heading size="md" mb={3}>
         Workspaces
       </Heading>
       <SecondFactorPrompt error={secondFactorError} onVerified={retryRefused} />
-      {workspaces.length === 0 ? (
+      {operators.length === 0 ? (
         <Text mb={4}>
-          None of your Operators has a workspace for this project. Install one
-          with <Code>calkit operator install</Code> on a machine with this
-          project in <Code>~/calkit</Code> or <Code>~/dev</Code>, or add it with{" "}
+          No Operators yet. Install the Calkit CLI and run{" "}
+          <Code>calkit operator install</Code> to install the Operator and
+          connect to a workspace.
+        </Text>
+      ) : workspaces.length === 0 ? (
+        <Text mb={4}>
+          None of your Operators has this project yet. If it's already on one of
+          your machines, add it there with{" "}
           <Code>calkit operator add-workspace</Code>.
         </Text>
       ) : (
@@ -396,22 +421,56 @@ function Workspaces() {
           </Tbody>
         </Table>
       )}
-      {project?.git_repo_url && cloneTargets.length > 0 && (
-        <Flex align="center" gap={2} mb={6} wrap="wrap">
-          <Text>Clone this project onto</Text>
-          {cloneTargets.map((op) => (
-            <Button
-              key={op.id}
-              size="xs"
-              isLoading={
-                cloneMutation.isPending && cloneMutation.variables === op.id
-              }
-              onClick={() => cloneMutation.mutate(String(op.id))}
-            >
-              {op.name}
-            </Button>
+      {project?.git_repo_url && createTargets.length > 0 && (
+        <Box mb={6}>
+          <Text mb={2} fontSize="sm" color="ui.dim">
+            {workspaces.length === 0
+              ? "Create a workspace on"
+              : "Create a workspace on another machine"}
+          </Text>
+          {createTargets.map((op) => (
+            <Flex key={op.id} align="center" gap={2} mb={1}>
+              <Box
+                w={2}
+                h={2}
+                borderRadius="full"
+                bg={op.is_online ? "ui.success" : "yellow.400"}
+              />
+              <Text fontSize="sm">{op.name}</Text>
+              {op.is_online ? (
+                <Button
+                  size="xs"
+                  leftIcon={<FiPlus />}
+                  onClick={() => setCreate(String(op.id))}
+                >
+                  Create workspace
+                </Button>
+              ) : (
+                <Button
+                  size="xs"
+                  isLoading={waking.has(String(op.id))}
+                  loadingText="Waking"
+                  onClick={() => wakeOperator(String(op.id))}
+                >
+                  Wake
+                </Button>
+              )}
+            </Flex>
           ))}
-        </Flex>
+        </Box>
+      )}
+      {creatingOn && project?.git_repo_url && (
+        <CreateWorkspace
+          operator={creatingOn}
+          conn={getConnection(String(creatingOn.id))}
+          gitRepoUrl={project.git_repo_url}
+          defaultPath={`~/calkit/${projectName}`}
+          onClose={() => setCreate(undefined)}
+          onCreated={() => {
+            operatorsQuery.refetch()
+            workspacesQuery.refetch()
+          }}
+        />
       )}
       {/* The summary on the left and sessions on the right, side by side
           when there's room for both */}
@@ -468,5 +527,209 @@ function Workspaces() {
         )}
       </Grid>
     </Box>
+  )
+}
+
+// What the Operator found the machine still needs before cloning, from
+// 'machine.check'
+type MachineSetup = {
+  git_name: string | null
+  git_email: string | null
+  repo: { host: string; ssh: boolean; error: string | null }
+  token: boolean
+}
+
+// Creates a workspace for the project on an Operator's machine, setting up
+// what it needs first, e.g., Git's name and email
+function CreateWorkspace({
+  operator,
+  conn,
+  gitRepoUrl,
+  defaultPath,
+  onClose,
+  onCreated,
+}: {
+  operator: OperatorOut
+  conn: OperatorConnection
+  gitRepoUrl: string
+  defaultPath: string
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const showToast = useCustomToast()
+  const { user } = useAuth()
+  const [path, setPath] = useState(defaultPath)
+  const [gitName, setGitName] = useState(user?.full_name ?? "")
+  const [gitEmail, setGitEmail] = useState(user?.email ?? "")
+  const [makeToken, setMakeToken] = useState(true)
+  const setupQuery = useQuery({
+    queryKey: ["operators", operator.id, "machine-setup", gitRepoUrl],
+    queryFn: async (): Promise<MachineSetup> => {
+      await conn.waitUntilConnected()
+      return conn.request("machine.check", { git_repo_url: gitRepoUrl })
+    },
+    retry: false,
+  })
+  const setup = setupQuery.data
+  const needsGit = !!setup && (!setup.git_name || !setup.git_email)
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!setup) throw new Error("The machine hasn't been checked yet")
+      const fields: Record<string, string> = {}
+      if (!setup.git_name) fields.git_name = gitName
+      if (!setup.git_email) fields.git_email = gitEmail
+      if (!setup.token && makeToken) {
+        const token = await UsersService.postUserToken({
+          tokenPost: {
+            expires_days: 365,
+            scope: null,
+            description: `Calkit CLI on ${operator.name}`,
+          },
+        })
+        fields.token = token.data.access_token
+      }
+      if (Object.keys(fields).length) {
+        await conn.request("machine.configure", fields)
+      }
+      return conn.request("workspaces.clone", {
+        git_repo_url: gitRepoUrl,
+        path,
+      })
+    },
+    onSuccess: (result: { path: string }) => {
+      showToast(
+        "Workspace created",
+        `${result.path} on ${operator.name}`,
+        "success",
+      )
+      onCreated()
+      onClose()
+    },
+    onError: (err: Error) =>
+      showToast("Could not create workspace", err.message, "error"),
+  })
+  const ready =
+    !!setup &&
+    !setup.repo.error &&
+    path.trim() !== "" &&
+    (!needsGit || (gitName.trim() !== "" && gitEmail.includes("@")))
+  return (
+    <Modal isOpen onClose={onClose} size="lg">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>Create workspace on {operator.name}</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          <FormControl mb={4}>
+            <FormLabel htmlFor="path">Path</FormLabel>
+            <Input
+              id="path"
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              autoComplete="off"
+              data-form-type="other"
+              data-lpignore="true"
+            />
+          </FormControl>
+          {setupQuery.isPending ? (
+            <Flex align="center" gap={2} fontSize="sm" color="ui.dim">
+              <Spinner size="sm" />
+              Checking {operator.name}
+            </Flex>
+          ) : setupQuery.error ? (
+            <Text fontSize="sm" color="red.400">
+              {setupQuery.error.message}
+            </Text>
+          ) : setup ? (
+            <>
+              {setup.repo.error && (
+                <Alert status="warning" borderRadius="md" mb={4} gap={2}>
+                  <AlertIcon />
+                  <Box flex={1} fontSize="sm">
+                    {setup.repo.ssh ? (
+                      <Text>
+                        {operator.name} can't reach {setup.repo.host} over SSH.
+                        On that machine, run <Code>ssh-keygen -t ed25519</Code>,
+                        add the public key to your {setup.repo.host} account,
+                        then run <Code>ssh -T git@{setup.repo.host}</Code> once.
+                      </Text>
+                    ) : (
+                      <Text>
+                        {operator.name} can't reach the repository on{" "}
+                        {setup.repo.host}. Sign in to {setup.repo.host} on that
+                        machine, e.g., with <Code>gh auth login</Code>.
+                      </Text>
+                    )}
+                    <Text color="ui.dim" fontSize="xs" mt={1}>
+                      {setup.repo.error}
+                    </Text>
+                  </Box>
+                  <Button
+                    size="xs"
+                    isLoading={setupQuery.isFetching}
+                    onClick={() => setupQuery.refetch()}
+                  >
+                    Check again
+                  </Button>
+                </Alert>
+              )}
+              {needsGit && (
+                <Box mb={4}>
+                  <Text fontSize="sm" mb={2}>
+                    Git needs a name and email for commits on {operator.name}.
+                  </Text>
+                  <Flex gap={2}>
+                    <Input
+                      size="sm"
+                      placeholder="Name"
+                      value={gitName}
+                      onChange={(e) => setGitName(e.target.value)}
+                      isDisabled={!!setup.git_name}
+                      autoComplete="off"
+                      data-form-type="other"
+                      data-lpignore="true"
+                    />
+                    <Input
+                      size="sm"
+                      placeholder="Email"
+                      value={gitEmail}
+                      onChange={(e) => setGitEmail(e.target.value)}
+                      isDisabled={!!setup.git_email}
+                      autoComplete="off"
+                      data-form-type="other"
+                      data-lpignore="true"
+                    />
+                  </Flex>
+                </Box>
+              )}
+              {!setup.token && (
+                <FormControl>
+                  <Checkbox
+                    isChecked={makeToken}
+                    onChange={(e) => setMakeToken(e.target.checked)}
+                  >
+                    Create a Calkit token for {operator.name}
+                  </Checkbox>
+                  <FormHelperText>
+                    So it can pull and push data with the hub.
+                  </FormHelperText>
+                </FormControl>
+              )}
+            </>
+          ) : null}
+        </ModalBody>
+        <ModalFooter gap={3}>
+          <Button
+            variant="primary"
+            isDisabled={!ready}
+            isLoading={createMutation.isPending}
+            onClick={() => createMutation.mutate()}
+          >
+            Create
+          </Button>
+          <Button onClick={onClose}>Cancel</Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   )
 }

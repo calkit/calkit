@@ -149,7 +149,7 @@ def install(
             )
         except Exception as e:
             raise_error(
-                f"Failed to install the operator on {ssh}: {explain(e)}"
+                f"Failed to install the Operator on {ssh}: {explain(e)}"
             )
         typer.echo(f"✅ Installed Operator '{remote['name']}' on {ssh}")
         return
@@ -182,15 +182,20 @@ def install(
         except NotImplementedError as e:
             raise_error(str(e))
         typer.echo(
-            "✅ Installed the Operator in cron mode; it checks in every "
-            "5 minutes and connects when you open it from the hub"
+            "✅ Installed the Operator in cron mode. It checks in every "
+            "5 minutes and connects when you open a workspace from the hub."
         )
         return
     try:
         notes = operator.install_service(at_boot=at_boot)
     except NotImplementedError as e:
         raise_error(str(e))
-    typer.echo("✅ Installed and started the Operator's service")
+    from calkit.hub import get_hub_url
+
+    typer.echo(
+        "✅ Installed the Operator. Its workspaces will show at "
+        f"{get_hub_url()}/workspaces."
+    )
     for note in notes:
         warn(note)
 
@@ -234,7 +239,7 @@ def start(
 
 @operator_app.command(name="status")
 def status(hub: HubOption = None) -> None:
-    """Show this machine's Operators and the workspaces they allow."""
+    """Show this machine's Operators and their workspaces."""
     from calkit import operator
 
     for i, hub_url in enumerate(_each_hub(hub)):
@@ -342,9 +347,7 @@ def add_workspace(
     ] = ".",
     hub: HubOption = None,
 ) -> None:
-    """Let the hub use a project outside ~/calkit and ~/dev as a
-    workspace.
-    """
+    """Add a project outside ~/calkit and ~/dev as a workspace."""
     from calkit import operator
 
     _select_hub(hub)

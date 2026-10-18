@@ -7,50 +7,50 @@
 
 ## Top-level commands
 
-| Command                                          | Description                                                                                                                                                 |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`init`](#top-command-init)                      | Initialize the current working directory.                                                                                                                   |
-| [`clone`](#top-command-clone)                    | Clone or download a copy of a project.                                                                                                                      |
-| [`status\|st`](#top-command-status-st)           | View status (project, version control, and/or pipeline).                                                                                                    |
-| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff.                                                                                                                             |
-| [`add`](#top-command-add)                        | Add paths to the repo.                                                                                                                                      |
-| [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                                                                |
-| [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                                                                       |
-| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                                                                 |
-| [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                                                                |
-| [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                                                                        |
-| [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                                                                    |
-| [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                                                                      |
-| [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                                                                        |
-| [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform, or 'operator' to let the hub use this machine. |
-| [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                                                                        |
-| [`calc`](#top-command-calc)                      | Run a project's calculation.                                                                                                                                |
-| [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                                                                           |
-| [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                                                                             |
-| [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                                                               |
-| [`stash`](#top-command-stash)                    | Stash workspace changes, including DVC-tracked data, or bring them back.                                                                                    |
-| [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                                                                             |
-| [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                                                                         |
-| [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                                                                     |
-| [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.                                                                                                |
-| [`config`](#command-group-config)                | Configure Calkit.                                                                                                                                           |
-| [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                                                                 |
-| [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                                                                     |
-| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                                                                          |
-| [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                                                                        |
-| [`show`](#command-group-show)                    | Show Calkit objects.                                                                                                                                        |
-| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                                                                            |
-| [`import`](#command-group-import)                | Import objects.                                                                                                                                             |
-| [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                                                                 |
-| [`update`](#command-group-update)                | Update objects.                                                                                                                                             |
-| [`check`](#command-group-check)                  | Check things.                                                                                                                                               |
-| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                                                                            |
-| [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                                                                     |
-| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                                                                 |
-| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                                                                   |
-| [`dev`](#command-group-dev)                      | Developer tools.                                                                                                                                            |
-| [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                                                                 |
-| [`operator`](#command-group-operator)            | Manage this machine's Operator, which lets the hub use it.                                                                                                  |
+| Command                                          | Description                                                                                                                                                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`init`](#top-command-init)                      | Initialize the current working directory.                                                                                                                                   |
+| [`clone`](#top-command-clone)                    | Clone or download a copy of a project.                                                                                                                                      |
+| [`status\|st`](#top-command-status-st)           | View status (project, version control, and/or pipeline).                                                                                                                    |
+| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff.                                                                                                                                             |
+| [`add`](#top-command-add)                        | Add paths to the repo.                                                                                                                                                      |
+| [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                                                                                |
+| [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                                                                                       |
+| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                                                                                 |
+| [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                                                                                |
+| [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                                                                                        |
+| [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                                                                                    |
+| [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                                                                                      |
+| [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                                                                                        |
+| [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform, or 'operator' to connect this machine's workspaces to the hub. |
+| [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                                                                                        |
+| [`calc`](#top-command-calc)                      | Run a project's calculation.                                                                                                                                                |
+| [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                                                                                           |
+| [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                                                                                             |
+| [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                                                                               |
+| [`stash`](#top-command-stash)                    | Stash workspace changes, including DVC-tracked data, or bring them back.                                                                                                    |
+| [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                                                                                             |
+| [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                                                                                         |
+| [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                                                                                     |
+| [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.                                                                                                                |
+| [`config`](#command-group-config)                | Configure Calkit.                                                                                                                                                           |
+| [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                                                                                 |
+| [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                                                                                     |
+| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                                                                                          |
+| [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                                                                                        |
+| [`show`](#command-group-show)                    | Show Calkit objects.                                                                                                                                                        |
+| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                                                                                            |
+| [`import`](#command-group-import)                | Import objects.                                                                                                                                                             |
+| [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                                                                                 |
+| [`update`](#command-group-update)                | Update objects.                                                                                                                                                             |
+| [`check`](#command-group-check)                  | Check things.                                                                                                                                                               |
+| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                                                                                            |
+| [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                                                                                     |
+| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                                                                                 |
+| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                                                                                   |
+| [`dev`](#command-group-dev)                      | Developer tools.                                                                                                                                                            |
+| [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                                                                                 |
+| [`operator`](#command-group-operator)            | Manage this machine's Operator, which connects its workspaces to the hub.                                                                                                   |
 
 ## Top-level command details
 
@@ -429,7 +429,7 @@ Options:
 
 ### `calkit install`
 
-Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform, or 'operator' to let the hub use this machine.
+Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform, or 'operator' to connect this machine's workspaces to the hub.
 
 Usage:
 
@@ -4442,17 +4442,17 @@ Options:
 
 ### `calkit operator`
 
-Manage this machine's Operator, which lets the hub use it.
+Manage this machine's Operator, which connects its workspaces to the hub.
 
 | Command                                               | Description                                                                                     |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | [`install`](#subcommand-operator-install)             | Register this machine as an Operator and run it as a service.                                   |
 | [`start`](#subcommand-operator-start)                 | Run the Operator in the foreground, e.g., inside tmux.                                          |
-| [`status`](#subcommand-operator-status)               | Show this machine's Operators and the workspaces they allow.                                    |
+| [`status`](#subcommand-operator-status)               | Show this machine's Operators and their workspaces.                                             |
 | [`stop`](#subcommand-operator-stop)                   | Stop the Operator's service until it's restarted, for every hub unless one is given.            |
 | [`restart`](#subcommand-operator-restart)             | Restart the Operator's service, e.g., after updating Calkit, for every hub unless one is given. |
 | [`logs`](#subcommand-operator-logs)                   | Show the Operator service's logs.                                                               |
-| [`add-workspace`](#subcommand-operator-add-workspace) | Let the hub use a project outside ~/calkit and ~/dev as a workspace.                            |
+| [`add-workspace`](#subcommand-operator-add-workspace) | Add a project outside ~/calkit and ~/dev as a workspace.                                        |
 | [`uninstall`](#subcommand-operator-uninstall)         | Revoke this machine's Operator on the hub and remove it here.                                   |
 
 <a id="subcommand-operator-install"></a>
@@ -4502,7 +4502,7 @@ Options:
 
 #### `calkit operator status`
 
-Show this machine's Operators and the workspaces they allow.
+Show this machine's Operators and their workspaces.
 
 Usage:
 
@@ -4575,7 +4575,7 @@ Options:
 
 #### `calkit operator add-workspace`
 
-Let the hub use a project outside ~/calkit and ~/dev as a workspace.
+Add a project outside ~/calkit and ~/dev as a workspace.
 
 Usage:
 

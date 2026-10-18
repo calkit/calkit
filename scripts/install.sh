@@ -2,8 +2,9 @@
 # Install Calkit with uv (installing the latter if it isn't yet)
 #
 # Options, passed with `curl -LsSf install.calkit.org | sh -s -- <options>`:
-#   --operator             Also install the Calkit Operator, which lets the hub
-#                          use this machine (or set CALKIT_INSTALL_OPERATOR=1)
+#   --operator             Also install the Calkit Operator, which connects
+#                          this machine's workspaces to the hub
+#                          (or set CALKIT_INSTALL_OPERATOR=1)
 #   --no-shell-completion  Skip installing shell completion
 
 OPERATOR="${CALKIT_INSTALL_OPERATOR:-0}"

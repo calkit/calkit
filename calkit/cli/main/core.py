@@ -103,7 +103,10 @@ app.add_typer(sync_app, name="sync", help="Sync with external systems.")
 app.add_typer(
     operator_app,
     name="operator",
-    help="Manage this machine's Operator, which lets the hub use it.",
+    help=(
+        "Manage this machine's Operator, which connects its workspaces to "
+        "the hub."
+    ),
 )
 
 
@@ -4683,8 +4686,8 @@ def run_in_env(
     name="install",
     help=(
         "Install a registered native dependency (e.g., pixi, uv) via its "
-        "upstream installer for the current platform, or 'operator' to let "
-        "the hub use this machine."
+        "upstream installer for the current platform, or 'operator' to "
+        "connect this machine's workspaces to the hub."
     ),
 )
 def install_app(

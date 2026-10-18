@@ -2,9 +2,10 @@
 #
 # Options, passed by running it as a script block, e.g.,
 # & ([scriptblock]::Create((irm install-ps1.calkit.org))) --operator
-#   --operator             Also install the Calkit Operator, which lets the hub
-#                          use this machine (or set CALKIT_INSTALL_OPERATOR=1,
-#                          which also works with `irm ... | iex`)
+#   --operator             Also install the Calkit Operator, which connects
+#                          this machine's workspaces to the hub
+#                          (or set CALKIT_INSTALL_OPERATOR=1, which also works
+#                          with `irm ... | iex`)
 #   --no-shell-completion  Skip installing shell completion
 
 # Every statement below is kept on a single line so the script still does the

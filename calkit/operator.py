@@ -401,7 +401,7 @@ def workspace_lock_holder(wdir: str) -> dict | None:
     try:
         if "operator" not in " ".join(psutil.Process(pid).cmdline()):
             return None
-    except psutil.Error:
+    except (psutil.Error, SystemError):
         return None
     return holder
 
@@ -973,20 +973,22 @@ def find_agents(paths: list[str]) -> dict[str, list[dict]]:
     import psutil
 
     found: dict[str, list[dict]] = {}
-    for proc in psutil.process_iter(["name", "cmdline"]):
+    # Each process is read inside the try, since one that exits meanwhile
+    # can make psutil raise SystemError, which would end the whole scan
+    for proc in psutil.process_iter():
         try:
-            tool = _agent_tool(proc.info["cmdline"] or [])
+            tool = _agent_tool(proc.cmdline())
             if tool is None:
                 continue
             cwd = os.path.realpath(proc.cwd())
             parents = proc.parents()
-        except (psutil.Error, OSError):
+        except (psutil.Error, OSError, SystemError):
             continue
 
         def runs_tool(p: Any) -> bool:
             try:
                 return _agent_tool(p.cmdline()) == tool
-            except (psutil.Error, OSError):
+            except (psutil.Error, OSError, SystemError):
                 return False
 
         # An agent's own helpers, e.g., subagents, aren't others
@@ -999,7 +1001,7 @@ def find_agents(paths: list[str]) -> dict[str, list[dict]]:
             continue
         try:
             env = proc.environ()
-        except (psutil.Error, OSError):
+        except (psutil.Error, OSError, SystemError):
             env = {}
         # tmux names its socket and the pane in what it starts
         tmux = None
@@ -1018,7 +1020,7 @@ def find_agents(paths: list[str]) -> dict[str, list[dict]]:
         apps = [p for p in parents if p.pid > 1]
         try:
             app = apps[-1].name() if apps else None
-        except psutil.Error:
+        except (psutil.Error, SystemError):
             app = None
         agent: dict[str, Any] = dict(
             tool=tool,
@@ -1653,7 +1655,7 @@ class Session:
             if name[:1].isdigit():
                 name = os.path.basename(proc.cmdline()[0]) or name
             return name
-        except (OSError, IndexError, psutil.Error):
+        except (OSError, IndexError, SystemError, psutil.Error):
             return "shell"
 
     def info(self) -> dict:
@@ -2355,7 +2357,7 @@ def get_running_pid(key: str | None = None) -> int | None:
         return None
     try:
         cmdline = " ".join(psutil.Process(pid).cmdline())
-    except psutil.Error:
+    except (psutil.Error, SystemError):
         return None
     # The ID may have been reused by something else since
     return pid if "operator" in cmdline else None

@@ -203,7 +203,7 @@ def test_agents(tmp_path, monkeypatch):
             wdir,
             {"TMUX": "/tmp/tmux-1/default,1,0", "TMUX_PANE": "%3"},
         )
-        start("not-an-agent", wdir)
+        broken = start("not-an-agent", wdir)
         start("claude", home)
         # Claude Code's record of the process names its conversation
         sessions_dir = os.path.join(home, ".claude", "sessions")
@@ -233,6 +233,23 @@ def test_agents(tmp_path, monkeypatch):
             "socket": "/tmp/tmux-1/default",
             "pane": "%3",
         }
+        # A process that psutil fails to read, e.g., as it exits, is skipped
+        # rather than ending the scan
+        import psutil
+
+        cmdline = psutil.Process.cmdline
+
+        def flaky(self):
+            if self.pid == broken:
+                raise SystemError("returned a result with an exception set")
+            return cmdline(self)
+
+        with monkeypatch.context() as m:
+            m.setattr(psutil.Process, "cmdline", flaky)
+            assert {a["pid"] for a in operator.find_agents([wdir])[wdir]} == {
+                claude,
+                codex,
+            }
         # Only ones in tmux can be attached to, and only in their workspace
         op = operator.Operator({"workspaces": []})
         op.workspaces = [{"path": wdir, "kind": "personal"}]

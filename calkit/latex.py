@@ -519,6 +519,17 @@ def find_citations(document: str) -> list[Citation]:
     return list(dict.fromkeys(found))
 
 
+def find_shown(document: str, wdir: str | None = None) -> list[str]:
+    """Project files a document shows, whether cited with calkit.sty's
+    commands or included plainly, e.g., with ``\\includegraphics`` or
+    ``\\input``, relative to ``wdir`` like ``document`` is.
+    """
+    cited = [
+        c.path for c in find_citations(os.path.join(wdir or ".", document))
+    ]
+    return list(dict.fromkeys(cited + detect_inputs(document, wdir=wdir)))
+
+
 def root_documents(folder: str) -> list[str]:
     """The documents directly in a folder, i.e., ``.tex`` files with a
     ``\\documentclass``, rather than the files they input.

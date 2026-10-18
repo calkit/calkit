@@ -10,12 +10,12 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: e4ee0a41f3edd5b13e24459298d94737
-      size: 128660
+      md5: 2f55d50307bf095567cf1abd30fff921
+      size: 128942
     - path: calkit/docx.py
       hash: md5
-      md5: 3f34445a3e65cf2c10f908b84de55fd2
-      size: 55475
+      md5: 611355cdf404240e9991499fc0fa3665
+      size: 55987
     - path: calkit/latex.py
       hash: md5
       md5: 4804078b664b11c447912359f7fbd168
@@ -46,8 +46,8 @@ stages:
       size: 4747
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5
@@ -75,8 +75,8 @@ stages:
       size: 5
     - path: calkit/docx.py
       hash: md5
-      md5: 3f34445a3e65cf2c10f908b84de55fd2
-      size: 55475
+      md5: 611355cdf404240e9991499fc0fa3665
+      size: 55987
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: adf9a8da2e08dee394a2de3a2d4e831a
@@ -95,8 +95,8 @@ stages:
       size: 2652
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
@@ -120,8 +120,8 @@ stages:
       size: 62525
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: images/latex/sizes.json
       hash: md5
@@ -144,8 +144,8 @@ stages:
       size: 14225
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: results/research-flow.json
       hash: md5
@@ -168,8 +168,8 @@ stages:
       size: 12155
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: docs/img/research-flow-goals.png
       hash: md5
@@ -270,8 +270,8 @@ stages:
       size: 1861
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: results/2027-budget.json
       hash: md5

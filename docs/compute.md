@@ -1,72 +1,20 @@
 # Adding compute resources
 
-Some projects contain computationally expensive steps.
-One way to manage this is to clone the project onto an [HPC cluster](hpc.md)
-and run the pipeline there, commit, and push results back out.
-However, this will typically require SSHing into the cluster,
-which can feel fragmented if some work is happening there versus
-your laptop, for example.
-
-Calkit can also run individual stages on another machine over SSH,
+Some projects have steps that need more than a laptop,
+or work that happens on several machines,
+e.g., a workstation at the office and a cluster.
+Calkit can already send individual stages to another machine over SSH,
 by giving a `system`, `slurm`, or `pbs` environment a `host`
-(see [environments](environments.md)).
-This works well for sending heavy stages somewhere else,
-but it needs SSH access from wherever you run the pipeline,
-and it doesn't give you a way to look in on that machine from the web.
+(see [environments](environments.md)),
+or you can clone the project onto an [HPC cluster](hpc.md) and work there.
+Both mean logging in to that machine to see what's going on.
 
-Another approach is to install what's called a Calkit Operator
-on each machine on which you want to work on at least some part of a Calkit
-project.
-The Operator manages _workspaces_, both ephemeral and long-lived,
-which can be accessed from the CLI and Hub,
-for running pipeline stages, viewing status on the web,
-and interacting with AI coding agents.
-
-To install the Operator on a given machine, first
-[install Calkit](installation.md),
-then call:
-
-```sh
-calkit operator install
-```
-
-(`calkit install operator` works too.)
-Calkit's [install script](installation.md) can also install the Operator
-along with Calkit, with its `--operator` option.
-
-This installs the Operator as a service that starts when the machine
-boots, so it's running even if you're not logged in.
-For example, if you install it on a cloud VM that you stop when you're not
-using it, the Operator will be back up as soon as you start the VM again.
-Starting at boot may require admin rights;
-if you don't have them, the Operator will start when you log in instead,
-and the install command will tell you what to run to change that.
-
-If you're running on an HPC, where long-running processes on login nodes
-are typically killed, you have two options.
-The first is to install it in cron mode with the `--cron` option,
-which means it will periodically check in with the Calkit Hub,
-reporting the status of any scheduler jobs,
-and open up a websocket connection for accepting commands only when
-there's something to do.
-The second is to run it in the foreground, e.g., inside tmux, with:
-
-```sh
-calkit operator start
-```
-
-When installed, the Operator registers itself with the Hub and receives
-its own token,
-which can be revoked without affecting any of your other tokens.
-Anyone who can use the Operator from the Hub can open a shell on that
-machine as you,
-so it's important you only install it on a user account that only you
-control.
-For the same reason, you'll need two-factor authentication set up on your
-Hub account before you can open sessions on an Operator,
-which you can do with an authenticator app under the Operators tab in
-your Hub settings.
-You'll be asked for a code from the app every 12 hours.
+A Calkit Operator lets you work on your machines from the Calkit Hub
+instead.
+Install it on each machine you want to work on,
+and the Hub's Workspaces pages show your projects there, called
+_workspaces_,
+with their status, terminal sessions, coding agents, and pipeline runs.
 
 <!-- prettier-ignore -->
 !!! warning
@@ -75,21 +23,185 @@ You'll be asked for a code from the app every 12 hours.
     Some institutions and HPC centers prohibit tools like this,
     so check their policies before installing it.
 
-It's also possible to install the Operator on another machine via SSH,
-e.g.:
+## Installing the Operator
+
+First [install Calkit](installation.md), then run:
+
+```sh
+calkit operator install
+```
+
+`calkit install operator` works too,
+and Calkit's [install script](installation.md) can install the Operator
+along with Calkit with its `--operator` option.
+
+The Operator runs as a service that starts when the machine boots,
+so it's running even if you're not logged in.
+For example, if you install it on a cloud VM that you stop when you're not
+using it, the Operator is back up as soon as you start the VM again.
+On macOS, starting at boot asks for your password,
+and on Linux, the install lets your user's services keep running after you
+log out.
+If that isn't possible, the Operator starts when you log in instead,
+and the install command says so.
+To start it at login on purpose, pass `--login`.
+On Windows, it always starts at login.
+
+### On a cluster
+
+Login nodes on most clusters stop long-running processes,
+so there you have two options.
+The first is to install the Operator in cron mode with `--cron`.
+It then checks in with the Hub every 5 minutes,
+and only connects when you wake it from the Hub,
+stopping again after 15 minutes with nothing to do.
+The second is to run it yourself, e.g., inside tmux, with:
+
+```sh
+calkit operator start
+```
+
+### On another machine
+
+You can also install the Operator on another machine over SSH:
 
 ```sh
 calkit operator install --ssh user@cluster.example.edu
 ```
 
-The host can be anything you'd pass to `ssh`, including a host from your
-`~/.ssh/config`.
-This command will install Calkit on that machine if necessary,
-then the Operator, registering it with the Hub from your current machine,
-so the other one doesn't need to be logged in.
-It can be combined with `--cron` or `--no-service`.
+The host can be anything you'd pass to `ssh`,
+including a host from your `~/.ssh/config`.
+This installs Calkit there if needed, then the Operator,
+registering it with the Hub from the machine you're on,
+so you don't need to log in to the Hub on the other one.
+It can be combined with `--cron`,
+or with `--no-service` to only register it there.
 
-The service can be managed with:
+### For another hub
+
+To install the Operator for a hub other than your default one,
+e.g., one run by your institution, pass its URL with `--hub`:
+
+```sh
+calkit operator install --hub https://hub.example.edu
+```
+
+A machine can have an Operator for each hub you use,
+and the other `calkit operator` commands take `--hub` to choose one.
+A project folder can be used from one hub at a time:
+while one hub has a session open in it or is changing it,
+the others show it as in use.
+
+## Keeping it secure
+
+The Operator gets its own token from the Hub,
+which can be revoked without affecting your other tokens.
+Only you can see or use your Operators,
+but anyone signed in to the Hub as you could open a shell on the machine
+as you,
+so only install it on a user account that only you control.
+
+For the same reason,
+connecting to a workspace requires two-factor authentication.
+Set it up with an authenticator app under the Operators tab in your Hub
+settings.
+You'll be asked for a code from the app every 12 hours.
+
+## Finding your workspaces
+
+The Operator finds the Calkit projects in your `~/calkit` and `~/dev`
+folders.
+To add one from somewhere else, run on that machine:
+
+```sh
+calkit operator add-workspace path/to/project
+```
+
+The Hub can only reach these workspaces,
+plus the ones Calkit creates on that machine to run stages.
+
+The Workspaces link at the top of the Hub lists all of them,
+grouped by machine and then project,
+along with their terminal sessions and coding agents.
+You can filter them, e.g., to the ones with uncommitted changes or a
+pipeline running.
+
+Each project also has a Workspaces page in its sidebar,
+listing that project's workspaces on all of your machines,
+e.g., a clone on your laptop and another on a cluster,
+with the branch and commit each is on.
+The sidebar's Workspaces icon turns green when one of them is on a machine
+that's online.
+
+### Creating a workspace
+
+If a machine with an Operator doesn't have the project yet,
+the project's Workspaces page has a Create workspace button for it.
+The workspace goes in `~/calkit/<project name>` unless you choose
+another folder.
+Before creating it, the Hub checks that machine:
+
+- If Git doesn't have your name and email there, it asks for them,
+  filled in from your Hub profile.
+- If the machine can't reach the project's repository over SSH,
+  click "Set up SSH".
+  The Hub shows the machine's SSH key, making one if it has none.
+  Add it to your account's SSH keys on the Git host, e.g., GitHub,
+  then click "Check again".
+- If Calkit on that machine isn't signed in to the Hub,
+  leave "Authenticate this Operator with the Calkit CLI" checked,
+  so the workspace can pull and push data.
+
+## Working in a workspace
+
+Click a workspace to see its details:
+
+- **Sync:** what there is to pull or push, for both code and data,
+  with Pull and Push buttons.
+  If the remote has changed too, you'll be offered a merge.
+- **Changes:** files that have changed since the last commit,
+  with Commit and Discard buttons.
+  Discarding keeps a copy of your changes,
+  which `calkit stash pop` brings back.
+- **Pipeline:** which stages are out of date and why,
+  which are running, and the questions they answer.
+  Run the whole pipeline or a single stage, and add a new stage.
+  You can also run a project's pipeline on one of your machines from the
+  project's Pipeline page.
+- **Environments:** when each was last checked and whether it has
+  changed since.
+- **Run log:** the output of the latest run, with a button to stop it.
+
+The "+ Workspace" button creates another workspace for the project on a
+new branch, so you can work on a change without disturbing this one.
+It shares the same data, so nothing needs pulling again.
+
+### Sessions and coding agents
+
+From a workspace you can open terminal sessions,
+each a shell in the workspace with the same environment you'd get
+logging in over SSH.
+Run any coding agent you like in one,
+e.g., Claude Code in one session and a plain shell below it.
+Sessions are labeled by what's running in them, e.g., `claude`.
+
+Sessions keep running when you close the browser tab.
+For example, you can leave a coding agent running on your office
+workstation, then check in on it from home,
+or from anywhere you can reach the Hub.
+
+The Hub also finds Claude Code, Codex, and OpenCode
+running in a workspace outside of a session,
+e.g., in your editor's terminal or in tmux,
+and shows what Claude Code and Codex are doing from their own logs.
+You can attach to an agent running in tmux.
+
+On Windows, the Operator can do everything except open terminal sessions,
+which aren't supported there yet.
+
+## Managing Operators
+
+On a machine, manage its Operator with:
 
 ```sh
 calkit operator status
@@ -98,113 +210,22 @@ calkit operator restart
 calkit operator logs
 ```
 
-On the Hub, if you go to your settings, you'll see an "Operators"
-tab that lists your installed Operators and their status.
-You can restart or revoke them from there if desired.
-After Calkit is upgraded, Operators restart with the new version on their
-own once no session or run is using them.
+Without `--hub`, `status`, `stop`, and `restart` act on all of the
+machine's Operators.
 
-To install the Operator for a hub other than your default one, e.g., one
-run by your institution, pass its URL with `--hub`:
-
-```sh
-calkit operator install --hub https://hub.example.edu
-```
-
-A machine can have an Operator for each hub you use,
-and the other `calkit operator` commands take `--hub` to choose which one
-to act on.
-Without it, `status`, `stop`, and `restart` act on all of them.
-A project folder can be used from one hub at a time:
-while one hub has a session open in it or is changing it,
-the others show it as in use and wait.
-
-On Windows, the Operator starts at login and can do everything except
-open shell sessions, which aren't supported there yet.
-
-By default, the Operator will detect long-lived personal workspaces
-in your `~/calkit` and `~/dev` folders.
-Projects cloned elsewhere can be added with:
-
-```sh
-calkit operator add-workspace path/to/project
-```
-
-The Operator will only give the Hub access to these workspaces,
-plus the ones Calkit creates for running stages on that machine,
-and only to you.
-When viewing a project on the Hub,
-if there is a workspace connected to a live Operator, you'll see
-a green dot next to the Workspaces link in the sidebar.
-
-The Workspaces page replaces the project's "local machine" page,
-and the Operator replaces `calkit local-server`.
-
-On the project's Workspaces page,
-you'll see the project's workspaces on all of your Operators in a table,
-e.g., a clone on your laptop and another on a cluster,
-along with which commit each is on,
-whether it has uncommitted changes,
-how far ahead of or behind the Hub it is,
-and any live shell sessions in it.
-You can enter into a running shell session or start a new one.
-Each session starts as a shell in the workspace, with the same environment
-you'd get logging in over SSH,
-from which you can run any coding agent you like.
-For example, you may want two stacked vertically,
-with the top one running a coding agent like OpenCode
-and the bottom a normal shell session.
-Sessions are labeled by what's running in them, e.g., `opencode`.
-You'll also be able to see the current pipeline status,
-similar to the VS Code extension's stage list.
-In fact, the workspace view is similar to working in VS Code,
-except greatly simplified.
-You can open and edit files as well.
-Saving a file writes it in the workspace, just like saving in a local
-editor, and committing and pushing are separate steps.
-If a coding agent changes a file you have open,
-it will reload if you haven't edited it,
-and you'll be asked before saving over the agent's changes if you have.
-
-Shell sessions keep running when you close the browser tab.
-For example, you can install the Operator on your office workstation,
-leave a coding agent running in a workspace there,
-then check in on it and interact with it from home, or from anywhere
-you can reach the Hub.
-
-When in a workspace view,
-you can toggle between that and the Hub for the current project state.
-For example,
-if you've added a new figure in a workspace and that is currently
-activated,
-you can see it on the project's figures page and optionally
-save the project to push it to the hub and bring the two
-into alignment with each other.
-
-## Monitoring cluster jobs
-
-If an Operator is running on a cluster, a workspace's page shows
-its scheduler jobs, the same ones listed by
-[`calkit scheduler queue`](hpc.md#monitoring),
-along with their logs.
-If a stage's job fails or times out, you'll see it there,
-and you can rerun the stage from the Hub without logging in to the
-cluster.
+The Operators tab in your Hub settings lists your Operators and their
+status, where you can restart or revoke them.
+An Operator in cron mode shows as asleep until you wake it from the
+Workspaces page.
+After Calkit is upgraded on a machine,
+its Operator restarts with the new version on its own
+once no session or run is using it.
 
 ## Removal
 
-You can see all Operators attached to your user account with:
-
-```sh
-calkit hub get operators
-```
-
-Operators can be revoked from the Operators tab in your Hub settings.
-This revokes the Operator's token and,
-if it's connected, shuts it down.
-
-To uninstall the Operator from a machine, run the following on that
-machine:
+Revoking an Operator from the Operators tab in your Hub settings
+revokes its token and shuts it down at its next check-in.
+To uninstall the Operator from a machine, run this on that machine:
 
 ```sh
 calkit operator uninstall
@@ -212,18 +233,27 @@ calkit operator uninstall
 
 ## Features coming soon
 
-- The ability to share a workspace with a collaborator for "multiplayer" mode.
-  Each can see what the other is looking at, chat in real time,
-  and make joint commits.
-- The ability to allow a collaborator to create their own workspace on a
-  given machine, so they don't need to set up Calkit on their own.
-- The ability to plug the Hub's LaTeX editor into an Operator for compilation
-  and saving in the actual environment attached to its pipeline stage.
-- Similar as above, but for figure editing.
-- Running pipeline stages on a machine with an Operator without needing
-  SSH access to it, using the same `host` in the stage's environment.
-- Running stages on another machine without keeping your own machine on
-  until they finish, e.g., submitting a long GPU job from your laptop,
-  closing it, and pulling the results later.
+- Sharing a workspace with a collaborator for "multiplayer" mode,
+  where each can see what the other is looking at, chat in real time,
+  and make joint commits,
+  or letting a collaborator create their own workspace on a machine,
+  so they don't need to set up Calkit themselves
+  ([#1482](https://github.com/calkit/calkit/issues/1482)).
+- Opening and editing a workspace's files from the Hub,
+  and switching the project's pages between the Hub's version and a
+  workspace's
+  ([#1702](https://github.com/calkit/calkit/issues/1702)).
+- Seeing a cluster's scheduler jobs for a workspace, with their logs,
+  and rerunning a stage whose job failed.
+- Plugging the Hub's LaTeX and figure editors into an Operator,
+  to build in the stage's own environment
+  ([#1111](https://github.com/calkit/calkit/issues/1111)).
+- Running stages on a machine with an Operator without SSH access to it,
+  and without keeping your own machine on until they finish,
+  e.g., submitting a long GPU job from your laptop, closing it,
+  and pulling the results later
+  ([#185](https://github.com/calkit/calkit/issues/185)).
+- Upgrading Calkit on an Operator's machine from the Hub
+  ([#1870](https://github.com/calkit/calkit/issues/1870)).
 
-TODO: Add links to GitHub issues for these and recommend upvoting.
+If one of these would help you, add a 👍 to its issue.

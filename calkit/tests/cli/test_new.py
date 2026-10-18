@@ -2300,6 +2300,14 @@ def test_release_detached_head(tmp_dir):
 
 
 def test_new_workspace(tmp_dir):
+    def cache_dir(path: str) -> str:
+        # Normalized, since Git gives paths on Windows with forward slashes
+        with open(os.path.join(path, ".dvc", "config.local")) as f:
+            for line in f:
+                if line.strip().startswith("dir ="):
+                    return os.path.normpath(line.split("=", 1)[1].strip())
+        return ""
+
     subprocess.check_call(["calkit", "init"])
     with open("data.csv", "w") as f:
         f.write("a,b\n")
@@ -2316,12 +2324,14 @@ def test_new_workspace(tmp_dir):
     path = f"{root}-fix-axes"
     repo = git.Repo(path)
     assert repo.active_branch.name == "fix/axes"
-    assert repo.git.rev_parse("--git-common-dir") == os.path.join(root, ".git")
+    assert os.path.normpath(
+        repo.git.rev_parse("--git-common-dir")
+    ) == os.path.join(root, ".git")
     with open(os.path.join(path, "data.csv")) as f:
         assert f.read() == "a,b\n"
     local_config = open(os.path.join(path, ".dvc", "config.local")).read()
     assert "autostage = true" in local_config
-    assert os.path.join(root, ".dvc", "cache") in local_config
+    assert cache_dir(path) == os.path.join(root, ".dvc", "cache")
     assert not os.path.exists(os.path.join(path, ".dvc", "cache"))
     # One made from a worktree made some other way, without the main
     # checkout's cache, is still named after it and uses its cache
@@ -2335,7 +2345,7 @@ def test_new_workspace(tmp_dir):
         assert f.read() == "a,b\n"
     local_config = open(os.path.join(path, ".dvc", "config.local")).read()
     assert "autostage = true" in local_config
-    assert os.path.join(root, ".dvc", "cache") in local_config
+    assert cache_dir(path) == os.path.join(root, ".dvc", "cache")
     # An existing branch is checked out rather than created, and a path
     # that's taken is refused
     git.Repo(root).git.branch("other")

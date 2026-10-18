@@ -4,6 +4,7 @@ import itertools
 import os
 import posixpath
 import re
+import shlex
 import warnings
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +22,7 @@ from calkit.models.pipeline import (
     Pipeline,
     ShellCommandStage,
     Stage,
+    is_flag_and_value,
 )
 
 
@@ -2649,6 +2651,15 @@ def to_dvc(
         # parameters if any reference project-level parameters
         if stage.kind == "jupyter-notebook":
             stage.update_parameters(params=project_params)
+        # The one form of arg that isn't passed as a single argument
+        for arg in getattr(stage, "args", None) or []:
+            if is_flag_and_value(arg):
+                warnings.warn(
+                    f"Stage '{stage_name}' has the arg {arg!r}, which the "
+                    "shell splits into separate arguments. Write each as "
+                    f"its own item instead: {shlex.split(arg)}.",
+                    stacklevel=2,
+                )
         dvc_stage = stage.to_dvc()
         # Check if this stage iterates, which means we should create a matrix
         # stage

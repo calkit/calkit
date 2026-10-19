@@ -23,37 +23,56 @@ The decisions behind it are in [ADR 0001](adrs/0001-operators.md).
 | Operator token     | `cko_` + selector and verifier  | Until revoked | Authenticating the Operator to the API      |
 | Operator relay JWT | JWT with scope `relay:operator` | 10 minutes    | Opening the Operator's relay connection     |
 | Browser relay JWT  | JWT with scope `relay:browser`  | 60 seconds    | Opening one browser connection to the relay |
+| Machine CLI token  | `ckp_` personal access token    | 365 days      | Calkit's CLI on the Operator's machine      |
 
 Operator tokens are stored like personal access tokens: a selector to look
 the record up and a hashed verifier.
-Relay tokens are only checked when a connection opens.
+The machine's CLI token is a personal access token the hub issues to the
+Operator, tied to it, and revoked with it.
+Relay tokens are checked when a connection opens, and the Operator's again
+when it refreshes its connection's.
 Revoking an Operator takes effect at its next check-in, when the API
-rejects its token and the Operator shuts down.
+rejects its token and the Operator shuts down, and at the relay within 10
+minutes, once the relay token it can no longer refresh expires.
 
 ## API
 
 - `POST /operators`, with the user's token, registers an Operator and
-  returns its ID, name, and Operator token.
+  returns its ID, name, Operator token, and `grant_public_key`.
   The token is only returned here.
+  It takes the Operator's own P-256 public key as a JSON Web Key,
+  `public_key`, which an Operator installed with `--ssh`, registered from
+  another machine, sends at its first check-in instead.
+  Names must match `^[a-z0-9][a-z0-9-]{0,63}$`, and a user can have at
+  most 50 active Operators.
+  The owner is emailed whenever one is registered or revoked.
 - `GET /operators` lists the user's Operators.
-- `DELETE /operators/{operator_id}` revokes one.
+- `DELETE /operators/{operator_id}` revokes one, which takes a web sign-in,
+  as relay tokens do, not just the user's token.
+  `DELETE /operators/self`, with the Operator token, revokes the Operator
+  making the request, which is how `calkit operator uninstall` does it.
 - `POST /operators/check-in`, with the Operator token, records that the
   Operator is alive, how it runs (`mode`: `service`, `foreground`, or
   `cron`), whether it's `connected` to the relay, and what workspaces it
   has, each with its Git state and pipeline run state: `running`,
   `running_stages`, `running_since`, and `last_run` (`status`, `started`,
   `ended`, and `failed_stages`), when it was last active
-  (`last_activity`), and the coding agents running there (`agents`), and
-  whether a restart is pending (`restart_pending`).
+  (`last_activity`), whether `in_use_by` an Operator for another hub,
+  which is always just `another hub`, and the coding agents running there
+  (`agents`), and whether a restart is pending (`restart_pending`).
   Each agent, e.g., Claude Code, Codex, or opencode, is found by its
   command and working directory, however it was started, and has its
   `tool`, `pid`, when it `started`, `where` it runs (`session`, one of the
   Operator's, `tmux`, or another `terminal`), the `app` it was started
   from, e.g., `Code`, and the `name` and `status` it gives itself, if any.
   It also lists the sign-ins its open channels came from
-  (`channel_sessions`, the grants' `sid`s).
-  It returns the relay URL, an Operator relay token, `connect`, which
-  tells an Operator in cron mode whether to connect, `restart`, which
+  (`channel_sessions`, the grants' `sid`s), and its `public_key`, which
+  the hub keeps the first time it's sent and never replaces.
+  A different one gets 409, after which the Operator doesn't connect and
+  `calkit operator install` registers it again.
+  It returns the relay URL, an Operator relay token, `grant_public_key`,
+  which grants are checked with, `connect`, which tells an Operator in
+  cron mode whether to connect, `restart`, which
   passes on a restart its owner asked for, and `ended_sessions`, which of
   those sign-ins are no longer live, e.g., after a password change, whose
   channels the Operator then closes, leaving their sessions running.
@@ -65,7 +84,9 @@ rejects its token and the Operator shuts down.
 - `POST /operators/{operator_id}/restart`, with the user's token, asks an
   Operator to restart, which it hears at its next check-in.
 - `POST /operators/{operator_id}/relay-token`, with the user's token,
-  returns the relay URL and a browser relay token for that Operator.
+  returns the relay URL and a browser relay token for that Operator, along
+  with the Operator's `operator_public_key` and the `grant_id` of the
+  grant in the token, which the browser checks replies with.
   The browser sends the public half of a P-256 key it made for this
   connection, whose private half can't be exported, as a JSON Web Key:
   `{"public_key": {"kty": "EC", "crv": "P-256", "x": ..., "y": ...}}`.
@@ -73,16 +94,32 @@ rejects its token and the Operator shuts down.
   whose sign-in session is still live, not a personal access token or a
   CLI, CI, or GitHub token login, and proof that the session entered a
   two-factor code within the last 12 hours:
-  the `second_factor_token` returned by `POST /user/totp/verify` (or
-  `/confirm`), sent in an `X-Second-Factor` header.
-  That token names the session, so it's worthless to any other, and
-  changing the password ends every other session.
+  the `second_factor` cookie `POST /user/totp/verify` (or `/confirm`)
+  sets, which is HttpOnly and SameSite=Strict, and lasts 12 hours.
+  Their responses, like `GET /user/totp`, say until when, as
+  `verified_until`.
+  The cookie's token names the session, so it's worthless to any other.
   Otherwise it answers 403 with a detail the browser recognizes, to prompt
   for setup or a code.
+  It answers 409 if the Operator is offline or hasn't sent its key yet.
   Setting up two-factor authentication (`POST /user/totp`) emails a code,
   which confirming takes along with one from the authenticator app.
   It, and registering an Operator, require a verified email, and changing
-  a verified email takes a code sent to it.
+  a verified email takes a signed-in session and a code sent to it for the
+  new address.
+- `POST /logout` ends the caller's sign-in session and clears the
+  `second_factor` cookie, and `POST /user/sessions/end-others`, with a
+  signed-in session, ends every other one.
+  Changing the password or email, or turning off two-factor
+  authentication, ends every other session too, and using a rotated
+  refresh token after its grace window ends its own.
+- `POST /operators/{operator_id}/cli-token-request`, which takes what a
+  relay token does, lets that Operator fetch a CLI token for its machine
+  within the next 10 minutes.
+  `POST /operators/cli-token`, with the Operator token, then returns
+  `{"token": ...}`, a personal access token for the owner with full scope
+  that lasts 365 days, replacing any the Operator was issued before, or 403
+  if none was requested.
 - `GET /projects/{owner}/{name}/workspaces` lists the project's workspaces
   across the user's Operators, from their latest check-ins.
 
@@ -91,12 +128,15 @@ last three minutes, and asleep if it's in cron mode, not online, and has
 checked in within the last 15 minutes.
 Operators check in with `connected` false as they shut down, so they show
 as offline or asleep right away.
+The browser only connects to Operators that are online, and closes its
+connections to ones that go offline.
 
 ## Cron mode
 
 On machines where long-running processes aren't allowed, e.g., a
 cluster's login node, cron runs `calkit operator start --mode cron` every
-5 minutes and at boot.
+5 minutes and at boot, from `/`, where the Linux and macOS services run
+too.
 It checks in with `connected` false and exits unless `connect` is true.
 If it is, it runs as usual until it has had no sessions and no browsers
 for 15 minutes.
@@ -135,18 +175,31 @@ each opens only one connection.
 
 - `/operator`, one connection per Operator.
   A new connection replaces an existing one for the same Operator.
+  The relay closes it with code 4401 once its token expires, so after
+  each check-in the Operator sends the relay token it got,
+  `{"type": "auth.refresh", "token": ...}`, which moves the deadline to
+  that token's expiry if it's an unused one for the same Operator and
+  owner, and is ignored otherwise.
 - `/browser`, any number per Operator.
-  Closes with code 4404 if the Operator isn't connected.
+  Closes with code 4404 if the Operator isn't connected, and 4401 if the
+  token's user isn't the Operator's owner.
 
 When a browser connects, the relay assigns it a channel ID and sends the
 Operator `{"type": "channel.open", "ch": ..., "user_id": ..., "grant": ...}`.
+The Operator ignores frames whose channel ID doesn't match
+`[A-Za-z0-9_-]{1,64}`.
 The grant, which comes from the browser's relay token, is an EdDSA JWT
 the API signed, with the Operator's ID as `aud`, its owner as `sub`, a
-`jti`, a 60 second `exp`, the browser's public key as `cnf.jwk`, and
-the sign-in it came from as `sid`.
-The Operator checks it against the key it pinned from `grant_public_key`
-when it registered (or at its first check-in, if registered before), and
-refuses channels without a valid, unused one.
+`jti`, `iat`, a 60 second `exp`, the browser's public key as `cnf.jwk`,
+the sign-in it came from as `sid`, and when the second factor that let it
+be issued expires as `tfa_exp`.
+The Operator checks it against the `grant_public_key` from its latest
+check-in, which comes over HTTPS, closing its open channels if that
+changes.
+It refuses channels without a valid, unused grant, or while it hasn't
+checked in for 10 minutes, with `channel.close`.
+Grant IDs it has used are kept in `used-grants.json` in its directory, so
+they stay used across restarts.
 Browser messages are forwarded to the Operator as
 `{"type": "channel.message", "ch": ..., "msg": ...}`,
 and the Operator sends `{"ch": ..., "msg": ...}` to reach a browser, which
@@ -156,20 +209,43 @@ Each browser message is sent signed, as
 JSON text, `seq` counts up from 1 on each connection, and `sig` is an
 ECDSA P-256 SHA-256 signature, as r and s side by side in base64url, of
 `calkit-operator-message\n{seq}\n{body}` with the key the grant names.
-The Operator drops a message whose signature doesn't check out or whose
-`seq` isn't past the last one, so the relay, which carries the grant,
-can neither use it nor forge or replay messages in a channel a user
-opened.
-What the Operator sends back isn't signed, and the relay can read both
-directions.
+A message whose signature doesn't check out, or whose `seq` isn't exactly
+one past the last, closes the channel, so the relay, which carries the
+grant, can neither use it nor forge, replay, drop, or reorder messages in
+a channel a user opened.
+
+What the Operator sends back is signed the same way, with its own key,
+over `calkit-operator-reply\n{grant_id}\n{seq}\n{body}`, where `grant_id`
+is the grant's `jti`, so a reply only counts on its own channel, and
+`seq` counts up from 1 on each channel.
+The first reply is always `{"type": "channel.ready"}`, which the browser
+waits for before sending anything, closing the connection if it doesn't
+come within 20 seconds.
+The browser checks every reply with the `operator_public_key` from the
+API, not the relay, and closes the connection over one that doesn't check
+out or isn't next, reconnecting with a new key and grant.
+So the relay can read both directions, e.g., what's typed in a terminal
+and what it shows, but can't forge, drop, or reorder anything.
 When a browser disconnects, the Operator gets
 `{"type": "channel.close", "ch": ...}`.
-The Operator sends the same to close a channel itself, e.g., when its
-sign-in ends, and the relay closes the browser with code 4401.
+The Operator sends the same to close a channel itself, and the relay
+closes the browser with code 4401.
+It does that when the channel's sign-in ends, its second factor expires
+(`tfa_exp`), the grant key changes, the Operator hasn't checked in for 10
+minutes, or more than 8 MiB of replies are waiting to go to the browser.
 When the Operator disconnects, its browsers are closed with code 4410.
 
-All messages are JSON text frames.
-Messages over 256 KiB close the connection with code 1009.
+All messages are JSON text frames, and binary ones close the connection
+with code 1003.
+Messages over 256 KiB close the connection with code 1009, and the relay
+runs with uvicorn's `--ws-max-size 300000` and `--ws-max-queue 4`, and
+without permessage-deflate, so larger ones are refused before they're
+buffered.
+A reply too large to send becomes an error reply to its request, and is
+dropped if it isn't one.
+New connections close with code 1013 while 200 are waiting to send their
+tokens, and a Traefik `inFlightReq` middleware allows each client address
+50 connections at once.
 The relay counts bytes in each direction per Operator and logs them every
 minute.
 
@@ -178,6 +254,9 @@ minute.
 These are the `msg` payloads between a browser and an Operator.
 Requests carry an `id`, answered by `{"type": "result", "id": ...,
 "result": ...}` or `{"type": "error", "id": ..., "error": ...}`.
+The browser gives up waiting after 2 minutes, except for `workspace.run`,
+`workspace.pull`, `workspace.push`, `workspace.save`, `workspace.new`, and
+`workspaces.clone`, which take as long as they take.
 
 | Browser sends     | Fields                            | Result             |
 | ----------------- | --------------------------------- | ------------------ |
@@ -250,6 +329,14 @@ browser asks for both and shows Git's first.
 `workspace.pull` only fast-forwards, returning `diverged` when it can't,
 unless `merge` is true, in which case it merges, undoing a merge that
 conflicts.
+`workspace.pull` and `workspace.push` first remove the hub's token from
+the local config of DVC remotes that aren't on the hub, since a pull can
+point one anywhere.
+`workspace.save` refuses `.dvc/config.local` and anything in
+`.calkit/local`, which hold the machine's credentials.
+Files the Operator reads or writes in a workspace itself, e.g., its lock
+or a run's log, are never followed through links, since a repo can commit
+links to anywhere.
 
 `workspace.agent_log` returns the end of a running agent's conversation as
 `entries`, each with a `role` (`user`, `assistant`, `tool`, or `event`,
@@ -269,6 +356,8 @@ where the Operator finds it, else in `~/calkit`, and returns its `path`.
 `workspaces.clone`, with `id`, `git_repo_url`, and optionally `path`,
 clones a project with the machine's own Git credentials and returns its
 `path`.
+Its `git_repo_url`, like `machine.check`'s, must be
+`https://host[:port]/path` or `git@host:path`.
 It goes in `~/calkit/<repo name>` unless `path` says otherwise, which can
 start with `~/` and must be in the user's home folder, outside hidden
 folders, and not exist yet.
@@ -282,10 +371,12 @@ whether it's `ssh`, and an `error` if `git ls-remote` couldn't reach it
 without prompting, and `token`, whether Calkit has a token for this
 Operator's hub, which pulling and pushing data use.
 `machine.configure`, with `id` and any of `git_name`, `git_email`, and
-`token`, sets Git's global identity and stores the token in Calkit's
-config, as `calkit config set token` would.
-The browser makes that token with the hub's personal access token API,
-so it reaches the Operator only over a channel the owner opened.
+`token`, sets Git's global identity and, with `token` true, gets a CLI
+token for the machine and stores it in Calkit's config, as
+`calkit config set token` would.
+The browser first calls `POST /operators/{operator_id}/cli-token-request`,
+and the Operator then gets the token from `POST /operators/cli-token`
+with its own token, so it never passes through the relay.
 `machine.ssh_key`, with `id`, returns the machine's SSH `public_key`,
 making an ed25519 key with no passphrase first if it has none, and
 whether it was `created`, for the owner to add to their Git host, as

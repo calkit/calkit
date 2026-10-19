@@ -92,8 +92,8 @@ Relayed traffic is kept to what is interactive and small:
 - Terminal traffic is keystrokes and screen output, typically a few KB/s
   while a session is active and nothing while idle.
   The Operator coalesces output into frames every few tens of
-  milliseconds, and the websocket uses permessage-deflate, which matters
-  for agent TUIs that redraw often.
+  milliseconds, which matters for agent TUIs that redraw often.
+  The relay doesn't compress frames with permessage-deflate.
 - Structured commands, e.g., status, the scheduler queue, a page of logs,
   or a file opened in the editor, return small payloads.
   The relay enforces a maximum message size.
@@ -154,7 +154,7 @@ a leaked credential, e.g., a personal access token in a CI secret or a
 DVC token sent to a remote a repo controls, so it's tightened three ways:
 
 - Proof of entering a code belongs to the session that entered it: a
-  short-lived token it sends with requests, not a record on the account.
+  short-lived token in an HttpOnly cookie, not a record on the account.
 - Getting a relay token or managing two-factor authentication takes a
   signed-in session, and personal access tokens are refused, as are
   scoped ones anywhere outside their scope.
@@ -173,9 +173,10 @@ further:
   personal access token can't be traded for one.
   The proof of a second factor names the session, and changing or
   resetting the password ends every other session.
-- Changing a verified email takes a code sent to it, and setting up an
-  authenticator app or registering an Operator takes a verified email,
-  so a stolen session can't move the account to an attacker's inbox and
+- Changing a verified email takes a code sent to it for the new address,
+  and setting up an authenticator app or registering an Operator takes a
+  verified email, so a stolen session can't move the account to an
+  attacker's inbox and
   set up their app.
   A Google sign-in that claims an account whose email was never verified
   resets whatever someone else could have set up on it.
@@ -186,22 +187,23 @@ further:
 - The Operator doesn't take the relay's word for who opened a channel.
   The API signs a grant for each browser connection, naming the Operator
   and its owner, with an Ed25519 key only it holds, and the Operator
-  checks it against the public key it pinned when it registered, using
-  each grant once.
+  checks it against the public key the API sends with each check-in, over
+  HTTPS, using each grant once, even across restarts.
   So the relay alone can't open channels, for shells or anything else,
   and what's left to trust is the API itself, as with any web terminal
   its pages serve.
 - The grant also names a key the browser made for that connection and
   can't export, which signs every message, numbered, so the relay can't
-  use a grant it carries or act inside a channel, though it can read
-  both directions.
+  use a grant it carries or act inside a channel.
   The grant names its sign-in too, and the Operator closes the channel
   within a check-in once that sign-in ends, e.g., with a password change.
 - The Operator registers with the user's own hub, never one named by a
-  project in the working directory, and refuses to connect without TLS
-  except locally or to run as root.
+  project in the working directory, refuses to connect without TLS except
+  locally, and always refuses to run as root, since its sessions would be
+  root shells.
   Paths and clone URLs from the hub have to be plain ones, so they can't
-  be taken as options or reach outside the workspace.
+  be taken as options or reach outside the workspace, and files a repo
+  committed as links aren't followed.
 - Links built from project data only allow web and email URLs, since a
   `javascript:` URL in a project's `calkit.yaml` would otherwise run in
   the owner's browser, where it could reach their Operators.
@@ -210,6 +212,33 @@ further:
   accounts the user alone controls, and to check institutional policy
   first, since this is equivalent to a VS Code tunnel, which some
   institutions and HPC centers prohibit.
+
+A third review closed what was left to the relay and to stolen sessions:
+
+- The Operator has a key of its own, which the hub keeps the first time
+  it's sent and never replaces, and signs every reply with it, bound to
+  the channel's grant.
+  The browser gets that key from the API, not the relay, and messages are
+  numbered contiguously both ways, with a gap closing the channel.
+  So the relay can still read both directions, including what's typed in
+  a terminal and what it shows, but can't forge, drop, or reorder
+  anything in either.
+- Channels last only as long as the second factor that let them open,
+  and close while the Operator hasn't checked in for 10 minutes, since it
+  can't then tell which sign-ins have ended.
+  The relay drops an Operator connection whose token isn't refreshed
+  after check-ins, so a revoked Operator is cut off within 10 minutes.
+- The machine's CLI token, which pulling and pushing data use, is issued
+  by the hub to the Operator, which fetches it over HTTPS once its owner
+  asks, rather than made in the browser and sent through the relay.
+  It's tied to the Operator and revoked with it.
+  The hub's token is removed from DVC remotes that aren't on the hub
+  before pulls and pushes, and files holding it are never saved to a
+  commit.
+- Signing out ends the session, and other sessions can be ended from
+  user settings.
+  Revoking an Operator takes a signed-in session, and the owner is
+  emailed whenever one is registered or revoked.
 
 Shell sessions aren't confined to workspaces.
 Only an Operator's owner can open them, and the owner already has a shell
@@ -246,7 +275,8 @@ A workspace can be seen by more than one of them, e.g., one under
 `~/calkit`, but is used by one at a time: an Operator takes a lock in
 the workspace itself, `.calkit/local/operator.lock`, while a session or
 an action that changes it is running, and the others refuse to change it
-and report it as in use from that hub until it's released.
+and report it as in use from another hub, without saying which, until
+it's released.
 A lock left by an Operator that's no longer running is stale and can be
 taken.
 
@@ -344,14 +374,14 @@ first instead of submitting its own job.
 The Operator owns its PTYs, so shell sessions, and any coding agent
 running in one, survive browser disconnects.
 Sessions end when closed explicitly or when the Operator restarts.
-Windows uses ConPTY.
+Windows Operators don't offer sessions yet.
 
 Every session is a login shell in the workspace, so it has the user's
 full environment, e.g., `PATH` additions and modules, as with SSH.
 Users run whichever coding agent they like from it, and get the shell back
 when the agent exits.
 The hub labels each session by its terminal's foreground process, e.g.,
-`claude` or `bash`, falling back to "shell" on Windows.
+`claude` or `bash`.
 Agent-specific features are deferred:
 
 - An optional command to run when a session starts.
@@ -457,10 +487,13 @@ It can rerun a failed stage through the Operator.
 
 ### Removal
 
-`calkit operator uninstall` removes the service and local state.
-Deleting an Operator on the hub revokes its token and, if connected, tells
-it to shut down.
-A revoked Operator stops itself the next time it fails to connect.
+`calkit operator uninstall` revokes the Operator on the hub with its own
+token and removes the service and local state.
+Deleting an Operator on the hub revokes its token and the CLI token
+issued to its machine.
+The Operator stops at its next check-in, when the hub refuses its token,
+and the relay drops its connection within 10 minutes, once it can no
+longer refresh its relay token.
 The hub cannot uninstall anything from a machine that is offline.
 
 ### Configuration ownership

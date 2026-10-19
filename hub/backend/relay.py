@@ -28,9 +28,13 @@ logging.basicConfig(level=logging.INFO)
 MAX_MESSAGE_BYTES = 256 * 1024
 # How long a new connection has to send its token
 AUTH_TIMEOUT_SECONDS = 10
+# How many connections may be waiting to send one at once
+MAX_UNAUTHENTICATED = 200
 METER_LOG_INTERVAL_SECONDS = 60
 # Close codes
+CLOSE_UNSUPPORTED = 1003
 CLOSE_TOO_BIG = 1009
+CLOSE_TRY_AGAIN = 1013
 CLOSE_UNAUTHORIZED = 4401
 CLOSE_OPERATOR_OFFLINE = 4404
 CLOSE_REPLACED = 4409
@@ -62,6 +66,10 @@ def decode_relay_token(
     return payload
 
 
+class Closed(Exception):
+    """The relay closed a socket itself, so it mustn't close it again."""
+
+
 async def authenticate(
     ws: WebSocket, kind: Literal["operator", "browser"]
 ) -> dict | None:
@@ -70,13 +78,22 @@ async def authenticate(
     Tokens go in a message rather than the URL, so they stay out of
     access logs.
     """
-    await ws.accept()
+    global unauthenticated
+    if unauthenticated >= MAX_UNAUTHENTICATED:
+        await ws.close(CLOSE_TRY_AGAIN)
+        return None
+    unauthenticated += 1
     try:
+        await ws.accept()
         async with asyncio.timeout(AUTH_TIMEOUT_SECONDS):
             msg = await _receive(ws)
-    except (TimeoutError, WebSocketDisconnect):
-        msg = None
-    token = msg.get("token") if msg else None
+    except (WebSocketDisconnect, Closed):
+        return None
+    except TimeoutError:
+        msg = {}
+    finally:
+        unauthenticated -= 1
+    token = msg.get("token")
     payload = (
         decode_relay_token(token, kind) if isinstance(token, str) else None
     )
@@ -86,13 +103,17 @@ async def authenticate(
 
 
 class Operator:
-    def __init__(self, ws: WebSocket, user_id: str) -> None:
+    def __init__(self, ws: WebSocket, user_id: str, exp: float) -> None:
         self.ws = ws
         self.user_id = user_id
+        # When its token expires, which refreshing it pushes back
+        self.exp = exp
         self.channels: dict[str, WebSocket] = {}
 
 
 operators: dict[str, Operator] = {}
+# Connections that haven't sent a token yet
+unauthenticated = 0
 # IDs of relay tokens already used, with when they expire
 used_tokens: dict[str, float] = {}
 # Bytes relayed per Operator since the last log, as (to Operator, from it)
@@ -122,15 +143,23 @@ app = FastAPI(lifespan=lifespan, openapi_url=None)
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "operators": len(operators)}
+    return {"ok": True}
 
 
-async def _receive(ws: WebSocket) -> dict | None:
-    """Receive one JSON message, closing the socket if it's too big."""
-    text = await ws.receive_text()
+async def _receive(ws: WebSocket) -> dict:
+    """Receive one JSON message, closing the socket if it's too big or
+    binary, which raises Closed.
+    """
+    message = await ws.receive()
+    if message["type"] == "websocket.disconnect":
+        raise WebSocketDisconnect(message.get("code", 1000))
+    text = message.get("text")
+    if text is None:
+        await ws.close(CLOSE_UNSUPPORTED)
+        raise Closed
     if len(text.encode()) > MAX_MESSAGE_BYTES:
         await ws.close(CLOSE_TOO_BIG)
-        return None
+        raise Closed
     try:
         msg = json.loads(text)
     except json.JSONDecodeError:
@@ -156,15 +185,45 @@ async def operator_ws(ws: WebSocket) -> None:
     operator_id = payload["sub"]
     existing = operators.get(operator_id)
     if existing is not None:
-        await existing.ws.close(CLOSE_REPLACED)
-    operator = Operator(ws, user_id=payload["user_id"])
+        try:
+            await existing.ws.close(CLOSE_REPLACED)
+        except Exception:
+            pass
+    operator = Operator(
+        ws, user_id=payload["user_id"], exp=float(payload["exp"])
+    )
     operators[operator_id] = operator
     logger.info(f"Operator {operator_id} connected")
+    loop = asyncio.get_running_loop()
     try:
         while True:
-            msg = await _receive(ws)
-            if msg is None:
+            # Its token has to be refreshed before it expires, which it is
+            # after each check-in, so one revoked, or taken by someone who
+            # can't check in, doesn't stay connected
+            deadline = loop.time() + operator.exp - time.time()
+            try:
+                async with asyncio.timeout_at(deadline):
+                    msg = await _receive(ws)
+            except TimeoutError:
+                logger.info(f"Operator {operator_id}'s token expired")
+                await ws.close(CLOSE_UNAUTHORIZED)
                 break
+            if msg.get("type") == "auth.refresh":
+                token = msg.get("token")
+                refreshed = (
+                    decode_relay_token(token, "operator")
+                    if isinstance(token, str)
+                    else None
+                )
+                if (
+                    refreshed is None
+                    or refreshed.get("sub") != operator_id
+                    or refreshed.get("user_id") != operator.user_id
+                ):
+                    logger.info(f"Operator {operator_id} sent a bad refresh")
+                    continue
+                operator.exp = float(refreshed["exp"])
+                continue
             ch = msg.get("ch")
             if not isinstance(ch, str):
                 continue
@@ -182,7 +241,7 @@ async def operator_ws(ws: WebSocket) -> None:
             if "msg" not in msg:
                 continue
             meter[operator_id][1] += await _send(browser, msg["msg"])
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Closed):
         pass
     finally:
         # A replaced connection must not tear down its replacement
@@ -206,6 +265,10 @@ async def browser_ws(ws: WebSocket) -> None:
     if operator is None:
         await ws.close(CLOSE_OPERATOR_OFFLINE)
         return
+    # Only its owner can reach it
+    if payload.get("user_id") != operator.user_id:
+        await ws.close(CLOSE_UNAUTHORIZED)
+        return
     ch = uuid.uuid4().hex[:12]
     operator.channels[ch] = ws
     meter[operator_id][0] += await _send(
@@ -222,8 +285,6 @@ async def browser_ws(ws: WebSocket) -> None:
     try:
         while True:
             msg = await _receive(ws)
-            if msg is None:
-                break
             # The Operator may have reconnected since this browser did
             if operators.get(operator_id) is not operator:
                 await ws.close(CLOSE_OPERATOR_GONE)
@@ -231,7 +292,7 @@ async def browser_ws(ws: WebSocket) -> None:
             meter[operator_id][0] += await _send(
                 operator.ws, {"type": "channel.message", "ch": ch, "msg": msg}
             )
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Closed):
         pass
     finally:
         operator.channels.pop(ch, None)

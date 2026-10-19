@@ -371,6 +371,14 @@ class Settings(BaseSettings):
     def _enforce_non_default_secrets(self) -> Self:
         self._check_default_secret("SECRET_KEY", self.SECRET_KEY)
         self._check_default_secret("RELAY_SECRET_KEY", self.RELAY_SECRET_KEY)
+        # The relay is exposed to the internet, so its key has to be too
+        # long to guess
+        if len(self.RELAY_SECRET_KEY) < 32:
+            message = "RELAY_SECRET_KEY must be at least 32 characters"
+            if self.ENVIRONMENT == "local":
+                warnings.warn(message, stacklevel=1)
+            else:
+                raise ValueError(message)
         self._check_default_secret("POSTGRES_PASSWORD", self.POSTGRES_PASSWORD)
         self._check_default_secret(
             "FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD

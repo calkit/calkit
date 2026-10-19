@@ -161,14 +161,21 @@ services:
       args:
         INSTALL_DEV: ${INSTALL_DEV-true}
     environment:
-      RELAY_SECRET_KEY: ${RELAY_SECRET_KEY?Variable not set}
+      RELAY_SECRET_KEY: ${RELAY_SECRET_KEY:?Variable not set}
     command:
-      - fastapi
-      - run
+      - uvicorn
+      - relay:app
       - --reload
+      - --host
+      - 0.0.0.0
       - --port
       - "8002"
-      - relay.py
+      - --ws-max-size
+      - "300000"
+      - --ws-max-queue
+      - "4"
+      - --ws-per-message-deflate
+      - "false"
 
   mailcatcher:
     image: schickling/mailcatcher

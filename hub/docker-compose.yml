@@ -143,7 +143,7 @@ services:
       - ENVIRONMENT=${ENVIRONMENT}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
       - SECRET_KEY=${SECRET_KEY?Variable not set}
-      - RELAY_SECRET_KEY=${RELAY_SECRET_KEY?Variable not set}
+      - RELAY_SECRET_KEY=${RELAY_SECRET_KEY:?Variable not set}
       # Empty means wss://relay.$DOMAIN
       - RELAY_URL=${RELAY_URL-}
       - FERNET_KEY=${FERNET_KEY?Variable not set}
@@ -398,12 +398,29 @@ services:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
     restart: always
     pull_policy: never # We build locally on deploy
+    # It needs nothing internal, e.g., the database, so it isn't on the
+    # default network
     networks:
       - traefik-public
-      - default
     environment:
-      - RELAY_SECRET_KEY=${RELAY_SECRET_KEY?Variable not set}
-    command: ["fastapi", "run", "--workers", "1", "--port", "8002", "relay.py"]
+      - RELAY_SECRET_KEY=${RELAY_SECRET_KEY:?Variable not set}
+    # Messages are limited before they're buffered (relay.MAX_MESSAGE_BYTES
+    # plus room for framing), with few queued per connection
+    command:
+      - uvicorn
+      - relay:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - --workers
+      - "1"
+      - --ws-max-size
+      - "300000"
+      - --ws-max-queue
+      - "4"
+      - --ws-per-message-deflate
+      - "false"
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-public
@@ -416,6 +433,9 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.entrypoints=https
       - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.tls=true
       - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.tls.certresolver=le
+      # Limits how many connections each client address can hold open
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-relay-inflight.inflightreq.amount=50
+      - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.middlewares=${STACK_NAME?Variable not set}-relay-inflight
 
   texmf-proxy:
     image: '${DOCKER_IMAGE_TEXMF_PROXY-texmf-proxy}:${TAG-latest}'

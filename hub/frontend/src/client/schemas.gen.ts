@@ -53,6 +53,8 @@ export const AgentInfoSchema = {
     },
     pid: {
       type: "integer",
+      maximum: 2147483647,
+      minimum: 0,
       title: "Pid",
     },
     started: {
@@ -605,36 +607,6 @@ export const Body_projects_put_project_contentsSchema = {
   title: "Body_projects-put_project_contents",
 } as const
 
-export const BrowserKeySchema = {
-  properties: {
-    kty: {
-      type: "string",
-      const: "EC",
-      title: "Kty",
-    },
-    crv: {
-      type: "string",
-      const: "P-256",
-      title: "Crv",
-    },
-    x: {
-      type: "string",
-      pattern: "^[A-Za-z0-9_-]{43}$",
-      title: "X",
-    },
-    y: {
-      type: "string",
-      pattern: "^[A-Za-z0-9_-]{43}$",
-      title: "Y",
-    },
-  },
-  type: "object",
-  required: ["kty", "crv", "x", "y"],
-  title: "BrowserKey",
-  description:
-    "A browser's public key for one connection, as a JSON Web Key.\n\nThe browser signs every message it sends the Operator with the private\nhalf, which it can't export, so a grant naming this key is no use to\nthe relay that carries it.",
-} as const
-
 export const CheckInSchema = {
   properties: {
     calkit_version: {
@@ -689,6 +661,16 @@ export const CheckInSchema = {
       maxItems: 100,
       title: "Channel Sessions",
       default: [],
+    },
+    public_key: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/PublicKey",
+        },
+        {
+          type: "null",
+        },
+      ],
     },
   },
   type: "object",
@@ -760,6 +742,18 @@ export const CheckInRespSchema = {
   ],
   title: "CheckInResp",
   description: "Where and how an Operator connects to the relay.",
+} as const
+
+export const CliTokenSchema = {
+  properties: {
+    token: {
+      type: "string",
+      title: "Token",
+    },
+  },
+  type: "object",
+  required: ["token"],
+  title: "CliToken",
 } as const
 
 export const CollaboratorSchema = {
@@ -4305,6 +4299,24 @@ export const LatexCommentsMoveSchema = {
   title: "LatexCommentsMove",
 } as const
 
+export const LogoutRequestSchema = {
+  properties: {
+    refresh_token: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Refresh Token",
+    },
+  },
+  type: "object",
+  title: "LogoutRequest",
+} as const
+
 export const MapPathEntrySchema = {
   properties: {
     src: {
@@ -4983,7 +4995,7 @@ export const OperatorPostSchema = {
       anyOf: [
         {
           type: "string",
-          maxLength: 64,
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$",
         },
         {
           type: "null",
@@ -5042,10 +5054,22 @@ export const OperatorPostSchema = {
     hosts: {
       items: {
         type: "string",
+        maxLength: 255,
       },
       type: "array",
+      maxItems: 20,
       title: "Hosts",
       default: [],
+    },
+    public_key: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/PublicKey",
+        },
+        {
+          type: "null",
+        },
+      ],
     },
   },
   type: "object",
@@ -7588,6 +7612,36 @@ export const ProjectsPublicSchema = {
   title: "ProjectsPublic",
 } as const
 
+export const PublicKeySchema = {
+  properties: {
+    kty: {
+      type: "string",
+      const: "EC",
+      title: "Kty",
+    },
+    crv: {
+      type: "string",
+      const: "P-256",
+      title: "Crv",
+    },
+    x: {
+      type: "string",
+      pattern: "^[A-Za-z0-9_-]{43}$",
+      title: "X",
+    },
+    y: {
+      type: "string",
+      pattern: "^[A-Za-z0-9_-]{43}$",
+      title: "Y",
+    },
+  },
+  type: "object",
+  required: ["kty", "crv", "x", "y"],
+  title: "PublicKey",
+  description:
+    "A P-256 public key as a JSON Web Key, e.g., a browser's for one\nconnection, or an Operator's own.\n\nThe browser signs every message it sends the Operator with the private\nhalf of its key, which it can't export, so a grant naming this key is\nno use to the relay that carries it, and the Operator signs its replies\nwith its own, so the relay can't forge those either.",
+} as const
+
 export const PublicationSchema = {
   properties: {
     path: {
@@ -8894,7 +8948,7 @@ export const RefreshTokenRequestSchema = {
 export const RelayTokenReqSchema = {
   properties: {
     public_key: {
-      $ref: "#/components/schemas/BrowserKey",
+      $ref: "#/components/schemas/PublicKey",
     },
   },
   type: "object",
@@ -8913,12 +8967,19 @@ export const RelayTokenRespSchema = {
       type: "string",
       title: "Token",
     },
+    operator_public_key: {
+      $ref: "#/components/schemas/PublicKey",
+    },
+    grant_id: {
+      type: "string",
+      title: "Grant Id",
+    },
   },
   type: "object",
-  required: ["relay_url", "token"],
+  required: ["relay_url", "token", "operator_public_key", "grant_id"],
   title: "RelayTokenResp",
   description:
-    "Where and how a browser connects to an Operator through the relay.",
+    "Where and how a browser connects to an Operator through the relay,\nand how it checks the replies it gets are the Operator's.",
 } as const
 
 export const ReleaseCommentPostSchema = {
@@ -10730,16 +10791,17 @@ export const TOTPStatusSchema = {
       type: "boolean",
       title: "Verified",
     },
-    second_factor_token: {
+    verified_until: {
       anyOf: [
         {
           type: "string",
+          format: "date-time",
         },
         {
           type: "null",
         },
       ],
-      title: "Second Factor Token",
+      title: "Verified Until",
     },
   },
   type: "object",
@@ -11172,6 +11234,18 @@ export const TokenRespSchema = {
         },
       ],
       title: "Last Used",
+    },
+    operator_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Operator Id",
     },
   },
   type: "object",
@@ -11745,6 +11819,18 @@ export const UserTokenPublicSchema = {
       ],
       title: "Last Used",
     },
+    operator_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Operator Id",
+    },
   },
   type: "object",
   required: ["user_id", "expires", "is_active"],
@@ -11986,6 +12072,8 @@ export const WorkspaceSchema = {
       anyOf: [
         {
           type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
         },
         {
           type: "null",
@@ -11997,6 +12085,8 @@ export const WorkspaceSchema = {
       anyOf: [
         {
           type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
         },
         {
           type: "null",
@@ -12190,6 +12280,8 @@ export const WorkspaceInfoSchema = {
       anyOf: [
         {
           type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
         },
         {
           type: "null",
@@ -12201,6 +12293,8 @@ export const WorkspaceInfoSchema = {
       anyOf: [
         {
           type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
         },
         {
           type: "null",

@@ -321,34 +321,6 @@ export type BodyProjectsPutProjectContents = {
 }
 
 /**
- * BrowserKey
- *
- * A browser's public key for one connection, as a JSON Web Key.
- *
- * The browser signs every message it sends the Operator with the private
- * half, which it can't export, so a grant naming this key is no use to
- * the relay that carries it.
- */
-export type BrowserKey = {
-  /**
-   * Kty
-   */
-  kty: "EC"
-  /**
-   * Crv
-   */
-  crv: "P-256"
-  /**
-   * X
-   */
-  x: string
-  /**
-   * Y
-   */
-  y: string
-}
-
-/**
  * CheckIn
  *
  * What an Operator reports each time it checks in.
@@ -378,6 +350,7 @@ export type CheckIn = {
    * Channel Sessions
    */
   channel_sessions?: Array<string>
+  public_key?: PublicKey | null
 }
 
 /**
@@ -426,6 +399,16 @@ export type CheckInResp = {
    * Ended Sessions
    */
   ended_sessions?: Array<string>
+}
+
+/**
+ * CliToken
+ */
+export type CliToken = {
+  /**
+   * Token
+   */
+  token: string
 }
 
 /**
@@ -2534,6 +2517,16 @@ export type LatexCommentsMove = {
 }
 
 /**
+ * LogoutRequest
+ */
+export type LogoutRequest = {
+  /**
+   * Refresh Token
+   */
+  refresh_token?: string | null
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -2943,6 +2936,7 @@ export type OperatorPost = {
    * Hosts
    */
   hosts?: Array<string>
+  public_key?: PublicKey | null
 }
 
 /**
@@ -4350,6 +4344,36 @@ export type ProjectsPublic = {
 }
 
 /**
+ * PublicKey
+ *
+ * A P-256 public key as a JSON Web Key, e.g., a browser's for one
+ * connection, or an Operator's own.
+ *
+ * The browser signs every message it sends the Operator with the private
+ * half of its key, which it can't export, so a grant naming this key is
+ * no use to the relay that carries it, and the Operator signs its replies
+ * with its own, so the relay can't forge those either.
+ */
+export type PublicKey = {
+  /**
+   * Kty
+   */
+  kty: "EC"
+  /**
+   * Crv
+   */
+  crv: "P-256"
+  /**
+   * X
+   */
+  x: string
+  /**
+   * Y
+   */
+  y: string
+}
+
+/**
  * Publication
  *
  * A publication declared in calkit.yaml.
@@ -5044,13 +5068,14 @@ export type RefreshTokenRequest = {
  * What a browser asking to connect to an Operator sends.
  */
 export type RelayTokenReq = {
-  public_key: BrowserKey
+  public_key: PublicKey
 }
 
 /**
  * RelayTokenResp
  *
- * Where and how a browser connects to an Operator through the relay.
+ * Where and how a browser connects to an Operator through the relay,
+ * and how it checks the replies it gets are the Operator's.
  */
 export type RelayTokenResp = {
   /**
@@ -5061,6 +5086,11 @@ export type RelayTokenResp = {
    * Token
    */
   token: string
+  operator_public_key: PublicKey
+  /**
+   * Grant Id
+   */
+  grant_id: string
 }
 
 /**
@@ -6131,9 +6161,9 @@ export type TotpStatus = {
    */
   verified: boolean
   /**
-   * Second Factor Token
+   * Verified Until
    */
-  second_factor_token?: string | null
+  verified_until?: string | null
 }
 
 /**
@@ -6407,6 +6437,10 @@ export type TokenResp = {
    * Last Used
    */
   last_used?: string | null
+  /**
+   * Operator Id
+   */
+  operator_id?: string | null
 }
 
 /**
@@ -6715,6 +6749,10 @@ export type UserTokenPublic = {
    * Last Used
    */
   last_used?: string | null
+  /**
+   * Operator Id
+   */
+  operator_id?: string | null
 }
 
 /**
@@ -7772,6 +7810,34 @@ export type RefreshAccessTokenResponses = {
 export type RefreshAccessTokenResponse =
   RefreshAccessTokenResponses[keyof RefreshAccessTokenResponses]
 
+export type PostLogoutData = {
+  /**
+   * Req
+   */
+  body?: LogoutRequest | null
+  path?: never
+  query?: never
+  url: "/logout"
+}
+
+export type PostLogoutErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostLogoutError = PostLogoutErrors[keyof PostLogoutErrors]
+
+export type PostLogoutResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostLogoutResponse = PostLogoutResponses[keyof PostLogoutResponses]
+
 export type RecoverPasswordData = {
   body?: never
   path: {
@@ -8230,6 +8296,23 @@ export type PostUserEmailChangeCodeResponses = {
 
 export type PostUserEmailChangeCodeResponse =
   PostUserEmailChangeCodeResponses[keyof PostUserEmailChangeCodeResponses]
+
+export type PostUserSessionsEndOthersData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/sessions/end-others"
+}
+
+export type PostUserSessionsEndOthersResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserSessionsEndOthersResponse =
+  PostUserSessionsEndOthersResponses[keyof PostUserSessionsEndOthersResponses]
 
 export type UpdateCurrentUserPasswordData = {
   body: UpdatePassword
@@ -9107,12 +9190,6 @@ export type DeleteUserTotpResponse =
 
 export type GetUserTotpData = {
   body?: never
-  headers?: {
-    /**
-     * X-Second-Factor
-     */
-    "x-second-factor"?: string | null
-  }
   path?: never
   query?: never
   url: "/user/totp"
@@ -15721,6 +15798,23 @@ export type PostOperatorResponses = {
 export type PostOperatorResponse =
   PostOperatorResponses[keyof PostOperatorResponses]
 
+export type DeleteOperatorSelfData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/operators/self"
+}
+
+export type DeleteOperatorSelfResponses = {
+  /**
+   * Successful Response
+   */
+  200: OperatorOut
+}
+
+export type DeleteOperatorSelfResponse =
+  DeleteOperatorSelfResponses[keyof DeleteOperatorSelfResponses]
+
 export type DeleteOperatorData = {
   body?: never
   path: {
@@ -15846,12 +15940,6 @@ export type PostOperatorRestartResponse =
 
 export type PostOperatorRelayTokenData = {
   body: RelayTokenReq
-  headers?: {
-    /**
-     * X-Second-Factor
-     */
-    "x-second-factor"?: string | null
-  }
   path: {
     /**
      * Operator Id
@@ -15881,6 +15969,55 @@ export type PostOperatorRelayTokenResponses = {
 
 export type PostOperatorRelayTokenResponse =
   PostOperatorRelayTokenResponses[keyof PostOperatorRelayTokenResponses]
+
+export type PostOperatorCliTokenRequestData = {
+  body?: never
+  path: {
+    /**
+     * Operator Id
+     */
+    operator_id: string
+  }
+  query?: never
+  url: "/operators/{operator_id}/cli-token-request"
+}
+
+export type PostOperatorCliTokenRequestErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostOperatorCliTokenRequestError =
+  PostOperatorCliTokenRequestErrors[keyof PostOperatorCliTokenRequestErrors]
+
+export type PostOperatorCliTokenRequestResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostOperatorCliTokenRequestResponse =
+  PostOperatorCliTokenRequestResponses[keyof PostOperatorCliTokenRequestResponses]
+
+export type PostOperatorCliTokenData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/operators/cli-token"
+}
+
+export type PostOperatorCliTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: CliToken
+}
+
+export type PostOperatorCliTokenResponse =
+  PostOperatorCliTokenResponses[keyof PostOperatorCliTokenResponses]
 
 export type GetWorkspacesData = {
   body?: never

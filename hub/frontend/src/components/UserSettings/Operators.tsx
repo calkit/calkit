@@ -26,7 +26,6 @@ import { useState } from "react"
 import { OperatorsService, UsersService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
-import { storeSecondFactorToken } from "../../lib/auth"
 
 // What the API says when setting up two-factor authentication needs a
 // verified email first, from app/users.py
@@ -57,7 +56,9 @@ function TwoFactor() {
   const [emailCode, setEmailCode] = useState("")
   const statusQuery = useQuery({
     queryKey: ["user", "totp"],
-    queryFn: () => UsersService.getUserTotp().then((r) => r.data),
+    // With the cookie that says whether a code was entered recently
+    queryFn: () =>
+      UsersService.getUserTotp({ withCredentials: true }).then((r) => r.data),
   })
   const onSettled = () => {
     setCode("")
@@ -111,11 +112,12 @@ function TwoFactor() {
       : startMutation.mutate()
   const confirmMutation = useMutation({
     mutationFn: () =>
-      UsersService.postUserTotpConfirm({
-        totpConfirm: { code, email_code: emailCode },
-      }).then((r) => r.data),
-    onSuccess: (data) => {
-      storeSecondFactorToken(data.second_factor_token)
+      // Counts as entering a code, which the API keeps in a cookie
+      UsersService.postUserTotpConfirm(
+        { totpConfirm: { code, email_code: emailCode } },
+        { withCredentials: true },
+      ).then((r) => r.data),
+    onSuccess: () => {
       setEmailCode("")
       setSetup(null)
       showToast("Success!", "Two-factor authentication is on.", "success")
@@ -150,6 +152,12 @@ function TwoFactor() {
       {statusQuery.data?.enabled ? (
         <Flex align="center" gap={2}>
           <Badge colorScheme="green">On</Badge>
+          {statusQuery.data.verified_until && (
+            <Text fontSize="sm" color="ui.dim">
+              Code entered, good until{" "}
+              {new Date(statusQuery.data.verified_until).toLocaleString()}
+            </Text>
+          )}
           {codeInput}
           <Button
             size="sm"
@@ -303,6 +311,8 @@ function Operators() {
               <Th>Name</Th>
               <Th>Host</Th>
               <Th>Calkit</Th>
+              <Th>Machine ID</Th>
+              <Th>Created</Th>
               <Th>Last seen</Th>
               <Th>Workspaces</Th>
               <Th />
@@ -311,7 +321,7 @@ function Operators() {
           <Tbody>
             {operatorsQuery.isPending ? (
               <Tr>
-                {new Array(6).fill(null).map((_, index) => (
+                {new Array(8).fill(null).map((_, index) => (
                   <Td key={index}>
                     <SkeletonText noOfLines={1} paddingBlock="16px" />
                   </Td>
@@ -352,6 +362,17 @@ function Operators() {
                         </Tooltip>
                       )}
                     </Flex>
+                  </Td>
+                  {/* To tell an impostor from the real thing */}
+                  <Td>
+                    {op.machine_id && (
+                      <Tooltip label={op.machine_id}>
+                        <Code fontSize="xs">{op.machine_id.slice(0, 12)}</Code>
+                      </Tooltip>
+                    )}
+                  </Td>
+                  <Td>
+                    {op.created && new Date(`${op.created}Z`).toLocaleString()}
                   </Td>
                   <Td>
                     {op.last_seen

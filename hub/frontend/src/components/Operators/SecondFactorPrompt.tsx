@@ -1,11 +1,10 @@
 import { Alert, AlertIcon, Button, Input, Text } from "@chakra-ui/react"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
-import { storeSecondFactorToken } from "../../lib/auth"
 import {
   SECOND_FACTOR_REQUIRED,
   SECOND_FACTOR_SETUP_REQUIRED,
@@ -21,14 +20,17 @@ export default function SecondFactorPrompt({
   onVerified: () => void
 }) {
   const showToast = useCustomToast()
+  const queryClient = useQueryClient()
   const [code, setCode] = useState("")
   const verifyMutation = useMutation({
+    // The API keeps proof of the code in a cookie scripts can't read
     mutationFn: () =>
-      UsersService.postUserTotpVerify({ totpCode: { code } }).then(
-        (r) => r.data,
-      ),
+      UsersService.postUserTotpVerify(
+        { totpCode: { code } },
+        { withCredentials: true },
+      ).then((r) => r.data),
     onSuccess: (data) => {
-      storeSecondFactorToken(data.second_factor_token)
+      queryClient.setQueryData(["user", "totp"], data)
       setCode("")
       onVerified()
     },

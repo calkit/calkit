@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { OperatorConnection, type SessionInfo } from "./connection"
 
-// A page's connections to Operators through the relay, one each, opened
-// for the online ones and closed when the page goes, and the sessions on
+// A page's connections to Operators through the relay, one each, open
+// while they're online and closed when the page goes, and the sessions on
 // each
 export default function useOperatorConnections(online: string[]) {
   const connections = useRef(new Map<string, OperatorConnection>())
@@ -11,6 +11,13 @@ export default function useOperatorConnections(online: string[]) {
   const rerender = useCallback(() => setVersion((v) => v + 1), [])
   // Listed over the relay, so undefined until an Operator answers
   const [sessions, setSessions] = useState<Record<string, SessionInfo[]>>({})
+  // Stable while the set of Operators is, however the list was built
+  const onlineKey = [...new Set(online)].sort().join(",")
+  const onlineOperators = useMemo(
+    () => (onlineKey ? onlineKey.split(",") : []),
+    [onlineKey],
+  )
+  // Any Operator's, which only connects while it's online
   const getConnection = useCallback(
     (operatorId: string) => {
       let conn = connections.current.get(operatorId)
@@ -18,19 +25,18 @@ export default function useOperatorConnections(online: string[]) {
         conn = new OperatorConnection(operatorId)
         conn.statusListeners.add(rerender)
         connections.current.set(operatorId, conn)
+        if (onlineOperators.includes(operatorId)) conn.open()
       }
       return conn
     },
-    [rerender],
-  )
-  // Stable while the set of Operators is, however the list was built
-  const onlineKey = [...new Set(online)].sort().join(",")
-  const onlineOperators = useMemo(
-    () => (onlineKey ? onlineKey.split(",") : []),
-    [onlineKey],
+    [rerender, onlineOperators],
   )
   useEffect(() => {
-    for (const operatorId of onlineOperators) getConnection(operatorId)
+    for (const operatorId of onlineOperators) getConnection(operatorId).open()
+    // Gone offline, so asking for relay tokens would only be refused
+    for (const [operatorId, conn] of connections.current) {
+      if (!onlineOperators.includes(operatorId)) conn.close()
+    }
   }, [onlineOperators, getConnection])
   useEffect(() => {
     const conns = connections.current

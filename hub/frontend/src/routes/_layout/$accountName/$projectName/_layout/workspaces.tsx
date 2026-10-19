@@ -32,7 +32,11 @@ import {
   useClipboard,
 } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { createFileRoute, redirect } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  redirect,
+  useRouterState,
+} from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { FiPlus } from "react-icons/fi"
 import { z } from "zod"
@@ -40,7 +44,6 @@ import { z } from "zod"
 import {
   type OperatorOut,
   OperatorsService,
-  UsersService,
   type Workspace,
 } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
@@ -70,12 +73,18 @@ const workspacesSearchSchema = z.object({
   modal: z.enum(["save", "discard", "new_stage", "new_workspace"]).optional(),
   // Which of its pipeline's stages are listed, if not all
   stages: z.enum(["not_up_to_date", "running"]).optional(),
-  // A run asked for from another page, e.g., the pipeline's, which waits
-  // for a click here: a stage's name, or "*" for the whole pipeline
-  confirm_run: z.string().optional(),
   // The Operator a workspace is being created on, by ID
   create: z.string().optional(),
 })
+
+declare module "@tanstack/history" {
+  interface HistoryState {
+    // A run asked for from another page, e.g., the pipeline's, which waits
+    // for a click here: a stage's name, or "*" for the whole pipeline. Kept
+    // out of the URL so a link can't ask.
+    confirmRun?: string
+  }
+}
 
 // The open panes and workspace, kept for the browser tab so leaving for
 // another page and coming back, e.g., through the sidebar, restores them
@@ -97,7 +106,7 @@ export const Route = createFileRoute(
 )({
   component: Workspaces,
   validateSearch: (search) => workspacesSearchSchema.parse(search),
-  beforeLoad: ({ cause, params, search }) => {
+  beforeLoad: ({ cause, params, search, location }) => {
     // Only on arriving, since closing the last pane leaves none on purpose
     if (cause !== "enter") return
     const stored = readWorkspacesState(
@@ -117,6 +126,7 @@ export const Route = createFileRoute(
       to: "/$accountName/$projectName/workspaces",
       params,
       search: { ...search, ...restored },
+      state: location.state,
       replace: true,
     })
   },
@@ -126,6 +136,9 @@ function Workspaces() {
   const { accountName, projectName } = Route.useParams()
   const navigate = Route.useNavigate()
   const search = Route.useSearch()
+  const confirmRun = useRouterState({
+    select: (s) => s.location.state.confirmRun,
+  })
   const showToast = useCustomToast()
   const project = useProject(accountName, projectName).projectRequest.data
   // Operators in cron mode asked to connect, which do at their next check-in
@@ -141,7 +154,24 @@ function Workspaces() {
     refetchInterval: waking.size ? 10000 : 30000,
   })
   const workspaces = workspacesQuery.data ?? []
-  // Connect to every online Operator with a workspace for this project
+  // Operators without this project, which a workspace can be created on
+  const operatorsQuery = useQuery({
+    queryKey: ["user", "operators"],
+    queryFn: () => OperatorsService.getOperators().then((r) => r.data),
+  })
+  const operators = operatorsQuery.data ?? []
+  const createTargets = operators.filter(
+    (op) =>
+      (op.is_online || op.is_asleep) &&
+      !workspaces.some(
+        (ws) => ws.operator_id === op.id && ws.kind === "personal",
+      ),
+  )
+  const creatingOn = createTargets.find(
+    (op) => op.is_online && String(op.id) === search.create,
+  )
+  // Connect to every online Operator with a workspace for this project, and
+  // the one a workspace is being created on
   const {
     connections,
     getConnection,
@@ -150,9 +180,10 @@ function Workspaces() {
     refreshSessions,
     secondFactorError,
     retryRefused,
-  } = useOperatorConnections(
-    workspaces.filter((w) => w.operator_online).map((w) => w.operator_id),
-  )
+  } = useOperatorConnections([
+    ...workspaces.filter((w) => w.operator_online).map((w) => w.operator_id),
+    ...(creatingOn ? [String(creatingOn.id)] : []),
+  ])
   useEffect(() => {
     const state: WorkspacesState = {
       panes: search.panes,
@@ -233,22 +264,6 @@ function Workspaces() {
     })
   const setModal = (modal: WorkspaceModal | undefined) =>
     navigate({ search: (prev) => ({ ...prev, modal }) })
-  // Operators without this project, which a workspace can be created on
-  const operatorsQuery = useQuery({
-    queryKey: ["user", "operators"],
-    queryFn: () => OperatorsService.getOperators().then((r) => r.data),
-  })
-  const operators = operatorsQuery.data ?? []
-  const createTargets = operators.filter(
-    (op) =>
-      (op.is_online || op.is_asleep) &&
-      !workspaces.some(
-        (ws) => ws.operator_id === op.id && ws.kind === "personal",
-      ),
-  )
-  const creatingOn = createTargets.find(
-    (op) => op.is_online && String(op.id) === search.create,
-  )
   const setCreate = (operatorId: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, create: operatorId }) })
   const closePane = (pane: Pane, end: boolean) => {
@@ -500,10 +515,12 @@ function Workspaces() {
               setModal={setModal}
               narrow={panes.length > 0}
               onChanged={() => workspacesQuery.refetch()}
-              confirmRun={search.confirm_run}
+              confirmRun={confirmRun}
               clearConfirmRun={() =>
                 navigate({
-                  search: (prev) => ({ ...prev, confirm_run: undefined }),
+                  search: (prev) => prev,
+                  state: (prev) => ({ ...prev, confirmRun: undefined }),
+                  replace: true,
                 })
               }
             />
@@ -564,12 +581,16 @@ function CreateWorkspace({
   const [gitName, setGitName] = useState(user?.full_name ?? "")
   const [gitEmail, setGitEmail] = useState(user?.email ?? "")
   const [makeToken, setMakeToken] = useState(true)
+  // Checking contacts the repo's host from the machine, so it waits for a
+  // click
+  const [checkAsked, setCheckAsked] = useState(false)
   const setupQuery = useQuery({
     queryKey: ["operators", operator.id, "machine-setup", gitRepoUrl],
     queryFn: async (): Promise<MachineSetup> => {
       await conn.waitUntilConnected()
       return conn.request("machine.check", { git_repo_url: gitRepoUrl })
     },
+    enabled: checkAsked,
     retry: false,
   })
   const setup = setupQuery.data
@@ -587,21 +608,22 @@ function CreateWorkspace({
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!setup) throw new Error("The machine hasn't been checked yet")
-      const fields: Record<string, string> = {}
+      const fields: Record<string, string | boolean> = {}
       if (!setup.git_name) fields.git_name = gitName
       if (!setup.git_email) fields.git_email = gitEmail
+      // The Operator fetches its token from the hub itself, once asked here
       if (!setup.token && makeToken) {
-        const token = await UsersService.postUserToken({
-          tokenPost: {
-            expires_days: 365,
-            scope: null,
-            description: `Calkit CLI on ${operator.name}`,
-          },
-        })
-        fields.token = token.data.access_token
+        await OperatorsService.postOperatorCliTokenRequest(
+          { operator_id: String(operator.id) },
+          // For the second factor's cookie
+          { withCredentials: true },
+        )
+        fields.token = true
       }
       if (Object.keys(fields).length) {
         await conn.request("machine.configure", fields)
+        // So trying again doesn't set it up twice
+        await setupQuery.refetch()
       }
       return conn.request("workspaces.clone", {
         git_repo_url: gitRepoUrl,
@@ -643,7 +665,19 @@ function CreateWorkspace({
               data-lpignore="true"
             />
           </FormControl>
-          {setupQuery.isPending ? (
+          {!checkAsked ? (
+            <Flex align="center" gap={2} fontSize="sm">
+              <Text>
+                {operator.name} will check it can reach{" "}
+                <Code fontSize="xs" wordBreak="break-all">
+                  {gitRepoUrl}
+                </Code>
+              </Text>
+              <Button size="xs" onClick={() => setCheckAsked(true)}>
+                Check
+              </Button>
+            </Flex>
+          ) : setupQuery.isPending ? (
             <Flex align="center" gap={2} fontSize="sm" color="ui.dim">
               <Spinner size="sm" />
               Checking {operator.name}

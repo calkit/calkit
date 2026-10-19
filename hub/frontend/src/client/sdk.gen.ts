@@ -38,6 +38,7 @@ import type {
   DeleteFeatureVoteResponses,
   DeleteOperatorErrors,
   DeleteOperatorResponses,
+  DeleteOperatorSelfResponses,
   DeleteProjectByIdErrors,
   DeleteProjectByIdResponses,
   DeleteProjectCollaboratorErrors,
@@ -285,6 +286,7 @@ import type {
   LoginWithGithubTokenResponses,
   LoginWithGoogleErrors,
   LoginWithGoogleResponses,
+  LogoutRequest,
   MapPathsPost,
   MarkAllNotificationsReadResponses,
   MarkNotificationReadErrors,
@@ -332,8 +334,13 @@ import type {
   PostLoginDeviceResponses,
   PostLoginDeviceTokenErrors,
   PostLoginDeviceTokenResponses,
+  PostLogoutErrors,
+  PostLogoutResponses,
   PostOperatorCheckInErrors,
   PostOperatorCheckInResponses,
+  PostOperatorCliTokenRequestErrors,
+  PostOperatorCliTokenRequestResponses,
+  PostOperatorCliTokenResponses,
   PostOperatorErrors,
   PostOperatorRelayTokenErrors,
   PostOperatorRelayTokenResponses,
@@ -425,6 +432,7 @@ import type {
   PostUserGithubAuthResponses,
   PostUserGoogleAuthErrors,
   PostUserGoogleAuthResponses,
+  PostUserSessionsEndOthersResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
   PostUserTotpConfirmErrors,
@@ -666,7 +674,8 @@ export class LoginService {
    *
    * The old token is rotated out but still honored for a short grace window
    * (REFRESH_ROTATION_GRACE_SECONDS) so an interrupted rotation, e.g. the client
-   * reloaded before storing the new token, doesn't strand the session.
+   * reloaded before storing the new token, doesn't strand the session. Using
+   * it after that ends the session, since someone else may have a copy.
    */
   public static refreshAccessToken<ThrowOnError extends boolean = true>(
     parameters: {
@@ -689,6 +698,40 @@ export class LoginService {
     >({
       responseType: "json",
       url: "/login/refresh",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Logout
+   *
+   * Sign out: end this sign-in's session, which the access token or
+   * refresh token names, and forget its second factor.
+   */
+  public static postLogout<ThrowOnError extends boolean = true>(
+    parameters?: {
+      body?: LogoutRequest | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostLogoutResponses, PostLogoutErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "body", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostLogoutResponses,
+      PostLogoutErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/logout",
       ...options,
       ...params,
       headers: {
@@ -731,7 +774,8 @@ export class LoginService {
   /**
    * Reset Password
    *
-   * Reset password.
+   * Reset password, which a link can do only once, since it stops
+   * working when the password changes.
    */
   public static resetPassword<ThrowOnError extends boolean = true>(
     parameters: {
@@ -1205,6 +1249,8 @@ export class UsersService {
    * Update Current User
    *
    * Update own user.
+   *
+   * Changing the email takes a signed-in session, not a token.
    */
   public static updateCurrentUser<ThrowOnError extends boolean = true>(
     parameters: {
@@ -1241,7 +1287,8 @@ export class UsersService {
   /**
    * Post User Email Change Code
    *
-   * Email the current address a code for changing it to another.
+   * Email the current address a code for changing it to another, which
+   * only works for that address.
    */
   public static postUserEmailChangeCode<ThrowOnError extends boolean = true>(
     parameters: {
@@ -1272,6 +1319,26 @@ export class UsersService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Post User Sessions End Others
+   *
+   * Sign out of every other session, e.g., other browsers and CLIs.
+   */
+  public static postUserSessionsEndOthers<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostUserSessionsEndOthersResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).post<
+      PostUserSessionsEndOthersResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/sessions/end-others",
+      ...options,
     })
   }
 
@@ -1735,6 +1802,11 @@ export class UsersService {
 
   /**
    * Post User Token
+   *
+   * Create a personal access token.
+   *
+   * A full one takes a signed-in session, so a token can't mint more of
+   * itself, while one scoped to DVC, which the CLI makes, doesn't.
    */
   public static postUserToken<ThrowOnError extends boolean = true>(
     parameters: {
@@ -2302,7 +2374,8 @@ export class UsersService {
   /**
    * Delete User Totp
    *
-   * Turn off two-factor authentication, which takes a current code.
+   * Turn off two-factor authentication, which takes a current code and
+   * signs out every other session.
    */
   public static deleteUserTotp<ThrowOnError extends boolean = true>(
     parameters: {
@@ -2343,15 +2416,8 @@ export class UsersService {
    * has entered a code recently.
    */
   public static getUserTotp<ThrowOnError extends boolean = true>(
-    parameters?: {
-      "x-second-factor"?: string | null
-    },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<GetUserTotpResponses, GetUserTotpErrors, ThrowOnError> {
-    const params = buildClientParams(
-      [parameters],
-      [{ args: [{ in: "headers", key: "x-second-factor" }] }],
-    )
     return (options?.client ?? client).get<
       GetUserTotpResponses,
       GetUserTotpErrors,
@@ -2361,7 +2427,6 @@ export class UsersService {
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/totp",
       ...options,
-      ...params,
     })
   }
 
@@ -2390,7 +2455,7 @@ export class UsersService {
    * Post User Totp Confirm
    *
    * Finish setting up an authenticator app with a code from it and the
-   * one emailed.
+   * one emailed, in the session that started it.
    */
   public static postUserTotpConfirm<ThrowOnError extends boolean = true>(
     parameters: {
@@ -2427,8 +2492,8 @@ export class UsersService {
   /**
    * Post User Totp Verify
    *
-   * Enter a code, getting a token that lets this session take sensitive
-   * actions for a while.
+   * Enter a code, getting an HttpOnly cookie that lets this session take
+   * sensitive actions for a while.
    */
   public static postUserTotpVerify<ThrowOnError extends boolean = true>(
     parameters: {
@@ -9628,9 +9693,29 @@ export class OperatorsService {
   }
 
   /**
+   * Delete Operator Self
+   *
+   * Revoke the Operator making the request, e.g., when it's uninstalled.
+   */
+  public static deleteOperatorSelf<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<DeleteOperatorSelfResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).delete<
+      DeleteOperatorSelfResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/self",
+      ...options,
+    })
+  }
+
+  /**
    * Delete Operator
    *
-   * Revoke an Operator, which stops at its next check-in.
+   * Revoke an Operator, which takes a signed-in session, not a token.
    */
   public static deleteOperator<ThrowOnError extends boolean = true>(
     parameters: {
@@ -9772,7 +9857,6 @@ export class OperatorsService {
    */
   public static postOperatorRelayToken<ThrowOnError extends boolean = true>(
     parameters: {
-      "x-second-factor"?: string | null
       operator_id: string
       relayTokenReq: RelayTokenReq
     },
@@ -9787,7 +9871,6 @@ export class OperatorsService {
       [
         {
           args: [
-            { in: "headers", key: "x-second-factor" },
             { in: "path", key: "operator_id" },
             { key: "relayTokenReq", map: "body" },
           ],
@@ -9809,6 +9892,62 @@ export class OperatorsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Post Operator Cli Token Request
+   *
+   * Let one of the user's Operators fetch a CLI token for its machine,
+   * within the next 10 minutes, so the token never crosses the relay.
+   */
+  public static postOperatorCliTokenRequest<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      operator_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostOperatorCliTokenRequestResponses,
+    PostOperatorCliTokenRequestErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "operator_id" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostOperatorCliTokenRequestResponses,
+      PostOperatorCliTokenRequestErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/{operator_id}/cli-token-request",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Operator Cli Token
+   *
+   * Issue the Operator's machine a CLI token, if its owner asked for one
+   * recently, replacing any it was issued before.
+   */
+  public static postOperatorCliToken<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostOperatorCliTokenResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).post<
+      PostOperatorCliTokenResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/operators/cli-token",
+      ...options,
     })
   }
 

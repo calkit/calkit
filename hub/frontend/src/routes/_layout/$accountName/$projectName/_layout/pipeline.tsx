@@ -419,10 +419,8 @@ function ProjectPipeline() {
     navigate({
       to: "/$accountName/$projectName/workspaces",
       params: { accountName, projectName },
-      search: {
-        workspace: `${ws.operator_id}:${ws.path}`,
-        confirm_run: stage ?? "*",
-      },
+      search: { workspace: `${ws.operator_id}:${ws.path}` },
+      state: { confirmRun: stage ?? "*" },
     })
   const pipelineQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "pipeline", ref],

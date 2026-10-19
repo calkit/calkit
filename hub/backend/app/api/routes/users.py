@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal, Sequence
 
 import requests
 import sqlalchemy
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import selectinload
@@ -23,9 +23,10 @@ from app.api.deps import (
     CurrentSession,
     CurrentUser,
     SessionDep,
-    SessionUser,
     SignedIn,
+    TokenDep,
     get_current_active_superuser,
+    get_current_session,
 )
 from app.api.routes.login import CLI_LOGIN_DESCRIPTION
 from app.config import settings
@@ -198,10 +199,18 @@ def create_user(*, session: SessionDep, user_in: UserCreate) -> UserPublic:
 
 @router.patch("/user")
 def update_current_user(
-    *, session: SessionDep, user_in: UserUpdateMe, current_user: CurrentUser
+    *,
+    session: SessionDep,
+    user_in: UserUpdateMe,
+    current_user: CurrentUser,
+    token: TokenDep,
 ) -> UserPublic:
-    """Update own user."""
+    """Update own user.
+
+    Changing the email takes a signed-in session, not a token.
+    """
     if user_in.email and user_in.email.lower() != current_user.email.lower():
+        signed_in = get_current_session(session, token)
         existing_user = users.get_user_by_email(
             session=session, email=user_in.email
         )
@@ -214,6 +223,7 @@ def update_current_user(
             user=current_user,
             new_email=user_in.email,
             code=user_in.email_code,
+            keep_session=signed_in.session_id,
         )
     user_data = user_in.model_dump(
         exclude_unset=True, exclude={"email", "email_code"}
@@ -231,15 +241,29 @@ class EmailChangeCode(BaseModel):
 
 @router.post("/user/email-change-code")
 def post_user_email_change_code(
-    req: EmailChangeCode, current_user: CurrentUser, session: SessionDep
+    req: EmailChangeCode, signed_in: CurrentSession, session: SessionDep
 ) -> Message:
-    """Email the current address a code for changing it to another."""
+    """Email the current address a code for changing it to another, which
+    only works for that address.
+    """
     if not settings.emails_enabled:
         raise HTTPException(503, "Email isn't configured on this server")
     users.send_email_change_code(
-        session=session, user=current_user, new_email=req.email
+        session=session, user=signed_in.user, new_email=req.email
     )
     return Message(message="Code sent")
+
+
+@router.post("/user/sessions/end-others")
+def post_user_sessions_end_others(
+    session: SessionDep, signed_in: CurrentSession
+) -> Message:
+    """Sign out of every other session, e.g., other browsers and CLIs."""
+    users.end_sign_in_sessions(
+        session=session, user=signed_in.user, keep=signed_in.session_id
+    )
+    session.commit()
+    return Message(message="Signed out of other sessions")
 
 
 @router.patch("/user/password")
@@ -759,8 +783,18 @@ class TokenResp(UserTokenPublic, Token):
 
 @router.post("/user/tokens")
 def post_user_token(
-    session: SessionDep, current_user: CurrentUser, req: TokenPost
+    session: SessionDep,
+    current_user: CurrentUser,
+    access_token: TokenDep,
+    req: TokenPost,
 ) -> TokenResp:
+    """Create a personal access token.
+
+    A full one takes a signed-in session, so a token can't mint more of
+    itself, while one scoped to DVC, which the CLI makes, doesn't.
+    """
+    if req.scope is None:
+        get_current_session(session, access_token)
     # Generate a random token and hash it
     # Prepend 'ckp_' to indicate it's a Calkit user personal access token
     selector = secrets.token_hex(PAT_SELECTOR_LENGTH_BYTES)
@@ -1364,11 +1398,14 @@ def delete_user_onboarding_flag(
 class TOTPStatus(BaseModel):
     enabled: bool
     # Whether this session entered a code recently enough for sensitive
-    # actions, as proven by the token it got for doing so
+    # actions, as proven by the cookie it got for doing so, and until when
     verified: bool
-    # Returned when a code was just entered, for the session to send with
-    # sensitive requests
-    second_factor_token: str | None = None
+    verified_until: datetime | None = None
+
+
+SecondFactorCookie = Annotated[
+    str | None, Cookie(alias=users.SECOND_FACTOR_COOKIE)
+]
 
 
 def _totp_status(
@@ -1377,33 +1414,47 @@ def _totp_status(
     totp = signed_in.user.totp
     enabled = totp is not None and totp.confirmed_at is not None
     try:
-        users.require_second_factor(
+        expires = users.require_second_factor(
             signed_in.user, signed_in.session_id, second_factor_token
         )
-        verified = True
     except HTTPException:
-        verified = False
-    return TOTPStatus(enabled=enabled, verified=verified)
+        return TOTPStatus(enabled=enabled, verified=False)
+    return TOTPStatus(
+        enabled=enabled,
+        verified=True,
+        verified_until=datetime.fromtimestamp(expires, tz=UTC),
+    )
 
 
-def _totp_status_with_token(signed_in: SignedIn) -> TOTPStatus:
+def _totp_status_with_cookie(
+    signed_in: SignedIn, response: Response
+) -> TOTPStatus:
+    """The status after a code was entered, setting the cookie that proves
+    it for this session.
+    """
     token = users.create_second_factor_token(
         signed_in.user, signed_in.session_id
     )
-    status = _totp_status(signed_in, token)
-    status.second_factor_token = token
-    return status
+    response.set_cookie(
+        users.SECOND_FACTOR_COOKIE,
+        token,
+        max_age=users.SECOND_FACTOR_HOURS * 3600,
+        path="/",
+        secure=settings.ENVIRONMENT != "local",
+        httponly=True,
+        samesite="strict",
+    )
+    return _totp_status(signed_in, token)
 
 
 @router.get("/user/totp")
 def get_user_totp(
-    signed_in: CurrentSession,
-    x_second_factor: Annotated[str | None, Header()] = None,
+    signed_in: CurrentSession, second_factor: SecondFactorCookie = None
 ) -> TOTPStatus:
     """Whether two-factor authentication is set up, and whether this session
     has entered a code recently.
     """
-    return _totp_status(signed_in, x_second_factor)
+    return _totp_status(signed_in, second_factor)
 
 
 class TOTPSetup(BaseModel):
@@ -1413,14 +1464,17 @@ class TOTPSetup(BaseModel):
 
 @router.post("/user/totp")
 def post_user_totp(
-    session: SessionDep, current_user: SessionUser
+    session: SessionDep, signed_in: CurrentSession
 ) -> TOTPSetup:
     """Start setting up an authenticator app, emailing a code that
     confirming takes along with one from the app.
     """
     from urllib.parse import quote
 
-    secret = users.start_totp_setup(session, current_user)
+    current_user = signed_in.user
+    secret = users.start_totp_setup(
+        session, current_user, signed_in.session_id
+    )
     label = quote(f"Calkit:{current_user.email}")
     return TOTPSetup(
         secret=secret,
@@ -1439,10 +1493,13 @@ class TOTPConfirm(TOTPCode):
 
 @router.post("/user/totp/confirm")
 def post_user_totp_confirm(
-    session: SessionDep, signed_in: CurrentSession, req: TOTPConfirm
+    session: SessionDep,
+    signed_in: CurrentSession,
+    req: TOTPConfirm,
+    response: Response,
 ) -> TOTPStatus:
     """Finish setting up an authenticator app with a code from it and the
-    one emailed.
+    one emailed, in the session that started it.
     """
     current_user = signed_in.user
     totp = current_user.totp
@@ -1452,22 +1509,31 @@ def post_user_totp_confirm(
         )
     if totp.confirmed_at is not None:
         raise HTTPException(409, "Two-factor authentication is already set up")
-    users.check_totp_setup_email_code(session, totp, req.email_code)
+    if totp.setup_session_id != signed_in.session_id:
+        raise HTTPException(
+            409, "Two-factor setup was started in another session"
+        )
+    users.check_totp_setup_email_code(
+        session, current_user, totp, req.email_code
+    )
     users.check_totp_code(session, totp, req.code)
     totp.confirmed_at = utcnow()
     totp.email_code_hash = None
     session.add(totp)
     session.commit()
     session.refresh(current_user)
-    return _totp_status_with_token(signed_in)
+    return _totp_status_with_cookie(signed_in, response)
 
 
 @router.post("/user/totp/verify")
 def post_user_totp_verify(
-    session: SessionDep, signed_in: CurrentSession, req: TOTPCode
+    session: SessionDep,
+    signed_in: CurrentSession,
+    req: TOTPCode,
+    response: Response,
 ) -> TOTPStatus:
-    """Enter a code, getting a token that lets this session take sensitive
-    actions for a while.
+    """Enter a code, getting an HttpOnly cookie that lets this session take
+    sensitive actions for a while.
     """
     current_user = signed_in.user
     totp = current_user.totp
@@ -1475,20 +1541,25 @@ def post_user_totp_verify(
         raise HTTPException(404, "Two-factor authentication isn't set up")
     users.check_totp_code(session, totp, req.code)
     session.refresh(current_user)
-    return _totp_status_with_token(signed_in)
+    return _totp_status_with_cookie(signed_in, response)
 
 
 @router.delete("/user/totp")
 def delete_user_totp(
     session: SessionDep, signed_in: CurrentSession, req: TOTPCode
 ) -> TOTPStatus:
-    """Turn off two-factor authentication, which takes a current code."""
+    """Turn off two-factor authentication, which takes a current code and
+    signs out every other session.
+    """
     current_user = signed_in.user
     totp = current_user.totp
     if totp is None or totp.confirmed_at is None:
         raise HTTPException(404, "Two-factor authentication isn't set up")
     users.check_totp_code(session, totp, req.code)
     session.delete(totp)
+    users.end_sign_in_sessions(
+        session=session, user=current_user, keep=signed_in.session_id
+    )
     session.commit()
     session.refresh(current_user)
     return _totp_status(signed_in)

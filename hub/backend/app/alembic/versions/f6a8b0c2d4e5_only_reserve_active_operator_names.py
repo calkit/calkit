@@ -23,4 +23,10 @@ def upgrade():
 
 def downgrade():
     op.drop_index('uq_operator_user_name_active', table_name='operator', postgresql_where=sa.text('is_active'))
+    # Revoked Operators may share a name with each other or an active one,
+    # so they're given unique ones first
+    op.execute(
+        "UPDATE operator SET name = left(name, 55) || '-' || left(id::text, 8) "
+        "WHERE NOT is_active"
+    )
     op.create_unique_constraint('uq_operator_user_name', 'operator', ['user_id', 'name'])

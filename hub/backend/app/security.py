@@ -103,25 +103,33 @@ def create_operator_grant(
     expires_delta: timedelta,
     browser_key: dict[str, str],
     session_id: uuid.UUID,
-) -> str:
-    """Create a grant for a user to open one channel to an Operator.
+    second_factor_expires: int,
+) -> tuple[str, str]:
+    """Create a grant for a user to open one channel to an Operator,
+    returning it and its ID.
 
     It's signed with a key only the API holds, and the Operator checks it,
     so the relay, which carries it, can't open channels of its own. It
     names the browser's public key, which the Operator checks every message
     on the channel is signed with, so the relay can't act inside a channel
     either, and the sign-in it came from, so the Operator can close the
-    channel once that sign-in ends.
+    channel once that sign-in ends, or when the second factor that
+    authorized it expires (``tfa_exp``).
     """
+    now = datetime.now(timezone.utc)
+    grant_id = secrets.token_hex(16)
     payload = {
-        "exp": datetime.now(timezone.utc) + expires_delta,
+        "exp": now + expires_delta,
+        "iat": int(now.timestamp()),
         "aud": str(operator_id),
         "sub": str(user_id),
-        "jti": secrets.token_hex(16),
+        "jti": grant_id,
         "cnf": {"jwk": browser_key},
         "sid": str(session_id),
+        "tfa_exp": second_factor_expires,
     }
-    return jwt.encode(payload, _operator_grant_key(), algorithm="EdDSA")
+    token = jwt.encode(payload, _operator_grant_key(), algorithm="EdDSA")
+    return token, grant_id
 
 
 def create_relay_token(
@@ -157,26 +165,42 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def generate_password_reset_token(email: str) -> str:
+def hash_password_hash(hashed_password: str) -> str:
+    """A short digest of a password hash, which a reset link carries so it
+    stops working once the password changes, e.g., when it's used.
+    """
+    return hashlib.sha256(hashed_password.encode()).hexdigest()[:16]
+
+
+def generate_password_reset_token(email: str, hashed_password: str) -> str:
     delta = timedelta(hours=settings.EMAIL_RESET_TOKEN_EXPIRE_HOURS)
     now = datetime.now(timezone.utc)
     expires = now + delta
     exp = expires.timestamp()
     encoded_jwt = jwt.encode(
-        {"exp": exp, "nbf": now, "sub": email},
+        {
+            "exp": exp,
+            "nbf": now,
+            "sub": email,
+            "purpose": "reset-password",
+            "pwh": hash_password_hash(hashed_password),
+        },
         settings.SECRET_KEY,
         algorithm="HS256",
     )
     return encoded_jwt
 
 
-def verify_password_reset_token(token: str) -> str | None:
+def verify_password_reset_token(token: str) -> tuple[str, str] | None:
+    """The email a reset token was issued for and the digest of the
+    password hash it was issued against.
+    """
     try:
-        decoded_token = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=["HS256"]
-        )
-        return str(decoded_token["sub"])
-    except InvalidTokenError:
+        decoded = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        if decoded.get("purpose") != "reset-password":
+            return None
+        return str(decoded["sub"]), str(decoded["pwh"])
+    except (InvalidTokenError, KeyError):
         return None
 
 

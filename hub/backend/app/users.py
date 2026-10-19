@@ -11,7 +11,7 @@ from typing import Any
 import requests
 from fastapi import HTTPException
 from requests.exceptions import JSONDecodeError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, func, select
 
 import app.stripe
 from app import utcnow
@@ -28,6 +28,8 @@ from app.messaging import (
     EMAIL_VERIFICATION_CODE_MINUTES,
     generate_confirm_email_change_email,
     generate_confirm_two_factor_email,
+    generate_email_changed_email,
+    generate_two_factor_locked_email,
     send_email,
 )
 from app.models import (
@@ -35,6 +37,7 @@ from app.models import (
     RefreshToken,
     User,
     UserCreate,
+    UserDailyCount,
     UserEmailVerification,
     UserExternalCredential,
     UserGitHubToken,
@@ -235,6 +238,9 @@ def update_user(
         password = user_data["password"]
         hashed_password = get_password_hash(password)
         extra_data["hashed_password"] = hashed_password
+    # Deactivating a user signs them out everywhere
+    if user_data.get("is_active") is False:
+        end_sign_in_sessions(session=session, user=db_user)
     db_user.sqlmodel_update(user_data, update=extra_data)
     session.add(db_user)
     session.commit()
@@ -243,7 +249,14 @@ def update_user(
 
 
 def get_user_by_email(*, session: Session, email: str) -> User | None:
-    statement = select(User).where(User.email == email)
+    """Get a user by email, ignoring case, preferring an exact match, since
+    older accounts may differ only in case.
+    """
+    statement = (
+        select(User)
+        .where(func.lower(User.email) == email.lower())
+        .order_by(col(User.email) != email)
+    )
     session_user = session.exec(statement).first()
     return session_user
 
@@ -258,28 +271,93 @@ def email_is_verified(*, session: Session, user: User) -> bool:
 
 EMAIL_VERIFICATION_RESEND_SECONDS = 60
 EMAIL_VERIFICATION_MAX_ATTEMPTS = 5
+# Across every emailed code, i.e., for verifying an address, changing it, or
+# setting up two-factor authentication, so guessing can't go on by asking
+# for new codes
+EMAILED_CODES_PER_DAY = 10
+WRONG_EMAILED_CODES_PER_DAY = 20
 
 
-def hash_email_verification_code(code: str) -> str:
+def get_daily_count(
+    session: Session, user: User, kind: str, limit: int, detail: str
+) -> UserDailyCount:
+    """Today's count of something limited per day for the user, locked for
+    updating, refusing with a 429 once it has reached the limit.
+    """
+    from sqlalchemy.dialects.postgresql import insert
+
+    today = utcnow().date()
+    session.exec(
+        insert(UserDailyCount)
+        .values(user_id=user.id, kind=kind, day=today, count=0)
+        .on_conflict_do_nothing()
+    )
+    row = session.exec(
+        select(UserDailyCount)
+        .where(UserDailyCount.user_id == user.id)
+        .where(UserDailyCount.kind == kind)
+        .with_for_update()
+    ).one()
+    if row.day != today:
+        row.day = today
+        row.count = 0
+    if row.count >= limit:
+        session.commit()
+        raise HTTPException(429, detail)
+    return row
+
+
+def count_wrong_emailed_code(session: Session, user: User) -> UserDailyCount:
+    """Today's count of wrong emailed codes, which the caller adds to if
+    another one is wrong.
+    """
+    return get_daily_count(
+        session,
+        user,
+        "wrong-emailed-codes",
+        WRONG_EMAILED_CODES_PER_DAY,
+        "Too many wrong codes today; try again tomorrow",
+    )
+
+
+def count_emailed_code(session: Session, user: User) -> None:
+    """Count a code about to be emailed, refusing past the daily limit."""
+    row = get_daily_count(
+        session,
+        user,
+        "emailed-codes",
+        EMAILED_CODES_PER_DAY,
+        "Too many codes sent today; try again tomorrow",
+    )
+    row.count += 1
+    session.add(row)
+
+
+def hash_email_verification_code(
+    code: str, new_email: str | None = None
+) -> str:
     """The stored form of a code: an HMAC under the server's secret.
 
     Six digits is too small a space to protect with a slow hash alone,
     which is why guesses are counted; keying the hash keeps a leaked table
-    from being useful on its own.
+    from being useful on its own. A code for changing the email is bound to
+    the new address, so it can't move the account anywhere else.
     """
+    message = code if new_email is None else f"{code}\n{new_email.lower()}"
     return hmac.new(
-        settings.SECRET_KEY.encode(), code.encode(), "sha256"
+        settings.SECRET_KEY.encode(), message.encode(), "sha256"
     ).hexdigest()
 
 
 def create_email_verification(
-    *, session: Session, user: User
+    *, session: Session, user: User, new_email: str | None = None
 ) -> tuple[str, str]:
     """Issue a fresh code and link token for the user's current email.
 
     Returns the code and the token, which the caller emails. Any earlier
     code stops working. Raises 429 when one was sent less than a minute
-    ago, so the endpoint can't be used to flood an inbox.
+    ago, so the endpoint can't be used to flood an inbox, or when too many
+    were sent today.
     """
     now = utcnow()
     existing = user.email_verification
@@ -291,16 +369,17 @@ def create_email_verification(
         raise HTTPException(
             429, "A code was just sent. Wait a minute before asking again."
         )
+    count_emailed_code(session, user)
     code = f"{secrets.randbelow(10**6):06d}"
     expires = now + timedelta(minutes=EMAIL_VERIFICATION_CODE_MINUTES)
     if existing is None:
         existing = UserEmailVerification(
             user_id=user.id,
-            code_hash=hash_email_verification_code(code),
+            code_hash=hash_email_verification_code(code, new_email),
             expires=expires,
         )
     else:
-        existing.code_hash = hash_email_verification_code(code)
+        existing.code_hash = hash_email_verification_code(code, new_email)
         existing.created = now
         existing.expires = expires
         existing.attempts = 0
@@ -340,35 +419,42 @@ def mark_email_verified(*, session: Session, user: User) -> User:
 
 
 def check_email_verification_code(
-    *, session: Session, user: User, code: str
+    *, session: Session, user: User, code: str, new_email: str | None = None
 ) -> None:
     """Check a code emailed to the user's current address, using it up.
 
-    A wrong code counts as an attempt; past the limit the code is thrown
-    away and a new one has to be requested, which is what keeps guessing
-    all million of them from being an option.
+    A wrong code counts as an attempt; past the limit the code stops
+    working and a new one has to be requested, and wrong codes are limited
+    per day too, which is what keeps guessing all million of them from
+    being an option. The code is kept until it's used, so asking for
+    another is still limited to once a minute.
     """
     pending = user.email_verification
     if pending is None:
         raise HTTPException(400, "No verification code has been sent")
     # Locked, so parallel guesses can't all get in under the limit
     session.refresh(pending, with_for_update=True)
+    if pending.attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+        raise HTTPException(400, "Too many wrong codes; request a new one")
     if pending.expires < utcnow():
-        session.delete(pending)
-        session.commit()
         raise HTTPException(400, "That code has expired; request a new one")
+    wrong_today = count_wrong_emailed_code(session, user)
     if not hmac.compare_digest(
-        pending.code_hash, hash_email_verification_code(code.strip())
+        pending.code_hash,
+        hash_email_verification_code(code.strip(), new_email),
     ):
         pending.attempts += 1
-        if pending.attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
-            session.delete(pending)
-            session.commit()
-            raise HTTPException(400, "Too many wrong codes; request a new one")
+        wrong_today.count += 1
         session.add(pending)
+        session.add(wrong_today)
         session.commit()
+        if pending.attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            raise HTTPException(400, "Too many wrong codes; request a new one")
         raise HTTPException(400, "That code isn't right")
     session.delete(pending)
+    # So saving the user later doesn't try to save the deleted code too
+    session.flush()
+    session.expire(user, ["email_verification"])
 
 
 def confirm_email_verification_code(
@@ -390,7 +476,9 @@ def send_email_change_code(
     """
     if not user.email_verified:
         raise HTTPException(400, "An unverified email can be changed as is")
-    code, _ = create_email_verification(session=session, user=user)
+    code, _ = create_email_verification(
+        session=session, user=user, new_email=new_email
+    )
     email_data = generate_confirm_email_change_email(
         email_to=user.email, new_email=new_email, code=code
     )
@@ -402,22 +490,42 @@ def send_email_change_code(
 
 
 def change_email(
-    *, session: Session, user: User, new_email: str, code: str | None
+    *,
+    session: Session,
+    user: User,
+    new_email: str,
+    code: str | None,
+    keep_session: uuid.UUID,
 ) -> None:
     """Change the user's email, which takes a code sent to the current one
-    if it's verified.
+    for this new address if it's verified.
 
-    The new address isn't verified until the user proves it is.
+    The new address isn't verified until the user proves it is. The old one
+    hears about it, and every other sign-in ends.
     """
-    if user.email_verified:
+    old_email = user.email
+    was_verified = user.email_verified
+    if was_verified:
         if not code:
             raise HTTPException(
                 403, "Changing a verified email takes a code sent to it"
             )
-        check_email_verification_code(session=session, user=user, code=code)
+        check_email_verification_code(
+            session=session, user=user, code=code, new_email=new_email
+        )
     user.email = new_email
     user.email_verified_at = None
     session.add(user)
+    end_sign_in_sessions(session=session, user=user, keep=keep_session)
+    if was_verified and settings.emails_enabled:
+        email_data = generate_email_changed_email(
+            email_to=old_email, new_email=new_email
+        )
+        send_email(
+            email_to=old_email,
+            subject=email_data.subject,
+            html_content=email_data.html_content,
+        )
 
 
 def end_sign_in_sessions(
@@ -438,6 +546,21 @@ def end_sign_in_sessions(
         if keep is None or token.session_id != keep:
             token.is_active = False
             session.add(token)
+
+
+def end_sign_in_session(
+    *, session: Session, user_id: uuid.UUID, session_id: uuid.UUID
+) -> None:
+    """Sign out one sign-in, e.g., when its owner signs out."""
+    tokens = session.exec(
+        select(RefreshToken)
+        .where(RefreshToken.user_id == user_id)
+        .where(RefreshToken.session_id == session_id)
+        .where(RefreshToken.is_active)
+    ).all()
+    for token in tokens:
+        token.is_active = False
+        session.add(token)
 
 
 def confirm_email_verification_token(*, session: Session, token: str) -> User:
@@ -1078,19 +1201,26 @@ def check_user_subscription_active(session: Session, user: User) -> bool:
 
 # How long a second factor entered in a session covers sensitive actions
 SECOND_FACTOR_HOURS = 12
+# The HttpOnly cookie that holds a session's proof of entering one
+SECOND_FACTOR_COOKIE = "second_factor"
 TOTP_MAX_FAILED_ATTEMPTS = 5
+# The first lockout's length, which doubles with each one after, up to a day
 TOTP_LOCKOUT_MINUTES = 5
+TOTP_MAX_LOCKOUT_MINUTES = 24 * 60
 # Error details the frontend recognizes, to prompt for a code or set one up
 SECOND_FACTOR_SETUP_REQUIRED = "Two-factor authentication setup required"
 SECOND_FACTOR_REQUIRED = "Two-factor authentication code required"
 
 
-def start_totp_setup(session: Session, user: User) -> str:
+def start_totp_setup(
+    session: Session, user: User, session_id: uuid.UUID
+) -> str:
     """Start setting up an authenticator app, returning its secret.
 
     A code is also emailed, which confirming takes along with one from the
     app, so someone holding a leaked credential for the account can't add
-    their own app without the user's email too.
+    their own app without the user's email too. Only the sign-in that
+    started it sees the secret and can finish it.
     """
     totp = user.totp
     if totp is not None and totp.confirmed_at is not None:
@@ -1106,12 +1236,18 @@ def start_totp_setup(session: Session, user: User) -> str:
         and (now - totp.created).total_seconds()
         < EMAIL_VERIFICATION_RESEND_SECONDS
     ):
+        if totp.setup_session_id != session_id:
+            raise HTTPException(
+                409, "Two-factor setup was just started in another session"
+            )
         return decrypt_secret(totp.secret)
+    count_emailed_code(session, user)
     secret = generate_totp_secret()
     email_code = f"{secrets.randbelow(10**6):06d}"
     if totp is None:
         totp = UserTOTP(user_id=user.id, secret=encrypt_secret(secret))
     totp.secret = encrypt_secret(secret)
+    totp.setup_session_id = session_id
     totp.created = now
     totp.email_code_hash = hash_email_verification_code(email_code)
     totp.email_code_expires = now + timedelta(
@@ -1132,7 +1268,7 @@ def start_totp_setup(session: Session, user: User) -> str:
 
 
 def check_totp_setup_email_code(
-    session: Session, totp: UserTOTP, code: str
+    session: Session, user: User, totp: UserTOTP, code: str
 ) -> None:
     """Check the code emailed when setting up an authenticator app."""
     # Locked, so parallel guesses can't all get in under the limit
@@ -1141,10 +1277,13 @@ def check_totp_setup_email_code(
         raise HTTPException(400, "No setup code has been sent")
     if totp.email_code_expires < utcnow():
         raise HTTPException(400, "That code has expired; start setup again")
+    wrong_today = count_wrong_emailed_code(session, user)
     if not hmac.compare_digest(
         totp.email_code_hash, hash_email_verification_code(code.strip())
     ):
         totp.email_code_attempts += 1
+        wrong_today.count += 1
+        session.add(wrong_today)
         if totp.email_code_attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
             totp.email_code_hash = None
             session.add(totp)
@@ -1159,30 +1298,46 @@ def check_totp_code(session: Session, totp: UserTOTP, code: str) -> None:
     """Check an authenticator code, recording it as used if it's valid.
 
     Codes are six digits, so wrong guesses lock the user out for a while,
-    and a code can't be used twice, so one seen over a shoulder or in a log
-    is worthless.
+    longer each time until a right one, and the user hears about it, and a
+    code can't be used twice, so one seen over a shoulder or in a log is
+    worthless.
     """
     now = utcnow()
     # Locked, so parallel guesses can't all get in under the limit, and a
     # code can't be used twice at once
     session.refresh(totp, with_for_update=True)
     if totp.locked_until is not None and totp.locked_until > now:
-        raise HTTPException(
-            429, "Too many attempts; try again in a few minutes"
-        )
+        raise HTTPException(429, "Too many attempts; try again later")
     step = match_totp_step(decrypt_secret(totp.secret), code)
     if step is None or (
         totp.last_used_step is not None and step <= totp.last_used_step
     ):
         totp.failed_attempts += 1
+        lockout_minutes = None
         if totp.failed_attempts >= TOTP_MAX_FAILED_ATTEMPTS:
             totp.failed_attempts = 0
-            totp.locked_until = now + timedelta(minutes=TOTP_LOCKOUT_MINUTES)
+            totp.lockouts += 1
+            lockout_minutes = min(
+                TOTP_LOCKOUT_MINUTES * 2 ** min(totp.lockouts - 1, 16),
+                TOTP_MAX_LOCKOUT_MINUTES,
+            )
+            totp.locked_until = now + timedelta(minutes=lockout_minutes)
         session.add(totp)
         session.commit()
+        user = session.get(User, totp.user_id)
+        if lockout_minutes and user is not None and settings.emails_enabled:
+            email_data = generate_two_factor_locked_email(
+                email_to=user.email, minutes=lockout_minutes
+            )
+            send_email(
+                email_to=user.email,
+                subject=email_data.subject,
+                html_content=email_data.html_content,
+            )
         raise HTTPException(400, "Invalid code")
     totp.last_used_step = step
     totp.failed_attempts = 0
+    totp.lockouts = 0
     totp.locked_until = None
     totp.last_verified_at = now
     session.add(totp)
@@ -1198,13 +1353,14 @@ def create_second_factor_token(user: User, session_id: uuid.UUID) -> str:
 
 def require_second_factor(
     user: User, session_id: uuid.UUID, token: str | None
-) -> None:
+) -> int:
     """Refuse sensitive actions unless this session entered a second
-    factor recently.
+    factor recently, returning when that stops counting, in seconds since
+    the epoch.
 
-    What proves it is the token the session got when it entered a code,
-    not a record on the account, so entering a code in one browser doesn't
-    also vouch for every other credential the user has.
+    What proves it is the token the session got when it entered a code, in
+    an HttpOnly cookie, not a record on the account, so entering a code in
+    one browser doesn't also vouch for every other credential the user has.
     """
     totp = user.totp
     if totp is None or totp.confirmed_at is None:
@@ -1222,3 +1378,4 @@ def require_second_factor(
     )
     if issued < totp.confirmed_at.replace(microsecond=0):
         raise HTTPException(403, SECOND_FACTOR_REQUIRED)
+    return int(payload["exp"])

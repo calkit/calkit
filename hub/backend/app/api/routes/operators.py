@@ -9,10 +9,11 @@ import uuid
 from datetime import timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Cookie, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import col, func, select
 
+import app.projects
 from app import users
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
@@ -25,14 +26,17 @@ from app.api.deps import (
 )
 from app.config import settings
 from app.core import utcnow
+from app.messaging import generate_operator_email, send_email
 from app.models import (
     Account,
+    Message,
     Operator,
     OperatorPublic,
     OperatorWorkspace,
     Project,
     RefreshToken,
     User,
+    UserToken,
 )
 from app.security import (
     create_operator_grant,
@@ -54,6 +58,14 @@ CRON_CHECK_IN_INTERVAL_SECONDS = 300
 CONNECT_REQUEST_SECONDS = 900
 OPERATOR_RELAY_TOKEN_MINUTES = 10
 BROWSER_RELAY_TOKEN_SECONDS = 60
+# How long a request for a CLI token for an Operator's machine stands
+CLI_TOKEN_REQUEST_SECONDS = 600
+CLI_TOKEN_DAYS = 365
+MAX_ACTIVE_OPERATORS = 50
+NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
+# Hub names for an owner and project, as an Operator reports them
+PROJECT_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,255}/[A-Za-z0-9._-]{1,255}$")
+MAX_INT = 2**31 - 1
 
 
 def get_current_operator(session: SessionDep, token: TokenDep) -> Operator:
@@ -69,7 +81,8 @@ def get_current_operator(session: SessionDep, token: TokenDep) -> Operator:
         verifier, operator.hashed_verifier
     ):
         raise HTTPException(403, "Invalid token")
-    if not operator.is_active:
+    # Including when its owner was deactivated
+    if not operator.is_active or not operator.user.is_active:
         raise HTTPException(403, "Operator has been revoked")
     return operator
 
@@ -125,15 +138,79 @@ def _out(operator: Operator) -> OperatorOut:
     )
 
 
+class PublicKey(BaseModel):
+    """A P-256 public key as a JSON Web Key, e.g., a browser's for one
+    connection, or an Operator's own.
+
+    The browser signs every message it sends the Operator with the private
+    half of its key, which it can't export, so a grant naming this key is
+    no use to the relay that carries it, and the Operator signs its replies
+    with its own, so the relay can't forge those either.
+    """
+
+    kty: Literal["EC"]
+    crv: Literal["P-256"]
+    # Base64url coordinates of the point, 32 bytes each
+    x: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+    y: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+
+
+def _check_public_key(key: PublicKey) -> None:
+    """Refuse a key that isn't a point on P-256, which the other end would
+    reject anyway, so the sender hears why now.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    def coordinate(value: str) -> int:
+        return int.from_bytes(base64.urlsafe_b64decode(value + "="), "big")
+
+    try:
+        ec.EllipticCurvePublicNumbers(
+            coordinate(key.x), coordinate(key.y), ec.SECP256R1()
+        ).public_key()
+    except ValueError:
+        raise HTTPException(422, "Invalid public key")
+
+
 class OperatorPost(BaseModel):
     """What a machine reports about itself when registering."""
 
-    name: str | None = Field(default=None, max_length=64)
+    name: str | None = Field(default=None, pattern=NAME_PATTERN)
     hostname: str | None = Field(default=None, max_length=255)
     machine_id: str | None = Field(default=None, max_length=255)
     platform: str | None = Field(default=None, max_length=64)
     calkit_version: str | None = Field(default=None, max_length=64)
-    hosts: list[str] = []
+    hosts: list[Annotated[str, Field(max_length=255)]] = Field(
+        default=[], max_length=20
+    )
+    # Its own key, which it signs replies to browsers with; an Operator
+    # installed over SSH sends it at its first check-in instead
+    public_key: PublicKey | None = None
+
+
+def _send_operator_email(
+    operator: Operator, user: User, event: Literal["registered", "revoked"]
+) -> None:
+    """Tell the owner an Operator was registered or revoked, so one they
+    didn't expect stands out.
+    """
+    if not settings.emails_enabled:
+        return
+    email_data = generate_operator_email(
+        email_to=user.email,
+        event=event,
+        name=operator.name,
+        hostname=operator.hostname,
+        platform=operator.platform,
+        machine_id=operator.machine_id,
+    )
+    send_email(
+        email_to=user.email,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
 
 
 class OperatorRegistered(OperatorOut):
@@ -153,6 +230,8 @@ def post_operator(
     # itself by email, so that address has to be the user's
     if not current_user.email_verified:
         raise HTTPException(403, "Verify your email first")
+    if req.public_key is not None:
+        _check_public_key(req.public_key)
     # Names default to the hostname, suffixed until unique for the user
     base = req.name or re.sub(
         r"[^a-z0-9-]+", "-", (req.hostname or "operator").lower()
@@ -165,6 +244,8 @@ def post_operator(
             .where(Operator.is_active)
         ).all()
     )
+    if len(taken) >= MAX_ACTIVE_OPERATORS:
+        raise HTTPException(409, "Too many Operators; revoke some first")
     if req.name is not None and req.name in taken:
         raise HTTPException(409, f"An Operator named '{req.name}' exists")
     name = base
@@ -184,10 +265,12 @@ def post_operator(
         hosts=req.hosts or ([req.hostname] if req.hostname else []),
         selector=selector,
         hashed_verifier=hash_token_verifier(verifier),
+        public_key=req.public_key.model_dump() if req.public_key else None,
     )
     session.add(operator)
     session.commit()
     session.refresh(operator)
+    _send_operator_email(operator, current_user, "registered")
     return OperatorRegistered.model_validate(
         _out(operator),
         update=dict(
@@ -223,18 +306,43 @@ def _get_owned_operator(
     return operator
 
 
-@router.delete("/operators/{operator_id}")
-def delete_operator(
-    session: SessionDep, current_user: CurrentUser, operator_id: uuid.UUID
-) -> OperatorOut:
-    """Revoke an Operator, which stops at its next check-in."""
-    operator = _get_owned_operator(session, current_user, operator_id)
+def _revoke(session: SessionDep, operator: Operator) -> OperatorOut:
+    """Revoke an Operator, which stops at its next check-in, along with
+    the CLI token issued to its machine.
+    """
     # Kept rather than deleted so a revoked token can say it was revoked
     operator.is_active = False
+    operator.cli_token_requested_at = None
     session.add(operator)
+    tokens = session.exec(
+        select(UserToken)
+        .where(UserToken.operator_id == operator.id)
+        .where(UserToken.is_active)
+    ).all()
+    for token in tokens:
+        token.is_active = False
+        session.add(token)
     session.commit()
     session.refresh(operator)
+    _send_operator_email(operator, operator.user, "revoked")
     return _out(operator)
+
+
+@router.delete("/operators/self")
+def delete_operator_self(
+    session: SessionDep, operator: CurrentOperator
+) -> OperatorOut:
+    """Revoke the Operator making the request, e.g., when it's uninstalled."""
+    return _revoke(session, operator)
+
+
+@router.delete("/operators/{operator_id}")
+def delete_operator(
+    session: SessionDep, signed_in: CurrentSession, operator_id: uuid.UUID
+) -> OperatorOut:
+    """Revoke an Operator, which takes a signed-in session, not a token."""
+    operator = _get_owned_operator(session, signed_in.user, operator_id)
+    return _revoke(session, operator)
 
 
 class LastRun(BaseModel):
@@ -252,7 +360,7 @@ class AgentInfo(BaseModel):
     """A coding agent running in a workspace, e.g., Claude Code."""
 
     tool: str = Field(max_length=32)
-    pid: int
+    pid: int = Field(ge=0, le=MAX_INT)
     started: str | None = Field(default=None, max_length=64)
     # In one of the Operator's sessions, a tmux pane, which can be attached
     # to, or another terminal, e.g., an editor's
@@ -274,8 +382,8 @@ class WorkspaceInfo(BaseModel):
     branch: str | None = Field(default=None, max_length=256)
     commit: str | None = Field(default=None, max_length=64)
     dirty: bool | None = None
-    ahead: int | None = None
-    behind: int | None = None
+    ahead: int | None = Field(default=None, ge=0, le=MAX_INT)
+    behind: int | None = Field(default=None, ge=0, le=MAX_INT)
     # Whether a pipeline run is in progress there, which stages, and since
     # when, and how the latest one ended, so the hub can show it without
     # connecting
@@ -305,6 +413,9 @@ class CheckIn(BaseModel):
     workspaces: list[WorkspaceInfo] = Field(default=[], max_length=1000)
     # The sign-ins its open channels came from, to hear which have ended
     channel_sessions: list[uuid.UUID] = Field(default=[], max_length=100)
+    # Its own key, which is stored if the hub has none yet, and otherwise
+    # has to match
+    public_key: PublicKey | None = None
 
 
 class CheckInResp(BaseModel):
@@ -316,7 +427,7 @@ class CheckInResp(BaseModel):
     relay_url: str
     relay_token: str
     check_in_interval: int = CHECK_IN_INTERVAL_SECONDS
-    # For Operators registered before grants were signed to pin
+    # What grants are signed with, which the Operator takes from here
     grant_public_key: str
     # Whether an Operator in cron mode should connect
     connect: bool = False
@@ -333,6 +444,8 @@ def _ended_sessions(
     """Which of these sign-ins of the Operator's owner are no longer live."""
     if not session_ids:
         return []
+    if not operator.user.is_active:
+        return sorted(set(session_ids), key=str)
     live = session.exec(
         select(RefreshToken.session_id)
         .where(col(RefreshToken.session_id).in_(session_ids))
@@ -350,12 +463,17 @@ def _update_workspaces(
     """Make the Operator's stored workspaces match what it reported."""
     existing = {ws.path: ws for ws in operator.workspaces}
     now = utcnow()
+    seen = set()
     for info in reported:
+        # Only the first of any reported twice
+        if info.path in seen:
+            continue
+        seen.add(info.path)
         ws = existing.pop(info.path, None)
         if ws is None:
             ws = OperatorWorkspace(operator_id=operator.id, path=info.path)
         owner = name = None
-        if info.project and "/" in info.project:
+        if info.project and PROJECT_PATTERN.match(info.project):
             owner, name = info.project.lower().split("/", 1)
         ws.kind = info.kind
         ws.owner_name = owner
@@ -390,6 +508,13 @@ def post_operator_check_in(
     """Record that an Operator is alive and what it has, and tell it how
     to connect.
     """
+    if req.public_key is not None:
+        _check_public_key(req.public_key)
+        key = req.public_key.model_dump()
+        if operator.public_key is None:
+            operator.public_key = key
+        elif operator.public_key != key:
+            raise HTTPException(409, "Operator key doesn't match")
     operator.last_seen = utcnow()
     _update_workspaces(session, operator, req.workspaces)
     if req.calkit_version is not None:
@@ -456,51 +581,46 @@ def post_operator_restart(
     return _out(operator)
 
 
-class BrowserKey(BaseModel):
-    """A browser's public key for one connection, as a JSON Web Key.
-
-    The browser signs every message it sends the Operator with the private
-    half, which it can't export, so a grant naming this key is no use to
-    the relay that carries it.
-    """
-
-    kty: Literal["EC"]
-    crv: Literal["P-256"]
-    # Base64url coordinates of the point, 32 bytes each
-    x: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
-    y: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
-
-
 class RelayTokenReq(BaseModel):
     """What a browser asking to connect to an Operator sends."""
 
-    public_key: BrowserKey
-
-
-def _check_browser_key(key: BrowserKey) -> None:
-    """Refuse a key that isn't a point on P-256, which the Operator would
-    reject anyway, so the browser hears why now.
-    """
-    import base64
-
-    from cryptography.hazmat.primitives.asymmetric import ec
-
-    def coordinate(value: str) -> int:
-        return int.from_bytes(base64.urlsafe_b64decode(value + "="), "big")
-
-    try:
-        ec.EllipticCurvePublicNumbers(
-            coordinate(key.x), coordinate(key.y), ec.SECP256R1()
-        ).public_key()
-    except ValueError:
-        raise HTTPException(422, "Invalid public key")
+    public_key: PublicKey
 
 
 class RelayTokenResp(BaseModel):
-    """Where and how a browser connects to an Operator through the relay."""
+    """Where and how a browser connects to an Operator through the relay,
+    and how it checks the replies it gets are the Operator's.
+    """
 
     relay_url: str
     token: str
+    # The Operator's key, which signs its replies, and the ID of the grant
+    # in the token, which they're bound to
+    operator_public_key: PublicKey
+    grant_id: str
+
+
+SecondFactorCookie = Annotated[
+    str | None, Cookie(alias=users.SECOND_FACTOR_COOKIE)
+]
+
+
+def _get_operator_for_session(
+    session: SessionDep,
+    signed_in: CurrentSession,
+    operator_id: uuid.UUID,
+    second_factor: str | None,
+) -> tuple[Operator, int]:
+    """Get one of the user's online Operators for a signed-in session that
+    entered a second factor recently, and when that stops counting.
+    """
+    operator = _get_owned_operator(session, signed_in.user, operator_id)
+    second_factor_expires = users.require_second_factor(
+        signed_in.user, signed_in.session_id, second_factor
+    )
+    if not is_online(operator):
+        raise HTTPException(409, "Operator is offline")
+    return operator, second_factor_expires
 
 
 @router.post("/operators/{operator_id}/relay-token")
@@ -509,37 +629,102 @@ def post_operator_relay_token(
     signed_in: CurrentSession,
     operator_id: uuid.UUID,
     req: RelayTokenReq,
-    x_second_factor: Annotated[str | None, Header()] = None,
+    second_factor: SecondFactorCookie = None,
 ) -> RelayTokenResp:
     """Let the user's browser connect to one of their online Operators.
 
     This opens a shell on their machine, so it takes a signed-in session,
     not a token, that entered a second factor recently.
     """
-    _check_browser_key(req.public_key)
-    current_user = signed_in.user
-    operator = _get_owned_operator(session, current_user, operator_id)
-    users.require_second_factor(
-        current_user, signed_in.session_id, x_second_factor
+    _check_public_key(req.public_key)
+    operator, second_factor_expires = _get_operator_for_session(
+        session, signed_in, operator_id, second_factor
     )
-    if not is_online(operator):
-        raise HTTPException(409, "Operator is offline")
+    if operator.public_key is None:
+        raise HTTPException(409, "Operator hasn't sent its key yet")
+    grant, grant_id = create_operator_grant(
+        operator.id,
+        signed_in.user.id,
+        timedelta(seconds=BROWSER_RELAY_TOKEN_SECONDS),
+        browser_key=req.public_key.model_dump(),
+        session_id=signed_in.session_id,
+        second_factor_expires=second_factor_expires,
+    )
     return RelayTokenResp(
         relay_url=settings.relay_url,
         token=create_relay_token(
             "browser",
             operator_id=operator.id,
-            user_id=current_user.id,
+            user_id=signed_in.user.id,
             expires_delta=timedelta(seconds=BROWSER_RELAY_TOKEN_SECONDS),
-            grant=create_operator_grant(
-                operator.id,
-                current_user.id,
-                timedelta(seconds=BROWSER_RELAY_TOKEN_SECONDS),
-                browser_key=req.public_key.model_dump(),
-                session_id=signed_in.session_id,
-            ),
+            grant=grant,
         ),
+        operator_public_key=PublicKey.model_validate(operator.public_key),
+        grant_id=grant_id,
     )
+
+
+@router.post("/operators/{operator_id}/cli-token-request")
+def post_operator_cli_token_request(
+    session: SessionDep,
+    signed_in: CurrentSession,
+    operator_id: uuid.UUID,
+    second_factor: SecondFactorCookie = None,
+) -> Message:
+    """Let one of the user's Operators fetch a CLI token for its machine,
+    within the next 10 minutes, so the token never crosses the relay.
+    """
+    operator, _ = _get_operator_for_session(
+        session, signed_in, operator_id, second_factor
+    )
+    operator.cli_token_requested_at = utcnow()
+    session.add(operator)
+    session.commit()
+    return Message(message="Token requested")
+
+
+class CliToken(BaseModel):
+    token: str
+
+
+@router.post("/operators/cli-token")
+def post_operator_cli_token(
+    session: SessionDep, operator: CurrentOperator
+) -> CliToken:
+    """Issue the Operator's machine a CLI token, if its owner asked for one
+    recently, replacing any it was issued before.
+    """
+    requested = operator.cli_token_requested_at
+    if (
+        requested is None
+        or (utcnow() - requested).total_seconds() > CLI_TOKEN_REQUEST_SECONDS
+    ):
+        raise HTTPException(403, "No token was requested")
+    operator.cli_token_requested_at = None
+    session.add(operator)
+    earlier = session.exec(
+        select(UserToken)
+        .where(UserToken.operator_id == operator.id)
+        .where(UserToken.is_active)
+    ).all()
+    for token in earlier:
+        token.is_active = False
+        session.add(token)
+    selector = secrets.token_hex(PAT_SELECTOR_LENGTH_BYTES)
+    verifier = secrets.token_hex(PAT_VERIFIER_LENGTH_BYTES)
+    session.add(
+        UserToken(
+            user_id=operator.user_id,
+            expires=utcnow() + timedelta(days=CLI_TOKEN_DAYS),
+            is_active=True,
+            selector=selector,
+            hashed_verifier=hash_token_verifier(verifier),
+            description=f"Operator {operator.name}",
+            operator_id=operator.id,
+        )
+    )
+    session.commit()
+    return CliToken(token=f"ckp_{selector}{verifier}")
 
 
 class Workspace(WorkspaceInfo):
@@ -586,11 +771,16 @@ def _list_workspaces(
     }
     on_hub: set[tuple[str, str]] = set()
     if names:
+        # Only ones the user can read, so this doesn't reveal that a private
+        # project exists
         found = session.exec(
             select(Account.name, Project.name)
+            .distinct()
             .join(Project, col(Project.owner_account_id) == Account.id)
+            .join(Project.user_access_records, isouter=True)  # type: ignore[arg-type]
             .where(col(Account.name).in_({o for o, _ in names}))
             .where(func.lower(Project.name).in_({n for _, n in names}))
+            .where(app.projects.readable_project_clause(user))
         ).all()
         on_hub = {(o.lower(), n.lower()) for o, n in found}
     resp = []

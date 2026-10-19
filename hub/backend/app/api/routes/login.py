@@ -20,6 +20,7 @@ from sqlmodel import Session, select
 from app import github, mixpanel, security, users
 from app.api.deps import (
     CurrentUser,
+    OptionalTokenDep,
     SessionDep,
     SessionUser,
     get_current_active_superuser,
@@ -44,6 +45,7 @@ from app.security import (
     generate_password_reset_token,
     generate_refresh_token,
     get_password_hash,
+    hash_password_hash,
     hash_refresh_token,
     verify_password_reset_token,
 )
@@ -154,7 +156,8 @@ def refresh_access_token(
 
     The old token is rotated out but still honored for a short grace window
     (REFRESH_ROTATION_GRACE_SECONDS) so an interrupted rotation, e.g. the client
-    reloaded before storing the new token, doesn't strand the session.
+    reloaded before storing the new token, doesn't strand the session. Using
+    it after that ends the session, since someone else may have a copy.
     """
     token_hash = hash_refresh_token(body.refresh_token)
     refresh_db = session.exec(
@@ -163,6 +166,22 @@ def refresh_access_token(
         .with_for_update()
     ).first()
     if refresh_db is None or not refresh_db.is_active:
+        raise HTTPException(401, "Invalid refresh token")
+    now = utcnow()
+    if (
+        refresh_db.rotated_at is not None
+        and (now - refresh_db.rotated_at).total_seconds()
+        > REFRESH_ROTATION_GRACE_SECONDS
+    ):
+        refresh_db.is_active = False
+        session.add(refresh_db)
+        if refresh_db.session_id is not None:
+            users.end_sign_in_session(
+                session=session,
+                user_id=refresh_db.user_id,
+                session_id=refresh_db.session_id,
+            )
+        session.commit()
         raise HTTPException(401, "Invalid refresh token")
     if refresh_db.expired:
         raise HTTPException(401, "Refresh token has expired")
@@ -180,9 +199,9 @@ def refresh_access_token(
     # can't be kept alive forever by repeated use). A retry with it during the
     # window still succeeds and mints a fresh pair, so an interrupted rotation
     # doesn't strand the client with a dead token.
-    grace_deadline = utcnow() + timedelta(
-        seconds=REFRESH_ROTATION_GRACE_SECONDS
-    )
+    if refresh_db.rotated_at is None:
+        refresh_db.rotated_at = now
+    grace_deadline = now + timedelta(seconds=REFRESH_ROTATION_GRACE_SECONDS)
     if refresh_db.expires > grace_deadline:
         refresh_db.expires = grace_deadline
     session.add(refresh_db)
@@ -202,6 +221,60 @@ def refresh_access_token(
     )
 
 
+class LogoutRequest(BaseModel):
+    # For when the access token has expired
+    refresh_token: str | None = None
+
+
+@router.post("/logout")
+def post_logout(
+    session: SessionDep,
+    response: Response,
+    token: OptionalTokenDep,
+    req: LogoutRequest | None = None,
+) -> Message:
+    """Sign out: end this sign-in's session, which the access token or
+    refresh token names, and forget its second factor.
+    """
+    ends: set[tuple[uuid.UUID, uuid.UUID]] = set()
+    if token is not None and not token.startswith("ckp_"):
+        try:
+            payload = jwt.decode(
+                token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
+            )
+            if not {"scope", "purpose", "token_id"} & payload.keys():
+                ends.add(
+                    (uuid.UUID(payload["sub"]), uuid.UUID(payload["sid"]))
+                )
+        except (InvalidTokenError, KeyError, TypeError, ValueError):
+            pass
+    if req is not None and req.refresh_token:
+        refresh_db = session.exec(
+            select(RefreshToken).where(
+                RefreshToken.token_hash
+                == hash_refresh_token(req.refresh_token)
+            )
+        ).first()
+        if refresh_db is not None:
+            refresh_db.is_active = False
+            session.add(refresh_db)
+            if refresh_db.session_id is not None:
+                ends.add((refresh_db.user_id, refresh_db.session_id))
+    for user_id, session_id in ends:
+        users.end_sign_in_session(
+            session=session, user_id=user_id, session_id=session_id
+        )
+    session.commit()
+    response.delete_cookie(
+        users.SECOND_FACTOR_COOKIE,
+        path="/",
+        secure=settings.ENVIRONMENT != "local",
+        httponly=True,
+        samesite="strict",
+    )
+    return Message(message="Signed out")
+
+
 @router.post("/password-recovery/{email}")
 def recover_password(email: str, session: SessionDep) -> Message:
     user = users.get_user_by_email(session=session, email=email)
@@ -210,7 +283,9 @@ def recover_password(email: str, session: SessionDep) -> Message:
             status_code=404,
             detail="The user with this email does not exist in the system.",
         )
-    password_reset_token = generate_password_reset_token(email=email)
+    password_reset_token = generate_password_reset_token(
+        email=user.email, hashed_password=user.hashed_password
+    )
     email_data = generate_reset_password_email(
         email_to=user.email, email=email, token=password_reset_token
     )
@@ -224,10 +299,13 @@ def recover_password(email: str, session: SessionDep) -> Message:
 
 @router.post("/reset-password/")
 def reset_password(session: SessionDep, body: NewPassword) -> Message:
-    """Reset password."""
-    email = verify_password_reset_token(token=body.token)
-    if not email:
+    """Reset password, which a link can do only once, since it stops
+    working when the password changes.
+    """
+    claims = verify_password_reset_token(token=body.token)
+    if not claims:
         raise HTTPException(status_code=400, detail="Invalid token")
+    email, password_digest = claims
     user = users.get_user_by_email(session=session, email=email)
     if not user:
         raise HTTPException(
@@ -236,6 +314,10 @@ def reset_password(session: SessionDep, body: NewPassword) -> Message:
         )
     elif not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+    if not secrets.compare_digest(
+        password_digest, hash_password_hash(user.hashed_password)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid token")
     hashed_password = get_password_hash(password=body.new_password)
     user.hashed_password = hashed_password
     session.add(user)
@@ -257,7 +339,9 @@ def recover_password_html_content(email: str, session: SessionDep) -> Any:
             status_code=404,
             detail="A user with this username does not exist in the system.",
         )
-    password_reset_token = generate_password_reset_token(email=email)
+    password_reset_token = generate_password_reset_token(
+        email=user.email, hashed_password=user.hashed_password
+    )
     email_data = generate_reset_password_email(
         email_to=user.email, email=email, token=password_reset_token
     )

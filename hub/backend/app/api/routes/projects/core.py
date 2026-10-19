@@ -344,31 +344,7 @@ def get_projects(
         # opened the project won't appear until they do.
         where_clause = app.projects.writable_project_clause(current_user)
     else:
-        where_clause = or_(
-            Project.is_public,
-            Project.owner_account_id == current_user.account.id,
-            # A row in the unified access table with either a native Calkit
-            # grant (role_id, e.g. an invite redemption) or GitHub-derived
-            # access. A row with both null is a cached "no access" result.
-            and_(
-                UserProjectAccess.user_id == current_user.id,
-                or_(
-                    UserProjectAccess.role_id.is_not(None),  # type: ignore
-                    UserProjectAccess.github_access.is_not(None),  # type: ignore
-                ),
-            ),
-            Project.owner_account.has(  # type: ignore
-                and_(
-                    Account.org_id.is_not(None),  # type: ignore
-                    select(UserOrgMembership)
-                    .where(
-                        UserOrgMembership.user_id == current_user.id,
-                        UserOrgMembership.org_id == Account.org_id,
-                    )
-                    .exists(),
-                )
-            ),
-        )
+        where_clause = app.projects.readable_project_clause(current_user)
     if owner_name is not None:
         where_clause = and_(
             where_clause,

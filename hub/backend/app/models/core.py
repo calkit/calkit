@@ -1,7 +1,7 @@
 """Core models that should make it into the top-level ``models`` namespace."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, get_args
 
 import sqlalchemy
@@ -341,6 +341,19 @@ class UserEmailVerification(SQLModel, table=True):
     user: User = Relationship(back_populates="email_verification")
 
 
+class UserDailyCount(SQLModel, table=True):
+    """How many times today a user did something limited per day, e.g.,
+    entered a wrong emailed code.
+    """
+
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", primary_key=True, ondelete="CASCADE"
+    )
+    kind: str = Field(primary_key=True, max_length=32)
+    day: date
+    count: int = 0
+
+
 class UserAdminPublic(UserPublic):
     """A user as listed for a superuser, with what they own."""
 
@@ -555,6 +568,11 @@ class UserTokenPublic(SQLModel):
     is_active: bool
     description: str | None = Field(default=None, max_length=256)
     last_used: datetime | None = Field(default=None)
+    # The Operator it was made for, as its machine's CLI token, which
+    # revoking the Operator deactivates
+    operator_id: uuid.UUID | None = Field(
+        default=None, foreign_key="operator.id", ondelete="CASCADE"
+    )
 
 
 class UserToken(UserTokenPublic, table=True):
@@ -579,9 +597,13 @@ class UserTOTP(SQLModel, table=True):
     opening sessions on an Operator.
     """
 
-    user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", primary_key=True, ondelete="CASCADE"
+    )
     # Encrypted with the app's Fernet keys
     secret: str = Field(max_length=512)
+    # The sign-in that started setting it up, which only it can finish
+    setup_session_id: uuid.UUID | None = Field(default=None)
     created: datetime = Field(default_factory=utcnow)
     # Null until the user proves the app works by entering a code from it
     confirmed_at: datetime | None = Field(default=None)
@@ -592,6 +614,9 @@ class UserTOTP(SQLModel, table=True):
     )
     failed_attempts: int = 0
     locked_until: datetime | None = Field(default=None)
+    # Lockouts since the last right code, each twice as long as the one
+    # before
+    lockouts: int = Field(default=0, sa_column_kwargs=dict(server_default="0"))
     # A code emailed when setting it up, so a leaked token alone can't add an
     # attacker's app; stored as an HMAC like email verification codes
     email_code_hash: str | None = Field(default=None, max_length=64)
@@ -601,7 +626,9 @@ class UserTOTP(SQLModel, table=True):
 
 class OperatorPublic(SQLModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", index=True, ondelete="CASCADE"
+    )
     name: str = Field(min_length=1, max_length=64)
     hostname: str | None = Field(default=None, max_length=255)
     machine_id: str | None = Field(default=None, max_length=255)
@@ -646,6 +673,13 @@ class Operator(OperatorPublic, table=True):
     )
     selector: str = Field(index=True, unique=True, max_length=32)
     hashed_verifier: str = Field(max_length=64)
+    # Its own P-256 public key as a JWK, which browsers check its replies
+    # with; set once, from registration or its first check-in
+    public_key: dict[str, str] | None = Field(
+        default=None, sa_column=sqlalchemy.Column(sqlalchemy.JSON)
+    )
+    # When its owner asked for a CLI token to be issued to it
+    cli_token_requested_at: datetime | None = Field(default=None)
     # Relationships
     user: User = Relationship(back_populates="operators")
     workspaces: list["OperatorWorkspace"] = Relationship(
@@ -747,6 +781,9 @@ class RefreshToken(SQLModel, table=True):
     interactive: bool = Field(
         default=False, sa_column_kwargs=dict(server_default=sqlalchemy.false())
     )
+    # When it was exchanged for a new one, after which it only works for a
+    # short grace period, and using it later ends its session
+    rotated_at: datetime | None = Field(default=None)
     # Relationships
     user: "User" = Relationship(back_populates="refresh_tokens")
 

@@ -527,6 +527,40 @@ def get_contents_from_repo(
     )
 
 
+def readable_project_clause(current_user: User) -> Any:
+    """Projects the user can read, as a SQL predicate, for a query that
+    outer joins ``Project.user_access_records``.
+
+    GitHub-derived access only counts once it's been resolved and cached for
+    the user, i.e., they've opened the project before.
+    """
+    return or_(
+        Project.is_public,
+        Project.owner_account_id == current_user.account.id,
+        # A row in the unified access table with either a native Calkit
+        # grant (role_id, e.g. an invite redemption) or GitHub-derived
+        # access. A row with both null is a cached "no access" result.
+        and_(
+            UserProjectAccess.user_id == current_user.id,
+            or_(
+                UserProjectAccess.role_id.is_not(None),  # type: ignore
+                UserProjectAccess.github_access.is_not(None),  # type: ignore
+            ),
+        ),
+        Project.owner_account.has(  # type: ignore
+            and_(
+                Account.org_id.is_not(None),  # type: ignore
+                select(UserOrgMembership)
+                .where(
+                    UserOrgMembership.user_id == current_user.id,
+                    UserOrgMembership.org_id == Account.org_id,
+                )
+                .exists(),
+            )
+        ),
+    )
+
+
 def writable_project_clause(current_user: User):
     """Projects the user can write to, as a SQL predicate.
 

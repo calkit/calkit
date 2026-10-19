@@ -1,20 +1,31 @@
 import base64
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import timedelta
+from typing import Any, Literal
+from unittest.mock import patch
 
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from httpx import Response
+from sqlmodel import Session, select
 from starlette.websockets import WebSocketDisconnect
 
 from app import users
 from app.config import settings
 from app.core import utcnow
-from app.models import Operator, Project, RefreshToken, User, UserTOTP
+from app.models import (
+    Operator,
+    Project,
+    RefreshToken,
+    User,
+    UserToken,
+    UserTOTP,
+)
 from app.security import (
     create_access_token,
     create_second_factor_token,
@@ -31,21 +42,46 @@ def test_operators(
     normal_user_token_headers: dict[str, str],
     superuser_token_headers: dict[str, str],
 ) -> None:
-    def b64url(n: int) -> str:
-        return base64.urlsafe_b64encode(n.to_bytes(32, "big")).decode()[:-1]
+    from app.main import app
 
+    def make_jwk() -> dict[str, str]:
+        def b64url(n: int) -> str:
+            return base64.urlsafe_b64encode(n.to_bytes(32, "big")).decode()[
+                :-1
+            ]
+
+        key = ec.generate_private_key(ec.SECP256R1()).public_key()
+        numbers = key.public_numbers()
+        return {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": b64url(numbers.x),
+            "y": b64url(numbers.y),
+        }
+
+    # A client of its own, since it keeps the second factor cookie
+    client = TestClient(app)
     hostname = f"Lab-Box-{uuid.uuid4().hex[:6]}"
     # What a browser sends to connect: the public half of a key it made
-    numbers = (
-        ec.generate_private_key(ec.SECP256R1()).public_key().public_numbers()
-    )
-    jwk = {
-        "kty": "EC",
-        "crv": "P-256",
-        "x": b64url(numbers.x),
-        "y": b64url(numbers.y),
-    }
+    jwk = make_jwk()
     browser_key = {"public_key": jwk}
+    # And the Operator's own, which it signs its replies with
+    operator_jwk = make_jwk()
+
+    def relay_token(
+        headers: dict[str, str],
+        second_factor: str | None,
+        key: dict[str, Any] | None = None,
+    ) -> Response:
+        client.cookies.clear()
+        if second_factor is not None:
+            client.cookies.set(users.SECOND_FACTOR_COOKIE, second_factor)
+        return client.post(
+            f"/operators/{op['id']}/relay-token",
+            json=key or browser_key,
+            headers=headers,
+        )
+
     # Registering takes a verified email, since that's what setting up the
     # second factor for opening sessions proves itself with
     me = client.get("/user", headers=normal_user_token_headers).json()
@@ -63,14 +99,42 @@ def test_operators(
     user.email_verified_at = utcnow()
     db.add(user)
     db.commit()
-    # Names default to the slugified hostname, suffixed until unique
-    r = client.post(
-        "/operators",
-        headers=normal_user_token_headers,
-        json={"hostname": hostname, "platform": "linux"},
-    )
+    # Names are lowercase letters, digits, and dashes
+    for name in ["Lab Box", "-lab", "lab_box", "a" * 65, ""]:
+        r = client.post(
+            "/operators",
+            headers=normal_user_token_headers,
+            json={"name": name},
+        )
+        assert r.status_code == 422, name
+    # As are hosts, with limits, and keys have to be on the curve
+    for bad in [
+        {"hosts": ["h"] * 21},
+        {"hosts": ["h" * 256]},
+        {"public_key": operator_jwk | {"y": operator_jwk["x"]}},
+    ]:
+        r = client.post(
+            "/operators", headers=normal_user_token_headers, json=bad
+        )
+        assert r.status_code == 422, bad
+    # Names default to the slugified hostname, suffixed until unique, and the
+    # owner hears about each one registered, so one they didn't expect
+    # stands out
+    with patch("app.api.routes.operators.send_email") as send:
+        r = client.post(
+            "/operators",
+            headers=normal_user_token_headers,
+            json={
+                "hostname": hostname,
+                "platform": "linux",
+                "machine_id": "m-123",
+            },
+        )
     assert r.status_code == 200, r.text
     op = r.json()
+    assert send.call_args.kwargs["email_to"] == user.email
+    assert op["name"] in send.call_args.kwargs["subject"]
+    assert "m-123" in send.call_args.kwargs["html_content"]
     assert op["name"] == hostname.lower()
     assert op["hosts"] == [hostname]
     assert op["token"].startswith("cko_")
@@ -112,6 +176,18 @@ def test_operators(
     )
     assert r.status_code == 200, r.text
     check_in = r.json()
+    # Numbers that don't fit are refused
+    for bad in [
+        {"path": "/x", "ahead": -1},
+        {"path": "/x", "behind": 2**31},
+        {"path": "/x", "agents": [{"tool": "claude", "pid": 2**40}]},
+    ]:
+        r = client.post(
+            "/operators/check-in",
+            headers=op_headers,
+            json={"workspaces": [bad]},
+        )
+        assert r.status_code == 422, bad
     assert check_in["relay_url"] == settings.relay_url
     payload = jwt.decode(
         check_in["relay_token"],
@@ -143,6 +219,21 @@ def test_operators(
         owner_account_id=user.account.id,
     )
     db.add(hub_project)
+    su = db.exec(
+        select(User).where(User.email == settings.FIRST_SUPERUSER)
+    ).one()
+    private, public = [
+        Project(
+            name=f"{kind}-{uuid.uuid4().hex[:6]}",
+            title=kind,
+            git_repo_url=f"https://github.com/someone/{kind}",
+            owner_account_id=su.account.id,
+            is_public=kind == "public",
+        )
+        for kind in ["private", "public"]
+    ]
+    db.add(private)
+    db.add(public)
     db.commit()
     # Checking in again updates workspaces in place, drops ones that are gone,
     # and reports runs in progress, which stages, and how the last run ended,
@@ -183,7 +274,20 @@ def test_operators(
                     "path": "/home/me/calkit/d",
                     "project": f"{user.account.name}/{hub_project.name.upper()}",
                 },
-                {"path": "/home/me/misc"},
+                # Another user's private project, which this one can't tell
+                # exists, and a public one
+                {
+                    "path": "/home/me/calkit/e",
+                    "project": f"{su.account.name}/{private.name}",
+                },
+                {
+                    "path": "/home/me/calkit/f",
+                    "project": f"{su.account.name}/{public.name}",
+                },
+                # A project that isn't named like one, and a path reported
+                # twice, of which only the first counts
+                {"path": "/home/me/misc", "project": "a/b/c"},
+                {"path": "/home/me/misc", "project": "someone/else"},
             ]
         },
     )
@@ -196,15 +300,24 @@ def test_operators(
         "/home/me/calkit/a",
         "/home/me/calkit/b",
         "/home/me/calkit/d",
+        "/home/me/calkit/e",
+        "/home/me/calkit/f",
         "/home/me/misc",
     ]
-    assert [w["on_hub"] for w in mine] == [False, False, True, False]
+    assert [w["on_hub"] for w in mine] == [
+        False,
+        False,
+        True,
+        False,
+        True,
+        False,
+    ]
     assert mine[0]["last_activity"] == "2026-09-29T12:00:00+00:00"
     assert mine[1]["last_activity"] is None
     # And which agents are running in them
     assert mine[0]["agents"] == [agent]
     assert mine[1]["agents"] == []
-    assert mine[3]["project"] is None
+    assert mine[5]["project"] is None
     assert mine[0]["running"] and mine[0]["running_stages"] == ["train"]
     assert mine[0]["running_since"] == "2026-09-29T12:05:00+00:00"
     assert mine[0]["last_run"] == last_run
@@ -232,23 +345,16 @@ def test_operators(
     assert r.json() == []
     r = client.get("/workspaces", headers=superuser_token_headers)
     assert op["id"] not in [w["operator_id"] for w in r.json()]
-    r = client.post(
-        f"/operators/{op['id']}/relay-token",
-        json=browser_key,
-        headers=superuser_token_headers,
-    )
+    r = relay_token(superuser_token_headers, None)
     assert r.status_code == 404
     # Opening sessions takes two-factor authentication, set up and recent
     user = db.get(User, uuid.UUID(check_in["user_id"]))
+    assert user is not None
     existing = db.get(UserTOTP, user.id)
     if existing is not None:
         db.delete(existing)
         db.commit()
-    r = client.post(
-        f"/operators/{op['id']}/relay-token",
-        json=browser_key,
-        headers=normal_user_token_headers,
-    )
+    r = relay_token(normal_user_token_headers, None)
     assert r.status_code == 403
     assert r.json()["detail"] == SECOND_FACTOR_SETUP_REQUIRED
     # Once set up, a session needs its own proof of entering a code: the
@@ -261,11 +367,7 @@ def test_operators(
     )
     db.add(totp)
     db.commit()
-    r = client.post(
-        f"/operators/{op['id']}/relay-token",
-        json=browser_key,
-        headers=normal_user_token_headers,
-    )
+    r = relay_token(normal_user_token_headers, None)
     assert r.status_code == 403
     assert r.json()["detail"] == SECOND_FACTOR_REQUIRED
     access_token = normal_user_token_headers["Authorization"].split()[1]
@@ -275,9 +377,6 @@ def test_operators(
         ]
     )
     second_factor = users.create_second_factor_token(user, session_id)
-    with_second_factor = normal_user_token_headers | {
-        "X-Second-Factor": second_factor
-    }
     # Another user's proof doesn't count, nor does the user's own from
     # another session
     for other in [
@@ -286,11 +385,7 @@ def test_operators(
         ),
         create_second_factor_token(user.id, uuid.uuid4(), timedelta(hours=1)),
     ]:
-        r = client.post(
-            f"/operators/{op['id']}/relay-token",
-            json=browser_key,
-            headers=normal_user_token_headers | {"X-Second-Factor": other},
-        )
+        r = relay_token(normal_user_token_headers, other)
         assert r.status_code == 403
     # Nor do logins that aren't a person signing in to the web app, e.g.,
     # the CLI's, a GitHub token's, or an emailed link's, even with proof
@@ -313,15 +408,11 @@ def test_operators(
         create_access_token(user.id, timedelta(minutes=5)),
         generate_email_verification_token(user.id, user.email),
     ]:
-        r = client.post(
-            f"/operators/{op['id']}/relay-token",
-            json=browser_key,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "X-Second-Factor": create_second_factor_token(
-                    user.id, cli_session_id, timedelta(hours=1)
-                ),
-            },
+        r = relay_token(
+            {"Authorization": f"Bearer {token}"},
+            create_second_factor_token(
+                user.id, cli_session_id, timedelta(hours=1)
+            ),
         )
         assert r.status_code == 403
     # Nor do tokens made for scripts, even with the proof
@@ -330,30 +421,47 @@ def test_operators(
         headers=normal_user_token_headers,
         json={"expires_days": 1, "scope": None},
     )
-    pat_headers = {
-        "Authorization": f"Bearer {r.json()['access_token']}",
-        "X-Second-Factor": second_factor,
-    }
-    r = client.post(
-        f"/operators/{op['id']}/relay-token",
-        json=browser_key,
-        headers=pat_headers,
-    )
+    pat_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = relay_token(pat_headers, second_factor)
     assert r.status_code == 403
-    # Browsers get a short-lived relay token for an online Operator
-    r = client.post(
-        f"/operators/{op['id']}/relay-token",
-        json=browser_key,
-        headers=with_second_factor,
-    )
+    # Browsers check the Operator's replies with its key, so it has to have
+    # sent one, which an Operator installed over SSH does at its first
+    # check-in, and which can't change after
+    r = relay_token(normal_user_token_headers, second_factor)
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Operator hasn't sent its key yet"
+    for key, status in [
+        (operator_jwk | {"y": operator_jwk["x"]}, 422),
+        (operator_jwk, 200),
+        (operator_jwk, 200),
+        (make_jwk(), 409),
+        (None, 200),
+    ]:
+        r = client.post(
+            "/operators/check-in",
+            headers=op_headers,
+            json={
+                "public_key": key,
+                "workspaces": [
+                    {"path": "/home/me/calkit/a", "project": project}
+                ],
+            },
+        )
+        assert r.status_code == status, r.text
+    assert r.json()["grant_public_key"] == op["grant_public_key"]
+    # Browsers get a short-lived relay token for an online Operator, and
+    # its key, which comes from the API, not the relay
+    r = relay_token(normal_user_token_headers, second_factor)
     assert r.status_code == 200, r.text
+    assert r.json()["operator_public_key"] == operator_jwk
     payload = jwt.decode(
         r.json()["token"], settings.RELAY_SECRET_KEY, algorithms=["HS256"]
     )
     assert payload["scope"] == "relay:browser"
     assert payload["sub"] == op["id"]
     # It carries a grant the API signed, which the Operator checks against
-    # the key it pinned when it registered, so the relay can't forge one
+    # the key the hub gives it at registration and check-in, so the relay
+    # can't forge one
     public_key = Ed25519PublicKey.from_public_bytes(
         base64.b64decode(op["grant_public_key"])
     )
@@ -363,32 +471,91 @@ def test_operators(
     assert grant["sub"] == str(user.id)
     assert check_in["grant_public_key"] == op["grant_public_key"]
     # The grant names the browser's key, so only messages it signs count,
-    # and the sign-in, so the channel closes once that ends
+    # and the sign-in, so the channel closes once that ends, as it does once
+    # the second factor stops counting; its ID binds the Operator's replies
+    # to it
     assert grant["cnf"] == {"jwk": jwk}
     assert grant["sid"] == str(session_id)
+    assert grant["jti"] == r.json()["grant_id"]
+    assert (
+        grant["tfa_exp"]
+        == jwt.decode(second_factor, options={"verify_signature": False})[
+            "exp"
+        ]
+    )
+    assert abs(grant["iat"] - time.time()) < 10
     # A key that isn't on the curve, or isn't a key, is refused
     for bad in [
         jwk | {"y": jwk["x"]},
         jwk | {"crv": "P-384"},
         {"kty": "EC", "crv": "P-256", "x": "short", "y": jwk["y"]},
     ]:
-        r = client.post(
-            f"/operators/{op['id']}/relay-token",
-            json={"public_key": bad},
-            headers=with_second_factor,
+        r = relay_token(
+            normal_user_token_headers, second_factor, {"public_key": bad}
         )
         assert r.status_code == 422, bad
-    # An Operator that stopped checking in is offline
+    # The machine's CLI token is fetched by the Operator over HTTPS, never
+    # sent through the relay, and only once its owner has asked for one,
+    # within 10 minutes, with a second factor
+    cli_token_request = f"/operators/{op['id']}/cli-token-request"
+    r = client.post("/operators/cli-token", headers=op_headers)
+    assert r.status_code == 403
+    assert r.json()["detail"] == "No token was requested"
+    for headers, factor in [
+        (normal_user_token_headers, None),
+        (pat_headers, second_factor),
+        (superuser_token_headers, None),
+    ]:
+        client.cookies.clear()
+        if factor is not None:
+            client.cookies.set(users.SECOND_FACTOR_COOKIE, factor)
+        r = client.post(cli_token_request, headers=headers)
+        assert r.status_code in (403, 404), r.text
+    r = client.post("/operators/cli-token", headers=op_headers)
+    assert r.status_code == 403
+    client.cookies.set(users.SECOND_FACTOR_COOKIE, second_factor)
+    tokens = []
+    for _ in range(2):
+        r = client.post(cli_token_request, headers=normal_user_token_headers)
+        assert r.status_code == 200, r.text
+        r = client.post("/operators/cli-token", headers=op_headers)
+        assert r.status_code == 200, r.text
+        tokens.append(r.json()["token"])
+        # Once
+        r = client.post("/operators/cli-token", headers=op_headers)
+        assert r.status_code == 403
+    # It's a full token of the owner's, tied to the Operator, and a new one
+    # replaces the one before
+    first, cli_token = tokens
+    assert cli_token.startswith("ckp_")
+    r = client.get("/user", headers={"Authorization": f"Bearer {cli_token}"})
+    assert r.status_code == 200 and r.json()["id"] == str(user.id)
+    r = client.get("/user", headers={"Authorization": f"Bearer {first}"})
+    assert r.status_code == 403
+    stored = db.exec(
+        select(UserToken)
+        .where(UserToken.operator_id == uuid.UUID(op["id"]))
+        .where(UserToken.is_active)
+    ).one()
+    assert stored.description == f"Operator {op['name']}"
+    # A request that's too old lapses
+    r = client.post(cli_token_request, headers=normal_user_token_headers)
     operator = db.get(Operator, uuid.UUID(op["id"]))
     assert operator is not None
+    db.refresh(operator)
+    assert operator.cli_token_requested_at is not None
+    operator.cli_token_requested_at -= timedelta(minutes=11)
+    db.add(operator)
+    db.commit()
+    r = client.post("/operators/cli-token", headers=op_headers)
+    assert r.status_code == 403
+    # An Operator that stopped checking in is offline
     operator.last_seen = utcnow() - timedelta(minutes=10)
     db.add(operator)
     db.commit()
-    r = client.post(
-        f"/operators/{op['id']}/relay-token",
-        json=browser_key,
-        headers=with_second_factor,
-    )
+    r = relay_token(normal_user_token_headers, second_factor)
+    assert r.status_code == 409
+    r = client.post(cli_token_request, headers=normal_user_token_headers)
     assert r.status_code == 409
     # An Operator in cron mode that's between check-ins is asleep, and waking
     # it tells it to connect at its next check-in
@@ -489,24 +656,125 @@ def test_operators(
     db.add(other_sign_in)
     db.commit()
     assert ended(session_id, other_session_id) == {str(other_session_id)}
-    # Revoking stops its token working
-    r = client.delete(
-        f"/operators/{op['id']}", headers=normal_user_token_headers
-    )
+    # Revoking takes a signed-in session, not a token, stops its token
+    # working, deactivates the CLI token issued to its machine, and tells
+    # the owner
+    r = client.delete(f"/operators/{op['id']}", headers=pat_headers)
+    assert r.status_code == 403
+    with patch("app.api.routes.operators.send_email") as send:
+        r = client.delete(
+            f"/operators/{op['id']}", headers=normal_user_token_headers
+        )
     assert r.status_code == 200
+    assert send.call_args.kwargs["email_to"] == user.email
+    assert "revoked" in send.call_args.kwargs["subject"]
     r = client.post("/operators/check-in", headers=op_headers, json={})
     assert r.status_code == 403
     assert "revoked" in r.json()["detail"]
+    r = client.get("/user", headers={"Authorization": f"Bearer {cli_token}"})
+    assert r.status_code == 403
     r = client.get("/operators", headers=normal_user_token_headers)
     assert op["id"] not in [o["id"] for o in r.json()]
     # A revoked Operator's name can be used again
     r = client.post(
         "/operators",
         headers=normal_user_token_headers,
-        json={"name": op["name"]},
+        json={"name": op["name"], "public_key": operator_jwk},
     )
     assert r.status_code == 200, r.text
     assert r.json()["name"] == op["name"]
+    # An Operator can revoke itself, e.g., when it's uninstalled, which
+    # takes its CLI token with it too
+    again = r.json()
+    again_headers = {"Authorization": f"Bearer {again['token']}"}
+    r = client.post(
+        f"/operators/{again['id']}/cli-token-request",
+        headers=normal_user_token_headers,
+    )
+    assert r.status_code == 409
+    r = client.post("/operators/check-in", headers=again_headers, json={})
+    r = client.post(
+        f"/operators/{again['id']}/cli-token-request",
+        headers=normal_user_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    r = client.post("/operators/cli-token", headers=again_headers)
+    again_cli = {"Authorization": f"Bearer {r.json()['token']}"}
+    with patch("app.api.routes.operators.send_email"):
+        r = client.delete("/operators/self", headers=again_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == again["id"] and not r.json()["is_active"]
+    r = client.post("/operators/check-in", headers=again_headers, json={})
+    assert r.status_code == 403
+    assert client.get("/user", headers=again_cli).status_code == 403
+    client.cookies.clear()
+
+
+def test_operator_owner_limits(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    from app.tests import (
+        authentication_token_from_email,
+        create_random_user,
+    )
+
+    user = create_random_user(db)
+    user.email_verified_at = utcnow()
+    db.add(user)
+    db.commit()
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    r = client.post("/operators", headers=headers, json={"name": "first"})
+    assert r.status_code == 200, r.text
+    op_headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    # A user can only have so many active Operators
+    for n in range(49):
+        db.add(
+            Operator(
+                user_id=user.id,
+                name=f"op-{n}",
+                selector=uuid.uuid4().hex,
+                hashed_verifier=uuid.uuid4().hex,
+            )
+        )
+    db.commit()
+    r = client.post("/operators", headers=headers, json={"name": "another"})
+    assert r.status_code == 409
+    # Deactivating the owner revokes their Operators, and ends every sign-in
+    # their channels came from
+    session_id = uuid.uuid4()
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash=uuid.uuid4().hex,
+            expires=utcnow() + timedelta(days=1),
+            session_id=session_id,
+            interactive=True,
+        )
+    )
+    db.commit()
+    r = client.post(
+        "/operators/check-in",
+        headers=op_headers,
+        json={"channel_sessions": [str(session_id)]},
+    )
+    assert r.json()["ended_sessions"] == []
+    operator = db.exec(
+        select(Operator)
+        .where(Operator.user_id == user.id)
+        .where(Operator.name == "first")
+    ).one()
+    user.is_active = False
+    db.add(user)
+    db.commit()
+    from app.api.routes.operators import _ended_sessions
+
+    db.refresh(operator)
+    assert _ended_sessions(db, operator, [session_id]) == [session_id]
+    r = client.post("/operators/check-in", headers=op_headers, json={})
+    assert r.status_code == 403
+    assert "revoked" in r.json()["detail"]
 
 
 def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -518,12 +786,18 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
     operator_id = uuid.uuid4()
     user_id = uuid.uuid4()
 
-    def token(kind, grant=None):
+    def token(
+        kind: Literal["operator", "browser"],
+        grant: str | None = None,
+        user: uuid.UUID = user_id,
+        operator: uuid.UUID = operator_id,
+        seconds: int = 60,
+    ) -> str:
         return create_relay_token(
             kind,
-            operator_id=operator_id,
-            user_id=user_id,
-            expires_delta=timedelta(minutes=1),
+            operator_id=operator,
+            user_id=user,
+            expires_delta=timedelta(seconds=seconds),
             grant=grant,
         )
 
@@ -591,3 +865,58 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
                 with pytest.raises(WebSocketDisconnect) as e:
                     browser_ws.receive_text()
                 assert e.value.code == relay.CLOSE_UNAUTHORIZED
+        # Health says nothing about who's connected
+        assert client.get("/health").json() == {"ok": True}
+        # A binary or oversized first message closes the connection, once
+        big = "x" * (relay.MAX_MESSAGE_BYTES + 1)
+        cases: list[tuple[str, bytes | str, int]] = [
+            ("/operator", b"\0", relay.CLOSE_UNSUPPORTED),
+            ("/browser", big, relay.CLOSE_TOO_BIG),
+        ]
+        for path, data, code in cases:
+            with client.websocket_connect(path) as ws:
+                if isinstance(data, bytes):
+                    ws.send_bytes(data)
+                else:
+                    ws.send_text(data)
+                with pytest.raises(WebSocketDisconnect) as e:
+                    ws.receive_text()
+            assert e.value.code == code
+        # Too many connections waiting to send a token are turned away
+        monkeypatch.setattr(relay, "MAX_UNAUTHENTICATED", 0)
+        with pytest.raises(WebSocketDisconnect) as e:
+            with client.websocket_connect("/operator") as ws:
+                ws.receive_text()
+        assert e.value.code == relay.CLOSE_TRY_AGAIN
+        monkeypatch.undo()
+        monkeypatch.setenv("RELAY_SECRET_KEY", settings.RELAY_SECRET_KEY)
+        with connect(client, "/operator", token("operator")) as op_ws:
+            # Browsers only reach their own user's Operators
+            stranger = token("browser", user=uuid.uuid4())
+            with connect(client, "/browser", stranger) as browser_ws:
+                with pytest.raises(WebSocketDisconnect) as e:
+                    browser_ws.receive_text()
+            assert e.value.code == relay.CLOSE_UNAUTHORIZED
+        # An Operator's connection closes once its token expires, unless it
+        # sends a new one, which has to be for it
+        with connect(
+            client, "/operator", token("operator", seconds=2)
+        ) as op_ws:
+            for bad in [
+                "nope",
+                token("browser"),
+                token("operator", operator=uuid.uuid4()),
+                token("operator", user=uuid.uuid4()),
+            ]:
+                op_ws.send_json({"type": "auth.refresh", "token": bad})
+            refreshed = token("operator", seconds=60)
+            op_ws.send_json({"type": "auth.refresh", "token": refreshed})
+            time.sleep(2.5)
+            with connect(client, "/browser", token("browser")):
+                assert op_ws.receive_json()["type"] == "channel.open"
+        with connect(
+            client, "/operator", token("operator", seconds=1)
+        ) as op_ws:
+            with pytest.raises(WebSocketDisconnect) as e:
+                op_ws.receive_text()
+            assert e.value.code == relay.CLOSE_UNAUTHORIZED

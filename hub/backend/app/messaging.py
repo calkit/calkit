@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import emails  # type: ignore
 from jinja2 import Template
@@ -148,6 +148,62 @@ def generate_confirm_email_change_email(
             "new_email": new_email,
             "code": code,
             "valid_minutes": EMAIL_VERIFICATION_CODE_MINUTES,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_email_changed_email(email_to: str, new_email: str) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Your email was changed"
+    html_content = render_email_template(
+        template_name="email_changed.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "new_email": new_email,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_two_factor_locked_email(email_to: str, minutes: int) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Two-factor authentication locked"
+    html_content = render_email_template(
+        template_name="two_factor_locked.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "minutes": minutes,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_operator_email(
+    email_to: str,
+    event: Literal["registered", "revoked"],
+    name: str,
+    hostname: str | None,
+    platform: str | None,
+    machine_id: str | None,
+) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = {
+        "registered": f"{project_name} - New Operator {name}",
+        "revoked": f"{project_name} - Operator {name} revoked",
+    }[event]
+    html_content = render_email_template(
+        template_name=f"operator_{event}.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "name": name,
+            "hostname": hostname or "an unknown host",
+            "platform": platform or "unknown platform",
+            "machine_id": machine_id or "unknown",
+            "link": f"{settings.frontend_host}/settings?tab=operators",
         },
     )
     return EmailData(html_content=html_content, subject=subject)

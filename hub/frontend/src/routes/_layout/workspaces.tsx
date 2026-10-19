@@ -15,9 +15,10 @@ import {
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import {
-  Link as RouterLink,
   createFileRoute,
   redirect,
+  Link as RouterLink,
+  linkOptions,
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import {
@@ -451,6 +452,13 @@ function Workspaces() {
   const selectedConn = selectedWorkspace
     ? getConnection(selectedWorkspace.operator_id)
     : undefined
+  // Reported by the Operator, so only linked when it's a hub project name
+  const projectMatch = selectedWorkspace?.project?.match(
+    /^([a-z0-9][a-z0-9-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/,
+  )
+  const projectParams = projectMatch
+    ? { accountName: projectMatch[1], projectName: projectMatch[2] }
+    : undefined
   return (
     <Flex h="100%" w="100%" direction={{ base: "column", lg: "row" }}>
       <Box
@@ -666,15 +674,17 @@ function Workspaces() {
                 <Code fontSize="xs">{selectedSession.label}</Code>
               )}
               <Flex gap={2} ml="auto">
-                {selectedWorkspace.project && (
+                {projectParams && (
                   <Button
                     as={RouterLink}
                     size="xs"
                     variant="outline"
-                    to={`/${selectedWorkspace.project}/workspaces` as any}
-                    search={
-                      { workspace: workspaceKey(selectedWorkspace) } as any
-                    }
+                    // Checked here, since Chakra's "as" loses the types
+                    {...linkOptions({
+                      to: "/$accountName/$projectName/workspaces",
+                      params: projectParams,
+                      search: { workspace: workspaceKey(selectedWorkspace) },
+                    })}
                   >
                     Open project
                   </Button>

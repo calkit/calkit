@@ -197,9 +197,10 @@ function AgentLog({
                     {e.role === "user" ? "You" : agent?.tool ?? "Agent"}
                   </Text>
                   {e.role === "assistant" ? (
-                    // Agents write Markdown, as their terminals render it
+                    // Agents write Markdown, as their terminals render it,
+                    // but what they read can steer it, so nothing loads
                     <Box fontSize="sm">
-                      <Markdown>{e.text}</Markdown>
+                      <Markdown untrusted>{e.text}</Markdown>
                     </Box>
                   ) : (
                     <Text fontSize="sm" whiteSpace="pre-wrap">

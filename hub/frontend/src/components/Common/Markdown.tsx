@@ -58,6 +58,11 @@ interface MarkdownProps {
     /** The directory the text's file is in; the repo root by default. */
     dir?: string
   }
+  /**
+   * Text nobody vetted, e.g., an agent's output: raw HTML is left out and
+   * images become links, so nothing loads from elsewhere by itself.
+   */
+  untrusted?: boolean
 }
 
 /** The repo path an image source points at, resolved against the directory
@@ -136,6 +141,15 @@ const BlueLink = (props: any) => {
   return <Link variant="blue" {...props} />
 }
 
+// An image in untrusted text, as a link to it rather than a request for it
+const imageLink = ({ src, alt }: any) => {
+  return (
+    <Link variant="blue" href={src} isExternal rel="noreferrer">
+      {alt || src}
+    </Link>
+  )
+}
+
 const inlineParagraph = ({ children, ...props }: any) => {
   return (
     <Text as="span" my={0} {...props}>
@@ -207,6 +221,7 @@ const Markdown = ({
   noOfLines,
   foldedProse = false,
   repo,
+  untrusted = false,
 }: MarkdownProps) => {
   const tableBorderColor = useColorModeValue("gray.200", "whiteAlpha.300")
   const tableHeaderBg = useColorModeValue("gray.50", "whiteAlpha.100")
@@ -335,10 +350,10 @@ const Markdown = ({
       pre,
       code,
       a: BlueLink,
-      ...(repoImage ? { img: repoImage } : {}),
+      ...(untrusted ? { img: imageLink } : repoImage ? { img: repoImage } : {}),
       ...tableComponents,
     }),
-    [inline, tableComponents, repoImage],
+    [inline, tableComponents, repoImage, untrusted],
   )
 
   return (
@@ -384,7 +399,7 @@ const Markdown = ({
         unwrapDisallowed={inline}
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[
-          rehypeRaw,
+          ...(untrusted ? [] : [rehypeRaw]),
           [rehypeSanitize, sanitizeSchema],
           rehypeKatex,
         ]}

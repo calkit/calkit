@@ -435,6 +435,8 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.tls.certresolver=le
       # Limits how many connections each client address can hold open
       - traefik.http.middlewares.${STACK_NAME?Variable not set}-relay-inflight.inflightreq.amount=50
+      # By the connection's own address, since by default it groups by host
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-relay-inflight.inflightreq.sourcecriterion.ipstrategy.depth=0
       - traefik.http.routers.${STACK_NAME?Variable not set}-relay-https.middlewares=${STACK_NAME?Variable not set}-relay-inflight
 
   texmf-proxy:

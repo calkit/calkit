@@ -7805,7 +7805,10 @@ def get_project_pipeline(
     commit_sha = resolve_commit_sha(repo, ref)
     mermaid_key = (
         cache.make_key(
-            "mermaid", f"{owner_name}/{project_name}".lower(), commit_sha
+            # Versioned, since older entries have unescaped labels
+            "mermaid-v2",
+            f"{owner_name}/{project_name}".lower(),
+            commit_sha,
         )
         if commit_sha
         else None

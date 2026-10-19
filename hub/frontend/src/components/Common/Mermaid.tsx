@@ -95,13 +95,15 @@ const Mermaid = ({
         mermaid.initialize({
           startOnLoad: false,
           theme: "dark",
-          securityLevel: "loose",
+          // The source comes from the repo's dvc.yaml, so labels are
+          // sanitized and `click` directives ignored; our own node click
+          // handlers are attached below, after rendering
+          securityLevel: "strict",
           fontFamily: "monospace",
           // Mermaid's own default is 500, past which it throws instead of
           // drawing anything. A real pipeline crosses that easily -- a
           // hundred-odd stages wired to their inputs and outputs is a few
-          // hundred edges -- and the graph is the project's own, not
-          // untrusted input, so the guard only costs us the diagram.
+          // hundred edges -- and the edge count only costs layout time.
           maxEdges: 5000,
         })
         setRenderError(null)

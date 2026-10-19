@@ -96,22 +96,65 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     # not
     _init_project(os.path.join(home, "calkit", "demo"))
     _init_project(os.path.join(home, "dev", "tool"), name="tool")
+    # A project's name is whatever its repo says, so only ones the hub could
+    # have are reported
+    _init_project(os.path.join(home, "dev", "odd"), owner="a b", name="c")
+    # Nor does looking at one run anything its own Git config says, e.g.,
+    # in one unpacked from an archive rather than cloned
+    ran = os.path.join(home, "ran")
+    if sys.platform != "win32":
+        hook = os.path.join(home, "fsmonitor.sh")
+        with open(hook, "w") as f:
+            f.write(f"#!/bin/sh\ntouch {shlex.quote(ran)}\n")
+        os.chmod(hook, 0o755)
+        subprocess.run(
+            ["git", "config", "core.fsmonitor", hook],
+            cwd=os.path.join(home, "dev", "odd"),
+            check=True,
+        )
     os.makedirs(os.path.join(home, "dev", "not-calkit"))
     os.makedirs(os.path.join(home, "calkit", "not-a-project"))
     with open(os.path.join(home, "calkit", "demo", "notes.txt"), "w") as f:
         f.write("uncommitted")
-    # The hub's grant key is pinned at the first check-in of an Operator
-    # registered before grants were signed, and never replaced after
+    # The hub's grant key, which comes over HTTPS, is the one grants are
+    # checked with, so a new one replaces the old
+    from requests.exceptions import HTTPError
+
     from calkit import hub
 
     keys = iter(["key1", "key2"])
-    monkeypatch.setattr(
-        hub, "_request", lambda *a, **kw: {"grant_public_key": next(keys)}
-    )
+    posted = []
+
+    def request(*args: Any, **kwargs: Any) -> dict:
+        posted.append(kwargs["json"])
+        return {"grant_public_key": next(keys)}
+
+    monkeypatch.setattr(hub, "_request", request)
     cfg = {"token": "cko_x", "api_url": "https://api.hub", "workspaces": []}
     operator.check_in(cfg, [], "service")
+    assert (operator.load_config() or {})["grant_public_key"] == "key1"
     operator.check_in(cfg, [], "service")
-    assert operator.load_config()["grant_public_key"] == "key1"
+    assert (operator.load_config() or {})["grant_public_key"] == "key2"
+    # The Operator's own public key goes with each, which the hub keeps
+    # the first time, for browsers to check replies with
+    assert posted[0]["public_key"] == operator.get_operator_public_jwk()
+    assert posted[1]["public_key"] == posted[0]["public_key"]
+    # A hub that has another key for it is refused, and installing again
+    # registers it anew
+    response = SimpleNamespace(status_code=409)
+
+    def conflict(*args: Any, **kwargs: Any) -> dict:
+        raise HTTPError("409: Operator key doesn't match", response=response)
+
+    monkeypatch.setattr(hub, "_request", conflict)
+    with pytest.raises(operator.OperatorKeyRejected):
+        operator.check_in(cfg, [], "service")
+    assert (operator.load_config() or {})["key_rejected"]
+    # Revoked, it stops
+    response.status_code = 403
+    with pytest.raises(operator.OperatorRevoked) as revoked:
+        operator.check_in(cfg, [], "service")
+    assert not isinstance(revoked.value, operator.OperatorKeyRejected)
     # Registered projects elsewhere are found, but only once
     elsewhere = os.path.join(home, "src", "other")
     _init_project(elsewhere, name="other")
@@ -132,9 +175,12 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     assert set(workspaces) == {
         "calkit/demo",
         "dev/tool",
+        "dev/odd",
         "src/other",
         ".calkit/workspaces/calkit.io/alice/demo",
     }
+    assert workspaces["dev/odd"]["project"] is None
+    assert not os.path.exists(ran)
     demo = workspaces["calkit/demo"]
     assert demo["kind"] == "personal"
     assert demo["project"] == "alice/demo"
@@ -395,6 +441,7 @@ async def test_sessions(tmp_path, monkeypatch):
     import time
 
     import jwt
+    from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -402,6 +449,7 @@ async def test_sessions(tmp_path, monkeypatch):
     )
     from cryptography.hazmat.primitives.asymmetric.utils import (
         decode_dss_signature,
+        encode_dss_signature,
     )
     from cryptography.hazmat.primitives.serialization import (
         Encoding,
@@ -412,15 +460,16 @@ async def test_sessions(tmp_path, monkeypatch):
     public_key = base64.b64encode(
         hub_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     ).decode()
-    op = operator.Operator(
-        {
-            "id": "op1",
-            "user_id": "owner",
-            "grant_public_key": public_key,
-            "workspaces": [],
-        }
-    )
+    cfg = {
+        "id": "op1",
+        "user_id": "owner",
+        "grant_public_key": public_key,
+        "workspaces": [],
+    }
+    op = operator.Operator(cfg)
     op.workspaces = operator.discover_workspaces(op.cfg)
+    # Channels are only opened while the hub can be heard from
+    op.last_check_in = time.monotonic()
 
     def b64url(data: bytes) -> str:
         return base64.urlsafe_b64encode(data).decode().rstrip("=")
@@ -447,15 +496,18 @@ async def test_sessions(tmp_path, monkeypatch):
         jti=None,
         jwk=None,
         sid="sign-in-1",
+        tfa_exp=None,
         drop=(),
     ):
         payload = {
             "exp": time.time() + expires_in,
+            "iat": int(time.time()),
             "aud": aud,
             "sub": sub,
             "jti": jti or os.urandom(8).hex(),
             "cnf": {"jwk": jwk or browser_jwk},
             "sid": sid,
+            "tfa_exp": int(time.time()) + 3600 if tfa_exp is None else tfa_exp,
         }
         for k in drop:
             del payload[k]
@@ -479,8 +531,7 @@ async def test_sessions(tmp_path, monkeypatch):
 
     workspace = op.workspaces[0]["path"]
 
-    # Messages go out unescaped, since escaping a TUI's box drawing makes
-    # each character up to 12 bytes, which can pass the relay's limit
+    # What reaches the relay, in order
     class FakeSocket:
         def __init__(self):
             self.sent: list[str] = []
@@ -489,15 +540,61 @@ async def test_sessions(tmp_path, monkeypatch):
             self.sent.append(text)
 
     op.ws = FakeSocket()
-    await operator.Operator.send(op, "x", {"data": "───"})
-    assert op.ws.sent == ['{"ch": "x", "msg": {"data": "───"}}']
-    op.ws = None
-    sent: list[tuple[str, dict]] = []
+    grant_ids: dict[str, str] = {}
 
-    async def send(ch, msg):
-        sent.append((ch, msg))
+    def open_channel(ch: str, **kwargs: Any) -> None:
+        grant_ids[ch] = kwargs.setdefault("jti", os.urandom(8).hex())
+        seqs[ch] = 0
+        cleared_seqs[ch] = 0
+        op.on_relay_message(
+            {"type": "channel.open", "ch": ch, "grant": grant(**kwargs)}
+        )
 
-    monkeypatch.setattr(op, "send", send)
+    def operator_public_key() -> Any:
+        return operator.get_operator_key().public_key()
+
+    def verify(signed: dict, grant_id: str) -> None:
+        raw = base64.urlsafe_b64decode(signed["sig"] + "==")
+        operator_public_key().verify(
+            encode_dss_signature(
+                int.from_bytes(raw[:32], "big"),
+                int.from_bytes(raw[32:], "big"),
+            ),
+            f"{operator.REPLY_SIGNATURE_CONTEXT}\n{grant_id}\n"
+            f"{signed['seq']}\n{signed['body']}".encode(),
+            ec.ECDSA(hashes.SHA256()),
+        )
+
+    # Replies a browser would take, each signed by the Operator for its
+    # channel's grant, in order
+    # The last reply's sequence number on each channel before what's in
+    # the log, which is cleared as the test goes
+    cleared_seqs: dict[str, int] = {}
+
+    def sent() -> list[tuple[str, dict]]:
+        replies, last = [], dict(cleared_seqs)
+        for text in op.ws.sent:
+            frame = json.loads(text)
+            if "msg" not in frame:
+                continue
+            ch, signed = frame["ch"], frame["msg"]
+            verify(signed, grant_ids[ch])
+            assert signed["seq"] == last.get(ch, 0) + 1
+            last[ch] = signed["seq"]
+            replies.append((ch, json.loads(signed["body"])))
+        return replies
+
+    def to_relay() -> list[dict]:
+        return [
+            json.loads(t) for t in op.ws.sent if "msg" not in json.loads(t)
+        ]
+
+    def clear() -> None:
+        for text in op.ws.sent:
+            frame = json.loads(text)
+            if "msg" in frame:
+                cleared_seqs[frame["ch"]] = frame["msg"]["seq"]
+        op.ws.sent.clear()
 
     async def wait_for(predicate, timeout=10.0):
         deadline = asyncio.get_running_loop().time() + timeout
@@ -508,12 +605,12 @@ async def test_sessions(tmp_path, monkeypatch):
     def output(ch):
         return "".join(
             m["data"]
-            for c, m in sent
+            for c, m in sent()
             if c == ch and m["type"] == "sessions.output"
         )
 
     def reply(req_id):
-        replies = [m for _, m in sent if m.get("id") == req_id]
+        replies = [m for _, m in sent() if m.get("id") == req_id]
         return replies[0] if replies else None
 
     def message(ch, msg):
@@ -522,10 +619,28 @@ async def test_sessions(tmp_path, monkeypatch):
         )
 
     # Channels are refused unless the hub signed a grant for the owner to use
-    # this Operator, whatever the relay says, and each grant works once
-    used = grant(jti="used")
-    op.on_relay_message({"type": "channel.open", "ch": "u", "grant": used})
+    # this Operator, whatever the relay says, and each grant works once,
+    # even after a restart
+    open_channel("u", jti="used")
     op.on_relay_message({"type": "channel.close", "ch": "u"})
+    restarted = operator.Operator(cfg)
+    restarted.ws = FakeSocket()
+    restarted.last_check_in = time.monotonic()
+    used = grant(jti="used")
+    restarted.on_relay_message(
+        {"type": "channel.open", "ch": "u", "grant": used}
+    )
+    assert restarted.channels == {}
+    await asyncio.sleep(0.05)
+    assert [json.loads(t) for t in restarted.ws.sent] == [
+        {"type": "channel.close", "ch": "u"}
+    ]
+    if sys.platform != "win32":
+        used_path = os.path.join(operator.operator_dir(), "used-grants.json")
+        assert stat.S_IMODE(os.stat(used_path).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(operator.operator_dir()).st_mode) == 0o700
+    await asyncio.sleep(0.05)
+    clear()
     for bad in [
         None,
         "nope",
@@ -533,9 +648,14 @@ async def test_sessions(tmp_path, monkeypatch):
         grant(aud="op2"),
         grant(expires_in=-120),
         grant(key=Ed25519PrivateKey.generate()),
-        # Grants name the browser's key and sign-in
+        # Grants name the browser's key and sign-in, when they were issued,
+        # and when their second factor expires, which mustn't have passed
         grant(drop=["cnf"]),
         grant(drop=["sid"]),
+        grant(drop=["iat"]),
+        grant(drop=["tfa_exp"]),
+        grant(tfa_exp=int(time.time()) - 5),
+        grant(tfa_exp="later"),
         grant(jwk=browser_jwk | {"y": browser_jwk["x"]}),
         used,
     ]:
@@ -548,32 +668,83 @@ async def test_sessions(tmp_path, monkeypatch):
             }
         )
         message("x", {"type": "sessions.list", "id": 1})
+    # Nor while the hub can't be heard from, so ended sign-ins would go
+    # unnoticed
+    op.last_check_in = time.monotonic() - operator.CHECK_IN_GRACE_SECONDS
+    open_channel("x")
+    op.last_check_in = time.monotonic()
+    # The relay names channels, and only plainly
+    for bad_ch in ["a b", "x" * 65, "a\nb", 7]:
+        op.on_relay_message(
+            {"type": "channel.open", "ch": bad_ch, "grant": grant()}
+        )
     await asyncio.sleep(0.1)
-    assert sent == []
-    op.on_relay_message({"type": "channel.open", "ch": "a", "grant": grant()})
+    assert op.channels == {}
+    assert sent() == []
+    assert {json.dumps(m) for m in to_relay()} == {
+        '{"type": "channel.close", "ch": "x"}'
+    }
+    clear()
+    # A channel's first reply says it's ready, signed with the Operator's
+    # key for that channel's grant only, so the relay can't move replies
+    # from one channel to another
+    open_channel("a")
+    await wait_for(lambda: sent())
+    assert sent() == [("a", {"type": "channel.ready"})]
+    first = json.loads(op.ws.sent[0])["msg"]
+    with pytest.raises(InvalidSignature):
+        verify(first, "another-grant")
+    if sys.platform != "win32":
+        key_path = os.path.join(operator.operator_dir(), "operator-key.pem")
+        assert stat.S_IMODE(os.stat(key_path).st_mode) == 0o600
+    # It's the key the hub is told about
+    numbers = operator_public_key().public_numbers()
+    jwk = operator.get_operator_public_jwk()
+    assert jwk["kty"] == "EC" and jwk["crv"] == "P-256"
+    assert operator._b64url_decode(jwk["x"]) == numbers.x.to_bytes(32, "big")
+    assert len(jwk["x"]) == len(jwk["y"]) == 43
+    # Replies go out unescaped, since escaping a TUI's box drawing makes
+    # each character up to 12 bytes, which can pass the relay's limit
+    op.send_soon("a", {"data": "───"})
+    await wait_for(lambda: len(sent()) == 2)
+    assert "───" in op.ws.sent[-1]
+    clear()
     # On an open channel, only messages the browser signed count, each once
-    # and in order, so the relay that carried the grant can't act with it
+    # and in order, without any missing, e.g., a keystroke, so the relay that
+    # carried the grant can't act with it; anything else closes the channel
     listing = {"type": "sessions.list", "id": 20}
     other_key, _ = browser_key()
-    signed = sign("a", listing)
-    for bad in [
-        listing,
-        signed | {"body": json.dumps(listing | {"id": 21})},
-        signed | {"sig": signed["sig"][:-4] + "AAAA"},
-        sign("a", listing, key=other_key),
-        signed | {"seq": True},
-    ]:
-        op.on_relay_message({"type": "channel.message", "ch": "a", "msg": bad})
+    for i, make_bad in enumerate(
+        [
+            lambda ch: listing,
+            lambda ch: (
+                sign(ch, listing) | {"body": json.dumps(listing | {"id": 21})}
+            ),
+            lambda ch: sign(ch, listing) | {"sig": "A" * 86},
+            lambda ch: sign(ch, listing, key=other_key),
+            lambda ch: sign(ch, listing) | {"seq": True},
+            lambda ch: sign(ch, listing, seq=2),
+            lambda ch: sign(ch, listing, seq=0),
+        ]
+    ):
+        ch = f"bad{i}"
+        open_channel(ch)
+        op.on_relay_message(
+            {"type": "channel.message", "ch": ch, "msg": make_bad(ch)}
+        )
+        assert ch not in op.channels
     await asyncio.sleep(0.1)
-    assert sent == []
+    assert all(m["type"] == "channel.ready" for _, m in sent())
+    assert [m["ch"] for m in to_relay()] == [f"bad{i}" for i in range(7)]
+    clear()
+    open_channel("a")
+    signed = sign("a", listing)
     op.on_relay_message({"type": "channel.message", "ch": "a", "msg": signed})
     await wait_for(lambda: reply(20))
-    sent.clear()
+    # Replaying one closes it too
     op.on_relay_message({"type": "channel.message", "ch": "a", "msg": signed})
-    earlier = sign("a", listing | {"id": 22}, seq=signed["seq"] - 1)
-    op.on_relay_message({"type": "channel.message", "ch": "a", "msg": earlier})
-    await asyncio.sleep(0.1)
-    assert sent == []
+    assert "a" not in op.channels
+    clear()
     # Signed as sent, as the hub's tests check with the same vector, from
     # hub/frontend/src/components/Operators/connection.test.ts
     vector = {
@@ -592,9 +763,15 @@ async def test_sessions(tmp_path, monkeypatch):
     }
     auth = operator.check_grant(op.cfg, grant(jwk=vector["jwk"]), {})
     assert auth is not None
+    auth.seq = 6
     assert operator.open_signed_message(
         auth, {k: vector[k] for k in ["seq", "body", "sig"]}
     ) == {"type": "sessions.input", "session": "s1", "data": "ls ─\n"}
+    # A type that isn't a string is refused without ending the channel
+    open_channel("a")
+    message("a", {"type": ["x"], "id": 30})
+    await wait_for(lambda: reply(30))
+    assert reply(30) == {"type": "error", "id": 30, "error": "Invalid type"}
     # Only allowed workspaces can have sessions
     message("a", {"type": "sessions.open", "id": 2, "workspace": "/"})
     await wait_for(lambda: reply(2))
@@ -617,12 +794,31 @@ async def test_sessions(tmp_path, monkeypatch):
     paste = ("true " + "x" * 64 + "\n") * 300 + "echo PASTED-$((2*3))\n"
     message("a", {"type": "sessions.input", "session": sid, "data": paste})
     await wait_for(lambda: "PASTED-6" in output("a"), timeout=30)
+    # A session doesn't get another's terminal, nor anything else the
+    # Operator has open, which a shell that lists what it has shows
+    assert not os.get_inheritable(op.sessions[sid].fd)
+    lister = tmp_path / "lister.sh"
+    lister.write_text(
+        "#!/bin/sh\necho \"FDS:$(ls /dev/fd | tr '\\n' ' '):FDS\"\n"
+        'exec /bin/sh "$@"\n'
+    )
+    lister.chmod(0o755)
+    monkeypatch.setenv("SHELL", str(lister))
+    message("a", {"type": "sessions.open", "id": 7, "workspace": workspace})
+    await wait_for(lambda: reply(7))
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    second = reply(7)["result"]["session"]
+    await wait_for(lambda: ":FDS" in output("a"))
+    listed = output("a").split("FDS:")[1].split(":FDS")[0].split()
+    assert "0" in listed and str(op.sessions[sid].fd) not in listed
+    message("a", {"type": "sessions.close", "session": second})
+    await wait_for(lambda: second not in op.sessions)
     # A second channel attaching gets the scrollback replayed
-    op.on_relay_message({"type": "channel.open", "ch": "b", "grant": grant()})
+    open_channel("b")
     message("b", {"type": "sessions.attach", "id": 4, "session": sid})
     await wait_for(lambda: "HI-42" in output("b"))
     # Marked, so the browser doesn't answer queries in it a second time
-    outputs = [(c, m) for c, m in sent if m["type"] == "sessions.output"]
+    outputs = [(c, m) for c, m in sent() if m["type"] == "sessions.output"]
     assert all(m.get("replay") for c, m in outputs if c == "b")
     assert not any(
         m.get("replay") for c, m in outputs if c == "a" and "HI" in m["data"]
@@ -631,7 +827,7 @@ async def test_sessions(tmp_path, monkeypatch):
     op.on_relay_message({"type": "channel.close", "ch": "a"})
     op.on_relay_message({"type": "channel.close", "ch": "b"})
     assert op.sessions[sid].channels == set()
-    op.on_relay_message({"type": "channel.open", "ch": "c", "grant": grant()})
+    open_channel("c")
     message("c", {"type": "sessions.list", "id": 5})
     await wait_for(lambda: reply(5))
     assert [s["id"] for s in reply(5)["result"]["sessions"]] == [sid]
@@ -640,37 +836,75 @@ async def test_sessions(tmp_path, monkeypatch):
         "c", {"type": "sessions.input", "session": sid, "data": "exit 3\n"}
     )
     await wait_for(
-        lambda: [m for _, m in sent if m["type"] == "sessions.exit"]
+        lambda: [
+            m for c, m in sent() if c == "c" and m["type"] == "sessions.exit"
+        ]
     )
-    exits = [m for _, m in sent if m["type"] == "sessions.exit"]
+    exits = [m for c, m in sent() if c == "c" and m["type"] == "sessions.exit"]
     assert exits == [{"type": "sessions.exit", "session": sid, "code": 3}]
     assert op.sessions == {}
+    # A reply too large for the relay is an error instead, and a browser too
+    # far behind is closed
+    message("c", {"type": "sessions.list", "id": 8})
+    await wait_for(lambda: reply(8))
+    clear()
+    op.send_soon("c", {"type": "result", "id": 9, "result": "\x1b" * 100_000})
+    await wait_for(lambda: reply(9))
+    assert reply(9)["type"] == "error"
+    monkeypatch.setattr(operator, "MAX_CHANNEL_BACKLOG_BYTES", 1000)
+    open_channel("slow")
+    op.send_soon("slow", {"data": "x" * 900})
+    assert "slow" not in op.channels
+    monkeypatch.setattr(operator, "MAX_CHANNEL_BACKLOG_BYTES", 2**20)
+    await asyncio.sleep(0.1)
+    clear()
     # Channels close once the sign-in they came from ends, e.g., with a
-    # password change, which check-ins hear about
-    op.on_relay_message(
-        {"type": "channel.open", "ch": "d", "grant": grant(sid="sign-in-2")}
-    )
+    # password change, which check-ins hear about, and the relay is given
+    # a fresh token for the connection
+    open_channel("d", sid="sign-in-2")
     checked_in: list[list[str]] = []
 
     def fake_check_in(cfg, workspaces, mode, connected, restart, sessions):
         checked_in.append(sessions)
-        return {"ended_sessions": ["sign-in-2"]}
+        return {"ended_sessions": ["sign-in-2"], "relay_token": "tok2"}
 
     monkeypatch.setattr(operator, "check_in", fake_check_in)
     monkeypatch.setattr(operator, "discover_workspaces", lambda cfg: [])
-    op.ws = FakeSocket()
     await op.check_in()
     assert checked_in == [["sign-in-1", "sign-in-2"]]
     assert set(op.channels) == {"c"}
-    # The relay is asked to close it, though it's refused here regardless
-    assert op.ws.sent == ['{"type": "channel.close", "ch": "d"}']
-    op.ws = None
-    sent.clear()
-    message("d", {"type": "sessions.list", "id": 30})
     await asyncio.sleep(0.1)
-    assert sent == []
+    # The relay is asked to close it, though it's refused here regardless
+    assert to_relay() == [
+        {"type": "channel.close", "ch": "d"},
+        {"type": "auth.refresh", "token": "tok2"},
+    ]
+    clear()
+    message("d", {"type": "sessions.list", "id": 31})
+    await asyncio.sleep(0.1)
+    assert sent() == []
+
+    # A new grant key from the hub, which comes over HTTPS, replaces the
+    # one grants were checked with, so channels opened with the old one close
+    def new_key(cfg: dict, *args: Any) -> dict:
+        cfg["grant_public_key"] = "other"
+        return {}
+
+    monkeypatch.setattr(operator, "check_in", new_key)
+    await op.check_in()
+    assert op.channels == {}
+    cfg["grant_public_key"] = public_key
+    # They close once their second factor expires, and while the hub can't
+    # be reached
+    open_channel("e")
+    open_channel("f")
+    op.channels["e"].tfa_exp = time.time() - 1
+    op.expire_channels()
+    assert set(op.channels) == {"f"}
+    op.last_check_in = time.monotonic() - operator.CHECK_IN_GRACE_SECONDS
+    op.expire_channels()
+    assert op.channels == {}
     # With nothing using it, an Operator with an idle limit stops
-    op.on_relay_message({"type": "channel.close", "ch": "c"})
     op.idle_exit_seconds = 0.1
     await asyncio.wait_for(op.wait_until_idle(), 5)
 
@@ -722,10 +956,10 @@ def test_service_files(tmp_path, monkeypatch):
     import plistlib
 
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    # Started from /, without what's there on the import path, so modules
+    # in the home folder, e.g., a pty.py, can't stand in for its own
     command = [
-        sys.executable,
-        "-m",
-        "calkit",
+        *operator.CALKIT_COMMAND,
         "operator",
         "start",
         "--hub",
@@ -733,12 +967,21 @@ def test_service_files(tmp_path, monkeypatch):
         "--mode",
         "service",
     ]
+    (tmp_path / "typer.py").write_text("raise SystemExit('shadowed')\n")
+    version = subprocess.run(
+        [*operator.CALKIT_COMMAND, "--version"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert version.returncode == 0, version.stderr
     # launchd restarts it on failure, but not after it exits because it
     # was revoked
     agent = plistlib.loads(operator._launchd_plist(at_boot=False))
     assert agent["ProgramArguments"] == command
     assert agent["KeepAlive"] == {"SuccessfulExit": False}
     assert agent["StandardOutPath"] == operator.get_log_path()
+    assert agent["WorkingDirectory"] == "/"
     assert "UserName" not in agent
     # Not throttled like a background job
     assert agent["ProcessType"] == "Interactive"
@@ -750,6 +993,10 @@ def test_service_files(tmp_path, monkeypatch):
     if sys.platform != "win32":
         daemon = plistlib.loads(operator._launchd_plist(at_boot=True))
         assert daemon["UserName"]
+        # launchd opens its log as root, so the Operator writes its own
+        assert daemon["StandardOutPath"] == "/dev/null"
+        assert daemon["StandardErrorPath"] == "/dev/null"
+        assert daemon["ProgramArguments"] == [*command, "--log-file"]
         assert operator._launchd_plist_path(at_boot=True).startswith(
             "/Library/LaunchDaemons/"
         )
@@ -762,8 +1009,17 @@ def test_service_files(tmp_path, monkeypatch):
     assert 'cmd /c ""' in script and '2>&1"""' in script
     unit = operator._systemd_unit()
     assert f"ExecStart={shlex.join(command)}" in unit
+    assert "WorkingDirectory=/\n" in unit
     assert "Restart=on-failure" in unit
     assert "WantedBy=default.target" in unit
+    # What systemd would expand in a path is escaped
+    with monkeypatch.context() as m:
+        m.setattr(
+            operator, "CALKIT_COMMAND", ["/opt/py%x$y/python", "-c", "x"]
+        )
+        assert (
+            "ExecStart='/opt/py%%x$$y/python' -c x" in operator._systemd_unit()
+        )
     # Restarting a loaded launchd agent happens in place, since booting it
     # out returns before it has stopped, so booting it in again fails;
     # one that isn't loaded is started
@@ -865,7 +1121,8 @@ def test_service_files(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Cron and flock are POSIX")
 def test_cron_and_lock(tmp_path, monkeypatch):
-    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
+    # A % in a path would be a newline to cron
+    monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path / "home%1"))
     # A fake crontab that keeps its table in a file
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -887,7 +1144,15 @@ def test_cron_and_lock(tmp_path, monkeypatch):
     ours = [line for line in lines if line.endswith(operator.cron_marker())]
     assert [line.split()[0] for line in ours] == ["*/5", "@reboot"]
     assert all("--mode cron" in line for line in ours)
-    assert all(operator.get_log_path() in line for line in ours)
+    # From /, so nothing in the home folder is on its import path
+    assert all(" cd / && " in line for line in ours)
+    log = operator.get_log_path()
+    assert "%" in log
+    assert all(log.replace("%", "\\%") in line for line in ours)
+    assert all("%" not in line.replace("\\%", "") for line in ours)
+    # Its folder and log are the user's alone, e.g., on a shared login node
+    assert stat.S_IMODE(os.stat(log).st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(os.path.dirname(log)).st_mode) == 0o700
     assert "cron" in operator.get_service_status()
     operator.uninstall_service()
     assert table.read_text().splitlines() == ["0 * * * * echo mine"]
@@ -1047,6 +1312,60 @@ def test_workspace_actions(tmp_path, monkeypatch):
         with pytest.raises(ValueError):
             operator.save_workspace(wdir, ["link/secret"])
         os.remove(os.path.join(wdir, "link"))
+        # Nor are files a repo committed as links followed out of it, e.g.,
+        # a .gitignore linked to ~/.bashrc, or a pipeline linked elsewhere
+        with open(outside, "w") as f:
+            f.write("export SECRET=1\n")
+        for fname in [".gitignore", "dvc.yaml", "calkit.yaml"]:
+            moved = os.path.join(wdir, fname + ".real")
+            had = os.path.lexists(os.path.join(wdir, fname))
+            if had:
+                os.rename(os.path.join(wdir, fname), moved)
+            os.symlink(outside, os.path.join(wdir, fname))
+            with pytest.raises(ValueError, match="link"):
+                if fname == ".gitignore":
+                    operator.ignore_path(wdir, "scratch.log")
+                else:
+                    operator.add_stage(wdir, name="s", cmd="echo", outs=["o"])
+            if fname == "dvc.yaml":
+                assert operator.get_stage_list(wdir, None) == []
+            os.remove(os.path.join(wdir, fname))
+            if had:
+                os.rename(moved, os.path.join(wdir, fname))
+        with open(outside) as f:
+            assert f.read() == "export SECRET=1\n"
+        # Or a log named like the latest run's
+        logs = os.path.join(wdir, ".calkit", "logs")
+        os.makedirs(logs)
+        os.symlink(outside, os.path.join(logs, "9999-zz.log"))
+        assert operator.get_run_log(wdir) == {"name": None, "log": None}
+        shutil.rmtree(os.path.join(wdir, ".calkit"))
+        os.remove(outside)
+    # The machine's credentials never go in a commit, even when a repo's
+    # own .gitignore lets them through, nor anything else of this machine's
+    dvc_ignore = os.path.join(wdir, ".dvc", ".gitignore")
+    with open(dvc_ignore) as f:
+        dvc_ignored = f.read()
+    with open(dvc_ignore, "w") as f:
+        f.write("/tmp\n/cache\n")
+    local_config = os.path.join(wdir, ".dvc", "config.local")
+    with open(local_config, "w") as f:
+        f.write(
+            "['remote \"calkit\"']\n"
+            "    url = HTTPS://attacker.example/dvc\n"
+            "    custom_auth_header = Authorization\n"
+            "    password = Bearer ckp_token\n"
+        )
+    for bad_paths in [
+        [".dvc"],
+        [".dvc/config.local"],
+        [".DVC/Config.local"],
+        ["."],
+    ]:
+        with pytest.raises(ValueError, match="credentials"):
+            operator.save_workspace(wdir, bad_paths)
+    with open(dvc_ignore, "w") as f:
+        f.write(dvc_ignored)
     # Ignoring commits the .gitignore change
     operator.ignore_path(wdir, "scratch.log")
     status = operator.get_workspace_status(wdir, fetch=False)
@@ -1125,6 +1444,21 @@ def test_workspace_actions(tmp_path, monkeypatch):
     # The hub follows a run through its log, named by when it started
     run_log = operator.get_run_log(wdir)
     assert run_log["name"].endswith(".log") and "plot" in run_log["log"]
+    # Only the end of a run's output and its log is kept, however long
+    with open(os.path.join(local, "logs", "9999-zz.log"), "w") as f:
+        f.write("old\n" + "x" * 300_000 + "\nEND")
+    run_log = operator.get_run_log(wdir)
+    assert len(run_log["log"]) == 50_000 and run_log["log"].endswith("END")
+    os.remove(os.path.join(local, "logs", "9999-zz.log"))
+    with monkeypatch.context() as m:
+        m.setattr(
+            operator,
+            "CALKIT_COMMAND",
+            [sys.executable, "-c", "print('y' * 300_000, end='END')"],
+        )
+        result = operator.run_pipeline(wdir)
+    assert result["ok"] and len(result["output"]) == 50_000
+    assert result["output"].endswith("END")
     # Stopping needs a run in progress, and a run the hub started stops
     # with everything it started
     with pytest.raises(ValueError):
@@ -1342,8 +1676,12 @@ def test_workspace_actions(tmp_path, monkeypatch):
 
     commit("a.txt", "a", other)
     git("push", "-q", cwd=other)
+    # Pulling clears the hub's token from remotes the repo points elsewhere,
+    # e.g., with a scheme in capitals, before DVC sends it there
+    assert "ckp_token" in open(local_config).read()
     assert operator.pull_workspace(wdir) == {"diverged": False}
     assert os.path.isfile(os.path.join(wdir, "a.txt"))
+    assert "ckp_token" not in open(local_config).read()
     commit("b.txt", "b", other)
     git("push", "-q", cwd=other)
     commit("c.txt", "c", wdir)
@@ -1417,28 +1755,75 @@ def test_machine_setup(tmp_path, monkeypatch):
     assert operator.check_machine_setup(missing)["repo"]["error"]
     ssh = operator.check_machine_setup("git@example.com:someone/demo.git")
     assert ssh["repo"]["host"] == "example.com" and ssh["repo"]["ssh"]
-    # What's missing can be set from the hub
+    # What's missing can be set from the hub, which hands the token to the
+    # Operator over HTTPS when the owner asked for one, never through the
+    # relay
+    from requests.exceptions import HTTPError
+
+    from calkit import hub
+
     token = "ckp_" + "ab" * 32
+    cfg = {"token": "cko_op", "api_url": "https://api.hub"}
+    hub_token: dict[str, str] | None = {"token": token}
+    requests: list[tuple[str, str, dict]] = []
+
+    def request(kind: str, path: str, **kwargs: Any) -> dict | None:
+        requests.append((kind, path, kwargs))
+        if hub_token is None:
+            response = SimpleNamespace(status_code=403)
+            raise HTTPError("403: No token was requested", response=response)
+        return hub_token
+
+    monkeypatch.setattr(hub, "_request", request)
     operator.configure_machine(
-        git_name=" Ada Lovelace ", git_email="ada@example.com", token=token
+        git_name=" Ada Lovelace ",
+        git_email="ada@example.com",
+        token=True,
+        cfg=cfg,
     )
+    ((kind, req_path, kwargs),) = requests
+    assert (kind, req_path) == ("post", "/operators/cli-token")
+    assert kwargs["headers"] == {"Authorization": "Bearer cko_op"}
+    assert kwargs["base_url"] == "https://api.hub" and not kwargs["auth"]
     setup = operator.check_machine_setup(url)
     assert setup["git_name"] == "Ada Lovelace"
     assert setup["git_email"] == "ada@example.com"
     assert setup["token"]
     assert config.read().token == token
-    # But nothing that isn't what it says it is
-    for kwargs in [
+    # But nothing that isn't what it says it is, including a token sent
+    # with the request, as the relay could
+    bad_kwargs: list[dict[str, Any]] = [
         {"git_name": ""},
         {"git_name": "a\n[core]\n\tsshCommand = evil"},
+        {"git_name": ["x"]},
         {"git_email": "not-an-email"},
+        {"token": token},
         {"token": "abc"},
-        {"token": token + "\n"},
-    ]:
+        {"token": True},
+    ]
+    for kwargs in bad_kwargs:
         with pytest.raises(ValueError):
             operator.configure_machine(**kwargs)
+    # Nor one the hub didn't hand out, or one it sent wrong
+    for hub_token in [None, {"token": token + "\n"}, {}]:
+        with pytest.raises(ValueError):
+            operator.configure_machine(token=True, cfg=cfg)
+    hub_token = {"token": token}
     assert operator.check_machine_setup(url)["git_name"] == "Ada Lovelace"
-    for bad in ["", "/etc", "--upload-pack=touch /tmp/x"]:
+    bad_urls: list[Any] = [
+        "",
+        "/etc",
+        "--upload-pack=touch /tmp/x",
+        "https://example.com",
+        "https://user@example.com/someone/demo",
+        "https://example.com/someone/demo extra",
+        "https://example.com/someone/demo\nx",
+        "git@-oProxyCommand=x:someone/demo",
+        "git@example.com:-x",
+        "ssh://example.com/someone/demo",
+        ["https://example.com/someone/demo"],
+    ]
+    for bad in bad_urls:
         with pytest.raises(ValueError):
             operator.check_machine_setup(bad)
 
@@ -1449,7 +1834,7 @@ def test_machine_setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config.Settings, "write", locked)
     with pytest.raises(RuntimeError, match="calkit config set token"):
-        operator.configure_machine(token=token)
+        operator.configure_machine(token=True, cfg=cfg)
     # A machine with no SSH key gets one to add to the Git host, and one that
     # has a key keeps it
     if shutil.which("ssh-keygen"):
@@ -1532,10 +1917,15 @@ def test_install_remote(monkeypatch):
     runs = []
     remote_config = {"text": ""}
 
+    uid = ["1000"]
+
     def run(argv, **kwargs):
         runs.append((argv, kwargs.get("input")))
         if "cat ~/.calkit/operators/calkit.io/config.yaml 2>" in argv[-1]:
-            return SimpleNamespace(stdout=remote_config["text"])
+            # Anything a login prints comes first
+            return SimpleNamespace(
+                stdout=f"Welcome\ncalkit-uid={uid[0]}\n{remote_config['text']}"
+            )
         if fail_install and "operator install" in argv[-1]:
             raise subprocess.CalledProcessError(1, argv)
         return SimpleNamespace(stdout="")
@@ -1547,6 +1937,9 @@ def test_install_remote(monkeypatch):
     assert posted["hostname"] == "login1.cluster"
     assert posted["platform"] == "linux"
     assert posted["hosts"] == ["cluster", "login1.cluster"]
+    # without its key, which the Operator there sends at its first
+    # check-in
+    assert "public_key" not in posted
     # Its config goes over SSH, readable only by the user, then Calkit there
     # installs it in the mode asked for
     _, (write_argv, config_text), (install_argv, _) = runs
@@ -1578,22 +1971,42 @@ def test_install_remote(monkeypatch):
     operator.install_remote("cluster")
     assert posted["hostname"] == "login1.cluster"
     assert len(runs) == 3
-    # A registration whose install fails is revoked
-    remote_config["text"] = ""
-    fail_install = True
+    # As is one whose key the hub refused, which is revoked with its own
+    # token first
     deleted = []
     monkeypatch.setattr(
         hub,
         "_request",
         lambda kind, path, **kw: (
-            deleted.append(path)
+            deleted.append((path, kw.get("headers")))
             if kind == "delete"
             else request(kind, path, **kw)
         ),
     )
+    remote_config["text"] = yaml.safe_dump(cfg | {"key_rejected": True})
+    posted.clear()
+    runs.clear()
+    operator.install_remote("cluster")
+    assert posted["hostname"] == "login1.cluster"
+    assert deleted == [
+        ("/operators/self", {"Authorization": "Bearer cko_secret"})
+    ]
+    # A registration whose install fails is revoked, with its own token,
+    # since the user's may not be from a sign-in that can
+    remote_config["text"] = ""
+    fail_install = True
+    deleted.clear()
     with pytest.raises(subprocess.CalledProcessError):
         operator.install_remote("cluster")
-    assert deleted == ["/operators/op1"]
+    assert deleted == [
+        ("/operators/self", {"Authorization": "Bearer cko_secret"})
+    ]
+    # Sessions would be root shells, so it's never installed as root there
+    uid[0] = "0"
+    posted.clear()
+    with pytest.raises(ValueError, match="root"):
+        operator.install_remote("root@cluster")
+    assert posted == {}
 
 
 def test_hubs(tmp_path, monkeypatch):
@@ -1683,20 +2096,50 @@ def test_workspace_lock(tmp_path, monkeypatch):
             os.path.join(wdir, ".calkit", "local", "operator.lock"), "w"
         ) as f:
             json.dump({"hub": "http://localhost", "pid": other.pid}, f)
-        with pytest.raises(ValueError, match="http://localhost"):
+        # Without saying which hub, which is none of this one's business
+        with pytest.raises(ValueError, match="another hub"):
             operator.claim_workspace(wdir)
         (ws,) = [
             w
             for w in operator.discover_workspaces({})
             if w["path"] == os.path.realpath(wdir)
         ]
-        assert ws["in_use_by"] == "http://localhost"
+        assert ws["in_use_by"] == "another hub"
+        # One the repo committed was written by no Operator
+        subprocess.run(
+            ["git", "add", "-f", operator.LOCK_PATH], cwd=wdir, check=True
+        )
+        assert operator.workspace_lock_holder(wdir) is None
+        subprocess.run(
+            ["git", "rm", "-q", "--cached", operator.LOCK_PATH],
+            cwd=wdir,
+            check=True,
+        )
+        assert operator.workspace_lock_holder(wdir) is not None
     finally:
         other.kill()
         other.wait()
     operator.claim_workspace(wdir)
     assert operator.workspace_lock_holder(wdir)["pid"] == os.getpid()
     operator.release_workspace(wdir)
+    # Nor is a lock written through a link the repo committed
+    if sys.platform != "win32":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        shutil.rmtree(os.path.join(wdir, ".calkit", "local"))
+        os.symlink(outside, os.path.join(wdir, ".calkit", "local"))
+        with pytest.raises(ValueError):
+            operator.claim_workspace(wdir)
+        os.remove(os.path.join(wdir, ".calkit", "local"))
+        os.makedirs(os.path.join(wdir, ".calkit", "local"))
+        os.symlink(
+            outside / "lock",
+            os.path.join(wdir, ".calkit", "local", "operator.lock"),
+        )
+        assert operator.workspace_lock_holder(wdir) is None
+        operator.claim_workspace(wdir)
+        operator.release_workspace(wdir)
+        assert list(outside.iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -1704,6 +2147,8 @@ async def test_relay_connection(monkeypatch):
     import websockets.asyncio.client
 
     sent = []
+    # What the relay sends, including what isn't JSON or an object
+    incoming = ["not json", "[1]", '{"type": "first"}', '{"type": "second"}']
 
     class FakeSocket:
         async def send(self, text):
@@ -1713,6 +2158,8 @@ async def test_relay_connection(monkeypatch):
             return self
 
         async def __anext__(self):
+            if incoming:
+                return incoming.pop(0)
             # Open for a moment, as a real connection waits for messages
             await asyncio.sleep(0.05)
             raise StopAsyncIteration
@@ -1736,8 +2183,17 @@ async def test_relay_connection(monkeypatch):
         return {}
 
     monkeypatch.setattr(op, "check_in", check_in)
+    handled = []
+
+    # One that fails to be handled doesn't end the connection
+    def on_relay_message(frame: dict) -> None:
+        handled.append(frame["type"])
+        raise TypeError("unhashable type: 'list'")
+
+    monkeypatch.setattr(op, "on_relay_message", on_relay_message)
     await op.connect({"relay_url": "wss://relay.hub", "relay_token": "tok"})
     await op.connected_check_in
+    assert handled == ["first", "second"]
     # The token goes in the first message, and the Operator checks in as
     # connected right away, so the hub doesn't show it offline until the
     # next regular check-in

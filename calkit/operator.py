@@ -24,6 +24,7 @@ import subprocess
 import sys
 import uuid
 import warnings
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,16 +37,31 @@ SCROLLBACK_BYTES = 256 * 1024
 # Output is batched this long so a burst of redraws goes out as one message
 OUTPUT_COALESCE_SECONDS = 0.02
 # Terminal output is full of escape sequences, which JSON escapes to six
-# characters each, so chunks stay well under the relay's message limit
-OUTPUT_CHUNK_CHARS = 32 * 1024
+# characters each and again to seven in a signed reply's body, so chunks stay
+# well under the relay's message limit
+OUTPUT_CHUNK_CHARS = 16 * 1024
 RECONNECT_MAX_DELAY_SECONDS = 60
 # Messages from the relay are at most 256 KiB, plus its wrapping
 MAX_FRAME_BYTES = 1024 * 1024
+# What the relay takes in one message, with room to spare
+MAX_SEND_BYTES = 250_000
+# Replies waiting to go to one browser, past which it's too far behind and
+# its channel is closed, so a slow one can't make this hold everything
+MAX_CHANNEL_BACKLOG_BYTES = 8 * 1024 * 1024
+# How often channels are checked for an expired second factor
+CHANNEL_CHECK_SECONDS = 30
+# Without a check-in for this long, the Operator can't hear of ended
+# sign-ins, so it closes its channels until it can
+CHECK_IN_GRACE_SECONDS = 600
+# What the relay names channels, which the Operator logs
+CHANNEL_ID_PATTERN = r"[A-Za-z0-9_-]{1,64}"
 # Session input waiting for its terminal to drain, e.g., a long paste
 MAX_INPUT_BUFFER_BYTES = 1024 * 1024
 # In cron mode, the Operator exits after this long with no sessions or
 # browsers, and cron starts it again when the hub asks
 CRON_IDLE_EXIT_SECONDS = 900
+# So a file a repo committed as a link isn't followed out of it
+NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 # Folders in the home directory whose Calkit projects are workspaces
 WORKSPACE_ROOTS = ["calkit", "dev"]
 # How often to check whether Calkit was upgraded or a restart was asked for
@@ -69,6 +85,10 @@ _inherited_hub = os.environ.get("CALKIT_HUB")
 
 class OperatorRevoked(Exception):
     pass
+
+
+class OperatorKeyRejected(OperatorRevoked):
+    """The hub has another key for this Operator, so it mustn't connect."""
 
 
 def select_hub(hub_url: str | None = None) -> str:
@@ -172,15 +192,110 @@ def list_configured_hubs() -> list[str]:
     return hubs
 
 
+def _private_dir(path: str) -> str:
+    """Make a folder only the user can open, e.g., an Operator's, which on
+    a shared login node others could otherwise look in.
+    """
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    if os.name == "posix":
+        os.chmod(path, 0o700)
+    return path
+
+
 def _write_private(fpath: str, text: str) -> None:
     """Write a file only the user can read, e.g., one holding a token."""
-    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    _private_dir(os.path.dirname(fpath))
     fd = os.open(fpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     # A file that already existed keeps its mode otherwise
     if hasattr(os, "fchmod"):
         os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(text)
+
+
+def _private_log() -> str:
+    """Create the log, if it isn't there, so only the user can read it, as
+    what service managers and cron create is readable by anyone.
+    """
+    fpath = get_log_path()
+    _private_dir(os.path.dirname(fpath))
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+    fd = os.open(fpath, flags | NOFOLLOW, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    return fpath
+
+
+def get_operator_key() -> Any:
+    """This Operator's own P-256 key, made the first time it's needed, which
+    it signs what it sends browsers with, so they know it's from here.
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    fpath = os.path.join(operator_dir(), "operator-key.pem")
+    if os.path.isfile(fpath):
+        with open(fpath, "rb") as f:
+            key = serialization.load_pem_private_key(f.read(), password=None)
+        if isinstance(key, ec.EllipticCurvePrivateKey) and isinstance(
+            key.curve, ec.SECP256R1
+        ):
+            return key
+        raise ValueError(f"{fpath} isn't a P-256 key")
+    key = ec.generate_private_key(ec.SECP256R1())
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    _write_private(fpath, pem.decode())
+    return key
+
+
+def get_operator_public_jwk() -> dict:
+    """The public half of this Operator's key, as a JSON Web Key."""
+    import base64
+
+    numbers = get_operator_key().public_key().public_numbers()
+    return {
+        "kty": "EC",
+        "crv": "P-256",
+        **{
+            name: base64.urlsafe_b64encode(value.to_bytes(32, "big"))
+            .decode()
+            .rstrip("=")
+            for name, value in [("x", numbers.x), ("y", numbers.y)]
+        },
+    }
+
+
+def _used_grants_path() -> str:
+    return os.path.join(operator_dir(), "used-grants.json")
+
+
+def load_used_grants() -> dict[str, float]:
+    """IDs of grants channels were opened with, and when they expire, kept
+    across restarts, so a grant can't be used again after one.
+    """
+    try:
+        with open(_used_grants_path()) as f:
+            used = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(used, dict):
+        return {}
+    return {
+        str(jti): float(exp)
+        for jti, exp in used.items()
+        if isinstance(exp, (int, float))
+    }
+
+
+def save_used_grants(used: dict[str, float]) -> None:
+    _write_private(_used_grants_path(), json.dumps(used))
 
 
 def load_config() -> dict | None:
@@ -268,6 +383,8 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
             platform=platform.system().lower(),
             calkit_version=calkit.__version__,
             hosts=hosts or [hostname],
+            # So browsers can tell its replies from anyone else's
+            public_key=get_operator_public_jwk(),
         ),
     )
     cfg = dict(
@@ -282,6 +399,39 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
     )
     save_config(cfg)
     return cfg
+
+
+def revoke_self(cfg: dict) -> None:
+    """Revoke an Operator on the hub with its own token, which works however
+    the user is signed in, taking one already revoked as done.
+    """
+    from requests.exceptions import HTTPError
+
+    from calkit import hub
+
+    try:
+        hub._request(
+            "delete",
+            "/operators/self",
+            headers={"Authorization": f"Bearer {cfg['token']}"},
+            auth=False,
+            allow_login=False,
+            base_url=cfg["api_url"],
+            max_retries=2,
+        )
+    except HTTPError as e:
+        # Its token is refused once it's revoked
+        status = e.response.status_code if e.response is not None else None
+        if status not in (401, 403, 410):
+            raise
+
+
+def refuse_root() -> None:
+    """Refuse to run as root, since sessions would be root shells."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        raise ValueError(
+            "The Operator can't run as root; run it as your own user"
+        )
 
 
 def install_remote(
@@ -315,14 +465,31 @@ def install_remote(
     target = ws.ensure_reachable(target, interactive=interactive)
     ws.ensure_calkit_installed(target, interactive=interactive, required=True)
     # Reinstalling, e.g., to change mode, keeps the Operator it already has
-    # rather than leaving that one behind on the hub
-    existing = subprocess.run(
-        target.login_argv(f"cat {remote_config} 2>/dev/null || true"),
+    # rather than leaving that one behind on the hub. Who it would run as is
+    # asked at the same time, to save logging in again.
+    out = subprocess.run(
+        target.login_argv(
+            f'echo "calkit-uid=$(id -u)" && cat {remote_config} 2>/dev/null '
+            "|| true"
+        ),
         capture_output=True,
         text=True,
     ).stdout
+    # After anything a login prints first
+    uid, _, existing = out.partition("calkit-uid=")[2].partition("\n")
+    if uid.strip() == "0":
+        raise ValueError(
+            "The Operator can't run as root; install it as another user"
+        )
     cfg = yaml.safe_load(existing) if existing.strip() else None
     registered = False
+    # One whose key the hub refused is replaced, since it can't connect
+    if isinstance(cfg, dict) and cfg.get("key_rejected"):
+        try:
+            revoke_self(cfg)
+        except Exception:
+            pass
+        cfg = None
     if not is_registered(cfg):
         info = ws.remote_system_info(target)
         hostname = info.get("hostname") or host
@@ -376,13 +543,33 @@ def install_remote(
     except Exception:
         # A registration nothing can use would linger on the hub
         if registered:
-            hub._request("delete", f"/operators/{cfg['id']}")
+            revoke_self(cfg)
         raise
     return dict(cfg)
 
 
-def _workspace_lock_path(wdir: str) -> str:
-    return os.path.join(wdir, ".calkit", "local", "operator.lock")
+def _open_in_workspace(wdir: str, path: str, mode: str = "r") -> Any:
+    """Open a file in a workspace for reading or writing, refusing a link or
+    a path through one out of it, since a repo can commit links to anywhere,
+    e.g., a .gitignore linked to ~/.bashrc.
+    """
+    root = os.path.realpath(wdir)
+    parent = os.path.realpath(os.path.join(root, os.path.dirname(path)))
+    if parent != root and not parent.startswith(root + os.sep):
+        raise ValueError(f"{path} is outside the workspace")
+    fpath = os.path.join(parent, os.path.basename(path))
+    if os.path.islink(fpath):
+        raise ValueError(f"{path} is a link, which the Operator won't follow")
+    flags = os.O_RDONLY if mode == "r" else os.O_WRONLY | os.O_CREAT
+    if mode == "w":
+        flags |= os.O_TRUNC
+    elif mode == "x":
+        flags |= os.O_EXCL
+    fd = os.open(fpath, flags | NOFOLLOW, 0o644)
+    return os.fdopen(fd, "r" if mode == "r" else "w")
+
+
+LOCK_PATH = ".calkit/local/operator.lock"
 
 
 def workspace_lock_holder(wdir: str) -> dict | None:
@@ -395,23 +582,39 @@ def workspace_lock_holder(wdir: str) -> dict | None:
     import psutil
 
     try:
-        with open(_workspace_lock_path(wdir)) as f:
+        with _open_in_workspace(wdir, LOCK_PATH) as f:
             holder = json.load(f)
     except (OSError, ValueError):
         return None
     if not isinstance(holder, dict):
         return None
     pid = holder.get("pid")
-    if not isinstance(pid, int):
+    if not isinstance(pid, int) or isinstance(pid, bool):
         return None
     if pid == os.getpid():
         return holder
     # One that's gone left a stale lock, as did one whose ID has since been
     # reused by something else
     try:
-        if "operator" not in " ".join(psutil.Process(pid).cmdline()):
+        proc = psutil.Process(pid)
+        if "operator" not in " ".join(proc.cmdline()):
+            return None
+        if hasattr(os, "getuid") and proc.uids().real != os.getuid():
             return None
     except (psutil.Error, SystemError):
+        return None
+    # A repo can commit one, which no Operator wrote
+    try:
+        tracked = subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "ls-files", "--", LOCK_PATH],
+            cwd=wdir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if tracked:
         return None
     return holder
 
@@ -425,15 +628,25 @@ def claim_workspace(wdir: str) -> None:
     if holder is not None:
         if holder.get("pid") == os.getpid():
             return
+        # Not saying which, since that's another hub's business
         raise ValueError(
-            "This workspace is in use by the Operator for "
-            f"{holder.get('hub', 'another hub')}"
+            "This workspace is in use by this machine's Operator for "
+            "another hub"
         )
-    fpath = _workspace_lock_path(wdir)
+    root = os.path.realpath(wdir)
+    local = os.path.realpath(os.path.join(root, os.path.dirname(LOCK_PATH)))
+    if not local.startswith(root + os.sep):
+        raise ValueError(".calkit/local is outside the workspace")
+    os.makedirs(local, exist_ok=True)
     # Which keeps it out of Git
-    calkit.ensure_local_dir(wdir)
-    tmp = f"{fpath}.{os.getpid()}"
-    with open(tmp, "w") as f:
+    if not os.path.lexists(os.path.join(local, ".gitignore")):
+        with _open_in_workspace(wdir, ".calkit/local/.gitignore", "w") as f:
+            f.write("*\n")
+    fpath = os.path.join(local, os.path.basename(LOCK_PATH))
+    tmp = f"{LOCK_PATH}.{os.getpid()}"
+    if os.path.lexists(os.path.join(root, tmp)):
+        os.remove(os.path.join(root, tmp))
+    with _open_in_workspace(wdir, tmp, "x") as f:
         json.dump(
             {
                 "hub": get_hub_url(),
@@ -442,7 +655,8 @@ def claim_workspace(wdir: str) -> None:
             },
             f,
         )
-    os.replace(tmp, fpath)
+    # Replacing a link, rather than writing through it
+    os.replace(os.path.join(root, tmp), fpath)
     # Another Operator may have claimed it at the same moment, in which
     # case only one of the writes stands
     holder = workspace_lock_holder(wdir)
@@ -455,9 +669,21 @@ def release_workspace(wdir: str) -> None:
     holder = workspace_lock_holder(wdir)
     if holder is not None and holder.get("pid") == os.getpid():
         try:
-            os.remove(_workspace_lock_path(wdir))
+            os.remove(os.path.join(wdir, LOCK_PATH))
         except OSError:
             pass
+
+
+# Git as discovery runs it in every folder that looks like a project, where
+# a repo's own config, e.g., in one unpacked from an archive rather than
+# cloned, mustn't be able to run anything
+SAFE_GIT = [
+    "git",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+]
 
 
 def discover_workspaces(cfg: dict) -> list[dict]:
@@ -472,7 +698,7 @@ def discover_workspaces(cfg: dict) -> list[dict]:
         """Branch, commit, dirtiness, and divergence of a checkout."""
         try:
             out = subprocess.run(
-                ["git", "status", "--porcelain=v2", "--branch"],
+                [*SAFE_GIT, "status", "--porcelain=v2", "--branch"],
                 cwd=path,
                 capture_output=True,
                 text=True,
@@ -507,7 +733,7 @@ def discover_workspaces(cfg: dict) -> list[dict]:
         times = []
         try:
             out = subprocess.run(
-                ["git", "log", "-1", "--format=%ct"],
+                [*SAFE_GIT, "log", "-1", "--format=%ct"],
                 cwd=path,
                 capture_output=True,
                 text=True,
@@ -572,11 +798,17 @@ def discover_workspaces(cfg: dict) -> list[dict]:
             project = calkit.detect_project_name(wdir=path)
         except Exception:
             project = None
-        # Another hub's Operator using it, which this one has to wait for
+        # Only names the hub could have, since it's whatever the repo says
+        if not isinstance(project, str) or not re.fullmatch(
+            r"[A-Za-z0-9._-]{1,128}/[A-Za-z0-9._-]{1,128}", project
+        ):
+            project = None
+        # Another hub's Operator using it, which this one has to wait for,
+        # without saying which hub, since that's none of this one's business
         holder = workspace_lock_holder(path)
         in_use_by = None
         if holder is not None and holder.get("hub") != get_hub_url():
-            in_use_by = holder.get("hub")
+            in_use_by = "another hub"
         ws = (
             dict(path=path, kind=kind, project=project, in_use_by=in_use_by)
             | _git_status(path)
@@ -628,6 +860,9 @@ def check_in(
                 connected=connected,
                 restart_pending=restart_pending,
                 channel_sessions=channel_sessions or [],
+                # Kept by the hub the first time, e.g., for one installed
+                # over SSH, and never replaced
+                public_key=get_operator_public_jwk(),
             ),
             headers={"Authorization": f"Bearer {cfg['token']}"},
             auth=False,
@@ -636,37 +871,55 @@ def check_in(
             max_retries=2,
         )
     except HTTPError as e:
-        if e.response is not None and e.response.status_code == 403:
+        status = e.response.status_code if e.response is not None else None
+        if status == 403:
             raise OperatorRevoked(str(e))
+        if status == 409:
+            # So 'calkit operator install' registers it again
+            cfg["key_rejected"] = True
+            save_config(cfg)
+            logger.error(
+                "The hub has a different key for this Operator, so it won't "
+                "connect; run 'calkit operator install' again"
+            )
+            raise OperatorKeyRejected(str(e))
         raise
-    # Operators registered before grants were signed pin the key now; one
-    # that's already pinned is never replaced
+    # The hub's, which came over HTTPS, so it's what grants are checked with
     key = resp.get("grant_public_key")
-    if key and not cfg.get("grant_public_key"):
+    if key and key != cfg.get("grant_public_key"):
+        if cfg.get("grant_public_key"):
+            logger.info("The hub's grant key changed")
         cfg["grant_public_key"] = key
         save_config(cfg)
-    elif key and key != cfg.get("grant_public_key"):
-        logger.warning(
-            "The hub's grant key changed, so browsers can't connect; "
-            "run 'calkit operator install' again if that's expected"
-        )
     return resp
 
 
 @dataclass
 class ChannelAuth:
     """What a channel's grant lets through: messages signed with the
-    browser's key, in order, while the sign-in it came from lasts.
+    browser's key, in order, while the sign-in it came from and its second
+    factor last.
     """
 
     key: Any
     session_id: str
-    # The last message's sequence number, which each next one must pass
+    # The grant's ID, which replies are signed with, so they only count on
+    # this channel
+    grant_id: str = ""
+    # When the second factor that let the grant be issued expires
+    tfa_exp: float = float("inf")
+    # The last message's sequence number, which the next one must follow
     seq: int = 0
+    # The last reply's, likewise
+    reply_seq: int = 0
+    # Bytes of replies waiting to be sent
+    backlog: int = 0
 
 
 # Signed with each browser message, so a signature means nothing elsewhere
 MESSAGE_SIGNATURE_CONTEXT = "calkit-operator-message"
+# Likewise for each reply, which browsers check
+REPLY_SIGNATURE_CONTEXT = "calkit-operator-reply"
 # How many of its channels' sign-ins a check-in can ask about
 MAX_CHANNEL_SESSIONS = 100
 
@@ -681,7 +934,8 @@ def check_grant(
     cfg: dict, grant: Any, used: dict[str, float]
 ) -> ChannelAuth | None:
     """What a channel may do, if its grant is one the hub signed for this
-    Operator's owner, and hasn't been used or expired.
+    Operator's owner, and hasn't been used or expired, nor has the second
+    factor it was issued with.
 
     This, rather than the relay's word, is what decides who opened a
     channel, so the relay alone can't run anything here. The grant names
@@ -706,7 +960,18 @@ def check_grant(
             Ed25519PublicKey.from_public_bytes(base64.b64decode(key)),
             algorithms=["EdDSA"],
             audience=str(cfg["id"]),
-            options={"require": ["exp", "aud", "sub", "jti", "cnf", "sid"]},
+            options={
+                "require": [
+                    "exp",
+                    "iat",
+                    "aud",
+                    "sub",
+                    "jti",
+                    "cnf",
+                    "sid",
+                    "tfa_exp",
+                ]
+            },
             # For clocks that disagree with the hub's
             leeway=60,
         )
@@ -721,20 +986,36 @@ def check_grant(
     except (jwt.InvalidTokenError, ValueError, KeyError, TypeError):
         return None
     now = time.time()
+    tfa_exp = payload["tfa_exp"]
+    if (
+        not isinstance(tfa_exp, int)
+        or isinstance(tfa_exp, bool)
+        or tfa_exp < now
+    ):
+        return None
     for jti, exp in list(used.items()):
         if exp + 60 < now:
             del used[jti]
     jti = payload["jti"]
-    if payload["sub"] != str(cfg["user_id"]) or jti in used:
+    if (
+        payload["sub"] != str(cfg["user_id"])
+        or not isinstance(jti, str)
+        or jti in used
+    ):
         return None
     used[jti] = float(payload["exp"])
-    return ChannelAuth(key=browser_key, session_id=str(payload["sid"]))
+    return ChannelAuth(
+        key=browser_key,
+        session_id=str(payload["sid"]),
+        grant_id=jti,
+        tfa_exp=float(tfa_exp),
+    )
 
 
 def open_signed_message(auth: ChannelAuth, msg: Any) -> dict | None:
     """The message a browser sent, if it's signed with its channel's key
-    and comes after the last one, so the relay can neither forge one nor
-    replay one.
+    and comes right after the last one, so the relay can neither forge,
+    replay, nor drop one, e.g., a keystroke.
 
     Browsers send ``{"seq": ..., "body": ..., "sig": ...}``, where ``body``
     is the message as JSON text, signed as sent, so neither end has to
@@ -753,7 +1034,7 @@ def open_signed_message(auth: ChannelAuth, msg: Any) -> dict | None:
     if (
         not isinstance(seq, int)
         or isinstance(seq, bool)
-        or seq <= auth.seq
+        or seq != auth.seq + 1
         or not isinstance(body, str)
         or not isinstance(sig, str)
     ):
@@ -780,6 +1061,34 @@ def open_signed_message(auth: ChannelAuth, msg: Any) -> dict | None:
     return inner
 
 
+def sign_reply(key: Any, auth: ChannelAuth, msg: dict) -> dict:
+    """A message for a browser, signed with this Operator's key as WebCrypto
+    would, for its channel, next in order, so the relay can neither forge,
+    reorder, nor drop one, e.g., to swap the SSH key a user is shown.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import (
+        decode_dss_signature,
+    )
+
+    seq = auth.reply_seq + 1
+    # Unescaped, since escaping makes each non-ASCII character, e.g., a
+    # TUI's box drawing, 6 to 12 bytes, which can push a chunk of output
+    # past the relay's message limit
+    body = json.dumps(msg, ensure_ascii=False)
+    text = f"{REPLY_SIGNATURE_CONTEXT}\n{auth.grant_id}\n{seq}\n{body}"
+    r, s = decode_dss_signature(
+        key.sign(text.encode(), ec.ECDSA(hashes.SHA256()))
+    )
+    sig = base64.urlsafe_b64encode(
+        r.to_bytes(32, "big") + s.to_bytes(32, "big")
+    )
+    return {"seq": seq, "body": body, "sig": sig.decode().rstrip("=")}
+
+
 def get_shell() -> str:
     shell = os.environ.get("SHELL")
     if shell:
@@ -804,16 +1113,15 @@ def child_env() -> dict[str, str]:
     return env
 
 
-# The Operator's own Calkit, since "-m calkit" would import a calkit package
-# in the working directory first, e.g., in a checkout of Calkit itself
+# The Operator's own Calkit, since "-m calkit" would import modules in the
+# working directory first, e.g., a calkit package in a checkout of Calkit
+# itself, or a pty.py in the home folder a service starts in. On one line
+# without quotes, so it goes in a crontab, systemd unit, or VBScript as is.
 CALKIT_COMMAND = [
     sys.executable,
     "-c",
-    "import sys\n"
-    "if sys.path[0] == '': del sys.path[0]\n"
-    "sys.argv[0] = 'calkit'\n"
-    "from calkit.cli import run\n"
-    "run()",
+    "import sys; sys.path[0] or sys.path.pop(0); import calkit.cli; "
+    "sys.argv[0] = calkit.__name__; calkit.cli.run()",
 ]
 
 
@@ -877,9 +1185,9 @@ def get_stage_list(wdir: str, status: dict | None) -> list[dict]:
     from calkit.core import _load_yaml_readonly
 
     try:
-        with open(os.path.join(wdir, "dvc.yaml")) as f:
+        with _open_in_workspace(wdir, "dvc.yaml") as f:
             dvc_stages = (_load_yaml_readonly(f) or {}).get("stages") or {}
-        with open(os.path.join(wdir, "calkit.yaml")) as f:
+        with _open_in_workspace(wdir, "calkit.yaml") as f:
             ck_stages = (
                 (_load_yaml_readonly(f) or {}).get("pipeline") or {}
             ).get("stages") or {}
@@ -1337,7 +1645,7 @@ def get_run_state(wdir: str) -> dict:
     record = os.path.join(runs_dir, max(names)) if names else None
     if record is not None:
         try:
-            with open(record) as f:
+            with _open_in_workspace(wdir, os.path.relpath(record, wdir)) as f:
                 run = json.load(f)
             state["last_run"] = dict(
                 status=run["status"],
@@ -1387,12 +1695,15 @@ def pull_workspace(wdir: str, merge: bool = False) -> dict:
                 + (", ..." if len(conflicts) > 10 else "")
                 + "; resolve it in a session"
             )
+    # The pull may have pointed a remote that has the hub's token elsewhere
+    calkit.dvc.clear_off_hub_auth(wdir)
     _calkit(["dvc", "pull"], wdir)
     return {"diverged": False}
 
 
 def push_workspace(wdir: str) -> None:
     """Push with DVC, then with Git."""
+    calkit.dvc.clear_off_hub_auth(wdir)
     _calkit(["dvc", "push"], wdir)
     git_repo = calkit.git.get_repo(wdir)
     git_repo.git.push("origin", git_repo.active_branch.name)
@@ -1431,8 +1742,19 @@ def save_workspace(
         raise ValueError("No paths to save")
     for path in paths:
         check_workspace_path(wdir, path)
+    repo = calkit.git.get_repo(wdir)
+    # Credentials a repo's own .gitignore can let through, e.g., the hub's
+    # token in .dvc/config.local, never go in a commit, which the hub would
+    # then offer to push
+    candidates = repo.git.ls_files(
+        "-z", "--cached", "--others", "--exclude-standard", "--", *paths
+    ).split("\0")
+    for fpath in [*paths, *candidates]:
+        parts = os.path.normpath(fpath).replace(os.sep, "/").lower()
+        if re.search(r"(^|/)(\.dvc/config\.local|\.calkit/local)(/|$)", parts):
+            raise ValueError(f"{fpath} holds this machine's credentials")
     # Only what was asked for goes in the commit
-    calkit.git.get_repo(wdir).git.reset()
+    repo.git.reset()
     args = ["add", *paths, "--commit-message"]
     args.append(message or f"Update {', '.join(paths)}")
     if to is not None:
@@ -1453,14 +1775,13 @@ def ignore_path(
     git_repo = calkit.git.get_repo(wdir)
     if git_repo.ignored(path):
         return
-    fpath = os.path.join(wdir, ".gitignore")
     txt = ""
-    if os.path.isfile(fpath):
-        with open(fpath) as f:
+    if os.path.lexists(os.path.join(wdir, ".gitignore")):
+        with _open_in_workspace(wdir, ".gitignore") as f:
             txt = f.read()
     if txt and not txt.endswith("\n"):
         txt += "\n"
-    with open(fpath, "w") as f:
+    with _open_in_workspace(wdir, ".gitignore", "w") as f:
         f.write(txt + path + "\n")
     if commit:
         git_repo.git.add(".gitignore")
@@ -1500,6 +1821,12 @@ def add_stage(
     """
     for path in [*(deps or []), *(outs or [])]:
         check_workspace_path(wdir, path)
+    # Both are written back, which mustn't go through a link
+    for fname in ("dvc.yaml", "calkit.yaml"):
+        if os.path.islink(os.path.join(wdir, fname)):
+            raise ValueError(
+                f"{fname} is a link, which the Operator won't follow"
+            )
     if calkit_type is not None:
         if calkit_type not in ("figure", "dataset", "publication"):
             raise ValueError(f"Unknown object type '{calkit_type}'")
@@ -1511,10 +1838,9 @@ def add_stage(
         objs = ck_info.get(calkit_type + "s", [])
         if outs[0] in [obj.get("path") for obj in objs]:
             raise ValueError(f"A {calkit_type} already exists at {outs[0]}")
-    fpath = os.path.join(wdir, "dvc.yaml")
     pipeline: dict = {}
-    if os.path.isfile(fpath):
-        with open(fpath) as f:
+    if os.path.lexists(os.path.join(wdir, "dvc.yaml")):
+        with _open_in_workspace(wdir, "dvc.yaml") as f:
             pipeline = calkit.ryaml.load(f) or {}
     stages = pipeline.get("stages", {})
     if name in stages:
@@ -1532,7 +1858,7 @@ def add_stage(
         stage["outs"] = outs
     stages[name] = stage
     pipeline["stages"] = stages
-    with open(fpath, "w") as f:
+    with _open_in_workspace(wdir, "dvc.yaml", "w") as f:
         calkit.ryaml.dump(pipeline, f)
     repo = calkit.git.get_repo(wdir)
     repo.git.add("dvc.yaml")
@@ -1540,7 +1866,7 @@ def add_stage(
         assert outs is not None and calkit_object is not None
         objs.append(dict(path=outs[0], stage=name) | calkit_object)
         ck_info[calkit_type + "s"] = objs
-        with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+        with _open_in_workspace(wdir, "calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
         repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Add pipeline stage {name}"])
@@ -1574,12 +1900,17 @@ def run_pipeline(wdir: str, stages: list[str] | None = None) -> dict:
         start_new_session=sys.platform != "win32",
     )
     _runs[wdir] = proc
+    # Only the end is kept, however much it prints, which is all that's
+    # sent, kept well under the relay's message limit
+    output = ""
     try:
-        output, _ = proc.communicate()
+        assert proc.stdout is not None
+        while chunk := proc.stdout.read(65536):
+            output = (output + chunk)[-50_000:]
+        proc.wait()
     finally:
         _runs.pop(wdir, None)
-    # Kept well under the relay's message limit
-    return {"ok": proc.returncode == 0, "output": output[-50_000:]}
+    return {"ok": proc.returncode == 0, "output": output}
 
 
 def stop_run(wdir: str) -> dict:
@@ -1621,19 +1952,30 @@ def get_run_log(wdir: str) -> dict:
     fpath = _get_latest_run_log_path(wdir)
     if fpath is None:
         return {"name": None, "log": None}
+    # Only the end, since a log can be large
     try:
-        with open(fpath, errors="replace") as f:
-            log = f.read()
+        with open(
+            fpath, "rb", opener=lambda p, f: os.open(p, f | NOFOLLOW)
+        ) as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 200_000))
+            log = f.read().decode("utf-8", errors="replace")
     except OSError:
         return {"name": None, "log": None}
     # Named by when it started
     return {"name": os.path.basename(fpath), "log": log[-50_000:]}
 
 
-def _check_repo_url(git_repo_url: str) -> None:
+def _check_repo_url(git_repo_url: Any) -> None:
     # Only the kinds of URL projects have, so nothing else Git can fetch
-    # from, e.g., local paths or other transports, can be named
-    if not re.match(r"(https://|git@)[A-Za-z0-9]", git_repo_url):
+    # from, e.g., local paths or other transports, can be named, and only
+    # the host it names is contacted
+    host = r"[A-Za-z0-9][A-Za-z0-9.-]*"
+    path = r"[A-Za-z0-9][A-Za-z0-9._~/-]*"
+    if not isinstance(git_repo_url, str) or not re.fullmatch(
+        rf"https://{host}(:[0-9]{{1,5}})?/{path}|git@{host}:{path}",
+        git_repo_url,
+    ):
         raise ValueError(f"Can't clone {git_repo_url}")
 
 
@@ -1794,20 +2136,55 @@ def get_ssh_public_key() -> dict:
         return {"public_key": f.read().strip(), "created": True}
 
 
+def request_cli_token(cfg: dict) -> str:
+    """A token for Calkit here, which the owner just asked the hub for, from
+    the hub over HTTPS, so it never passes through the relay.
+    """
+    from requests.exceptions import HTTPError
+
+    from calkit import hub
+
+    try:
+        resp = hub._request(
+            "post",
+            "/operators/cli-token",
+            headers={"Authorization": f"Bearer {cfg['token']}"},
+            auth=False,
+            allow_login=False,
+            base_url=cfg["api_url"],
+            max_retries=2,
+        )
+    except HTTPError as e:
+        if e.response is not None and e.response.status_code == 403:
+            raise ValueError("The hub didn't ask for a token; try again")
+        raise
+    token = resp.get("token") if isinstance(resp, dict) else None
+    if not isinstance(token, str) or not re.fullmatch(
+        r"ckp_[0-9a-f]{16,128}", token
+    ):
+        raise ValueError("The hub sent an invalid token")
+    return token
+
+
 def configure_machine(
     git_name: str | None = None,
     git_email: str | None = None,
-    token: str | None = None,
+    token: bool = False,
+    cfg: dict | None = None,
 ) -> dict:
     """Set up what ``check_machine_setup`` found missing, as the owner asked
-    from the hub.
+    from the hub, which asks it for a token for Calkit here, if one's wanted.
     """
     import keyring.errors
 
+    if not isinstance(token, bool):
+        raise ValueError("Invalid token request")
     home = config.get_user_home()
     for key, value in [("user.name", git_name), ("user.email", git_email)]:
         if value is None:
             continue
+        if not isinstance(value, str):
+            raise ValueError(f"Invalid {key.removeprefix('user.')}")
         value = value.strip()
         if (
             not value
@@ -1823,13 +2200,14 @@ def configure_machine(
             timeout=10,
             check=True,
         )
-    if token is not None:
-        if not re.fullmatch(r"ckp_[0-9a-f]{16,128}", token):
-            raise ValueError("Invalid token")
+    if token:
+        if cfg is None:
+            raise ValueError("Invalid token request")
+        new_token = request_cli_token(cfg)
         try:
             settings = config.read()
             settings = config.Settings.model_validate(
-                settings.model_dump() | {"token": token}
+                settings.model_dump() | {"token": new_token}
             )
             settings.write()
         except keyring.errors.KeyringError:
@@ -1977,10 +2355,18 @@ class Operator:
         self.sessions: dict[str, Session] = {}
         # Browser channels, which are all the owner's, and what each may do
         self.channels: dict[str, ChannelAuth] = {}
-        # IDs of grants channels were opened with, and when they expire
-        self.used_grants: dict[str, float] = {}
+        # IDs of grants channels were opened with, and when they expire,
+        # read from where they're kept across restarts when first needed
+        self.used_grants: dict[str, float] | None = None
+        # The key replies are signed with, likewise
+        self.key: Any = None
         self.workspaces: list[dict] = []
         self.ws: Any = None
+        # What's waiting to go to the relay, in order, and what sends it
+        self.outbox: deque[tuple[str | None, str]] = deque()
+        self.writer: asyncio.Task | None = None
+        # When it last heard from the hub, by the monotonic clock
+        self.last_check_in: float | None = None
         self.check_in_interval = 60
         # One Git or DVC operation at a time per workspace, and which
         self.workspace_locks: dict[str, asyncio.Lock] = {}
@@ -1993,22 +2379,74 @@ class Operator:
         self.stop_requested = False
         self.restarting = False
 
-    async def send(self, ch: str, msg: dict) -> None:
-        ws = self.ws
-        if ws is None:
-            return
-        try:
-            # Unescaped, since escaping makes each non-ASCII character, e.g.,
-            # a TUI's box drawing, 6 to 12 bytes, which can push a chunk of
-            # output past the relay's message limit
-            await ws.send(
-                json.dumps({"ch": ch, "msg": msg}, ensure_ascii=False)
-            )
-        except Exception as e:
-            logger.debug(f"Dropped message to {ch}: {e}")
-
     def send_soon(self, ch: str, msg: dict) -> None:
-        asyncio.get_running_loop().create_task(self.send(ch, msg))
+        """Sign a message for a browser's channel and queue it for the relay,
+        which only passes it on, in the order they were queued.
+        """
+        auth = self.channels.get(ch)
+        if auth is None or self.ws is None:
+            return
+        if self.key is None:
+            self.key = get_operator_key()
+        signed = sign_reply(self.key, auth, msg)
+        text = json.dumps({"ch": ch, "msg": signed}, ensure_ascii=False)
+        size = len(text.encode())
+        if size > MAX_SEND_BYTES:
+            # The relay would close the connection over it, so a request
+            # hears why instead
+            logger.warning("Dropped a reply too large to send")
+            if "id" not in msg:
+                return
+            msg = {
+                "type": "error",
+                "id": msg.get("id"),
+                "error": "The reply was too large to send",
+            }
+            signed = sign_reply(self.key, auth, msg)
+            text = json.dumps({"ch": ch, "msg": signed}, ensure_ascii=False)
+            size = len(text.encode())
+        auth.reply_seq = signed["seq"]
+        auth.backlog += size
+        if auth.backlog > MAX_CHANNEL_BACKLOG_BYTES:
+            logger.warning("Closed a channel too far behind on its replies")
+            self.close_channel(ch)
+            return
+        self._queue(ch, text)
+
+    async def send(self, ch: str, msg: dict) -> None:
+        self.send_soon(ch, msg)
+
+    def send_to_relay(self, msg: dict) -> None:
+        """Queue a message for the relay itself, e.g., to close a channel."""
+        if self.ws is not None:
+            self._queue(None, json.dumps(msg))
+
+    def _queue(self, ch: str | None, text: str) -> None:
+        self.outbox.append((ch, text))
+        if self.writer is None:
+            self.writer = asyncio.get_running_loop().create_task(
+                self._write_out()
+            )
+
+    async def _write_out(self) -> None:
+        """Send what's queued for the relay, one message at a time, so they
+        arrive in the order they were signed.
+        """
+        try:
+            while self.outbox:
+                ch, text = self.outbox.popleft()
+                auth = self.channels.get(ch) if ch is not None else None
+                ws = self.ws
+                try:
+                    if ws is not None:
+                        await ws.send(text)
+                except Exception as e:
+                    logger.debug(f"Dropped a message to the relay: {e}")
+                finally:
+                    if auth is not None:
+                        auth.backlog -= len(text.encode())
+        finally:
+            self.writer = None
 
     def get_workspace(self, path: str, personal: bool = True) -> str:
         """Resolve a workspace the hub may use, refusing anything else.
@@ -2070,16 +2508,24 @@ class Operator:
         argv = [os.fsencode(shell), b"-l"]
         envb = {os.fsencode(k): os.fsencode(v) for k, v in env.items()}
         cwd = os.fsencode(workspace)
+        try:
+            max_fd = min(os.sysconf("SC_OPEN_MAX"), 65536)
+        except (OSError, ValueError):
+            max_fd = 4096
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             pid, fd = pty.fork()
         if pid == 0:
-            # Child: a login shell in the workspace, as over SSH
+            # Child: a login shell in the workspace, as over SSH, without
+            # anything of the Operator's, e.g., other sessions' terminals
             try:
+                os.closerange(3, max_fd)
                 os.chdir(cwd)
                 os.execve(argv[0], argv, envb)
             finally:
                 os._exit(127)
+        # Nor does anything started later get this one's
+        os.set_inheritable(fd, False)
         os.set_blocking(fd, False)
         session = Session(
             id=uuid.uuid4().hex[:12], workspace=workspace, pid=pid, fd=fd
@@ -2159,7 +2605,8 @@ class Operator:
         session.pending.clear()
         if not text:
             return
-        for ch in session.channels:
+        # A channel too far behind is closed while this goes
+        for ch in list(session.channels):
             for chunk in _chunks(text):
                 self.send_soon(
                     ch,
@@ -2187,7 +2634,7 @@ class Operator:
             pass
         self.sessions.pop(session.id, None)
         self._release_if_unused(session.workspace)
-        for ch in session.channels:
+        for ch in list(session.channels):
             self.send_soon(
                 ch,
                 {"type": "sessions.exit", "session": session.id, "code": code},
@@ -2284,16 +2731,35 @@ class Operator:
     def on_relay_message(self, frame: dict) -> None:
         kind = frame.get("type")
         ch = frame.get("ch")
-        if not isinstance(ch, str):
+        # The relay names channels, and they're logged
+        if not isinstance(ch, str) or not re.fullmatch(CHANNEL_ID_PATTERN, ch):
+            logger.warning("Ignored a relay message with an invalid channel")
             return
         if kind == "channel.open":
             # Only the owner may use this Operator, as the hub vouches with
-            # a grant it signed, whatever the relay says
-            auth = check_grant(self.cfg, frame.get("grant"), self.used_grants)
-            if auth is not None:
-                self.channels[ch] = auth
-            else:
-                logger.warning(f"Refused channel {ch} without a valid grant")
+            # a grant it signed, whatever the relay says, and only while it
+            # can hear from the hub which sign-ins have ended
+            auth = None
+            if self.hub_reachable():
+                if self.used_grants is None:
+                    self.used_grants = load_used_grants()
+                auth = check_grant(
+                    self.cfg, frame.get("grant"), self.used_grants
+                )
+            # Kept, so it can't be used again after a restart either
+            try:
+                if auth is not None:
+                    save_used_grants(self.used_grants or {})
+            except OSError:
+                auth = None
+            if auth is None:
+                logger.warning("Refused a channel without a valid grant")
+                self.send_to_relay({"type": "channel.close", "ch": ch})
+                return
+            self.channels[ch] = auth
+            # Browsers send nothing before this, which shows it's this
+            # Operator they reached
+            self.send_soon(ch, {"type": "channel.ready"})
             return
         if kind == "channel.close":
             self.drop_channel(ch)
@@ -2302,14 +2768,26 @@ class Operator:
             return
         msg = open_signed_message(self.channels[ch], frame.get("msg"))
         if msg is None:
-            logger.warning(f"Dropped an unsigned message on channel {ch}")
+            # One missing or out of order could change what the rest mean,
+            # e.g., a dropped keystroke, so the channel can't go on
+            logger.warning(
+                "Closed a channel over a message that wasn't signed or in "
+                "order"
+            )
+            self.close_channel(ch)
             return
-        if msg.get("type") in WORKSPACE_ACTIONS or msg.get("type") in (
-            MACHINE_ACTIONS
-        ):
+        msg_type = msg.get("type")
+        req_id = msg.get("id")
+        if not isinstance(msg_type, str):
+            if req_id is not None:
+                self.send_soon(
+                    ch,
+                    {"type": "error", "id": req_id, "error": "Invalid type"},
+                )
+            return
+        if msg_type in WORKSPACE_ACTIONS or msg_type in MACHINE_ACTIONS:
             asyncio.get_running_loop().create_task(self.run_action(ch, msg))
             return
-        req_id = msg.get("id")
         try:
             result = self.handle(ch, msg)
         except Exception as e:
@@ -2318,7 +2796,7 @@ class Operator:
                     ch, {"type": "error", "id": req_id, "error": str(e)}
                 )
             else:
-                logger.warning(f"Failed to handle {msg.get('type')}: {e}")
+                logger.warning(f"Failed to handle a message: {e}")
             return
         if req_id is not None:
             self.send_soon(
@@ -2333,24 +2811,58 @@ class Operator:
         for session in self.sessions.values():
             session.channels.discard(ch)
 
-    async def close_ended_channels(self, ended: list[str]) -> None:
+    def close_channel(self, ch: str) -> None:
+        """Forget a channel and have the relay close its browser, which
+        reconnects if it's still wanted.
+        """
+        self.drop_channel(ch)
+        self.send_to_relay({"type": "channel.close", "ch": ch})
+
+    def close_ended_channels(self, ended: list[str]) -> None:
         """Close the channels opened from sign-ins that have since ended,
         e.g., with a password change, leaving their sessions running.
         """
         for ch, auth in list(self.channels.items()):
-            if auth.session_id not in ended:
-                continue
-            self.drop_channel(ch)
-            logger.info(f"Closed channel {ch}, since its sign-in ended")
-            # Messages on it are refused here regardless, so this only tells
-            # the browser sooner
-            if self.ws is not None:
-                try:
-                    await self.ws.send(
-                        json.dumps({"type": "channel.close", "ch": ch})
-                    )
-                except Exception:
-                    pass
+            if auth.session_id in ended:
+                self.close_channel(ch)
+                logger.info(f"Closed channel {ch}, since its sign-in ended")
+
+    def hub_reachable(self) -> bool:
+        """Whether the hub was heard from lately enough for this Operator to
+        know which sign-ins have ended.
+        """
+        import time
+
+        return (
+            self.last_check_in is not None
+            and time.monotonic() - self.last_check_in < CHECK_IN_GRACE_SECONDS
+        )
+
+    def expire_channels(self) -> None:
+        """Close channels whose second factor has expired, and all of them
+        while the hub can't be reached, leaving sessions running.
+        """
+        import time
+
+        if self.channels and not self.hub_reachable():
+            logger.warning(
+                "Closed all channels, since the hub hasn't been reachable "
+                "for a while"
+            )
+            for ch in list(self.channels):
+                self.close_channel(ch)
+        now = time.time()
+        for ch, auth in list(self.channels.items()):
+            if now > auth.tfa_exp:
+                self.close_channel(ch)
+                logger.info(
+                    f"Closed channel {ch}, since its second factor expired"
+                )
+
+    async def watch_channels(self) -> None:
+        while True:
+            await asyncio.sleep(CHANNEL_CHECK_SECONDS)
+            self.expire_channels()
 
     async def run_action(self, ch: str, msg: dict) -> None:
         """Run a request that waits on Git, DVC, or the network in a thread,
@@ -2394,7 +2906,8 @@ class Operator:
                     configure_machine,
                     git_name=msg.get("git_name"),
                     git_email=msg.get("git_email"),
-                    token=msg.get("token"),
+                    token=msg.get("token", False),
+                    cfg=self.cfg,
                 )
             else:
                 wdir = self.get_workspace(
@@ -2446,9 +2959,12 @@ class Operator:
             )
 
     async def check_in(self) -> dict:
+        import time
+
         self.workspaces = await asyncio.to_thread(
             discover_workspaces, self.cfg
         )
+        grant_key = self.cfg.get("grant_public_key")
         # Whether browsers can reach it now, so the hub doesn't show it
         # online while it's reconnecting
         resp = await asyncio.to_thread(
@@ -2464,10 +2980,22 @@ class Operator:
                 :MAX_CHANNEL_SESSIONS
             ],
         )
+        self.last_check_in = time.monotonic()
         self.check_in_interval = resp.get("check_in_interval", 60)
-        await self.close_ended_channels(
+        # Grants checked with the old key can't be trusted with the new one
+        if grant_key and self.cfg.get("grant_public_key") != grant_key:
+            for ch in list(self.channels):
+                self.close_channel(ch)
+        self.close_ended_channels(
             [str(s) for s in resp.get("ended_sessions") or []]
         )
+        self.expire_channels()
+        # The relay closes the connection once its token expires otherwise,
+        # so one that stops checking in, e.g., once revoked, is cut off
+        if self.ws is not None and resp.get("relay_token"):
+            self.send_to_relay(
+                {"type": "auth.refresh", "token": resp["relay_token"]}
+            )
         if resp.get("restart"):
             self.restart_requested = True
         return resp
@@ -2538,16 +3066,26 @@ class Operator:
             self.connected_check_in = asyncio.create_task(
                 self.check_in_quietly()
             )
+            watcher = asyncio.create_task(self.watch_channels())
             try:
                 async for text in ws:
                     try:
                         frame = json.loads(text)
-                    except json.JSONDecodeError:
+                    except ValueError:
                         continue
-                    if isinstance(frame, dict):
+                    if not isinstance(frame, dict):
+                        continue
+                    # One bad message mustn't end the connection
+                    try:
                         self.on_relay_message(frame)
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to handle a relay message: {e}"
+                        )
             finally:
+                watcher.cancel()
                 self.ws = None
+                self.outbox.clear()
                 self.channels.clear()
                 for session in self.sessions.values():
                     session.channels.clear()
@@ -2625,8 +3163,7 @@ def acquire_lock() -> Any:
     Two would each replace the other's relay connection, and in cron mode
     cron starts one every few minutes regardless.
     """
-    fpath = os.path.join(operator_dir(), "operator.lock")
-    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    fpath = os.path.join(_private_dir(operator_dir()), "operator.lock")
     f = open(fpath, "w")
     try:
         if sys.platform == "win32":
@@ -2691,6 +3228,8 @@ def restart_process(mode: str) -> None:
     cmd = _service_command(mode)
     if logger.isEnabledFor(logging.DEBUG):
         cmd.append("--verbose")
+    if _logs_to_file:
+        cmd.append("--log-file")
     for handler in logging.getLogger().handlers:
         handler.flush()
     if sys.platform == "win32":
@@ -2726,10 +3265,13 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
     """
     import signal
 
+    refuse_root()
     lock = acquire_lock()
     if lock is None:
         return False
     trim_log()
+    if os.path.exists(get_log_path()):
+        _private_log()
     if not any(isinstance(f, RepeatFilter) for f in logger.filters):
         logger.addFilter(RepeatFilter())
 
@@ -2792,6 +3334,26 @@ def get_log_path() -> str:
     return os.path.join(operator_dir(), "operator.log")
 
 
+# Whether this process writes its own log, rather than a service manager
+_logs_to_file = False
+
+
+def log_to_file() -> None:
+    """Send this process's output to its log, opened as the user, rather
+    than have launchd open it as root, which a link in its place could
+    point at a file only root may write.
+    """
+    global _logs_to_file
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | NOFOLLOW
+    fd = os.open(_private_log(), flags, 0o600)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.dup2(fd, 1)
+    os.dup2(fd, 2)
+    os.close(fd)
+    _logs_to_file = True
+
+
 def trim_log(fpath: str | None = None) -> None:
     """Drop the log's oldest lines once it's over LOG_MAX_BYTES.
 
@@ -2846,9 +3408,7 @@ class RepeatFilter(logging.Filter):
 def _service_command(mode: str = "service") -> list[str]:
     # The interpreter Calkit runs in, so the service doesn't depend on PATH
     return [
-        sys.executable,
-        "-m",
-        "calkit",
+        *CALKIT_COMMAND,
         "operator",
         "start",
         "--hub",
@@ -2879,14 +3439,17 @@ def install_cron() -> None:
             "This machine has no crontab; install with --no-service and run "
             "'calkit operator start' yourself, e.g., inside tmux"
         )
-    os.makedirs(os.path.dirname(get_log_path()), exist_ok=True)
-    command = shlex.join(_service_command("cron"))
-    log = shlex.quote(get_log_path())
+    # From / rather than the home folder, and with cron's own meaning of %
+    # escaped, i.e., a newline
+    command = (
+        f"cd / && {shlex.join(_service_command('cron'))} "
+        f">> {shlex.quote(_private_log())} 2>&1"
+    ).replace("%", "\\%")
     lines = [
         line for line in _read_crontab() if not line.endswith(cron_marker())
     ]
     for schedule in ["*/5 * * * *", "@reboot"]:
-        lines.append(f"{schedule} {command} >> {log} 2>&1 {cron_marker()}")
+        lines.append(f"{schedule} {command} {cron_marker()}")
     _write_crontab(lines)
 
 
@@ -2910,15 +3473,20 @@ def _launchd_plist_path(at_boot: bool, key: str | None = None) -> str:
 def _launchd_plist(at_boot: bool) -> bytes:
     import plistlib
 
+    # At boot, launchd opens these as root, so the Operator writes its own
+    # log instead
+    log = "/dev/null" if at_boot else get_log_path()
     plist: dict[str, Any] = {
         "Label": service_label(),
-        "ProgramArguments": _service_command(),
+        "ProgramArguments": _service_command()
+        + (["--log-file"] if at_boot else []),
         "RunAtLoad": True,
         # Restarted if it fails, but not after it exits cleanly because it
         # was revoked
         "KeepAlive": {"SuccessfulExit": False},
-        "StandardOutPath": get_log_path(),
-        "StandardErrorPath": get_log_path(),
+        "StandardOutPath": log,
+        "StandardErrorPath": log,
+        "WorkingDirectory": "/",
         "EnvironmentVariables": {"HOME": config.get_user_home()},
         # Without one, launchd throttles its CPU and disk use, which made
         # looking over workspaces take minutes while people waited on it
@@ -2927,8 +3495,8 @@ def _launchd_plist(at_boot: bool) -> bytes:
     if at_boot:
         import pwd
 
-        # From the OS rather than the environment, which says root under
-        # sudo, and this must never run as root
+        # This user, which installing makes sure isn't root, from the OS
+        # rather than the environment
         plist["UserName"] = pwd.getpwuid(os.getuid()).pw_name
     return plistlib.dumps(plist)
 
@@ -2969,7 +3537,10 @@ def _systemd_unit_path(key: str | None = None) -> str:
 
 
 def _systemd_unit() -> str:
+    # With systemd's own meanings of %, $, and backslashes escaped
     command = " ".join(shlex.quote(arg) for arg in _service_command())
+    for char, escaped in [("\\", "\\\\"), ("%", "%%"), ("$", "$$")]:
+        command = command.replace(char, escaped)
     return (
         "[Unit]\n"
         "Description=Calkit Operator\n"
@@ -2977,6 +3548,7 @@ def _systemd_unit() -> str:
         "\n"
         "[Service]\n"
         f"ExecStart={command}\n"
+        "WorkingDirectory=/\n"
         "Restart=on-failure\n"
         "RestartSec=10\n"
         "\n"
@@ -3028,7 +3600,7 @@ def install_service(login: bool = False) -> list[str]:
 
     notes = []
     system = platform.system()
-    os.makedirs(os.path.dirname(get_log_path()), exist_ok=True)
+    _private_log()
     if system == "Linux":
         # Clusters often have no user systemd, e.g., on login nodes
         probe = (
@@ -3332,9 +3904,10 @@ def set_service_running(running: bool) -> None:
     # when the hub asks
     if _cron_installed():
         if running:
-            with open(get_log_path(), "a") as log:
+            with open(_private_log(), "a") as log:
                 subprocess.Popen(
                     _service_command("cron"),
+                    cwd="/",
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,

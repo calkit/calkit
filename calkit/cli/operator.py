@@ -133,9 +133,8 @@ def install(
         return str(e)
 
     # Sessions would be root shells, and it asks for sudo when it needs it
-    if os.name == "posix" and os.geteuid() == 0 and os.getenv("SUDO_USER"):
-        raise_error("Run this without sudo")
     try:
+        operator.refuse_root()
         _select_hub(hub, installing=True)
         hub_url = operator.use_own_hub()
     except ValueError as e:
@@ -158,6 +157,18 @@ def install(
         typer.echo(f"✅ Installed Operator '{remote['name']}' on {ssh}")
         return
     cfg = operator.load_config()
+    # One whose key the hub refused can't connect, so it's revoked, in case
+    # someone else holds its token, and registered again
+    if cfg is not None and cfg.get("key_rejected"):
+        typer.echo(
+            f"The hub refused Operator '{cfg.get('name')}', so it will be "
+            "registered again"
+        )
+        try:
+            operator.revoke_self(cfg)
+        except Exception as e:
+            warn(f"Couldn't revoke '{cfg.get('name')}' on the hub ({e})")
+        cfg = None
     # A revoked Operator, or one from another hub, would exit at its first
     # check-in, so it's registered again
     if cfg is not None and not operator.is_registered(cfg):
@@ -213,14 +224,22 @@ def start(
     # cron mode it only connects when the hub asks and stops when idle
     mode: Annotated[str, typer.Option("--mode", hidden=True)] = "foreground",
     hub: HubOption = None,
+    # Set for a service whose manager would otherwise open the log as root
+    log_file: Annotated[bool, typer.Option("--log-file", hidden=True)] = False,
 ) -> None:
     """Run the Operator in the foreground, e.g., inside tmux."""
     import logging
 
     from calkit import operator
 
+    try:
+        operator.refuse_root()
+    except ValueError as e:
+        raise_error(str(e))
     _select_hub(hub)
     cfg = _require_config()
+    if log_file:
+        operator.log_to_file()
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -234,6 +253,10 @@ def start(
             # Cron starts one every few minutes, so this is routine there
             if mode != "cron":
                 typer.echo("Another Operator is already running here")
+    except operator.OperatorKeyRejected:
+        # Already logged, and a clean exit, so a service manager doesn't
+        # restart it
+        pass
     except operator.OperatorRevoked:
         # A clean exit, so a service manager doesn't restart it
         typer.echo("This Operator has been revoked on the hub; stopping")
@@ -371,23 +394,18 @@ def add_workspace(
 @operator_app.command(name="uninstall")
 def uninstall(hub: HubOption = None) -> None:
     """Revoke this machine's Operator on the hub and remove it here."""
-    from calkit import hub as hub_api
     from calkit import operator
 
     _select_hub(hub)
     cfg = _require_config()
     operator.uninstall_service()
+    # With its own token, so it works however you're signed in here
     try:
-        hub_api._request(
-            "delete", f"/operators/{cfg['id']}", base_url=cfg["api_url"]
-        )
+        operator.revoke_self(cfg)
     except Exception as e:
-        response = getattr(e, "response", None)
-        # 410 means it was already revoked, e.g., from the hub
-        if response is None or response.status_code != 410:
-            typer.echo(
-                f"Could not revoke '{cfg['name']}' on the hub ({e}); "
-                "revoke it from your hub settings"
-            )
+        typer.echo(
+            f"Could not revoke '{cfg['name']}' on the hub ({e}); "
+            "revoke it from your hub settings"
+        )
     os.remove(operator.get_config_path())
     typer.echo(f"Uninstalled Operator '{cfg['name']}'")

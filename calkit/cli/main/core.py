@@ -2489,9 +2489,13 @@ def _get_latest_run_log_content(wdir: str = ".") -> str | None:
     latest = _get_latest_run_log_path(wdir)
     if latest is None:
         return None
+    # Only the end of a large one, which is read while a run goes, e.g., by
+    # an Operator at every check-in
     try:
-        with open(latest) as f:
-            return f.read()
+        with open(latest, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 10_000_000))
+            return f.read().decode("utf-8", errors="replace")
     except OSError:
         return None
 
@@ -2504,6 +2508,7 @@ def _get_latest_run_log_path(wdir: str = ".") -> str | None:
     file across both by name (logs are named by start timestamp).
     """
     candidates = []
+    root = os.path.realpath(wdir)
     for d in [
         os.path.join(wdir, ".calkit", "local", "logs"),
         os.path.join(wdir, ".calkit", "logs"),
@@ -2512,6 +2517,14 @@ def _get_latest_run_log_path(wdir: str = ".") -> str | None:
             candidates += [
                 os.path.join(d, f) for f in os.listdir(d) if f.endswith(".log")
             ]
+    # A repo can commit a link named like a log to any file, e.g., an SSH
+    # key, which an Operator would send the hub
+    candidates = [
+        c
+        for c in candidates
+        if not os.path.islink(c)
+        and os.path.realpath(c).startswith(root + os.sep)
+    ]
     if not candidates:
         return None
     return max(candidates, key=os.path.basename)

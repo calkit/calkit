@@ -2369,7 +2369,22 @@ def test_new_workspace(tmp_dir):
         text=True,
     )
     assert result.returncode != 0 and "already exists" in result.stderr
-
+    # What to start from is never taken as an option
+    flagged = os.path.join(os.path.dirname(root), "flagged")
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "flagged",
+            "--path",
+            flagged,
+            "--from=--quiet",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 and not os.path.exists(flagged)
     # A branch from before DVC was set up gets no DVC config
     blob = git_out("hash-object", "-w", "--stdin", input="hi\n")
     tree = git_out("mktree", input=f"100644 blob {blob}\tREADME.md\n")

@@ -4499,9 +4499,11 @@ def new_workspace(
     if branch in repo.heads:
         if start_point is not None:
             raise_error(f"Branch '{branch}' exists, so it can't start --from")
-        args = [path, branch]
+        args = ["--", path, branch]
     else:
-        args = ["-b", branch, path] + ([start_point] if start_point else [])
+        # Positionals after --, so none can be taken as an option
+        args = ["-b", branch, "--", path]
+        args += [start_point] if start_point else []
     try:
         repo.git.worktree("add", *args)
     except Exception as e:
@@ -4518,7 +4520,11 @@ def new_workspace(
         for source in (root, main_root):
             local_config = os.path.join(source, ".dvc", "config.local")
             if os.path.isfile(local_config):
-                shutil.copy(local_config, os.path.join(path, ".dvc"))
+                # Never through a link the branch committed in its place
+                dest = os.path.join(path, ".dvc", "config.local")
+                if os.path.islink(dest):
+                    os.remove(dest)
+                shutil.copy(local_config, dest)
                 break
         cache_dir = calkit.dvc.get_dvc_repo(cache_root).cache.local_cache_dir
         calkit.dvc.run_dvc_command(

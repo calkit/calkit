@@ -415,6 +415,7 @@ def clone(
                 calkit.dvc.set_remote_auth(remote_name=name)
     # DVC pull
     if not no_dvc_pull:
+        calkit.dvc.clear_off_hub_auth()
         try:
             result = calkit.dvc.run_dvc_command(["pull"])
             if result != 0:
@@ -1798,6 +1799,9 @@ def pull(
                         f"Checking authentication for DVC remote: {name}"
                     )
                     calkit.dvc.set_remote_auth(remote_name=name)
+        # The Git pull may have pointed a remote with the hub's token
+        # elsewhere
+        calkit.dvc.clear_off_hub_auth()
         if (
             not no_recursive
             and "--recursive" not in dvc_args
@@ -1821,6 +1825,7 @@ def pull(
                 if not os.path.isdir(os.path.join(sp_path, ".dvc")):
                     continue
                 typer.echo(f"DVC pulling subproject: {sp_path}")
+                calkit.dvc.clear_off_hub_auth(wdir=sp_path)
                 sp_result = calkit.dvc.run_dvc_command(
                     ["pull"] + dvc_args,
                     cwd=sp_path,
@@ -1914,6 +1919,7 @@ def push(
                         f"Checking authentication for DVC remote: {name}"
                     )
                     calkit.dvc.set_remote_auth(remote_name=name)
+        calkit.dvc.clear_off_hub_auth()
         if remotes:
             typer.echo("Pushing to DVC remote")
             result = calkit.dvc.run_dvc_command(
@@ -5136,6 +5142,8 @@ def call_dvc(
     Useful if Calkit is installed as a tool, e.g., with `uv tool` or `pipx`,
     and DVC is not installed.
     """
+    # DVC would send the hub's token wherever the repo points a remote
+    calkit.dvc.clear_off_hub_auth()
     result = calkit.dvc.run_dvc_command(sys.argv[2:])
     if result != 0 and len(sys.argv) > 2 and sys.argv[2] == "add":
         typer.secho(

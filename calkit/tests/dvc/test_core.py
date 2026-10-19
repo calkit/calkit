@@ -4,6 +4,7 @@ import logging
 import os
 import stat
 import subprocess
+from pathlib import Path
 
 import dvc.repo
 import git
@@ -281,6 +282,16 @@ def test_detect_calkit_remote_type():
     assert (
         calkit.dvc.detect_calkit_remote_type(http_name, "ssh://git@host/repo")
         is None
+    )
+    # Schemes in any case, since DVC takes them so, but not others that
+    # merely start like HTTP
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "HTTPS://evil.example")
+        == "http"
+    )
+    assert calkit.dvc.detect_calkit_remote_type(ck_name, "CK://o/p") == "ck"
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "httpx://evil") is None
     )
 
 
@@ -604,9 +615,14 @@ def test_set_remote_auth_only_for_hub_remotes(monkeypatch, tmp_path):
     monkeypatch.setattr(calkit.config, "read", lambda: settings)
     for url, sent in [
         ("https://api.calkit.io/projects/o/p/dvc", True),
+        ("HTTPS://API.calkit.io:443/projects/o/p/dvc", True),
         # A repo can name a remote like the hub's and point it anywhere
         ("https://attacker.example/dvc", False),
         ("https://api.calkit.io.attacker.example/dvc", False),
+        ("HTTPS://attacker.example/dvc", False),
+        ("https://api.calkit.io@attacker.example/dvc", False),
+        ("https://api.calkit.io:8443/dvc", False),
+        ("http://api.calkit.io/dvc", False),
     ]:
         calls.clear()
         monkeypatch.setattr(
@@ -628,6 +644,66 @@ def test_set_remote_auth_only_for_hub_remotes(monkeypatch, tmp_path):
             assert calls[-1][-1] == "Bearer ckp_token"
         else:
             assert "ckp_token" not in fpath.read_text(), url
+
+
+def test_clear_off_hub_auth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        calkit.hub, "get_base_url", lambda: "https://api.calkit.io"
+    )
+    dvc_dir = tmp_path / ".dvc"
+    dvc_dir.mkdir()
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    # The repo says where remotes are, and the local config holds the token
+    (dvc_dir / "config").write_text(
+        "['remote \"calkit\"']\n"
+        "    url = https://api.calkit.io/projects/o/p/dvc\n"
+        "['remote \"calkit:o/q\"']\n"
+        "    url = HTTPS://attacker.example/dvc\n"
+        "['remote \"dav\"']\n"
+        "    url = webdavs://attacker.example/dvc\n"
+        "['remote \"mine\"']\n"
+        "    url = https://storage.example/dvc\n"
+    )
+    local = dvc_dir / "config.local"
+    local.write_text(
+        "['remote \"calkit\"']\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+        "['remote \"calkit:o/q\"']\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+        "['remote \"dav\"']\n"
+        "    token = ckp_token\n"
+        "    ssl_verify = false\n"
+        # The user's own credentials for a remote of their own stay
+        "['remote \"mine\"']\n"
+        "    user = me\n"
+        "    password = hunter2\n"
+        # And a URL set locally wins over the repo's
+        "['remote \"local-url\"']\n"
+        "    url = https://elsewhere.example\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+    )
+    # Found from a folder inside the project, as DVC finds it
+    cleared = calkit.dvc.clear_off_hub_auth(wdir=str(sub))
+    assert sorted(cleared) == ["calkit:o/q", "dav", "local-url"]
+    cfg = ConfigObj(str(local), encoding="utf-8")
+    assert cfg['remote "calkit"']["password"] == "Bearer ckp_token"
+    assert 'remote "calkit:o/q"' not in cfg
+    assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}
+    assert cfg['remote "mine"']["password"] == "hunter2"
+    assert dict(cfg['remote "local-url"']) == {
+        "url": "https://elsewhere.example"
+    }
+    # Nothing to clear, or no DVC at all, changes nothing
+    assert calkit.dvc.clear_off_hub_auth(wdir=str(tmp_path)) == []
+    other = tmp_path.parent / f"{tmp_path.name}-nodvc"
+    other.mkdir()
+    assert calkit.dvc.clear_off_hub_auth(wdir=str(other)) == []
 
 
 def test_ck_fs_reads_content_only_for_dirs() -> None:

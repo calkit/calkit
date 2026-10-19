@@ -1049,11 +1049,112 @@ def detect_calkit_remote_type(
     )
     if not name_matches:
         return None
-    if url.startswith("ck://"):
+    # Schemes are case-insensitive, and DVC treats them so
+    scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+    if scheme == "ck":
         return "ck"
-    if url.startswith("http"):
+    if scheme in ("http", "https"):
         return "http"
     return None
+
+
+def is_on_hub(url: str, base_url: str) -> bool:
+    """Whether a URL is on the hub's API, by its scheme, host, port, and
+    path, so the hub's token is sent nowhere else.
+    """
+    from urllib.parse import urlsplit
+
+    def port(parts: Any) -> int | None:
+        return parts.port or {"http": 80, "https": 443}.get(parts.scheme)
+
+    try:
+        target, base = urlsplit(url.strip()), urlsplit(base_url)
+        same_port = port(target) == port(base)
+    except ValueError:
+        return False
+    base_path = base.path.rstrip("/")
+    return (
+        target.scheme.lower() in ("http", "https")
+        and target.scheme.lower() == base.scheme.lower()
+        and target.hostname is not None
+        and target.hostname == base.hostname
+        and same_port
+        and target.username is None
+        and target.password is None
+        and (
+            target.path == base_path or target.path.startswith(base_path + "/")
+        )
+    )
+
+
+# What the hub's token is kept in for a remote, in its local config
+REMOTE_AUTH_OPTIONS = (
+    "custom_auth_header",
+    "password",
+    "auth",
+    "token",
+    "user",
+)
+
+
+def clear_off_hub_auth(
+    wdir: str | None = None, base_url: str | None = None
+) -> list[str]:
+    """Remove the hub's token from the local config of DVC remotes that
+    aren't on the hub, returning their names.
+
+    The repo says where its remotes are, so a pull can point one that has
+    the token anywhere, which DVC would send it to. This runs before
+    anything that talks to remotes.
+    """
+    root = os.path.abspath(wdir or ".")
+    while not os.path.isdir(os.path.join(root, ".dvc")):
+        if os.path.dirname(root) == root:
+            return []
+        root = os.path.dirname(root)
+    config_local = os.path.join(root, ".dvc", "config.local")
+    if not os.path.isfile(config_local):
+        return []
+    try:
+        local = ConfigObj(config_local, encoding="utf-8")
+        shared_path = os.path.join(root, ".dvc", "config")
+        shared = (
+            ConfigObj(shared_path, encoding="utf-8")
+            if os.path.isfile(shared_path)
+            else {}
+        )
+    except Exception:
+        return []
+    if base_url is None:
+        base_url = calkit.hub.get_base_url()
+    cleared = []
+    for section, options in list(local.items()):
+        match = re.fullmatch(r'remote "(.+)"', section)
+        if match is None or not isinstance(options, dict):
+            continue
+        # The header Calkit sets with the token, or the token itself, not
+        # credentials of the user's own for remotes elsewhere
+        secrets = [str(options.get(k, "")) for k in ("password", "token")]
+        if "custom_auth_header" not in options and not any(
+            "ckp_" in secret for secret in secrets
+        ):
+            continue
+        url = options.get("url") or (shared.get(section) or {}).get("url")
+        if isinstance(url, str) and is_on_hub(url, base_url):
+            continue
+        for option in REMOTE_AUTH_OPTIONS:
+            options.pop(option, None)
+        if not options:
+            local.pop(section)
+        cleared.append(match.group(1))
+    if cleared:
+        local.write()
+        for name in cleared:
+            logger.warning(
+                f"Removed the hub's token from DVC remote {name}, "
+                "since it isn't on the hub"
+            )
+    return cleared
 
 
 def configure_remote(
@@ -1149,7 +1250,7 @@ def set_remote_auth(
     # Check if this is a ck:// remote (doesn't need HTTP auth)
     remotes = get_remotes(wdir=wdir)
     remote_url = remotes.get(remote_name, "")
-    if remote_url.startswith("ck://"):
+    if remote_url.lower().startswith("ck://"):
         clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         logger.info(
             f"Remote {remote_name} uses ck:// scheme; skipping HTTP auth setup"
@@ -1158,7 +1259,7 @@ def set_remote_auth(
     # The token is the user's own, and a repo can point a remote named like
     # the hub's anywhere, so it only goes to the hub it came from
     base_url = calkit.hub.get_base_url().rstrip("/")
-    if remote_url != base_url and not remote_url.startswith(base_url + "/"):
+    if not is_on_hub(remote_url, base_url):
         # Including any set while it pointed at the hub
         clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         logger.warning(

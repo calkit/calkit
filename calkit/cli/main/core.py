@@ -590,8 +590,14 @@ def get_status(
             git.Repo.init()
         # Likewise, if this isn't a DVC repo, initialize one so the pipeline
         # can be compiled and its status reported. DVC init requires a Git
-        # repo, which the block above ensures exists.
-        if not os.path.isfile(os.path.join(".dvc", "config")):
+        # repo, which the block above ensures exists. Ask DVC rather than
+        # looking for ./.dvc, since its discovery walks up and a subproject
+        # inside an initialized parent would otherwise get a nested repo.
+        from dvc.exceptions import NotDvcRepoError
+
+        try:
+            calkit.dvc.get_dvc_repo()
+        except NotDvcRepoError:
             typer.echo("Initializing DVC repository")
             try:
                 result = calkit.dvc.init(quiet=True)
@@ -599,6 +605,11 @@ def get_status(
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
                 raise_error(f"Failed to initialize DVC repository: {e}")
+        except Exception as e:
+            # E.g., DVC's site cache dir isn't writable, which init can't fix
+            raise_error(
+                f"Failed to open DVC repo: {e.__class__.__name__}: {e}"
+            )
     valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:

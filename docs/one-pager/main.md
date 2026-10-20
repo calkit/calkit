@@ -2,9 +2,9 @@
 
 ![Calkit system](../img/pipeline.png)
 
-**Calkit is an open-source framework and platform that keeps figures,
-tables, and values in research articles connected to the code and data
-that calculated them, for fast iteration and full _observability_.**
+**Calkit is an open-source research project framework and platform that
+keeps figures, tables, and values in articles connected to the code and data
+that produced them, for fast iteration and full transparency.**
 
 <!-- calkit values path=results/traction.json -->
 

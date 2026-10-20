@@ -28,7 +28,7 @@ as agents will happily generate---and maybe hallucinate---artifacts
 without showing all their work.
 Thus, it's now more important than ever to make it easy and intuitive
 to deliver research artifacts with their entire digital paper trail,
-such that evidence can be traced all the way back to its origin.
+such that evidence for claims can be traced all the way back to its origin.
 
 ## Our approach
 
@@ -45,9 +45,8 @@ information flows freely between them for fast iteration.
 An optional, self-hostable web app
 facilitates collaboration during the project
 and sharing once it's done, like a GitHub for science.
-Since everything is integrated,
-every figure and number can be traced back to its origin,
-making it much easier to review work done by AI agents or humans.
+With everything connected and "single-button reproducible,"
+it becomes much easier to review work done by AI agents or humans.
 
 ## A success story {.box}
 
@@ -66,34 +65,26 @@ making it much easier to review work done by AI agents or humans.
 
 <!-- calkit values path=results/2027-budget.json -->
 
-## The ask: \$<!-- calkit value key=total_rounded format="{:,.0f}" -->100,000<!-- /calkit value --> to learn what sticks
+## The ask: \$<!-- calkit value key=total_rounded format="{:,.0f}" -->100,000<!-- /calkit value --> towards widespread adoption
 
 Thus far we've seen the most traction from Overleaf users
 who appreciate its user friendliness but want to connect it to their analyses
 to eliminate error-prone and tedious manual uploads.
-In 2027 we'll take Calkit on tour, starting at Caltech and various
+In 2027 we'll take Calkit on tour, starting at Caltech and several
 universities in Boston,
 teaching researchers how to integrate their workflows with our
 new browser extension,
-hosting
-
-<!-- calkit value key=workshops -->8<!-- /calkit value -->
-
-workshops with
-
-<!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
-
-researchers and help
-about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
-of them convert active projects.
-Learnings from the workshops will be published openly and fed back
+hosting <!-- calkit value key=workshops -->8<!-- /calkit value -->
+workshops to serve approximately <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
+researchers.
+Learnings from these will be published openly and fed back
 into improving Calkit.
 
 ![](../img/2027-budget.png)
 
 ::: footer
-Calkit is led by its creator, Pete Bachant, with 25% of a Caltech Schmidt
-Academy research software engineer and Google Cloud credits for hosting.
-Learn more at [docs.calkit.org](https://docs.calkit.org) and
-[calkit.io](https://calkit.io), or email [pete@calkit.org](mailto:pete@calkit.org).
+Calkit is led by Pete Bachant, a Senior Research Software Engineer
+and instructor at Caltech's
+[Schmidt Academy for Software Engineering](https://sase.caltech.edu).
+To learn more, visit [docs.calkit.org](https://docs.calkit.org) or email [pete@calkit.org](mailto:pete@calkit.org).
 :::

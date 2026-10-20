@@ -38,12 +38,12 @@ solutions focus on embedding code in documents (literate programming)
 or helping researchers share and obtain credit for
 outputs like code and data after a project is done.
 Calkit takes a more integrated, modular approach.
+Stages like analysis and writing can remain separate but connected,
+with information flowing freely between them for fast iteration.
 Version control (including large data files),
 environment management, pipelines with hashed I/O,
 and provenance definition are all included,
 so researchers don't need to assemble bespoke workflows.
-Stages like analysis and writing remain separate but connected,
-with information flowing freely between them for fast iteration.
 An optional, self-hostable web app
 facilitates collaboration during the project
 and sharing once it's done, like a GitHub for science.

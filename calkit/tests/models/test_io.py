@@ -37,7 +37,8 @@ def test_schedule_input(monkeypatch, tmp_path):
     assert ScheduleInput(kind="schedule", period="daily").period_file_path == (
         day.period_file_path
     )
-    # Each period, from the same time, is written as when it started
+    # Each period, from the same time, is written as when it started, with
+    # multiples counted from 1970
     monkeypatch.setenv("CALKIT_NOW", "2026-10-20T14:37:00+00:00")
     expected = {
         "15min": "2026-10-20T14:30",
@@ -50,6 +51,8 @@ def test_schedule_input(monkeypatch, tmp_path):
         "2 months": "2026-09",
         "1y": "2026",
         "5y": "2025",
+        "3 years": "2024",
+        "7 months": "2026-08",
     }
     for period, value in expected.items():
         schedule = ScheduleInput(kind="schedule", period=period)
@@ -78,6 +81,10 @@ def test_schedule_input(monkeypatch, tmp_path):
     )
     assert la.get_current_period() == "2026-10-19"
     assert la.period_file_path.endswith("/1-day-america_los_angeles.txt")
+    # A trailing Z means UTC, even where Python can't read it, e.g., 3.10
+    monkeypatch.setenv("CALKIT_NOW", "2026-10-20T02:30:00Z")
+    assert la.get_current_period() == "2026-10-19"
+    assert day.get_current_period() == "2026-10-20"
     # A time without a zone is taken to be in the schedule's
     monkeypatch.setenv("CALKIT_NOW", "2026-10-19T23:00:00")
     assert la.get_current_period() == "2026-10-19"

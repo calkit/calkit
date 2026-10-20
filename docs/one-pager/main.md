@@ -12,7 +12,7 @@ that produced them, for fast iteration and full transparency.**
 ## By the numbers
 
 - **<!-- calkit value key=hub_project_owners -->37<!-- /calkit value -->**
-  researchers and groups with projects on calkit.io
+  researchers and groups with projects on [calkit.io](https://calkit.io)
 - **<!-- calkit value key=papers_shipped -->5<!-- /calkit value -->**
   reproducible publications shipped
 - **<!-- calkit value key=releases_per_week_last_90_days -->7.3<!-- /calkit value -->**

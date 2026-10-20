@@ -1,4 +1,4 @@
-# _Calkit_: The cure for reproducibility anxiety in the age of AI
+# _Calkit_: The cure for [reproducibility anxiety]{.highlight} in the age of AI
 
 ![Calkit system](../img/pipeline.png)
 
@@ -36,29 +36,36 @@ As of <!-- calkit value key=date -->2026-10-19<!-- /calkit value -->.
   e.g., screenshots pasted into Overleaf]
 - **Monoliths:** [TODO: literate programming and notebooks
   put everything in one context]
-- **Calkit:** [TODO: modules stay separate but connected in one
-  pipeline, so you work in one context at a time]
-- [TODO: Humans and AI agents both work observably,
-  so each can verify the other's work]
+- **Calkit:** [TODO: modular but connected, one context at a time]
+- [TODO: Humans and AI agents verify each other's work]
 
 ## A sample success story
 
 [Rebecca (Becca) McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en)
-[TODO: who she is and what success meant for her, stated up front]
+[TODO: who she is and what success meant]
 
-- 87 figures and 92 numerical results in one dissertation,
-  kept consistent by one pipeline
 - MATLAB, Python, Julia, and LaTeX in single-button reproducible pipelines
 - 3 journal articles submitted, with collaborators contributing through
   Overleaf instead of Git
 - [TODO: the workshop she ran]
 
 > In the first conference paper I wrote back in 2022,
-> I had a scare where my process of manually screenshotting MATLAB figures
-> and uploading them to Overleaf
-> almost led me to publish inconsistent results ...
-> Using Calkit significantly **relieved my anxiety** about inadvertently
-> contributing to the replication crisis ...
+> I had a scare where my process of manually screenshotting MATLAB figures and uploading them to Overleaf
+> almost led me to publish inconsistent results when I forgot to rerun some intermediate steps.
+> To ensure the integrity of my research, I resolved to better automate my workflow,
+> and spent too much time creating some clunky one-off reproducibility code that only partially addressed my needs.
+> Then in 2025 I stumbled upon Calkit.
+> With its structured approach, cross-language capabilities, and use of software engineering best practices,
+> Calkit was more comprehensive, flexible, and future-proof than my hacky custom script, and
+> I relied on it heavily for the remainder of my projects.
+> Using Calkit significantly **relieved my anxiety** about inadvertently contributing to the replication crisis;
+> streamlined review, collaboration, and reproduction workflows that would have been otherwise infeasible;
+> and improved the usability and visibility of my work for other researchers.
+> Importantly, Calkit scales to more complex projects, and I can't imagine how I would have
+> kept the 87 figures and 92 numerical results in my dissertation straight without this tool.
+> I also received impressive technical support, including fast and helpful responses to my questions, bug reports, and feature requests.
+> I would recommend Calkit to software-savvy researchers (and even tech-traditionalist collaborators)
+> who care about the accuracy and transparency of their results.
 
 <!-- calkit values path=results/2027-budget.json -->
 
@@ -79,9 +86,7 @@ work transparently and observably]
 
 ## Team and support
 
-[TODO: Pete, plus current support: 25% of a Research Software Engineer from
-the Schmidt Academy for Software Engineering at Caltech, and research credits
-from Google Cloud]
+[TODO: Pete; 25% of a Caltech Schmidt Academy RSE; Google Cloud credits]
 
 Learn more at [docs.calkit.org](https://docs.calkit.org) and
 [calkit.io](https://calkit.io), or email Pete Bachant at

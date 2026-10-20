@@ -18,6 +18,14 @@ local function number(item)
   return "\\cknumber{" .. shown .. "}{" .. latex(inlines) .. "}"
 end
 
+function Span(span)
+  -- A phrase to make pop, e.g., in the title
+  if span.classes:includes("highlight") then
+    return { pandoc.RawInline("latex", "\\textcolor{ckhighlight}{") }
+      .. span.content .. { pandoc.RawInline("latex", "}") }
+  end
+end
+
 function Pandoc(doc)
   local blocks = {}
   local i = 1

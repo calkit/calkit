@@ -1,6 +1,14 @@
 {
-  "date": "2026-10-19",
-  "hub_users": 130,
+  "date": "2026-10-20",
+  "hub_users": 137,
+  "hub_projects": 52,
+  "hub_projects_worked_on": 16,
+  "hub_project_owners": 37,
+  "hub_excluded_accounts": [
+    "calkit",
+    "petebachant",
+    "pwbachant"
+  ],
   "github_stars": 60,
   "github_forks": 17,
   "pypi_downloads_last_month": 3616,

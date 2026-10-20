@@ -200,7 +200,8 @@ pipeline:
       description: >-
         Fetch usage numbers for the one-pager, frozen as of when it last ran.
       args:
-        - --hub-users=130
+        - --exclude-hub-account=pwbachant
+        - --exclude-hub-account=calkit
       inputs:
         - data/calkit-projects/papers.csv
       outputs:

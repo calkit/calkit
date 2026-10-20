@@ -93,7 +93,7 @@ stages:
       calkit.yaml. Changes made here will be overwritten.
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py
-      --hub-users=130
+      --exclude-hub-account=pwbachant --exclude-hub-account=calkit
     deps:
       - scripts/traction.py
       - data/calkit-projects/papers.csv

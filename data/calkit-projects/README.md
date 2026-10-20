@@ -69,9 +69,12 @@ Other: arXiv API for 2511.00164 (no journal ref);
 - `[third-party adoption]`: external authors used Calkit, but not as the
   paper's build system
 
-`is_pete` is true for repos owned by petebachant, calkit, or pwbachant, plus
-repos where Pete is the primary contributor (XFlow-Energy/xfo,
-swarm-migration/engie-hangest, UNH-CORE/RVAT-Re-dep).
+`is_pete` is true for repos owned by petebachant, calkit, or pwbachant
+(Pete's test account), plus repos where Pete is the primary contributor
+(swarm-migration/engie-hangest, UNH-CORE/RVAT-Re-dep).
 
-Raw responses are in `raw/`; scripts in `scripts/` (`build_csv.py` holds the
-manual publication annotations).
+Private projects are left out, e.g., XFlow-Energy/xfo.
+Raw responses and the scripts that gathered them weren't kept.
+
+In `papers.csv`, only papers and theses that are `published`, `submitted`,
+or `preprint` count as shipped.

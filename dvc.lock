@@ -290,8 +290,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 396599e8628e13dfc1b3b9b4de92bee1
-      size: 10824
+      md5: b41fc82f0b3cfb9d19ce9eeb9c713729
+      size: 10879
     - path: docs/img/2027-budget.png
       hash: md5
       md5: 7034eb6919ba172bd659d837cacafdad
@@ -302,8 +302,8 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 4fc32d013c8afdc39487e7ad2614c540
-      size: 4447
+      md5: f698415dfde11484b24d89b3eb7f1c17
+      size: 4449
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 1102b36541da50fb365f4eb12351f882
@@ -318,13 +318,13 @@ stages:
       size: 1971
     - path: results/traction.json
       hash: md5
-      md5: 9745f5a4c51d15abbf9816fbbf4f9bcc
-      size: 170
+      md5: edfc85af2304e65996c08f54577c7e72
+      size: 335
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 7b81b3456b119fd2ee938561bb3835ec
-      size: 179182
+      md5: d422bbd8a14871db8b3096b0e012edaf
+      size: 179662
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:
@@ -351,7 +351,7 @@ stages:
       size: 48184
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
-      --hub-users=130
+      --exclude-hub-account=pwbachant --exclude-hub-account=calkit
     deps:
     - path: .python-version
       hash: md5
@@ -359,12 +359,12 @@ stages:
       size: 5
     - path: data/calkit-projects/papers.csv
       hash: md5
-      md5: b4fa1c730c16c7470cd6a2575caed7eb
-      size: 2055
+      md5: 25c93384345a37319cc23781b29c4856
+      size: 1938
     - path: scripts/traction.py
       hash: md5
-      md5: 62d5d62baf3f850f29332edbfeb1f538
-      size: 1722
+      md5: ce1f5a80737d62f0f9ea1c17e78bced4
+      size: 2127
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f
@@ -372,5 +372,5 @@ stages:
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 9745f5a4c51d15abbf9816fbbf4f9bcc
-      size: 170
+      md5: edfc85af2304e65996c08f54577c7e72
+      size: 335

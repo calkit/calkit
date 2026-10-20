@@ -3,9 +3,8 @@ https://github.com/symbiotic-engineering/MDOcean,"Leveraging Semi-Analytical Mod
 https://github.com/symbiotic-engineering/MDOcean,WEC Optimization to Maximize Grid Economic Value and Avoided Emissions,paper,UMERC 2025,published,10.5281/zenodo.20546182,,false
 https://github.com/symbiotic-engineering/MDOcean,"Development, Validation, and Benchmarking of a Multidisciplinary Semi-Analytical Model for Wave Energy Converters",paper,Applied Ocean Research,submitted,,,false
 https://github.com/symbiotic-engineering/MDOcean,Leveraging Multidisciplinary Design Optimization to Advance Wave Energy Converter Viability,paper,Renewable Energy,in-prep,,,false
-https://github.com/symbiotic-engineering/OpenFLASH,Numerics of the matched eigenfunction method for computing wave forces on concentric bodies,paper,Journal of Fluid Mechanics,submitted,,10.5281/zenodo.20530090,false
+https://github.com/symbiotic-engineering/OpenFLASH,Matrix structure and convergence behaviour of the matched eigenfunction method for computing heave wave forces on generalized concentric bodies,paper,arXiv:2605.19730,submitted,10.48550/arXiv.2605.19730,10.5281/zenodo.20530090,false
 https://github.com/symbiotic-engineering/OpenFLASH,OpenFLASH: An open-source flexible library for analytical and semi-analytical hydrodynamics calculations,paper,Journal of Open Source Software,submitted,,10.5281/zenodo.20518809,false
 https://github.com/boom-astro/boom-paper,"BOOM and Babamul: a real-time, multi-survey, optical alert broker system operating at scale",paper,arXiv:2511.00164,preprint,10.48550/arXiv.2511.00164,10.22002/xkxga-41b84,true
 https://github.com/zshivji/diazoDB-HPC,DiazoDB: Interactive Nitrogenase Web Database,dataset,ISME20 (poster),published,10.5281/zenodo.21909831,10.5281/zenodo.21961348,true
-https://github.com/XFlow-Energy/xfo,"Optimizing optimization: benchmarking genetic, Bayesian, and staged strategies on realistic multi-objective design problems",paper,,in-prep,,,true
 https://github.com/petebachant/boundary-layer-turbulence-modeling,Deriving a new RANS model from DNS data,paper,,in-prep,,,true

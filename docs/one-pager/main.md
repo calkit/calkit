@@ -1,4 +1,4 @@
-# _Calkit_: The cure for [reproducibility anxiety]{.highlight} in the age of AI
+# _Calkit_: The cure for [_reproducibility anxiety_]{.highlight} in the age of AI
 
 ![Calkit system](../img/pipeline.png)
 
@@ -9,7 +9,7 @@ framework that ..."]**
 
 ## By the numbers
 
-- **<!-- calkit value key=hub_users -->130<!-- /calkit value -->**
+- **<!-- calkit value key=hub_users -->137<!-- /calkit value -->**
   users on calkit.io, plus others on their own Git and DVC remotes
 - **<!-- calkit value key=pypi_downloads_last_month format="{:,.0f}" -->3,616<!-- /calkit value -->**
   downloads from PyPI last month
@@ -17,7 +17,7 @@ framework that ..."]**
   papers, including a PhD dissertation, published or submitted with a
   Calkit project
 
-As of <!-- calkit value key=date -->2026-10-19<!-- /calkit value -->.
+As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 
 ## The problem
 

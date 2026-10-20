@@ -25,23 +25,21 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
   It feels fine, so they iterate less,
   and one forgotten rerun ships inconsistent results
 - AI makes results cheap to produce and easy to get wrong,
-  so seeing how something was calculated, by an agent or by us,
-  is now the bottleneck
+  so verifying them is now the bottleneck
 - The publisher PLOS found
   [only 12% of articles sharing code](https://doi.org/10.1371/journal.pone.0311493),
   and less of what's shared actually runs
 
 ## Our approach
 
-Instead of combining computational analysis and writing into a single context
+Instead of combining analysis and writing in one context
 (literate programming),
-Calkit allows each to exist as separate _modules_ integrated
-into a more holistic project context
-with user-friendly interfaces.
-All pillars of reproducibility---version control, environment management,
-a pipeline with hashed I/O, and defined provenance---are bundled
-from open-source components, so users don't need to assemble their own
-bespoke workflows.
+Calkit keeps each in its own _module_, connected in one project.
+It bundles every pillar of reproducibility---version control, environments,
+a pipeline that reruns only what changed, and provenance---from open-source
+tools, so no one assembles a bespoke workflow.
+Every figure and number traces back to the code and data that made it,
+so an AI agent's work can be checked and rerun like ours.
 
 ## A sample success story {.box}
 
@@ -90,9 +88,8 @@ What we learn drives development between them.
   researchers, with
   <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
   supported converting active projects
-- Opt-in analytics in the browser extension, CLI, and VS Code,
-  to measure who gets connected
-- An open curriculum and a report on what worked
+- Opt-in analytics in our browser extension, CLI, and VS Code extension,
+  plus an open curriculum and a report on what worked
 
 ::: footer
 Calkit is led by its creator, Pete Bachant, with 25% of a Caltech Schmidt

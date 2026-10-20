@@ -91,5 +91,6 @@ and instructor at Caltech's
 [Schmidt Academy for Software Engineering](https://sase.caltech.edu),
 which funds 25% of his time on Calkit.
 Google Cloud has supported [calkit.io](https://calkit.io) with research credits.
+
 To learn more, visit [docs.calkit.org](https://docs.calkit.org) or email [pete@calkit.org](mailto:pete@calkit.org).
 :::

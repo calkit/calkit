@@ -65,14 +65,14 @@ it becomes much easier to review work done by AI agents or humans.
 
 <!-- calkit values path=results/2027-budget.json -->
 
-## The ask: \$<!-- calkit value key=total_rounded format="{:,.0f}" -->100,000<!-- /calkit value --> towards widespread adoption
+## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k towards widespread adoption
 
 Thus far we've seen the most traction from Overleaf users
 who appreciate its user friendliness but want to connect it to their analyses
 to eliminate error-prone and tedious manual uploads.
 In 2027 we'll take Calkit on tour, starting at Caltech and several
 universities in Boston,
-teaching researchers how to integrate their workflows with our
+teaching researchers how to integrate and automate their workflows with our
 new browser extension,
 hosting <!-- calkit value key=workshops -->8<!-- /calkit value -->
 workshops to serve approximately <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->

@@ -75,6 +75,7 @@
   "indirect": 0.0,
   "total": 98500.0,
   "total_rounded": 100000.0,
+  "total_rounded_thousands": 100.0,
   "workshops": 8,
   "researchers_trained": 200,
   "projects_supported": 60,

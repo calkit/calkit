@@ -49,6 +49,7 @@ results = {
     "total": total,
     # The ask as it's pitched, to the nearest $10k
     "total_rounded": round(total, -4),
+    "total_rounded_thousands": round(total, -4) / 1000,
     "workshops": args.workshops,
     "researchers_trained": trained,
     "projects_supported": args.supported,

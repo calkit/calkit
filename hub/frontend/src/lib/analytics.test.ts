@@ -185,11 +185,19 @@ describe("initAnalytics", () => {
   })
 
   it("reports interaction, which is what tells a person from a bot", async () => {
-    const { initAnalytics } = await load()
+    const { mixpanel, initAnalytics } = await load()
     initAnalytics(makeRouter())
+    expect(mixpanel.register).toHaveBeenCalledWith(
+      { interacted: false },
+      { persistent: false },
+    )
     window.dispatchEvent(new Event("pointerdown"))
     flush()
     expect(lastBeacon().signals.interacted).toBe(true)
+    expect(mixpanel.register).toHaveBeenLastCalledWith(
+      { interacted: true },
+      { persistent: false },
+    )
   })
 
   it("opts back in when consent was granted but Mixpanel lost its record", async () => {

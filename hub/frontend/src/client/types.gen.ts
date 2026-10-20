@@ -31,6 +31,50 @@ export type AccountPublic = {
 }
 
 /**
+ * ActiveCounts
+ */
+export type ActiveCounts = {
+  /**
+   * Last Day
+   */
+  last_day: number
+  /**
+   * Last 7 Days
+   */
+  last_7_days: number
+  /**
+   * Last 30 Days
+   */
+  last_30_days: number
+}
+
+/**
+ * AnalyticsStats
+ */
+export type AnalyticsStats = {
+  /**
+   * Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.
+   */
+  active_users: ActiveCounts
+  /**
+   * Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.
+   */
+  active_visitors: ActiveCounts
+  /**
+   * Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.
+   */
+  human_visits: ActiveCounts
+  /**
+   * Human visits as above that included a project page, leaving out projects owned by excluded accounts
+   */
+  human_project_visits: ActiveCounts
+  /**
+   * Distinct projects, not owned by excluded accounts, with human visits as above
+   */
+  projects_viewed: ActiveCounts
+}
+
+/**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
@@ -1998,6 +2042,10 @@ export type HubStats = {
    * Excluded Accounts
    */
   excluded_accounts: Array<string>
+  /**
+   * From Mixpanel; null when not configured or unreachable
+   */
+  analytics?: AnalyticsStats | null
 }
 
 /**
@@ -6180,6 +6228,12 @@ export type UserStats = {
    * Verified
    */
   verified: number
+  /**
+   * Likely Human
+   *
+   * Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.
+   */
+  likely_human: number
 }
 
 /**

@@ -1,18 +1,31 @@
 """Tests for app.api.routes.misc endpoints."""
 
+import json
+import time
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+import requests
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app import users
 from app.config import settings
 from app.core import utcnow
-from app.models import Project, UserCreate
+from app.models import (
+    ROLE_IDS,
+    Project,
+    RefreshToken,
+    User,
+    UserCreate,
+    UserExternalCredential,
+    UserProjectAccess,
+    UserToken,
+)
 from app.tests import random_email, random_lower_string
 
 
@@ -192,6 +205,7 @@ def test_get_hub_stats(
     db: Session,
     superuser_token_headers: dict[str, str],
     normal_user_token_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def add_project(account_id: uuid.UUID, **kwargs: Any) -> Project:
         project = Project(
@@ -206,6 +220,14 @@ def test_get_hub_stats(
         db.refresh(project)
         return project
 
+    # Mixpanel isn't read from until a scenario below configures it, even
+    # where a local .env has the credentials
+    for name in [
+        "MIXPANEL_SERVICE_ACCOUNT_USERNAME",
+        "MIXPANEL_SERVICE_ACCOUNT_SECRET",
+        "MIXPANEL_PROJECT_ID",
+    ]:
+        monkeypatch.setattr(settings, name, None)
     # Superusers only
     assert client.get("/stats").status_code == 401
     r = client.get("/stats", headers=normal_user_token_headers)
@@ -258,6 +280,10 @@ def test_get_hub_stats(
     assert superuser.account.name in after["excluded_accounts"]
     assert after["users"]["total"] - before["users"]["total"] == 2
     assert after["users"]["verified"] - before["users"]["verified"] == 1
+    # Verified is a sign of a person; a bare password signup isn't
+    assert (
+        after["users"]["likely_human"] - before["users"]["likely_human"] == 1
+    )
     diff = {
         k: after["projects"][k] - before["projects"][k]
         for k in after["projects"]
@@ -287,3 +313,400 @@ def test_get_hub_stats(
     # One project fewer for the excluded account, at least one more for
     # superusers
     assert stats["projects"]["total"] >= after["projects"]["total"]
+
+    # Each sign of a person counts a user as likely human on its own, while
+    # sessions on just one day don't
+    def add_user(github_username: str | None = None) -> User:
+        return users.create_user(
+            session=db,
+            user_create=UserCreate(
+                email=random_email(),
+                password=random_lower_string(),
+                github_username=github_username,
+            ),
+        )
+
+    def add_refresh_token(user_id: uuid.UUID, created: datetime) -> None:
+        db.add(
+            RefreshToken(
+                user_id=user_id,
+                token_hash=uuid.uuid4().hex,
+                created=created,
+                expires=now + timedelta(days=30),
+            )
+        )
+
+    add_user(github_username=f"gh-{uuid.uuid4().hex[:8]}")
+    db.add(
+        UserExternalCredential(
+            user_id=add_user().id, provider="overleaf", secret_payload="x"
+        )
+    )
+    db.add(
+        UserProjectAccess(
+            user_id=add_user().id,
+            project_id=worked_on.id,
+            role_id=ROLE_IDS["write"],
+        )
+    )
+    # Access cached from GitHub with no role isn't an invitation
+    db.add(UserProjectAccess(user_id=add_user().id, project_id=worked_on.id))
+    db.add(
+        UserToken(
+            user_id=add_user().id,
+            expires=now + timedelta(days=1),
+            is_active=True,
+        )
+    )
+    returning = add_user()
+    add_refresh_token(returning.id, now)
+    add_refresh_token(returning.id, now - timedelta(days=2))
+    one_day = add_user()
+    add_refresh_token(one_day.id, now.replace(hour=1))
+    add_refresh_token(one_day.id, now.replace(hour=2))
+    db.commit()
+    base = client.get("/stats", headers=headers).json()
+    assert base["users"]["total"] - after["users"]["total"] == 7
+    assert base["users"]["likely_human"] - after["users"]["likely_human"] == 5
+    # Without Mixpanel read access configured there are no analytics
+    assert base["analytics"] is None
+    # With it, people are counted from the event export. Accounts count if
+    # they're likely human and still exist, with a device's events folded
+    # into the account it later signed in as. Devices count from the last day
+    # they sent two or more events with input among them, which leaves out
+    # idle pages, automatic events, and bots rotating their identity per
+    # request. Anonymous page views, automated browsers, old events, and
+    # excluded users don't count at all.
+    now_ts = time.time()
+
+    def at(days_ago: int, minute: int) -> float:
+        day = datetime.now(UTC).date() - timedelta(days=days_ago)
+        midnight = datetime.combine(day, datetime.min.time(), UTC)
+        return midnight.timestamp() + 3600 + minute * 60
+
+    pageview = "$mp_web_page_view"
+    anonymous = {
+        "anonymous": True,
+        "human": True,
+        "bot": False,
+        "interacted": True,
+        "time": at(2, 0),
+    }
+    events = [
+        ("Logged in", {"distinct_id": str(user.id), "time": now_ts - 3600}),
+        (
+            pageview,
+            {"distinct_id": str(user.id), "time": now_ts - 20 * 86400},
+        ),
+        (
+            "Clicked login",
+            {
+                "distinct_id": str(other.id),
+                "$user_id": str(other.id),
+                "$device_id": "abc",
+                "time": now_ts - 3 * 86400,
+            },
+        ),
+        *[
+            (
+                pageview,
+                {
+                    "distinct_id": "$device:abc",
+                    "interacted": True,
+                    "time": at(5, minute),
+                },
+            )
+            for minute in (0, 5)
+        ],
+        # Engaged ten days ago and idle since, so a visitor in 30 days only
+        (
+            pageview,
+            {
+                "distinct_id": "$device:def",
+                "interacted": False,
+                "time": at(10, 0),
+            },
+        ),
+        (
+            pageview,
+            {
+                "distinct_id": "$device:def",
+                "interacted": True,
+                "time": at(10, 2),
+            },
+        ),
+        (
+            pageview,
+            {
+                "distinct_id": "$device:def",
+                "interacted": False,
+                "time": now_ts - 3600,
+            },
+        ),
+        # One page view with input, as from a bot rotating its identity
+        (
+            pageview,
+            {
+                "distinct_id": "$device:rotating",
+                "interacted": True,
+                "time": now_ts - 7200,
+            },
+        ),
+        *[
+            (
+                pageview,
+                {
+                    "distinct_id": "$device:idle",
+                    "interacted": False,
+                    "time": at(2, minute),
+                },
+            )
+            for minute in (0, 5)
+        ],
+        # From before the frontend sent input with every event, a click
+        # counts while an event that fires on its own doesn't
+        (
+            "Clicked sign up",
+            {"distinct_id": "$device:legacy", "time": at(4, 0)},
+        ),
+        (pageview, {"distinct_id": "$device:legacy", "time": at(4, 1)}),
+        ("404 (front end)", {"distinct_id": "$device:auto", "time": at(3, 0)}),
+        (pageview, {"distinct_id": "$device:auto", "time": at(3, 1)}),
+        # An account since deleted is neither a user nor a visitor
+        *[
+            (
+                "Clicked",
+                {
+                    "distinct_id": str(uuid.uuid4()),
+                    "interacted": True,
+                    "time": at(6, minute),
+                },
+            )
+            for minute in (0, 1)
+        ],
+        ("Logged in", {"distinct_id": str(superuser.id), "time": now_ts - 60}),
+        (
+            pageview,
+            {"distinct_id": "a1b2", "anonymous": True, "time": now_ts - 60},
+        ),
+        *[
+            (
+                "Clicked",
+                {
+                    "distinct_id": "$device:bot",
+                    "bot": True,
+                    "interacted": True,
+                    "time": at(2, minute),
+                },
+            )
+            for minute in (0, 1)
+        ],
+        *[
+            (
+                pageview,
+                {
+                    "distinct_id": "$device:driven",
+                    "webdriver": True,
+                    "interacted": True,
+                    "time": at(2, minute),
+                },
+            )
+            for minute in (0, 1)
+        ],
+        (
+            "Clicked",
+            {"distinct_id": "$device:old", "time": now_ts - 40 * 86400},
+        ),
+        # Anonymous visitors count by day when human: twice on one day is one
+        # visit, the same ID on another day is another, bots and visitors
+        # without input don't count, and a project page counts as a project
+        # visit unless an excluded account owns the project
+        *[
+            (pageview, {**anonymous, "distinct_id": "v1", "time": at(3, m)})
+            for m in (0, 5)
+        ],
+        (pageview, {**anonymous, "distinct_id": "v1", "time": at(12, 0)}),
+        (
+            pageview,
+            {
+                **anonymous,
+                "distinct_id": "v2",
+                "owner_name": user.account.name,
+                "project_name": "proj-a",
+                "time": at(4, 0),
+            },
+        ),
+        (
+            pageview,
+            {
+                **anonymous,
+                "distinct_id": "v3",
+                "owner_name": superuser.account.name,
+                "project_name": "mine",
+                "time": at(5, 0),
+            },
+        ),
+        (
+            pageview,
+            {**anonymous, "distinct_id": "v4", "human": False, "bot": True},
+        ),
+        (
+            pageview,
+            {
+                **anonymous,
+                "distinct_id": "v5",
+                "human": False,
+                "interacted": False,
+            },
+        ),
+        (
+            pageview,
+            {
+                **anonymous,
+                "distinct_id": "v6",
+                "owner_name": user.account.name.upper(),
+                "project_name": "Proj-A",
+                "time": now_ts - 60,
+            },
+        ),
+    ]
+    lines = [
+        json.dumps({"event": e, "properties": p}).encode() for e, p in events
+    ]
+    resp = SimpleNamespace(ok=True, iter_lines=lambda: iter([*lines, b""]))
+    with (
+        patch.multiple(
+            settings,
+            MIXPANEL_SERVICE_ACCOUNT_USERNAME="sa",
+            MIXPANEL_SERVICE_ACCOUNT_SECRET="secret",
+            MIXPANEL_PROJECT_ID=123,
+        ),
+        patch("app.mixpanel.cache.get_json", return_value=None),
+        patch("app.mixpanel.cache.set_json") as set_json,
+        patch("app.mixpanel.requests.get", return_value=resp) as get,
+    ):
+        stats = client.get("/stats", headers=headers).json()
+        assert get.call_args.kwargs["auth"] == ("sa", "secret")
+        params = get.call_args.kwargs["params"]
+        assert params["project_id"] == 123
+        set_json.assert_called_once()
+        assert stats["users"] == base["users"]
+        # The other user isn't likely human yet, so is in neither count
+        assert stats["analytics"] == {
+            "active_users": {
+                "last_day": 1,
+                "last_7_days": 1,
+                "last_30_days": 1,
+            },
+            "active_visitors": {
+                "last_day": 1,
+                "last_7_days": 2,
+                "last_30_days": 3,
+            },
+            "human_visits": {
+                "last_day": 1,
+                "last_7_days": 4,
+                "last_30_days": 5,
+            },
+            "human_project_visits": {
+                "last_day": 1,
+                "last_7_days": 2,
+                "last_30_days": 2,
+            },
+            "projects_viewed": {
+                "last_day": 1,
+                "last_7_days": 1,
+                "last_30_days": 1,
+            },
+        }
+        # Once they are, they count, with their earlier device folded in
+        db.add(
+            UserToken(
+                user_id=other.id,
+                expires=now + timedelta(days=1),
+                is_active=True,
+            )
+        )
+        db.commit()
+        stats = client.get("/stats", headers=headers).json()
+        assert stats["analytics"] == {
+            "active_users": {
+                "last_day": 1,
+                "last_7_days": 2,
+                "last_30_days": 2,
+            },
+            "active_visitors": {
+                "last_day": 1,
+                "last_7_days": 3,
+                "last_30_days": 4,
+            },
+            "human_visits": {
+                "last_day": 1,
+                "last_7_days": 4,
+                "last_30_days": 5,
+            },
+            "human_project_visits": {
+                "last_day": 1,
+                "last_7_days": 2,
+                "last_30_days": 2,
+            },
+            "projects_viewed": {
+                "last_day": 1,
+                "last_7_days": 1,
+                "last_30_days": 1,
+            },
+        }
+        # Excluded accounts are left out here too, and superusers come back
+        stats = client.get(
+            "/stats",
+            headers=headers,
+            params={
+                "exclude": [other.account.name],
+                "include_superusers": True,
+            },
+        ).json()
+        assert stats["analytics"]["active_users"] == {
+            "last_day": 2,
+            "last_7_days": 2,
+            "last_30_days": 2,
+        }
+        assert stats["analytics"]["human_project_visits"] == {
+            "last_day": 1,
+            "last_7_days": 3,
+            "last_30_days": 3,
+        }
+        assert stats["analytics"]["projects_viewed"] == {
+            "last_day": 1,
+            "last_7_days": 2,
+            "last_30_days": 2,
+        }
+        # A cached result is used without asking Mixpanel again
+        get.reset_mock()
+        cached = {
+            "people": {str(user.id): [now_ts - 60, 0.0, True]},
+            "visits": [["2026-01-01", "v1", "", "", now_ts - 60]],
+        }
+        with patch("app.mixpanel.cache.get_json", return_value=cached):
+            stats = client.get("/stats", headers=headers).json()
+        get.assert_not_called()
+        assert stats["analytics"]["active_users"]["last_day"] == 1
+        assert stats["analytics"]["human_visits"]["last_day"] == 1
+        # Mixpanel failing, by connection or status, leaves analytics out
+        # rather than failing the request, and says why in the log
+        get.side_effect = requests.ConnectionError("down")
+        r = client.get("/stats", headers=headers)
+        assert r.status_code == 200
+        assert r.json()["analytics"] is None
+        assert r.json()["users"]["total"] == base["users"]["total"]
+        get.side_effect = None
+        get.return_value = SimpleNamespace(
+            ok=False,
+            status_code=403,
+            text="Service account is missing the download_events_csv permission",
+        )
+        with patch("app.mixpanel.logger.warning") as warning:
+            stats = client.get("/stats", headers=headers).json()
+        assert "403" in warning.call_args.args[0]
+        assert "download_events_csv" in warning.call_args.args[0]
+        assert stats["analytics"] is None
+        assert stats["projects"] == base["projects"]

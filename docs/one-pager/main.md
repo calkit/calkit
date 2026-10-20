@@ -31,34 +31,19 @@ unworkable.
 ## Our approach
 
 AI review overload and failures to reproduce have the same solution:
-every artifact, from raw data to article,
-must clearly define where it came from,
-and most should come from a deterministic, automated pipeline.
-Calkit includes such a pipeline,
-with hashed I/O, version control, environment management,
-and provenance tracking all built in,
-allowing different stages to be done in different tools or programming
-languages, gluing everything together for single-button reproducibility.
-Every figure and number traces back to the code and data that made it,
-whether a person or an AI agent did the work.
-
-Open science or reproducibility tools
-typically fall into two categories:
-monolithic document-based workflows (literate programming)
-or platforms to help users gain credit for sharing more of their
-artifacts.
-
-Calkit has a different take on both.
-It allows different stages like writing and analysis to live in
-different contexts or modules,
-but keeps them tied together,
-with an optional platform that makes both collaboration during
-and sharing after the project is complete,
-like a GitHub for science.
-
-The automation and transparency also makes it seamless to collaborate with
-AI agents,
-since they are also guided into working reproducibly.
+every artifact, from raw data to article, must declare where it came from,
+ideally a deterministic, automated pipeline.
+Existing tools either put everything in one document
+(literate programming) or help researchers share and get credit for
+artifacts after the fact.
+Calkit is vertically integrated instead:
+one stack with version control, environments, a pipeline with hashed I/O,
+and provenance, where each stage, from analysis to writing,
+uses whatever tool or language suits it.
+An optional platform, like GitHub for science, hosts collaboration and
+sharing.
+Every figure and number traces back to what made it,
+and AI agents working in a Calkit project are guided to do the same.
 
 ## A success story {.box}
 

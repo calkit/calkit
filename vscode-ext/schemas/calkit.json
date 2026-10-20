@@ -2325,7 +2325,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -6409,7 +6409,7 @@
       "properties": {
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -6459,7 +6459,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -7373,7 +7373,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -8302,7 +8302,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -8979,7 +8979,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },

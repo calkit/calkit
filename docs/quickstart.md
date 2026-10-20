@@ -92,10 +92,6 @@ calkit run
 ```
 
 ```
-💻 Getting system information
-🔗 Checking system-level requirements
-📦 Checking environments
-🔀 Compiling DVC pipeline
 Running stage 'collect-data':
 Running stage 'analyze':
 Running stage 'figs-to-paper':

@@ -376,8 +376,8 @@ stages:
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 067f908695690cc15aba1856fe0271a8
-      size: 510
+      md5: ff734a00cb7a7c311f704f4e9779b1e3
+      size: 498
   find-calkit-projects:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
     deps:

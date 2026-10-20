@@ -21,29 +21,30 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 
 ## The problem
 
-- [TODO: AI makes results cheap to produce and easy to get wrong,
-  so verification is now the bottleneck]
-- [TODO: We need to see how an agent calculated something,
-  just as we need to see how we did]
+- Most researchers paste figures and numbers into Overleaf by hand.
+  It feels fine, so they iterate less,
+  and one forgotten rerun ships inconsistent results
+- AI makes results cheap to produce and easy to get wrong,
+  so seeing how something was calculated, by an agent or by us,
+  is now the bottleneck
 - The publisher PLOS found
   [only 12% of articles sharing code](https://doi.org/10.1371/journal.pone.0311493),
   and less of what's shared actually runs
-- [TODO: Reproducibility anxiety is justified but rare,
-  e.g., Becca's near miss below]
 
 ## Our approach
 
-- **Silos:** [TODO: separate tools glued together by hand,
-  e.g., screenshots pasted into Overleaf]
-- **Monoliths:** [TODO: literate programming and notebooks
-  put everything in one context]
-- **Calkit:** [TODO: modular but connected, one context at a time]
-- [TODO: Humans and AI agents verify each other's work]
+- **Silos:** separate tools glued together by hand,
+  e.g., screenshots pasted into Overleaf
+- **Monoliths:** notebooks and literate programming
+  put everything in one context
+- **Calkit:** modular but connected: one context at a time,
+  with every output linked to what made it,
+  so people and AI agents can check each other's work
 
 ## A sample success story {.box}
 
 [Rebecca (Becca) McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en)
-[TODO: who she is and what success meant]
+built her Cornell PhD on Calkit:
 
 - MATLAB, Python, Julia, and LaTeX in single-button reproducible pipelines
 - 3 journal articles submitted, with collaborators contributing through
@@ -70,28 +71,30 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 
 <!-- calkit values path=results/2027-budget.json -->
 
-## The ask: \$<!-- calkit value key=total_rounded format="{:,.0f}" -->100,000<!-- /calkit value --> to take Calkit on tour
+## The ask: \$<!-- calkit value key=total_rounded format="{:,.0f}" -->100,000<!-- /calkit value --> to learn what sticks
 
-[TODO: A year of workshops on reproducibility and on getting AI agents to
-work transparently and observably, to reach beyond early adopters and learn
-what an even friendlier UX needs]
+For most researchers, connecting an analysis to Overleaf is still too
+much work.
+In 2027 we'll take Calkit on tour, starting at Caltech with our browser
+extension's Overleaf sync, and run each workshop as an experiment:
+who connects a figure, who still uses it six weeks later, and why.
+What we learn drives development between them.
 
 ![](../img/2027-budget.png)
 
 - <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops
-  training about
+  for about
   <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
-  researchers
-- <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
-  researchers supported converting their active projects
-- [TODO: What others can reuse, e.g., an open curriculum]
-
-## Team and support
-
-[TODO: Pete; 25% of a Caltech Schmidt Academy RSE; Google Cloud credits]
+  researchers, with
+  <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
+  supported converting active projects
+- Opt-in analytics in the browser extension, CLI, and VS Code,
+  to measure who gets connected
+- An open curriculum and a report on what worked
 
 ::: footer
+Calkit is led by its creator, Pete Bachant, with 25% of a Caltech Schmidt
+Academy research software engineer and Google Cloud credits for hosting.
 Learn more at [docs.calkit.org](https://docs.calkit.org) and
-[calkit.io](https://calkit.io), or email Pete Bachant at
-[pete@calkit.org](mailto:pete@calkit.org).
+[calkit.io](https://calkit.io), or email [pete@calkit.org](mailto:pete@calkit.org).
 :::

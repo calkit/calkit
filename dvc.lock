@@ -290,41 +290,41 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: b41fc82f0b3cfb9d19ce9eeb9c713729
-      size: 10879
+      md5: eeb63a42379060b1398a11c5d2d459eb
+      size: 12642
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: 7034eb6919ba172bd659d837cacafdad
-      size: 48184
+      md5: f37579eb411eeb6d199bf3d3368b4118
+      size: 47665
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: a7be181a81c2c75ac20f7c8abf54e827
-      size: 4352
+      md5: f60da7ab4808222fa08ed9292665f83d
+      size: 4811
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 1102b36541da50fb365f4eb12351f882
       size: 3327
     - path: docs/one-pager/template.tex
       hash: md5
-      md5: 2e35f6980f9fba731f326655c7c6b32a
-      size: 4282
+      md5: b718bf735c1211beedd7c52c48a0a332
+      size: 4284
     - path: results/2027-budget.json
       hash: md5
       md5: f28d1a9ad590fcff26d64c407ef02e28
       size: 1971
     - path: results/traction.json
       hash: md5
-      md5: edfc85af2304e65996c08f54577c7e72
-      size: 335
+      md5: 067f908695690cc15aba1856fe0271a8
+      size: 510
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: aed852b64d499d5e09a287ae86bc6380
-      size: 179548
+      md5: b2686b727416fd46d5c497390a72bdf5
+      size: 179432
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:
@@ -338,7 +338,7 @@ stages:
       size: 1971
     - path: scripts/plot-budget.py
       hash: md5
-      md5: 3993f83b5644335bf4a5a97a92104364
+      md5: 3679d07375be29204a1b11c2bb21b787
       size: 1398
     - path: uv.lock
       hash: md5
@@ -347,8 +347,8 @@ stages:
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: 7034eb6919ba172bd659d837cacafdad
-      size: 48184
+      md5: f37579eb411eeb6d199bf3d3368b4118
+      size: 47665
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit

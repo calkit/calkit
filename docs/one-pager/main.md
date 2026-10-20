@@ -1,4 +1,4 @@
-# _Calkit_: Agile, verifiable, reproducible science in the age of AI
+# _Calkit_: The cure for reproducibility anxiety in the age of AI
 
 ![Calkit system](../img/pipeline.png)
 
@@ -53,7 +53,7 @@ Read how Calkit helped Becca with her research in her own words:
 > With its structured approach, cross-language capabilities, and use of software engineering best practices,
 > Calkit was more comprehensive, flexible, and future-proof than my hacky custom script, and
 > I relied on it heavily for the remainder of my projects.
-> Using Calkit significantly relieved my anxiety about inadvertently contributing to the replication crisis;
+> Using Calkit significantly **relieved my anxiety** about inadvertently contributing to the replication crisis;
 > streamlined review, collaboration, and reproduction workflows that would have been otherwise infeasible;
 > and improved the usability and visibility of my work for other researchers.
 > Importantly, Calkit scales to more complex projects, and I can't imagine how I would have

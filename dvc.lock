@@ -302,8 +302,8 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 9eb77fa05cafa81ae489649daafb2f12
-      size: 4610
+      md5: 6c06cfd42ba1d82ea1f408f360b32645
+      size: 4617
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 1102b36541da50fb365f4eb12351f882
@@ -323,8 +323,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: c0bb6ef333c3c575e5cd9398604bbfc9
-      size: 177846
+      md5: 69040bbecb3f7c84a2e759db3bf1a467
+      size: 177845
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:

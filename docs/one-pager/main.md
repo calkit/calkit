@@ -42,12 +42,12 @@ Version control (including large data files),
 environment management, pipelines with hashed I/O,
 and provenance definition are all included,
 so researchers don't need to assemble bespoke workflows.
-Stages like analysis and writing remain separate,
+Stages like analysis and writing remain separate but connected,
 with information flowing freely between them for fast iteration.
 An optional, self-hostable web app
 facilitates collaboration during the project
 and sharing once it's done, like a GitHub for science.
-With everything connected and "single-button reproducible,"
+With the whole project "single-button reproducible,"
 it becomes much easier to review work done by AI agents or humans.
 
 ## A success story {.box}

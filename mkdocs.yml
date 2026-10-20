@@ -91,6 +91,7 @@ nav:
   - Calkit vs. other tools: comparisons.md
   - ROI calculator: roi/index.md
   - Governance: governance.md
+  - Testimonials: testimonials.md
   - Privacy policy: privacy.md
   - Acknowledgements: acknowledgements.md
 # Internal design notes live in docs/dev; they're for contributors, not

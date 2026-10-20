@@ -1,6 +1,8 @@
 -- Lay out the one-pager's Markdown for the page, so the Markdown itself can
--- read naturally anywhere: the lead image moves up beside the numbers, and
--- the "By the numbers" section becomes the box they're shown in
+-- read naturally anywhere: the lead image moves up beside the numbers, the
+-- "By the numbers" section becomes the box they're shown in, and a section
+-- marked {.box} becomes a full-width box between the columns, and a
+-- footer div goes in the page's footer
 
 local function latex(inlines)
   local out = pandoc.write(pandoc.Pandoc({ pandoc.Plain(inlines) }), "latex")
@@ -16,6 +18,14 @@ local function number(item)
   end
   local shown = value.t == "Strong" and latex(value.content) or latex({ value })
   return "\\cknumber{" .. shown .. "}{" .. latex(inlines) .. "}"
+end
+
+function Span(span)
+  -- A phrase to make pop, e.g., in the title
+  if span.classes:includes("highlight") then
+    return { pandoc.RawInline("latex", "\\textcolor{ckhighlight}{") }
+      .. span.content .. { pandoc.RawInline("latex", "}") }
+  end
 end
 
 function Pandoc(doc)
@@ -56,6 +66,24 @@ function Pandoc(doc)
           pandoc.RawBlock("latex", table.concat(notes, "\n")),
         })
       end
+    elseif b.t == "Div" and b.classes:includes("footer") then
+      doc.meta.footer = pandoc.MetaInlines(pandoc.utils.blocks_to_inlines(b.content))
+      i = i + 1
+    elseif b.t == "Header" and b.classes:includes("box") then
+      -- Its own columns, balanced, so a long quote can flow from one to the
+      -- other rather than set the box's height
+      table.insert(blocks, pandoc.RawBlock("latex",
+        "\\end{multicols}\n\\begin{ckbox}{" .. latex(b.content) .. "}\n"
+        .. "\\begin{multicols}{2}\\ckbody"))
+      i = i + 1
+      while i <= #doc.blocks
+        and not (doc.blocks[i].t == "Header" and doc.blocks[i].level <= b.level)
+      do
+        table.insert(blocks, doc.blocks[i])
+        i = i + 1
+      end
+      table.insert(blocks, pandoc.RawBlock("latex",
+        "\\end{multicols}\n\\end{ckbox}\n\\begin{multicols}{2}\\ckbody"))
     else
       table.insert(blocks, b)
       i = i + 1

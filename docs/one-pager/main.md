@@ -2,7 +2,8 @@
 
 ![Calkit system](../img/pipeline.png)
 
-**Calkit is an open-source research project framework and platform that
+**Calkit is an open-source research project framework, toolset, and
+collaboration platform that
 keeps figures, tables, and values in articles connected to the code and data
 that produced them, for fast iteration and full transparency.**
 
@@ -24,7 +25,7 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 AI is making scientific output cheaper than ever to produce,
 shifting the bottleneck to verification and potentially deepening
 the still-unsolved reproducibility crisis,
-as agents will happily generate---and maybe hallucinate---artifacts
+as agents will happily generate---and possibly hallucinate---artifacts
 without showing all their work.
 It's now essential to make it easy and intuitive
 to deliver research artifacts with their entire digital paper trail,
@@ -67,7 +68,7 @@ it becomes much easier to review work done by AI agents or humans.
 
 ## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k toward widespread adoption
 
-Thus far we've seen the most traction from Overleaf users
+Thus far we've seen the most interest from Overleaf users
 who appreciate its user friendliness but want to connect it to their analyses
 to eliminate error-prone and tedious manual uploads.
 In 2027 we'll take Calkit on tour, starting at Caltech and several
@@ -76,8 +77,8 @@ teaching researchers how to integrate and automate their workflows with our
 new
 [browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
 hosting <!-- calkit value key=workshops -->8<!-- /calkit value -->
-workshops where some <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
-researchers connect their own projects, with weeks of follow-up support
+workshops, helping roughly <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
+researchers connect their own projects, with follow-up support
 for about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
 of them.
 Learnings from these will be published openly and fed back
